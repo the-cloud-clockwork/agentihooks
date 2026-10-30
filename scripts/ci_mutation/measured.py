@@ -18,6 +18,7 @@ from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 # Traced test seconds: every unit of a split mutant reruns the fastest tests, where most mutants die, then one slice.
 HEAD_SECONDS = 20.0
 SLICE_SECONDS = 120.0
+BATCH_RUNNERS = 40
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
@@ -97,12 +98,29 @@ def measured_splits(
     return splits
 
 
+def assign_units(
+    items: list[tuple[float, str, int | None]], units: dict[str, list[float]], count: int
+) -> tuple[dict, list[float]]:
+    loads = [0.0] * count
+    assignments = {name: [None] * len(unit) for name, unit in units.items()}
+    for cost, name, position in sorted(items, key=lambda item: (-item[0], item[1])):
+        taken = assignments[name] if position is not None else []
+        index = min((index for index in range(count) if index not in taken), key=lambda index: (loads[index], index))
+        if position is None:
+            assignments[name] = index
+        else:
+            assignments[name][position] = index
+        loads[index] += cost
+    return assignments, loads
+
+
 def plan_shards(
     costs: dict[str, float],
     target: float = 240,
     limit: int = 10,
     splits: dict | None = None,
     unit_costs: dict | None = None,
+    budget: float = 1080,
 ) -> dict:
     splits = splits or {}
     units = {
@@ -116,16 +134,11 @@ def plan_shards(
     seconds = sum(costs[name] for name in sorted(costs))
     widest = max(map(len, units.values()), default=1)
     count = max(min(limit, widest), shard_count(seconds, len(items), target, limit))
-    loads = [0.0] * count
-    assignments = {name: [None] * len(unit) for name, unit in units.items()}
-    for cost, name, position in sorted(items, key=lambda item: (-item[0], item[1])):
-        taken = assignments[name] if position is not None else []
-        index = min((index for index in range(count) if index not in taken), key=lambda index: (loads[index], index))
-        if position is None:
-            assignments[name] = index
-        else:
-            assignments[name][position] = index
-        loads[index] += cost
+    assignments, loads = assign_units(items, units, count)
+    ceiling = max(count, min(BATCH_RUNNERS, len(items)))
+    while max(loads) > shard_workers() * budget and count < ceiling:
+        count += 1
+        assignments, loads = assign_units(items, units, count)
     return {
         "shards": count,
         "assignments": assignments,
