@@ -435,8 +435,12 @@ def cmd_get(args):
 
 
 def cmd_tasks(args):
+    rows = resource(args.slug, "tasks", collection=True)
+    if args.json:
+        print(SHOW_JSON(rows))
+        return
     text = (args.text or "").lower()
-    for task in resource(args.slug, "tasks", collection=True):
+    for task in rows:
         state, lane, title = task.get("state") or "open", task.get("lane") or "", task.get("title") or ""
         if state == "done" or task.get("out_of_scope"):
             continue
@@ -444,6 +448,10 @@ def cmd_tasks(args):
             continue
         if text in title.lower():
             print(f"{task['id']}  {state}  {lane}  {title}")
+
+
+def cmd_freezes(args):
+    print(SHOW_JSON(resource(args.slug, "freezes", collection=True)))
 
 
 def cmd_status(args):
@@ -1069,6 +1077,8 @@ def build_parser():
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):
         tasks.add_argument(flag)
+    tasks.add_argument("--json", action="store_true", help="print the raw task collection as JSON")
+    sub.add_parser("freezes", help="print the freeze and focus records as JSON")
     priority = sub.add_parser("priority")
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
