@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tomllib
 from pathlib import Path
@@ -271,7 +272,12 @@ def test_a_checker_failure_names_its_output(
 
     monkeypatch.setattr(type_gate.subprocess, "run", run)
     assert _grade(head, head, capsys) == (1, "::error::basedpyright exited 2: boom\n")
-    assert calls[-1] == {"cwd": head, "capture_output": True, "text": True}
+    assert calls[-1] == {
+        "cwd": head,
+        "env": {**os.environ, "NODE_OPTIONS": "--max-old-space-size=8192"},
+        "capture_output": True,
+        "text": True,
+    }
 
 
 def test_sources_lists_checked_files_in_sorted_order(tmp_path: Path) -> None:

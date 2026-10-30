@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -17,6 +18,7 @@ CONFIG = {
     "strict": ["hooks", "scripts"],
 }
 _BASEDPYRIGHT = (sys.executable, "-I", "-m", "basedpyright")
+_NODE_OPTIONS = "--max-old-space-size=8192"
 
 
 class GradeError(Exception):
@@ -53,7 +55,11 @@ def sources(head: Path) -> list[str]:
 
 
 def measure(head: Path) -> dict[str, int]:
-    """Run basedpyright over the head's sources in sorted order and count its errors per file."""
+    """Run basedpyright over the head's sources in sorted order and count its errors per file.
+
+    The checker empties its type cache once the Node heap passes ninety percent of its limit, and when that happens
+    varies between runs, so the heap limit is raised well above what the check uses.
+    """
     result = subprocess.run(
         [
             *_BASEDPYRIGHT,
@@ -65,6 +71,7 @@ def measure(head: Path) -> dict[str, int]:
             *sources(head),
         ],
         cwd=head,
+        env={**os.environ, "NODE_OPTIONS": _NODE_OPTIONS},
         capture_output=True,
         text=True,
     )
