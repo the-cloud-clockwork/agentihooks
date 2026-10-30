@@ -14,7 +14,8 @@ class OrderingRuntime(FakeRuntime):
         self.order = order
 
     def spawn(self, config, lane, name, task):
-        self.order.append("spawn")
+        if lane != "master":
+            self.order.append("spawn")
         return super().spawn(config, lane, name, task)
 
 
