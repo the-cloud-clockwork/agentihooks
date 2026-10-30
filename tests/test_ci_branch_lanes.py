@@ -928,7 +928,20 @@ def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
 
 @pytest.mark.parametrize(
     "change",
-    [None, "group", "queue", "cancel", "other-job", "job", "untrusted", "trusted-name", "new-job", "name", "events"],
+    [
+        None,
+        "moved",
+        "group",
+        "queue",
+        "cancel",
+        "other-job",
+        "job",
+        "untrusted",
+        "trusted-name",
+        "new-job",
+        "name",
+        "events",
+    ],
 )
 def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_group(change: str | None) -> None:
     import copy
@@ -936,6 +949,8 @@ def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_grou
     baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "test.yml").read_text())
     baseline["jobs"]["flake-budget"].pop("concurrency", None)
     updated = copy.deepcopy(baseline)
+    if change == "moved":
+        baseline["jobs"]["flake-budget"]["concurrency"] = {"group": "flake-history-old"}
     name = "test-summary" if change == "other-job" else "flake-budget"
     if change == "new-job":
         name = "flake-history"
@@ -959,8 +974,8 @@ def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_grou
     elif change == "events":
         updated[True] = {"workflow_dispatch": None}
     found = lanes.problems(updated, baseline)
-    assert bool(found) == (change is not None)
-    if change is not None:
+    assert bool(found) == (change not in (None, "moved"))
+    if found:
         assert any(problem.startswith(f"job {name} ") for problem in found)
 
 
