@@ -158,13 +158,14 @@ def test_restore_refuses_while_an_agent_of_the_swarm_is_live(store):
     assert everything(store.redis) == before
 
 
-def test_pending_inbox_items_survive_a_lost_redis(store):
+def test_pending_inbox_items_survive_a_lost_redis(store: RedisStore) -> None:
     item = seed(store, "sw")
+    pending = [i.id for i in InboxStore(store.redis).pending_items("master@sw")]
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
     snapshot.restore(store, "sw", live=set())
     inbox = InboxStore(store.redis)
-    assert [i.id for i in inbox.pending_items("master@sw")] == [item.id]
+    assert [i.id for i in inbox.pending_items("master@sw")] == pending
     assert item.id in {i.id for i in inbox.pending()}
     assert [h["state"] for h in inbox.history(item.id)] == ["pending"]
 
