@@ -18,7 +18,7 @@ CONFIG = {
     "strict": ["hooks", "scripts"],
 }
 _BASEDPYRIGHT = (sys.executable, "-I", "-m", "basedpyright")
-_NODE_OPTIONS = "--max-old-space-size=8192"
+_NODE_OPTIONS = "--max-old-space-size=6656"
 
 
 class GradeError(Exception):
