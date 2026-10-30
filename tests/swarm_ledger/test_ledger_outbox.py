@@ -201,8 +201,10 @@ def test_join_reaches_the_server_past_unrelated_talk_and_keeps_deduplication(
     op = {"op": "join", "id": "join-through-talk", "by": ENG, "role": "member"}
     first = ledger.call(SLUG, [op])
     assert first["applied"] == [op["id"]]
-    assert stored()["_meta"]["members"][ENG]["role"] == "member"
-    assert ledger.call(SLUG, [op])["applied"] == []
+    joined = stored()
+    assert joined["_meta"]["members"][ENG]["role"] == "member"
+    assert ledger.call(SLUG, [op])["applied"] == [op["id"]]
+    assert stored() == joined
     assert outbox.path().read_text() == before
 
 
