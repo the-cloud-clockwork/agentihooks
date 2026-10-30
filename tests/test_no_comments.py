@@ -123,3 +123,32 @@ def test_registry_removal_is_red(tmp_path: Path) -> None:
 def test_whole_tree_checks_unchanged_comments(tmp_path: Path) -> None:
     root = _tree(tmp_path / "head", {"subject.py": "# legacy\n"})
     assert no_comments.main(["--head", str(root), "--all"]) == 1
+
+
+def test_prepush_keeps_the_protected_grader_when_head_deletes_it(tmp_path: Path) -> None:
+    from scripts import ci_prepush
+
+    root = _tree(tmp_path / "repo", {"scripts/no_comments.py": "pass\n"})
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=CI", "-c", "user.email=ci@example.invalid", "commit", "-qm", "base"],
+        check=True,
+    )
+    (root / "scripts/no_comments.py").unlink()
+    grade = tmp_path / "grade"
+    grade.mkdir()
+    steps = ci_prepush._comment_step(root, "HEAD", grade)
+    assert steps == [
+        (
+            "Python comments",
+            [
+                ci_prepush.sys.executable,
+                "-I",
+                str(grade / "comments-base/scripts/no_comments.py"),
+                "--base",
+                str(grade / "comments-base"),
+                "--head",
+                str(root),
+            ],
+        )
+    ]
+    assert (grade / "comments-base/scripts/no_comments.py").read_text() == "pass\n"

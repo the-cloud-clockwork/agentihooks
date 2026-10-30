@@ -56,7 +56,8 @@ def _comment_step(root: Path, revision: str, grade: Path) -> list[tuple[str, lis
     import io
     import tarfile
 
-    if not (root / "scripts/no_comments.py").is_file():
+    protected = _git(root, "ls-tree", "--name-only", revision, "scripts/no_comments.py")
+    if not protected and not (root / "scripts/no_comments.py").is_file():
         return []
     snapshot = grade / "comments-base"
     snapshot.mkdir()
