@@ -103,11 +103,11 @@ async def reclaim_all(js: JetStreamContext, stream: str, prefix: str) -> None:
         if STAGED.fullmatch(key):
             continue
         last = await js.get_last_msg(stream, name)
-        await reclaim(js, stream, prefix, key, functools.partial(_single, last.data or b""), last.seq)
+        await reclaim(js, stream, prefix, key, functools.partial(_single, last.data), last.seq)
 
 
-async def _single(value: bytes) -> list[bytes]:
-    return [value]
+async def _single(value: bytes | None) -> list[bytes]:
+    return [value] if value else []
 
 
 def due(last: datetime.datetime | None, now: datetime.datetime) -> datetime.datetime | None:
