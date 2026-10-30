@@ -22,7 +22,7 @@ def test_a_restore_with_real_time_sets_the_held_and_lost_journal_state(tmp_path:
     )
     request_metrics.restore(path)
     assert (request_metrics.JOURNAL, request_metrics.HELD_SINCE) == (path, now - 100.0)
-    assert request_metrics.LOST
+    assert request_metrics.LOST == [(now - 10.0, request_metrics.STARTED_AT)]
     request_metrics.record("GET", "/", 0.1, 0.1, 0.0)
     assert request_metrics.PENDING
 
