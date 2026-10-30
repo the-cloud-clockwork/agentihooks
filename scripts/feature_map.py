@@ -22,12 +22,16 @@ def _tests(root: Path) -> dict[str, str | None]:
         nodes = _suite_nodes(ast.parse(path.read_text()).body, path.relative_to(root).as_posix())
         for test_id, node in nodes.items():
             marked[test_id] = None
-            for decorator in node.decorator_list:
-                if isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "pytest.mark.feature":
-                    marked[test_id] = ast.literal_eval(decorator.args[0])
-                    if not isinstance(marked[test_id], str) or not marked[test_id].strip():
-                        raise ValueError(f"{test_id}: feature marker requires an id")
+            for decorator in filter(_is_feature, node.decorator_list):
+                if decorator.args and isinstance(decorator.args[0], ast.Constant):
+                    marked[test_id] = decorator.args[0].value
+                if not isinstance(marked[test_id], str) or not marked[test_id].strip():
+                    raise ValueError(f"{test_id}: feature marker requires an id")
     return marked
+
+
+def _is_feature(decorator: ast.expr) -> bool:
+    return isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "pytest.mark.feature"
 
 
 def _rules(root: Path) -> set[str]:
@@ -69,6 +73,8 @@ def _suite_nodes(body: list[ast.stmt], prefix: str) -> dict[str, ast.FunctionDef
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
             result[f"{prefix}::{node.name}"] = node
+        if isinstance(node, ast.ClassDef) and any(map(_is_feature, node.decorator_list)):
+            raise ValueError(f"{prefix}::{node.name}: feature marker belongs on test functions")
         if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
             if not any(
                 isinstance(item, ast.FunctionDef) and item.name in {"__init__", "__new__"} for item in node.body
@@ -105,11 +111,15 @@ def _behaviour_test(node_id: str, name: str, tests: dict[str, str | None]) -> No
 def _provenance(entry: dict, name: str, origin: str) -> None:
     if origin == "operator":
         _require(entry, "operator_words")
+    if origin == "operator" or "ordered_at" in entry:
+        ordered_at = _require(entry, "ordered_at")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", ordered_at):
+            raise ValueError(f"{name}: invalid ordered_at")
         try:
-            datetime.date.fromisoformat(_require(entry, "ordered_at"))
+            datetime.date.fromisoformat(ordered_at)
         except ValueError as error:
             raise ValueError(f"{name}: invalid ordered_at") from error
-    if origin != "inventory" or "ledger_item" in entry:
+    if origin != "inventory" or "ledger_item" in entry or "ordered_at" in entry:
         if not re.fullmatch(LEDGER_ITEM, _require(entry, "ledger_item")):
             raise ValueError(f"{name}: invalid ledger_item")
 

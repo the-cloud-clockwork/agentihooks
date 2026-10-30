@@ -468,6 +468,78 @@ def test_the_repository_feature_map_is_valid():
     assert feature_map.validate(root, root / "feature-map.json") >= 1
 
 
+@pytest.mark.parametrize("ordered_at", ["20261025", "2026-10-25x", " 2026-10-25"])
+def test_ordered_at_takes_only_the_dashed_date_form(mapped_repo, ordered_at):
+    root, path, entry = mapped_repo
+    _rewrite(path, {**entry, "ordered_at": ordered_at})
+    with pytest.raises(ValueError, match="^login: invalid ordered_at$"):
+        feature_map.validate(root, path)
+
+
+def test_an_order_date_outside_operator_needs_its_ledger_item(mapped_repo):
+    root, path, _ = mapped_repo
+    entry = _outside_operator("inventory", ordered_at="2026-10-25")
+    del entry["ledger_item"]
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="^login: requires ledger_item$"):
+        feature_map.validate(root, path)
+    _rewrite(path, _outside_operator("inventory", ordered_at="2026-02-30"))
+    with pytest.raises(ValueError, match="^login: invalid ordered_at$"):
+        feature_map.validate(root, path)
+    _rewrite(path, _outside_operator("inventory", ordered_at="2026-10-25"))
+    assert feature_map.validate(root, path) == 1
+
+
+@pytest.mark.parametrize(
+    ("ledger_item", "valid"),
+    [
+        ("ledger:rig/phases/fmap", True),
+        ("ledger:rig/comments/c-1", True),
+        ("ledger:rig/chat/m_2", True),
+        ("ledger:rig/tasks/t1 extra", False),
+        ("see ledger:rig/tasks/t1", False),
+        ("ledger:rig/notes/t1", False),
+    ],
+)
+def test_ledger_items_take_the_whole_ledger_form(mapped_repo, ledger_item, valid):
+    root, path, entry = mapped_repo
+    _rewrite(path, {**entry, "ledger_item": ledger_item})
+    if valid:
+        assert feature_map.validate(root, path) == 1
+    else:
+        with pytest.raises(ValueError, match="^login: invalid ledger_item$"):
+            feature_map.validate(root, path)
+
+
+def test_a_live_check_outside_the_repository_fails_even_when_it_exists(mapped_repo):
+    root, path, entry = mapped_repo
+    (root.parent / "outside.sh").write_text("exit 0\n")
+    _rewrite(path, {**entry, "live_check": ["bash", "../outside.sh"]})
+    with pytest.raises(ValueError, match=r"^login: missing live check \['bash', '../outside.sh'\]$"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("marker", ["", "id='login'", "LOGIN", "'log' + 'in'"])
+def test_a_feature_marker_needs_a_literal_id_argument(mapped_repo, marker):
+    root, path, _ = mapped_repo
+    (root / "tests/test_orphan.py").write_text(
+        f"import pytest\nLOGIN = 'login'\n@pytest.mark.feature({marker})\ndef test_other():\n    pass\n"
+    )
+    with pytest.raises(ValueError, match="^tests/test_orphan.py::test_other: feature marker requires an id$"):
+        feature_map.validate(root, path)
+
+
+def test_a_feature_marker_on_a_class_is_refused(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_orphan.py").write_text(
+        'import pytest\n@pytest.mark.feature("login")\nclass TestOrphan:\n    def test_other(self):\n        pass\n'
+    )
+    with pytest.raises(
+        ValueError, match="^tests/test_orphan.py::TestOrphan: feature marker belongs on test functions$"
+    ):
+        feature_map.validate(root, path)
+
+
 def _gh(tmp_path, body):
     gh = tmp_path / "gh"
     gh.write_text(f"#!{sys.executable}\nimport json, sys\n{body}")
