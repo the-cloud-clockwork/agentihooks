@@ -78,15 +78,13 @@ jobs:
       LEDGER_TEST_POSTGRES_URL: postgresql://postgres@127.0.0.1:5432/ledger
       MEMORY_TEST_POSTGRES_URL: postgresql://postgres@127.0.0.1:5433/memory
     steps:
+      - name: Start the ledger Postgres from the service image
+        run: |
+          docker run --pull never --rm -d --name writer-lock-postgres -p 127.0.0.1:5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger pgvector/pgvector:0.8.0-pg16
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-
-      - name: Start Postgres from a retried pull
-        run: |
-          bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/postgres:16
-          docker run --pull never --rm -d --name writer-lock-postgres -p 127.0.0.1:5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger public.ecr.aws/docker/library/postgres:16
-          timeout 60 bash -c 'until docker exec writer-lock-postgres pg_isready -h 127.0.0.1 -p 5432 -d ledger; do sleep 1; done'
 
       - uses: actions/setup-python@v5
         with:
@@ -102,6 +100,9 @@ jobs:
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Wait for the ledger Postgres
+        run: timeout 60 bash -c 'until docker exec writer-lock-postgres pg_isready -h 127.0.0.1 -p 5432 -d ledger; do sleep 1; done'
 
       - name: Run the idle writer lock holder scenario
         shell: bash
