@@ -539,6 +539,10 @@ def test_a_split_file_keeps_its_new_tests(heavy):
         "from tests.shared import test_shared\n",
         "test_made = pytest.mark.unit(lambda: None)\n",
         "if True:\n    def test_nested(): pass\n",
+        "from tests.shared import *\n",
+        "import unittest\nclass Relay(unittest.TestCase):\n    def test_c(self): pass\n",
+        "class TestInit:\n    def __init__(self): pass\n",
+        "pytestmark = pytest.mark.xdist_group('shared')\n",
     ],
 )
 def test_a_file_over_its_leg_share_with_an_unstored_test_pytest_may_skip_stays_whole(heavy, source):

@@ -135,12 +135,19 @@ def file_seconds(durations: dict[str, float], files: set[str]) -> dict[str, floa
     return {path: total if total else UNKNOWN_SECONDS for path, total in seconds.items()}
 
 
-def defined_tests(source: str) -> tuple[set[str], set[str], set[str]]:
-    """Top level test definitions, those with only mark decorators, and every other name the module binds."""
+def defined_tests(source: str) -> tuple[set[str], set[str], set[str]] | None:
+    """Top level test definitions, those with only mark decorators, and every other name the module binds; None when
+    pytest might collect a test those names miss or refuse a class node, or the file shares xdist group state."""
+    if "xdist_group" in source:
+        return None
     plain = set()
     defined = set()
     others = set()
     for statement in ast.parse(source).body:
+        if isinstance(statement, ast.ClassDef) and (
+            statement.bases or any(getattr(node, "name", "") == "__init__" for node in statement.body)
+        ):
+            return None
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             others.add(statement.name)
             if statement.name.startswith("Test" if isinstance(statement, ast.ClassDef) else "test"):
@@ -161,8 +168,11 @@ def defined_tests(source: str) -> tuple[set[str], set[str], set[str]]:
 def file_units(root: Path, path: str, durations: dict[str, float]) -> dict[str, float]:
     """Seconds per top level test definition of a file, empty unless those definitions are every test name the module
     binds and each unstored one is a plain function pytest surely collects."""
-    defined, plain, others = defined_tests((root / path).read_text())
-    if any(name.startswith(("test", "Test")) for name in others):
+    names = defined_tests((root / path).read_text())
+    if names is None:
+        return {}
+    defined, plain, others = names
+    if "*" in others or any(name.startswith(("test", "Test")) for name in others):
         return {}
     units = dict.fromkeys(defined, 0.0)
     stored = set()
@@ -183,7 +193,10 @@ def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: in
     count = min(limit, max(1, math.ceil(total / LEG_SECONDS)))
     files = sorted(tests - FIRST_SHARD_FILES)
     sizes = source_sizes(root, files)
-    work = {path: seconds[path] for path in files}
+    work = dict.fromkeys(files, 0.0)
+    for node, duration in durations.items():
+        if (path := node.partition("::")[0]) in work:
+            work[path] += duration
     for path in files:
         if count > 1 and seconds[path] > total / count and (units := file_units(root, path, durations)):
             del work[path]
