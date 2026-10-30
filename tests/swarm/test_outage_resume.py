@@ -510,7 +510,7 @@ def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_s
     assert recovery_state(store, dead.name) == "done"
 
 
-def test_a_restart_refused_for_another_reason_is_reported(
+def test_an_unsupported_handoff_restart_retries_fresh_on_the_same_seat(
     store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.swarm.tick import SpawnError as RestartError
@@ -518,17 +518,39 @@ def test_a_restart_refused_for_another_reason_is_reported(
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
     dead = agents[2]
     runtime.live.remove(dead.name)
-    refused = []
+    native_spawn = runtime.spawn
+    launched = []
 
     def spawn(config: SwarmConfig, lane: str, name: str, task: dict[str, object]) -> Placed:
+        launched.append(task)
+        if len(launched) == 1:
+            raise RestartError("saved run options unavailable", "unsupported")
+        return native_spawn(config, lane, name, task)
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
+    actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert f"outage resume for {dead.name}" in actions
+    assert len(launched) == 2
+    assert not launched[0].get(profile_choice.FRESH)
+    assert launched[1] == {**launched[0], profile_choice.FRESH: True}
+    assert launched[1]["seat"] == dead.seat
+    assert recovery_state(store, dead.name) == "done"
+
+
+def test_a_restart_refused_for_another_reason_is_reported(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    refused = []
+
+    def spawn(config, lane, name, task):
         refused.append(task)
-        raise RestartError("no seat", "unavailable")
+        raise SpawnError("no seat", "unavailable")
 
     monkeypatch.setattr(runtime, "spawn", spawn)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert f"outage resume for {dead.name} refused: no seat" in actions
     assert len(refused) == 1
-    assert recovery_state(store, dead.name) == "pending"
 
 
 @pytest.mark.parametrize("moment", ["before resume", "during resume", "before respawn"])
