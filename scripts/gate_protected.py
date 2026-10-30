@@ -94,7 +94,7 @@ def _aggregator_problems(
             base_job.get(field) != head_job.get(field)
             or field == "steps"
             and base_id == "gate-required"
-            and "docs" in ci_wiring.needs_of(head_job)
+            and {"docs", "type-gate"} & ci_wiring.needs_of(head_job)
         )
         and not (
             field == "steps"
