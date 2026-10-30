@@ -609,6 +609,16 @@ def test_a_file_holding_all_the_selected_time_stays_whole_on_one_leg(tmp_path):
     assert ci_select.legs_for(tmp_path, {"tests/test_heavy1.py"}, durations, 1) == [["tests/test_heavy1.py"]]
 
 
+def test_an_unmeasured_file_weighs_nothing_on_its_leg(tmp_path):
+    write(tmp_path, {f"tests/test_{name}.py": "def test_case(): pass\n" for name in ("a", "b", "x", "u")})
+    durations = seconds(test_a=100.0, test_b=99.0, test_x=0.5)
+    tests = {f"tests/test_{name}.py" for name in ("a", "b", "x", "u")}
+    assert ci_select.legs_for(tmp_path, tests, durations, 4) == [
+        ["tests/test_a.py"],
+        ["tests/test_b.py", "tests/test_u.py", "tests/test_x.py"],
+    ]
+
+
 def test_the_split_units_of_one_file_share_its_collection_on_a_leg(tmp_path):
     padding = "#" + "x" * 2_000_000 + "\n"
     write(
@@ -622,8 +632,8 @@ def test_the_split_units_of_one_file_share_its_collection_on_a_leg(tmp_path):
     durations = {
         "tests/test_heavy1.py::test_a": 120.0,
         "tests/test_heavy1.py::test_b": 40.0,
-        "tests/test_heavy2.py::test_case[one]": 30.0,
-        "tests/test_heavy2.py::test_case[two]": 30.0,
+        "tests/test_heavy2.py::TestCase::test_one": 30.0,
+        "tests/test_heavy2.py::TestCase::test_two": 30.0,
         **seconds(test_heavy3=50.0),
     }
     tests = {"tests/test_heavy1.py", "tests/test_heavy2.py", "tests/test_heavy3.py"}
