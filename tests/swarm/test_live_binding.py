@@ -1406,7 +1406,7 @@ def test_hosted_agent_takes_the_home_its_hive_join_report_names(ticking, monkeyp
     assert (report["state"], report["differences"]) == ("matching", {})
 
 
-def test_hosted_agent_without_a_join_report_has_an_unknown_home_that_never_retires(ticking, monkeypatch, tmp_path):
+def test_hosted_agent_without_a_join_report_is_never_retired_on_its_home(ticking, monkeypatch, tmp_path):
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
@@ -1415,12 +1415,11 @@ def test_hosted_agent_without_a_join_report_has_an_unknown_home_that_never_retir
     hosted = _hosted(store, old, monkeypatch, tmp_path, report=False)
     assert live_binding.hosted_home(store, hosted) == hosted
     assert live_binding.compare(hosted, _hive_facts(hosted)) == {}
-    assert live_binding.unknown(hosted, _hive_facts(hosted)) == ["home"]
     runtime.bindings = lambda agents: {a.name: _hive_facts(a) for a in agents}
     tick("sw", store, ledger, runtime, 200)
     assert hosted.name not in runtime.killed
     report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), hosted.name))
-    assert (report["state"], report["unknown"]) == ("matching", ["home"])
+    assert (report["state"], report["differences"]) == ("matching", {})
 
 
 def test_local_agent_without_validation_still_expects_the_profile_home(monkeypatch, tmp_path):
