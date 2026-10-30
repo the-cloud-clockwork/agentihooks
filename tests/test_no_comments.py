@@ -405,6 +405,9 @@ HEADER = "".join(f"# header line {index}\n" for index in range(20))
         (SCRIPT_JS, "f();\n", "f();\n/** planted */\nconst x = 1;\n", 2),
         (SCRIPT_JS, "f();\n", "f();\n/* planted */\nfunction g() {}\n", 2),
         (SCRIPT_JS, "f();\n", "f(); /** planted */\nfunction g() {}\n", 1),
+        (SCRIPT_JS, "f();\n", "f();\n/**/\nfunction g() {}\n", 2),
+        (SCRIPT_JS, "f();\n", "f();\n/** Run g. */\nfunction g() {}\n// planted\n", 4),
+        (".semgrep/fixture.sh", "echo a\n", "echo a\n# ruleid: example.rule\nsleep 1\n# planted\n", 4),
         (SCRIPT_JS, "f();\n", "try { f(); } catch (e) { /* storage blocked */ }\n", 1),
         (SCRIPT_JS, "f();\n", "f();\n// eslint-disable-next-line no-undef -- reason\ng();\n", 2),
         (SHEET, "a { color: red; }\n", "a { color: red; /* planted */ }\n", 1),
@@ -443,6 +446,8 @@ def test_planted_tree_comment_is_red(
         ("scripts/other/subject.js", "f(); // outside the ledger front end\n"),
         (SHEET, '/* header\n   second line */\na { content: "/* not */"; }\n'),
         (SHEET, "/* header */a { color: red; }\n"),
+        (SHEET, "/* only a header */\n"),
+        (SCRIPT_JS, "f();\n/** @ts-nocheck */\n"),
     ],
 )
 def test_tree_comment_allowance_is_green(tmp_path: Path, name: str, after: str) -> None:
@@ -461,6 +466,19 @@ def test_long_header_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str], 
     assert _grade(tmp_path, "", header, name) == 1
     start = 2 if name == SCRIPT else 1
     assert capsys.readouterr().out == f"::error::{name}:{start}: file header exceeds 20 lines\n"
+    kind = no_comments.language(tmp_path / "head", name)
+    assert no_comments.tree_violations(header.encode(), kind, name) == [
+        (start, start + 20, "file header exceeds 20 lines")
+    ]
+
+
+def test_undecodable_comment_is_red() -> None:
+    assert no_comments.tree_violations(b"f();\n// \xff\n", "javascript", SCRIPT_JS) == [(2, 2, "forbidden comment")]
+
+
+def test_ungraded_file_before_a_graded_one_is_skipped(tmp_path: Path) -> None:
+    head = _tree(tmp_path / "head", {"a.txt": "# not graded\n", "b.py": "# legacy\n"})
+    assert no_comments.grade(None, head, True) == ["b.py:1: forbidden comment"]
 
 
 def test_unchanged_tree_comment_is_green(tmp_path: Path) -> None:

@@ -130,8 +130,8 @@ def _comments(root: Any) -> Iterator[Any]:
 def _text(node: Any) -> str:
     text = node.text.decode(errors="replace")
     if text.startswith("/*"):
-        text = text[2:-2].lstrip("*")
-    return text.lstrip("#/").strip()
+        text = text[2:-2].removeprefix("*")
+    return text.removeprefix("//").removeprefix("#").strip()
 
 
 def _shebang(node: Any) -> bool:
