@@ -143,3 +143,28 @@ def test_time_before_the_first_launch_never_holds_back_a_filling_pool(store, mon
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert sorted(task for _, _, task in runtime.spawned) == ["t1", "t2", "t3"]
     assert not any("launch budget" in action for action in actions)
+
+
+def test_a_filling_pool_is_priced_at_its_mean_preparation_time(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), PooledLaunches()
+    clock = _slow_launches(monkeypatch, runtime, 0)
+    _slow_preparation(monkeypatch, clock, 7)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert sorted(task for _, _, task in runtime.spawned) == ["t1", "t2"]
+    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
+
+
+class PairedLaunches(PooledLaunches):
+    def launch_room(self, config):
+        return 2
+
+
+def test_a_second_pool_fills_on_preparation_time_once_its_first_task_is_priced(store, monkeypatch):
+    store.update("sw", max_eng=4)
+    ledger, runtime = tasks(*((f"t{n}", "eng") for n in range(1, 5))), PairedLaunches()
+    clock = _slow_launches(monkeypatch, runtime, 3.5)
+    _slow_preparation(monkeypatch, clock, 1)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert sorted(task for _, _, task in runtime.spawned) == ["t1", "t2", "t3", "t4"]
+    assert not any("launch budget" in action for action in actions)
