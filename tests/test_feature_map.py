@@ -652,22 +652,34 @@ def test_live_check_requires_the_deployed_feature_job_and_step(tmp_path, jobs, s
         '@pytest.mark.feature("login")\ndef test_shared():\n    pytest.skip("later")\n',
         'pytestmark = pytest.mark.skip\n@pytest.mark.feature("login")\ndef test_shared():\n    assert True\n',
         'class TestLogin:\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        self.skipTest("x")\n',
+        '@pytest.mark.feature("login")\ndef test_shared():\n    return\n    assert True\n',
+        '@pytest.mark.feature("login")\n@pytest.mark.parametrize("case", [])\ndef test_shared(case):\n    assert case\n',
     ],
 )
-def test_a_disabled_mapped_test_fails(mapped_repo, source):
+def test_a_disabled_mapped_test_fails(mapped_repo: tuple[Path, Path, dict], source: str) -> None:
     root, path, entry = mapped_repo
     node = "tests/test_login.py::" + ("TestLogin::test_shared" if "class" in source else "test_shared")
     _rewrite(path, {**entry, "behaviour_test": node})
     (root / "tests/test_login.py").write_text("import pytest\n" + source)
     with pytest.raises(ValueError, match=re.escape(f"mapped test is skipped, xfailed or returns early: ['{node}']")):
         feature_map.validate(root, path)
-    (root / "tests/test_login.py").write_text(
-        "import pytest\n" + re.sub(r"pytest\.(mark\.)?(skipif|skip|xfail|importorskip)|self\.skipTest", "str", source)
-    )
+    enabled = '@pytest.mark.feature("login")\ndef test_shared(self=None):\n    assert True\n'
+    if "class" in source:
+        enabled = "class TestLogin:\n" + "".join(f"    {line}\n" for line in enabled.splitlines())
+    (root / "tests/test_login.py").write_text("import pytest\n" + enabled)
     assert feature_map.validate(root, path) == 1
 
 
-def _base(tmp_path, features, retired=()):
+@pytest.mark.parametrize("config", ["pyproject.toml", "pytest.ini", "conftest.py"])
+def test_a_config_naming_a_mapped_test_module_fails(mapped_repo: tuple[Path, Path, dict], config: str) -> None:
+    root, path, _ = mapped_repo
+    assert feature_map.validate(root, path) == 1
+    (root / config).write_text("--deselect tests/test_login.py::test_shared\n")
+    with pytest.raises(ValueError, match=re.escape(f"mapped test module is named in a test config: ['{config} ")):
+        feature_map.validate(root, path)
+
+
+def _base(tmp_path: Path, features: list[dict], retired: tuple[dict, ...] = ()) -> Path:
     base = tmp_path / "base-map.json"
     base.write_text(json.dumps({"features": features, "retired": list(retired)}))
     return base
@@ -676,7 +688,7 @@ def _base(tmp_path, features, retired=()):
 RETIRED = {"id": "logout", "reason": "Merged into login", "ledger_item": "ledger:rig/tasks/t2"}
 
 
-def test_removing_a_feature_needs_a_retired_record(mapped_repo):
+def test_removing_a_feature_needs_a_retired_record(mapped_repo: tuple[Path, Path, dict]) -> None:
     root, path, entry = mapped_repo
     base = _base(root, [entry, {**entry, "id": "logout"}])
     with pytest.raises(ValueError, match=re.escape("removed feature needs a retired record: ['logout']")):
@@ -686,36 +698,45 @@ def test_removing_a_feature_needs_a_retired_record(mapped_repo):
 
 
 @pytest.mark.parametrize("field", ["id", "reason", "ledger_item"])
-def test_a_retired_record_needs_its_id_reason_and_ledger_item(mapped_repo, field):
+def test_a_retired_record_needs_its_id_reason_and_ledger_item(mapped_repo: tuple[Path, Path, dict], field: str) -> None:
     root, path, entry = mapped_repo
     path.write_text(json.dumps({"features": [entry], "retired": [{**RETIRED, field: ""}]}))
     with pytest.raises(ValueError, match=f"requires {field}$"):
         feature_map.validate(root, path)
 
 
-def test_a_retired_record_takes_a_whole_ledger_item(mapped_repo):
+def test_a_retired_record_takes_a_whole_ledger_item(mapped_repo: tuple[Path, Path, dict]) -> None:
     root, path, entry = mapped_repo
     path.write_text(json.dumps({"features": [entry], "retired": [{**RETIRED, "ledger_item": "t2"}]}))
     with pytest.raises(ValueError, match="^logout: invalid retired ledger_item$"):
         feature_map.validate(root, path)
 
 
-@pytest.mark.parametrize("retired", [{"id": "x"}, [RETIRED, RETIRED], ["logout"]])
-def test_retired_must_be_a_list_of_distinct_records(mapped_repo, retired):
+@pytest.mark.parametrize(
+    ("retired", "error"),
+    [
+        ({"id": "x"}, "retired must be a list of records"),
+        (["logout"], "retired must be a list of records"),
+        ([RETIRED, RETIRED], "duplicate retired feature logout"),
+    ],
+)
+def test_retired_must_be_a_list_of_distinct_records(
+    mapped_repo: tuple[Path, Path, dict], retired: object, error: str
+) -> None:
     root, path, entry = mapped_repo
     path.write_text(json.dumps({"features": [entry], "retired": retired}))
-    with pytest.raises(ValueError, match="retired"):
+    with pytest.raises(ValueError, match=f"^{error}$"):
         feature_map.validate(root, path)
 
 
-def test_a_retired_id_is_never_reused(mapped_repo):
+def test_a_retired_id_is_never_reused(mapped_repo: tuple[Path, Path, dict]) -> None:
     root, path, entry = mapped_repo
     path.write_text(json.dumps({"features": [entry], "retired": [{**RETIRED, "id": "login"}]}))
     with pytest.raises(ValueError, match=re.escape("retired feature id reused: ['login']")):
         feature_map.validate(root, path)
 
 
-def test_a_retired_record_cannot_be_dropped(mapped_repo):
+def test_a_retired_record_cannot_be_dropped(mapped_repo: tuple[Path, Path, dict]) -> None:
     root, path, entry = mapped_repo
     base = _base(root, [entry], [RETIRED])
     with pytest.raises(ValueError, match=re.escape("retired record removed: ['logout']")):
@@ -724,7 +745,7 @@ def test_a_retired_record_cannot_be_dropped(mapped_repo):
     assert feature_map.validate(root, path, base) == 1
 
 
-def test_removing_a_mapped_test_without_changing_its_entry_fails(mapped_repo):
+def test_removing_a_mapped_test_without_changing_its_entry_fails(mapped_repo: tuple[Path, Path, dict]) -> None:
     root, path, entry = mapped_repo
     base = _base(root, [entry])
     assert feature_map.validate(root, path, base) == 1
@@ -733,12 +754,14 @@ def test_removing_a_mapped_test_without_changing_its_entry_fails(mapped_repo):
         feature_map.validate(root, path, base)
 
 
-def test_a_base_without_a_map_grades_the_head_alone(mapped_repo):
+def test_a_base_without_a_map_grades_the_head_alone(mapped_repo: tuple[Path, Path, dict]) -> None:
     root, path, _ = mapped_repo
     assert feature_map.validate(root, path, root / "absent.json") == 1
 
 
-def test_cli_grades_against_the_base_map(mapped_repo, monkeypatch, capsys):
+def test_cli_grades_against_the_base_map(
+    mapped_repo: tuple[Path, Path, dict], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root, path, entry = mapped_repo
     base = root / "base"
     base.mkdir()
@@ -751,7 +774,7 @@ def test_cli_grades_against_the_base_map(mapped_repo, monkeypatch, capsys):
     assert "1 features" in capsys.readouterr().out
 
 
-def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base():
+def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base() -> None:
     workflow = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())
     step = next(
         step for step in workflow["jobs"]["lint"]["steps"] if step.get("name") == "Hold the mapped feature tests"
