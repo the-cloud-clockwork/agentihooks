@@ -184,14 +184,16 @@ class InboxStore:
             "",
         )
 
-    def send(self, sender, address, text, ref="", fyi=False, task="", item_id=""):
+    def send(
+        self, sender: str, address: str, text: str, ref: str = "", fyi: bool = False, task: str = "", item_id: str = ""
+    ) -> Item:
         """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
         work, so a bare close names no outcome; a given item_id refuses a second write of that item."""
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         from scripts.hive import scope
 
-        sender, address = self.names.resolve(sender), self.names.resolve(address)
+        sender, address = self.names.resolve(sender), self.seats.recipient(address)
         home = self.home(address)
         if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
