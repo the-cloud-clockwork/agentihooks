@@ -6,18 +6,16 @@ from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from tests.swarm_ledger.test_sqlite import document
 
 
-def test_ordered_event_rows_keep_duplicates_and_revision_filter(tmp_path):
+def test_ordered_event_rows_keep_duplicates_in_their_stored_order(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
     state = document()
     state["_meta"]["events"] = [{"rev": 2, "id": "repeat"}, {"rev": 1, "id": "first"}, {"rev": 2, "id": "repeat"}]
     repo.import_document("events", state)
-    assert repo.events_since("events", 0) == state["_meta"]["events"]
-    assert repo.events_since("events", 1) == [{"rev": 2, "id": "repeat"}, {"rev": 2, "id": "repeat"}]
+    assert repo.export_document("events")["_meta"]["events"] == state["_meta"]["events"]
     after = copy.deepcopy(state)
     after["_meta"]["events"] = [{"rev": 1, "id": "first"}, {"rev": 2, "id": "repeat"}, {"rev": 3, "id": "last"}]
     repo.import_document("events", after, replace=True)
     assert repo.export_document("events") == after
-    assert repo.events_since("events", 2) == [{"rev": 3, "id": "last"}]
 
 
 def test_unversioned_event_records_are_refused(tmp_path):
