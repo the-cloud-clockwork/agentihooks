@@ -319,6 +319,7 @@ def test_the_api_refuses_to_start_without_a_token_unless_told_to_serve_open(monk
 def test_the_api_refuses_to_start_without_the_shared_database_unless_told_to_serve_a_folder(monkeypatch):
     monkeypatch.setenv(store.TOKEN_ENV, "secret")
     monkeypatch.delenv("AGENTIHOOKS_SWARM_DATABASE_URL", raising=False)
+    monkeypatch.setattr(store, "repository", lambda: pytest.fail("the api started without a database"))
 
     with pytest.raises(SystemExit) as stopped:
         store.main(["--port", "0"])
