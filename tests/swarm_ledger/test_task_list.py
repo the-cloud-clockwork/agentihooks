@@ -247,3 +247,4 @@ def test_a_targets_read_is_refused_outside_a_plain_tasks_read(path: str, query: 
     with pytest.raises(APIError) as refused:
         routes.ledger_get(handler, SimpleNamespace(), "one", path)
     assert (refused.value.status, refused.value.code) == (400, "schema_invalid")
+    assert query["targets"] == "" or str(refused.value) == "Only a plain tasks read takes targets"
