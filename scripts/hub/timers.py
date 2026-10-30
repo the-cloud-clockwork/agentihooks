@@ -10,6 +10,16 @@ from scripts.hub.registry import Reactor
 
 BUCKET = "hub-timers"
 INDEX = "deadlines"
+KEEP_MS = 3_600_000
+
+
+def _recent(rows: dict, now: int) -> dict:
+    """Pending rows and tombstones that ended inside the keep window; older tombstones leave the index."""
+    return {
+        key: row
+        for key, row in rows.items()
+        if row["request"] is not None or ("ended" in row and now - row["ended"] < KEEP_MS)
+    }
 
 
 class Timers:
@@ -32,7 +42,8 @@ class Timers:
     def _store(self, event: Envelope, *, complete: bool) -> None:
         for _ in range(8):
             entry = self._state.get(INDEX)
-            rows = json.loads(entry.value) if entry else {}
+            now = self._clock()
+            rows = _recent(json.loads(entry.value), now) if entry else {}
             previous = rows.get(event.key)
             if previous is not None:
                 if complete:
@@ -42,6 +53,8 @@ class Timers:
                     return
             request = None if complete or event.type == "deadline.cancelled" else event.to_dict()
             rows[event.key] = {"version": event.version, "request": request}
+            if request is None:
+                rows[event.key]["ended"] = now
             value = json.dumps(rows).encode()
             try:
                 if entry:
