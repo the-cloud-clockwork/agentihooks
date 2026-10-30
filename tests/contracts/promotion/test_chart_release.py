@@ -146,7 +146,8 @@ def _install_published(
         capture_output=True,
         text=True,
     )
-    return result, [json.loads(line) for line in calls.read_text().splitlines()]
+    lines = calls.read_text().splitlines() if calls.exists() else []
+    return result, [json.loads(line) for line in lines]
 
 
 @pytest.mark.parametrize(
