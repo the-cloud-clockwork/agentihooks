@@ -443,7 +443,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         actions.extend(followed)
         if agent is None:
             continue
-        filled = live_binding.fill(agent, facts.get(agent.name, {}))
+        filled = live_binding.hosted_home(store, live_binding.fill(agent, facts.get(agent.name, {})))
         if filled != agent:
             store.put_agent(slug, filled)
             agent = filled
