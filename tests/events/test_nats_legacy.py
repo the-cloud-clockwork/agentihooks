@@ -72,11 +72,17 @@ def test_legacy_stream_creation_keeps_the_dedupe_window():
     import asyncio
     from unittest.mock import AsyncMock
 
-    from scripts.events.nats_legacy import LEGACY_EVENTS, provision_events
+    from scripts.events.nats_legacy import EVENTS_MAX_AGE_S, EVENTS_MAX_BYTES, LEGACY_EVENTS, provision_events
 
     js = SimpleNamespace(add_stream=AsyncMock())
     asyncio.run(provision_events(js, "events", 12.5))
-    js.add_stream.assert_awaited_once_with(name="events", subjects=LEGACY_EVENTS, duplicate_window=12.5)
+    js.add_stream.assert_awaited_once_with(
+        name="events",
+        subjects=LEGACY_EVENTS,
+        duplicate_window=12.5,
+        max_age=EVENTS_MAX_AGE_S,
+        max_bytes=EVENTS_MAX_BYTES,
+    )
 
 
 def test_legacy_stream_upgrade_retains_configuration_and_refuses_unexpected_errors():
@@ -86,7 +92,7 @@ def test_legacy_stream_upgrade_retains_configuration_and_refuses_unexpected_erro
     from nats.js.api import StreamConfig
     from nats.js.errors import APIError
 
-    from scripts.events.nats_legacy import LEGACY_EVENTS, provision_events
+    from scripts.events.nats_legacy import EVENTS_MAX_AGE_S, EVENTS_MAX_BYTES, LEGACY_EVENTS, provision_events
 
     config = StreamConfig(name="events", subjects=["swarm.>"], max_msgs=123, duplicate_window=12.5)
     js = SimpleNamespace(
@@ -101,10 +107,13 @@ def test_legacy_stream_upgrade_retains_configuration_and_refuses_unexpected_erro
     assert updated.subjects == LEGACY_EVENTS
     assert updated.max_msgs == 123
     assert updated.duplicate_window == 12.5
+    assert updated.max_age == EVENTS_MAX_AGE_S
+    assert updated.max_bytes == EVENTS_MAX_BYTES
+    current = StreamConfig(name="events", subjects=LEGACY_EVENTS, max_age=EVENTS_MAX_AGE_S, max_bytes=EVENTS_MAX_BYTES)
     for code in [10058, 10059]:
         error = APIError(err_code=code)
         js.add_stream.side_effect = error
-        js.stream_info.return_value = SimpleNamespace(config=StreamConfig(name="events", subjects=LEGACY_EVENTS))
+        js.stream_info.return_value = SimpleNamespace(config=current)
         with pytest.raises(APIError) as caught:
             asyncio.run(provision_events(js, "events", 12.5))
         assert caught.value is error
