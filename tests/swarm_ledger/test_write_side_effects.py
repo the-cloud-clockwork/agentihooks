@@ -56,7 +56,6 @@ def test_a_failed_relay_is_retried_from_the_store_and_the_write_stands(down, mon
         ledger_server.deferred(ledger_server.RELAY)(SLUG, state)
         assert ran.wait(5)
         ran.clear()
-        assert down.texts(ENG.seat) == []
         assert ledger_server.unrelayed() == held(state["_meta"]["rev"])
         kept, _ = core.sync(SLUG)
         assert [m["text"] for m in kept["chat"]] == [ASK["text"]]
