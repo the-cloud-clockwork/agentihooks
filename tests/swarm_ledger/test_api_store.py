@@ -867,13 +867,13 @@ def test_a_request_without_credentials_is_refused_whatever_the_token(tmp_path: P
         assert remote.Client(base).call("GET", "/ledgers") == (401, {"code": "unauthorized"})
 
 
-def test_the_store_reads_the_token_the_whole_ledger_and_every_event_by_default(api: tuple) -> None:
+def test_the_store_reads_the_token_and_every_event_by_default_and_refuses_a_read_naming_no_part(api: tuple) -> None:
     stored, base = api
     client = remote.Client(base, "secret")
 
     assert client.call("GET", "/ledgers/split/token") == (200, {"token": stored.token("split")})
     assert client.call("GET", "/ledgers/split/events") == (200, stored.events_since("split", 0))
-    assert client.call("GET", "/ledgers/split/read") == (200, stored.read("split"))
+    assert client.call("GET", "/ledgers/split/read") == (404, {"code": "ledger_not_found"})
 
 
 def test_the_store_refuses_an_empty_path_an_unknown_ledger_method_and_a_commit_missing_its_drops(api: tuple) -> None:
@@ -1054,7 +1054,8 @@ def test_a_store_commit_holds_its_ledger_lock_caches_what_it_wrote_and_ignores_a
         "begin_ledger",
         lambda connection, slug, statement: locked.append(slug) or begin(connection, slug, statement),
     )
-    written = stored.commit("split", revision, {"title": "Moved"}, ["absent"], [], summary)
+    meta = {**stored.current("split").state["_meta"], "rev": revision + 1}
+    written = stored.commit("split", revision, {"title": "Moved", "_meta": meta}, ["absent"], [], summary)
 
     assert "split" in locked and None not in locked
     assert stored.generations() == {"split": written.generation}
@@ -1105,7 +1106,7 @@ def test_a_registry_session_hands_out_private_copies_of_what_it_read() -> None:
 
 def test_remote_task_rows_carry_the_task_revision_fields_and_commits_cache_by_ledger(api: tuple) -> None:
     _, base = api
-    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"), plain)
+    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"))
     repository.apply_ops("split", ops=[ADD])
     meta = repository.current("split").state["_meta"]
 
