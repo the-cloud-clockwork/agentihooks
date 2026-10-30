@@ -16,7 +16,7 @@ _NAMES = r"[\w.-]+(?:\s*,\s*[\w.-]+)*"
 _DIRECTIVES = (
     rf"noqa(?::\s*{_CODES})?",
     rf"type:\s*ignore(?:\[{_NAMES}\])?",
-    r"pragma:\s*no (?:cover|branch)",
+    r"pragma:\s*no (?:cover|branch|mutate)",
     rf"pyright:\s*ignore(?:\[{_NAMES}\])?",
     r"pyright:\s*(?:strict|basic|standard|off)",
     r"pyright:\s*\w+\s*=\s*(?:true|false|error|warning|information|none)(?:\s*,\s*\w+\s*=\s*(?:true|false|error|warning|information|none))*",

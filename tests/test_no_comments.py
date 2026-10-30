@@ -38,6 +38,7 @@ def test_planted_comment_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[st
         "type: ignore[attr-defined]",
         "pragma: no cover",
         "pragma: no branch",
+        "pragma: no mutate",
         "pyright: ignore[reportAny]",
         "ruff: noqa: F401",
         "fmt: off",
@@ -351,3 +352,10 @@ def test_prepush_refuses_an_archive_link_outside_the_snapshot(tmp_path: Path) ->
     grade.mkdir()
     with pytest.raises(tarfile.AbsoluteLinkError):
         ci_prepush._comment_step(root, "HEAD", grade)
+
+
+def test_whole_tree_includes_unchanged_base_files(tmp_path: Path) -> None:
+    files = {"subject.py": "# legacy\n"}
+    base = _tree(tmp_path / "base", files)
+    head = _tree(tmp_path / "head", files)
+    assert no_comments.grade(base, head, True) == ["subject.py:1: forbidden comment"]
