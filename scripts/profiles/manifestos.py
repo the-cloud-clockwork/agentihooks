@@ -19,9 +19,11 @@ def _env(root: Path) -> dict:
     return (_load_native_layer(path).get("env") or {}) if path else {}
 
 
-def enabled(bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None) -> bool:
+def enabled(
+    bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None, shared: Path | None = None
+) -> bool:
     value = "true"
-    for root in [r for r in (bundle, user) if r is not None] + [path for _, path in dirs]:
+    for root in [r for r in (bundle, shared, user) if r is not None] + [path for _, path in dirs]:
         value = str(_env(root).get(ENABLED, value))
     return value.lower() in ("true", "1", "yes")
 
@@ -41,10 +43,12 @@ def choice(dirs: list[tuple[str, Path]]) -> dict[str, bool]:
     return chosen
 
 
-def paths(bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None) -> list[Path]:
-    if not enabled(bundle, dirs, user):
+def paths(
+    bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None, shared: Path | None = None
+) -> list[Path]:
+    if not enabled(bundle, dirs, user, shared):
         return []
-    found = config._resolve_manifesto_paths(bundle, profile_chain.role(dirs), choice(dirs), user)
+    found = config._resolve_manifesto_paths(bundle, profile_chain.role(dirs), choice(dirs), user, shared)
     return [Path(path) for path in found]
 
 
@@ -72,7 +76,8 @@ def main(argv: list[str] | None = None) -> int:
     state = profile_chain.read_state()
     bundle = args.bundle or profile_chain.bundle_path(state)
     user = None if args.bundle else profile_chain.user_bundle_path(state)
-    found = [Path(path) for path in config._resolve_manifesto_paths(bundle, user_root=user)]
+    shared = None if args.bundle else profile_chain.shared_bundle_path(state)
+    found = [Path(path) for path in config._resolve_manifesto_paths(bundle, user_root=user, shared_root=shared)]
     if not found:
         folder = Path(bundle) / "manifestos" if bundle is not None else "the default manifesto folder"
         print(f"No manifestos in {folder}", file=sys.stderr)

@@ -583,7 +583,7 @@ def test_queue_browser_setup_cannot_enter_the_downloading_action():
     assert offline["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
 
 
-def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
+def test_only_a_dev_push_saves_the_test_environment_after_installing_it() -> None:
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     callers = {
         name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
@@ -594,14 +594,19 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
         assert "count-record" not in jobs
         jobs["count-record"] = recorder
         callers["count-record"] = recorder["steps"]
-    assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-rerun", "unit-selected"]
+    expected = {"count-record", "split", "test-count", "unit", "unit-rerun", "unit-selected"}
+    assert set(callers) == expected | ({"type-gate"} if "type-gate" in jobs else set())
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"
         saves = [
             step for step in steps if step.get("uses") == "actions/cache/save@v4" and step["with"]["path"] == "~/venv"
         ]
-        guards = {"unit-selected": "github.event_name == 'pull_request'", "test-count": "github.event_name != 'push'"}
+        guards = {
+            "unit-selected": "github.event_name == 'pull_request'",
+            "test-count": "github.event_name != 'push'",
+            "type-gate": "github.event_name != 'push'",
+        }
         if name in guards:
             assert guards[name] in jobs[name]["if"]
             assert saves == []
