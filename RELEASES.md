@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.514 · 2026-10-30
+
+### 2026-10-30 · f5e69c4d3abf · #8953 · @agenticore-app
+
+**Hold mapped feature tests against disabling and unrecorded removal**
+
+This change strengthens the feature map validator so mapped tests can no longer be quietly disabled or deleted. It now reuses the shared disabling checks to reject skipped, xfailed, skipif'd, or early-returning mapped tests, and introduces a `retired` ledger so removing a feature or its tests requires an explicit, non-reusable retirement record checked against the base. The validator runs from the protected grader copy (with `--base`) so a pull request cannot loosen its own gate. Planted red and green CI runs confirm each rule triggers and passes correctly, closing a gap where feature coverage could silently erode.
+
 ## v2.17.513 · 2026-10-30
 
 ### 2026-10-30 · 1a9b9eb12705 · #8948 · @agenticore-app
