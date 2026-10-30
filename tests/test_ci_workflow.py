@@ -383,19 +383,39 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     ]
 
 
-def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
+def test_unit_restores_one_venv_per_interpreter_and_dependency_files() -> None:
     _, cache = _unit_step_index(lambda s: s.get("id") == "venv")
     _, python = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/setup-python"))
-    key = cache["with"]["key"]
     assert cache["with"]["path"] == "~/venv"
+    assert cache["with"]["key"] == "${{ steps.day.outputs.key }}"
+    _, day = _unit_step_index(lambda s: s.get("id") == "day")
+    key = day["env"]["KEY_PREFIX"] + day["env"]["KEY_INPUTS"]
     assert "${{ runner.os }}" in key
     assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
     assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
     assert "${{ hashFiles('.github/test-requirements.lock') }}" in key
-    _, day = _unit_step_index(lambda s: s.get("id") == "day")
-    assert day["run"] == 'echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"'
-    assert "${{ steps.day.outputs.date }}" in key
+    assert day["run"].splitlines() == [
+        "date=$(date -u +%F)",
+        'echo "date=$date" >> "$GITHUB_OUTPUT"',
+        'echo "key=$KEY_PREFIX-$date-$KEY_INPUTS" >> "$GITHUB_OUTPUT"',
+    ]
     assert "matrix.shard" not in key
+
+
+def test_records_name_the_test_environment_when_the_wheelhouse_skips_its_restore() -> None:
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    jobs = workflow["jobs"]
+    assert jobs["unit"]["env"]["UNIT_WHEELHOUSE"] == "${{ github.event_name == 'pull_request' && '1' || '' }}"
+    assert jobs["unit-selected"]["env"]["UNIT_WHEELHOUSE"] == "1"
+    environments = [
+        value
+        for job in (jobs["test-count"], jobs["unit"], jobs["unit-selected"])
+        for step in job.get("steps", [])
+        for name, value in step.get("env", {}).items()
+        if name in ("ENVIRONMENT", "TEST_COUNT_ENVIRONMENT")
+    ]
+    assert environments
+    assert set(environments) == {"${{ steps.day.outputs.key }}"}
 
 
 def test_a_restored_venv_skips_uv_and_the_install():
@@ -481,7 +501,7 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
     assert excludes == ["opentelemetry-exporter-otlp-proto-grpc"]
 
 
-def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
+def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs() -> None:
     workflow = _workflow()
     assert (_ROOT / ".github/test-constraints.txt").read_text().splitlines() == [
         "playwright==1.63.0",
@@ -491,14 +511,17 @@ def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs()
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
-        assert "${{ hashFiles('.github/test-constraints.txt') }}" in cache["with"]["key"]
+        day = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "day")
+        assert cache["with"]["key"] == "${{ steps.day.outputs.key }}"
+        assert "${{ hashFiles('.github/test-constraints.txt') }}" in day["env"]["KEY_INPUTS"]
 
 
-def test_every_job_sharing_the_test_environment_installs_the_baked_browser_version():
+def test_every_job_sharing_the_test_environment_installs_the_baked_browser_version() -> None:
     sharing, unpinned = [], []
     for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
         for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items():
             keys = [str((step.get("with") or {}).get("key", "")) for step in job.get("steps", [])]
+            keys += [str((step.get("env") or {}).get("KEY_PREFIX", "")) for step in job.get("steps", [])]
             if any(key.startswith("venv-") for key in keys):
                 sharing.append(f"{path.name}:{name}")
                 if (job.get("env") or {}).get(
@@ -506,6 +529,7 @@ def test_every_job_sharing_the_test_environment_installs_the_baked_browser_versi
                 ) != "${{ github.workspace }}/.github/test-constraints.txt":
                     unpinned.append(f"{path.name}:{name}")
     assert "count-record.yml:count-record" in sharing
+    assert "test.yml:unit" in sharing
     assert unpinned == []
 
 
