@@ -154,7 +154,10 @@ def test_a_failed_checker_run_is_red(
     assert out.startswith("::error::basedpyright exited ")
 
 
-def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
+def test_grading_needs_a_base(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as exited:
         type_gate.main([])
     assert exited.value.code == 2
