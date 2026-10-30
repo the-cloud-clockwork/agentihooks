@@ -420,3 +420,47 @@ def test_the_controller_ticks_every_swarm_while_no_host_ticked_list_is_set(store
     monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
 
     assert controller.run_once(store) == {"XXXX": ["XXXX"]}
+
+
+def test_the_host_tick_leaves_a_swarm_the_controller_ticks_so_the_controller_takes_its_lease(store, monkeypatch):
+    from scripts.swarm import cli, commands, controller
+    from scripts.swarm.store import SwarmConfig
+
+    clock = [1000]
+    monkeypatch.setattr(lease, "now_ms", lambda saved: clock[0])
+    for slug in ("proof", "workstation"):
+        store.create(SwarmConfig(slug, "agentihooks", 2, 0))
+    held = lease.acquire(store, "proof", "workstation-hive")
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", "workstation")
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller-hive")
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
+
+    controller.run_once(store)
+
+    assert lease.acquire(store, "proof", "workstation-hive") is None
+    assert lease.acquire(store, "proof", "controller-hive") is None
+    clock[0] = held.expires_at + 1
+    assert lease.acquire(store, "proof", "workstation-hive") is None
+    assert lease.acquire(store, "proof", "controller-hive").owner == "controller-hive"
+    assert lease.acquire(store, "workstation", "workstation-hive").owner == "workstation-hive"
+
+
+def test_the_controller_marks_each_swarm_for_one_lease_ttl_as_it_ticks_it(store, monkeypatch):
+    from scripts.swarm import cli, commands, controller
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("proof", "agentihooks", 2, 0))
+    monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller-hive")
+    marks = []
+    monkeypatch.setattr(
+        cli,
+        "run_tick",
+        lambda saved, slug, *args, **kwargs: marks.append(saved.redis.get(saved.key(slug, "controller-host"))) or [],
+    )
+
+    controller.run_once(store)
+
+    assert marks == ["controller-hive"]
+    assert 0 < store.redis.pttl(store.key("proof", "controller-host")) <= lease.ttl_ms()
+    assert lease.acquire(store, "proof", "controller-hive").owner == "controller-hive"
