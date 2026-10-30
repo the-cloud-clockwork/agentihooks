@@ -67,7 +67,7 @@ for doc in docs:
     pod = doc["spec"]["template"]["spec"]
     container = pod["containers"][0]
     stop = " ".join(container["lifecycle"]["preStop"]["exec"]["command"])
-    if f"agentihooks hive drain --wait {drain}" not in stop or pod["terminationGracePeriodSeconds"] != int(drain) + 30:
+    if f"agentihooks hive drain --wait {drain} >>" not in stop or pod["terminationGracePeriodSeconds"] != int(drain) + 30:
         sys.exit(f"the chart worker hive no longer drains for {drain} seconds before it stops: {stop}")
     if "readinessProbe" not in container:
         sys.exit("the chart worker hive has no rollout readiness probe")
@@ -172,6 +172,8 @@ if handed["hive"] != old or handed["at"] >= int(stopped):
     sys.exit(f"{agent} handed off at {handed['at']} on {handed['hive']}, not before hive {old} stopped at {stopped}")
 if envelope.get("agent") != agent or envelope.get("reason") != "recycle":
     sys.exit(f"the recorded handoff is not {agent}'s own: {json.dumps(envelope)}")
+if samples == 0:
+    sys.exit(f"the roll lease was never read while hive {old} drained")
 if f"hive {old} drained: every agent handed off, 1 ordered to hand off" not in Path(log).read_text():
     sys.exit(f"the preStop drain of hive {old} did not order {agent} and end on its handoff")
 print(

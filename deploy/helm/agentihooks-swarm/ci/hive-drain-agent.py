@@ -60,8 +60,8 @@ def hand_off(store: RedisStore, agent: AgentRecord) -> None:
     at = now_ms()
     built = envelope.build(store, SLUG, agent, "recycle", None, at)
     store.put_handoff(SLUG, TASK, DOCUMENT, seat=SEAT, envelope=built)
-    store.put_agent(SLUG, replace(agent, state="finished"))
     store.redis.set(key("handed"), json.dumps({"at": at, "hive": agent.hive}))
+    store.put_agent(SLUG, replace(agent, state="finished"))
 
 
 def main() -> None:
