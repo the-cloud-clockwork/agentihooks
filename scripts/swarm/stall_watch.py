@@ -7,6 +7,7 @@ one still open two more limits later reaches the operator's Priorities and ntfy.
 """
 
 import base64
+import functools
 import json
 import os
 import urllib.request
@@ -18,7 +19,7 @@ from scripts.gates.enforcement import STALL_WATCH
 from scripts.hive import join_report
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
-from scripts.swarm import capacity, idle, outage, ready, waits
+from scripts.swarm import capacity, freeze, idle, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.ledger_events import Mail
 
@@ -312,6 +313,12 @@ def _lane_full(watch, lane, decision):
 def _lane_tasks(watch, rows, lane):
     tasks = [rows.get(task["id"], task) for task in watch.claimable(lane)]
     return [task for task in tasks if task.get("state", "open") == "open" and not task.get("claimed_by")]
+
+
+def ready_lanes(slug: str, store: object, ledger: object, doc: dict) -> Callable[[str], list]:
+    """Each lane's ready tasks as autoscale reads its demand, so a watched focus holds the same tasks from the alert."""
+    lanes = functools.cache(lambda: capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, doc))[1])
+    return lambda lane: lanes()[lane]
 
 
 def _unclaimed(watch, mail, rows, limit, marks, seen):
