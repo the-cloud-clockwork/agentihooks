@@ -131,13 +131,11 @@ def cheap(redis: "Redis", report: dict) -> dict:
     return {
         **redis_checks(redis, report["slug"], report["execution_id"]),
         "transcript": checked(lambda: transcript_ready(context["transcript_dir"])),
-        "profile": checked(
-            lambda: context["profile"] in rendered_chain(Path(context["home"]), report.get("agent", ""))
-        ),
+        "profile": checked(lambda: context["profile"] in rendered_chain(Path(context["home"]), report.get("agent"))),
         "settings": checked(lambda: settings_ready(context)),
         "pane": checked(lambda: pane_ready(context["pane"])),
         "started_at": report["started_at"] > 0,
-        "brain": checked(lambda: "brain" in rendered_overlays(Path(context["home"]), report.get("agent", ""))),
+        "brain": checked(lambda: "brain" in rendered_overlays(Path(context["home"]), report.get("agent"))),
     }
 
 

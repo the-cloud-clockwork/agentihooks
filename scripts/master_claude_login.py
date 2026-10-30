@@ -546,14 +546,14 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
     return target, found
 
 
-def rendered_overlays(home: Path, name: str) -> list[str]:
+def rendered_overlays(home: Path, name: str | None) -> list[str]:
     found = _read(home.parent / RENDERS).get(name)
     if isinstance(found, dict):
         return found["overlays"]
     return found if isinstance(found, list) else profile_chain.rendered_overlays(home)
 
 
-def rendered_chain(home: Path, name: str) -> list[str]:
+def rendered_chain(home: Path, name: str | None) -> list[str]:
     found = _read(home.parent / RENDERS).get(name)
     return found["chain"] if isinstance(found, dict) else profile_chain.rendered_chain(home)
 

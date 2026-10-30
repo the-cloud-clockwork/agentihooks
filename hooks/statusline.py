@@ -334,7 +334,7 @@ def main() -> None:
             from scripts.master_claude_login import rendered_overlays as _rendered_overlays
 
             _home = os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude"
-            _overlays = _rendered_overlays(Path(_home), os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
+            _overlays = _rendered_overlays(Path(_home), os.environ.get("AGENTIHOOKS_AGENT_NAME"))
             _ovl_display = f"{_CYAN}{','.join(_overlays)}{_RESET}" if _overlays else f"{_DIM}none{_RESET}"
 
             _voice_str = ""
