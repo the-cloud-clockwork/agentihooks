@@ -226,6 +226,9 @@ def tick(slug, store, ledger, runtime, now_ms):
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
+    if config.state == "running" and config.engine != EVENTS_ENGINE and not lifetime.sleeping(slug, store, rows):
+        with PLACING, _placement_pass(runtime):
+            actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
     actions += skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
@@ -290,8 +293,6 @@ def tick(slug, store, ledger, runtime, now_ms):
                 placement = partial(preempt.probe, runtime)
                 seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order, placement)
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
-                with _placement_pass(runtime):
-                    actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
