@@ -95,8 +95,10 @@ def _ruff(paths: list[Path]) -> list[dict]:
     return json.loads(result.stdout)
 
 
-def _ruff_hits(tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], hits: list[dict], measured: dict) -> None:
-    for hit in hits:
+def _ruff_hits(
+    tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measured: dict, hits: list[dict] | None = None
+) -> None:
+    for hit in _ruff(list(defs)) if hits is None else hits:
         path, row, message = Path(hit["filename"]), hit["location"]["row"], hit["message"]
         value = _MEASURED.search(message)
         if hit["code"] not in RULES or value is None or row not in defs.get(path, {}):
@@ -116,7 +118,7 @@ def measure(tree: Path) -> dict[str, dict[str, int]]:
     defs = {path: parsed.get(path, {}) for path in sources}
     measured = {}
     _lengths(tree, defs, measured)
-    _ruff_hits(tree, defs, hits, measured)
+    _ruff_hits(tree, defs, measured, hits)
     return measured
 
 
