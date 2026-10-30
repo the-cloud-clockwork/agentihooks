@@ -206,6 +206,39 @@ def test_join_reaches_the_server_past_unrelated_talk_and_keeps_deduplication(
     assert outbox.path().read_text() == before
 
 
+@pytest.mark.parametrize("pinned", [False, True])
+def test_outage_join_is_kept_replayed_once_and_counted_at_launch(
+    server: Server, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], pinned: bool
+) -> None:
+    from scripts.swarm import launch_check
+    from scripts.swarm.store import AgentRecord
+
+    if pinned:
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ENG)
+    agent = AgentRecord(ENG, "eng", "t1", started_at=1)
+    assert launch_check.joined_at(agent, stored()) is None
+    server.stop()
+    assert run(capsys, ENG, "join") == [{"joined": ENG, "slug": SLUG, "role": "member"}]
+    line = outbox.path().read_text()
+    entry = json.loads(line)
+    assert entry["args"]["ops"][0]["op"] == "join"
+    assert entry["args"]["agent"] == (ENG if pinned else "")
+    assert launch_check.joined_at(agent, stored()) is None
+    assert outbox.flush(None).applied == []
+    assert outbox.path().read_text() == line
+    server.start()
+    assert outbox.flush(None).applied == [entry["item"]]
+    joined = launch_check.joined_at(agent, stored())
+    assert joined is not None
+    first = stored()["_meta"]
+    outbox.path().write_text(line)
+    assert outbox.flush(None).applied == [entry["item"]]
+    assert stored()["_meta"]["join_history"] == first["join_history"]
+    assert stored()["_meta"]["members"] == first["members"]
+    assert launch_check.joined_at(agent, stored()) == joined
+    assert not outbox.path().exists()
+
+
 def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay(server, monkeypatch, capsys):
     import urllib.error
 
