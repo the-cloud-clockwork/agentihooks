@@ -17,7 +17,7 @@ def _repository():
 def save(slug: str, file_id: str, data: bytes) -> None:
     repository = _repository()
     encoded = base64.b64encode(data).decode()
-    if hasattr(repository, "file_save"):
+    if repository.remote:
         repository.file_save(TABLE, slug, file_id, encoded)
         return
     with repository.connect() as connection, connection:
@@ -26,7 +26,7 @@ def save(slug: str, file_id: str, data: bytes) -> None:
 
 def load(slug: str, file_id: str) -> bytes | None:
     repository = _repository()
-    if hasattr(repository, "file_load"):
+    if repository.remote:
         value = repository.file_load(TABLE, slug, file_id)
         return None if value is None else base64.b64decode(value)
     with repository.connect() as connection:
@@ -36,7 +36,7 @@ def load(slug: str, file_id: str) -> bytes | None:
 
 def ids(slug: str) -> set[str]:
     repository = _repository()
-    if hasattr(repository, "file_list"):
+    if repository.remote:
         return set(repository.file_list(TABLE, slug))
     with repository.connect() as connection:
         return {row[0] for row in connection.execute(LIST, (slug,)).fetchall()}
@@ -46,7 +46,7 @@ def drop(slug: str, file_ids: set[str]) -> None:
     if not file_ids:
         return
     repository = _repository()
-    if hasattr(repository, "file_drop"):
+    if repository.remote:
         repository.file_drop(TABLE, slug, file_ids)
         return
     with repository.connect() as connection, connection:

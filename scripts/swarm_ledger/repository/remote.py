@@ -19,7 +19,7 @@ URL_ENV = "AGENTIHOOKS_SWARM_API_URL"
 TOKEN_ENV = "AGENTIHOOKS_SWARM_API_TOKEN"
 PREFIX = "/api/v1/store"
 JSON = mimetypes.types_map[".json"]
-ATTEMPTS = 3
+ATTEMPTS = 4
 TIMEOUT_S = 30.0
 
 

@@ -1562,7 +1562,7 @@ def serve():
         server_handoff.announce(json.dumps(stored.generations()).encode())
     ledger_writer = ports.swarm().ledger_writer
     writer = ledger_writer.WriterLease(core.LEDGER_DIR)
-    if not storage.shared():
+    if not (storage.shared() or storage.api()):
         take_lease(writer, ledger_writer, listener)
     if listener is not None:
         carried = take_carry()

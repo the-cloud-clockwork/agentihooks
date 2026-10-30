@@ -31,7 +31,7 @@ def _registry(name):
     from scripts.swarm_ledger import storage
 
     repository = _repository()
-    if getattr(repository, "remote", False):
+    if repository.remote:
         with repository.connect() as connection:
             return repository.registry(name, connection)
     return storage.read_registry(repository.directory, name)

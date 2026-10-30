@@ -96,7 +96,15 @@ def reading(stored: SQLiteLedgerRepository, slug: str, part: str | None, query: 
     raise refused(404, Code.NOT_FOUND)
 
 
+def commit_shape(body: dict) -> None:
+    shapes = dict(revision=int, changed=dict, dropped=list, events=list, summary=dict)
+    wrong = sorted(name for name, kind in shapes.items() if type(body.get(name)) is not kind)
+    if wrong or "_meta" in body["dropped"] or not isinstance(body["changed"].get("_meta", {}), dict):
+        raise refused(400, Code.BAD_REQUEST, fields=wrong or ["_meta"])
+
+
 def committing(stored: SQLiteLedgerRepository, slug: str, body: dict) -> dict:
+    commit_shape(body)
     try:
         written = stored.commit(
             slug, body["revision"], body["changed"], body["dropped"], body["events"], body["summary"]
@@ -293,10 +301,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=int(os.environ.get(PORT_ENV, DEFAULT_PORT)))
     parser.add_argument("--no-relay", action="store_true")
     parser.add_argument("--open", action="store_true")
+    parser.add_argument("--folder", action="store_true")
     options = parser.parse_args(argv)
     token = os.environ.get(TOKEN_ENV, "")
     if not token and not options.open:
         parser.error(f"{TOKEN_ENV} is unset; pass --open to serve without a token")
+    if not postgres.url(os.environ) and not options.folder:
+        parser.error("no shared database URL; pass --folder to serve the ledger folder")
     stored = repository()
     listening = server(stored, options.host, options.port, token)
     print(f"swarm api on {options.host}:{listening.server_address[1]}", flush=True)

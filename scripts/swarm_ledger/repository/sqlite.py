@@ -412,6 +412,7 @@ class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
     adopts = True
+    remote = False
 
     def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)

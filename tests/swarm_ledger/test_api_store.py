@@ -26,8 +26,28 @@ CONTENT = {
 }
 ADD = {"op": "task_add", "id": "a1", "by": "swarm", "task": "t2", "title": "second", "lane": "eng", "phase": "p1"}
 ADD_OTHER = {**ADD, "id": "a2", "task": "t3", "title": "third"}
-FORBIDDEN_NAMES = {"ledger_core", "scripts.swarm"}
-FORBIDDEN_PREFIXES = ("scripts.gates", "scripts.swarm.", "scripts.hub", "ledger_", "scripts.swarm_ledger.ledger_core")
+RULES = (
+    "ledger_core",
+    "ledger_alerts",
+    "ledger_plans",
+    "ledger_priorities",
+    "ledger_notifications",
+    "ledger_close",
+    "ledger_bin",
+    "ledger_artifacts",
+    "ledger_media",
+    "ledger_authority",
+    "ledger_tasks",
+    "ledger_comments",
+)
+FORBIDDEN_NAMES = {
+    "scripts.swarm",
+    "scripts.swarm_ledger.repository.mutation",
+    "scripts.swarm_ledger.repository.legacy",
+    *RULES,
+    *(f"scripts.swarm_ledger.{name}" for name in RULES),
+}
+FORBIDDEN_PREFIXES = ("scripts.gates", "scripts.swarm.", "scripts.hub")
 
 PROBE = """
 import json, sys, threading, urllib.request, urllib.error
@@ -155,7 +175,7 @@ def test_the_remote_repository_reruns_the_rules_on_a_fresh_read_when_another_wri
     assert [task["id"] for task in stored.current("split").state["tasks"]] == ["t1", "t3", "t2"]
 
 
-def test_the_remote_repository_stops_after_three_conflicting_commits(api, monkeypatch):
+def test_the_remote_repository_reruns_at_most_three_times_after_a_conflicting_commit(api, monkeypatch):
     _, base = api
     repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"))
     commits = []
@@ -288,3 +308,27 @@ def test_the_api_refuses_to_start_without_a_token_unless_told_to_serve_open(monk
     with pytest.raises(SystemExit) as stopped:
         store.main(["--port", "0"])
     assert stopped.value.code == 2
+
+
+def test_the_api_refuses_to_start_without_the_shared_database_unless_told_to_serve_a_folder(monkeypatch):
+    monkeypatch.setenv(store.TOKEN_ENV, "secret")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_DATABASE_URL", raising=False)
+
+    with pytest.raises(SystemExit) as stopped:
+        store.main(["--port", "0"])
+    assert stopped.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [{"revision": "1"}, {"changed": []}, {"dropped": ["_meta"]}, {"changed": {"_meta": []}}],
+)
+def test_a_commit_of_the_wrong_shape_is_refused_and_writes_nothing(api, broken):
+    stored, base = api
+    revision = stored.current("split").state["_meta"]["rev"]
+    body = {**dict(revision=revision, changed={"title": "Moved"}, dropped=[], events=[], summary={}), **broken}
+
+    status, answer = remote.Client(base, "secret").call("POST", "/ledgers/split/commit", body=body)
+
+    assert status == 400 and answer["code"] == "bad_request"
+    assert stored.read("split", "title") == {"title": "Split"}
