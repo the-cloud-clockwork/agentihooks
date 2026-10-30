@@ -1,7 +1,7 @@
 ---
 title: Feature map
 parent: Reference
-nav_order: 62
+nav_order: 63
 ---
 
 # Feature map
@@ -37,6 +37,9 @@ Every entry names where it came from in `origin`:
 | `semgrep_rule` | `operator`; optional otherwise | Rule id from `.semgrep/features/` |
 | `live_check` | `operator`; optional otherwise | Argument list run from the repository root, without a shell |
 
+An `ordered_at` outside `operator` is checked the same way and needs a
+`ledger_item` beside it.
+
 An optional key that is present is checked the same way as a required one: a
 rule id must exist, a ledger item must have the ledger form and a live check
 must name a repository command.
@@ -70,8 +73,10 @@ suite source without importing it or running it, and fails when:
   map does not hold;
 - a marker has no id, two entries share an id, or two feature rules share an id.
 
-A feature rule that no entry names does not fail the map; operator entries name
-their rule, and the inventory tasks map the rest.
+Every rule in `.semgrep/features/` must be named by an entry's `semgrep_rule`
+or listed in the map's top level `unmapped_rules`. That list holds the rules not
+yet mapped and may only shrink: a listed rule that an entry names, or that no
+longer exists, fails the map until it is removed from the list.
 
 ## Operator entries
 

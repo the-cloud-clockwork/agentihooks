@@ -151,6 +151,15 @@ def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str | None
     return nodes
 
 
+def _rule_coverage(rules: set[str], owned: set[str], unmapped: object) -> None:
+    if not isinstance(unmapped, list) or not all(isinstance(rule, str) for rule in unmapped):
+        raise ValueError("unmapped_rules must be a list of rule ids")
+    if stale := sorted(set(unmapped) & owned | set(unmapped) - rules):
+        raise ValueError(f"remove mapped or deleted rules from unmapped_rules: {stale}")
+    if missing := sorted(rules - owned - set(unmapped)):
+        raise ValueError(f"unmapped rule: {missing}")
+
+
 def validate(root: Path, map_path: Path) -> int:
     data = json.loads(map_path.read_text())
     entries = data["features"]
@@ -163,6 +172,9 @@ def validate(root: Path, map_path: Path) -> int:
         if entry["id"] in ids:
             raise ValueError(f"duplicate feature {entry['id']}")
         ids.add(entry["id"])
+    _rule_coverage(
+        rules, {entry["semgrep_rule"] for entry in entries if "semgrep_rule" in entry}, data.get("unmapped_rules", [])
+    )
     if missing := {node_id for node_id, feature in tests.items() if feature is not None} - owned_tests:
         raise ValueError(f"unmapped feature test: {sorted(missing)}")
     return len(entries)

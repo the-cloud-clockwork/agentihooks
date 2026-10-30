@@ -17,5 +17,12 @@
         "scripts/feature_checks/semgrep-feature-tests.sh"
       ]
     }
+  ],
+  "unmapped_rules": [
+    "feature-front-door-no-token",
+    "feature-front-door-route-check",
+    "feature-front-door-runtime-check",
+    "feature-stale-nudge-in-tick",
+    "feature-stale-nudge-recorded"
   ]
 }

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -132,10 +133,31 @@ def test_duplicate_feature_ids_fail(mapped_repo):
         feature_map.validate(root, path)
 
 
-def test_a_feature_rule_no_entry_names_does_not_fail(mapped_repo):
-    root, path, _ = mapped_repo
-    (root / ".semgrep/features/other.yaml").write_text("rules:\n  - id: feature-orphan\n")
+def test_an_unmapped_feature_rule_fails_unless_the_map_lists_it(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / ".semgrep/features/other.yaml").write_text("rules:\n  - id: feature-orphan\n  - id: feature-stray\n")
+    with pytest.raises(ValueError, match=r"^unmapped rule: \['feature-orphan', 'feature-stray'\]$"):
+        feature_map.validate(root, path)
+    path.write_text(json.dumps({"features": [entry], "unmapped_rules": ["feature-orphan", "feature-stray"]}))
     assert feature_map.validate(root, path) == 1
+
+
+@pytest.mark.parametrize("unmapped", [["feature-login"], ["feature-gone"], ["feature-gone", "feature-login"]])
+def test_mapped_or_deleted_rules_must_leave_the_unmapped_list(mapped_repo, unmapped):
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [entry], "unmapped_rules": unmapped}))
+    with pytest.raises(
+        ValueError, match=rf"^remove mapped or deleted rules from unmapped_rules: {re.escape(str(sorted(unmapped)))}$"
+    ):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("unmapped", ["feature-login", [17], {"feature-login": 1}])
+def test_unmapped_rules_must_be_a_list_of_rule_ids(mapped_repo, unmapped):
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [entry], "unmapped_rules": unmapped}))
+    with pytest.raises(ValueError, match="^unmapped_rules must be a list of rule ids$"):
+        feature_map.validate(root, path)
 
 
 def test_an_unmapped_feature_test_fails(mapped_repo):
