@@ -56,7 +56,8 @@ def test_retirement_cannot_remove_a_replacement_with_a_delayed_projection(store,
         if not replacements:
             replacements.append(None)
             monkeypatch.setattr(store, "project_agent", lambda *args, **kwargs: None)
-            replacements[0] = store.start_execution("fixture", agent, agent.execution_id)
+            fresh = replace(agent, execution_id="", generation=0)
+            replacements[0] = store.start_execution("fixture", fresh, agent.execution_id)
         return write(saved, slug, change)
 
     monkeypatch.setattr(fencing, "write", replace_first)
