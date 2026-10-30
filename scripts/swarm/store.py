@@ -568,7 +568,7 @@ class RedisStore:
 
         def end(doc):
             current = {a.execution_id for a in occupants_of(doc).values() if a.name == name}
-            if current != live:
+            if current != live or (expected is not None and expected.execution_id not in current):
                 return False
             for execution_id in live & set(doc["executions"]):
                 if doc["executions"][execution_id]["state"] != "finished":
@@ -582,8 +582,6 @@ class RedisStore:
                     previous = pipe.hget(self.key(slug, "agents"), name)
                     doc = fencing.read(self, slug)
                     executions = [a for a in occupants_of(doc).values() if a.name == name]
-                    if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
-                        return False
                     lives = records_of(doc) if previous else []
                     live = {agent.execution_id for agent in executions}
                     if not lease.fenced(self, slug, lease.EPOCH.get(), end):
