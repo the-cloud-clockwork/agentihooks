@@ -50,6 +50,13 @@ def test_a_judged_real_finding_becomes_a_troubleshoot_task_then_a_fix_naming_its
         ledger_kinds.check(task)
 
 
+@pytest.mark.parametrize("fix", ["code", "tune"])
+def test_the_doctor_cause_and_fix_tasks_close_only_with_the_feature_they_proved(fix):
+    cause, fixed = loop.fix_tasks(WATCHED, *judged("established"), fix, ())
+    assert cause["contract"]["feature"] == "yes"
+    assert fixed["contract"]["feature"] == "yes"
+
+
 @pytest.mark.parametrize("verdict", [None, "false-positive", "insufficient-evidence", "resolved"])
 def test_a_finding_not_judged_real_never_becomes_a_task(verdict):
     finding, judgment = judged(verdict or "established")
