@@ -113,3 +113,23 @@ def pretool(tool_name: str, tool_input: dict, session_id: str, cwd: str = "") ->
     if _allowed(tool_name, tool_input, cwd, slug):
         return notice, None
     return notice, BLOCK.format(slug=slug, categories=categories)
+
+
+def checked(payload: dict) -> str | None:
+    try:
+        notice, block = pretool(
+            str(payload.get("tool_name") or ""),
+            payload.get("tool_input") or {},
+            payload.get("session_id", ""),
+            payload.get("cwd", ""),
+        )
+    except Exception as e:
+        from hooks.common import log
+
+        log("blocker window check failed", {"error": str(e)})
+        return None
+    if notice:
+        from hooks.common import inject_context
+
+        inject_context(notice, also_log=False, skip_compression=True, kind="alert")
+    return block
