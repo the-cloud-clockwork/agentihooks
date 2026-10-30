@@ -1156,11 +1156,11 @@ def _spawn_stop(slug, config, store, runtime, now_ms, in_flight=0):
 
 
 class _LaunchClock:
-    def __init__(self):
+    def __init__(self) -> None:
         self.begun, self.tried, self.forgiven, self.free, self.failing = time.monotonic(), 0, 0, 0.0, ""
         self.preparations, self.preparing = 0, 0.0
 
-    def spent(self, task, batch):
+    def spent(self, task: dict, batch: list) -> str | None:
         if not self.preparations:
             return None
         charged = self.tried - self.forgiven
@@ -1170,7 +1170,7 @@ class _LaunchClock:
             return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
         return None
 
-    def prepared(self, at):
+    def prepared(self, at: float) -> None:
         self.preparations, self.preparing = self.preparations + 1, self.preparing + time.monotonic() - at
 
     def charge(self, at, errors, launches):
@@ -1228,7 +1228,16 @@ def _placement_pass(runtime):
             end()
 
 
-def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
+def _spawn(
+    slug: str,
+    config: SwarmConfig,
+    store: object,
+    ledger: object,
+    runtime: object,
+    rows: dict,
+    doc: dict,
+    now_ms: int,
+) -> list:
     agents = store.agents(slug)
     taken = {a.seat for a in agents}
     held = timing.timed(_held_for_master, slug, store, now_ms)
