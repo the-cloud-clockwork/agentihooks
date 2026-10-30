@@ -54,8 +54,14 @@ def _read_collected(path: Path) -> list[str] | None:
 
 
 def within(collected: list[str], files: list[str]) -> list[str]:
-    paths = {PurePosixPath(path) for path in files}
-    return [nodeid for nodeid in collected if PurePosixPath(nodeid.split("::", 1)[0]) in paths]
+    paths = {PurePosixPath(path) for path in files if "::" not in path}
+    units = {path for path in files if "::" in path}
+    prefixes = tuple(f"{unit}{mark}" for unit in units for mark in ("::", "["))
+    return [
+        nodeid
+        for nodeid in collected
+        if PurePosixPath(nodeid.split("::", 1)[0]) in paths or nodeid in units or nodeid.startswith(prefixes)
+    ]
 
 
 def _scope(args: argparse.Namespace) -> list[str] | None:

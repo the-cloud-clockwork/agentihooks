@@ -75,5 +75,15 @@
   "hooks/context/venv_guard.py",
   "hooks/context/version_guard.py",
   "hooks/context/voice_output.py",
-  "hooks/context/worker_mode.py"
+  "hooks/context/worker_mode.py",
+  "hooks/integrations/__init__.py",
+  "hooks/integrations/aws.py",
+  "hooks/integrations/base.py",
+  "hooks/integrations/dynamodb.py",
+  "hooks/integrations/lambda_invoke.py",
+  "hooks/integrations/mailer.py",
+  "hooks/integrations/postgres.py",
+  "hooks/integrations/session_state.py",
+  "hooks/integrations/storage.py",
+  "tests/test_integrations_failure_paths.py"
 ]

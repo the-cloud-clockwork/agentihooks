@@ -1746,7 +1746,7 @@ jobs:
           [[ ${#files[@]} -gt 0 ]] || { echo "::error::Leg $LEG of the selection names no test file."; exit 1; }
           missing=false
           for file in "${files[@]}"; do
-            if [[ ! -f "$file" ]]; then
+            if [[ ! -f "${file%%::*}" ]]; then
               echo "::error::Selected test path $file does not exist."
               missing=true
             fi
