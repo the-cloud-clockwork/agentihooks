@@ -1562,7 +1562,7 @@ def serve():
         server_handoff.announce(json.dumps(stored.generations()).encode())
     ledger_writer = ports.swarm().ledger_writer
     writer = ledger_writer.WriterLease(core.LEDGER_DIR)
-    if not storage.shared():
+    if not (storage.shared() or storage.api()):
         take_lease(writer, ledger_writer, listener)
     if listener is not None:
         carried = take_carry()
@@ -1575,7 +1575,7 @@ def serve():
     threading.Thread(target=retrying(watch_ledgers), args=(server,), kwargs={"stopping": watching}, daemon=True).start()
     threading.Thread(target=answer_reloads, args=(server,), daemon=True).start()
     threading.Thread(target=refresh_streams, args=(warmed if carried is None else carried,), daemon=True).start()
-    if storage.shared():
+    if storage.shared() or storage.api():
         threading.Thread(target=retrying(follow_shared), daemon=True).start()
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST)

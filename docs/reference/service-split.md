@@ -56,6 +56,11 @@ The inventory below was mapped from `dev` at `65249ec02` by reading the code nam
   are data integrity, not policy, and that exist today in `mutations.GuardedOperations.check`:
   - every changed resource carries an expected revision (`428 revision_required`, `409 revision_conflict`);
   - an `operation_id` replays its stored results and refuses different content (`409 operation_conflict`).
+- Step 1 (da2) ships the write as `POST /api/v1/store/ledgers/{slug}/commit`: the ledger server runs the rule chain
+  on the state it read, then sends the changed top level values, dropped keys, events and summary with the ledger
+  revision it ruled against. A moved revision answers `409 revision_conflict` and the ledger server reruns the chain on
+  a fresh read, at most three times. The per resource guards and operation receipts stay in the ledger server's
+  `GuardedOperations` until the operations route below replaces the commit route with the app server step.
 - Op application is `ledger_core.apply_op` and `apply_changes` reduced to their data mechanics: shape validation
   (`check_body`, `check_op` without the text filter) and row changes. The commit writes rows, events and the outbox
   in one transaction, as `sqlite._write` does today.
