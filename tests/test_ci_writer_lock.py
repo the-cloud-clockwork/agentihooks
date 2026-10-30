@@ -53,7 +53,7 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario() -> None
     assert "tests/swarm_ledger/test_postgres_writer_floor.py" in steps[-2]["run"]
     assert "tests/swarm_ledger/test_postgres_repository.py" in steps[-2]["run"]
     assert "tests/test_memory_postgres_parity.py" in steps[-2]["run"]
-    assert "grep -q ' 19 passed'" in steps[-2]["run"]
+    assert "grep -q ' 21 passed'" in steps[-2]["run"]
     assert steps[-1]["uses"] == "./.github/actions/input-key/save"
     assert steps[-1]["if"] == "github.event_name == 'push' || github.event_name == 'workflow_dispatch'"
     assert steps[-1]["with"] == {"key": "${{ needs.inputs.outputs.key }}"}
