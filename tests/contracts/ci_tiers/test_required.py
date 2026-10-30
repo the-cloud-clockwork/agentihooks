@@ -164,7 +164,7 @@ def test_skipping_reuse_requires_protected_duration_provenance(forged):
     head = copy.deepcopy(base)
     head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps(
         docs="docs" in head["test.yml"]["jobs"]["gate-required"]["needs"],
-        typing="type-gate" in head["test.yml"]["jobs"]["gate-required"]["needs"],
+        typing=True,
     )
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
@@ -186,7 +186,7 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     head = copy.deepcopy(base)
     head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps(
         docs="docs" in head["test.yml"]["jobs"]["gate-required"]["needs"],
-        typing="type-gate" in head["test.yml"]["jobs"]["gate-required"]["needs"],
+        typing=True,
     )
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
@@ -209,7 +209,7 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     assert any("changes its steps" in problem for problem in grade())
     head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps(
         docs="docs" in head["test.yml"]["jobs"]["gate-required"]["needs"],
-        typing="type-gate" in head["test.yml"]["jobs"]["gate-required"]["needs"],
+        typing=True,
     )
     head["test.yml"]["jobs"]["reuse"]["if"] = "false"
     assert grade() == ["The early queue gate requires the existing whole queue reuse exclusion"]

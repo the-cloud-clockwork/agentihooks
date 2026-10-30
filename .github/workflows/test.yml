@@ -2956,6 +2956,9 @@ jobs:
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/type_gate.py" ]]; then
             cd "$RUNNER_TEMP/grader"
+          elif [[ -f "$RUNNER_TEMP/base/tests/TYPE_BASELINE.json" ]]; then
+            echo "::error::dev carries a type baseline but no scripts/type_gate.py, so nothing trusted can grade."
+            exit 1
           fi
           python -m scripts.type_gate --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --measured "$RUNNER_TEMP/type-baseline/TYPE_BASELINE.json"
       - name: Upload the head's type error measurement

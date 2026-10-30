@@ -47,9 +47,15 @@ def measure(head: Path) -> dict[str, int]:
     )
     if result.returncode not in (0, 1):
         raise GradeError(f"basedpyright exited {result.returncode}: {result.stderr.strip() or result.stdout.strip()}")
+    try:
+        report = json.loads(result.stdout)
+    except ValueError as exc:
+        raise GradeError(f"basedpyright printed no report: {result.stderr.strip()}") from exc
+    if not report["summary"]["filesAnalyzed"]:
+        raise GradeError("basedpyright analysed no files")
     root = head.resolve()
     counts: dict[str, int] = {}
-    for diagnostic in json.loads(result.stdout)["generalDiagnostics"]:
+    for diagnostic in report["generalDiagnostics"]:
         if diagnostic["severity"] == "error":
             path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
             counts[path] = counts.get(path, 0) + 1

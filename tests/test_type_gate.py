@@ -217,6 +217,32 @@ def test_a_checker_failure_names_its_output(
     assert calls[-1] == {"cwd": head, "capture_output": True, "text": True}
 
 
+@pytest.mark.parametrize(
+    "returncode,stdout,message",
+    [
+        (1, "not json", "basedpyright printed no report: crash"),
+        (0, '{"generalDiagnostics": [], "summary": {"filesAnalyzed": 0}}', "basedpyright analysed no files"),
+    ],
+)
+def test_a_checker_run_without_a_usable_report_is_red(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: str,
+    message: str,
+) -> None:
+    head = _tree(tmp_path, {}, {})
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--version" in command:
+            return subprocess.CompletedProcess(command, 0, f"basedpyright {type_gate.BASEDPYRIGHT_VERSION}\n", "")
+        return subprocess.CompletedProcess(command, returncode, stdout, "crash\n")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    assert _grade(head, head, capsys) == (1, f"::error::{message}\n")
+
+
 def test_the_parser_reads_paths_and_defaults_the_head_to_the_working_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
