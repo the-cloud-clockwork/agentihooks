@@ -115,6 +115,31 @@ def test_statusline_names_the_overlays_rendered_into_the_home(monkeypatch, capsy
     assert f"  {shown}  channels:brain,amygdala" in plain
 
 
+def test_statusline_shows_each_shared_login_holders_overlays(monkeypatch, capsys, tmp_path):
+    from hooks import statusline
+    from scripts import master_claude_login as login
+
+    home = tmp_path / "login" / "claude"
+    home.mkdir(parents=True)
+    (home / ".agentihooks-render.json").write_text(json.dumps({"overlays": ["rig"]}))
+    (home.parent / login.RENDERS).write_text(
+        json.dumps(
+            {
+                "master@rig-1": {"chain": ["master", "rig"], "overlays": ["rig"]},
+                "master@doctor-1": {"chain": ["master", "doctor"], "overlays": ["doctor"]},
+            }
+        )
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    for slug, other in (("doctor", "rig"), ("rig", "doctor")):
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", f"master@{slug}-1")
+        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+        statusline.main()
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+        assert f"overlay:{slug}  channels:" in plain
+        assert f"overlay:{other}  channels:" not in plain
+
+
 MODEL_PAYLOAD = {
     "session_id": "statusline-model",
     "model": {"id": "claude-opus-5-5", "display_name": "Opus 5.5"},
