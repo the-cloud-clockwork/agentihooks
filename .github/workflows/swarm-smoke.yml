@@ -2,6 +2,10 @@ name: Swarm container smoke
 
 on:
   workflow_call:
+    inputs:
+      hive-join-only:
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -38,6 +42,7 @@ jobs:
       - name: Build the swarm image
         id: build
         env:
+          HIVE_JOIN_ONLY: ${{ inputs.hive-join-only }}
           LAYERS_FROM: ${{ steps.layers.outputs.cache-matched-key && format('type=local,src={0}/swarm-smoke-layers', runner.temp) || '' }}
           LAYERS_TO: ${{ steps.layers.outputs.cache-hit != 'true' && format('type=local,dest={0}/swarm-smoke-layers-next,mode=max,compression=uncompressed', runner.temp) || '' }}
         run: |
@@ -45,6 +50,12 @@ jobs:
             ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"} . &
           build=$!
           status=0
+          if [[ "$HIVE_JOIN_ONLY" == true ]]; then
+            bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
+              docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
+            wait "$build" || status=$?
+            exit "$status"
+          fi
           bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
             docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
           redis=$!
@@ -62,7 +73,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Run the hive launch, Compose install, hive join, Compose hive, Compose task, recovery drill and swarm init scenarios in parallel
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.hive-join-only }}
         env:
           SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
         run: >-
@@ -74,11 +85,16 @@ jobs:
           scripts/packaging/compose-task-smoke.sh
           scripts/packaging/compose-recovery-drill.sh
           scripts/packaging/swarm-init-smoke.sh
+      - name: Run the hive join scenario
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.hive-join-only }}
+        env:
+          SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
+        run: bash scripts/packaging/hive-join-smoke.sh
       - name: Prove image pulls tolerate an absent attestation
         if: github.event_name == 'workflow_dispatch'
         run: bash scripts/packaging/hive-launch-attestation-proof.sh
       - name: Run the pinned herdr and ssh clients inside the swarm image
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.hive-join-only }}
         run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check
       - name: Keep the swarm smoke layers
         if: steps.layers.outputs.cache-hit != 'true'

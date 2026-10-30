@@ -19,15 +19,40 @@ jobs:
     outputs:
       hit: ${{ steps.key.outputs.hit }}
       key: ${{ steps.key.outputs.key }}
+      hive_join: ${{ steps.hive-join.outputs.due }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Select hive join smoke inputs
+        id: hive-join
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/hive-join-changed"
+          due=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              scripts/hive/daemon.py|scripts/hive/dispatch.py|scripts/hive/orders.py|scripts/packaging/hive-join-smoke.sh|.github/workflows/writer-lock.yml|.github/workflows/swarm-smoke.yml|.github/workflows/test.yml) due=true ;;
+            esac
+          done < "$RUNNER_TEMP/hive-join-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
       - name: Key the declared inputs
         id: key
         uses: ./.github/actions/input-key
         with:
           job: writer-lock
+
+  hive-join:
+    needs: [inputs]
+    if: github.event_name == 'pull_request' && needs.inputs.outputs.hive_join == 'true'
+    uses: ./.github/workflows/swarm-smoke.yml
+    with:
+      hive-join-only: true
 
   scenario:
     needs: [inputs]
