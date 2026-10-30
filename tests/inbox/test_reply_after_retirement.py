@@ -15,6 +15,7 @@ pytestmark = pytest.mark.unit
 if TYPE_CHECKING:
     import fakeredis
 
+
 @pytest.fixture
 def server():
     import fakeredis
