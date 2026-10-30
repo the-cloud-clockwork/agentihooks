@@ -10,9 +10,9 @@ from http import HTTPMethod
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from scripts.swarm_ledger import request_metrics
-from scripts.swarm_ledger.repository import artifact_files, media_files, plain, postgres
-from scripts.swarm_ledger.repository.sqlite import BEGIN_IMMEDIATE, Conflict, Missing, SQLiteLedgerRepository
+from scripts.swarm_ledger import request_metrics, storage
+from scripts.swarm_ledger.repository import LedgerRepository, artifact_files, media_files, plain
+from scripts.swarm_ledger.storage import BEGIN_IMMEDIATE, Conflict, Missing
 
 PREFIX = "/api/v1/store"
 TOKEN_ENV = "AGENTIHOOKS_SWARM_API_TOKEN"
@@ -51,15 +51,8 @@ class Action(StrEnum):
     DROP = auto()
 
 
-class Folder(SQLiteLedgerRepository):
-    adopts = False
-
-
-def repository(environ: dict = os.environ) -> SQLiteLedgerRepository:
-    address = postgres.url(environ)
-    if address:
-        return postgres.PostgresLedgerRepository(address, plain)
-    return Folder(None, plain)
+def repository() -> LedgerRepository:
+    return storage.owned(plain)
 
 
 class Answer(Exception):
@@ -76,7 +69,7 @@ def first(query: dict, key: str, default: str | None) -> str | None:
     return query.get(key, [default])[0]
 
 
-def reading(stored: SQLiteLedgerRepository, slug: str, part: str | None, query: dict) -> object:
+def reading(stored: LedgerRepository, slug: str, part: str | None, query: dict) -> object:
     if part is None:
         entry = stored.current(slug)
         if first(query, Part.READ, None) == str(entry.generation):
@@ -103,7 +96,7 @@ def commit_shape(body: dict) -> None:
         raise refused(400, Code.BAD_REQUEST, fields=wrong or ["_meta"])
 
 
-def committing(stored: SQLiteLedgerRepository, slug: str, body: dict) -> dict:
+def committing(stored: LedgerRepository, slug: str, body: dict) -> dict:
     commit_shape(body)
     try:
         written = stored.commit(
@@ -114,7 +107,7 @@ def committing(stored: SQLiteLedgerRepository, slug: str, body: dict) -> dict:
     return dict(generation=written.generation, revision=written.state["_meta"]["rev"])
 
 
-def holding(stored: SQLiteLedgerRepository, body: dict) -> dict:
+def holding(stored: LedgerRepository, body: dict) -> dict:
     action = body.get("action")
     if action == Action.HOLD:
         stored.hold_revision(body["kind"], body["slug"], body["revision"])
@@ -127,7 +120,7 @@ def holding(stored: SQLiteLedgerRepository, body: dict) -> dict:
     return dict(ok=True)
 
 
-def file_read(stored: SQLiteLedgerRepository, table: str, slug: str, item: str | None) -> object:
+def file_read(stored: LedgerRepository, table: str, slug: str, item: str | None) -> object:
     with stored.connect() as connection:
         if item is None:
             return dict(connection.execute(FILES[table].LIST, (slug,)).fetchall())
@@ -137,7 +130,7 @@ def file_read(stored: SQLiteLedgerRepository, table: str, slug: str, item: str |
     return dict(data=row[0])
 
 
-def file_write(stored: SQLiteLedgerRepository, table: str, slug: str, item: str, body: dict) -> dict:
+def file_write(stored: LedgerRepository, table: str, slug: str, item: str, body: dict) -> dict:
     data = body["data"]
     base64.b64decode(data, validate=True)
     arguments = (slug, item, data, body["at"]) if table == media_files.TABLE else (slug, item, data)
@@ -146,13 +139,13 @@ def file_write(stored: SQLiteLedgerRepository, table: str, slug: str, item: str,
     return dict(ok=True)
 
 
-def file_drop(stored: SQLiteLedgerRepository, table: str, slug: str, item: str) -> dict:
+def file_drop(stored: LedgerRepository, table: str, slug: str, item: str) -> dict:
     with stored.connect() as connection, connection:
         connection.execute(FILES[table].DROP, (slug, item))
     return dict(ok=True)
 
 
-def ledger_route(stored: SQLiteLedgerRepository, method: str, parts: list, query: dict, body: dict | None) -> object:
+def ledger_route(stored: LedgerRepository, method: str, parts: list, query: dict, body: dict | None) -> object:
     slug, part = parts[0], (parts[1] if len(parts) > 1 else None)
     if method == HTTPMethod.POST and part == Part.COMMIT:
         return committing(stored, slug, body or {})
@@ -161,7 +154,7 @@ def ledger_route(stored: SQLiteLedgerRepository, method: str, parts: list, query
     raise refused(404, Code.NOT_FOUND)
 
 
-def file_route(stored: SQLiteLedgerRepository, method: str, parts: list, body: dict | None) -> object:
+def file_route(stored: LedgerRepository, method: str, parts: list, body: dict | None) -> object:
     table, slug, item = parts[0], parts[1], (parts[2] if len(parts) > 2 else None)
     if table not in FILES:
         raise refused(404, Code.NOT_FOUND)
@@ -174,12 +167,12 @@ def file_route(stored: SQLiteLedgerRepository, method: str, parts: list, body: d
     raise refused(404, Code.NOT_FOUND)
 
 
-def registry_read(stored: SQLiteLedgerRepository, name: str) -> dict:
+def registry_read(stored: LedgerRepository, name: str) -> dict:
     with stored.connect() as connection:
         return stored.registry(name, connection)
 
 
-def registry_commit(stored: SQLiteLedgerRepository, body: dict) -> dict:
+def registry_commit(stored: LedgerRepository, body: dict) -> dict:
     unread = sorted(set(body["set"]) - set(body["expected"]))
     if unread:
         raise refused(400, Code.BAD_REQUEST, registries=unread)
@@ -195,7 +188,7 @@ def registry_commit(stored: SQLiteLedgerRepository, body: dict) -> dict:
     return dict(ok=True)
 
 
-def route(stored: SQLiteLedgerRepository, method: str, path: str, query: dict, body: dict | None) -> object:
+def route(stored: LedgerRepository, method: str, path: str, query: dict, body: dict | None) -> object:
     parts = [unquote(part) for part in path.split("/") if part]
     head, rest = (parts[0], parts[1:]) if parts else ("", [])
     if head == Part.REGISTRIES and len(rest) == 1 and method == HTTPMethod.GET:
@@ -214,7 +207,7 @@ def route(stored: SQLiteLedgerRepository, method: str, path: str, query: dict, b
 
 
 class Handler(BaseHTTPRequestHandler):
-    stored: SQLiteLedgerRepository
+    stored: LedgerRepository
     token: str = ""
     protocol_version = "HTTP/1.1"
 
@@ -280,14 +273,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def server(stored: SQLiteLedgerRepository, host: str, port: int, token: str) -> ThreadingHTTPServer:
+def server(stored: LedgerRepository, host: str, port: int, token: str) -> ThreadingHTTPServer:
     handler = type("Bound", (Handler,), dict(stored=stored, token=token))
     listening = ThreadingHTTPServer((host, port), handler)
     listening.daemon_threads = True
     return listening
 
 
-def relaying(stored: SQLiteLedgerRepository, relay: bool) -> object:
+def relaying(stored: LedgerRepository, relay: bool) -> object:
     if not relay:
         return nullcontext()
     from scripts.swarm_ledger import outbox_host
@@ -306,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     token = os.environ.get(TOKEN_ENV, "")
     if not token and not options.open:
         parser.error(f"{TOKEN_ENV} is unset; pass --open to serve without a token")
-    if not postgres.url(os.environ) and not options.folder:
+    if not storage.shared() and not options.folder:
         parser.error("no shared database URL; pass --folder to serve the ledger folder")
     stored = repository()
     listening = server(stored, options.host, options.port, token)

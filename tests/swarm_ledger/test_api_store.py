@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm_ledger import storage
 from scripts.swarm_ledger.api import store
 from scripts.swarm_ledger.repository import plain, remote, sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
@@ -105,7 +106,7 @@ def child_env(folder: Path, **extra: str) -> dict:
 def api(tmp_path):
     folder = tmp_path / "api"
     stored = seeded(folder)
-    listening = store.server(store.Folder(folder / sqlite.DATABASE, store.plain), "127.0.0.1", 0, "secret")
+    listening = store.server(storage.owned(store.plain, folder / sqlite.DATABASE), "127.0.0.1", 0, "secret")
     threading.Thread(target=listening.serve_forever, daemon=True).start()
     try:
         yield stored, f"http://127.0.0.1:{listening.server_address[1]}"
@@ -192,8 +193,6 @@ def test_the_remote_repository_reruns_at_most_three_times_after_a_conflicting_co
 
 
 def test_storage_builds_the_remote_repository_only_when_the_api_is_set_and_the_database_is_not(monkeypatch):
-    from scripts.swarm_ledger import storage
-
     monkeypatch.delenv("AGENTIHOOKS_SWARM_DATABASE_URL", raising=False)
     monkeypatch.setenv(remote.URL_ENV, "http://api:8766")
     assert isinstance(storage.build(), remote.RemoteLedgerRepository)

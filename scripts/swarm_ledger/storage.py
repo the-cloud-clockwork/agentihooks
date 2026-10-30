@@ -6,8 +6,23 @@ from pathlib import Path
 from scripts.swarm_ledger.repository import LedgerRepository, postgres, remote, sqlite
 
 DATABASE = sqlite.DATABASE
+BEGIN_IMMEDIATE = sqlite.BEGIN_IMMEDIATE
 Error = sqlite3.Error
 Missing = sqlite.Missing
+Conflict = sqlite.Conflict
+
+
+class Folder(sqlite.SQLiteLedgerRepository):
+    adopts = False
+
+
+def owned(domain: object, path: Path | None = None) -> LedgerRepository:
+    """The repository a process that owns the store serves: the shared database when its URL is set, else the
+    ledger folder, never adopting legacy files."""
+    address = shared()
+    if path is None and address:
+        return postgres.PostgresLedgerRepository(address, domain)
+    return Folder(path, domain)
 
 
 def shared() -> str | None:
