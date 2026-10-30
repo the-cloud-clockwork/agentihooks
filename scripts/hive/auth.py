@@ -58,6 +58,7 @@ NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 SERVICE_TTL_S = 300
+_LEDGER_OF: dict[str, str] = {}
 
 
 class HiveError(Exception):
@@ -207,15 +208,30 @@ def ledger_member(redis, credential: str) -> str | None:
     )
 
 
-def issue_agent(redis, member_id: str, slug: str, name: str) -> str:
+def _member_ledger(redis: object, member_id: str, fresh: bool) -> str | None:
+    """The member's ledger digest, kept per process because the member record carries every legacy agent token."""
+    if not fresh:
+        return _LEDGER_OF[member_id]
     found = member(redis, member_id)
     if found is None:
-        raise HiveError("Hive membership was revoked")
-    digest = found["ledger"]
+        return None
+    _LEDGER_OF[member_id] = found["ledger"]
+    return found["ledger"]
+
+
+def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     store = _store(redis)
-    current = hive_state.read(store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}")))
-    if current != member_id:
-        raise HiveError("Hive membership was revoked")
+    for fresh in (member_id not in _LEDGER_OF, True):
+        digest = _member_ledger(redis, member_id, fresh)
+        if digest is None:
+            raise HiveError("Hive membership was revoked")
+        current = hive_state.read(
+            store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+        )
+        if current == member_id:
+            break
+        if fresh:
+            raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
     key = f"agent.{member_id}.{_digest(token)}"
     hive_state.amend(store, key, lambda _: {"ledger": digest, "scope": [slug, name]})
