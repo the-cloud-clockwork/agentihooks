@@ -19,13 +19,35 @@ class OrderingRuntime(FakeRuntime):
         return super().spawn(config, lane, name, task)
 
 
-def test_spawn_is_attempted_before_reap_and_exits_sweep(store, monkeypatch):
+def _ordered(store, monkeypatch):
     order = []
     monkeypatch.setattr(tick_module, "_reap", lambda *a, **k: order.append("reap") or [])
     monkeypatch.setattr(tick_module.exits, "sweep", lambda *a, **k: order.append("exits.sweep") or [])
-    ledger, runtime = tasks(("t1", "eng")), OrderingRuntime(order)
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert order == ["spawn", "reap", "exits.sweep"]
-    assert len(runtime.spawned) == 1
-    assert runtime.spawned[0][0] == "eng"
-    assert runtime.spawned[0][2] == "t1"
+    runtime = OrderingRuntime(order)
+    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=1_000)
+    return order, runtime
+
+
+def test_a_pass_after_one_that_never_reached_its_spawn_spawns_before_exits_sweep_and_reap(store, monkeypatch):
+    store.redis.set(store.key("sw", tick_module.SPAWN_DUE), 500)
+    order, runtime = _ordered(store, monkeypatch)
+    assert order == ["spawn", "exits.sweep", "reap"]
+    assert [(lane, task) for lane, _, task in runtime.spawned if lane != "master"] == [("eng", "t1")]
+    assert not store.redis.exists(store.key("sw", tick_module.SPAWN_DUE))
+
+
+def test_a_pass_after_a_completed_one_spawns_after_reap_and_clears_its_due_mark(store, monkeypatch):
+    order, runtime = _ordered(store, monkeypatch)
+    assert order == ["exits.sweep", "reap", "spawn"]
+    assert [(lane, task) for lane, _, task in runtime.spawned if lane != "master"] == [("eng", "t1")]
+    assert not store.redis.exists(store.key("sw", tick_module.SPAWN_DUE))
+
+
+def test_a_pass_stopped_before_its_spawn_leaves_the_next_pass_due(store, monkeypatch):
+    def stopped(*a, **k):
+        raise SystemExit("stopped by the service")
+
+    monkeypatch.setattr(tick_module, "_reap", stopped)
+    with pytest.raises(SystemExit):
+        tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
+    assert store.redis.get(store.key("sw", tick_module.SPAWN_DUE)) == "1000"
