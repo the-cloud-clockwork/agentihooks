@@ -1033,8 +1033,8 @@ def test_a_missing_owner_record_does_not_stop_the_final_drain(home, tmp_path):
     assert result == "owner exited"
 
 
-def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypatch):
-    from unittest.mock import MagicMock
+def test_default_supervisor_wait_uses_local_sleep(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
 
     from scripts.scheduler import process_timer
 
@@ -1043,8 +1043,7 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
     _request("session", transcript)
     clock, state = Clock(), {"alive": True}
     clock.hooks.append((1, lambda: state.update(alive=False)))
-    timer = MagicMock()
-    timer.return_value.__enter__.return_value.wait.side_effect = lambda timeout=None: clock.sleep(trace_flush.POLL_SEC)
+    timer = Mock(side_effect=AssertionError("local cadence must not create a scheduler timer"))
     monkeypatch.setattr(process_timer, "Timer", timer)
     assert (
         trace_flush.supervise(
@@ -1057,7 +1056,8 @@ def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypa
         )
         == "owner exited"
     )
-    timer.assert_called_once_with(trace_flush.POLL_SEC, state=None)
+    assert clock.now == trace_flush.POLL_SEC
+    timer.assert_not_called()
 
 
 @pytest.mark.parametrize("interval", [0.25, 2.5, 15.0])
@@ -1077,6 +1077,7 @@ def test_unanswered_scheduler_does_not_delay_source_acceptance(
         return state["now"]
 
     def local_wait(delay: float) -> None:
+        assert 0 < delay <= trace_flush.POLL_SEC
         waits.append(delay)
         state["now"] += delay
 
@@ -1112,7 +1113,9 @@ def test_unanswered_scheduler_does_not_delay_source_acceptance(
 
 
 @pytest.mark.parametrize("failure", ["timeout", "connection", "conflict"])
-def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tmp_path, monkeypatch, failure):
+def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
     from unittest.mock import Mock, call
 
     from redis.exceptions import ConnectionError, TimeoutError
@@ -1154,7 +1157,13 @@ def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tm
 
     assert (
         trace_flush.supervise(
-            "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda owner: state["alive"]
+            "session",
+            trace_flush.Budget(15, 5, 3),
+            send,
+            clock,
+            clock.sleep,
+            lambda owner: state["alive"],
+            timer_wait=lambda delay: trace_flush.scheduled_wait(delay, "session"),
         )
         == "owner exited"
     )
@@ -1284,7 +1293,9 @@ def test_scheduler_deadline_restores_the_previous_alarm_after_interruption(monke
     trace_flush.time.sleep.assert_not_called()
 
 
-def test_default_supervisor_scheduler_failure_names_its_session(home, tmp_path, monkeypatch, capsys):
+def test_explicit_supervisor_scheduler_failure_names_its_session(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from unittest.mock import Mock
 
     from scripts.events.bus import StateConflict
@@ -1304,6 +1315,7 @@ def test_default_supervisor_scheduler_failure_names_its_session(home, tmp_path, 
             clock,
             clock.sleep,
             lambda record: owner["alive"],
+            timer_wait=lambda delay: trace_flush.scheduled_wait(delay, "export-session"),
         )
         == "owner exited"
     )
