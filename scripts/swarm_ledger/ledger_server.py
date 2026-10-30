@@ -15,6 +15,7 @@ Idempotent: --ensure on a running server only prints the URL.
 """
 
 import argparse
+import contextlib
 import errno
 import functools
 import html
@@ -31,7 +32,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -653,7 +654,7 @@ def deliver_alerts(slug, state):
     return sent
 
 
-RELAY, ALERTS = "relay", "alerts"
+RELAY, ALERTS, DOCTOR = "relay", "alerts", "doctor"
 UNRELAYED = "ledger-unrelayed.json"
 REPLAY_EVERY = 5
 
@@ -705,10 +706,49 @@ def replay_unrelayed() -> None:
             except KeyError:
                 stored.drop_revisions(kind, slug)
                 continue
-            REPLAYS[kind](slug, state)
+            globals()[SIDE_EFFECTS[kind]](slug, state)
 
 
-REPLAYS = {RELAY: relay_to_inbox, ALERTS: deliver_alerts}
+SIDE_EFFECTS = {RELAY: "relay_to_inbox", DOCTOR: "doctor_phrase", ALERTS: "deliver_alerts"}
+EFFECTS = None
+
+
+def pending(kind: str, state: dict) -> bool:
+    """Whether the write at the state's revision left this kind of side effect anything to do."""
+    meta = state["_meta"]
+    if kind == ALERTS:
+        rows = [a for a in state.get("alerts", []) if a["state"] == ledger_alerts.OPEN]
+    else:
+        rows = [e for e in meta.get("events", []) if e.get("by") == "operator"]
+    return any(row.get("rev") == meta["rev"] for row in rows)
+
+
+def deferred(kind: str) -> Callable[[str, dict], object]:
+    """The side effect of a write: held in the store for the effects worker while one runs, else run in place."""
+
+    def run(slug: str, state: dict) -> object:
+        if EFFECTS is None:
+            return globals()[SIDE_EFFECTS[kind]](slug, state)
+        if pending(kind, state):
+            unrelayed_on(kind, slug, state["_meta"]["rev"])
+            EFFECTS.wake()
+        return []
+
+    return run
+
+
+@contextlib.contextmanager
+def side_effects() -> Iterator[None]:
+    """Run held write side effects on the outbox host's effects worker for as long as the server serves."""
+    from scripts.swarm_ledger import outbox_host
+
+    global EFFECTS
+    with outbox_host.effects(replay_unrelayed) as worker:
+        EFFECTS = worker
+        try:
+            yield
+        finally:
+            EFFECTS = None
 
 
 def expire_alerts() -> None:
@@ -720,15 +760,17 @@ def expire_alerts() -> None:
             repository.apply_ops(slug)
 
 
-def doctor_phrase(slug, state):
+def doctor_phrase(slug: str, state: dict) -> None:
     meta = state["_meta"]
+    since = unrelayed_since(DOCTOR, slug, meta["rev"])
     said = [
         e
         for e in meta.get("events", [])
-        if e.get("rev") == meta["rev"] and e.get("by") == "operator" and e.get("target") == "chat"
+        if since <= e.get("rev", -1) <= meta["rev"] and e.get("by") == "operator" and e.get("target") == "chat"
     ]
     if any(e.get("text", "").strip().lower() == DOCTOR_PHRASE for e in said):
         swarm_control(slug, ["stop"], "doctor")
+    relayed(DOCTOR, slug, since, meta["rev"])
 
 
 def stream_resources(slug):
@@ -776,8 +818,8 @@ def api_services():
         layout=ledger_layout.read,
         write_layout=ledger_layout.write,
         write_gate=write_gate,
-        relay_to_inbox=relay_to_inbox,
-        deliver_alerts=deliver_alerts,
+        relay_to_inbox=deferred(RELAY),
+        deliver_alerts=deferred(ALERTS),
     )
     swarm: SwarmService = services.Swarm(
         doctor=DOCTOR,
@@ -788,7 +830,7 @@ def api_services():
         lifecycle=lifecycle_control,
         refresh_quota=refresh_quota,
         control_argv=control_argv,
-        doctor_phrase=doctor_phrase,
+        doctor_phrase=deferred(DOCTOR),
     )
     media: MediaService = services.Media(
         media_store=ledger_media,
@@ -970,9 +1012,9 @@ class Handler(BaseHTTPRequestHandler):
         if gate:
             gate.publish(rejected)
         if changes or ops:
-            relay_to_inbox(slug, state)
-            doctor_phrase(slug, state)
-        deliver_alerts(slug, state)
+            deferred(RELAY)(slug, state)
+            deferred(DOCTOR)(slug, state)
+        deferred(ALERTS)(slug, state)
         warnings = [*state["_meta"].get("warnings", []), *refusals.values(), *screen.warnings.values()]
         reply = {
             "applied": [op["id"] for op in ops or [] if op["id"] not in rejected],
@@ -1436,7 +1478,7 @@ def watch_ledgers(server=None, interval=2.0, stopping=NEVER):
             if passes % REPLAY_EVERY == 0:
                 try:
                     if unrelayed():
-                        replay_unrelayed()
+                        (replay_unrelayed if EFFECTS is None else EFFECTS.wake)()
                 except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
                     sys.stderr.write(f"unrelayed replay: {exc}\n")
             sample_streams()
@@ -1586,7 +1628,7 @@ def serve():
         from scripts.hub import projector
         from scripts.swarm_ledger import outbox_host
 
-        with outbox_host.running(stored), projector.running(repository, HUB):
+        with outbox_host.running(stored), side_effects(), projector.running(repository, HUB):
             try:
                 server.serve_forever(POLL_S)
             finally:
