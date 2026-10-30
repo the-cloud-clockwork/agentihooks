@@ -636,11 +636,11 @@ class HerdrRuntime:
             self._reserve_account(account, lane, agent)
         return account
 
-    def _route_account(self, agent, saved, task_id, lane, admitted):
+    def _route_account(
+        self, agent: str, saved: dict, task_id: str, lane: str, admitted: bool
+    ) -> tuple[capacity.Account | None, capacity.Account]:
         if admitted:
-            from scripts.swarm.capacity import Account
-
-            return None, Account(agent, saved.get("account"), "admitted", 0, None, None)
+            return None, capacity.Account(agent, saved.get("account"), "admitted", 0, None, None)
         account = self._claim_account(agent, saved.get("account") or self.planned_account(task_id, agent), lane)
         return account, account
 

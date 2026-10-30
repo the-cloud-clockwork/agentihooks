@@ -156,7 +156,10 @@ def test_a_stale_hive_view_never_refuses_the_account_the_controller_admitted(hiv
 def test_an_admitted_launch_routes_to_its_admitted_account_in_every_lane(hive, lane):
     from dataclasses import replace
 
+    from scripts.swarm.capacity import Account
+
     hive.rows[1] = replace(_account("admitted", sessions=3), reserved="master", unreserved_cap=4)
     account, row = hive.herdr._route_account("claude", {"harness": "claude", "account": "admitted"}, "task", lane, True)
-    assert (account, row.harness, row.name) == (None, "claude", "admitted")
+    assert account is None
+    assert row == Account("claude", "admitted", "admitted", 0, None, None)
     assert hive.reads == []
