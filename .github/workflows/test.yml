@@ -2959,7 +2959,7 @@ jobs:
           fi
           python -m scripts.type_gate --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --measured "$RUNNER_TEMP/type-baseline/TYPE_BASELINE.json"
       - name: Upload the head's type error measurement
-        if: ${{ !cancelled() && hashFiles(format('{0}/type-baseline/TYPE_BASELINE.json', runner.temp)) != '' }}
+        if: ${{ !cancelled() }}
         uses: ./.github/actions/retry-upload
         with:
           if-no-files-found: error
