@@ -477,6 +477,546 @@
       "tests": [
         "tests/swarm/test_tick_reaper.py::test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group"
       ]
+    },
+    {
+      "id": "inbox-hook-delivery",
+      "origin": "inventory",
+      "behaviour": "A pending inbox item reaches its own session once through the tool hook: Claude at PreToolUse, Codex at PostToolUse, and another session's items are never injected.",
+      "seam": "The inbox delivery in the PreToolUse and PostToolUse hooks",
+      "tests": [
+        "tests/inbox/test_delivery.py::test_claude_gets_a_pending_item_once_at_pre_tool_use_and_it_is_delivered",
+        "tests/inbox/test_delivery.py::test_codex_gets_the_item_at_post_tool_use_not_at_pre_tool_use",
+        "tests/inbox/test_delivery.py::test_another_session_items_are_never_injected"
+      ]
+    },
+    {
+      "id": "inbox-confirmation",
+      "origin": "inventory",
+      "behaviour": "A delivered item is confirmed by the next hook event, by a read or by a close, and only for the session it was shown to.",
+      "seam": "The inbox confirmation in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_confirmation.py::test_confirm_moves_a_delivered_or_read_item_to_confirmed",
+        "tests/inbox/test_confirmation.py::test_read_and_close_count_as_confirmation",
+        "tests/inbox/test_confirmation.py::test_the_next_hook_event_confirms_an_item_shown_by_the_last_one",
+        "tests/inbox/test_confirmation.py::test_another_session_cannot_directly_confirm_the_delivery"
+      ]
+    },
+    {
+      "id": "inbox-redelivery",
+      "origin": "inventory",
+      "behaviour": "An item delivered and never confirmed returns to pending after the redelivery window with the same id, for whichever transport claims next; a confirmed item is never redelivered.",
+      "seam": "The inbox redelivery window in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_confirmation.py::test_redelivery_window_defaults_to_five_minutes_and_reads_the_environment",
+        "tests/inbox/test_confirmation.py::test_a_delivered_item_never_confirmed_returns_to_pending_after_the_window",
+        "tests/inbox/test_confirmation.py::test_a_confirmed_item_is_never_redelivered",
+        "tests/inbox/test_confirmation.py::test_an_unconfirmed_item_is_shown_again_by_whichever_transport_claims_next"
+      ]
+    },
+    {
+      "id": "inbox-channel-write-failure",
+      "origin": "inventory",
+      "behaviour": "A failed or cancelled inbox channel write puts every unsent item back to pending at once.",
+      "seam": "The inbox channel write in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_confirmation.py::test_a_failed_channel_write_puts_every_unsent_item_back_to_pending",
+        "tests/inbox/test_confirmation.py::test_a_cancelled_channel_write_puts_the_item_back_to_pending"
+      ]
+    },
+    {
+      "id": "inbox-settlement",
+      "origin": "inventory",
+      "behaviour": "Information closes on receipt while work stays open and reminds its receiver until it is explicitly replied to or closed.",
+      "seam": "The inbox settlement of information and work items",
+      "tests": [
+        "tests/inbox/test_settlement.py::test_information_closes_on_receipt_and_work_needs_explicit_settlement",
+        "tests/inbox/test_settlement.py::test_confirmed_work_reminds_its_receiver_until_explicit_settlement"
+      ]
+    },
+    {
+      "id": "inbox-wake",
+      "origin": "inventory",
+      "behaviour": "An idle Codex pane with a pending item gets exactly one typed wake; a busy pane, a Claude pane with its inbox channel and the master pane are never typed into.",
+      "seam": "The swarm tick wake pass in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_wake.py::test_an_idle_pane_with_a_pending_item_gets_exactly_one_prompt",
+        "tests/inbox/test_wake.py::test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_window",
+        "tests/inbox/test_wake.py::test_a_claude_pane_takes_its_items_through_the_inbox_channel_never_a_typed_wake",
+        "tests/inbox/test_wake.py::test_a_tick_with_pending_items_never_types_into_the_master_pane"
+      ]
+    },
+    {
+      "id": "inbox-escalation",
+      "origin": "inventory",
+      "behaviour": "An unread item is retried three times, then goes to the master seat, then to the operator one window later; an item for the master goes straight to the operator and an unread notice for information is never escalated.",
+      "seam": "The swarm tick escalation ladder in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_wake.py::test_retries_stop_at_three_then_the_master_gets_an_item",
+        "tests/inbox/test_wake.py::test_the_operator_notification_follows_the_next_window",
+        "tests/inbox/test_wake.py::test_an_item_for_the_master_skips_straight_to_the_operator",
+        "tests/inbox/test_wake.py::test_an_unread_fyi_is_never_escalated"
+      ]
+    },
+    {
+      "id": "inbox-outage-hold",
+      "origin": "inventory",
+      "behaviour": "A Redis or provider outage pauses the wake and escalation ladder, which resumes where it stopped once the outage ends.",
+      "seam": "The wake ladder outage hold in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_wake_outage.py::test_the_ladder_pauses_for_an_outage_and_resumes_where_it_stopped",
+        "tests/inbox/test_wake_outage.py::test_escalation_to_the_master_and_operator_waits_out_the_outage"
+      ]
+    },
+    {
+      "id": "inbox-outbox-replay",
+      "origin": "inventory",
+      "behaviour": "Sends, replies and closes made while Redis is down queue in the local outbox and replay exactly once in order when it returns; a new send waits behind queued records.",
+      "seam": "The local inbox outbox replay in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_outbox.py::test_sends_during_a_refused_connection_arrive_once_in_send_order_when_redis_returns",
+        "tests/inbox/test_outbox.py::test_replies_and_closes_made_while_redis_is_down_replay_once",
+        "tests/inbox/test_outbox.py::test_a_send_waits_behind_queued_records_while_they_cannot_replay"
+      ]
+    },
+    {
+      "id": "inbox-outbox-limits",
+      "origin": "inventory",
+      "behaviour": "A full outbox refuses the new operation and keeps every queued record; the warning stays quiet below its threshold and both bounds read the environment.",
+      "seam": "The local inbox outbox bounds",
+      "tests": [
+        "tests/inbox/test_outbox.py::test_a_full_outbox_refuses_loudly_and_keeps_the_oldest_record",
+        "tests/inbox/test_outbox.py::test_the_outbox_warning_stays_quiet_below_its_threshold",
+        "tests/inbox/test_outbox.py::test_bounds_default_and_read_the_environment"
+      ]
+    },
+    {
+      "id": "inbox-outbox-set-aside",
+      "origin": "inventory",
+      "behaviour": "A corrupt outbox record or one Redis refuses on replay is reported and set aside, and the rest replays.",
+      "seam": "The outbox skipped records file",
+      "tests": [
+        "tests/inbox/test_outbox.py::test_a_corrupt_record_is_reported_and_skipped_never_replayed_twice",
+        "tests/inbox/test_outbox.py::test_a_record_redis_refuses_on_replay_is_reported_and_set_aside"
+      ]
+    },
+    {
+      "id": "inbox-outbox-flush",
+      "origin": "inventory",
+      "behaviour": "The inbox hook and the swarm tick flush the outbox before they deliver anything.",
+      "seam": "The outbox flush at the inbox hook and the tick",
+      "tests": [
+        "tests/inbox/test_outbox.py::test_the_inbox_hook_flushes_the_outbox_before_delivering",
+        "tests/inbox/test_outbox.py::test_the_tick_flushes_the_outbox_first"
+      ]
+    },
+    {
+      "id": "inbox-seats",
+      "origin": "inventory",
+      "behaviour": "An item sent to a seat reaches whichever agent occupies it, a successor gets its predecessor's pending items, and only the occupant reads, replies and closes it.",
+      "seam": "The seat addresses of the inbox store",
+      "tests": [
+        "tests/inbox/test_seats.py::test_an_item_sent_to_a_seat_is_delivered_to_whichever_agent_occupies_it",
+        "tests/inbox/test_seats.py::test_a_successor_gets_its_predecessors_pending_items",
+        "tests/inbox/test_seats.py::test_only_the_occupant_reads_replies_and_closes_a_seat_item"
+      ]
+    },
+    {
+      "id": "inbox-sender-identity",
+      "origin": "inventory",
+      "behaviour": "The sender of a message is the session itself, never an argument; a session without identity is refused.",
+      "seam": "agentihooks msg send",
+      "tests": [
+        "tests/inbox/test_cli.py::test_a_forged_sender_argument_is_ignored",
+        "tests/inbox/test_cli.py::test_the_session_id_is_the_sender_without_an_agent_name",
+        "tests/inbox/test_cli.py::test_a_session_without_identity_is_refused"
+      ]
+    },
+    {
+      "id": "inbox-close-outcomes",
+      "origin": "inventory",
+      "behaviour": "Closing an item needs an outcome naming where the work went, a reply answers the sender and closes the item done, and history keeps every transition.",
+      "seam": "agentihooks msg close and msg reply over the inbox store",
+      "tests": [
+        "tests/inbox/test_store.py::test_closing_without_a_reason_is_refused",
+        "tests/inbox/test_store.py::test_handoff_and_blocked_need_their_detail",
+        "tests/inbox/test_store.py::test_reply_goes_to_the_sender_and_closes_the_original_done",
+        "tests/inbox/test_store.py::test_history_keeps_every_transition_in_order"
+      ]
+    },
+    {
+      "id": "inbox-fyi",
+      "origin": "inventory",
+      "behaviour": "A send or reply marked fyi is information that needs no work from its receiver.",
+      "seam": "The fyi flag of agentihooks msg send and msg reply",
+      "tests": [
+        "tests/inbox/test_cli.py::test_send_and_reply_with_fyi_mark_the_item_as_needing_no_work"
+      ]
+    },
+    {
+      "id": "inbox-addresses",
+      "origin": "inventory",
+      "behaviour": "A message to an unregistered address is refused, names the sender's swarm addresses and stores nothing; names, seats, the operator and session ids are accepted.",
+      "seam": "The inbox address check",
+      "tests": [
+        "tests/inbox/test_addresses.py::test_unknown_destination_is_refused_with_sender_swarm_addresses_and_nothing_stored",
+        "tests/inbox/test_addresses.py::test_real_names_seats_operator_and_session_ids_still_accept_messages"
+      ]
+    },
+    {
+      "id": "inbox-operator-front-door",
+      "origin": "inventory",
+      "behaviour": "Agents never write to the operator first: a lane agent's message to the operator goes to its front door master.",
+      "seam": "The operator address of the inbox store",
+      "tests": [
+        "tests/inbox/test_operator_front_door.py::test_a_lane_agent_send_to_the_operator_goes_to_its_front_door",
+        "tests/inbox/test_operator_front_door.py::test_the_front_door_never_writes_to_the_operator_first",
+        "tests/inbox/test_operator_front_door.py::test_a_session_outside_any_swarm_never_writes_to_the_operator_first"
+      ]
+    },
+    {
+      "id": "inbox-operator-writes",
+      "origin": "inventory",
+      "behaviour": "Every operator write on the ledger page becomes one inbox item: for the agent that claimed its task, else for the master; a chat line goes to its addressee and a sync order to every live agent.",
+      "seam": "The operator write relay from the ledger to the inbox",
+      "tests": [
+        "tests/inbox/test_operator_writes.py::test_an_operator_reply_on_a_claimed_tasks_comment_is_one_item_for_that_tasks_agent",
+        "tests/inbox/test_operator_writes.py::test_a_reply_on_a_phase_goes_to_the_master",
+        "tests/inbox/test_operator_writes.py::test_a_chat_line_goes_to_its_addressee_and_an_unaddressed_one_to_the_master",
+        "tests/inbox/test_operator_writes.py::test_a_sync_order_is_one_item_for_every_live_agent",
+        "tests/inbox/test_operator_writes.py::test_the_same_write_relayed_twice_is_one_item_and_two_writes_are_two"
+      ]
+    },
+    {
+      "id": "masters-channel",
+      "origin": "inventory",
+      "behaviour": "The masters of a swarm post and read a durable shared channel; engineers, planners, other swarms and broadcasts cannot reach it.",
+      "seam": "agentihooks swarm masters channel",
+      "tests": [
+        "tests/test_swarm_v2_masters_channel.py::test_two_masters_post_and_read_each_others_posts",
+        "tests/test_swarm_v2_masters_channel.py::test_an_engineer_ci_planner_or_unseated_session_can_neither_post_nor_read",
+        "tests/test_swarm_v2_masters_channel.py::test_posts_are_durable_with_no_expiry",
+        "tests/test_swarm_v2_masters_channel.py::test_channel_publish_refuses_a_masters_channel",
+        "tests/test_swarm_v2_masters_channel.py::test_swarm_masters_channel_command_lets_masters_talk_and_refuses_the_engineer"
+      ]
+    },
+    {
+      "id": "ledger-write-results",
+      "origin": "inventory",
+      "behaviour": "Every ledger write command prints the applied write and exits zero, or exits non zero naming the refusal reason.",
+      "seam": "agentihooks ledger write commands",
+      "tests": [
+        "tests/swarm_ledger/test_ledger.py::test_every_write_command_exits_non_zero_naming_the_refusal_reason",
+        "tests/swarm_ledger/test_ledger.py::test_every_write_command_prints_an_applied_write_and_exits_zero"
+      ]
+    },
+    {
+      "id": "ledger-join-past-talk",
+      "origin": "inventory",
+      "behaviour": "A ledger join lands past pending talk while pending talk still holds other writes.",
+      "seam": "agentihooks ledger join",
+      "tests": [
+        "tests/swarm_ledger/test_ledger.py::test_join_lands_past_pending_talk",
+        "tests/swarm_ledger/test_ledger.py::test_pending_talk_still_holds_other_writes"
+      ]
+    },
+    {
+      "id": "ledger-outbox",
+      "origin": "inventory",
+      "behaviour": "Talk sent while the ledger server is stopped queues and lands once, in order, when it returns; reads and other writes fail and never overtake queued talk.",
+      "seam": "The ledger client outbox",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_outbox.py::test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_when_it_returns",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_a_replayed_record_lands_once_even_when_it_is_replayed_again",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it"
+      ]
+    },
+    {
+      "id": "ledger-outbox-expiry",
+      "origin": "inventory",
+      "behaviour": "A queued ledger record past the age limit is set aside as it was written; a stopped server never expires held talk.",
+      "seam": "The ledger client outbox age limit",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_outbox.py::test_an_expired_record_is_set_aside_as_it_was_written",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_a_stopped_server_never_expires_held_talk",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_the_busy_age_limit_reads_its_setting_and_defaults_to_an_hour"
+      ]
+    },
+    {
+      "id": "ledger-event-relay",
+      "origin": "inventory",
+      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order, and a crash between publish and mark never duplicates an event.",
+      "seam": "The ledger outbox relay",
+      "tests": [
+        "tests/swarm_ledger/test_outbox_relay.py::test_the_relay_publishes_each_unsent_row_on_its_subject_with_the_row_id_and_marks_it_sent",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_sent_row_is_never_published_again",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event"
+      ]
+    },
+    {
+      "id": "ledger-answer",
+      "origin": "inventory",
+      "behaviour": "The master answers a ledger question as itself at delegate and full autonomy and its priority clears; a worker's answer is refused.",
+      "seam": "agentihooks ledger answer",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_answer.py::test_the_master_answers_as_itself_and_the_priority_clears",
+        "tests/swarm_ledger/test_ledger_answer.py::test_a_worker_answer_is_refused_and_the_priority_stays",
+        "tests/swarm_ledger/test_ledger_answer.py::test_cli_master_answers_at_delegate_and_full",
+        "tests/swarm_ledger/test_ledger_answer.py::test_cli_refuses_below_delegate_autonomy"
+      ]
+    },
+    {
+      "id": "ledger-relay",
+      "origin": "inventory",
+      "behaviour": "The master relays only words the operator typed in a swarm pane onto a ledger item; words he never said are refused.",
+      "seam": "agentihooks ledger relay",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_relay.py::test_cli_relays_words_the_operator_said_in_the_pane",
+        "tests/swarm_ledger/test_ledger_relay.py::test_cli_refuses_words_the_operator_never_said",
+        "tests/swarm_ledger/test_ledger_relay.py::test_a_planners_words_count_and_an_engineers_or_another_swarms_do_not"
+      ]
+    },
+    {
+      "id": "ledger-followup-duplicates",
+      "origin": "inventory",
+      "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
+      "seam": "agentihooks ledger followup add",
+      "tests": [
+        "tests/swarm_ledger/test_followup_duplicate_check.py::test_a_repeated_follow_up_is_refused_naming_it",
+        "tests/swarm_ledger/test_followup_duplicate_check.py::test_a_follow_up_repeating_an_open_task_is_refused_naming_the_task",
+        "tests/swarm_ledger/test_followup_duplicate_check.py::test_the_not_duplicate_reason_skips_the_check_and_is_stored"
+      ]
+    },
+    {
+      "id": "ledger-operator-chat",
+      "origin": "inventory",
+      "behaviour": "Ledger chat refuses an agent line addressed to nobody or written to the operator unprompted, shows an agent answer to an operator line, and puts notices in the notifications panel.",
+      "seam": "The chat write of the ledger server",
+      "tests": [
+        "tests/swarm_ledger/test_operator_chat.py::test_an_agent_line_addressed_to_nobody_is_refused",
+        "tests/swarm_ledger/test_operator_chat.py::test_an_unprompted_agent_line_to_the_operator_is_refused",
+        "tests/swarm_ledger/test_operator_chat.py::test_an_agent_line_answering_an_operator_line_is_shown",
+        "tests/swarm_ledger/test_operator_chat.py::test_a_notice_lands_in_the_notifications_panel_and_never_in_chat"
+      ]
+    },
+    {
+      "id": "artifact-storage",
+      "origin": "inventory",
+      "behaviour": "Markdown, JSON and SVG artifacts are stored once by content hash, SVG without scripts; any other file or an oversize file is refused.",
+      "seam": "The ledger artifact store",
+      "tests": [
+        "tests/swarm_ledger/test_artifacts.py::TestStore::test_markdown_json_and_svg_are_stored_once_by_content_hash",
+        "tests/swarm_ledger/test_artifacts.py::TestStore::test_svg_is_stored_without_scripts_handlers_or_script_links",
+        "tests/swarm_ledger/test_artifacts.py::TestStore::test_anything_else_is_refused",
+        "tests/swarm_ledger/test_artifacts.py::TestStore::test_an_oversize_file_is_refused"
+      ]
+    },
+    {
+      "id": "artifact-request-rule",
+      "origin": "inventory",
+      "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",
+      "seam": "agentihooks ledger artifact",
+      "tests": [
+        "tests/swarm_ledger/test_artifact_lifecycle.py::TestRequestGate::test_a_publish_on_an_unmarked_task_is_refused_and_names_where_proofs_go",
+        "tests/swarm_ledger/test_artifact_lifecycle.py::TestRequestGate::test_a_task_marked_artifact_accepts_a_publish",
+        "tests/swarm_ledger/test_artifact_lifecycle.py::TestRequestGate::test_an_operator_message_naming_the_request_accepts_a_publish",
+        "tests/swarm_ledger/test_artifact_lifecycle.py::TestRequestGate::test_an_agent_message_or_an_unknown_id_is_no_request"
+      ]
+    },
+    {
+      "id": "artifact-trash",
+      "origin": "inventory",
+      "behaviour": "Deleting an artifact moves it to the trash and keeps its file; restore brings it back.",
+      "seam": "The artifact trash of the ledger server",
+      "tests": [
+        "tests/swarm_ledger/test_artifact_lifecycle.py::TestTrash::test_delete_moves_the_artifact_to_the_trash_and_keeps_its_file",
+        "tests/swarm_ledger/test_artifact_lifecycle.py::TestTrash::test_restore_brings_it_back"
+      ]
+    },
+    {
+      "id": "master-artifacts",
+      "origin": "inventory",
+      "behaviour": "A joined master publishes a requested artifact or its plan without a task claim; an unjoined master or a publish without a request is refused.",
+      "seam": "agentihooks ledger artifact and publish-plan as the master",
+      "tests": [
+        "tests/swarm_ledger/test_master_artifacts.py::test_joined_master_publishes_requested_markdown_without_claims",
+        "tests/swarm_ledger/test_master_artifacts.py::test_master_requires_operator_request",
+        "tests/swarm_ledger/test_master_artifacts.py::test_unjoined_master_cannot_publish",
+        "tests/swarm_ledger/test_master_artifacts.py::test_page_server_accepts_a_master_plan_without_operator_request"
+      ]
+    },
+    {
+      "id": "plan-publish",
+      "origin": "inventory",
+      "behaviour": "An accepted plan is published as a GitHub issue where the repo has issues, else as a ledger artifact, and each phase is linked and commented.",
+      "seam": "agentihooks ledger publish-plan",
+      "tests": [
+        "tests/swarm_ledger/test_plan_publish.py::test_publish_goes_to_an_artifact_without_issues",
+        "tests/swarm_ledger/test_plan_publish.py::test_publish_opens_an_issue_where_the_repo_has_issues",
+        "tests/swarm_ledger/test_plan_publish.py::test_publish_plan_command_links_each_phase_and_comments_it"
+      ]
+    },
+    {
+      "id": "plan-links",
+      "origin": "inventory",
+      "behaviour": "A task added to a phase with a plan carries its plan link, and a planner's slice is refused while a slice task lacks it.",
+      "seam": "The plan link check on task add",
+      "tests": [
+        "tests/swarm_ledger/test_plan_publish.py::test_task_added_to_a_phase_with_a_plan_carries_its_link",
+        "tests/swarm_ledger/test_plan_publish.py::test_slice_is_refused_while_a_slice_task_carries_no_plan_link"
+      ]
+    },
+    {
+      "id": "plan-read",
+      "origin": "inventory",
+      "behaviour": "agentihooks plan read prints the task's plan chunk with ten lines of margin each side, the description as the whole spec when the task has no plan lines, and the whole phase range on request.",
+      "seam": "agentihooks plan read",
+      "tests": [
+        "tests/swarm_ledger/test_plan_read.py::test_task_chunk_carries_ten_lines_of_margin_each_side",
+        "tests/swarm_ledger/test_plan_read.py::test_task_without_plan_lines_prints_its_description_as_the_whole_spec",
+        "tests/swarm_ledger/test_plan_read.py::test_phase_option_prints_the_phase_range_clamped_to_the_plan_end"
+      ]
+    },
+    {
+      "id": "plan-shared-slice",
+      "origin": "inventory",
+      "behaviour": "A plan slice another open task holds is refused on task add or set, and plan read prints the task's own row as scope with the shared slice as context.",
+      "seam": "The shared slice check on task add and agentihooks plan read",
+      "tests": [
+        "tests/swarm_ledger/test_shared_plan_slice.py::TestRefusal::test_adding_a_task_on_a_slice_another_open_task_holds_is_refused",
+        "tests/swarm_ledger/test_shared_plan_slice.py::TestRefusal::test_setting_a_task_onto_a_slice_another_open_task_holds_is_refused",
+        "tests/swarm_ledger/test_shared_plan_slice.py::TestPlanRead::test_plan_read_prints_the_task_row_as_scope_and_the_shared_slice_as_context"
+      ]
+    },
+    {
+      "id": "plan-phases-append",
+      "origin": "inventory",
+      "behaviour": "An accepted plan is appended as new phases, automatic unless it names manual; a taken phase id or an invalid graph refuses the whole plan.",
+      "seam": "agentihooks ledger plan phases",
+      "tests": [
+        "tests/swarm_ledger/test_plan_phases.py::test_a_plan_phase_is_appended_auto_unless_it_names_manual_and_only_manual_waits_in_review",
+        "tests/swarm_ledger/test_plan_phases.py::test_a_taken_phase_id_refuses_the_whole_plan_and_changes_nothing",
+        "tests/swarm_ledger/test_plan_phases.py::test_plan_phases_command_appends_a_two_phase_plan_in_review"
+      ]
+    },
+    {
+      "id": "ledger-home",
+      "origin": "inventory",
+      "behaviour": "The HOME page lists every ledger with its title, kind, counts, swarm state and last activity, and a closed ledger shows closed with a reopen button.",
+      "seam": "The HOME page of the ledger server",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_server.py::test_each_row_carries_title_kind_counts_swarm_state_and_last_activity",
+        "tests/swarm_ledger/test_ledger_server.py::test_a_closed_ledger_shows_closed_and_a_reopen_button",
+        "tests/swarm_ledger/test_ledger_server.py::test_the_bin_lists_days_left_and_a_restore_button"
+      ]
+    },
+    {
+      "id": "ledger-bin",
+      "origin": "inventory",
+      "behaviour": "A closed ledger goes to the bin at its close time, a restore keeps it out, and closing it again bins it again.",
+      "seam": "The ledger bin state",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_bin.py::test_a_closed_ledger_goes_to_the_bin_at_the_given_time",
+        "tests/swarm_ledger/test_ledger_bin.py::test_a_restore_at_or_after_the_close_keeps_the_ledger_out",
+        "tests/swarm_ledger/test_ledger_bin.py::test_closing_again_after_a_restore_bins_it_again"
+      ]
+    },
+    {
+      "id": "ledger-column-resize",
+      "origin": "inventory",
+      "behaviour": "Every column on the ledger page and HOME resizes by its header grip, and widths are saved beside panel sizes and clear with Reset layout.",
+      "seam": "The column grips of the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_column_resize.py::test_every_table_on_the_ledger_page_is_one_the_column_grips_reach",
+        "tests/swarm_ledger/test_column_resize.py::test_the_ledger_page_and_home_wire_column_grips_and_save_their_widths",
+        "tests/swarm_ledger/test_column_resize.py::test_column_widths_round_trip_beside_panel_sizes_and_reset_with_them"
+      ]
+    },
+    {
+      "id": "ledger-tabs",
+      "origin": "inventory",
+      "behaviour": "The ledger page tabs keep the shell fixed, scroll only the active body, and keep the tab choice and scroll positions across switches.",
+      "seam": "The tabs of the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_tabs.py::test_tabs_keep_the_shell_fixed_and_scroll_only_the_active_body",
+        "tests/swarm_ledger/test_tabs.py::test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches"
+      ]
+    },
+    {
+      "id": "ledger-agent-row-actions",
+      "origin": "inventory",
+      "behaviour": "An agent row on the Swarm tab messages the agent through chat and terminates it only after confirmation; header stop and close ask before they send.",
+      "seam": "The agent row and header actions of the Swarm tab",
+      "tests": [
+        "tests/swarm_ledger/test_swarm_actions.py::test_message_opens_the_chat_addressed_to_the_row",
+        "tests/swarm_ledger/test_swarm_actions.py::test_terminate_asks_then_sends_only_once_confirmed",
+        "tests/swarm_ledger/test_swarm_actions.py::test_header_stop_now_and_close_ledger_ask_then_send"
+      ]
+    },
+    {
+      "id": "ledger-chat-recipient",
+      "origin": "inventory",
+      "behaviour": "The chat composer goes to the master by default, offers the whole swarm and each live agent, and falls back to the master when a picked agent finishes.",
+      "seam": "The chat composer of the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_chat_to.py::test_the_composer_states_its_recipient_master_by_default",
+        "tests/swarm_ledger/test_chat_to.py::test_the_picker_offers_master_the_whole_swarm_and_each_live_agent",
+        "tests/swarm_ledger/test_chat_to.py::test_a_picked_agent_that_finished_falls_back_to_master"
+      ]
+    },
+    {
+      "id": "ledger-alerts-panel",
+      "origin": "inventory",
+      "behaviour": "The alerts panel lists open alerts with who holds a claimed one, and claim and close send their operations.",
+      "seam": "The alerts panel of the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_alerts_page.py::test_the_panel_lists_open_alerts_and_who_holds_a_claimed_one",
+        "tests/swarm_ledger/test_alerts_page.py::test_claim_and_close_from_the_panel_send_their_ops"
+      ]
+    },
+    {
+      "id": "ledger-artifacts-panel",
+      "origin": "inventory",
+      "behaviour": "The artifacts panel lists every artifact newest first, renders Markdown, JSON and SVG without running scripts, and offers delete and trash restore.",
+      "seam": "The artifacts panel of the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_artifacts_page.py::test_icon_lists_every_artifact_newest_first_with_author_task_and_time",
+        "tests/swarm_ledger/test_artifacts_page.py::test_svg_renders_as_an_image_and_its_script_never_runs",
+        "tests/swarm_ledger/test_artifacts_page.py::test_the_trash_lists_days_left_and_restore_brings_an_artifact_back"
+      ]
+    },
+    {
+      "id": "ledger-hives-panel",
+      "origin": "inventory",
+      "behaviour": "The hives panel shows each hive's requested columns and writes max agents, exclusion and flags as the operator, naming the reason for a refused write.",
+      "seam": "The hives panel of the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_hives_panel.py::test_each_hive_shows_only_the_requested_columns",
+        "tests/swarm_ledger/test_hives_panel.py::test_editing_max_agents_writes_it_as_the_operator",
+        "tests/swarm_ledger/test_hives_panel.py::test_a_refused_write_names_the_reason_and_keeps_the_stored_value"
+      ]
+    },
+    {
+      "id": "ledger-model-controls",
+      "origin": "inventory",
+      "behaviour": "The model controls offer only catalog models, apply changed models and effort in one write, and return to the stored config when the apply fails.",
+      "seam": "The model controls of the Swarm tab",
+      "tests": [
+        "tests/swarm_ledger/test_model_controls_page.py::test_select_options_come_only_from_catalog_route",
+        "tests/swarm_ledger/test_model_controls_page.py::test_apply_sends_changed_models_and_xhigh_in_one_body",
+        "tests/swarm_ledger/test_model_controls_page.py::test_a_failed_apply_returns_the_panel_to_the_stored_config"
+      ]
+    },
+    {
+      "id": "ledger-restore-choice",
+      "origin": "inventory",
+      "behaviour": "A restore choice on the page routes to the matching restore decision command; a bad choice is refused.",
+      "seam": "The restore decision route of the ledger server",
+      "tests": [
+        "tests/swarm_ledger/test_handoff_outcomes.py::test_page_restore_choice_routes_to_the_matching_command",
+        "tests/swarm_ledger/test_handoff_outcomes.py::test_bad_restore_choices_are_refused",
+        "tests/swarm_ledger/test_recovery_page.py::test_a_choice_is_sent_as_a_restore_decision_and_the_handoff_row_points_to_recovery"
+      ]
     }
   ],
   "unmapped_rules": [
