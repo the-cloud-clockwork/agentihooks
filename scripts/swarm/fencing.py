@@ -61,8 +61,12 @@ def now_ms() -> int:
     return round(time.time() * 1000)
 
 
+def _project_executions(value: bytes) -> bytes:
+    return _encode(json.loads(value).get("executions", {}))
+
+
 def _states(store: Any) -> Any:
-    return state.for_store(store, BUCKET)
+    return state.for_store(store, BUCKET, projection=_project_executions)
 
 
 def _task(key: str) -> str:
@@ -127,6 +131,15 @@ def _decode(value: bytes) -> dict:
 
 def read(store: Any, slug: str) -> dict:
     return _decode(_entry(_states(store), store, slug).value)
+
+
+def read_executions(store: Any, slug: str) -> dict:
+    states = _states(store)
+    if isinstance(states, RedisStateStore):
+        entry = states.get_projection(slug)
+        if entry is not None:
+            return json.loads(entry.value)
+    return read(store, slug)["executions"]
 
 
 def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
