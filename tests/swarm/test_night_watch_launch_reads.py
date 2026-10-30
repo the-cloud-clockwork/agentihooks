@@ -1,6 +1,5 @@
 import json
 
-import fakeredis
 import pytest
 
 from scripts.hive import scope
@@ -26,6 +25,8 @@ class Listing:
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
