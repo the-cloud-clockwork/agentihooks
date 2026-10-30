@@ -340,6 +340,15 @@ def test_runtime_read_annotations_stay_graded_while_docstrings_and_plain_signatu
     assert discover_changes(tmp_path, first, "HEAD") == expected
 
 
+def test_a_bare_tree_is_the_tree_of_the_source_written_without_signature_annotations():
+    import ast
+
+    from scripts.ci_mutation.scope import bare_tree
+
+    plain = ast.dump(ast.parse("def f(a):\n    return a\n"))
+    assert bare_tree(b'def f(a: int) -> int:\n    """F."""\n    return a\n') == plain
+
+
 def test_a_new_docstring_module_selects_no_line_and_an_annotated_assignment_still_does(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 
