@@ -345,7 +345,7 @@
     {
       "id": "swarm-health-verdicts",
       "origin": "inventory",
-      "behaviour": "Each finding has a stable id; a verdict hides it through the cooldown and it returns once only if its evidence grew.",
+      "behaviour": "Each finding has a stable id; a verdict hides it through the cooldown, it returns with its earlier verdict only if its evidence grew, and it stays shown until a new verdict hides it.",
       "seam": "agentihooks swarm verdict",
       "tests": [
         "tests/swarm/test_health.py::test_each_finding_carries_a_stable_id_and_the_measure_its_evidence_grows_by",
