@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import Protocol
+from typing import Any, Protocol
 
 from hooks.context import context_recycle
 from scripts.doctor import priming
@@ -201,7 +201,7 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-def tick(slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, now_ms: int) -> list[str]:
+def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     from scripts.swarm import automated_gc
 
     config = store.ensure_code(slug)
