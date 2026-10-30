@@ -2383,6 +2383,9 @@ def on_subagent_start(payload: dict) -> None:
       - brain.inject + brain.delivery spans visible in ClickHouse/Langfuse
 
     This is the fix for the "subagents have no brain" gap (BRAIN-MVP item #21).
+
+    Each subagent session id is recorded in _KNOWN_SUBAGENT_IDS, so a subagent prompt never arms a
+    release, hotfix, push or PR signal for itself.
     """
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     agent_type = payload.get("agent_type", "unknown")
@@ -2713,6 +2716,9 @@ def main() -> None:
     batch. Codex and Copilot parse stdout as one JSON object, so injected context is buffered and flushed
     once; on a block that buffered context is folded into the stderr message, and no exit path leaves
     context buffered for the next event.
+
+    The blocked event name is bound before the try, so the outer BlockAction handler can name the event
+    even when the block fires before dispatch.
     """
     _blocked_event = "Unknown"
     try:

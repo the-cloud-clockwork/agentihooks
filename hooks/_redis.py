@@ -2,7 +2,8 @@
 
 Hooks run as separate processes invoked by Claude Code, so they cannot share
 the agenticore singleton.  This lightweight module provides a standalone
-Redis connection by reading environment variables directly.
+Redis connection by reading environment variables directly. The TTL defaults
+match the agenticore settings defaults.
 
 Usage::
 

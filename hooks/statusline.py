@@ -6,7 +6,8 @@ reads it, computes context metrics, and prints a multi-line status bar.
 Usage (set in settings.json):
     "statusLine": {"type": "command", "command": "cd /app && __PYTHON__ -m hooks.statusline"}
 
-Supports ANSI colors and multiple output lines (each print = a row).
+Supports ANSI colors and multiple output lines (each print = a row). Importing hooks.config loads the
+agentihooks env files, which the status line reads.
 
 Native fields used from Claude Code's statusline JSON:
   - context_window.used_percentage, context_window_size, current_usage

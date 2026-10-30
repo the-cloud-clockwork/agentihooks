@@ -1,4 +1,19 @@
-"""Configuration for hooks module."""
+"""Configuration for hooks module.
+
+Settings rules that hold across the module:
+  - The scripts package config pin runs after the env files load, because they can set XDG_CONFIG_HOME.
+  - _MULTILINE_REPORTED is shared with the bashrc agentienv check, so the shell and every process it starts
+    name a multi line value once.
+  - An invalid SECRETS_MODE falls back to standard, never to off.
+  - The session id banner is the only identity the session scoped MCP tools have when the MCP server is
+    shared by every session.
+  - The kubectl mutation guard is disabled only by the operator setting its env var explicitly, never by a
+    signal or bypass mode.
+  - An explicit BRAIN_ENABLED wins over brain auto detection; AGENTIHOOKS_BASE_CHANNELS has no code default.
+  - The broadcast per injection byte caps stay below Claude Code's 10,000 character additionalContext limit
+    with envelope headroom.
+  - Manifestos load in deterministic filename order.
+"""
 
 import os
 import re
