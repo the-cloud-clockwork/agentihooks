@@ -927,7 +927,8 @@ def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
 
 
 @pytest.mark.parametrize(
-    "change", [None, "group", "queue", "cancel", "other-job", "job", "untrusted", "trusted-name", "new-job"]
+    "change",
+    [None, "group", "queue", "cancel", "other-job", "job", "untrusted", "trusted-name", "new-job", "name", "events"],
 )
 def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_group(change: str | None) -> None:
     import copy
@@ -953,6 +954,10 @@ def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_grou
         baseline = None
     elif change == "trusted-name":
         baseline["name"] = updated["name"] = "Other tests"
+    elif change == "name":
+        updated["name"] = "Other tests"
+    elif change == "events":
+        updated[True] = {"workflow_dispatch": None}
     found = lanes.problems(updated, baseline)
     assert bool(found) == (change is not None)
     if change is not None:
