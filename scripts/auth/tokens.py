@@ -18,7 +18,7 @@ def key(environ: Mapping[str, str]) -> str:
 
 def legacy(environ: Mapping[str, str]) -> bool:
     """Whether services still accept today's credentials beside signed tokens."""
-    return environ.get(LEGACY_ENV, "on") != "off"
+    return environ.get(LEGACY_ENV) != "off"
 
 
 def sign(secret: str, principal: str, slug: str, now: float | None = None) -> str:

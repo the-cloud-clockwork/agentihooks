@@ -76,8 +76,8 @@ def hive_principal(slug: str, token: str, agent: str) -> str | None:
 
 def caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
     """principal for this request: a signed auth token, else today's credentials while legacy credentials are on."""
-    bearer = headers.get("Authorization") or ""
-    if bearer.startswith("Bearer "):
+    bearer = headers.get("Authorization")
+    if bearer and bearer.startswith("Bearer "):
         return tokens.verify(tokens.key(environ), bearer.removeprefix("Bearer "), slug)
     return credential_caller(headers, admin, slug) if tokens.legacy(environ) else None
 
