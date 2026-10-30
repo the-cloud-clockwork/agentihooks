@@ -7,18 +7,22 @@ from .memory import subject_matches
 from .subjects import PREFIX
 
 LEGACY_EVENTS = ["swarm.*.execution.>", "legacy.swarm.>"]
+EVENTS_MAX_AGE_S = 7 * 24 * 3600.0
+EVENTS_MAX_BYTES = 1 << 30
 
 
 async def provision_events(js: JetStreamContext, name: str, dedupe_window: float) -> None:
+    limits = {"max_age": EVENTS_MAX_AGE_S, "max_bytes": EVENTS_MAX_BYTES}
     try:
-        await js.add_stream(name=name, subjects=LEGACY_EVENTS, duplicate_window=dedupe_window)
+        await js.add_stream(name=name, subjects=LEGACY_EVENTS, duplicate_window=dedupe_window, **limits)
     except APIError as exc:
         if exc.err_code != 10058:
             raise
         info = await js.stream_info(name)
-        if info.config.subjects == LEGACY_EVENTS:
+        current = (info.config.subjects, info.config.max_age, info.config.max_bytes)
+        if current == (LEGACY_EVENTS, EVENTS_MAX_AGE_S, EVENTS_MAX_BYTES):
             raise
-        await js.update_stream(config=replace(info.config, subjects=LEGACY_EVENTS))
+        await js.update_stream(config=replace(info.config, subjects=LEGACY_EVENTS, **limits))
 
 
 def legacy_target(logical: str, permissions: dict) -> str:

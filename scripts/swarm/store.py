@@ -3,8 +3,10 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
-from typing import TYPE_CHECKING
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
@@ -510,17 +512,12 @@ class RedisStore:
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
                     pipe.hdel(self.key(slug, "retire-failures"), name)
-                    self._retire_name(pipe, name, ended)
                     pipe.execute()
+                    self.names.retire(name, ended)
                     return True
                 except WatchError:
                     continue
         raise SwarmError("agent registry kept changing; retirement was not committed")
-
-    def _retire_name(self, pipe, name, ended):
-        row = self.names.entry(name)
-        if row and not row["retired_at"]:
-            pipe.hset(self.names.key("name", name), "retired_at", ended)
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)
@@ -814,8 +811,13 @@ def _hive_recovered(redis, environ, refused):
     return _pinged(redis, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
 
 
+@lru_cache(maxsize=8)
+def _pooled_client(factory: Callable[..., Any], url: str, _pid: int) -> Any:
+    return factory(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
+
+
 def _pinged(redis, url):
-    client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
+    client = _pooled_client(redis.Redis.from_url, url, os.getpid())
     client.ping()
     return client
 

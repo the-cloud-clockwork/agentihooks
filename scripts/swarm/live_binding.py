@@ -80,7 +80,7 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
     from scripts import master_claude_login
     from scripts.profiles import binding
     from scripts.select_profile import _native_options
-    from scripts.swarm import launch_check, launch_model
+    from scripts.swarm import launch_model
 
     try:
         found, harness, env, account = binding.process(proc, pid)
@@ -99,7 +99,7 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
             "effort": effort,
             "account": account,
             "hooks": bool(home) and hooks(Path(home), harness),
-            "chain": launch_check.chain(home) if home else [],
+            "chain": master_claude_login.rendered_chain(Path(home), agent.name) if home else [],
             "overlays": master_claude_login.rendered_overlays(Path(home), agent.name) if home else [],
         }
     except (OSError, ValueError, StopIteration):
@@ -220,8 +220,25 @@ def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None
     return min(registered or named.values(), key=lambda s: s.process.start_time, default=None)
 
 
+def hosted_home(store: RedisStore, agent: AgentRecord) -> AgentRecord:
+    """Record the home a hive agent's join report names as its validated home when the launch recorded none."""
+    from scripts.hive import join_report, reports
+
+    validation = agent.profile_decision.get("validation", {})
+    if validation.get("home") or not reports.host(agent):
+        return agent
+    home = join_report.read(store.redis, agent).get("context", {}).get("home")
+    if not home:
+        return agent
+    return replace(agent, profile_decision={**agent.profile_decision, "validation": {**validation, "home": home}})
+
+
 def _unheld(agent: AgentRecord) -> list[str]:
-    homeless = not agent.profile_decision.get("validation", {}).get("home") and not (agent.profile and agent.harness)
+    from scripts.hive import reports
+
+    homeless = not agent.profile_decision.get("validation", {}).get("home") and (
+        not (agent.profile and agent.harness) or bool(reports.host(agent))
+    )
     return [field for field, value in assignment(agent).items() if not value or (field == "home" and homeless)]
 
 

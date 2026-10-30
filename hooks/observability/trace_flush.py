@@ -12,7 +12,6 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 
 from hooks.context.account_sessions import (
@@ -327,7 +326,7 @@ def supervise(
     timer_wait: Callable[[float], None] | None = None,
 ) -> str:
     limits = limits or budget()
-    timer_wait = timer_wait or partial(scheduled_wait, session_id=session_id)
+    timer_wait = timer_wait or sleep
     handle = _lock(session_id, limits.attempts * limits.attempt_timeout + limits.interval, clock, sleep)
     if handle is None:
         return "another exporter owns the session"
@@ -339,8 +338,8 @@ def supervise(
             record = _read(request_path(session_id))
             owner_alive = is_alive(_owner(record, "owner_"))
             fresh = record.get("at") != seen
-            if (failing or not fresh) and owner_alive and clock() < due:
-                timer_wait(POLL_SEC)
+            if (failing or not fresh) and owner_alive and (remaining := due - clock()) > 0:
+                timer_wait(min(POLL_SEC, remaining))
                 continue
             seen = record.get("at")
             trigger = "final" if not owner_alive else f"request:{record.get('reason', '')}" if fresh else "interval"

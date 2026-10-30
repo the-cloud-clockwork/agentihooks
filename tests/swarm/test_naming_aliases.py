@@ -232,14 +232,16 @@ def test_export_lists_the_swarm_aliases_as_store_rows_that_restore_writes_back(c
     others.mint_code("other", "other", "/repo")
     others.alias("other-eng-1", others.next("other", "eng"))
     rows = names.export("sw")
-    assert rows == {
+    aliased = {key: value for key, value in rows.items() if key.startswith(("alias.", "aliases-of.")) and value}
+    assert aliased == {
         name_state.state_key("aliases-of", new): ["sw-eng-1", "sw-eng-2"],
         name_state.state_key("alias", "sw-eng-1"): new,
         name_state.state_key("alias", "sw-eng-2"): new,
         name_state.state_key("aliases-of", last): ["sw-ci-3"],
         name_state.state_key("alias", "sw-ci-3"): last,
     }
-    assert name_state.state_key("aliases-of", quiet) not in rows
+    assert rows[name_state.state_key("aliases-of", quiet)] == []
+    assert name_state.state_key("alias", "other-eng-1") not in rows
     assert names.export("missing") == {}
     client.delete(_legacy("alias", "sw-eng-2"), _legacy("aliases-of", new))
     client.delete(RedisStateStore(client, name_state.BUCKET).watch_key)

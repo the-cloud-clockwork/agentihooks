@@ -128,6 +128,7 @@ import watch_ledger  # noqa: E402
 from scripts.gates.base import Who
 from scripts.inbox import outbox
 from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, ports, storage, workflow_task
+from scripts.swarm_ledger.adapters import hive_ledger
 
 repository = storage.default()
 
@@ -317,11 +318,16 @@ def queue(slug, ops, service):
 def remote_call(slug, ops, service):
     deliver = functools.partial(request, slug, ops, service)
     try:
-        return retried(deliver, REMOTE_READ_ATTEMPTS if ops is None else 1)
+        answer = retried(deliver, REMOTE_READ_ATTEMPTS if ops is None else 1)
     except urllib.error.HTTPError as exc:
+        if ops is not None and exc.code in hive_ledger.GATEWAY:
+            hive_ledger.report(exc.code)
         sys.exit(f"server refused: {exc.code} {refusal_text(exc)}")
     except OSError as exc:
         sys.exit(f"ledger server not answering on {base()}: {exc}")
+    if ops is not None:
+        hive_ledger.report(None)
+    return answer
 
 
 def retried(read, attempts):

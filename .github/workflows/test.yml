@@ -750,7 +750,9 @@ jobs:
         name: Stamp the day
         if: env.UNIT_SOURCE == ''
         id: day
-        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/test-env-key
+        with:
+          python-version: ${{ steps.python.outputs.python-version }}
 
       - &venv
         name: Restore the test environment
@@ -761,7 +763,7 @@ jobs:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/venv
-          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}-${{ hashFiles('.github/test-requirements.lock') }}
+          key: ${{ steps.day.outputs.key }}
 
       - &uv
         name: Set up uv
@@ -810,8 +812,8 @@ jobs:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ${{ runner.temp }}/count-collections
-          key: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-${{ github.sha }}
-          restore-keys: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-
+          key: ${{ steps.day.outputs.key }}-counts-v1-${{ github.sha }}
+          restore-keys: ${{ steps.day.outputs.key }}-counts-v1-
 
       - name: Mint the token that reads the dev count record
         id: app-token
@@ -850,7 +852,7 @@ jobs:
           PULL: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.head_ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
+          ENVIRONMENT: ${{ steps.day.outputs.key }}
           PYTHONUNBUFFERED: "1"
         run: |
           git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
@@ -898,7 +900,7 @@ jobs:
       - name: Hold the base revision's test count
         env:
           TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
-          TEST_COUNT_ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
+          TEST_COUNT_ENVIRONMENT: ${{ steps.day.outputs.key }}
           TEST_COUNT_BASE_RECORD: ${{ runner.temp }}/base-record.json
           TEST_COUNT_HEAD_COLLECTION: ${{ runner.temp }}/collected.json
         run: |
@@ -1043,7 +1045,7 @@ jobs:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: ~/venv
-          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}-${{ hashFiles('.github/test-requirements.lock') }}
+          key: ${{ steps.day.outputs.key }}
 
       - name: Set up uv
         if: github.event_name == 'push' && env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
@@ -1259,6 +1261,7 @@ jobs:
       GIT_CONFIG_VALUE_0: "false"
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ${{ needs.split.outputs.source }}
+      UNIT_WHEELHOUSE: ${{ github.event_name == 'pull_request' && '1' || '' }}
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       LEG: ${{ matrix.shard }}
     strategy:
@@ -1543,7 +1546,7 @@ jobs:
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PULL: ${{ github.event.pull_request.number }}
-          ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
+          ENVIRONMENT: ${{ steps.day.outputs.key }}
         run: |
           python -m tests.branch_record --coverage-dir . --inputs dep-inputs --results ci-results --flakes flakes.jsonl --root . \
             --commit "$GITHUB_SHA" --head "$HEAD_SHA" --pull "$PULL" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
@@ -2701,6 +2704,14 @@ jobs:
             echo "::error::dev carries no scripts/swallowed_exceptions.py, so nothing trusted can grade."
             exit 1
           fi
+
+      - name: Reject new Python comments and preserve comment free files
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/no_comments.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.no_comments --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       # dev's copy grades the head's new and changed units, so a pull request cannot loosen its own design rules.
       # Until dev carries the grader, the head's copy grades.

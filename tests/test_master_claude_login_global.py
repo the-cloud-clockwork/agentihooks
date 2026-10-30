@@ -255,6 +255,37 @@ def test_a_front_door_joining_a_live_home_passes_the_overlay_check_on_its_own_re
         assert launch_check._overlays(facts, ["brain", "swarm-brain"]) == missed
 
 
+def test_a_joining_master_passes_the_base_check_on_its_own_chain(ah, tmp_path, rendered):
+    import os
+    import shutil
+
+    from scripts.swarm import launch_check, live_binding
+    from scripts.swarm.store import AgentRecord
+
+    _render(rendered, "Rig master.\n")
+    (rendered / ".agentihooks-render.json").write_text(
+        json.dumps({"chain": ["rig-base", "brain"], "overlays": ["brain"]})
+    )
+    home = login.build(rendered)
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "r"}}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    login.claim("master@rig-1", os.getppid())
+    doctor = tmp_path / "doctor" / "claude"
+    shutil.copytree(rendered, doctor)
+    shutil.copyfile(rendered.parent / "claude.sources.json", doctor.parent / "claude.sources.json")
+    (doctor / ".agentihooks-render.json").write_text(
+        json.dumps({"chain": ["doctor-base", "brain", "swarm-brain"], "overlays": ["brain", "swarm-brain"]})
+    )
+    assert login.prepare(_environ(doctor, "doctor"), tmp_path)[0] == home
+    proc = tmp_path / "proc"
+    _process(proc, 42, home)
+    joining = AgentRecord("master@doctor-1", "master", "", harness="claude", profile="doctor-base")
+    facts = live_binding.read(joining, 42, proc)
+    assert launch_check._base(joining, facts, False) == {}
+    first = AgentRecord("master@rig-1", "master", "", harness="claude", profile="rig-base")
+    assert launch_check._base(first, live_binding.read(first, 42, proc), False) == {}
+
+
 def test_a_rebuilt_login_home_drops_the_earlier_holders_render_records(ah, rendered):
     _stamp(rendered, ["brain", "swarm-brain"])
     login.root().mkdir(parents=True)
