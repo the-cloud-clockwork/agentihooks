@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.497 · 2026-10-30
+
+### 2026-10-30 · a9db9ee548c2 · #8833 · @agenticore-app
+
+**Add the service split design record**
+
+This change adds docs/reference/service-split.md, the design record for task da1 of plan #8818, laying out how the ledger application splits into four services plus the agent WebSocket. It defines the contracts for the frontend, API, app server and auth service, maps every route, rule, side effect and auth path from the dev inventory to its target service, and lays out seven strangler steps with switches, rollbacks, resource budgets and the Compose developer build. This gives the team a verified, reviewed blueprint to safely execute the service split in phase one, closing #8827.
+
+### 2026-10-30 · 5874938044ca · #8832 · @agenticore-app
+
+**Accept allowlists registered in the head shrink only literal**
+
+This change fixes a bug where newly added allowlist or baseline files registered in the same pull request were incorrectly flagged as unregistered by the protected threshold registry. Now, `registry_errors()` reads the head's `SHRINK_ONLY` literal via `constant()` to recognize fresh registrations, while still rejecting unregistered files, registered allowlists that grow, and registrations that only appear in `GRADED_BY`. This lets legitimate new allowlist additions land cleanly without fighting the gate, while preserving protection against unauthorized growth or bypass.
+
+### 2026-10-30 · 610a3dde478b · #8829 · @agenticore-app
+
+**Skip mutation lines in modules whose bare syntax tree did not change**
+
+This change teaches `changes_since` to recognize when a file's edits only touched comments, docstrings, or plain function signature annotations without altering the actual logic, and skips generating mutation lines for those files in that case. It avoids wasted mutation-testing effort and noisy survivors on purely cosmetic diffs, while still fully grading any file that contains a real logic change. Exceptions remain for decorated functions, assignment annotations like dataclass fields, and functions invoked by reference at runtime, where annotations still matter and continue to be graded.
+
 ## v2.17.495 · 2026-10-30
 
 ### 2026-10-29 · 65249ec02f45 · #8816 · @nestorcolt
