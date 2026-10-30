@@ -723,9 +723,10 @@ class SQLiteLedgerRepository:
         outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
         generation = entry.generation + 1
         refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
+        ruled = summarize(slug, state) if summary is None else summary
         connection.execute(
             UPDATE,
-            (state["_meta"]["rev"], generation, encode(summary or summarize(slug, state)), self.domain.now_ms(), slug),
+            (state["_meta"]["rev"], generation, encode(ruled), self.domain.now_ms(), slug),
         )
         return Entry(generation, None, state, fragments, writer)
 

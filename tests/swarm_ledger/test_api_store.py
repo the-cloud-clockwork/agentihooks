@@ -785,6 +785,7 @@ def test_the_api_names_the_database_it_needs_when_it_refuses_to_start(
 ) -> None:
     monkeypatch.setenv(store.TOKEN_ENV, "secret")
     monkeypatch.setattr(store.storage, "shared", lambda: None)
+    monkeypatch.setattr(store, "repository", lambda: pytest.fail("the api started without a database"))
 
     with pytest.raises(SystemExit):
         store.main([])
@@ -808,7 +809,7 @@ def test_the_api_announces_its_address_on_a_piped_stdout_while_it_serves(tmp_pat
     child = subprocess.Popen(
         [*command, "--host", "127.0.0.1", "--port", "0"],
         cwd=ROOT,
-        env=child_env(tmp_path),
+        env=child_env(tmp_path, PYTHONUNBUFFERED="1"),
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -860,6 +861,14 @@ def test_a_bad_request_names_its_cause_and_closes_its_connection(api: tuple) -> 
         {"code": "bad_request", "detail": "'kind'"},
     )
     assert data.startswith(b"HTTP/1.1 400") and data.count(b"HTTP/1.1 ") == 1
+
+
+def test_a_post_without_a_length_reads_no_body(api: tuple) -> None:
+    _, base = api
+
+    data = raw(base, b"POST /api/v1/store/held HTTP/1.1\r\nHost: api\r\nAuthorization: Bearer secret\r\n\r\nX")
+
+    assert data.startswith(b"HTTP/1.1 400") and b'"unknown_action"' in data
 
 
 def test_a_request_without_credentials_is_refused_whatever_the_token(tmp_path: Path) -> None:

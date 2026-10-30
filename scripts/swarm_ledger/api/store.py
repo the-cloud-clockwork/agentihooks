@@ -308,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("no shared database URL; pass --folder to serve the ledger folder")
     stored = repository()
     listening = server(stored, options.host, options.port, token)
-    print(f"swarm api on {options.host}:{listening.server_address[1]}", flush=True)
+    print(f"swarm api on {options.host}:{listening.server_address[1]}")
     with relaying(stored, not options.no_relay):
         try:
             listening.serve_forever(0.2)
