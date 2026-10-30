@@ -75,7 +75,7 @@ def store_keys(store: Store) -> list[str]:
 
     with mock.patch.object(hive_state, "on_redis", lambda: True):
         opened = store.open()
-    return [opened._current, opened._revision, f"{opened._history}probe"]
+    return [opened._current, opened._revision, f"{opened._history}probe", opened._projected, opened._published]
 
 
 def consumer_map(deployment: str, root: Path = ROOT) -> dict:

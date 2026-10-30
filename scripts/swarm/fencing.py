@@ -66,7 +66,10 @@ def _project_executions(value: bytes) -> bytes:
 
 
 def _states(store: Any) -> Any:
-    return state.for_store(store, BUCKET, projection=_project_executions)
+    states = state.for_store(store, BUCKET)
+    if isinstance(states, RedisStateStore):
+        states.projection = _project_executions
+    return states
 
 
 def _task(key: str) -> str:

@@ -37,7 +37,7 @@ class RedisStateStore:
         self._history = f"{base}:history:"
         self._projected = f"{base}:projected"
         self._published = f"{base}:published"
-        self._projection = projection
+        self.projection = projection
 
     @property
     def watch_key(self) -> str:
@@ -78,11 +78,13 @@ class RedisStateStore:
                     found = pipe.hget(self._current, key)
                     if (None if found is None else json.loads(found)["revision"]) != revision:
                         raise StateConflict(conflict)
-                    consistent = pipe.get(self._revision) == pipe.get(self._published)
+                    published = pipe.get(self._published)
+                    consistent = pipe.get(self._revision) == published
                     written = self.redis.incr(self._revision)
                     row = json.dumps({"revision": written, "value": base64.b64encode(value).decode()})
                     pipe.multi()
-                    self._project(pipe, key, value, written, consistent)
+                    if self.projection is not None or published is not None:
+                        self._project(pipe, key, value, written, consistent)
                     pipe.hset(self._current, key, row)
                     pipe.rpush(self._history + key, row)
                     pipe.ltrim(self._history + key, -HISTORY, -1)
@@ -95,10 +97,10 @@ class RedisStateStore:
     def _project(self, pipe: Any, key: str, value: bytes, revision: int, consistent: bool) -> None:
         if not consistent:
             pipe.delete(self._projected)
-        if self._projection is None:
+        if self.projection is None:
             pipe.hdel(self._projected, key)
         else:
-            row = json.dumps({"revision": revision, "value": base64.b64encode(self._projection(value)).decode()})
+            row = json.dumps({"revision": revision, "value": base64.b64encode(self.projection(value)).decode()})
             pipe.hset(self._projected, key, row)
         pipe.set(self._published, revision)
 
