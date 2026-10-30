@@ -179,8 +179,3 @@ class Swarm:
 
         return ledger_cutover
 
-    @property
-    def hive_ledger(self):
-        from scripts.swarm import hive_ledger
-
-        return hive_ledger
