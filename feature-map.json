@@ -26,6 +26,457 @@
       "tests": [
         "tests/features/test_harness.py::test_a_scripted_agent_reports_its_canary_beats_and_hands_off_through_the_ledger_server"
       ]
+    },
+    {
+      "id": "swarm-tick-pass-scope",
+      "origin": "inventory",
+      "behaviour": "The host tick skips retired, closed and unavailable ledgers before any tick pass.",
+      "seam": "scripts.swarm.tick run passes over the host's swarm selection",
+      "tests": [
+        "tests/swarm/test_tick_selection.py::test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass"
+      ]
+    },
+    {
+      "id": "swarm-tick-lock",
+      "origin": "inventory",
+      "behaviour": "One tick holds a swarm at a time; a holder whose process is gone is replaced at once and a live holder keeps its lock.",
+      "seam": "The tick lock in scripts.swarm.lease",
+      "tests": [
+        "tests/swarm/test_tick_lock.py::test_a_killed_tick_holder_is_replaced_without_waiting_for_expiry",
+        "tests/swarm/test_tick_lock.py::test_a_live_tick_holder_keeps_its_lock"
+      ]
+    },
+    {
+      "id": "swarm-tick-launch-budget",
+      "origin": "inventory",
+      "behaviour": "A tick pass stops launching once its launch budget is spent.",
+      "seam": "The spawn pass of scripts.swarm.tick",
+      "tests": [
+        "tests/swarm/test_tick_launch_budget.py::test_a_slow_preparation_stops_the_pass_at_the_launch_budget"
+      ]
+    },
+    {
+      "id": "swarm-claim-order",
+      "origin": "inventory",
+      "behaviour": "Claimable tasks are taken by rank, then resumed work, then the fast clear exception, then dependency depth, with ledger order breaking ties.",
+      "seam": "scripts.swarm.claim_order ordering key",
+      "tests": [
+        "tests/swarm/test_claim_order.py::test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth",
+        "tests/swarm/test_claim_order.py::test_within_a_rank_the_longer_chain_goes_first_and_ledger_order_breaks_ties"
+      ]
+    },
+    {
+      "id": "swarm-claim-dependencies",
+      "origin": "inventory",
+      "behaviour": "A task stacked on a live dependency is claimable while work parked on it waits.",
+      "seam": "The tick claim pass and scripts.swarm.health.urgent_hold",
+      "tests": [
+        "tests/swarm/test_urgent_hold.py::test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits"
+      ]
+    },
+    {
+      "id": "swarm-park-restack",
+      "origin": "inventory",
+      "behaviour": "The spawn prompt tells a stacked claim to build on its dependency branch, push and park, and tells the next engineer to finish a parked task from its branch after a restack.",
+      "seam": "The spawn prompt in scripts.swarm.prompt",
+      "tests": [
+        "tests/swarm/test_startup_prompts.py::test_a_stacked_claim_starts_from_the_dependency_branch_builds_pushes_and_parks",
+        "tests/swarm/test_startup_prompts.py::test_a_parked_task_finishes_from_its_branch_after_a_restack"
+      ]
+    },
+    {
+      "id": "swarm-claim-lives",
+      "origin": "inventory",
+      "behaviour": "Every claim the tick makes spends one agent life; a fourth claim is refused and the task blocked for the master.",
+      "seam": "The claims gate in scripts.gates.claims on the tick claim path",
+      "tests": [
+        "tests/swarm/test_claim_cap.py::test_every_claim_the_tick_makes_counts_one_agent_life",
+        "tests/swarm/test_claim_cap.py::test_a_fourth_claim_is_refused_and_the_task_blocked_for_the_master"
+      ]
+    },
+    {
+      "id": "swarm-reclaim",
+      "origin": "inventory",
+      "behaviour": "A task reclaimed after its agent was lost launches on that agent's recorded branch.",
+      "seam": "The tick reclaim launch in scripts.swarm.continuation",
+      "tests": [
+        "tests/swarm/test_continuation_ownership.py::test_reclaimed_launch_uses_its_recorded_task_branch"
+      ]
+    },
+    {
+      "id": "swarm-launch-check",
+      "origin": "inventory",
+      "behaviour": "Each launch is checked for join, seat, profile, settings and overlays by its deadline; each miss is named, a failed launch is retired and relaunched once, and a master failure is posted to the ledger.",
+      "seam": "scripts.swarm.launch_check and its tick pass",
+      "tests": [
+        "tests/swarm/test_launch_check.py::test_a_clean_launch_passes",
+        "tests/swarm/test_launch_check.py::test_tick_retires_and_relaunches_a_failed_launch_once",
+        "tests/swarm/test_launch_check.py::test_master_failure_is_posted_to_the_operator_chat_and_relaunched",
+        "tests/swarm/test_launch_check.py::test_not_joined_is_named",
+        "tests/swarm/test_launch_check.py::test_seat_held_by_another_is_named",
+        "tests/swarm/test_launch_check.py::test_wrong_profile_variable_is_named",
+        "tests/swarm/test_launch_check.py::test_missing_hooks_or_wrong_model_or_effort_is_named_settings",
+        "tests/swarm/test_launch_check.py::test_a_launch_missing_a_declared_overlay_fails_the_check",
+        "tests/swarm/test_launch_check.py::test_a_launch_missing_a_worn_overlay_fails_the_check",
+        "tests/swarm/test_launch_check.py::test_tick_waits_until_the_deadline_before_failing"
+      ]
+    },
+    {
+      "id": "swarm-master-seat",
+      "origin": "inventory",
+      "behaviour": "A swarm whose master is down launches its master first and promotes one live engineer only when the forced launch fails.",
+      "seam": "scripts.swarm.tick_master",
+      "tests": [
+        "tests/swarm/test_tick_master.py::test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promoted",
+        "tests/swarm/test_tick_master.py::test_a_failed_forced_launch_promotes_one_live_engineer"
+      ]
+    },
+    {
+      "id": "swarm-seat-priming",
+      "origin": "inventory",
+      "behaviour": "A successor is primed from its seat with the handoff, recaps in order and learned notes, and missing pieces are named.",
+      "seam": "The spawn prompt built from the seat",
+      "tests": [
+        "tests/swarm/test_seat_priming.py::test_the_successor_prompt_carries_the_chain_in_order",
+        "tests/swarm/test_seat_priming.py::test_the_tick_primes_a_successor_from_its_seat",
+        "tests/swarm/test_seat_priming.py::test_a_missing_recap_is_named_in_the_prompt"
+      ]
+    },
+    {
+      "id": "swarm-culture",
+      "origin": "inventory",
+      "behaviour": "The swarm culture reaches every lane and the master ahead of the seat recap.",
+      "seam": "The spawn prompt built from the swarm culture",
+      "tests": [
+        "tests/swarm/test_seat_priming.py::test_the_tick_primes_every_lane_and_the_master_with_the_swarm_culture",
+        "tests/swarm/test_seat_priming.py::test_culture_set_and_show_survive_swarm_remove",
+        "tests/swarm/test_seat_priming.py::test_the_culture_sits_ahead_of_the_seat_recap_for_every_lane_and_the_master"
+      ]
+    },
+    {
+      "id": "swarm-learned-notes",
+      "origin": "inventory",
+      "behaviour": "A learned note needs a reason, takes a maturity, and only the master or operator writes canon.",
+      "seam": "agentihooks swarm learned",
+      "tests": [
+        "tests/swarm/test_seat_priming.py::test_learned_takes_a_maturity_and_only_the_master_writes_canon",
+        "tests/swarm/test_handoff_v2_priming.py::test_learned_refuses_a_missing_reason_and_writes_nothing"
+      ]
+    },
+    {
+      "id": "swarm-handoff",
+      "origin": "inventory",
+      "behaviour": "The Handoff v2 checker refuses a document missing a heading or with headings out of order, and the seat recap is derived from the document.",
+      "seam": "scripts.handoff.check and agentihooks swarm handoff",
+      "tests": [
+        "tests/swarm/test_handoff_v2_priming.py::test_handoff_derives_the_seat_recap_without_another_file",
+        "tests/handoff/test_check.py::test_missing_heading_is_refused",
+        "tests/handoff/test_check.py::test_headings_out_of_order_are_refused"
+      ]
+    },
+    {
+      "id": "swarm-master-handoff",
+      "origin": "inventory",
+      "behaviour": "A master handoff that lands mid tick still launches the successor with the document.",
+      "seam": "The tick master pass",
+      "tests": [
+        "tests/swarm/test_tick_master_handoff.py::test_a_master_handoff_landing_mid_tick_still_launches_the_successor_with_the_doc"
+      ]
+    },
+    {
+      "id": "swarm-handoff-continuity",
+      "origin": "inventory",
+      "behaviour": "Confirming a handoff records continuity and never infers binding.",
+      "seam": "agentihooks swarm confirm-handoff",
+      "tests": [
+        "tests/swarm/test_handoff_commands.py::test_confirmation_command_records_continuity_but_never_infers_binding"
+      ]
+    },
+    {
+      "id": "swarm-dead-resume",
+      "origin": "inventory",
+      "behaviour": "A dead agent with room resumes its own conversation in its seat; a lost agent cannot reopen a successor's claim and a deliberately ended engineer is not resumed.",
+      "seam": "The tick reaper recovery path",
+      "tests": [
+        "tests/swarm/test_dead_resume.py::test_dead_agent_with_room_resumes_its_conversation_and_seat",
+        "tests/swarm/test_dead_resume.py::test_lost_agent_cannot_reopen_a_successors_claim",
+        "tests/swarm/test_dead_resume.py::test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens"
+      ]
+    },
+    {
+      "id": "swarm-reboot-recovery",
+      "origin": "inventory",
+      "behaviour": "After a reboot each recorded local agent resumes in its own conversation, seat and account, and one that cannot reopen awaits a decision.",
+      "seam": "scripts.swarm.reboot boot pass",
+      "tests": [
+        "tests/swarm/test_reboot.py::test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_account",
+        "tests/swarm/test_reboot.py::test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision"
+      ]
+    },
+    {
+      "id": "swarm-restore-decision",
+      "origin": "inventory",
+      "behaviour": "A failed resume stays awaiting a decision until the master or operator chooses resume or fresh; a worker cannot decide another seat's restore.",
+      "seam": "agentihooks swarm restore-decision",
+      "tests": [
+        "tests/swarm/test_restore_decisions.py::test_failed_resume_stays_awaiting_decision_even_after_a_tick",
+        "tests/swarm/test_restore_decisions.py::test_retry_resume_and_explicit_fresh_are_separate_choices",
+        "tests/swarm/test_handoff_commands.py::test_a_worker_cannot_decide_another_seats_restore"
+      ]
+    },
+    {
+      "id": "swarm-checked-waits",
+      "origin": "inventory",
+      "behaviour": "A checked wait lasts until the tick ends it once its thing resolves and tells the agent; a bare wait is capped at sixty minutes.",
+      "seam": "agentihooks swarm wait and the tick wait pass",
+      "tests": [
+        "tests/swarm/test_waits.py::test_a_wait_on_checks_lasts_until_the_tick_ends_it",
+        "tests/swarm/test_waits.py::test_the_tick_ends_a_checks_wait_once_and_tells_the_agent",
+        "tests/swarm/test_waits.py::test_a_bare_wait_is_capped_at_sixty_minutes"
+      ]
+    },
+    {
+      "id": "swarm-merge-wait",
+      "origin": "inventory",
+      "behaviour": "A merge wait holds while the pull request is queued, ends when it lands and reports when it drops out of the queue.",
+      "seam": "agentihooks swarm wait --on merge and the tick wait pass",
+      "tests": [
+        "tests/swarm/test_waits.py::test_the_tick_accepts_a_merge_wait_only_after_the_pull_request_lands",
+        "tests/swarm/test_waits.py::test_a_merge_wait_reports_when_the_queued_pull_request_drops_out"
+      ]
+    },
+    {
+      "id": "swarm-run-wait",
+      "origin": "inventory",
+      "behaviour": "A wait on an Actions run ends with its conclusion and a red run names its failed jobs.",
+      "seam": "The run wait pass",
+      "tests": [
+        "tests/swarm/test_run_wait.py::test_the_tick_ends_a_run_wait_with_its_conclusion",
+        "tests/swarm/test_run_wait.py::test_a_red_run_names_its_failed_jobs_and_ends_the_wait"
+      ]
+    },
+    {
+      "id": "swarm-push-wait",
+      "origin": "inventory",
+      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge.",
+      "seam": "The pull request wait hook and tick pass",
+      "tests": [
+        "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_checked_wait_on_the_pushed_task_pull_request",
+        "tests/swarm/test_pr_wait.py::test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge"
+      ]
+    },
+    {
+      "id": "swarm-prerequisite-wait",
+      "origin": "inventory",
+      "behaviour": "A long prerequisite queue directs stacking or blocking instead of idling, and a blocked task reopens only after its prerequisite merges.",
+      "seam": "agentihooks swarm block and wait admission",
+      "tests": [
+        "tests/swarm/test_prerequisite_wait.py::test_a_long_prerequisite_wait_directs_stacking_or_blocking_without_idling",
+        "tests/swarm/test_prerequisite_wait.py::test_block_retains_the_stack_and_tick_reopens_only_after_prerequisite_merge"
+      ]
+    },
+    {
+      "id": "swarm-idle",
+      "origin": "inventory",
+      "behaviour": "An agent counts idle only when its pane, heartbeat and declared wait all say so.",
+      "seam": "scripts.swarm.idle",
+      "tests": [
+        "tests/swarm/test_idle.py::test_an_agent_is_idle_only_when_pane_heartbeat_and_wait_all_say_so"
+      ]
+    },
+    {
+      "id": "swarm-health-ceremony",
+      "origin": "inventory",
+      "behaviour": "The ceremony finding names an agent whose ledger transitions outrun its outcomes.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health.py::test_ceremony_names_the_agent_its_transitions_and_its_outcomes",
+        "tests/swarm/test_health.py::test_a_healthy_event_set_produces_no_finding"
+      ]
+    },
+    {
+      "id": "swarm-health-scope-inflation",
+      "origin": "inventory",
+      "behaviour": "The scope inflation finding lists each self queued task with its gain.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health.py::test_scope_inflation_lists_each_task_by_title_with_its_gain"
+      ]
+    },
+    {
+      "id": "swarm-health-proof-loop",
+      "origin": "inventory",
+      "behaviour": "The proof loop finding names a task over its rerun or review round cap.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health.py::test_proof_loop_names_the_task_its_reruns_and_review_rounds",
+        "tests/swarm/test_health.py::test_review_rounds_over_the_cap_are_a_proof_loop"
+      ]
+    },
+    {
+      "id": "swarm-health-idle-claim",
+      "origin": "inventory",
+      "behaviour": "The idle with claim finding names an idle agent holding a claim, and a declared checks wait is not idle.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health.py::test_an_idle_agent_holding_a_claim_is_named_with_its_task",
+        "tests/swarm/test_health.py::test_an_agent_waiting_on_checks_does_not_trip_idle_with_claim"
+      ]
+    },
+    {
+      "id": "swarm-health-stale-claim",
+      "origin": "inventory",
+      "behaviour": "The stale claim finding names a quiet task, its holder and the quiet time.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health.py::test_a_quiet_claim_names_the_task_its_holder_and_the_quiet_time"
+      ]
+    },
+    {
+      "id": "swarm-health-over-monitoring",
+      "origin": "inventory",
+      "behaviour": "The over monitoring finding names an agent whose watch calls outnumber its actions, with a looser limit for the master.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health.py::test_over_monitoring_names_the_agent_and_its_counts",
+        "tests/swarm/test_health.py::test_the_master_gets_a_looser_over_monitoring_limit_than_other_agents"
+      ]
+    },
+    {
+      "id": "swarm-health-drain",
+      "origin": "inventory",
+      "behaviour": "An account at or under ten percent routing left counts as draining and status prints the drain finding.",
+      "seam": "scripts.swarm.drain_watch and agentihooks swarm status",
+      "tests": [
+        "tests/swarm/test_drain_watch.py::test_an_open_account_with_ten_percent_or_less_routing_left_counts_as_draining",
+        "tests/swarm/test_drain_watch.py::test_swarm_status_prints_the_capacity_decision_and_the_drain_finding"
+      ]
+    },
+    {
+      "id": "swarm-health-verdicts",
+      "origin": "inventory",
+      "behaviour": "Each finding has a stable id; a verdict hides it through the cooldown, it returns with its earlier verdict only if its evidence grew, and it stays shown until a new verdict hides it.",
+      "seam": "agentihooks swarm verdict",
+      "tests": [
+        "tests/swarm/test_health.py::test_each_finding_carries_a_stable_id_and_the_measure_its_evidence_grows_by",
+        "tests/swarm/test_health_verdicts.py::test_a_verdicted_finding_stays_hidden_through_the_cooldown",
+        "tests/swarm/test_health_verdicts.py::test_after_the_cooldown_it_returns_only_if_its_evidence_grew",
+        "tests/swarm/test_health_verdicts.py::test_a_verdict_must_be_one_of_the_five_and_name_a_known_finding",
+        "tests/swarm/test_health_verdicts.py::test_it_returns_at_most_once_and_carries_its_earlier_verdict"
+      ]
+    },
+    {
+      "id": "swarm-autoscale",
+      "origin": "inventory",
+      "behaviour": "Autoscale raises the lane ceilings only after three ticks, never past fifty, and applies a lower host room ceiling at once.",
+      "seam": "scripts.swarm.autoscale",
+      "tests": [
+        "tests/swarm/test_autoscale.py::test_more_accounts_raise_the_ceiling_only_on_the_third_tick",
+        "tests/swarm/test_autoscale.py::test_total_ceiling_is_at_most_fifty",
+        "tests/swarm/test_autoscale.py::test_host_room_caps_the_target_and_applies_a_lower_ceiling_at_once"
+      ]
+    },
+    {
+      "id": "swarm-manual-caps",
+      "origin": "inventory",
+      "behaviour": "Manual lane caps hold against a stored lane shift.",
+      "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
+      "tests": [
+        "tests/swarm/test_lane_caps_owner.py::test_manual_caps_ignore_a_stored_lane_shift"
+      ]
+    },
+    {
+      "id": "swarm-session-cap",
+      "origin": "inventory",
+      "behaviour": "With no free session slot the spawn and the master seat are held and the hold says why.",
+      "seam": "The dispatcher seat and master fill passes",
+      "tests": [
+        "tests/swarm/test_dispatch_seat.py::test_no_session_slot_holds_the_spawn",
+        "tests/swarm/test_master_fill.py::test_no_session_slot_holds_the_seat_and_says_why"
+      ]
+    },
+    {
+      "id": "swarm-freeze",
+      "origin": "inventory",
+      "behaviour": "A frozen node or selector holds its tasks from claims, a claimed task keeps its agent, and held work drains with a notice naming the freezes.",
+      "seam": "scripts.swarm.freeze and agentihooks swarm freeze",
+      "tests": [
+        "tests/swarm/test_freeze.py::test_a_task_under_a_frozen_node_or_matching_a_frozen_selector_is_held",
+        "tests/swarm/test_freeze.py::test_a_claimed_task_under_a_new_freeze_keeps_its_agent",
+        "tests/swarm/test_freeze.py::test_only_held_work_drains_with_a_notice_naming_the_freezes_and_unfreezing_runs_again"
+      ]
+    },
+    {
+      "id": "swarm-focus",
+      "origin": "inventory",
+      "behaviour": "A focus holds normal work outside it, urgent tasks and Doctor fixes pass, and focused work takes at most half the lane slots.",
+      "seam": "scripts.swarm.freeze focus and scripts.swarm.focus_budget",
+      "tests": [
+        "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
+        "tests/swarm/test_freeze.py::test_an_urgent_task_and_a_doctor_fix_pass_a_focus",
+        "tests/swarm/test_focus_budget.py::test_ten_lane_slots_allocate_five_focused_and_five_normal_tasks"
+      ]
+    },
+    {
+      "id": "swarm-handoff-preparation",
+      "origin": "inventory",
+      "behaviour": "A bound session reaching the compact limit gets the handoff preparation directive with its deadline, and the hard gate sits fifty thousand tokens above the limit.",
+      "seam": "The context recycle hook",
+      "tests": [
+        "tests/test_handoff_preparation.py::test_preparation_starts_at_the_limit_with_deadline",
+        "tests/test_handoff_preparation.py::test_hard_gate_sits_fifty_thousand_above_the_limit",
+        "tests/test_handoff_preparation.py::test_preparation_never_reaches_unbound_sessions"
+      ]
+    },
+    {
+      "id": "swarm-handoff-binding",
+      "origin": "inventory",
+      "behaviour": "The tick records binding when the successor attaches to the seat, separate from continuity.",
+      "seam": "scripts.handoff.transfers binding records",
+      "tests": [
+        "tests/handoff/test_transfers.py::test_tick_binds_a_successor_without_claiming_continuity",
+        "tests/handoff/test_transfers.py::test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start"
+      ]
+    },
+    {
+      "id": "swarm-intent-wait",
+      "origin": "inventory",
+      "behaviour": "A wait on intent names the agent's own task pull request and is refused for any other.",
+      "seam": "agentihooks swarm wait --on intent and scripts.swarm.waits",
+      "tests": [
+        "tests/swarm/test_waits.py::test_a_wait_on_intent_names_its_own_tasks_pull_request",
+        "tests/swarm/test_waits.py::test_target_problem_takes_intent_only_on_the_own_tasks_pull_request"
+      ]
+    },
+    {
+      "id": "swarm-claim-hold",
+      "origin": "inventory",
+      "behaviour": "A verification hold with no window for over an hour tells the master once, and a skipped hold never hides the eligible task behind it.",
+      "seam": "scripts.swarm.claim_hold in the tick",
+      "tests": [
+        "tests/swarm/test_claim_hold.py::test_tick_tells_the_master_once_when_a_verification_hold_has_no_window_for_over_an_hour",
+        "tests/swarm/test_claim_hold.py::test_a_skipped_hold_does_not_hide_the_eligible_task_behind_it"
+      ]
+    },
+    {
+      "id": "swarm-master-wake",
+      "origin": "inventory",
+      "behaviour": "An idle master with waiting work is woken at twenty minutes and retried, never while its pane holds typed input.",
+      "seam": "The master wake pass in scripts.swarm.master_wake",
+      "tests": [
+        "tests/swarm/test_master_wake.py::test_ready_master_with_work_wakes_at_twenty_minutes_and_retries",
+        "tests/swarm/test_master_wake.py::test_typed_input_prevents_wake",
+        "tests/swarm/test_master_wake.py::test_tick_runs_the_master_wake_pass"
+      ]
+    },
+    {
+      "id": "swarm-tick-reaper",
+      "origin": "inventory",
+      "behaviour": "A leftover tick process is reaped and recorded without touching its process group.",
+      "seam": "scripts.swarm.tick_reaper",
+      "tests": [
+        "tests/swarm/test_tick_reaper.py::test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group"
+      ]
     }
   ],
   "unmapped_rules": [
