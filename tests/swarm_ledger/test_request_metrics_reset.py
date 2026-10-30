@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -7,7 +8,7 @@ from scripts.swarm_ledger import request_metrics
 pytestmark = pytest.mark.xdist_group("request-metrics-reset")
 
 
-def test_a_restore_with_real_time_sets_the_held_and_lost_journal_state(tmp_path):
+def test_a_restore_with_real_time_sets_the_held_and_lost_journal_state(tmp_path: Path) -> None:
     now = request_metrics.time.time()
     path = tmp_path / request_metrics.JOURNAL_NAME
     path.write_text(
@@ -25,7 +26,7 @@ def test_a_restore_with_real_time_sets_the_held_and_lost_journal_state(tmp_path)
     assert request_metrics.PENDING
 
 
-def test_the_next_test_on_the_worker_starts_with_an_empty_request_metrics_journal():
+def test_the_next_test_on_the_worker_starts_with_an_empty_request_metrics_journal() -> None:
     assert request_metrics.JOURNAL is None
     assert request_metrics.HELD_SINCE is None
     assert request_metrics.LOST == []
