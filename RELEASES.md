@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.502 · 2026-10-30
+
+### 2026-10-30 · 133ed086e8ea · #8879 · @agenticore-app
+
+**Gate Python comments on changed lines with a growing comment free list**
+
+This change adds a grader that blocks new Python comments and standalone string statements on changed lines, limits module docstrings to twenty lines, and tracks exempt files in a growing list at tests/COMMENT_FREE_PATHS.json; tool directives still work, and Semgrep annotations are only allowed in .semgrep* fixture folders. It runs in both the lint job and the prepush plan, with a `--all` option to check the whole tree, keeping comment hygiene enforced automatically as the codebase grows rather than relying on manual review.
+
 ## v2.17.500 · 2026-10-30
 
 ### 2026-10-30 · 8c756e0ae2d4 · #8847 · @agenticore-app
