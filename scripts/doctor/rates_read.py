@@ -1,13 +1,13 @@
 """Read only loaders for the Doctor rates: the ledger, tool activity, health findings, the gate log, injection traces
 and the pull requests of tasks done in the span, cached in Redis."""
 
+from __future__ import annotations
+
 import json
 import subprocess
 from collections.abc import Callable, Iterable
 from pathlib import Path
-
-from redis import Redis
-from redis.exceptions import NoPermissionError
+from typing import TYPE_CHECKING
 
 from hooks import config
 from hooks.context import injection_trace
@@ -19,6 +19,9 @@ from scripts.swarm.health import activity
 from scripts.swarm.ledger_events import iso_ms
 from scripts.swarm.runtime import SWARM_HOME
 from scripts.swarm.store import PREFIX
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 FIELDS = "state,mergedAt,additions,deletions,files"
 OPEN_TTL_S = 300
@@ -78,6 +81,8 @@ def pulls(
     urls: Iterable[str],
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> dict[str, Pull]:
+    from redis.exceptions import NoPermissionError
+
     found = {}
     for url in sorted(set(urls)):
         key = ":".join((PREFIX, slug, "rates-pull", url))
