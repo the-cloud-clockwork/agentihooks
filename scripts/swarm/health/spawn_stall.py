@@ -7,7 +7,7 @@ from scripts.hive import admission, placement_waits
 from scripts.hive.placement import LOCAL_FULL
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import capacity, freeze, timing
+from scripts.swarm import blockers, capacity, freeze, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerGone
 
@@ -179,6 +179,7 @@ def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterat
         failure = {"step": step, "error": f"{type(error).__name__}: {error}", "at": clock()}
         timing.keep()
         store.redis.set(store.key(slug, "tick-failure"), json.dumps(failure))
+        blockers.record(store, slug, type(error).__name__, f"{step}: {error}", clock())
 
     token = timing.ON_FAILURE.set(failed)
     try:
@@ -187,3 +188,5 @@ def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterat
         timing.ON_FAILURE.reset(token)
         observe(store, slug, ledger, clock(), runtime)
         deliver(store, slug, ledger, clock())
+        if found := findings(store, slug):
+            blockers.record(store, slug, found[0].kind, found[0].summary, clock())

@@ -1372,6 +1372,21 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
         log("plan_read_guard failed", {"error": str(e)})
 
 
+def _blocker_window_check(payload: dict, tool_name: str, tool_input: dict) -> str | None:
+    try:
+        from hooks.context.blocker_window import pretool as _blocker_pretool
+
+        notice, block = _blocker_pretool(tool_name, tool_input, payload.get("session_id", ""), payload.get("cwd", ""))
+    except Exception as e:
+        log("blocker window check failed", {"error": str(e)})
+        return None
+    if notice:
+        from hooks.common import inject_context
+
+        inject_context(notice, also_log=False, skip_compression=True, kind="alert")
+    return block
+
+
 def _check_shell_guards(payload: dict) -> None:
     from hooks.context.local_test_guard import check_local_tests
     from hooks.context.swarm_wait_nudge import check_github_watch
@@ -1474,6 +1489,10 @@ def on_pre_tool_use(payload: dict) -> None:
     _swarm_block = _swarm_gates(tool_name, tool_input, payload.get("session_id", ""))
     if _swarm_block:
         raise BlockAction(_swarm_block)
+
+    _blocker_block = _blocker_window_check(payload, tool_name, tool_input)
+    if _blocker_block:
+        raise BlockAction(_blocker_block)
 
     from hooks.lifecycle.guard import pretool as _lifecycle_pretool
 

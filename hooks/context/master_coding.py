@@ -81,6 +81,19 @@ def close(session_id: str | None) -> None:
         path(session_id).unlink(missing_ok=True)
 
 
+def open_for_blockers(session_id: str, now: float | None = None) -> None:
+    path(session_id).parent.mkdir(parents=True, exist_ok=True)
+    path(session_id).write_text(json.dumps({"at": time.time() if now is None else now, "reason": "blockers"}))
+
+
+def opened_for_blockers(session_id: str) -> bool:
+    try:
+        data = json.loads(path(session_id).read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("reason") == "blockers"
+
+
 def is_open(session_id: str) -> bool:
     return bool(session_id) and is_master(session_id) and path(session_id).is_file()
 

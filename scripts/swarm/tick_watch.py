@@ -8,12 +8,13 @@ from collections.abc import Callable
 from threading import Lock, Thread
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import sd_notify, tick_heartbeat, timing
+from scripts.swarm import blockers, sd_notify, tick_heartbeat, timing
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
 
 KEY = "tick-watch"
 SENDER = "swarm"
+STALE_TICK = "stale tick"
 PASS_S = 60
 SLUG_PASS_S = 120
 BEAT_S = 30
@@ -95,6 +96,7 @@ def _alert(store, slug, now, episode, evidence) -> list[str]:
     for address in fresh:
         _send(store, address, text, _item_id(slug, episode["since"], address, "alert"))
     _save(store, slug, {**episode, "told": sorted([*episode["told"], *fresh])})
+    blockers.record(store, slug, STALE_TICK, "; ".join(evidence), now)
     return [f"told {address} the tick is stale" for address in fresh]
 
 

@@ -85,6 +85,7 @@ from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import (
     affinity,
     agent_up,
+    blockers,
     bottleneck,
     bottleneck_status,
     claim_lost,
@@ -1511,6 +1512,30 @@ def cmd_verdict(store, args):
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
 
 
+def cmd_blockers(store, args):
+    if args.action == "clear":
+        if not args.category:
+            raise SwarmError("blockers clear needs a category")
+        blockers.clear(store, args.slug, args.category)
+        print(json.dumps({"cleared": args.category}))
+        return
+    found = sorted(blockers.active(store, args.slug, now_ms()).values(), key=lambda row: row.category)
+    print(
+        json.dumps(
+            [
+                {
+                    "category": row.category,
+                    "first_seen": row.first_seen,
+                    "last_seen": row.last_seen,
+                    "count": row.count,
+                    "detail": row.detail,
+                }
+                for row in found
+            ]
+        )
+    )
+
+
 def cmd_classify(store, args):
     from scripts.swarm_v2.runtime import observe
 
@@ -2410,6 +2435,9 @@ def build_parser():
     merge.add_argument(
         "--lift", action="store_true", help="operator: prioritize immediately despite a running head group"
     )
+    blockers_cmd = sub.add_parser("blockers")
+    blockers_cmd.add_argument("action", nargs="?", default="list", choices=("list", "clear"))
+    blockers_cmd.add_argument("category", nargs="?", default="")
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)
