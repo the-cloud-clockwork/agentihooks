@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.511 · 2026-10-30
+
+### 2026-10-30 · 3fc9e4cd061c · #8937 · @agenticore-app
+
+**Provision hive brain binding and credential references**
+
+This change fixes hive engineers starting without brain tools by introducing optional `workers.brainBinding` chart settings that mount an existing binding Secret and pass through credential Secret key references. Worker startup now installs the projected binding document as a private, owned regular file before profile rendering, while the binding resolver keeps refusing to proceed when the document is missing. Validation confirms correct failure and success paths across startup, chart contracts, and kind integration. Full task completion still depends on the separate antoncore hive template mapping and the corresponding infrastructure provisioning and deployed proof, tracked under #8932 and #8936.
+
+### 2026-10-30 · 9116367b0b63 · #8931 · @agenticore-app
+
+**Read large inbox mailboxes in bounded Redis pages**
+
+This change fixes an unbounded Redis range read that caused connection resets on oversized mailboxes by fetching message identifiers in bounded pages of 500 before the existing row hydration step, while preserving message ordering, seat aggregation, and cleanup of dangling records. It directly resolves the reproduced failure where large inboxes triggered a connection reset, and the fix is backed by focused proofs covering paging, row batches, dangling indexes, CLI behavior, and seat handling, plus a clean mutation report, so operators should see large mailbox reads succeed reliably without behavioral regressions.
+
+### 2026-10-30 · 34c9ef125d5a · #8939 · @agenticore-app
+
+**Prove in kind that a rolled hive waits for its agent's handoff**
+
+This adds a kind smoke proof confirming that when a worker hive is rolled with `workers.rollout.enabled`, the old hive's container doesn't stop until its agent records its own handoff. A scripted agent and rollout lease checks verify the preStop hook actually waits for drain, the lease stays held by the release, and the replacement serves afterward, running alongside the existing controller lease proofs. It was validated green against the real preStop logic and confirmed red when a planted change made drain give up immediately, catching the bug via a mismatched handoff reason instead of the expected recycle-triggered one.
+
 ## v2.17.510 · 2026-10-30
 
 ### 2026-10-30 · d0df00db0692 · #8926 · @agenticore-app
