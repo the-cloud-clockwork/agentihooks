@@ -62,7 +62,7 @@ def now_ms() -> int:
 
 
 def _project_executions(value: bytes) -> bytes:
-    return _encode(json.loads(value).get("executions", {}))
+    return _encode(json.loads(value)["executions"])
 
 
 def _states(store: Any) -> Any:

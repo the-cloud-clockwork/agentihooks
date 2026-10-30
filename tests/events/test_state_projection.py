@@ -21,6 +21,7 @@ def test_projection_and_document_commit_at_the_same_revision() -> None:
     assert states.get("one").value == b"first"
     assert states.get_projection("one").value == b"view:first"
     assert states.get_projection("one").revision == first
+    assert states.get_projection("one").key == "one"
     second = states.update("one", b"second", first)
     assert states.get("one").value == b"second"
     assert states.get_projection("one").value == b"view:second"
@@ -51,6 +52,8 @@ def test_an_older_writer_invalidates_views_until_a_new_writer_clears_them() -> N
     states = RedisStateStore(redis, "probe", projection=project)
     states.create("one", b"first")
     other = states.create("two", b"other")
+    assert states.get_projection("one").value == b"view:first"
+    assert states.get_projection("two").value == b"view:other"
     revision = redis.incr(states._revision)
     row = json.dumps({"revision": revision, "value": base64.b64encode(b"old writer").decode()})
     redis.hset(states._current, "one", row)
