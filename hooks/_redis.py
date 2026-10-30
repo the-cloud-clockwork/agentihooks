@@ -19,8 +19,8 @@ import os
 _redis_client = None
 _redis_checked = False
 
-SESSION_TTL: int = int(os.getenv("REDIS_SESSION_TTL", "86400"))
-POSITION_TTL: int = int(os.getenv("REDIS_POSITION_TTL", "3600"))
+SESSION_TTL: int = int(os.getenv("REDIS_SESSION_TTL", "86400"))  # 24h
+POSITION_TTL: int = int(os.getenv("REDIS_POSITION_TTL", "3600"))  # 1h
 _KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agenticore")
 _installations: dict[str, str] = {}
 
@@ -53,7 +53,7 @@ def get_redis():
             socket_timeout=timeout,
             socket_connect_timeout=timeout,
         )
-        _redis_client.ping()
+        _redis_client.ping()  # fail-fast on bad URL
     except (KeyboardInterrupt, Exception):
         _redis_client = None
 

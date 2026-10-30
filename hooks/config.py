@@ -107,7 +107,7 @@ def _parse_env_file(
         if _open_quote:
             multiline.add(_key)
         if _key in this_file:
-            continue
+            continue  # first definition within a file wins
         if _key in pass_keys:
             os.environ[_key] = _val
             this_file.add(_key)

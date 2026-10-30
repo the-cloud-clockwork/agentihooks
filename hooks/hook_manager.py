@@ -80,7 +80,7 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
     Returns:
         dict with num_turns, duration_ms, last_response
     """
-    from datetime import datetime
+    from datetime import datetime  # Lazy import
 
     metrics = {
         "num_turns": 0,
@@ -151,8 +151,8 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
             duration = last_timestamp - first_timestamp
             metrics["duration_ms"] = int(duration.total_seconds() * 1000)
 
-    except Exception:  # NOSONAR
-        pass
+    except Exception:  # NOSONAR — hooks must never crash the parent process
+        pass  # Return partial metrics on error
 
     return metrics
 
@@ -192,7 +192,7 @@ def notify_on_error(transcript_path: str) -> None:
 
         detected_patterns = [p for p in ERROR_PATTERNS if p in content_lower]
         if not detected_patterns:
-            return
+            return  # No errors found
 
         error_lines = []
         for line in content.split("\n"):
@@ -212,7 +212,7 @@ def notify_on_error(transcript_path: str) -> None:
                 except json.JSONDecodeError:
                     error_lines.append(line[:500])
 
-        error_context = "\n\n---\n\n".join(error_lines[:5])
+        error_context = "\n\n---\n\n".join(error_lines[:5])  # Max 5 errors
         patterns_found = ", ".join(detected_patterns)
 
         from hooks.integrations.mailer import (
@@ -344,7 +344,7 @@ def on_session_start(payload: dict) -> None:
                 "agent.name": os.environ.get("AGENT_NAME", "unknown"),
             },
         ):
-            pass
+            pass  # span auto-ends on context exit → exported immediately
 
     log_claude_max_output_tokens()
 
@@ -1274,7 +1274,7 @@ def _credential_guard(payload: dict, tool_name: str) -> tuple[dict, str] | None:
                 _credential_rewrite = (_verdict.rewrite, _verdict.note or "")
     except BlockAction:
         raise
-    except Exception as e:  # NOSONAR
+    except Exception as e:  # NOSONAR — a guard that crashes must not crash the hook, unless a credential is in play
         if _near_credential(payload.get("tool_input") or {}):
             raise BlockAction(
                 f"BLOCKED: credential guard internal error near a credential path — refusing ({e})."
@@ -1625,7 +1625,7 @@ def on_pre_tool_use(payload: dict) -> None:
             if FILE_READ_CACHE_ENABLED:
                 from hooks.context.file_read_cache import check_and_block_redundant_read
 
-                check_and_block_redundant_read(payload)
+                check_and_block_redundant_read(payload)  # raises BlockAction if blocked
         except BlockAction:
             otel.emit_event(
                 "agentihooks.guardrail.read_deduplicated",
@@ -1669,7 +1669,7 @@ def on_pre_tool_use(payload: dict) -> None:
         try:
             from hooks.context.retry_breaker import check_hard_block
 
-            check_hard_block(payload)
+            check_hard_block(payload)  # raises BlockAction if count >= hard max
         except BlockAction:
             otel.emit_event(
                 "agentihooks.guardrail.retry_blocked",
@@ -1831,7 +1831,7 @@ def _near_credential(tool_input: dict) -> bool:
         from hooks.context.credential_guard import near_credential
 
         return near_credential(tool_input)
-    except Exception:  # NOSONAR
+    except Exception:  # NOSONAR — the guard module itself may be what broke
         return bool(_NEAR_CREDENTIAL.search(json.dumps(tool_input, default=str)))
 
 
@@ -2780,13 +2780,13 @@ def main() -> None:
 
             if requires_envelope_block(_blocked_event):
                 emit_permission_decision(_blocked_event, "deny", str(e))
-        except Exception:  # NOSONAR
+        except Exception:  # NOSONAR — a block must never be weakened by this
             pass
-        print(str(e), file=sys.stderr, flush=True)
+        print(str(e), file=sys.stderr, flush=True)  # Claude Code reads stderr for hook messages
         otel.flush()
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(2)
+        os._exit(2)  # blocks the action — skip Python shutdown (OTEL threads)
     except json.JSONDecodeError:
         import re as _re
 
@@ -2810,7 +2810,7 @@ def main() -> None:
     except KeyboardInterrupt:
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(130)
+        os._exit(130)  # standard SIGINT exit code
     except Exception as e:
         log(f"Hook manager error: {str(e)}")
         otel.flush()

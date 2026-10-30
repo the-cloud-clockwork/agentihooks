@@ -173,7 +173,7 @@ def _read_entries():
                             entries.append(entry)
                     except json.JSONDecodeError:
                         continue
-    except Exception:  # NOSONAR
+    except Exception:  # NOSONAR — hooks must never crash the parent process
         return []
     return entries
 
@@ -196,8 +196,8 @@ def _append_entry(entry):
         else:
             with open(MEMORY_PATH, "a") as f:
                 f.write(json.dumps(entry, separators=(",", ":")) + "\n")
-    except Exception:  # NOSONAR
-        pass
+    except Exception:  # NOSONAR — hooks must never crash the parent process
+        pass  # Silent failure - never break the agent
 
 
 def _append_entries(new_entries):
@@ -216,7 +216,7 @@ def _append_entries(new_entries):
         with open(MEMORY_PATH, "w") as f:
             for e in entries:
                 f.write(json.dumps(e, separators=(",", ":")) + "\n")
-    except Exception:  # NOSONAR
+    except Exception:  # NOSONAR — hooks must never crash the parent process
         pass
 
 
@@ -251,7 +251,7 @@ def _scan_transcript_for_errors(transcript_path, session_id=""):
 
     new_entries = []
     try:
-        tool_uses = {}
+        tool_uses = {}  # tool_use_id -> {tool_name, tool_input}
         for rec in iter_transcript_records(transcript_path):
             kind = rec.get("kind")
             if kind == "tool_call":
@@ -287,7 +287,7 @@ def _scan_transcript_for_errors(transcript_path, session_id=""):
                     }
                 )
 
-    except Exception:  # NOSONAR
+    except Exception:  # NOSONAR — hooks must never crash the parent process
         pass
 
     return new_entries
@@ -320,7 +320,7 @@ def _mark_tool_seen(session_id, tool_name):
         path = _seen_tools_path(session_id)
         with open(path, "a") as f:
             f.write(tool_name + "\n")
-    except Exception:  # NOSONAR
+    except Exception:  # NOSONAR — hooks must never crash the parent process
         pass
 
 
@@ -339,7 +339,7 @@ def inject_memory(tool_name="", session_id=""):
 
     entries = _read_entries()
     if not entries:
-        return
+        return  # Exit silently - no memory yet
 
     to_show = entries[-MAX_SHOW:]
 

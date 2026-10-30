@@ -2,17 +2,10 @@
   "hooks/__init__.py",
   "hooks/__main__.py",
   "hooks/_async.py",
-  "hooks/_brain_http.py",
-  "hooks/_redis.py",
-  "hooks/common.py",
-  "hooks/config.py",
-  "hooks/hook_manager.py",
   "hooks/logfile.py",
   "hooks/proc.py",
   "hooks/prompt_budget.py",
   "hooks/quota.py",
   "hooks/secrets.py",
-  "hooks/statusline.py",
-  "hooks/telemetry.py",
-  "hooks/tool_memory.py"
+  "hooks/telemetry.py"
 ]

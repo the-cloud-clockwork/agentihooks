@@ -133,7 +133,7 @@ def _request(
     except (json.JSONDecodeError, ValueError) as exc:
         log("brain_http: decode error", {"method": method, "url": url, "error": str(exc)})
         return None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — hooks must not raise
         log("brain_http: unexpected error", {"method": method, "url": url, "error": repr(exc)})
         return None
 

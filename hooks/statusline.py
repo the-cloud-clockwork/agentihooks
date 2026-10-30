@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import hooks.config  # noqa: F401
+import hooks.config  # noqa: F401 — side effect: loads env
 
 _RESET = "\033[0m"
 _DIM = "\033[2m"

@@ -105,8 +105,8 @@ def log(message: str, payload: dict | None = None) -> None:
             entry["payload"] = payload
 
         append_text(log_path, json.dumps(entry) + "\n")
-    except Exception:  # NOSONAR
-        pass
+    except Exception:  # NOSONAR — hooks must never crash the parent process
+        pass  # Silent failure - never break Claude
 
     try:
         if any(message.startswith(p) for p in _BRAIN_LOG_PREFIXES):
@@ -138,8 +138,8 @@ def log_command(script_name: str, output: str) -> None:
 {separator}
 """
         append_text(log_path, log_entry)
-    except Exception:  # NOSONAR
-        pass
+    except Exception:  # NOSONAR — hooks must never crash the parent process
+        pass  # Silent failure - never break Claude
 
 
 def log_transcript(conversation_id: str, entry_type: str, content: str) -> None:
@@ -172,8 +172,8 @@ def log_transcript(conversation_id: str, entry_type: str, content: str) -> None:
 {separator}
 """
         append_text(log_path, log_entry)
-    except Exception:  # NOSONAR
-        pass
+    except Exception:  # NOSONAR — hooks must never crash the parent process
+        pass  # Silent failure - never break Claude
 
 
 def output_json(data: dict) -> None:
