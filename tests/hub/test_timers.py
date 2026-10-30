@@ -411,3 +411,58 @@ def test_unchanged_timer_state_reuses_the_cached_heap(monkeypatch):
     timer.fire()
     timer.fire()
     assert calls == [1]
+
+
+def test_tombstones_past_the_keep_window_leave_the_index_on_the_next_write():
+    import json
+
+    from scripts.events import deadlines
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = timers.Timers(bus, clock)
+    timer.handle(deadlines.schedule(source(key="execution-old"), "idle", 1000))
+    timer.fire()
+    cancelled = deadlines.cancel(source(2, key="execution-cancelled"), "idle")
+    timer.handle(cancelled)
+    clock.now = 1000 + timers.KEEP_MS
+    fresh = deadlines.schedule(source(key="execution-fresh"), "idle", 10**9)
+    timer.handle(fresh)
+    rows = json.loads(bus.state(timers.BUCKET).get(timers.INDEX).value)
+    assert set(rows) == {fresh.key, cancelled.key}
+    clock.now = 1001 + timers.KEEP_MS
+    timer.handle(deadlines.schedule(source(2, key="execution-fresh"), "idle", 10**9))
+    rows = json.loads(bus.state(timers.BUCKET).get(timers.INDEX).value)
+    assert set(rows) == {fresh.key}
+    assert rows[fresh.key]["version"] == 2
+
+
+def test_tombstones_record_when_they_ended():
+    import json
+
+    from scripts.events import deadlines
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = timers.Timers(bus, clock)
+    request = deadlines.schedule(source(), "idle", 1000)
+    timer.handle(request)
+    clock.now = 1500
+    timer.fire()
+    rows = json.loads(bus.state(timers.BUCKET).get(timers.INDEX).value)
+    assert rows == {request.key: {"version": 1, "request": None, "ended": 1500}}
+
+
+def test_legacy_tombstones_without_an_end_time_leave_on_the_first_write():
+    import json
+
+    from scripts.events import deadlines
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    store = bus.state(timers.BUCKET)
+    store.create(timers.INDEX, json.dumps({"legacy": {"version": 3, "request": None}}).encode())
+    request = deadlines.schedule(source(), "idle", 10**9)
+    timers.Timers(bus, clock).handle(request)
+    rows = json.loads(store.get(timers.INDEX).value)
+    assert rows == {request.key: {"version": 1, "request": request.to_dict()}}
