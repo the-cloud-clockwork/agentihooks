@@ -124,6 +124,7 @@ def test_with_new_evidence_required_a_new_identity_still_needs_a_grown_measure(b
     assert store.visible([stretch(20, 7)], T0 + 2 * HOUR, HOUR, new_evidence=True) == []
 
 
+@pytest.mark.feature("swarm-health-verdicts")
 def test_it_returns_at_most_once_and_carries_its_earlier_verdict(board):
     _, store = board
     store.visible([watching(33)], T0, HOUR)

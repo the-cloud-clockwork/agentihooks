@@ -1868,6 +1868,7 @@ def test_a_dead_gate_keeps_waiting_while_its_workflow_run_is_active(tick, rollup
 OTHER = "https://github.com/o/r/pull/8"
 
 
+@pytest.mark.feature("swarm-intent-wait")
 def test_a_wait_on_intent_names_its_own_tasks_pull_request(started, capsys):
     store, ledger = started
     ledger.rows["t1"]["pr_url"] = URL
@@ -1896,6 +1897,7 @@ def test_a_checked_wait_reads_only_the_task_it_names(started):
     assert read == [("sw", "t2"), ("sw", "t1"), ("sw", "t9")]
 
 
+@pytest.mark.feature("swarm-intent-wait")
 def test_target_problem_takes_intent_only_on_the_own_tasks_pull_request():
     rows = {"t1": {"id": "t1", "pr_url": URL}, "t2": {"id": "t2", "pr_url": OTHER}}
     assert waits.target_problem("intent", URL, "t1", rows, None) == ""

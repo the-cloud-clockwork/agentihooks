@@ -58,18 +58,17 @@
     {
       "id": "swarm-claim-dependencies",
       "origin": "inventory",
-      "behaviour": "A task waits on an open dependency, a missing dependency still blocks it, and stacking on a live dependency is claimable while parked work waits.",
-      "seam": "The tick claim pass and scripts.swarm.claim_order",
+      "behaviour": "A task stacked on a live dependency is claimable while work parked on it waits.",
+      "seam": "The tick claim pass",
       "tests": [
-        "tests/swarm/test_urgent_hold.py::test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits",
-        "tests/swarm/test_claim_order.py::test_a_dependency_missing_from_the_ledger_still_blocks_the_dependent"
+        "tests/swarm/test_urgent_hold.py::test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits"
       ]
     },
     {
       "id": "swarm-park-restack",
       "origin": "inventory",
-      "behaviour": "A stacked claim builds on its dependency branch, pushes and parks, and the next engineer finishes it from that branch after a restack.",
-      "seam": "agentihooks swarm park and the successor spawn prompt",
+      "behaviour": "The spawn prompt tells a stacked claim to build on its dependency branch, push and park, and tells the next engineer to finish a parked task from its branch after a restack.",
+      "seam": "The spawn prompt in scripts.swarm.prompt",
       "tests": [
         "tests/swarm/test_startup_prompts.py::test_a_stacked_claim_starts_from_the_dependency_branch_builds_pushes_and_parks",
         "tests/swarm/test_startup_prompts.py::test_a_parked_task_finishes_from_its_branch_after_a_restack"
@@ -97,12 +96,19 @@
     {
       "id": "swarm-launch-check",
       "origin": "inventory",
-      "behaviour": "Each launch is checked for join, seat, profile, settings and overlays by its deadline; a failed launch is retired and relaunched once and a master failure is posted to the operator chat.",
+      "behaviour": "Each launch is checked for join, seat, profile, settings and overlays by its deadline; each miss is named, a failed launch is retired and relaunched once, and a master failure is posted to the ledger.",
       "seam": "scripts.swarm.launch_check and its tick pass",
       "tests": [
         "tests/swarm/test_launch_check.py::test_a_clean_launch_passes",
         "tests/swarm/test_launch_check.py::test_tick_retires_and_relaunches_a_failed_launch_once",
-        "tests/swarm/test_launch_check.py::test_master_failure_is_posted_to_the_operator_chat_and_relaunched"
+        "tests/swarm/test_launch_check.py::test_master_failure_is_posted_to_the_operator_chat_and_relaunched",
+        "tests/swarm/test_launch_check.py::test_not_joined_is_named",
+        "tests/swarm/test_launch_check.py::test_seat_held_by_another_is_named",
+        "tests/swarm/test_launch_check.py::test_wrong_profile_variable_is_named",
+        "tests/swarm/test_launch_check.py::test_missing_hooks_or_wrong_model_or_effort_is_named_settings",
+        "tests/swarm/test_launch_check.py::test_a_launch_missing_a_declared_overlay_fails_the_check",
+        "tests/swarm/test_launch_check.py::test_a_launch_missing_a_worn_overlay_fails_the_check",
+        "tests/swarm/test_launch_check.py::test_tick_waits_until_the_deadline_before_failing"
       ]
     },
     {
@@ -344,7 +350,8 @@
         "tests/swarm/test_health.py::test_each_finding_carries_a_stable_id_and_the_measure_its_evidence_grows_by",
         "tests/swarm/test_health_verdicts.py::test_a_verdicted_finding_stays_hidden_through_the_cooldown",
         "tests/swarm/test_health_verdicts.py::test_after_the_cooldown_it_returns_only_if_its_evidence_grew",
-        "tests/swarm/test_health_verdicts.py::test_a_verdict_must_be_one_of_the_five_and_name_a_known_finding"
+        "tests/swarm/test_health_verdicts.py::test_a_verdict_must_be_one_of_the_five_and_name_a_known_finding",
+        "tests/swarm/test_health_verdicts.py::test_it_returns_at_most_once_and_carries_its_earlier_verdict"
       ]
     },
     {
@@ -418,6 +425,46 @@
       "tests": [
         "tests/handoff/test_transfers.py::test_tick_binds_a_successor_without_claiming_continuity",
         "tests/handoff/test_transfers.py::test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start"
+      ]
+    },
+    {
+      "id": "swarm-intent-wait",
+      "origin": "inventory",
+      "behaviour": "A wait on intent names the agent's own task pull request and is refused for any other.",
+      "seam": "agentihooks swarm wait --on intent and scripts.swarm.waits",
+      "tests": [
+        "tests/swarm/test_waits.py::test_a_wait_on_intent_names_its_own_tasks_pull_request",
+        "tests/swarm/test_waits.py::test_target_problem_takes_intent_only_on_the_own_tasks_pull_request"
+      ]
+    },
+    {
+      "id": "swarm-claim-hold",
+      "origin": "inventory",
+      "behaviour": "A verification hold with no window for over an hour tells the master once, and a skipped hold never hides the eligible task behind it.",
+      "seam": "scripts.swarm.claim_hold in the tick",
+      "tests": [
+        "tests/swarm/test_claim_hold.py::test_tick_tells_the_master_once_when_a_verification_hold_has_no_window_for_over_an_hour",
+        "tests/swarm/test_claim_hold.py::test_a_skipped_hold_does_not_hide_the_eligible_task_behind_it"
+      ]
+    },
+    {
+      "id": "swarm-master-wake",
+      "origin": "inventory",
+      "behaviour": "An idle master with waiting work is woken at twenty minutes and retried, never while its pane holds typed input.",
+      "seam": "The master wake pass in scripts.swarm.master_wake",
+      "tests": [
+        "tests/swarm/test_master_wake.py::test_ready_master_with_work_wakes_at_twenty_minutes_and_retries",
+        "tests/swarm/test_master_wake.py::test_typed_input_prevents_wake",
+        "tests/swarm/test_master_wake.py::test_tick_runs_the_master_wake_pass"
+      ]
+    },
+    {
+      "id": "swarm-tick-reaper",
+      "origin": "inventory",
+      "behaviour": "A leftover tick process is reaped and recorded without touching its process group.",
+      "seam": "scripts.swarm.tick_reaper",
+      "tests": [
+        "tests/swarm/test_tick_reaper.py::test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group"
       ]
     }
   ],
