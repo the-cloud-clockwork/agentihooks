@@ -211,7 +211,16 @@ def test_an_observed_gate_logs_the_refusal_and_closes_the_task(ops):
 def test_a_skipped_gate_neither_logs_nor_refuses(ops):
     store, ledger, read, tmp_path = ops
     store.update("sw", gates={"feature": "off"})
-    assert run("sw", "done", *PROOF) == 0
+    assert run("sw", "done", *PROOF, "--feature", "nope") == 0
     assert read == []
     assert ledger.rows["t1"]["state"] == "done"
     assert gate_log.recent("sw", None, tmp_path) == []
+
+
+def test_a_task_without_a_pull_request_reads_only_the_dev_map(ops):
+    store, ledger, read, tmp_path = ops
+    enforce(store)
+    ledger.rows["t1"]["pr_url"] = ""
+    assert run("sw", "done", *PROOF, "--feature", "f1") == 0
+    assert read == ["dev"]
+    assert ledger.rows["t1"]["state"] == "done"
