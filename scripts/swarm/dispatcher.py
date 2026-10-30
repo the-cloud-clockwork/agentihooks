@@ -17,6 +17,7 @@ task.
 
 import json
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 
@@ -237,7 +238,9 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     return [action.text for action in done] + errors
 
 
-def _claimable(known, doc, graph, fix, deferred, checks):
+def _claimable(
+    known: dict, doc: dict, graph: dict, fix: str, deferred: set[str], checks: tuple[Callable[[dict], bool], ...]
+) -> set[str]:
     from scripts.swarm import readiness
 
     released, applied = checks
