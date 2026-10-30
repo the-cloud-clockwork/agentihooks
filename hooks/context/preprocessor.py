@@ -1,13 +1,8 @@
 """Context Preprocessor — token compression for injected content.
 
-Compresses injected banners and captured tool output (gated by
-CONTEXT_COMPRESSION_SCOPE=all) before they land in the model's context window.
-Leverages the fact that LLMs predict over subword tokens — abbreviated forms
-activate the same semantic representations as full words.
-
-Periodic rules/CLAUDE.md re-injection, which this module was originally built to
-compress, was removed 2026-07-20; the compression logic is retained for the
-injections that remain.
+Compresses injected banners and captured tool output (gated by CONTEXT_COMPRESSION_SCOPE=all)
+before they land in the model's context window; abbreviated forms activate the same
+semantic representations as full words.
 
 Four compression levels:
     0 (off)        — passthrough
@@ -30,10 +25,6 @@ import re
 from pathlib import Path
 
 from hooks.common import log
-
-# ---------------------------------------------------------------------------
-# Compression levels
-# ---------------------------------------------------------------------------
 
 
 class CompressionLevel(int):
@@ -63,15 +54,9 @@ def compression_ratio(original: str, compressed: str) -> float:
     return len(compressed) / len(original)
 
 
-# ---------------------------------------------------------------------------
-# Protection mask
-# ---------------------------------------------------------------------------
-
-# Code blocks (fenced and inline)
 _CODE_FENCE_RE = re.compile(r"```[\s\S]*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 
-# Negation words
 _NEGATION_WORDS = frozenset(
     {
         "never",
@@ -90,7 +75,6 @@ _NEGATION_WORDS = frozenset(
     }
 )
 
-# Assertion words
 _ASSERTION_WORDS = frozenset(
     {
         "always",
@@ -103,7 +87,6 @@ _ASSERTION_WORDS = frozenset(
     }
 )
 
-# Action verbs — high-stakes operations
 _ACTION_VERBS = frozenset(
     {
         "push",
@@ -129,22 +112,16 @@ _ACTION_VERBS = frozenset(
     }
 )
 
-# Combined word set for single-pass matching
 _PROTECTED_WORDS = _NEGATION_WORDS | _ASSERTION_WORDS | _ACTION_VERBS
 
-# Two-word negation phrases
 _TWO_WORD_PHRASES = ["must not", "do not", "must never", "do never"]
 
-# ALL_CAPS identifiers (env var names)
 _CAPS_ID_RE = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")
 
-# Numbers and thresholds
 _NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?(?:[kKmMgGtT]i?[bB]?)?\b|\b\d+%\b")
 
-# File paths
 _PATH_RE = re.compile(r"(?:^|\s)(\.{0,2}/[\w./-]+|~/[\w./-]+)", re.MULTILINE)
 
-# CLI subcommands (tool + first arg)
 _CLI_TOOLS = (
     "kubectl",
     "helm",
@@ -169,39 +146,31 @@ def _build_protection_mask(text: str) -> list[tuple[int, int]]:
     """Return list of (start, end) char spans that must not be modified."""
     spans: list[tuple[int, int]] = []
 
-    # Code blocks (highest priority — most content is protected here)
     for m in _CODE_FENCE_RE.finditer(text):
         spans.append((m.start(), m.end()))
     for m in _INLINE_CODE_RE.finditer(text):
         spans.append((m.start(), m.end()))
 
-    # Two-word phrases
     for phrase in _TWO_WORD_PHRASES:
         for m in re.finditer(re.escape(phrase), text, re.IGNORECASE):
             spans.append((m.start(), m.end()))
 
-    # Protected single words
     for m in re.finditer(r"\b\w+\b", text):
         if m.group().lower() in _PROTECTED_WORDS:
             spans.append((m.start(), m.end()))
 
-    # ALL_CAPS identifiers
     for m in _CAPS_ID_RE.finditer(text):
         spans.append((m.start(), m.end()))
 
-    # Numbers
     for m in _NUMBER_RE.finditer(text):
         spans.append((m.start(), m.end()))
 
-    # File paths
     for m in _PATH_RE.finditer(text):
         spans.append((m.start(1) if m.lastindex else m.start(), m.end()))
 
-    # CLI subcommands
     for m in _CLI_RE.finditer(text):
         spans.append((m.start(), m.end()))
 
-    # Merge overlapping spans
     return _merge_spans(spans)
 
 
@@ -224,10 +193,6 @@ def _overlaps_mask(start: int, end: int, mask: list[tuple[int, int]]) -> bool:
             return True
     return False
 
-
-# ---------------------------------------------------------------------------
-# Level 1: Markdown formatting removal
-# ---------------------------------------------------------------------------
 
 _MERMAID_RE = re.compile(r"```mermaid[\s\S]*?```", re.DOTALL)
 _HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
@@ -288,20 +253,16 @@ def _strip_markdown_tables(text: str, mask: list[tuple[int, int]]) -> str:
     i = 0
     while i < len(lines):
         line = lines[i]
-        # Detect table: line matches |...|, next line is separator |---|
         if re.match(r"^\s*\|.+\|", line) and i + 1 < len(lines) and re.match(r"^\s*\|[-:\s|]+\|", lines[i + 1]):
-            # Check if this table block overlaps a protected span
             table_start = sum(len(l) + 1 for l in lines[:i])
             if _overlaps_mask(table_start, table_start + len(line), mask):
                 result.append(line)
                 i += 1
                 continue
 
-            # Parse header
             headers = [c.strip() for c in line.strip().strip("|").split("|")]
-            i += 2  # skip header + separator
+            i += 2
 
-            # Parse data rows
             while i < len(lines) and re.match(r"^\s*\|.+\|", lines[i]):
                 cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
                 pairs = []
@@ -317,10 +278,6 @@ def _strip_markdown_tables(text: str, mask: list[tuple[int, int]]) -> str:
 
     return "\n".join(result)
 
-
-# ---------------------------------------------------------------------------
-# Level 2: Filler words and abbreviations
-# ---------------------------------------------------------------------------
 
 _FILLER_WORDS = frozenset(
     {
@@ -346,13 +303,11 @@ _FILLER_WORDS = frozenset(
     }
 )
 
-# Build filler regex — word boundary, case insensitive, only when surrounded by spaces
 _FILLER_RE = re.compile(
     r"(?<=\s)(?:" + "|".join(re.escape(w) for w in sorted(_FILLER_WORDS, key=len, reverse=True)) + r")(?=\s)",
     re.IGNORECASE,
 )
 
-# Abbreviation dictionary — loaded once, cached
 _abbrev_cache: dict[str, str] | None = None
 
 
@@ -363,7 +318,6 @@ def _load_abbrev_dict() -> dict[str, str]:
 
     entries: dict[str, str] = {}
 
-    # Built-in dictionary
     built_in = Path(__file__).parent / "data" / "abbreviations.json"
     try:
         if built_in.is_file():
@@ -372,7 +326,6 @@ def _load_abbrev_dict() -> dict[str, str]:
     except Exception:
         pass
 
-    # User override
     user_path = os.getenv("CONTEXT_REFRESH_ABBREV_FILE", "")
     if user_path:
         try:
@@ -392,7 +345,6 @@ def _remove_filler_words(text: str, mask: list[tuple[int, int]]) -> str:
         return ""
 
     result = _FILLER_RE.sub(_replace, text)
-    # Clean up double spaces left by removal
     return re.sub(r"  +", " ", result)
 
 
@@ -400,7 +352,6 @@ def _apply_abbreviations(text: str, mask: list[tuple[int, int]], abbrev_dict: di
     if not abbrev_dict:
         return text
 
-    # Sort by key length descending for longest-match-first
     sorted_entries = sorted(abbrev_dict.items(), key=lambda x: len(x[0]), reverse=True)
 
     for full, short in sorted_entries:
@@ -410,7 +361,6 @@ def _apply_abbreviations(text: str, mask: list[tuple[int, int]], abbrev_dict: di
             def _replace(m: re.Match) -> str:
                 if _overlaps_mask(m.start(), m.end(), mask):
                     return m.group()
-                # Preserve case of first letter
                 if m.group()[0].isupper():
                     return short_form[0].upper() + short_form[1:]
                 return short_form
@@ -418,15 +368,10 @@ def _apply_abbreviations(text: str, mask: list[tuple[int, int]], abbrev_dict: di
             return _replace
 
         text = pattern.sub(_make_replacer(short), text)
-        # Rebuild mask after each substitution since offsets changed
         mask = _build_protection_mask(text)
 
     return text
 
-
-# ---------------------------------------------------------------------------
-# Level 3: Internal vowel removal (disemvoweling)
-# ---------------------------------------------------------------------------
 
 _MIN_WORD_LENGTH = 7
 
@@ -460,7 +405,6 @@ _DISEMVOWEL_EXCLUSIONS = frozenset(
     }
 )
 
-# Match internal vowels flanked by consonants on both sides
 _INTERNAL_VOWEL_RE = re.compile(
     r"(?<=[bcdfghjklmnpqrstvwxyz])[aeiou]+(?=[bcdfghjklmnpqrstvwxyz])",
     re.IGNORECASE,
@@ -481,11 +425,6 @@ def _remove_internal_vowels(text: str, mask: list[tuple[int, int]]) -> str:
     return re.sub(r"\b[a-zA-Z]+\b", _process_word, text)
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 def preprocess(text: str, level: int = CompressionLevel.NONE) -> str:
     """Apply compression pipeline to text at the specified level.
 
@@ -496,7 +435,6 @@ def preprocess(text: str, level: int = CompressionLevel.NONE) -> str:
         return text
 
     try:
-        # Strip mermaid BEFORE building protection mask (otherwise code fence regex protects them)
         if level >= CompressionLevel.LIGHT:
             text = _MERMAID_RE.sub("[diagram removed]", text)
 
@@ -522,7 +460,6 @@ def preprocess(text: str, level: int = CompressionLevel.NONE) -> str:
         if level >= CompressionLevel.AGGRESSIVE:
             text = _remove_internal_vowels(text, mask)
 
-        # Clean up excessive blank lines
         text = re.sub(r"\n{3,}", "\n\n", text)
 
         return text

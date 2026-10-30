@@ -20,7 +20,6 @@ from pathlib import Path
 
 from hooks.hook_manager import BlockAction
 
-# Files that contain version fields managed by CI
 _VERSION_FILES = {
     "pyproject.toml",
     "package.json",
@@ -31,7 +30,6 @@ _VERSION_FILES = {
     "VERSION",
 }
 
-# Patterns that indicate a version field is being modified
 _VERSION_PATTERNS = [
     re.compile(r'version\s*[=:]\s*["\']?\d+\.\d+', re.IGNORECASE),
     re.compile(r'"version"\s*:\s*"', re.IGNORECASE),
@@ -95,16 +93,15 @@ def _file_inputs(tool_input: dict) -> list[dict]:
 
 
 def _check_file(payload: dict, tool_name: str, tool_input: dict) -> None:
+    """Block a version change in an existing manifest; creating a manifest declares its first version."""
     file_path = tool_input.get("file_path", "")
     if not file_path:
         return
 
-    # Creating a manifest declares the first version; only changes to an existing one are bumps.
     target = Path(payload.get("cwd") or ".") / file_path
     if not target.exists():
         return
 
-    # Check if the target file is a version-managed manifest
     filename = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
     if filename not in _VERSION_FILES:
         return
@@ -122,12 +119,10 @@ def _check_file(payload: dict, tool_name: str, tool_input: dict) -> None:
 
 
 def _text_verdict(filename: str, tool_name: str, tool_input: dict) -> None:
-    # Check if the change touches a version field
     content = ""
     if tool_name == "Edit":
         content = tool_input.get("new_string", "")
         old = tool_input.get("old_string", "")
-        # Only block if the version is actually changing
         if content == old:
             return
         content = f"{old}\n{content}"

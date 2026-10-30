@@ -115,7 +115,6 @@ def check_claude_md_write(payload: dict) -> None:
     elif tool_name == "Edit":
         disk_path = Path(file_path)
 
-        # If file doesn't exist yet, Edit doesn't apply — let it fail naturally
         if not disk_path.is_file():
             return
 
@@ -126,7 +125,6 @@ def check_claude_md_write(payload: dict) -> None:
         if old_string and old_string in current_content:
             resulting_content = current_content.replace(old_string, new_string, 1)
         else:
-            # Can't simulate — fall back to checking current size + new content growth
             resulting_content = current_content
 
         resulting_lines = resulting_content.count("\n") + (

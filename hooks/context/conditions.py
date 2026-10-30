@@ -38,11 +38,6 @@ _CODE_ROOT = Path(__file__).resolve().parents[2]
 _UNSET = object()
 
 
-# ---------------------------------------------------------------------------
-# Filenames
-# ---------------------------------------------------------------------------
-
-
 def is_ignored(filename: str) -> bool:
     return filename.startswith((".", "_")) or filename.endswith("~") or filename.lower().endswith(".md")
 
@@ -77,11 +72,6 @@ def parse_filename(filename: str) -> dict:
         "async": is_async,
         "key": f"{step}-{matcher}-{name.lower()}",
     }
-
-
-# ---------------------------------------------------------------------------
-# Layers and index
-# ---------------------------------------------------------------------------
 
 
 def _cache_path(repo: Path | None = None) -> Path:
@@ -337,11 +327,6 @@ def matching(
     return sorted(unique.values(), key=lambda e: e["order"])
 
 
-# ---------------------------------------------------------------------------
-# Execution
-# ---------------------------------------------------------------------------
-
-
 def _command(entry: dict) -> list[str] | None:
     runner = _RUNNERS.get(entry["ext"])
     if runner:
@@ -478,11 +463,6 @@ def _run_synchronous(entries: list[dict], step: str, payload: dict) -> list[dict
     return [runs[id(entry)] for entry in entries]
 
 
-# ---------------------------------------------------------------------------
-# Results
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class StepResult:
     contexts: list[str] = field(default_factory=list)
@@ -605,11 +585,6 @@ def run_step(step: str, payload: dict) -> StepResult | None:
     return merge(step, payload, list(zip(synchronous, _run_synchronous(synchronous, step, payload))))
 
 
-# ---------------------------------------------------------------------------
-# Policy per step — what the host is told
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class PreEffect:
     contexts: list[str]
@@ -704,11 +679,6 @@ def start_effect(payload: dict) -> StartEffect | None:
         return None
     return StartEffect(contexts=list(result.contexts))
 
-
-# ---------------------------------------------------------------------------
-# Operator gate — conditions are created or removed only when the operator
-# asks: his prompt this turn, his ledger comment or the master's relay of it
-# ---------------------------------------------------------------------------
 
 _ARTICLE = r"a|an|the|this|that|these|those|my"
 _DETERMINER = rf"(?:{_ARTICLE}|new|another|one)"
@@ -970,12 +940,15 @@ def _read_only_shell(command: str, cwd: str | None = None) -> bool:
 
 
 def _requested_on_task(session_id: str) -> bool:
-    """Open the gate from the operator's comment or the master's relay on this agent's ledger task."""
+    """Open the gate from the operator's comment or the master's relay on this agent's ledger task.
+
+    The hook lets a raising guard through, so a lookup that fails refuses.
+    """
     from hooks.context import ledger_request
 
     try:
         opened = ledger_request.find(contains_condition_signal)
-    except Exception:  # the hook lets a raising guard through, so a lookup that fails must refuse
+    except Exception:
         return False
     if opened:
         arm_gate(session_id, *opened)
@@ -1010,10 +983,6 @@ def write_guard(tool_name: str, tool_input: dict | None, session_id: str, cwd: s
             return GATE_MESSAGE
     return None
 
-
-# ---------------------------------------------------------------------------
-# Inventory, creation and removal (MCP tools and the CLI)
-# ---------------------------------------------------------------------------
 
 _LANGUAGES = {
     "bash": (".sh", "#!/usr/bin/env bash\n", 0o755),
