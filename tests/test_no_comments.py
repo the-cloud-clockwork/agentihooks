@@ -365,6 +365,7 @@ def test_prepush_snapshot_holds_the_base_and_keeps_the_index(tmp_path: Path) -> 
     grade.mkdir()
     ci_prepush._comment_step(root, "HEAD", grade)
     assert (grade / "comments-base/subject.py").read_text() == "base = 1\n"
+    assert sorted(path.name for path in grade.iterdir()) == ["comments-base", "comments-base.index"]
     assert (grade / "comments-base/scripts/no_comments.py").read_text() == "pass\n"
     staged = subprocess.run(
         ["git", "-C", str(root), "diff", "--cached", "--name-only"], check=True, capture_output=True, text=True
