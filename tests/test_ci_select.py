@@ -586,7 +586,7 @@ def test_a_split_file_sums_each_top_level_test_over_its_nodes(tmp_path):
         tmp_path,
         {
             "tests/test_heavy1.py": "import pytest\ndef test_a(): pass\n@pytest.mark.unit\ndef test_b(): pass\n"
-            "class TestC:\n    def test_d(self): pass\n    class TestE:\n        def test_f(self): pass\n"
+            "class TestC:\n    flag = 1\n    def test_d(self): pass\n    class TestE:\n        def test_f(self): pass\n"
         },
     )
     durations = {
