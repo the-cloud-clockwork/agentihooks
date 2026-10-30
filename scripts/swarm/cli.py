@@ -327,7 +327,7 @@ def lane_ready(slug: str, store: RedisStore, rows: dict, doc: dict) -> Callable[
     def ready(lane: str) -> list[dict]:
         if not claims:
             claims.append(claim_view(slug, store, rows, doc))
-        return ready_in_order(slug, store, rows, doc, lane, claims=claims[0])
+        return ready_in_order(slug, store, None, None, lane, claims=claims[0])
 
     return ready
 
