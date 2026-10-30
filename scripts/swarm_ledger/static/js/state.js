@@ -140,17 +140,20 @@ export function lsWrite() {
     const at = Date.now();
     localStorage.setItem(`${LS_KEY}:pending`, JSON.stringify({ ops, checks, at }));
     cacheVersion++;
-    if (!cacheFits({ doc, ops, checks })) return;
+    if (!cacheFits({ doc, ops, checks })) return false;
     if (!cacheWorker) {
       const main = document.querySelector("script[type=module]").src;
       cacheWorker = new Worker(new URL("cache_worker.js", main));
       cacheWorker.onmessage = ({ data }) => {
-        if (data.version !== cacheVersion) return;
-        try { localStorage.setItem(LS_KEY, data.value); } catch (e) { /* storage blocked */ }
+        if (data.version !== cacheVersion) return false;
+        try { localStorage.setItem(LS_KEY, data.value); return true; } catch (e) { return false; }
       };
     }
     cacheWorker.postMessage({ version: cacheVersion, value: { doc, ops, checks, at } });
-  } catch (e) { /* storage blocked */ }
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 export function hiddenDone(doc, list) {
