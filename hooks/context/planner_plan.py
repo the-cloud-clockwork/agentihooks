@@ -17,7 +17,6 @@ def accepts(tool_name: str, environ=None, target: str | None = None) -> bool:
 
 
 def grant(tool_input: dict) -> dict:
-    # Claude Code keeps its plan prompt for an allow that does not return the tool input, and a session started in
-    # plan mode falls back to manual mode on exit.
+    """Allow with the tool input returned, since Claude Code otherwise keeps its plan prompt and a plan mode session falls back to manual mode on exit."""
     decision = {"behavior": "allow", "updatedInput": tool_input, "updatedPermissions": [BYPASS]}
     return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}

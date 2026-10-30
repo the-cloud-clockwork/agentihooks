@@ -20,14 +20,7 @@ from typing import Any
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
 
-# In-process fallback when Redis is unavailable
-# Structure: {session_id: {file_path: mtime_float}}
 _memory_cache: dict[str, dict[str, tuple[float, list[tuple[int, int]]]]] = {}
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _get_mtime(file_path: str) -> float | None:
@@ -44,11 +37,6 @@ def _cache_key(session_id: str) -> str:
 
 def _mtime_key(session_id: str) -> str:
     return redis_key("file_mtime", session_id)
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def _read_ranges(session_id: str, file_path: str) -> list[tuple[int, int]]:
@@ -169,7 +157,6 @@ def clear_session_cache(session_id: str) -> None:
             except Exception as e:
                 log("file_read_cache: Redis delete error", {"error": str(e)})
     except KeyboardInterrupt:
-        # Operator pressed Ctrl+C mid-shutdown — exit silently.
         pass
 
     _memory_cache.pop(session_id, None)

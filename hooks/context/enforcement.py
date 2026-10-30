@@ -1,10 +1,8 @@
 """Enforcement system — drumbeat re-injection of operator-curated rules.
 
-Parallel to broadcast.py but semantically distinct:
-- No severity, no TTL, no per-session targeting.
-- Global entries reach every session; local entries reach only their project.
-- Permanent until operator clears (runtime) or removed in git (bundle/profile).
-- Cadence-driven: each enforcement re-injects every N tool calls.
+No severity, TTL or per-session targeting; global entries reach every session, local entries
+only their project. Permanent until the operator clears it (runtime) or removes it in git
+(bundle/profile). Each enforcement re-injects every N tool calls.
 
 Resolution (priority: local > runtime > profile chain > user bundle > shared bundle > bundle):
   1. <bundle_path>/enforcements.json                          → source: "bundle"
@@ -14,10 +12,10 @@ Resolution (priority: local > runtime > profile chain > user bundle > shared bun
   3. ~/.agentihooks/enforcements.json                          → source: "runtime"
   4. <project>/.agentihooks/enforcements.json                  → source: "local"
 
-Runtime store: ~/.agentihooks/enforcements.json (mutable via CLI/MCP).
-Bundle/profile stores: read-only at runtime, editable only in git.
-Local store: mutable through CLI commands carrying --local.
-Counter: per-session, persisted at ~/.agentihooks/enforcement_counters.json.
+Runtime store is mutable via CLI/MCP; bundle/profile stores are editable only in git; the
+local store is mutable through CLI commands carrying --local. Counters are per session in
+~/.agentihooks/enforcement_counters.json; session-keyed files drop their oldest sessions past
+a cap so sessions that never reached SessionEnd cannot grow them forever.
 """
 
 import fcntl
@@ -120,8 +118,6 @@ def _save_delivery_state(state: dict[str, list[str]]) -> None:
     os.replace(str(tmp), str(path))
 
 
-# Session-keyed files drop their oldest sessions past this many, so sessions
-# that never reached SessionEnd (crash, kill) cannot grow them forever.
 _SESSION_KEEP = 500
 
 
@@ -271,11 +267,6 @@ def load_all_enforcements(cwd: str | Path | None = None) -> list[dict]:
     return list(by_id.values())
 
 
-# ---------------------------------------------------------------------------
-# CRUD
-# ---------------------------------------------------------------------------
-
-
 def add_enforcement(
     message: str,
     cadence: int,
@@ -374,11 +365,6 @@ def clear_enforcement(
     count = len(entries) - len(remaining)
     _save_store(remaining, store)
     return count
-
-
-# ---------------------------------------------------------------------------
-# Counter + due-check
-# ---------------------------------------------------------------------------
 
 
 def increment_and_get_count(session_id: str) -> int:
@@ -508,11 +494,6 @@ def _due_enforcements(entries: list[dict], tool_call_count: int) -> list[dict]:
     return due
 
 
-# ---------------------------------------------------------------------------
-# Formatting
-# ---------------------------------------------------------------------------
-
-
 def _enforcement_message(msg: dict) -> str:
     message = msg.get("message", "")
     if msg.get("type") == "rule":
@@ -578,11 +559,6 @@ def _deliver(
     if record:
         injection_trace.record_enforcements(session_id, entries)
     return render(entries)
-
-
-# ---------------------------------------------------------------------------
-# Hook entry point
-# ---------------------------------------------------------------------------
 
 
 def get_session_start_enforcements(session_id: str, cwd: str | Path | None = None) -> str | None:
