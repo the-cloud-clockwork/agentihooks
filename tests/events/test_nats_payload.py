@@ -26,13 +26,15 @@ def bus(tmp_path):
 @pytest.mark.timeout(5, method="thread", func_only=True)
 @pytest.mark.parametrize("compressible", [False, True])
 @pytest.mark.parametrize("scoped", [False, True])
-def test_large_state_round_trips_with_atomic_revisions_and_history(bus, compressible, scoped):
+def test_large_state_round_trips_with_atomic_revisions_and_history(
+    bus: nats.NatsBus, compressible: bool, scoped: bool
+) -> None:
     if scoped:
         from scripts.events.nats_state import ScopedStateStore
 
-        store = ScopedStateStore(bus, "crew", "hub-timers")
+        store = ScopedStateStore(bus, "crew", "large-state")
     else:
-        store = bus.state("hub-timers")
+        store = bus.state("large-state")
     first = b"a" * (2 * 1024 * 1024) if compressible else random.Random(1).randbytes(2 * 1024 * 1024)
     second = first + b"changed"
     revision = store.create("deadlines", first)
@@ -42,9 +44,9 @@ def test_large_state_round_trips_with_atomic_revisions_and_history(bus, compress
     with pytest.raises(StateConflict):
         store.create("deadlines", first)
     rebound = (
-        ScopedStateStore(bus, "crew", "hub-timers")
+        ScopedStateStore(bus, "crew", "large-state")
         if scoped
-        else nats.NatsStateStore(bus._loop, bus._js, "hub-timers", False)
+        else nats.NatsStateStore(bus._loop, bus._js, "large-state", False)
     )
     assert rebound.get("deadlines").value == first
     updated = store.update("deadlines", second, revision)
