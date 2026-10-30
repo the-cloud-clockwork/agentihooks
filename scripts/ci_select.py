@@ -161,7 +161,7 @@ def defined_tests(source: str) -> tuple[set[str], set[str], set[str]] | None:
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 others.add(node.name)
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                others.update((alias.asname or alias.name).partition(".")[0] for alias in node.names)
+                others.update(alias.asname or alias.name for alias in node.names)
     return defined, plain - {name for name in defined if name.startswith("Test")}, others - defined
 
 
@@ -178,7 +178,7 @@ def file_units(root: Path, path: str, durations: dict[str, float]) -> dict[str, 
     stored = set()
     for node, duration in durations.items():
         file, _, rest = node.partition("::")
-        name = rest.split("::", 1)[0].partition("[")[0]
+        name = rest.partition("::")[0].partition("[")[0]
         if file == path and name in units:
             units[name] += duration
             stored.add(name)
@@ -198,13 +198,13 @@ def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: in
         if (path := node.partition("::")[0]) in work:
             work[path] += duration
     for path in files:
-        if count > 1 and seconds[path] > total / count and (units := file_units(root, path, durations)):
+        if seconds[path] > total / count and (units := file_units(root, path, durations)):
             del work[path]
             work.update(units)
             sizes.update(dict.fromkeys(units, sizes.pop(path)))
     collection = {unit: sizes[unit] * SECONDS_PER_SOURCE_BYTE for unit in work}
     files_of = {unit: unit.partition("::")[0] for unit in work}
-    legs = _assign_work(work, dict.fromkeys(work, 0.0), collection, count, 1, None, files_of)
+    legs = _assign_work(work, work, collection, count, 1, None, files_of)
     legs[0] = sorted(tests & FIRST_SHARD_FILES) + legs[0]
     return [sorted(leg) for leg in legs if leg]
 
