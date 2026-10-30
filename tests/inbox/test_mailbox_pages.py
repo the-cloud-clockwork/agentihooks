@@ -28,7 +28,7 @@ def test_seat_mailbox_listing_bounds_index_reads(count: int) -> None:
         return read(key, start, end)
 
     with patch.object(store.redis, "zrange", side_effect=bounded_read):
-        items = store.inbox(address)
+        items = store.mailbox(address)
 
     assert [item.id for item in items] == expected
     assert pages == [(start, start + 499) for start in range(0, count + 1, 500)]
