@@ -196,7 +196,7 @@ def test_finder_uses_package_paths_and_skips_non_source_loaders(tmp_path: Path) 
     assert imported.value == 1
     assert code.find_spec("sys") is None
     (package / "namespace").mkdir()
-    assert code.find_spec("package.namespace", [str(package)]) is None
+    assert code.find_spec("namespace", [str(package)]) is None
 
 
 def test_reload_uses_loaded_content_even_when_file_stamp_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
