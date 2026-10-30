@@ -1,10 +1,12 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from scripts.swarm import idle, outage, profile_choice, prompt, resume
 from scripts.swarm.pane import PaneObservation
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -508,20 +510,25 @@ def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_s
     assert recovery_state(store, dead.name) == "done"
 
 
-def test_a_restart_refused_for_another_reason_is_reported(store, tmp_path, monkeypatch):
+def test_a_restart_refused_for_another_reason_is_reported(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.tick import SpawnError as RestartError
+
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
     dead = agents[2]
     runtime.live.remove(dead.name)
     refused = []
 
-    def spawn(config, lane, name, task):
+    def spawn(config: SwarmConfig, lane: str, name: str, task: dict[str, object]) -> Placed:
         refused.append(task)
-        raise SpawnError("no seat", "unavailable")
+        raise RestartError("no seat", "unavailable")
 
     monkeypatch.setattr(runtime, "spawn", spawn)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert f"outage resume for {dead.name} refused: no seat" in actions
     assert len(refused) == 1
+    assert recovery_state(store, dead.name) == "pending"
 
 
 @pytest.mark.parametrize("moment", ["before resume", "during resume", "before respawn"])
