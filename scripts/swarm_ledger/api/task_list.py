@@ -70,9 +70,10 @@ def read(repository: object, slug: str, query: dict) -> Page | dict:
 
 
 def targeting(rows: list, url: str) -> dict:
-    """The tasks whose pull request, split halves or pull scopes name this pull request URL."""
+    """The tasks whose pull request, split halves or pull scopes name this pull request URL, in one reply."""
     found = [row for row in rows if isinstance(row, dict) and url in pull_links(row)]
-    return resources.page(found, resources.revision(found), {"limit": 100})
+    data = [{**resources.project(row), "revision": resources.revision(row)} for row in found]
+    return resources.bounded({"data": data, "revision": resources.revision(found), "next_cursor": None})
 
 
 def pull_links(row: dict) -> set:

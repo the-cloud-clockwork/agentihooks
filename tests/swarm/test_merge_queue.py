@@ -829,7 +829,6 @@ def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypat
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])
 def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
-
     first = "https://github.com/o/r/pull/6"
     task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": [first, URL]}
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
@@ -842,7 +841,6 @@ def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
 
 
 def test_cli_refuses_an_unlisted_pull_before_a_queue_call(monkeypatch):
-
     task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/6", URL]}
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
@@ -871,7 +869,6 @@ def test_cli_refuses_distributed_final_mutations_before_provider_calls(monkeypat
 
 @pytest.mark.parametrize("same_link", [False, True])
 def test_cli_refuses_another_distributed_tasks_pull_request(monkeypatch, same_link):
-
     state = swarm_of("eng")
     rows = [
         {"id": "t1", "pr_url": URL if same_link else "https://github.com/o/r/pull/8"},

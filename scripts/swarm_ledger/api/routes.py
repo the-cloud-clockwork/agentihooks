@@ -61,7 +61,7 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
     query = pagination(handler.path)
     if ("state" in query or "offset" in query or "q" in query) and path not in ledger_closed.COLLECTIONS:
         raise APIError(400, "schema_invalid", resources.DONE_ONLY)
-    if "targets" in query and (path != "tasks" or query.keys() & {"state", "offset", "q", "cursor"}):
+    if "targets" in query and (path != "tasks" or query.keys() & {"state", "offset", "q", "cursor", "limit"}):
         raise APIError(400, "schema_invalid", "Only a plain tasks read takes targets")
     if path == "events" and handler.headers.get("Accept") == "text/event-stream":
         return events(handler, services, slug)

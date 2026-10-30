@@ -53,8 +53,9 @@ def test_any_other_refusal_of_a_task_read_is_raised_with_its_body(monkeypatch, c
 
 
 def test_a_targeting_read_asks_the_ledger_for_the_tasks_naming_one_pull(monkeypatch: pytest.MonkeyPatch) -> None:
-    reads = served(monkeypatch, [{"id": "t2"}])
-    assert ledger_client.LedgerClient().tasks_targeting("demo", "https://github.com/o/r/pull/7") == [{"id": "t2"}]
+    own, other = {"id": "t2", "pr_url": "https://github.com/o/r/pull/7"}, {"id": "t3"}
+    reads = served(monkeypatch, [own, other])
+    assert ledger_client.LedgerClient().tasks_targeting("demo", "https://github.com/o/r/pull/7") == [own]
     assert reads == [("demo", "tasks?targets=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F7", False, False)]
 
 

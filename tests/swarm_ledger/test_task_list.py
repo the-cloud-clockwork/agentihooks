@@ -210,9 +210,25 @@ def test_a_targets_read_returns_only_the_tasks_naming_that_pull_request(tmp_path
     assert [row["title"] for row in routes.ledger_read(host, "one", "tasks", {})["data"]][3] == "Other"
 
 
+def test_a_targets_read_returns_every_match_in_one_reply() -> None:
+    from scripts.swarm_ledger.api import task_list
+
+    url = "https://github.com/o/r/pull/7"
+    rows = [{"id": f"t{n}", "pr_url": url, "comments": [{"id": "c"}]} for n in range(120)]
+    found = task_list.targeting(rows, url)
+    assert [row["id"] for row in found["data"]] == [f"t{n}" for n in range(120)]
+    assert found["next_cursor"] is None
+    assert found["data"][0]["comments_count"] == 1 and "comments" not in found["data"][0]
+
+
 @pytest.mark.parametrize(
     ("path", "query"),
-    [("phases", {"targets": "u"}), ("tasks", {"targets": "u", "state": "done"}), ("tasks", {"targets": ""})],
+    [
+        ("phases", {"targets": "u"}),
+        ("tasks", {"targets": "u", "state": "done"}),
+        ("tasks", {"targets": ""}),
+        ("tasks", {"targets": "u", "limit": 5}),
+    ],
 )
 def test_a_targets_read_is_refused_outside_a_plain_tasks_read(path: str, query: dict) -> None:
     from types import SimpleNamespace
