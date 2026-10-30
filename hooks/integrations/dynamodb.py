@@ -610,7 +610,7 @@ def get_last_assistant_response(transcript_path: str) -> Optional[str]:
 
 
 def main():
-    """CLI entry point for DynamoDB operations; hook mode warns on stdout and always exits 0."""
+    """CLI entry point for DynamoDB operations; hook warns on stdout, where Claude Code shows it, and exits 0."""
     if len(sys.argv) < 2:
         print("Usage: /app/hooks/integrations/dynamodb.py <command> [args]")
         print("")
