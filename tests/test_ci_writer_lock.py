@@ -10,7 +10,7 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
+def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario() -> None:
     caller = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["writer-lock"]
     assert caller["uses"] == "./.github/workflows/writer-lock.yml"
     workflow = yaml.safe_load((ROOT / ".github/workflows/writer-lock.yml").read_text())
@@ -50,7 +50,7 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
     assert "tests/swarm_ledger/test_postgres_writer_floor.py" in steps[-2]["run"]
     assert "tests/swarm_ledger/test_postgres_repository.py" in steps[-2]["run"]
     assert "tests/test_memory_postgres_parity.py" in steps[-2]["run"]
-    assert "grep -q ' 19 passed'" in steps[-2]["run"]
+    assert "grep -q ' 21 passed'" in steps[-2]["run"]
     assert steps[-1]["uses"] == "./.github/actions/input-key/save"
     assert steps[-1]["if"] == "github.event_name == 'push' || github.event_name == 'workflow_dispatch'"
     assert steps[-1]["with"] == {"key": "${{ needs.inputs.outputs.key }}"}
