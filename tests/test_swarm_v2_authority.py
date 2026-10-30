@@ -132,6 +132,7 @@ def test_legacy_writers_cannot_change_distributed_claims(fixture):
 
 
 def test_replay_recovers_highest_generation_without_reviving_old_worker(fixture):
+    from scripts.swarm import fencing
     from scripts.swarm_v2.authority import TaskAuthority
 
     store, authority, controller, clock, start = fixture
@@ -141,7 +142,8 @@ def test_replay_recovers_highest_generation_without_reviving_old_worker(fixture)
     new, token = start("eng-2@fixture")
     second = authority.admit(token, 100)
     journal = authority.journal("task")
-    store.redis.delete(store.key("fixture", "task-authority", "task"), store.key("fixture", "claim", "task"))
+    fencing.write(store, "fixture", lambda doc: doc["claims"].pop("task", None))
+    store.redis.delete(store.key("fixture", "claim", "task"))
     with pytest.raises(SwarmError) as error:
         authority.admit(token, 100)
     assert str(error.value) == "dependency_unavailable"
@@ -168,6 +170,37 @@ def start_after_rollback(controller, store, start):
     agent, token = start("eng-3@fixture")
     controller.admission_enabled = False
     return agent, token
+
+
+def _contend(monkeypatch):
+    from scripts.events.bus import StateConflict
+    from scripts.swarm import fencing
+
+    original = fencing.state.for_store
+    attempts = []
+
+    class Racing:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def get(self, key):
+            return self.inner.get(key)
+
+        def create(self, key, value):
+            return self.inner.create(key, value)
+
+        def update(self, key, value, revision):
+            attempts.append(True)
+            raise StateConflict("fixture contention")
+
+        def watch(self, key, from_revision=0):
+            return self.inner.watch(key, from_revision)
+
+    def for_store(store, bucket, environ=None):
+        return Racing(original(store, bucket, environ))
+
+    monkeypatch.setattr(fencing.state, "for_store", for_store)
+    return attempts
 
 
 @pytest.mark.parametrize("operation", ["renew", "release", "complete"])
@@ -209,27 +242,17 @@ def test_takeover_at_commit_rejects_former_holder(fixture, monkeypatch, operatio
     old, token = start()
     authority.admit(token, 100)
     new, new_token = start("eng-2@fixture")
-    original = store.redis.pipeline
     interrupted = []
+    original = authority._commit
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
+    def commit(*args, **kwargs):
+        if not interrupted:
+            interrupted.append(True)
+            clock[0] = 1100
+            authority.admit(new_token, 100)
+        return original(*args, **kwargs)
 
-        def run(*args, **kwargs):
-            if not interrupted and any(
-                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
-                for cmd in pipe.command_stack
-            ):
-                interrupted.append(True)
-                clock[0] = 1100
-                authority.admit(new_token, 100)
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(authority, "_commit", commit)
     args = {"renew": (200,), "release": (), "complete": ({},)}[operation]
     with pytest.raises(SwarmError) as error:
         getattr(authority, operation)(token, 1, *args)
@@ -241,16 +264,15 @@ def test_takeover_at_commit_rejects_former_holder(fixture, monkeypatch, operatio
 
 
 def test_replay_refuses_regressed_or_inconsistent_state(fixture):
+    from scripts.swarm import fencing
+
     store, authority, controller, clock, start = fixture
     old, token = start()
     first = authority.admit(token, 100)
     clock[0] = 1100
     new, token = start("eng-2@fixture")
     authority.admit(token, 100)
-    import json
-    from dataclasses import asdict
-
-    store.redis.set(store.key("fixture", "task-authority", "task"), json.dumps(asdict(first)))
+    fencing.write(store, "fixture", lambda doc: doc["claims"].update({"task": asdict(first)}))
     with pytest.raises(SwarmError) as error:
         authority.replay("task")
     assert str(error.value) == "journal_conflict"
@@ -337,14 +359,17 @@ def test_retired_execution_grant_is_counted_and_foreign_result_is_refused(fixtur
 
 
 def test_journal_replay_refuses_changed_generation(fixture):
-    import json
+    from scripts.swarm import fencing
 
     store, authority, controller, clock, start = fixture
     old, token = start()
     claim = authority.admit(token, 100)
-    row = authority.journal("task")[0]
-    row["claim"]["generation"] = 4
-    store.redis.lset(store.key("fixture", "claim-journal", "task"), 0, json.dumps(row))
+
+    def mutate(doc):
+        rows = doc["journals"]["task"]
+        rows[0] = {**rows[0], "claim": {**rows[0]["claim"], "generation": 4}}
+
+    fencing.write(store, "fixture", mutate)
     with pytest.raises(SwarmError) as error:
         authority.replay("task")
     assert str(error.value) == "journal_conflict"
@@ -353,33 +378,24 @@ def test_journal_replay_refuses_changed_generation(fixture):
 
 @pytest.mark.parametrize("operation", ["renew", "release", "complete"])
 def test_controller_takeover_at_commit_denies_old_authority(fixture, monkeypatch, operation):
+    from scripts.swarm import fencing
+    from scripts.swarm_v2.controller import Controller
+
     store, authority, controller, clock, start = fixture
     old, token = start()
     first = authority.admit(token, 100)
-    original = store.redis.pipeline
     interrupted = []
+    original = authority._commit
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
+    def commit(*args, **kwargs):
+        if not interrupted:
+            interrupted.append(True)
+            fencing.write(store, "fixture", lambda doc: doc.update(lease=None))
+            other = Controller(store, "fixture", [], lambda: True)
+            assert other.acquire()
+        return original(*args, **kwargs)
 
-        def run(*args, **kwargs):
-            if not interrupted and any(
-                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
-                for cmd in pipe.command_stack
-            ):
-                interrupted.append(True)
-                store.redis.delete(store.key("fixture", "control-owner"))
-                from scripts.swarm_v2.controller import Controller
-
-                other = Controller(store, "fixture", [], lambda: True)
-                assert other.acquire()
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(authority, "_commit", commit)
     args = {"renew": (200,), "release": (), "complete": ({},)}[operation]
     with pytest.raises(SwarmError) as error:
         getattr(authority, operation)(token, 1, *args)
@@ -408,39 +424,22 @@ def test_invalid_worker_grant_error_preserves_the_claim(fixture):
 
 @pytest.mark.parametrize("operation", ["renew", "replay"])
 def test_continuous_claim_contention_is_bounded(fixture, monkeypatch, operation):
-    from redis.exceptions import WatchError
+    from scripts.swarm import fencing
 
     store, authority, controller, clock, start = fixture
     agent, token = start()
     claim = authority.admit(token, 100)
-    original = store.redis.pipeline
-    attempts = []
-
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
-
-        def run(*args, **kwargs):
-            if any(
-                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
-                for cmd in pipe.command_stack
-            ):
-                attempts.append(True)
-                raise WatchError("fixture contention")
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    if operation == "replay":
+        fencing.write(store, "fixture", lambda doc: doc["claims"].pop("task", None))
+    attempts = _contend(monkeypatch)
     with pytest.raises(SwarmError) as error:
         if operation == "renew":
             authority.renew(token, 1, 200)
         else:
             authority.replay("task")
     assert str(error.value) == "dependency_unavailable"
-    assert len(attempts) == 5
-    assert authority.current("task") == claim
+    assert len(attempts) == fencing.ATTEMPTS
+    assert authority.current("task") == (None if operation == "replay" else claim)
     assert len(authority.journal("task")) == 1
 
 
@@ -465,26 +464,16 @@ def test_worker_scope_cannot_change_during_commit(fixture):
 def test_delayed_admission_does_not_extend_the_claimant_deadline(fixture, monkeypatch):
     store, authority, controller, clock, start = fixture
     agent, token = start()
-    original = store.redis.pipeline
     delayed = []
+    original = authority._commit
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
+    def commit(*args, **kwargs):
+        if not delayed:
+            delayed.append(True)
+            clock[0] = 1101
+        return original(*args, **kwargs)
 
-        def run(*args, **kwargs):
-            if not delayed and any(
-                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
-                for cmd in pipe.command_stack
-            ):
-                delayed.append(True)
-                clock[0] = 1101
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(authority, "_commit", commit)
     with pytest.raises(SwarmError) as error:
         authority.admit(token, 100)
     assert str(error.value) == "stale_generation"
@@ -500,26 +489,16 @@ def test_delayed_renewal_cannot_cross_the_former_lease_deadline(fixture, monkeyp
     agent, token = start()
     first = authority.admit(token, 200)
     clock[0] = 1100
-    original = store.redis.pipeline
     delayed = []
+    original = authority._commit
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
+    def commit(*args, **kwargs):
+        if not delayed:
+            delayed.append(True)
+            clock[0] = 1201
+        return original(*args, **kwargs)
 
-        def run(*args, **kwargs):
-            if not delayed and any(
-                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
-                for cmd in pipe.command_stack
-            ):
-                delayed.append(True)
-                clock[0] = 1201
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(authority, "_commit", commit)
     args = {"renew": (300,), "release": (), "complete": ({},)}[operation]
     with pytest.raises(SwarmError) as error:
         getattr(authority, operation)(token, 1, *args)
@@ -533,26 +512,16 @@ def test_delayed_renewal_cannot_cross_the_former_lease_deadline(fixture, monkeyp
 def test_controller_expiry_at_commit_cannot_admit_a_task(fixture, monkeypatch):
     store, authority, controller, clock, start = fixture
     agent, token = start()
-    original = store.redis.pipeline
     delayed = []
+    original = controller.require
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
+    def require():
+        if not delayed:
+            delayed.append(True)
+            clock[0] = controller.held.expires_at + 1
+        return original()
 
-        def run(*args, **kwargs):
-            if not delayed and any(
-                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
-                for cmd in pipe.command_stack
-            ):
-                delayed.append(True)
-                clock[0] = controller.held.expires_at + 1
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(controller, "require", require)
     with pytest.raises(SwarmError) as error:
         authority.admit(token, 200)
     assert str(error.value) == "the controller lease is stale"
@@ -564,41 +533,32 @@ def test_controller_expiry_at_commit_cannot_admit_a_task(fixture, monkeypatch):
 
 @pytest.mark.parametrize("operation", ["admit", "renew", "release", "complete"])
 def test_worker_credential_expiry_at_commit_preserves_task_state(fixture, monkeypatch, operation):
-    import json
-    from dataclasses import asdict, replace
+    from dataclasses import replace
     from datetime import datetime
+
+    from scripts.swarm import fencing
 
     store, authority, controller, clock, start = fixture
     agent, token = start()
     scope = authority.authorize(token)
-    audit = json.loads(store.redis.hget(store.key("fixture", "launch-grants"), scope.grant_id))
+    audit = fencing.read(store, "fixture")["grants"][scope.grant_id]
     deadline = int(datetime.fromisoformat(audit["expires_at"]).timestamp() * 1000)
     controller.held = replace(controller.held, expires_at=deadline + 10000)
-    store.redis.set(store.key("fixture", "control-owner"), json.dumps(asdict(controller.held)))
+    fencing.write(store, "fixture", lambda doc: doc.update(lease={**doc["lease"], "expires_at": deadline + 10000}))
     if operation != "admit":
         authority.admit(token, deadline + 20000)
     before = authority.current("task")
     journal = authority.journal("task")
-    original = store.redis.pipeline
     delayed = []
+    original = authority._commit
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
+    def commit(*args, **kwargs):
+        if not delayed:
+            delayed.append(True)
+            clock[0] = deadline
+        return original(*args, **kwargs)
 
-        def run(*args, **kwargs):
-            if not delayed and any(
-                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
-                for cmd in pipe.command_stack
-            ):
-                delayed.append(True)
-                clock[0] = deadline
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(authority, "_commit", commit)
     clock[0] += 1
     with pytest.raises(SwarmError) as error:
         if operation == "admit":
@@ -619,12 +579,15 @@ def test_worker_credential_expiry_at_commit_preserves_task_state(fixture, monkey
 @pytest.mark.parametrize("record", ["task-authority", "claim-journal"])
 @pytest.mark.parametrize("operation", ["claim", "refresh", "release"])
 def test_each_distributed_record_blocks_legacy_task_writes(fixture, record, operation):
+    from scripts.swarm import fencing
+
     store, authority, controller, clock, start = fixture
     agent, token = start()
     if operation != "claim":
         assert store.claim("fixture", "task", agent.name, 500)
-    key = store.key("fixture", record, "task")
-    store.redis.set(key, "retained-authority")
+    section = "claims" if record == "task-authority" else "journals"
+    value = {"marker": True} if section == "claims" else [{"marker": True}]
+    fencing.write(store, "fixture", lambda doc: doc[section].update({"task": value}))
     before = store.redis.get(store.key("fixture", "claim", "task"))
     if operation == "claim":
         result = store.claim("fixture", "task", agent.name, 500)
@@ -634,34 +597,36 @@ def test_each_distributed_record_blocks_legacy_task_writes(fixture, record, oper
         result = store.release("fixture", "task", agent.name)
     assert result is False
     assert store.redis.get(store.key("fixture", "claim", "task")) == before
-    assert store.redis.get(key) == "retained-authority"
+    assert fencing.read(store, "fixture")[section]["task"] == value
 
 
 @pytest.mark.parametrize("record", ["task-authority", "claim-journal", "claim"])
 def test_legacy_claim_watches_authority_record_created_at_commit(fixture, monkeypatch, record):
+    from scripts.swarm import fencing
+
     store, authority, controller, clock, start = fixture
-    key = store.key("fixture", record, "task")
-    original = store.redis.pipeline
     raced = []
+    original = fencing.authority_held
 
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
+    def held(store_, slug_, task_):
+        if not raced:
+            raced.append(True)
+            if record == "claim":
+                store.redis.set(store.key("fixture", "claim", "task"), "retained-authority")
+            elif record == "task-authority":
+                fencing.write(store_, slug_, lambda doc: doc["claims"].update({task_: {"marker": True}}))
+            else:
+                fencing.write(store_, slug_, lambda doc: doc["journals"].update({task_: [{"marker": True}]}))
+        return original(store_, slug_, task_)
 
-        def run(*args, **kwargs):
-            if not raced:
-                raced.append(True)
-                store.redis.set(key, "retained-authority")
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    monkeypatch.setattr(fencing, "authority_held", held)
     assert store.claim("fixture", "task", "worker", 500) is False
     assert raced == [True]
     assert store.claimant("fixture", "task") == ("retained-authority" if record == "claim" else None)
-    assert store.redis.get(key) == "retained-authority"
+    if record == "claim":
+        assert store.redis.get(store.key("fixture", "claim", "task")) == "retained-authority"
+    else:
+        assert fencing.authority_held(store, "fixture", "task") is True
 
 
 @pytest.mark.parametrize("operation", ["refresh", "release"])
@@ -765,49 +730,138 @@ def test_task_expiry_refuses_before_a_delayed_controller_expiry(fixture, monkeyp
     ],
 )
 def test_concurrent_authority_changes_are_bounded(fixture, monkeypatch, operation, record):
+    from scripts.swarm import fencing
+
     store, authority, controller, clock, start = fixture
     agent, token = start()
     claim = authority.admit(token, 100)
     journal = authority.journal("task")
-    key = (
-        store.key("fixture", record, "task")
-        if record in ("claim", "task-authority", "claim-journal")
-        else store.key("fixture", record)
-    )
-    original = store.redis.pipeline
-    raced = []
-    clock[0] += 1
-
-    def pipeline(*args, **kwargs):
-        pipe = original(*args, **kwargs)
-        execute = pipe.execute
-
-        def run(*args, **kwargs):
-            if any(cmd[0][0] == "EVAL" for cmd in pipe.command_stack):
-                raced.append(True)
-                clock[0] += 1
-                if record == "control-owner":
-                    controller.renew()
-                elif store.redis.type(key) == "hash":
-                    field, value = next(iter(store.redis.hgetall(key).items()))
-                    store.redis.hset(key, field, value)
-                elif record == "claim-journal":
-                    store.redis.lset(key, 0, store.redis.lindex(key, 0))
-                else:
-                    store.redis.set(key, store.redis.get(key) or "disabled")
-            return execute(*args, **kwargs)
-
-        pipe.execute = run
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    if operation == "replay":
+        fencing.write(store, "fixture", lambda doc: doc["claims"].pop("task", None))
+    attempts = _contend(monkeypatch)
     with pytest.raises(SwarmError) as error:
         if operation == "renew":
-            authority.renew(token, 1, 100)
+            authority.renew(token, 1, 200)
         else:
             authority.replay("task")
     assert str(error.value) == "dependency_unavailable"
-    assert raced == [True] * 5
-    assert authority.current("task") == claim
+    assert len(attempts) == fencing.ATTEMPTS
+    assert authority.current("task") == (None if operation == "replay" else claim)
     assert authority.journal("task") == journal
     assert store.claimant("fixture", "task") == agent.name
+    assert record
+
+
+def test_admission_reads_the_clock_of_its_own_store(fixture, monkeypatch):
+    from scripts.swarm import lease
+
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    monkeypatch.setattr(lease, "now_ms", lambda given: clock[0] if given is store else 10**15)
+
+    claim = authority.admit(token, 100)
+
+    assert authority.current("task") == claim
+    assert store.claimant("fixture", "task") == agent.name
+
+
+def test_an_admission_whose_lease_ends_before_its_commit_is_stale(fixture, monkeypatch):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    original = authority._execution
+
+    def late(doc, execution_id):
+        found = original(doc, execution_id)
+        clock[0] += 100
+        return found
+
+    monkeypatch.setattr(authority, "_execution", late)
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        authority.admit(token, 100)
+    assert authority.current("task") is None
+
+
+def test_a_release_whose_lease_ends_before_its_commit_is_stale(fixture, monkeypatch):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 100)
+    original = authority._holder
+
+    def late(scope, generation, previous):
+        original(scope, generation, previous)
+        clock[0] = previous.lease_deadline_ms
+
+    monkeypatch.setattr(authority, "_holder", late)
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        authority.release(token, claim.generation)
+    assert authority.current("task") == claim
+
+
+def test_a_claim_projects_no_holder_from_the_moment_its_lease_ends(fixture, monkeypatch):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 100)
+    projected = []
+    monkeypatch.setattr(store, "project_claim", lambda *args: projected.append(args))
+
+    clock[0] = claim.lease_deadline_ms - 1
+    authority._project(claim)
+    clock[0] = claim.lease_deadline_ms
+    authority._project(claim)
+
+    assert projected == [
+        ("fixture", "task", agent.name, claim.lease_deadline_ms),
+        ("fixture", "task", None, claim.lease_deadline_ms),
+    ]
+
+
+def test_a_repeated_admission_writes_and_projects_nothing(fixture):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    claim = authority.admit(token, 100)
+    store.redis.delete(store.key("fixture", "claim", "task"))
+
+    assert authority.admit(token, 100) == claim
+    assert store.claimant("fixture", "task") is None
+    assert len(authority.journal("task")) == 1
+
+
+def _pinned(authority, registration):
+    from scripts.swarm_v2.authority import TaskAuthority
+
+    return TaskAuthority(authority.store, authority.controller, lambda token: registration)
+
+
+def test_an_archived_attempt_is_stale_and_an_unknown_one_is_an_identity_conflict(fixture):
+    from scripts.swarm import fencing
+
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    registration = authority.authorize(token)
+    fencing.write(
+        store,
+        "fixture",
+        lambda doc: doc["archive"].update({agent.execution_id: doc["executions"].pop(agent.execution_id)}),
+    )
+    conflicts = fencing.count(store, "fixture", fencing.IDENTITY_CONFLICTS)
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        _pinned(authority, registration).admit("pinned", 100)
+    unknown = replace(registration, execution_id="exe-unknown")
+    with pytest.raises(SwarmError, match="^unknown execution identity; display labels cannot identify attempts$"):
+        _pinned(authority, unknown).admit("pinned", 100)
+    assert fencing.count(store, "fixture", fencing.IDENTITY_CONFLICTS) == conflicts + 1
+
+
+def test_task_authority_writes_are_fenced_by_the_controller_lease(fixture, monkeypatch):
+    from scripts.swarm import fencing, lease
+
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    registration = authority.authorize(token)
+    fencing.write(store, "fixture", lambda doc: doc.update(lease={**doc["lease"], "owner": "usurper"}))
+    monkeypatch.setattr(controller, "require", lambda: None)
+
+    with pytest.raises(SwarmError, match=f"^{lease.STALE}$"):
+        _pinned(authority, registration).admit("pinned", 100)
+    assert authority.current("task") is None

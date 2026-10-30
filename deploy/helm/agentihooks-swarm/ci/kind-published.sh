@@ -27,7 +27,13 @@ finish() {
 }
 trap finish EXIT
 
-if ! helm pull "$chart" --version "$version" --destination "$pulled"; then
+if [[ -n ${CHART_DIR:-} ]]; then
+  chart="$CHART_DIR"
+  if ! cp "$CHART_DIR/agentihooks-swarm-$version.tgz" "$pulled/"; then
+    printf 'the packaged chart %s version %s is missing\n' "$chart" "$version" >&2
+    exit 1
+  fi
+elif ! helm pull "$chart" --version "$version" --destination "$pulled"; then
   printf 'the chart %s version %s is not published\n' "$chart" "$version" >&2
   exit 1
 fi

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import commands, controller, lease
+from scripts.swarm import commands, controller, fencing, lease
 from scripts.swarm.rename import LOCK_MS, rename_swarm
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
@@ -142,7 +142,7 @@ def test_a_long_rename_keeps_its_lease(store, monkeypatch):
 
 def test_a_rename_that_lost_its_lease_stops_before_the_next_write(store):
     def take_over(pane):
-        store.redis.delete(store.key("sw", "control-owner"))
+        fencing.write(store, "sw", lambda doc: doc.update(lease=None))
         assert lease.acquire(store, "sw", "another-hive") is not None
 
     runtime, renamed = two_agent_herdr(store, take_over)
@@ -182,7 +182,7 @@ def test_a_rename_that_lost_its_lease_renames_no_workspace(store):
 
 
 def lose_lease(store):
-    store.redis.delete(store.key("sw", "control-owner"))
+    fencing.write(store, "sw", lambda doc: doc.update(lease=None))
     assert lease.acquire(store, "sw", "another-hive") is not None
 
 

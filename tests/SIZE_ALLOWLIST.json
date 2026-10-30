@@ -39,9 +39,9 @@
   "PLR0912": 15
  },
  "hooks/hook_manager.py::on_post_tool_use": {
-  "C901": 56,
-  "PLR0912": 56,
-  "function-lines": 304
+  "C901": 55,
+  "PLR0912": 55,
+  "function-lines": 302
  },
  "hooks/hook_manager.py::on_pre_tool_use": {
   "C901": 77,
@@ -147,7 +147,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 6799
+  "file-lines": 6795
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,

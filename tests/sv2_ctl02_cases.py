@@ -74,7 +74,9 @@ def run_case(case):
             assert case == "c"
             second = authority.complete(successor_token, 2, {"outcome": "done"})
             journal = authority.journal(inputs["task"])
-            store.redis.delete(store.key(inputs["swarm"], "task-authority", inputs["task"]))
+            from scripts.swarm import fencing
+
+            fencing.write(store, inputs["swarm"], lambda doc: doc["claims"].pop(inputs["task"], None))
             assert authority.replay(inputs["task"]) == second
             assert authority.replay(inputs["task"]) == second
             assert authority.journal(inputs["task"]) == journal

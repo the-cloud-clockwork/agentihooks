@@ -163,6 +163,7 @@ def test_done_from_the_seat_passes_while_the_swarm_sleeps_as_the_tick_raises_not
     assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, found, NOW).startswith("dispatcher triggers")
 
 
+@pytest.mark.feature("swarm-session-cap")
 def test_no_session_slot_holds_the_spawn():
     store, runtime = swarm(), FakeRuntime(full=True)
     assert run(store, runtime, doc(priority())) == ["no session slot for the dispatcher, waiting"]

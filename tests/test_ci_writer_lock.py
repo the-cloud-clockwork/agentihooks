@@ -32,18 +32,21 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario() -> None
     assert scenario["needs"] == ["inputs"]
     assert scenario["if"] == "github.event_name == 'workflow_dispatch' || needs.inputs.outputs.hit != 'true'"
     assert "postgres" not in scenario["services"]
-    image = "public.ecr.aws/docker/library/postgres:16"
+    image = "pgvector/pgvector:0.8.0-pg16"
+    assert scenario["services"]["pgvector"]["image"] == image
     steps = scenario["steps"]
-    start = next(i for i, step in enumerate(steps) if step.get("name") == "Start Postgres from a retried pull")
-    assert "if" not in steps[start]
-    assert any(step.get("uses", "").startswith("actions/checkout@") for step in steps[:start])
-    run = steps[start]["run"]
-    pull = run.index(f"bash scripts/packaging/pull-runtime-image.sh {image}\n")
-    assert pull < run.index(
+    start = steps[0]
+    assert start["name"] == "Start the ledger Postgres from the service image"
+    assert "if" not in start
+    assert start["run"] == (
         "docker run --pull never --rm -d --name writer-lock-postgres -p 127.0.0.1:5432:5432"
         f" -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger {image}\n"
     )
-    assert "until docker exec writer-lock-postgres pg_isready -h 127.0.0.1 -p 5432 -d ledger" in run
+    ready = next(i for i, step in enumerate(steps) if step.get("name") == "Wait for the ledger Postgres")
+    assert any(step.get("name") == "Install dependencies" for step in steps[:ready])
+    assert ready == len(steps) - 3
+    assert "until docker exec writer-lock-postgres pg_isready -h 127.0.0.1 -p 5432 -d ledger" in steps[ready]["run"]
+    assert not any("pull-runtime-image" in step.get("run", "") for step in steps)
     assert scenario["timeout-minutes"] >= 15
     assert scenario["services"]["pgvector"]["image"] == "pgvector/pgvector:0.8.0-pg16"
     assert scenario["services"]["pgvector"]["ports"] == ["5433:5432"]
@@ -53,7 +56,7 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario() -> None
     assert "tests/swarm_ledger/test_postgres_writer_floor.py" in steps[-2]["run"]
     assert "tests/swarm_ledger/test_postgres_repository.py" in steps[-2]["run"]
     assert "tests/test_memory_postgres_parity.py" in steps[-2]["run"]
-    assert "grep -q ' 19 passed'" in steps[-2]["run"]
+    assert "grep -q ' 21 passed'" in steps[-2]["run"]
     assert steps[-1]["uses"] == "./.github/actions/input-key/save"
     assert steps[-1]["if"] == "github.event_name == 'push' || github.event_name == 'workflow_dispatch'"
     assert steps[-1]["with"] == {"key": "${{ needs.inputs.outputs.key }}"}

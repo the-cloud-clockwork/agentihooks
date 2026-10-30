@@ -33,9 +33,12 @@ class Stalled:
 def stalled_store():
     import fakeredis
 
+    from scripts.swarm import fencing
+
     fake = fakeredis.FakeRedis(decode_responses=True)
     RedisStore(fake).create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=0, scaling=MANUAL_SCALING))
     RedisStore(fake).update(SLUG, state="running")
+    fencing.read(RedisStore(fake), SLUG)
     return RedisStore(Stalled(fake))
 
 
@@ -192,7 +195,6 @@ def test_bounded_routes_the_store_and_every_part_holding_its_client_through_the_
     assert type(bound) is RedisStore
     assert bound.redis is budget
     assert (bound.seats.redis, bound.memory.redis, bound.culture.redis, bound.names.redis) == (budget,) * 4
-    assert bound.execution_registry.redis is budget
     assert bound.execution_registry.store is bound
     assert store.execution_registry.store is store
     assert store.redis is not budget and store.seats.redis is store.redis

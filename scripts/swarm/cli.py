@@ -70,6 +70,7 @@ from urllib.parse import urlsplit
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
+from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -169,6 +170,7 @@ from scripts.swarm.store import (
     DISPATCH,
     FULL,
     MASTER,
+    AgentRecord,
     RedisStore,
     SwarmConfig,
     SwarmError,
@@ -1805,6 +1807,12 @@ def _queue_intent(store, args, agent, head):
         raise SwarmError(decision.reason)
 
 
+def _hotfix_master(store, args) -> bool:
+    from hooks.context import master_coding
+
+    return _me(store, args).lane == MASTER and master_coding.is_open(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
+
+
 def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
@@ -1813,7 +1821,8 @@ def cmd_merge(store, args):
             raise SwarmError("only the operator lifts a running merge group priority hold")
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
-        agent = _worker(store, args) if args.action != "state" else None
+        hotfix = args.action == "queue" and _hotfix_master(store, args)
+        agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
             done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
@@ -1821,7 +1830,9 @@ def cmd_merge(store, args):
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
+                admit=lambda head: (
+                    (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
+                ),
                 journal=queue_record.Journal(args.url),
                 attempts=merge_queue.ATTEMPTS,
             )
@@ -1830,7 +1841,7 @@ def cmd_merge(store, args):
     print(json.dumps(result))
 
 
-def cmd_done(store, args):
+def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
     if agent.lane == dispatch_seat.LANE:
         return _dispatcher_done(store, args.slug, agent)
@@ -1863,6 +1874,7 @@ def cmd_done(store, args):
     refused = done_gate.refusal(proven, url, _pull_reader(url, pull))
     if refused:
         raise SwarmError(refused)
+    _feature_gate(store, args.slug, agent, proven, pull)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
@@ -1904,6 +1916,23 @@ def _workflow_proof(store, slug, agent, ledger, row):
 
 def _pull_reader(url, pull):
     return lambda target: pull if target == url else ledger_events.view(target)
+
+
+def _feature_gate(
+    store: RedisStore, slug: str, agent: AgentRecord, task: dict, pull: ledger_events.PullRequest | None
+) -> None:
+    """Refuse swarm done when the feature gate enforces and the task names no mapped, tested feature."""
+    if modes.configured(feature_gate.GATE, store.config(slug).gates) == "off":
+        return
+    head = pull.head if pull is not None else ""
+    refused = feature_gate.refusal(
+        task,
+        task["proof"].get("feature", ""),
+        lambda: [feature_gate.read_map(ref) for ref in feature_gate.refs(head)],
+    )
+    who = Who(name=agent.name, swarm=slug, task=agent.task)
+    if refused and feature_gate.GATE.allows(store, who, "done", refused, now_ms()):
+        raise SwarmError(refused)
 
 
 def _dispatcher_done(store, slug, agent):

@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
-from scripts.swarm import default_models, effort_range
-from scripts.swarm.execution import ExecutionRegistry
+from scripts.swarm import default_models, effort_range, timing
+from scripts.swarm.execution import ExecutionRegistry, _finished_life, occupants_of, records_of
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
@@ -22,6 +22,9 @@ PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
+PROJECTION_ATTEMPTS = 5
+PROJECTION_CONTENTION = "agent registry kept changing; the agent was not shown"
+LEGACY_PROJECTION_CONTENTION = "agent registry kept changing; update was not committed"
 DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
@@ -317,11 +320,17 @@ class RedisStore:
             self.key(slug, "claim", task),
             None,
             lambda pipe, key: (pipe.set(key, agent, nx=True, px=lease_ms), pipe.incr(f"{key}:generation")),
-            self._claim_guards(slug, task),
+            (slug, task),
         )
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
+
+    def project_claim(self, slug: str, task: str, holder: str | None, deadline_ms: int) -> None:
+        if holder is None:
+            self.redis.delete(self.key(slug, "claim", task))
+        else:
+            self.redis.set(self.key(slug, "claim", task), holder, pxat=deadline_ms)
 
     def claimed(self, slug: str, tasks: list[str]) -> set[str]:
         found = self.redis.mget([self.key(slug, "claim", task) for task in tasks]) if tasks else []
@@ -334,15 +343,14 @@ class RedisStore:
         from redis.exceptions import WatchError
 
         key, ready = self.key(slug, "claim", task), self.key(slug, "ready")
-        guards = self._claim_guards(slug, task)
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key, f"{key}:generation", ready, *guards)
+                pipe.watch(key, f"{key}:generation", ready)
                 if (
                     pipe.get(key) not in (None, agent)
                     or int(pipe.get(f"{key}:generation") or 0) != generation
                     or pipe.hget(ready, task) != expected_ready
-                    or any(pipe.exists(guard) for guard in guards)
+                    or self.authority_held(slug, task)
                 ):
                     return False
                 pipe.multi()
@@ -356,16 +364,18 @@ class RedisStore:
     def ensure_claim(self, slug: str, agent: AgentRecord, lease_ms: int) -> bool:
         from redis.exceptions import WatchError
 
+        from scripts.swarm import fencing
+
         key = self.key(slug, "claim", agent.task)
-        guards = self._claim_guards(slug, agent.task)
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key, self.key(slug, "agents"), self.key(slug, "executions"), *guards)
+                fencing.watch(self, pipe)
+                pipe.watch(key, self.key(slug, "agents"))
                 current = next((a for a in self.agents(slug) if a.name == agent.name), None)
                 if current != agent or agent.state not in ("starting", "working", "awaiting-decision"):
                     return False
                 holder = pipe.get(key)
-                if holder not in (None, agent.name) or any(pipe.exists(guard) for guard in guards):
+                if holder not in (None, agent.name) or self.authority_held(slug, agent.task):
                     return False
                 pipe.multi()
                 pipe.set(key, agent.name, px=lease_ms)
@@ -380,7 +390,7 @@ class RedisStore:
             self.key(slug, "claim", task),
             agent,
             lambda pipe, key: pipe.pexpire(key, lease_ms),
-            self._claim_guards(slug, task),
+            (slug, task),
         )
 
     def release(self, slug: str, task: str, agent: str) -> bool:
@@ -388,16 +398,16 @@ class RedisStore:
             self.key(slug, "claim", task),
             agent,
             lambda pipe, key: pipe.delete(key),
-            self._claim_guards(slug, task),
+            (slug, task),
         )
 
-    def _if_holder(self, key, agent, action, guards=()):
+    def _if_holder(self, key: str, agent: str, action: str, task: str) -> Any:
         from redis.exceptions import WatchError
 
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key, *guards)
-                if any(pipe.exists(guard) for guard in guards) or pipe.get(key) != agent:
+                pipe.watch(key)
+                if self.authority_held(*task) or pipe.get(key) != agent:
                     return False
                 pipe.multi()
                 action(pipe, key)
@@ -405,8 +415,10 @@ class RedisStore:
             except WatchError:
                 return False
 
-    def _claim_guards(self, slug, task):
-        return self.key(slug, "task-authority", task), self.key(slug, "claim-journal", task)
+    def authority_held(self, slug: str, task: str) -> bool:
+        from scripts.swarm import fencing
+
+        return fencing.authority_held(self, slug, task)
 
     def put_handoff(self, slug, task, text, seat="", envelope=None):
         with self.redis.pipeline() as pipe:
@@ -476,7 +488,87 @@ class RedisStore:
         return self.execution_registry.occupants(slug)
 
     def execution_identity_conflicts_total(self, slug: str) -> int:
-        return int(self.redis.get(self.key(slug, "identity-conflicts")) or 0)
+        from scripts.swarm import fencing
+
+        return fencing.count(self, slug, fencing.IDENTITY_CONFLICTS)
+
+    def listed(self, slug: str) -> set[str]:
+        return set(self.redis.hkeys(self.key(slug, "agents")))
+
+    def projections(self, slug: str) -> tuple[dict[str, dict], dict[str, str]]:
+        with self.redis.pipeline() as pipe:
+            pipe.hgetall(self.key(slug, "agents"))
+            pipe.hgetall(self.key(slug, "desired-routes"))
+            rows, desired = pipe.execute()
+        return {name: json.loads(raw) for name, raw in rows.items()}, desired
+
+    def project_agent(
+        self,
+        slug: str,
+        agent: AgentRecord,
+        previous: AgentRecord | None = None,
+        removed: str | None = None,
+        listed_only: bool = False,
+    ) -> None:
+        def write(pipe: Any) -> Any:
+            if listed_only and not pipe.hexists(self.key(slug, "agents"), agent.name):
+                return
+            pipe.multi()
+            self._project_row(pipe, slug, agent, previous)
+            if removed:
+                pipe.hdel(self.key(slug, "agents"), removed)
+            timing.timed(pipe.execute)
+
+        self._projection(slug, write, PROJECTION_CONTENTION)
+
+    def project_legacy(self, slug: str, agent: AgentRecord, managed: Callable[[], bool]) -> bool:
+        def write(pipe: Any) -> bool:
+            if managed():
+                return False
+            raw = pipe.hget(self.key(slug, "agents"), agent.name)
+            row = json.loads(raw) if raw else None
+            written = replace(agent, state="finished") if row and _finished_life(row, agent) else agent
+            pipe.multi()
+            self._project_row(pipe, slug, written, AgentRecord(**row) if row else None)
+            timing.timed(pipe.execute)
+            return True
+
+        return self._projection(slug, write, LEGACY_PROJECTION_CONTENTION)
+
+    def _projection(self, slug: str, write: Callable, contention: str) -> Any:
+        from redis.exceptions import WatchError
+
+        for _ in range(PROJECTION_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(self.key(slug, "agents"))
+                    return write(pipe)
+                except WatchError:
+                    continue
+        raise SwarmError(contention)
+
+    def _project_row(self, pipe: Any, slug: str, agent: AgentRecord, previous: AgentRecord | None) -> None:
+        from scripts.swarm.execution import PROJECTION_OMITTED
+        from scripts.swarm.tick import agent_status
+
+        row = {field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}
+        pipe.hset(self.key(slug, "agents"), agent.name, json.dumps(row))
+        if agent.desired_route_kind:
+            pipe.hset(self.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
+        else:
+            pipe.hdel(self.key(slug, "desired-routes"), agent.name)
+        if previous is None or agent_status(previous) != agent_status(agent):
+            pipe.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
+
+    def publication(self, slug: str, seat: str) -> str:
+        from scripts.codex_session.binding import PUBLISHING
+
+        return self.redis.hget(self.key(slug, PUBLISHING), seat) or ""
+
+    def hive_report(self, hive: str) -> dict | None:
+        from scripts.hive import reports
+
+        return reports.Reports(self.redis).read(hive)
 
     def put_agent(self, slug, agent):
         self.execution_registry.put(slug, agent)
@@ -487,16 +579,34 @@ class RedisStore:
     def drop_agent(self, slug, name, at=None, expected=None, before=None):
         from redis.exceptions import WatchError
 
+        from scripts.swarm import fencing, lease
+
         ended = int(time.time() * 1000) if at is None else at
+
+        def end(doc: dict[str, Any]) -> Any:
+            current = {a.execution_id for a in occupants_of(doc).values() if a.name == name}
+            if current != live or (expected is not None and expected.execution_id not in current):
+                return False
+            for execution_id in live & set(doc["executions"]):
+                if doc["executions"][execution_id]["state"] != "finished":
+                    doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
+            return True
+
         for _ in range(5):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(self.key(slug, "agents"), self.key(slug, "executions"))
+                    pipe.watch(self.key(slug, "agents"))
                     previous = pipe.hget(self.key(slug, "agents"), name)
-                    executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
-                    if expected is not None and expected.execution_id not in {a.execution_id for a in executions}:
+                    doc = fencing.read(self, slug)
+                    executions = [a for a in occupants_of(doc).values() if a.name == name]
+                    lives = records_of(doc) if previous else []
+                    live = {agent.execution_id for agent in executions}
+                    if not lease.fenced(self, slug, lease.EPOCH.get(), end):
                         return False
-                    lives = self.execution_registry.records(slug) if previous else []
+                    fencing.watch(self, pipe)
+                    observed = occupants_of(fencing.read(self, slug)).values()
+                    if {a.execution_id for a in observed if a.name == name} != live:
+                        return False
                     pipe.multi()
                     if before is not None:
                         before(pipe)
@@ -515,23 +625,18 @@ class RedisStore:
                             self.key(slug, "history"),
                             json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
                         )
-                    for agent in executions:
-                        if agent.state != "finished":
-                            pipe.hset(
-                                self.key(slug, "executions"),
-                                agent.execution_id,
-                                json.dumps(asdict(replace(agent, state="ended"))),
-                            )
                     pipe.hdel(self.key(slug, "agents"), name)
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
                     pipe.hdel(self.key(slug, "retire-failures"), name)
                     pipe.execute()
                     self.names.retire(name, ended)
-                    return True
+                    break
                 except WatchError:
                     continue
-        raise SwarmError("agent registry kept changing; retirement was not committed")
+        else:
+            raise SwarmError("agent registry kept changing; retirement was not committed")
+        return True
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)
@@ -549,16 +654,15 @@ class RedisStore:
 
         key, lives = self.key(slug, "claim", task), self.key(slug, "started-lives")
         pending = self.key(slug, "pending-lives")
-        guards = self._claim_guards(slug, task)
         for _ in range(3):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, pending, *guards)
+                    pipe.watch(key, f"{key}:generation", f"{key}:refunded", lives, pending)
                     if (
                         pipe.get(key) != agent
                         or int(pipe.get(f"{key}:generation") or 0) != generation
                         or pipe.get(f"{key}:refunded") == str(generation)
-                        or any(pipe.exists(guard) for guard in guards)
+                        or self.authority_held(slug, task)
                     ):
                         return False
                     waiting = pipe.hget(pending, task)
@@ -689,6 +793,9 @@ class RedisStore:
         self.config(slug)
         if self.agents(slug):
             raise SwarmError(f"swarm {slug} still has agents; stop it with stop --now first")
+        from scripts.swarm import fencing
+
+        fencing.write(self, slug, lambda doc: doc.update({**fencing.EMPTY, "epoch": doc["epoch"]}))
         keys = list(self.redis.scan_iter(match=self.key(slug, "*")))
         if keys:
             self.redis.delete(*keys)
@@ -696,7 +803,9 @@ class RedisStore:
         self.names.release(slug)
 
     def export(self, slug):
-        """Everything the swarm holds in Redis: its own keys, its seats and their memory, its inbox addresses."""
+        """Everything the swarm holds: its own keys, its fencing document, its seats and memory, its inbox addresses."""
+        from scripts.swarm import fencing
+
         self.config(slug)
         own = [key for key in self.redis.scan_iter(match=self.key(slug, "*")) if key != self.key(slug, "tick-lock")]
         inbox, members = InboxStore(self.redis).keys_for(lambda address: of_swarm(address, slug, self.names))
@@ -706,11 +815,14 @@ class RedisStore:
         return {
             "keys": _dump(self.redis, keys),
             "members": {f"{PREFIX}:index": [slug], **members},
+            "fencing": fencing.read(self, slug),
             "names": self.names.export(slug),
         }
 
     def restore(self, slug, state):
-        """Replace the swarm's own keys with the exported ones and write back its seats and inbox."""
+        """Replace the swarm's own keys and fencing document with the exported ones and write back seats and inbox."""
+        from scripts.swarm import fencing
+
         with self.redis.pipeline() as pipe:
             pipe.delete(*self.redis.scan_iter(match=self.key(slug, "*")), *state["keys"])
             for key, entry in state["keys"].items():
@@ -720,6 +832,7 @@ class RedisStore:
             for key, found in state["members"].items():
                 pipe.sadd(key, *found)
             pipe.execute()
+        fencing.replace(self, slug, state.get("fencing"))
         self.names.names_state.restore(state.get("names", {}))
         self.ensure_code(slug)
 

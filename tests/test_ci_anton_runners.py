@@ -31,6 +31,7 @@ MOVED = {
     ("changelog.yml", "changelog"): LIGHT,
     ("changelog-seed.yml", "seed"): LIGHT,
     ("chaos.yml", "chaos"): STANDARD,
+    ("chart-release.yml", "package"): LIGHT,
     ("chart-release.yml", "publish"): LIGHT,
     ("mutation-line-selection-proof.yml", "compare"): BATCH,
     ("test.yml", "docs"): QUEUED,
@@ -112,6 +113,7 @@ MOVED = {
     ("test.yml", "unit-selected"): STANDARD,
     ("writer-lock.yml", "inputs"): LIGHT,
     ("writer-lock.yml", "scenario"): QUEUED,
+    ("feature-suite.yml", "features"): QUEUED,
     ("worker-resources.yml", "measure"): BATCH,
 }
 if (WORKFLOWS / "actions-storage.yml").exists():

@@ -90,14 +90,14 @@ from scripts.swarm.naming import lane_of, parse, seat_label
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
-from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
+from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
-SPAWN_BUDGET_S = 20
+SPAWN_BUDGET_S = 60
 SPAWN_POOL = 8
 STARTUP_GRACE_MS = 6 * 60 * 1000
 ACK_LATER = "hive_ack_later"
@@ -443,7 +443,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         actions.extend(followed)
         if agent is None:
             continue
-        filled = live_binding.fill(agent, facts.get(agent.name, {}))
+        filled = live_binding.hosted_home(store, live_binding.fill(agent, facts.get(agent.name, {})))
         if filled != agent:
             store.put_agent(slug, filled)
             agent = filled
@@ -502,7 +502,9 @@ def _ended(agent, rows):
     return agent.state == "finished" or bool(ended)
 
 
-def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
+def _launch_checks(
+    slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, doc: dict, now_ms: int
+) -> list[str]:
     waiting, actions = launch_check.pending(store, slug), []
     if not waiting:
         return actions
@@ -512,6 +514,8 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
     confirmed = [launch_check.canary(store, slug, agent) for agent in agents]
     agents, canaries = [agent for agent, _ in confirmed], {agent.name: miss for agent, miss in confirmed}
     facts = runtime.bindings(agents)
+    if any(launch_check.joined_at(agent, doc) is None for agent in agents):
+        doc = ledger.state(slug)
     for agent in agents:
         found = launch_check.misses(
             store,
