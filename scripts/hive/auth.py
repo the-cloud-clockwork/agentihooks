@@ -59,6 +59,7 @@ NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 SERVICE_TTL_S = 300
+_LEDGER_OF: dict[str, str] = {}
 
 
 class HiveError(Exception):
@@ -210,16 +211,35 @@ def ledger_member(redis, credential: str) -> str | None:
     )
 
 
+def _mapped(redis: object, store: object, digest: str | None, member_id: str) -> bool:
+    """True when the ledger credential with this digest belongs to member_id."""
+    if digest is None:
+        return False
+    return (
+        hive_state.read(store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}")))
+        == member_id
+    )
+
+
+def _member_ledger(redis: object, store: object, member_id: str) -> str | None:
+    """The ledger digest of a member with no holder record, cached per process and reloaded once it is unmapped."""
+    digest = _LEDGER_OF.get(member_id)
+    if _mapped(redis, store, digest, member_id):
+        return digest
+    found = member(redis, member_id)
+    if found is None:
+        return None
+    digest = _LEDGER_OF[member_id] = found["ledger"]
+    return digest
+
+
 def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     """A hive agent token scoped to one ledger and agent, recorded on its own without reading the member map."""
     store = _store(redis)
     digest = hive_state.read(store, f"holder.{member_id}")
     if digest is None and switch.legacy(os.environ):
-        digest = (member(redis, member_id) or {}).get("ledger")
-    current = digest and hive_state.read(
-        store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
-    )
-    if current != member_id:
+        digest = _member_ledger(redis, store, member_id)
+    if not _mapped(redis, store, digest, member_id):
         raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
     key = f"agent.{member_id}.{_digest(token)}"

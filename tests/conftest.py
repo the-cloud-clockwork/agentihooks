@@ -333,6 +333,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
         "OTEL_LANGFUSE_HOST_HEADER",
         "OTEL_LANGFUSE_PUBLIC_KEY",
         "OTEL_LANGFUSE_SECRET_KEY",
+        "BRAIN_URL",
+        "BRAIN_HTTP_TOKEN",
     ):
         monkeypatch.setattr(f"hooks.config.{_bound}", "")
 

@@ -22,6 +22,11 @@ umask 077
 export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
 export HIVE_REPO_ROOT="${HIVE_REPO_ROOT:-$HOME/dev}"
 mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT" "$HOME/dev/tcc-ecosystem"
+if [[ -n "${HIVE_BRAIN_BINDING_FILE:-}" ]]; then
+  mkdir -p "$AGENTIHOOKS_HOME/swarm"
+  install -m 0600 "$HIVE_BRAIN_BINDING_FILE" "$AGENTIHOOKS_HOME/swarm/brain-binding.json.next"
+  mv -f "$AGENTIHOOKS_HOME/swarm/brain-binding.json.next" "$AGENTIHOOKS_HOME/swarm/brain-binding.json"
+fi
 venv="$HOME/dev/tcc-ecosystem/.venv"
 [[ -e "$venv" && ! -L "$venv" ]] || ln -sfn "$(python3 -c 'import sys; print(sys.prefix)')" "$venv"
 git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"

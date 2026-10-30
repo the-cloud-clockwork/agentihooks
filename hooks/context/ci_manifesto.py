@@ -61,7 +61,11 @@ def _manifesto_paths() -> list[Path]:
 
     state = profile_chain.read_state()
     bundle = None if os.getenv("AGENTIHOOKS_BUNDLE_ROOT") else profile_chain.bundle_path(state)
-    found = _resolve_manifesto_paths(bundle, user_root=profile_chain.user_bundle_path(state))
+    found = _resolve_manifesto_paths(
+        bundle,
+        user_root=profile_chain.user_bundle_path(state),
+        shared_root=profile_chain.shared_bundle_path(state),
+    )
     return [Path(path).expanduser() for path in found]
 
 

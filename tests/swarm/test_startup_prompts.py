@@ -363,6 +363,7 @@ def test_the_code_steps_start_each_review_round_with_the_review_command(kind):
     )
 
 
+@pytest.mark.feature("swarm-park-restack")
 def test_a_stacked_claim_starts_from_the_dependency_branch_builds_pushes_and_parks():
     lines = _steps({"kind": "code", "stack_base": [{"task": "t1", "branch": "engineer-a1b2c3-0001"}]})
     text = "\n".join(lines)
@@ -427,6 +428,7 @@ def test_a_stacked_claim_continues_its_predecessors_branch_over_the_dependency_b
     assert "--from origin/eng-one" not in "\n".join(lines)
 
 
+@pytest.mark.feature("swarm-park-restack")
 def test_a_parked_task_finishes_from_its_branch_after_a_restack():
     envelope = {"continue_from": "origin/eng-parked", "remote_head": "abc"}
     lines = _steps(

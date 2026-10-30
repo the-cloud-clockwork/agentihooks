@@ -98,6 +98,7 @@ metadata:
 spec:
   activeDeadlineSeconds: 1900
   backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
       restartPolicy: Never

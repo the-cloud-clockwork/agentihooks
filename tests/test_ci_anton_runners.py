@@ -112,6 +112,7 @@ MOVED = {
     ("test.yml", "unit-selected"): STANDARD,
     ("writer-lock.yml", "inputs"): LIGHT,
     ("writer-lock.yml", "scenario"): QUEUED,
+    ("feature-suite.yml", "features"): QUEUED,
     ("worker-resources.yml", "measure"): BATCH,
 }
 if (WORKFLOWS / "actions-storage.yml").exists():
@@ -120,6 +121,9 @@ if (WORKFLOWS / "ci-minutes.yml").exists():
     MOVED[("ci-minutes.yml", "measure")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
+if (WORKFLOWS / "hive-join.yml").exists():
+    MOVED[("hive-join.yml", "smoke")] = QUEUED
+
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}
 
 # The runner trust loader contract fixes this job's runner.
