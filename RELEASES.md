@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.498 · 2026-10-30
+
+### 2026-10-30 · d1b68b08aa13 · #8800 · @nestorcolt
+
+**Keep a finished agent finished so a mid tick master handoff launches the successor**
+
+This change fixes a race in `ExecutionRegistry._update` where a master agent's `finished` status could be overwritten back to `working` if a handoff landed mid-tick, between `_reap`'s read of the agent list and `_watch_idle`'s write-back. Because that stale write only compared identity fields, it silently reverted completed masters, preventing `_ended` from firing and blocking successor launches. Now a `finished` record stays finished unless the write itself ends the execution, guarded under the registry's lock so all tick paths are protected, with tests confirming successors spawn correctly on handoff.
+
+### 2026-10-30 · fb2f01823752 · #8834 · @nestorcolt
+
+**Read claims and clear fleet red hold marks in one Redis call each**
+
+This change batches the fleet red notice pass so it reads claim state for every open unclaimed task with a single Redis MGET and clears all stale hold marks with one Redis DEL at the end of the pass, instead of issuing a separate GET and DEL per task. On rig-grade-swarm that per-task round-trip pattern was costing 76 to 80 seconds of every tick pass despite only 1.7 to 1.8 seconds of actual CPU work, so cutting it to two bulk calls removes most of that wall-clock time without altering which tasks get held, noticed, or cleared.
+
 ## v2.17.497 · 2026-10-30
 
 ### 2026-10-30 · a9db9ee548c2 · #8833 · @agenticore-app
