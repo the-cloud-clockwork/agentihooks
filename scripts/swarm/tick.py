@@ -689,7 +689,7 @@ def _elsewhere(agent: AgentRecord) -> bool:
     """A hub admitted agent names its hive before that hive records a host target."""
     from scripts.swarm.commands import hive_id
 
-    return bool(agent.hive) and agent.hive != hive_id()
+    return not agent.runtime_target and bool(agent.hive) and agent.hive != hive_id()
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):

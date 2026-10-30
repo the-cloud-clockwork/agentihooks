@@ -16,15 +16,18 @@ def store() -> RedisStore:
     return s
 
 
-@pytest.mark.parametrize(("hive", "kept"), [("anton-2", True), ("hub", False)])
+@pytest.mark.parametrize(
+    ("hive", "target", "kept"),
+    [("anton-2", {}, True), ("hub", {}, False), ("anton-2", {"pid": 7, "pid_start": 9}, False)],
+)
 def test_a_hub_admitted_agent_on_another_hive_outlives_the_local_startup_grace(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch, hive: str, kept: bool
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, hive: str, target: dict, kept: bool
 ) -> None:
     monkeypatch.setattr(commands, "hive_id", lambda: "hub")
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     (agent,) = workers(store)
-    agent = store.start_execution("sw", replace(agent, hive=hive, runtime_target={}), "")
+    agent = store.start_execution("sw", replace(agent, hive=hive, runtime_target=target), "")
     runtime.live.clear()
     runtime.statuses[agent.name] = "unknown"
     actions = tick("sw", store, ledger, runtime, now_ms=1_000 + STARTUP_GRACE_MS + 1)
@@ -34,4 +37,4 @@ def test_a_hub_admitted_agent_on_another_hive_outlives_the_local_startup_grace(
         assert f"suspect {agent.name}: its runtime did not answer" in actions
     else:
         assert any(action.startswith(f"lost {agent.name}") for action in actions)
-        assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t1")
+        assert runtime.spawned[-1][2] == "t1" and runtime.spawned[-1][1] != agent.name
