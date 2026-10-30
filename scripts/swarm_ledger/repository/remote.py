@@ -110,6 +110,8 @@ class Session:
             raise RegistryConflict(answer.get("registries", []))
         if status != 200:
             raise Unavailable(f"{status} {answer}")
+        self.seen.update(self.saved)
+        self.saved, self.purged = {}, []
 
     def __enter__(self) -> "Session":
         return self
@@ -296,7 +298,8 @@ class RemoteLedgerRepository:
 
     @contextmanager
     def connect(self) -> Iterator[Session]:
-        yield Session(self.client)
+        with Session(self.client) as session:
+            yield session
 
     def registry(self, name: str, connection: Session) -> dict:
         return connection.registry(name)
