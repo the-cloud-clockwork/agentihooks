@@ -199,17 +199,11 @@ def test_local_controller_spawns_every_lane(store):
 
 def test_workstation_room_reuses_one_fleet_scan_across_a_placement_pass(store, monkeypatch):
     from scripts.swarm import controller, lease
-    from scripts.swarm.store import AgentRecord
     from tests.swarm.test_tick import FakeRuntime
 
-    scans: list[str] = []
+    scans = []
     original = store.agents
-
-    def counting(slug: str) -> list[AgentRecord]:
-        scans.append(slug)
-        return original(slug)
-
-    monkeypatch.setattr(store, "agents", counting)
+    monkeypatch.setattr(store, "agents", lambda slug: (scans.append(slug), original(slug))[1])
     held = lease.acquire(store, "sw", "anton")
     runtime = controller.FencedRuntime(store, "sw", held, FakeRuntime(), "local")
     runtime.begin_placement_pass()

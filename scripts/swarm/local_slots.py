@@ -1,32 +1,24 @@
-from dataclasses import dataclass
-
 from scripts.swarm import lease
-from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
+from scripts.swarm.store import PREFIX, RedisStore
 from scripts.swarm_v2.runtime.base import LOCAL
 
 PENDING_MS = 300000
 STARTING = "starting"
-Records = dict[str, tuple[str, AgentRecord]]
-
-
-@dataclass
-class PassCache:
-    records: Records | None = None
 
 
 def key(machine: str) -> str:
     return f"{PREFIX}:local-slots:{machine}"
 
 
-def held(store: RedisStore, machine: str, slug: str, task: str, cache: PassCache | None = None) -> int:
+def held(store: RedisStore, machine: str, slug: str, task: str, cache: dict | None = None) -> int:
     return len(_held(store, store.redis.hgetall(key(machine)), f"{slug}/{task}", lease.now_ms(store), cache)[0])
 
 
-def running(store: RedisStore, slug: str, task: str, cache: PassCache | None = None) -> int:
+def running(store: RedisStore, slug: str, task: str, cache: dict | None = None) -> int:
     return len(_workers(_records(store, cache), f"{slug}/{task}"))
 
 
-def occupancy(store: RedisStore, machine: str, cache: PassCache | None = None) -> tuple[int, int]:
+def occupancy(store: RedisStore, machine: str, cache: dict | None = None) -> tuple[int, int]:
     running = len(_workers(_records(store, cache), None))
     held, _ = _held(store, store.redis.hgetall(key(machine)), None, lease.now_ms(store), cache)
     return running, len(held)
@@ -77,7 +69,7 @@ def release(store: RedisStore, machine: str, slug: str, name: str) -> None:
 
 
 def _held(
-    store: RedisStore, claims: dict, own: str | None, now: int, cache: PassCache | None = None
+    store: RedisStore, claims: dict, own: str | None, now: int, cache: dict | None = None
 ) -> tuple[list[str], list[str]]:
     records = _records(store, cache)
     agents = _workers(records, own)
@@ -89,16 +81,16 @@ def _held(
     return [*agents, *pending], [named for named in claims if named not in pending]
 
 
-def _records(store: RedisStore, cache: PassCache | None = None) -> Records:
-    if cache is not None and cache.records is not None:
-        return cache.records
-    built: Records = {
+def _records(store: RedisStore, cache: dict | None = None) -> dict:
+    if cache is not None and "records" in cache:
+        return cache["records"]
+    built = {
         f"{slug}/{agent.name}": (f"{slug}/{agent.task}", agent)
         for slug in store.slugs()
         for agent in store.agents(slug)
     }
     if cache is not None:
-        cache.records = built
+        cache["records"] = built
     return built
 
 
