@@ -31,18 +31,17 @@ def launching(tmp_path):
 
 
 @pytest.mark.parametrize("key", ["profile", "harness", "launch"])
-def test_handoff_missing_original_choices_cannot_spawn(launching, key):
+def test_handoff_missing_original_choices_spawns_fresh_on_the_lane_profile(launching, monkeypatch, key):
     engine, config, task, saved, calls = launching
+    monkeypatch.setattr(runtime.profile_choice, "installed", lambda name: True)
+    config.lanes = {"eng": {"profile": "engineer"}}
     if key == "launch":
         task["handoff_envelope"].pop("launch")
     else:
         saved.pop(key)
-    with pytest.raises(
-        SpawnError, match="^unsupported handoff: original profile and run options are missing$"
-    ) as error:
-        engine.spawn(config, "eng", "worker", task)
-    assert error.value.status == "unsupported"
-    assert not calls
+    engine.spawn(config, "eng", "worker", task)
+    assert len(calls) == 1
+    assert calls[0][calls[0].index("--profile") + 1] == "engineer"
 
 
 @pytest.mark.parametrize("key", ["model", "effort"])

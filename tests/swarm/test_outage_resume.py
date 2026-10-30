@@ -1,10 +1,12 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from scripts.swarm import idle, outage, profile_choice, prompt, resume
 from scripts.swarm.pane import PaneObservation
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -505,6 +507,33 @@ def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_s
     fresh = runtime.tasks[-1]
     assert (fresh["seat"], fresh["handoff"], fresh["transfer"]["handoff"]) == (dead.seat, handoff, handoff)
     assert handoff in "\n".join(prompt.priming_lines(fresh))
+    assert recovery_state(store, dead.name) == "done"
+
+
+def test_an_unsupported_handoff_restart_retries_fresh_on_the_same_seat(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.tick import SpawnError as RestartError
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    native_spawn = runtime.spawn
+    launched = []
+
+    def spawn(config: SwarmConfig, lane: str, name: str, task: dict[str, object]) -> Placed:
+        launched.append(task)
+        if len(launched) == 1:
+            raise RestartError("saved run options unavailable", "unsupported")
+        return native_spawn(config, lane, name, task)
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
+    actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert f"outage resume for {dead.name}" in actions
+    assert len(launched) == 2
+    assert not launched[0].get(profile_choice.FRESH)
+    assert launched[1] == {**launched[0], profile_choice.FRESH: True}
+    assert launched[1]["seat"] == dead.seat
     assert recovery_state(store, dead.name) == "done"
 
 

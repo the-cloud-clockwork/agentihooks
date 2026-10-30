@@ -13,7 +13,8 @@ UNITS = (
 def test_the_split_ledger_units_meet_the_complexity_limits():
     paths = {ROOT / unit.split("::")[0] for unit in UNITS}
     measured = {}
-    size_limits._ruff_hits(ROOT, {path: size_limits.functions(path.read_text()) for path in paths}, measured)
+    defs = {path: size_limits.functions(path.read_text()) for path in paths}
+    size_limits._ruff_hits(ROOT, defs, measured, size_limits._ruff(list(defs)))
     assert measured == {}
 
 

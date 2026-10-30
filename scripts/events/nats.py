@@ -3,7 +3,7 @@ import base64
 import datetime
 import threading
 from collections.abc import Callable, Coroutine, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import nats as nats_client
 from nats.aio.msg import Msg
@@ -11,6 +11,7 @@ from nats.errors import NoRespondersError
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
+from nats.js.kv import KeyValue
 
 from . import nats_payload, nkey
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
@@ -30,6 +31,7 @@ EVENT_STREAM = "AGENTIHOOKS-EVENTS"
 QUEUE_SUBJECT = "agentihooks.queue"
 MSG_ID = "Nats-Msg-Id"
 KV_HISTORY = 64
+STATE_LIMITS = {"hub-timers": {"history": 1, "max_bytes": 1 << 30}}
 # nats-py refuses a zero fetch timeout, and the server needs a moment to answer one that is nearly zero.
 MIN_FETCH_MS = 10
 LOOP_START_S = 5
@@ -297,6 +299,22 @@ async def provision_queue(js: JetStreamContext, names: QueueNames, config: BusCo
     )
 
 
+async def provision_state(js: JetStreamContext, bucket: str) -> KeyValue:
+    limits = STATE_LIMITS.get(bucket, {"history": KV_HISTORY})
+    try:
+        return await js.create_key_value(bucket=bucket, **limits)
+    except APIError as exc:
+        if exc.err_code != 10058 or bucket not in STATE_LIMITS:
+            raise
+    stream = f"KV_{bucket}"
+    info = await js.stream_info(stream)
+    await js.update_stream(config=replace(info.config, max_msgs_per_subject=limits["history"]))
+    await nats_payload.reclaim_all(js, stream, f"$KV.{bucket}.")
+    bounded = replace(info.config, max_msgs_per_subject=limits["history"], max_bytes=limits["max_bytes"])
+    await js.update_stream(config=bounded)
+    return await js.key_value(bucket)
+
+
 class NatsWorkQueue:
     def __init__(
         self,
@@ -349,9 +367,7 @@ class NatsStateStore:
         self._js = js
         self._bucket = bucket
         self._swept = None
-        self._kv = loop.run(
-            js.create_key_value(bucket=bucket, history=KV_HISTORY) if provision else js.key_value(bucket)
-        )
+        self._kv = loop.run(provision_state(js, bucket) if provision else js.key_value(bucket))
 
     async def _create_chunk(self, key: str, value: bytes) -> None:
         try:

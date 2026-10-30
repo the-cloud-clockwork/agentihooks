@@ -74,6 +74,7 @@ def test_an_agent_still_working_on_a_closed_account_past_its_warning_is_a_findin
     assert found[0].id == "working-on-drain/engineer@abc-0001"
 
 
+@pytest.mark.feature("swarm-health-drain")
 def test_an_open_account_with_ten_percent_or_less_routing_left_counts_as_draining():
     assert drain_watch.draining(_read(row("a", "OPEN", five=40.0, week=10.0)), Limits(), 100.0)
     assert not drain_watch.draining(_read(row("a", "OPEN", five=40.0, week=10.5)), Limits(), 100.0)
@@ -196,6 +197,7 @@ def test_the_grace_follows_its_health_setting():
     assert len(drain_watch.findings(store, SLUG, Limits(drain_minutes=25), 1_000_000 + 26 * MINUTE)) == 1
 
 
+@pytest.mark.feature("swarm-health-drain")
 def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(env, capsys, monkeypatch, tmp_path):  # noqa: F811
     from scripts.swarm import cli, status
 

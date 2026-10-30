@@ -1,6 +1,9 @@
+import pytest
+
 from scripts.swarm.autoscale import calculate
 
 
+@pytest.mark.feature("swarm-autoscale")
 def test_more_accounts_raise_the_ceiling_only_on_the_third_tick():
     live = {"plan": 0, "ci": 0, "eng": 2}
     previous = {
@@ -36,6 +39,7 @@ def test_lane_ceiling_preserves_live_agents_and_splits_ready_demand_in_order():
     assert decision["pending_raise"] == {"target": None, "ticks": 0}
 
 
+@pytest.mark.feature("swarm-autoscale")
 def test_total_ceiling_is_at_most_fifty():
     decision = calculate(
         {"plan": 1, "ci": 1, "eng": 46},
@@ -91,6 +95,7 @@ def test_a_quota_reset_waits_three_ticks_after_an_immediate_drain():
     assert decisions[-1]["pending_raise"] == {"target": None, "ticks": 0}
 
 
+@pytest.mark.feature("swarm-autoscale")
 def test_host_room_caps_the_target_and_applies_a_lower_ceiling_at_once():
     decision = calculate(
         {"plan": 1, "ci": 1, "eng": 2},

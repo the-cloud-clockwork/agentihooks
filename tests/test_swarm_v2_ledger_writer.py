@@ -345,8 +345,9 @@ def test_the_command_needs_a_subcommand(capsys):
 
 
 @pytest.fixture
-def serving(monkeypatch, tmp_path):
+def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(server, "metrics_journal", lambda *args: None)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())

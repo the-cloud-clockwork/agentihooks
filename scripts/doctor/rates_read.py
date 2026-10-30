@@ -1,9 +1,13 @@
 """Read only loaders for the Doctor rates: the ledger, tool activity, health findings, the gate log, injection traces
 and the pull requests of tasks done in the span, cached in Redis."""
 
+from __future__ import annotations
+
 import json
 import subprocess
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hooks import config
 from hooks.context import injection_trace
@@ -15,6 +19,9 @@ from scripts.swarm.health import activity
 from scripts.swarm.ledger_events import iso_ms
 from scripts.swarm.runtime import SWARM_HOME
 from scripts.swarm.store import PREFIX
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 FIELDS = "state,mergedAt,additions,deletions,files"
 OPEN_TTL_S = 300
@@ -68,7 +75,14 @@ def fetch(url, run=subprocess.run):
         return None
 
 
-def pulls(redis, slug, urls, run=subprocess.run):
+def pulls(
+    redis: Redis,
+    slug: str,
+    urls: Iterable[str],
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, Pull]:
+    from redis.exceptions import NoPermissionError
+
     found = {}
     for url in sorted(set(urls)):
         key = ":".join((PREFIX, slug, "rates-pull", url))
@@ -78,7 +92,10 @@ def pulls(redis, slug, urls, run=subprocess.run):
             if not isinstance(fetched, dict) or "state" not in fetched:
                 continue
             raw = json.dumps(fetched)
-            redis.set(key, raw, ex=OPEN_TTL_S if fetched["state"] == "OPEN" else SETTLED_TTL_S)
+            try:
+                redis.set(key, raw, ex=OPEN_TTL_S if fetched["state"] == "OPEN" else SETTLED_TTL_S)
+            except NoPermissionError:
+                pass
         found[url] = pull(json.loads(raw))
     return found
 
@@ -90,6 +107,16 @@ def _done_urls(events, tasks, span):
         if e["kind"] == "task done" and span.holds(e["at"]) and e["target"].startswith("tasks/")
     ]
     return [tasks[tid]["pr_url"] for tid in done if tasks.get(tid, {}).get("pr_url")]
+
+
+def _doctor_findings(store, slug):
+    from scripts.doctor.priming import doctor_slug
+
+    doctor = doctor_slug(slug)
+    if store.peer(doctor) != slug or not store.redis.hget(store.key(doctor, "doctor-timer"), "last"):
+        return None
+    raw = store.redis.hgetall(store.key(doctor, "doctor-findings"))
+    return {finding_id: json.loads(record) for finding_id, record in raw.items()}
 
 
 def load(store, ledger, slug, span, run=subprocess.run, home=SWARM_HOME):
@@ -106,4 +133,5 @@ def load(store, ledger, slug, span, run=subprocess.run, home=SWARM_HOME):
         corrections=_timed(injection_trace.corrections()),
         pulls=pulls(store.redis, slug, _done_urls(events, tasks, span), run),
         inbox=read.inbox_items(InboxStore(store.redis), slug),
+        doctor_findings=_doctor_findings(store, slug),
     )

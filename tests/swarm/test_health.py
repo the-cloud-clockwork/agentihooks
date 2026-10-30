@@ -47,10 +47,12 @@ def run(ledger, agents=(), activity=None, limits=LIMITS):
     return [f.as_dict() for f in health.findings(ledger, list(agents), activity or {}, limits)]
 
 
+@pytest.mark.feature("swarm-health-ceremony")
 def test_a_healthy_event_set_produces_no_finding():
     assert run(*healthy()) == []
 
 
+@pytest.mark.feature("swarm-health-ceremony")
 def test_ceremony_names_the_agent_its_transitions_and_its_outcomes():
     events = [ev("comment edited", "phases/p1") for _ in range(25)] + [ev("task done", "tasks/t1")]
     ledger = {"tasks": [task("t1", claimed_by="sw-eng-2")], "_meta": {"events": events}}
@@ -204,6 +206,7 @@ def test_a_comment_by_another_agent_is_not_the_dispatcher_decision():
     ]
 
 
+@pytest.mark.feature("swarm-health-scope-inflation")
 def test_scope_inflation_lists_each_task_by_title_with_its_gain():
     events = [ev("added", f"tasks/q{n}") for n in range(3)]
     tasks = [
@@ -232,6 +235,7 @@ def test_rising_gain_or_master_queued_tasks_are_not_inflation():
     assert run({"tasks": tasks, "_meta": {"events": events}}) == []
 
 
+@pytest.mark.feature("swarm-health-proof-loop")
 def test_proof_loop_names_the_task_its_reruns_and_review_rounds():
     events = [ev("task started", "tasks/t1", by="swarm") for _ in range(4)] + [ev("task pr", "tasks/t1")]
     assert run(
@@ -275,6 +279,7 @@ def test_failed_launch_findings_require_repetition_and_keep_each_launch_error():
     ]
 
 
+@pytest.mark.feature("swarm-health-proof-loop")
 def test_review_rounds_over_the_cap_are_a_proof_loop():
     events = [ev("task started", "tasks/t1", by="swarm")] + [ev("task pr", "tasks/t1") for _ in range(4)]
     found = run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}, "review_rounds": {"t1": {"first": 4}}})
@@ -357,6 +362,7 @@ def test_reruns_at_the_cap_are_no_proof_loop_and_one_more_measures_reruns_plus_r
     assert found.measure == 4
 
 
+@pytest.mark.feature("swarm-health-idle-claim")
 def test_an_idle_agent_holding_a_claim_is_named_with_its_task():
     ledger = {
         "tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")],
@@ -373,6 +379,7 @@ def test_an_idle_agent_holding_a_claim_is_named_with_its_task():
     ]
 
 
+@pytest.mark.feature("swarm-health-idle-claim")
 def test_an_agent_waiting_on_checks_does_not_trip_idle_with_claim():
     ledger = {"tasks": [task("t1", state="pr", title="Fold the chat panel")], "_meta": {"events": []}}
     idle = [agent(idle_ticks=5)]
@@ -380,6 +387,7 @@ def test_an_agent_waiting_on_checks_does_not_trip_idle_with_claim():
     assert [f.kind for f in health.findings(ledger, idle, {}, LIMITS)] == ["idle with claim"]
 
 
+@pytest.mark.feature("swarm-health-verdicts")
 def test_each_finding_carries_a_stable_id_and_the_measure_its_evidence_grows_by():
     ledger = {"tasks": [task("t1", state="claimed", pr_url="")], "_meta": {"events": []}}
     [idle] = health.findings(ledger, [agent(idle_ticks=4)], {}, LIMITS)
@@ -389,6 +397,7 @@ def test_each_finding_carries_a_stable_id_and_the_measure_its_evidence_grows_by(
     assert "measure" not in watch.as_dict()
 
 
+@pytest.mark.feature("swarm-health-stale-claim")
 def test_a_quiet_claim_names_the_task_its_holder_and_the_quiet_time():
     ledger = {"tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")], "_meta": {"events": []}}
     assert run(ledger, [{**agent(), "quiet_minutes": 44}]) == [
@@ -453,6 +462,7 @@ def test_fresh_agent_does_not_hide_a_stalled_agent_and_taskless_evidence_stays_n
     assert found[0].evidence == ("pane working; task ",)
 
 
+@pytest.mark.feature("swarm-health-over-monitoring")
 def test_over_monitoring_names_the_agent_and_its_counts():
     activity = {WORKER: {"watch": 40, "act": 3, "since": 21}}
     assert run({"tasks": [], "_meta": {"events": []}}, activity=activity) == [
@@ -476,6 +486,7 @@ def test_watching_after_the_last_action_within_the_ratio_gets_no_finding():
     assert run({"tasks": [], "_meta": {"events": []}}, activity=activity) == []
 
 
+@pytest.mark.feature("swarm-health-over-monitoring")
 def test_the_master_gets_a_looser_over_monitoring_limit_than_other_agents():
     counts = {"watch": 40, "act": 4, "since": 40}
     found = run({"tasks": [], "_meta": {"events": []}}, activity={"sw-master-1": counts, WORKER: counts})

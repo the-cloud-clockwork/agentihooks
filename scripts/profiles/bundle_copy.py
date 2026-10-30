@@ -11,10 +11,23 @@ from pathlib import Path
 READ_SECONDS = 10
 COPY_SECONDS = 300
 ROOT_FOLDER = "bundle"
+SHARED_FOLDER = "shared-bundle"
+UNPINNED = "-"
 USER_FOLDER = "user-bundle"
 _ACTIVE: ContextVar[tuple[Path, Path, str] | None] = ContextVar("recorded_bundle", default=None)
+_ACTIVE_SHARED: ContextVar[tuple[Path, Path, str] | None] = ContextVar("recorded_shared_bundle", default=None)
 _ACTIVE_USER: ContextVar[tuple[Path, Path, str] | None] = ContextVar("recorded_user_bundle", default=None)
-_SLOTS = ((ROOT_FOLDER, _ACTIVE), (USER_FOLDER, _ACTIVE_USER))
+_SLOTS = ((ROOT_FOLDER, _ACTIVE), (SHARED_FOLDER, _ACTIVE_SHARED), (USER_FOLDER, _ACTIVE_USER))
+
+
+def split_revision(revision: str) -> tuple[str, str | None, str]:
+    """Split root[:user] or root:shared:user; the shared part is None only in the two-part form."""
+    parts = revision.split(":")
+    if len(parts) > 3:
+        raise ValueError(f"bundle revision {revision!r} has more than three parts; expected root:shared:user")
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2]
+    return parts[0], None, parts[1] if len(parts) == 2 else ""
 
 
 def is_pinned() -> bool:
@@ -28,6 +41,11 @@ def current() -> Path | None:
 
 def current_user() -> Path | None:
     active = _ACTIVE_USER.get()
+    return active[1] if active is not None else None
+
+
+def current_shared() -> Path | None:
+    active = _ACTIVE_SHARED.get()
     return active[1] if active is not None else None
 
 
@@ -109,19 +127,30 @@ def _pin(stack: ExitStack, bundle: Path, revision: str, root: Path, label: str) 
 
 @contextmanager
 def recorded(
-    bundle: Path | None, revision: str, root: Path, user: Path | None = None, user_revision: str = ""
+    bundle: Path | None,
+    revision: str,
+    root: Path,
+    user: Path | None = None,
+    user_revision: str = "",
+    shared: Path | None = None,
+    shared_revision: str = "",
 ) -> Iterator[None]:
     if bundle is None:
         raise ValueError(f"the launch recorded bundle commit {revision}, but no bundle is linked")
+    if shared_revision and shared is None:
+        raise ValueError(f"the launch recorded shared bundle commit {shared_revision}, but no shared bundle is linked")
     if user_revision and user is None:
         raise ValueError(f"the launch recorded user bundle commit {user_revision}, but no user bundle is linked")
     root.mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
         copy, commit = _pin(stack, bundle, revision, root, "bundle")
         pinned = {_ACTIVE: (bundle, copy, commit)}
+        if shared_revision:
+            shared_copy, shared_commit = _pin(stack, shared, shared_revision, root, "shared bundle")
+            pinned[_ACTIVE_SHARED] = (shared, shared_copy, shared_commit)
         if user_revision:
             user_copy, user_commit = _pin(stack, user, user_revision, root, "user bundle")
             pinned[_ACTIVE_USER] = (user, user_copy, user_commit)
-        for slot in (_ACTIVE, _ACTIVE_USER):
+        for slot in (_ACTIVE, _ACTIVE_SHARED, _ACTIVE_USER):
             stack.callback(slot.reset, slot.set(pinned.get(slot)))
         yield

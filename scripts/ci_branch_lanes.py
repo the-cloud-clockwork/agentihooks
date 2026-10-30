@@ -146,9 +146,21 @@ def dedicated_chart_group(name: str, block: object, job: dict, trusted: dict) ->
     return (
         trusted.get("name") == "Helm chart release"
         and events(trusted) == [{"workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}}]
-        and name in {"publish", "kind"}
+        and name in {"package", "kind", "publish"}
         and job == (trusted.get("jobs") or {}).get(name)
         and block == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
+    )
+
+
+def flake_history_group(name: str, block: object, job: dict, trusted: dict) -> bool:
+    baseline = (trusted.get("jobs") or {}).get(name)
+    return (
+        trusted.get("name") == "Tests"
+        and name == "flake-budget"
+        and isinstance(baseline, dict)
+        and {key: value for key, value in job.items() if key != "concurrency"}
+        == {key: value for key, value in baseline.items() if key != "concurrency"}
+        and block == {"group": "flake-history", "queue": "max", "cancel-in-progress": False}
     )
 
 
@@ -181,7 +193,7 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         block = job.get("concurrency", workflow.get("concurrency"))
         base_job = (trusted.get("jobs") or {}).get(name, {})
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
-        if dedicated_chart_group(name, block, job, trusted):
+        if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
             continue
         if per_run_mutation_group(name, block, job, trusted):
             continue

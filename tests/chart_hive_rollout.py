@@ -36,6 +36,7 @@ def test_every_roll_acquires_before_sync_and_releases_after_serving():
     jobs = [item for item in objects if item["kind"] == "Job"]
     assert {item["metadata"]["annotations"]["argocd.argoproj.io/hook"] for item in jobs} == {"PreSync", "PostSync"}
     for job in jobs:
+        assert job["spec"]["ttlSecondsAfterFinished"] == 3600
         pod = job["spec"]["template"]["spec"]
         assert pod["automountServiceAccountToken"] is True
         command = pod["containers"][0]["command"]
