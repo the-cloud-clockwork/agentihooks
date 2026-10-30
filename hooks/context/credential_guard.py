@@ -11,7 +11,8 @@ Decisions are operand-aware: a sensitive path blocks only when a reader consumes
 positional operand, a ``<`` redirect target, an option value, a ``git`` revision path, or
 inside an interpreter one-liner. Naming the file (``find -name .env``) is not a read.
 A recursive search over a tree holding a credential file gets exclusions injected under
-``allow_rewrite``; otherwise the guard blocks when a credential file is present.
+``allow_rewrite``; otherwise the guard blocks. Shell rc names stay out of the exclusions:
+the harness reads an option value as a file operand and would trip its deny rule.
 
 ``evaluate(payload, ...)`` returns a ``Verdict``; ``decide(payload)`` is the block-only view
 used by the standalone launcher. The module has no intra-package imports so it also runs by

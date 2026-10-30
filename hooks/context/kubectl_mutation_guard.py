@@ -312,7 +312,11 @@ _BOOL_FLAGS = ("-i", "-t", "-it", "-ti", "--stdin", "--tty", "-q", "--quiet", "-
 
 
 def _kubectl_positionals(args: str) -> tuple[Optional[str], list[str]]:
-    """Split kubectl arguments into the namespace flag value and the positional arguments."""
+    """Split kubectl arguments into the namespace flag value and the positional arguments.
+
+    Any other flag may take the next token as its value, so an unknown flag returns no
+    namespace and no positionals and nothing is allowlisted.
+    """
     try:
         tokens = shlex.split(args)
     except ValueError:
@@ -403,6 +407,7 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
     Whole-command patterns, kubectl cp and scp run on the command with quoted strings and
     heredoc bodies stripped, so text mentions never match. ssh, kubectl exec and docker exec
     run on the original command because they inspect inside the quoted inner command.
+    The ssh pattern is anchored at command position so the word ssh inside text never matches.
     """
     if not command:
         return None
