@@ -62,6 +62,13 @@ def test_a_reused_pool_does_not_hide_a_later_authentication_refusal(source):
         store._pinged(source, "rediss://localhost/0")
 
 
+def test_eight_current_endpoints_keep_their_pools(source):
+    clients = [store._pinged(source, f"rediss://localhost/{database}") for database in range(8)]
+
+    for database, client in enumerate(clients):
+        assert store._pinged(source, f"rediss://localhost/{database}") is client
+
+
 def test_old_endpoints_leave_the_bounded_pool_cache(source):
     first = store._pinged(source, "rediss://localhost/0")
     for database in range(1, 9):
