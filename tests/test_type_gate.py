@@ -51,10 +51,10 @@ def test_the_config_pins_version_platform_and_strict_scope() -> None:
     }
 
 
-def test_the_baseline_is_registered_shrink_only() -> None:
+def test_the_baseline_moves_only_with_the_type_gate_s_evidence() -> None:
     from scripts import threshold_pins
 
-    assert str(type_gate.BASELINE) in threshold_pins.SHRINK_ONLY
+    assert (str(type_gate.BASELINE), "scripts.type_gate") in threshold_pins.GRADED_BY
 
 
 def test_a_new_ill_typed_function_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -188,13 +188,61 @@ def test_grade_holds_drift_only_on_touched_files_and_edited_entries() -> None:
     assert type_gate.grade({"a.py": 1}, {"a.py": 1}, {}, set()) == [
         f"{type_gate.BASELINE} records 0 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
     ]
-    assert type_gate.grade({"a.py": 2}, {"a.py": 3}, {"a.py": 2}, set()) == [
-        "a.py has 3 type errors, more than the 2 the base allows"
+    assert type_gate.grade({"a.py": 2}, {"a.py": 3}, {"a.py": 2}, {"a.py"}) == [
+        "a.py has 3 type errors, more than the 2 the base allows",
+        f"{type_gate.BASELINE} records 2 type errors in a.py, the head has 3; run python -m scripts.type_gate --write",
     ]
 
 
+def test_grade_holds_growth_only_on_touched_files() -> None:
+    assert type_gate.grade({"a.py": 2}, {"a.py": 3}, {"a.py": 2}, set()) == []
+    assert type_gate.grade({}, {"a.py": 169}, {}, {"b.py"}) == []
+
+
 def test_grade_reports_only_growth_for_a_new_file_absent_from_both_baselines() -> None:
-    assert type_gate.grade({}, {"a.py": 1}, {}, set()) == ["a.py has 1 type errors, more than the 0 the base allows"]
+    assert type_gate.grade({}, {"a.py": 1}, {}, {"a.py"}) == [
+        "a.py has 1 type errors, more than the 0 the base allows",
+        f"{type_gate.BASELINE} records 0 type errors in a.py, the head has 1; run python -m scripts.type_gate --write",
+    ]
+
+
+def test_a_baseline_merged_without_another_file_s_errors_does_not_freeze_the_next_head(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _tree(tmp_path / "base", {"hooks/service.py": ILL_TYPED}, {})
+    head = _tree(tmp_path / "head", {"hooks/service.py": ILL_TYPED, "hooks/other.py": WELL_TYPED}, {})
+    assert _grade(base, head, capsys) == (0, "1 type errors in 1 files, 0 allowed, 0 errors\n")
+
+
+def test_a_baseline_refresh_matching_the_measurement_is_green(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _tree(tmp_path / "base", {"hooks/service.py": ILL_TYPED}, {})
+    head = _tree(tmp_path / "head", {"hooks/service.py": ILL_TYPED}, {"hooks/service.py": 1})
+    assert _grade(base, head, capsys) == (0, "1 type errors in 1 files, 0 allowed, 0 errors\n")
+
+
+def test_a_refresh_raising_an_entry_past_the_measurement_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _tree(tmp_path / "base", {"hooks/service.py": ILL_TYPED}, {})
+    head = _tree(tmp_path / "head", {"hooks/service.py": ILL_TYPED}, {"hooks/service.py": 5})
+    assert _grade(base, head, capsys) == (
+        1,
+        "1 type errors in 1 files, 0 allowed, 1 errors\n"
+        f"::error::{type_gate.BASELINE} records 5 type errors in hooks/service.py, the head has 1; "
+        "run python -m scripts.type_gate --write\n",
+    )
+
+
+def test_a_head_that_touches_a_file_over_a_stale_baseline_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _tree(tmp_path / "base", {"hooks/service.py": ILL_TYPED}, {})
+    head = _tree(tmp_path / "head", {"hooks/service.py": ILL_TYPED + "\nx = 1\n"}, {"hooks/service.py": 1})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "::error::hooks/service.py has 1 type errors, more than the 0 the base allows\n" in out
 
 
 def test_a_base_without_a_baseline_grades_drift_on_every_file(
