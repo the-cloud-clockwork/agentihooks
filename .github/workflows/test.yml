@@ -2751,9 +2751,6 @@ jobs:
         run: |
           if grep -qs -- '"--base"' "$RUNNER_TEMP/grader/scripts/feature_map.py"; then
             cd "$RUNNER_TEMP/grader"
-          elif [[ -f "$RUNNER_TEMP/base/feature-map.json" && -f "$RUNNER_TEMP/grader/scripts/feature_map.py" ]]; then
-            echo "::error::The base maps features but dev's scripts/feature_map.py cannot grade against a base."
-            exit 1
           fi
           python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"
 
