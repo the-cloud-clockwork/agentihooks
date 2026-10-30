@@ -125,18 +125,19 @@ def redis_checks(redis: "Redis", slug: str, execution: str) -> dict:
 
 
 def cheap(redis: "Redis", report: dict) -> dict:
-    from hooks.context.profile_chain import rendered_overlays
-    from scripts.swarm.launch_check import chain
+    from scripts.master_claude_login import rendered_chain, rendered_overlays
 
     context = report["context"]
     return {
         **redis_checks(redis, report["slug"], report["execution_id"]),
         "transcript": checked(lambda: transcript_ready(context["transcript_dir"])),
-        "profile": checked(lambda: context["profile"] in chain(context["home"])),
+        "profile": checked(
+            lambda: context["profile"] in rendered_chain(Path(context["home"]), report.get("agent", ""))
+        ),
         "settings": checked(lambda: settings_ready(context)),
         "pane": checked(lambda: pane_ready(context["pane"])),
         "started_at": report["started_at"] > 0,
-        "brain": checked(lambda: "brain" in rendered_overlays(Path(context["home"]))),
+        "brain": checked(lambda: "brain" in rendered_overlays(Path(context["home"]), report.get("agent", ""))),
     }
 
 
