@@ -383,19 +383,39 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     ]
 
 
-def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
+def test_unit_restores_one_venv_per_interpreter_and_dependency_files() -> None:
     _, cache = _unit_step_index(lambda s: s.get("id") == "venv")
     _, python = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/setup-python"))
-    key = cache["with"]["key"]
     assert cache["with"]["path"] == "~/venv"
+    assert cache["with"]["key"] == "${{ steps.day.outputs.key }}"
+    _, day = _unit_step_index(lambda s: s.get("id") == "day")
+    key = day["env"]["KEY_PREFIX"] + day["env"]["KEY_INPUTS"]
     assert "${{ runner.os }}" in key
     assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
     assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
     assert "${{ hashFiles('.github/test-requirements.lock') }}" in key
-    _, day = _unit_step_index(lambda s: s.get("id") == "day")
-    assert day["run"] == 'echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"'
-    assert "${{ steps.day.outputs.date }}" in key
+    assert day["run"].splitlines() == [
+        "date=$(date -u +%F)",
+        'echo "date=$date" >> "$GITHUB_OUTPUT"',
+        'echo "key=$KEY_PREFIX-$date-$KEY_INPUTS" >> "$GITHUB_OUTPUT"',
+    ]
     assert "matrix.shard" not in key
+
+
+def test_records_name_the_test_environment_when_the_wheelhouse_skips_its_restore() -> None:
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    jobs = workflow["jobs"]
+    assert jobs["unit"]["env"]["UNIT_WHEELHOUSE"] == "${{ github.event_name == 'pull_request' && '1' || '' }}"
+    assert jobs["unit-selected"]["env"]["UNIT_WHEELHOUSE"] == "1"
+    environments = [
+        value
+        for job in jobs.values()
+        for step in job.get("steps", [])
+        for name, value in step.get("env", {}).items()
+        if name in ("ENVIRONMENT", "TEST_COUNT_ENVIRONMENT")
+    ]
+    assert environments
+    assert set(environments) == {"${{ steps.day.outputs.key }}"}
 
 
 def test_a_restored_venv_skips_uv_and_the_install():
