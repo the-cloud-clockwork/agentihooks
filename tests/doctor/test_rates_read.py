@@ -69,6 +69,37 @@ def test_pulls_are_cached_settled_for_a_week_and_open_for_five_minutes():
     assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:rates-pull:{URL.format(2)}") <= rates_read.OPEN_TTL_S
 
 
+@pytest.mark.parametrize("state", ["OPEN", "MERGED"])
+def test_pulls_return_fetched_data_when_the_hive_cannot_write_the_cache(
+    monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    from unittest.mock import Mock
+
+    from redis.exceptions import NoPermissionError
+
+    redis = fake_redis()
+    denied = Mock(side_effect=NoPermissionError("cache key is read only"))
+    monkeypatch.setattr(redis, "set", denied)
+    raw = {**RAW, "state": state}
+    run = Run(raw)
+    urls = [URL.format(1), URL.format(2)]
+    assert rates_read.pulls(redis, "sw", urls, run) == {url: rates_read.pull(raw) for url in urls}
+    assert [call[3] for call in run.calls] == urls
+    assert denied.call_count == 2
+    assert redis.keys() == []
+
+
+def test_pulls_do_not_hide_other_cache_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    from redis.exceptions import ConnectionError
+
+    redis = fake_redis()
+    monkeypatch.setattr(redis, "set", Mock(side_effect=ConnectionError("offline")))
+    with pytest.raises(ConnectionError, match="offline"):
+        rates_read.pulls(redis, "sw", [URL.format(1)], Run(RAW))
+
+
 def test_an_unreadable_pull_request_is_left_out_and_not_cached():
     redis = fake_redis()
     assert rates_read.pulls(redis, "sw", [URL.format(3)], Run(RAW, code=1)) == {}
