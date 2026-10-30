@@ -23,7 +23,9 @@ STALL_WATCH = Enforcement("stall")
 LANE_SPLIT = Enforcement("lane-split")
 NIGHT_WATCH = Enforcement("nightwatch")
 MASTER_RESET = Enforcement("reset")
+FEATURE = Enforcement("feature")
 ENFORCEMENTS = {
+    FEATURE.name: FEATURE,
     STALL_WATCH.name: STALL_WATCH,
     LANE_SPLIT.name: LANE_SPLIT,
     NIGHT_WATCH.name: NIGHT_WATCH,
