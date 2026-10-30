@@ -11,7 +11,6 @@ def store():
 
 
 def closing_pipelines(store, monkeypatch, closes):
-    """Pipelines whose first ``closes`` executions fail the way a server side close does."""
     from redis.exceptions import ConnectionError as RedisConnectionError
 
     real = store.redis.pipeline
@@ -65,3 +64,66 @@ def test_an_empty_read_opens_no_pipeline(store, monkeypatch):
     sizes = closing_pipelines(store, monkeypatch, closes=0)
     assert store._rows([]) == []
     assert sizes == []
+
+
+class ClosingServer:
+    def __init__(self):
+        import socket
+        import threading
+
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        self.listener.settimeout(5)
+        self.port = self.listener.getsockname()[1]
+        self.connections = []
+        self.thread = threading.Thread(target=self.serve, daemon=True)
+        self.thread.start()
+
+    def serve(self):
+        while True:
+            try:
+                conn, _ = self.listener.accept()
+            except OSError:
+                return
+            conn.settimeout(5)
+            self.connections.append(conn)
+            try:
+                self.answer(conn, closing=len(self.connections) == 1)
+            except OSError:
+                pass
+            finally:
+                conn.close()
+
+    def answer(self, conn, closing):
+        reader = conn.makefile("rb")
+        while True:
+            header = reader.readline()
+            if not header:
+                return
+            words = []
+            for _ in range(int(header[1:])):
+                size = int(reader.readline()[1:])
+                words.append(reader.read(size + 2)[:size])
+            if words[0].upper() == b"HGETALL":
+                if closing:
+                    return
+                conn.sendall(b"*2\r\n$4\r\ntext\r\n$4\r\nback\r\n")
+            else:
+                conn.sendall(b"+OK\r\n")
+
+    def close(self):
+        self.listener.close()
+        self.thread.join(5)
+
+
+def test_a_batch_is_read_again_on_a_new_connection_after_a_real_server_close():
+    import redis
+
+    server = ClosingServer()
+    try:
+        store = InboxStore(
+            redis.Redis(host="127.0.0.1", port=server.port, protocol=2, decode_responses=True, socket_timeout=5)
+        )
+        assert store._rows(["one", "two"]) == [{"text": "back"}, {"text": "back"}]
+        assert len(server.connections) == 2
+    finally:
+        server.close()
