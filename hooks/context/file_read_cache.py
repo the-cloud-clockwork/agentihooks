@@ -11,15 +11,18 @@ The mtime guard ensures that if a file is modified between reads, the second
 read is allowed through (and the stored mtime is updated).
 """
 
-import os
-from typing import Optional
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any
 
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
 
 # In-process fallback when Redis is unavailable
 # Structure: {session_id: {file_path: mtime_float}}
-_memory_cache: dict[str, dict[str, float]] = {}
+_memory_cache: dict[str, dict[str, tuple[float, list[tuple[int, int]]]]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -27,16 +30,16 @@ _memory_cache: dict[str, dict[str, float]] = {}
 # ---------------------------------------------------------------------------
 
 
-def _get_mtime(file_path: str) -> Optional[float]:
-    """Return file mtime as float, or None if the file cannot be stat'd."""
+def _get_mtime(file_path: str) -> float | None:
+    """Return the file modification time when it is available."""
     try:
-        return os.stat(file_path).st_mtime
+        return Path(file_path).stat().st_mtime
     except OSError:
         return None
 
 
 def _cache_key(session_id: str) -> str:
-    return redis_key("file_cache", session_id)
+    return redis_key("file_read_ranges", session_id)
 
 
 def _mtime_key(session_id: str) -> str:
@@ -48,78 +51,106 @@ def _mtime_key(session_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def was_file_read(session_id: str, file_path: str) -> bool:
-    """Return True if *file_path* was already read in *session_id* and is unmodified."""
+def _read_ranges(session_id: str, file_path: str) -> list[tuple[int, int]]:
+    current_mtime = _get_mtime(file_path)
     r = get_redis()
-
     if r is not None:
         try:
-            if not r.sismember(_cache_key(session_id), file_path):
-                return False
-            # Check mtime
             stored_mtime = r.hget(_mtime_key(session_id), file_path)
-            if stored_mtime is None:
-                return True  # No mtime stored — assume unchanged
-            current_mtime = _get_mtime(file_path)
-            if current_mtime is None:
-                return True  # Cannot stat — assume unchanged
-            return abs(float(stored_mtime) - current_mtime) < 0.001
+            if stored_mtime is None or current_mtime is None:
+                return []
+            if abs(float(stored_mtime) - current_mtime) >= 0.001:
+                return []
+            encoded = r.hget(_cache_key(session_id), file_path)
+            return [(pair[0], pair[1]) for pair in json.loads(encoded)] if encoded else []
         except Exception as e:
             log("file_read_cache: Redis read error", {"error": str(e)})
-            return False
-    else:
-        # Memory fallback
-        session_map = _memory_cache.get(session_id, {})
-        if file_path not in session_map:
-            return False
-        stored_mtime = session_map[file_path]
-        current_mtime = _get_mtime(file_path)
-        if current_mtime is None:
-            return True
-        return abs(stored_mtime - current_mtime) < 0.001
+            return []
+    stored = _memory_cache.get(session_id, {}).get(file_path)
+    if stored is None or current_mtime is None:
+        return []
+    mtime, ranges = stored
+    return ranges if abs(mtime - current_mtime) < 0.001 else []
 
 
-def mark_file_read(session_id: str, file_path: str) -> None:
-    """Record that *file_path* was read in *session_id*, storing current mtime."""
+def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(ranges):
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+def was_file_read(session_id: str, file_path: str, offset: int = 1, limit: int | None = None) -> bool:
+    """Return whether every requested line was delivered for this file revision."""
+    end = offset + limit - 1 if limit is not None else sys.maxsize
+    return any(start <= offset and stop >= end for start, stop in _read_ranges(session_id, file_path))
+
+
+def mark_file_read(session_id: str, file_path: str, start: int = 1, end: int = sys.maxsize) -> None:
+    """Record delivered lines, retaining coverage only for the current revision."""
     from hooks.config import FILE_READ_CACHE_TTL
 
     mtime = _get_mtime(file_path)
     if mtime is None:
-        mtime = 0.0
-
+        return
+    ranges = _merge_ranges([*_read_ranges(session_id, file_path), (start, end)])
     r = get_redis()
     if r is not None:
         try:
             cache_k = _cache_key(session_id)
             mtime_k = _mtime_key(session_id)
-            r.sadd(cache_k, file_path)
+            r.hset(cache_k, file_path, json.dumps(ranges))
             r.expire(cache_k, FILE_READ_CACHE_TTL)
             r.hset(mtime_k, file_path, mtime)
             r.expire(mtime_k, FILE_READ_CACHE_TTL)
         except Exception as e:
             log("file_read_cache: Redis write error", {"error": str(e)})
     else:
-        # Memory fallback
-        if session_id not in _memory_cache:
-            _memory_cache[session_id] = {}
-        _memory_cache[session_id][file_path] = mtime
+        _memory_cache.setdefault(session_id, {})[file_path] = (mtime, ranges)
 
 
-def check_and_block_redundant_read(payload: dict) -> None:
-    """Raise BlockAction if the file is already in context and unmodified.
+def _delivered_ranges(response: Any) -> list[tuple[int, int]]:
+    if isinstance(response, dict):
+        file = response.get("file", {})
+        start = file.get("startLine")
+        count = file.get("numLines")
+        total = file.get("totalLines")
+        if isinstance(start, int) and isinstance(count, int) and start > 0 and count > 0:
+            end = start + count - 1
+            if isinstance(total, int) and end == total:
+                end = sys.maxsize
+            return [(start, end)]
+        return []
+    if isinstance(response, str):
+        lines = [int(number) for number in re.findall(r"^\s*(\d+)→", response, re.MULTILINE)]
+        return _merge_ranges([(number, number) for number in lines])
+    return []
 
-    Should be called from on_pre_tool_use for tool_name == "Read".
-    """
+
+def mark_read_result(payload: dict[str, Any]) -> None:
+    """Record only successful Read output whose delivered lines are known."""
+    response = payload.get("tool_response", payload.get("tool_output"))
+    if payload.get("is_error") or isinstance(response, dict) and response.get("is_error"):
+        return
+    session_id = payload.get("session_id", "")
+    file_path = payload.get("tool_input", {}).get("file_path", "")
+    if not session_id or not file_path:
+        return
+    for start, end in _delivered_ranges(response):
+        mark_file_read(session_id, file_path, start, end)
+
+def check_and_block_redundant_read(payload: dict[str, Any]) -> None:
+    """Refuse a Read only when all requested lines are already in context."""
     from hooks.hook_manager import BlockAction
 
     session_id = payload.get("session_id", "")
     tool_input = payload.get("tool_input", {}) or {}
     file_path = tool_input.get("file_path", "")
-
     if not session_id or not file_path:
         return
-
-    if was_file_read(session_id, file_path):
+    if was_file_read(session_id, file_path, tool_input.get("offset", 1), tool_input.get("limit")):
         raise BlockAction(
             f"File {file_path} is already in context from this session. "
             "Use the content already available rather than re-reading."
