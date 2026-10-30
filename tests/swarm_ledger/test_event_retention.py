@@ -62,7 +62,7 @@ def acknowledge(repo, revision):
 def assert_stored(path, state):
     fresh = SQLiteLedgerRepository(path)
     assert fresh.get_document("ledger") == state
-    assert fresh.events_since("ledger", -1) == state["_meta"]["events"]
+    assert fresh.export_document("ledger")["_meta"]["events"] == state["_meta"]["events"]
 
 
 def test_without_an_acknowledgement_retention_keeps_the_newest_events(repo, path):
