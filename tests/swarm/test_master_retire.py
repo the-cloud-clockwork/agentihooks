@@ -4,9 +4,9 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox import exits
-from scripts.inbox.store import Contended, InboxStore
+from scripts.inbox.store import Contended, InboxStore, Item
 from scripts.swarm import launch_check, lifetime, live_binding, master_retire
-from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -37,8 +37,8 @@ def mismatch(runtime, name, **wrong):
     }
 
 
-def asks(store, name):
-    return [i for i in InboxStore(store.redis).inbox(name) if i.ref == master_retire.REF]
+def asks(store: RedisStore, name: str) -> list[Item]:
+    return [i for i in InboxStore(store.redis).inbox(store.seats.seat_of(name) or name) if i.ref == master_retire.REF]
 
 
 def current(store, name):
@@ -359,26 +359,30 @@ def test_forget_closes_an_open_request_once_and_reports_whether_one_existed(swar
     assert inbox.get(second.id).state == "done"
 
 
-def test_a_master_on_a_joined_hive_is_retired_and_its_ask_closed_in_the_hive_inbox(swarm, monkeypatch):
+def test_a_master_on_a_joined_hive_is_retired_and_its_ask_closed_in_the_hive_inbox(
+    swarm: tuple[RedisStore, FakeRuntime, FakeLedger, AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, _, _, master = swarm
     monkeypatch.setattr(InboxStore, "home", lambda self, address: "hive-a" if address == master.name else "")
     assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
     hive = InboxStore(store.redis, world="hive-a")
-    (ask,) = [i for i in hive.inbox(master.name) if i.ref == master_retire.REF]
+    (ask,) = [i for i in hive.inbox(master.seat) if i.ref == master_retire.REF]
     assert asks(store, master.name) == []
     assert master_retire.hold(store, "sw", master, "test", True, 200 + WAIT) == ""
     assert hive.get(ask.id).state == "done"
     assert master_retire.reason(store, "sw", master.name) == ""
 
 
-def test_a_hold_made_from_a_hive_member_closes_its_ask_in_that_member_world(swarm, monkeypatch):
+def test_a_hold_made_from_a_hive_member_closes_its_ask_in_that_member_world(
+    swarm: tuple[RedisStore, FakeRuntime, FakeLedger, AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive import scope
 
     store, _, _, master = swarm
     monkeypatch.setattr(scope, "member", lambda: "hive-b")
     assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
     member = InboxStore(store.redis, world="hive-b")
-    (ask,) = [i for i in member.inbox(master.name) if i.ref == master_retire.REF]
+    (ask,) = [i for i in member.inbox(master.seat) if i.ref == master_retire.REF]
     monkeypatch.setattr(scope, "member", lambda: "")
     assert master_retire.hold(store, "sw", master, "test", True, 200 + WAIT) == ""
     assert member.get(ask.id).state == "done"

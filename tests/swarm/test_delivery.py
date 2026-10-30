@@ -279,7 +279,9 @@ def test_a_refused_message_without_an_entry_reopens_nothing(store):
     assert box.get(asked.id).state == "done"
 
 
-def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens_the_item(store, monkeypatch):
+def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens_the_item(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.inbox.store import Contended
 
     store.seats.occupy("master@sw", "sw-master-1", 1)
@@ -289,17 +291,17 @@ def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens
     answer = box.reply(asked.id, "sw-master-1", "done at 18:45")
     reopen = box.reopen
 
-    def contended(*args):
+    def contended(*args: object) -> None:
         raise Contended("message op-1 changed meanwhile; run the command again")
 
     monkeypatch.setattr(box, "reopen", contended)
     assert delivery.post(box, box.get(answer.id), lambda: False) is False
     assert (box.get(answer.id).state, box.get(asked.id).state) == ("pending", "done")
-    assert box.pending_items("sw-master-1") == []
+    assert box.pending_items("master@sw") == []
     monkeypatch.setattr(box, "reopen", reopen)
     assert delivery.post(box, box.get(answer.id), lambda: False) is False
     assert (box.get(answer.id).state, box.get(asked.id).state) == ("cancelled", "read")
-    [notice] = box.pending_items("sw-master-1")
+    [notice] = box.pending_items("master@sw")
     assert notice.text == delivery.REFUSED.format(id=answer.id, reason="the swarm notice was dropped")
 
 

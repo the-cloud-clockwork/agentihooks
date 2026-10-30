@@ -1,9 +1,18 @@
+from __future__ import annotations
+
 import json
+from typing import TYPE_CHECKING
 
 import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from scripts.swarm.store import RedisStore
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 
@@ -63,12 +72,14 @@ def test_the_master_running_close_signs_the_summary(closing, monkeypatch):
     assert ledger.calls == [("summary", "Done here.", "master@a1b2c3-0001"), ("closed", "master@a1b2c3-0001")]
 
 
-def test_close_hands_itself_to_a_live_master_and_changes_nothing_else(closing, capsys):
+def test_close_hands_itself_to_a_live_master_and_changes_nothing_else(
+    closing: tuple[RedisStore, FakeLedger, FakeRuntime, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
     store, ledger, rt, tmp_path = closing
     assert run("sw", "close") == 0
     out = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert out == {"swarm": "sw", "asked": "master@a1b2c3-0001"}
-    items = [i for i in InboxStore(store.redis).inbox("master@a1b2c3-0001") if i.sender == "operator"]
+    items = [i for i in InboxStore(store.redis).inbox("master@sw") if i.sender == "operator"]
     assert len(items) == 1 and "agentihooks swarm sw close --note" in items[0].text
     assert ledger.calls == [] and rt.killed == []
     assert not (tmp_path / "sw" / "snapshot.json").exists()
