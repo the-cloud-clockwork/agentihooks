@@ -1,16 +1,17 @@
-"""Main process of the kind proof worker hive: keeps the hive ready and runs one scripted agent on it.
+#!/usr/bin/env bash
+set -euo pipefail
 
-The first hive pod registers its hive, seats a working agent with a task on it and, once the hive's roll order
-reaches that agent's inbox, records the agent's own handoff after a short delay, the way a real agent writes its
-document. Every pod records the moment its container is told to stop, which comes only after the chart's preStop
-drain returns, so the proof can order the handoff against the stop.
-"""
+# Main process of the kind proof worker hive: keeps the hive ready and runs one scripted agent on it.
+# The first hive pod registers its hive, seats a working agent with a task on it and, once the hive's roll order
+# reaches that agent's inbox, records the agent's own handoff after a short delay, the way a real agent writes its
+# document. Every pod records the moment its container is told to stop, which comes only after the chart's preStop
+# drain returns, so the proof can order the handoff against the stop.
 
+exec python - <<'EOF'
 import json
 import os
 import signal
 import sys
-import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -38,10 +39,10 @@ def now_ms() -> int:
 
 
 def keep_ready(marker: Path) -> None:
-    """Touch the readiness marker the chart's rollout readiness probe reads."""
-    while True:
-        marker.touch()
-        time.sleep(5)
+    """Touch the readiness marker the chart's rollout readiness probe reads, now and every five seconds."""
+    marker.touch()
+    signal.signal(signal.SIGALRM, lambda _signum, _frame: marker.touch())
+    signal.setitimer(signal.ITIMER_REAL, 5, 5)
 
 
 def stopped(store: RedisStore, hive: str) -> None:
@@ -71,7 +72,7 @@ def main() -> None:
     for stop in (signal.SIGTERM, signal.SIGINT):
         signal.signal(stop, lambda _signum, _frame: stopped(store, hive))
     registry.update(store.redis, hive, ["ui=no"])
-    threading.Thread(target=keep_ready, args=(Path(os.environ["HIVE_READY_FILE"]),), daemon=True).start()
+    keep_ready(Path(os.environ["HIVE_READY_FILE"]))
     print(f"hive {hive} serving", flush=True)
     if store.redis.set(key("agent-hive"), hive, nx=True):
         name = store.next_name(SLUG, "eng", now_ms())
@@ -87,3 +88,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+EOF

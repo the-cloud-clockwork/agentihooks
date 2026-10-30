@@ -71,7 +71,7 @@ for doc in docs:
         sys.exit(f"the chart worker hive no longer drains for {drain} seconds before it stops: {stop}")
     if "readinessProbe" not in container:
         sys.exit("the chart worker hive has no rollout readiness probe")
-    container["command"] = ["python", "/opt/drain/hive-drain-agent.py"]
+    container["command"] = ["bash", "/opt/drain/hive-drain-agent.sh"]
     env = [item for item in container["env"] if item["name"] != "AGENTIHOOKS_DEPLOYMENT"]
     env += [
         {"name": "AGENTIHOOKS_DEPLOYMENT", "value": "local"},
@@ -89,7 +89,7 @@ yaml.safe_dump_all(docs, sys.stdout)
 }
 
 printf 'kind-hive-drain-member' | kubectl create secret generic kind-hive-drain-join --from-file=credential=/dev/stdin
-kubectl create configmap kind-hive-drain-agent --from-file="$chart/ci/hive-drain-agent.py"
+kubectl create configmap kind-hive-drain-agent --from-file="$chart/ci/hive-drain-agent.sh"
 kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local AGENTIHOOKS_SWARM_REDIS_URL="$redis_url" python -c \
   "from scripts.swarm.store import SwarmConfig, connect; connect().create(SwarmConfig('$slug', '/data', 0, 0, state='stopped'))"
 rollout_objects rbac | kubectl apply -f -
