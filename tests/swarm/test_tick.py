@@ -1005,6 +1005,7 @@ def _slow_launches(monkeypatch, runtime, seconds):
 
     from scripts.swarm import tick as tick_module
 
+    monkeypatch.setattr(tick_module, "SPAWN_BUDGET_S", 20)
     clock = [0.0]
     monkeypatch.setattr(tick_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     spawn = runtime.spawn
@@ -1018,17 +1019,27 @@ def _slow_launches(monkeypatch, runtime, seconds):
 
 
 def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 20)
     from scripts.swarm.tick import SPAWN_BUDGET_S
 
     assert SPAWN_BUDGET_S == 20
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    _slow_launches(monkeypatch, runtime, 20)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
     assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
     assert ledger.rows["t2"].get("claimed_by", "") == ""
     assert ledger.rows["t2"]["state"] == "open"
     assert not store.redis.exists(store.key("sw", "claim", "t2"))
+
+
+def test_the_spawn_budget_is_sixty_seconds_and_fits_a_second_launch_in_one_pass(store):
+    from scripts.swarm.tick import SPAWN_BUDGET_S
+
+    assert SPAWN_BUDGET_S == 60
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert not any("launch budget" in action for action in actions)
 
 
 def test_time_spent_before_the_first_launch_never_holds_it_back(store, monkeypatch):

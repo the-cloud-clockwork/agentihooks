@@ -179,6 +179,7 @@ def test_a_pool_whose_every_launch_failed_spares_the_spawn_budget(store, monkeyp
 def test_a_started_pool_spends_the_spawn_budget_for_the_next_one(store, monkeypatch):
     from types import SimpleNamespace
 
+    monkeypatch.setattr(tick_module, "SPAWN_BUDGET_S", 20)
     store.update("sw", max_eng=3)
     ledger, pooled = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), PooledRuntime(2)
     clock = [0.0]
@@ -199,6 +200,7 @@ def test_a_started_pool_spends_the_spawn_budget_for_the_next_one(store, monkeypa
 def test_the_next_pool_is_priced_at_a_whole_pool_not_one_launch(store, monkeypatch):
     from types import SimpleNamespace
 
+    monkeypatch.setattr(tick_module, "SPAWN_BUDGET_S", 20)
     store.update("sw", max_eng=9)
     ledger, pooled = tasks(*((f"t{n}", "eng") for n in range(1, 10))), PooledRuntime(8)
     clock = [0.0]

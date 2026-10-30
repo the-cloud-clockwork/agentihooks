@@ -97,7 +97,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
-SPAWN_BUDGET_S = 20
+SPAWN_BUDGET_S = 60
 SPAWN_POOL = 8
 STARTUP_GRACE_MS = 6 * 60 * 1000
 ACK_LATER = "hive_ack_later"
