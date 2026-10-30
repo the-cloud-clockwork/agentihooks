@@ -974,8 +974,11 @@ def test_removed_hive_retirement_requires_expired_host_evidence(remote, protecti
     elif protection == "report":
         _publish(remote)
     elif protection == "working":
-        remote.agent = replace(remote.agent, state="working")
-        remote.store.put_agent("fixture", remote.agent)
+        working = replace(remote.agent, state="working")
+        pipe = remote.redis.pipeline()
+        remote.store.execution_registry.write(pipe, "fixture", working, remote.agent)
+        pipe.execute()
+        remote.agent = working
         rows["task"] = {"state": "claimed", "claimed_by": remote.agent.name}
     elif protection == "local":
         monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
@@ -986,6 +989,23 @@ def test_removed_hive_retirement_requires_expired_host_evidence(remote, protecti
 
     assert len(remote.store.agents("fixture")) == 1
     ledger.update_task.assert_not_called()
+
+
+def test_a_hive_agent_finished_during_its_reap_stays_finished(remote, monkeypatch):
+    from scripts.swarm import tick
+
+    _publish(remote)
+    observe = remote.runtime.observe
+
+    def finish_then_observe(agent):
+        monkeypatch.setattr(remote.runtime, "observe", observe)
+        remote.store.put_agent("fixture", replace(agent, state="finished"))
+        return observe(agent)
+
+    monkeypatch.setattr(remote.runtime, "observe", finish_then_observe)
+    rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
+    tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, NOW)
+    assert [a.state for a in remote.store.agents("fixture")] == ["finished"]
 
 
 @pytest.mark.parametrize("signal", ["index", "heartbeat", "report"])
