@@ -463,6 +463,7 @@ def test_launch_judgment_refreshes_a_join_after_the_snapshot(
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
     name = runtime.spawned[0][1]
+    ledger.members[runtime.masters[0][0]] = {"joined_at": LAUNCH + 1}
     read = ledger.state
     observations = []
 
