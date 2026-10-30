@@ -356,6 +356,7 @@ def _ledger_exit_guard(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(os, "_exit", exit_process)
 
+
 @pytest.fixture
 def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard: None) -> Path:
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
