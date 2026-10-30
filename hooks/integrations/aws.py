@@ -24,14 +24,6 @@ from typing import Dict, List, Optional
 
 from hooks.common import log
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-# Default config file locations (in order of priority)
-# The /home/appuser entries are container-only fallbacks (ECS/Fargate task
-# role image runs as `appuser`); they simply don't exist on a bare-metal or
-# macOS host and are skipped by the existence check in get_parser() below.
 DEFAULT_CONFIG_PATHS = [
     Path.home() / ".aws" / "config",
     Path.home() / ".aws" / "config.fargate",
@@ -39,15 +31,9 @@ DEFAULT_CONFIG_PATHS = [
     Path("/home/appuser/.aws/config.fargate"),
 ]
 
-# Regex patterns
 PROFILE_PATTERN = re.compile(r"^\[profile\s+([^\]]+)\]")
 ROLE_ARN_PATTERN = re.compile(r"role_arn\s*=\s*arn:aws:iam::(\d{12}):")
 ACCOUNT_ID_PATTERN = re.compile(r"\d{12}")
-
-
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
 
 
 @dataclass
@@ -62,11 +48,6 @@ class AWSAccount:
     def display(self) -> str:
         """Return display format: account_id|profile."""
         return f"{self.account_id}|{self.profile}"
-
-
-# =============================================================================
-# AWS CONFIG PARSER
-# =============================================================================
 
 
 class AWSConfigParser:
@@ -116,15 +97,18 @@ class AWSConfigParser:
         cls._instance = None
 
     def _find_config(self) -> Optional[Path]:
-        """Find AWS config file from default locations."""
-        # Check environment variable first
+        """Find AWS config file from default locations.
+
+        AWS_CONFIG_FILE wins, then DEFAULT_CONFIG_PATHS in priority order. The
+        /home/appuser entries are container-only fallbacks for the ECS/Fargate
+        task role image and are skipped where they do not exist.
+        """
         env_config = os.environ.get("AWS_CONFIG_FILE")
         if env_config:
             path = Path(env_config)
             if path.exists():
                 return path
 
-        # Check default locations
         for path in DEFAULT_CONFIG_PATHS:
             if path.exists():
                 return path
@@ -144,10 +128,8 @@ class AWSConfigParser:
             for line in content.splitlines():
                 line = line.strip()
 
-                # Check for profile header
                 profile_match = PROFILE_PATTERN.match(line)
                 if profile_match:
-                    # Save previous profile if it had an account ID
                     if current_profile and current_role_arn:
                         account_match = ACCOUNT_ID_PATTERN.search(current_role_arn)
                         if account_match:
@@ -157,18 +139,15 @@ class AWSConfigParser:
                                 role_arn=current_role_arn,
                             )
 
-                    # Start new profile
                     current_profile = profile_match.group(1)
                     current_role_arn = None
                     continue
 
-                # Check for role_arn
                 if current_profile and line.startswith("role_arn"):
                     role_match = ROLE_ARN_PATTERN.match(line)
                     if role_match:
                         current_role_arn = line.split("=", 1)[1].strip()
 
-            # Don't forget last profile
             if current_profile and current_role_arn:
                 account_match = ACCOUNT_ID_PATTERN.search(current_role_arn)
                 if account_match:
@@ -284,11 +263,6 @@ class AWSConfigParser:
         """Get the number of profiles loaded."""
         self._parse_config()
         return len(self._accounts)
-
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
 
 
 def get_aws_profiles(config_path: Optional[str] = None) -> List[str]:
