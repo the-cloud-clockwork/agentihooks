@@ -144,3 +144,12 @@ def test_the_command_names_itself_in_its_usage(capsys):
         service.main(["--help"])
 
     assert capsys.readouterr().out.startswith("usage: python -m scripts.auth ")
+
+
+def test_the_command_requires_a_subcommand(capsys):
+    with patch.object(service, "server") as server, pytest.raises(SystemExit) as exited:
+        service.main([])
+
+    assert exited.value.code == 2
+    assert "required" in capsys.readouterr().err
+    server.assert_not_called()

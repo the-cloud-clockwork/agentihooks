@@ -95,7 +95,7 @@ def server(address: tuple[str, int]) -> ThreadingHTTPServer:
 def main(argv: list[str] | None = None) -> int:
     """Run the auth service: serve [--host HOST] [--port PORT]."""
     parser = argparse.ArgumentParser(prog="python -m scripts.auth")
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(required=True)
     serve = commands.add_parser("serve")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=PORT)

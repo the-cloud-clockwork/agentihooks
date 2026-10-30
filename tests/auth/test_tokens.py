@@ -58,6 +58,14 @@ def test_no_key_verifies_nothing():
     assert tokens.verify("", tokens.sign(KEY, AGENT, SLUG), SLUG) is None
 
 
+def test_an_empty_token_is_refused():
+    assert tokens.verify(KEY, "", SLUG) is None
+
+
+def test_a_token_is_signed_with_hs256():
+    assert jwt.get_unverified_header(tokens.sign(KEY, AGENT, SLUG))["alg"] == "HS256"
+
+
 def test_the_key_and_the_legacy_switch_come_from_the_environment():
     assert tokens.key({"AGENTIHOOKS_AUTH_KEY": KEY}) == KEY
     assert tokens.key({}) == ""

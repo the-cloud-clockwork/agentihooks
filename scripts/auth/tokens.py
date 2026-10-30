@@ -25,12 +25,12 @@ def sign(secret: str, principal: str, slug: str, now: float | None = None) -> st
     """A token naming the principal ('' for the operator) on one ledger, valid for TTL_S seconds."""
     issued = int(time.time() if now is None else now)
     claims = {"sub": principal, "slug": slug, "iat": issued, "exp": issued + TTL_S}
-    return jwt.encode(claims, secret, algorithm=ALGORITHM)
+    return jwt.encode(claims, secret)
 
 
 def verify(secret: str, token: str, slug: str) -> str | None:
     """The token's principal when it is signed with the key, unexpired and issued for this ledger, else None."""
-    if not secret or not token:
+    if not secret:
         return None
     try:
         claims = jwt.decode(token, secret, algorithms=[ALGORITHM], options={"require": ["sub", "slug", "exp"]})
