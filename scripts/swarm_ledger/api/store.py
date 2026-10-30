@@ -21,6 +21,10 @@ DEFAULT_PORT = 8766
 MAX_BODY = 64 << 20
 FILES = {artifact_files.TABLE: artifact_files, media_files.TABLE: media_files}
 WITH_BODY = {HTTPMethod.POST, HTTPMethod.PUT}
+AUTHORIZATION = "Authorization"
+CONTENT_LENGTH = "Content-Length"
+CONTENT_TYPE = "Content-Type"
+JSON = "application/json"
 
 
 class Code(StrEnum):
@@ -57,7 +61,6 @@ def repository() -> LedgerRepository:
 
 class Answer(Exception):
     def __init__(self, status: int, body: object = None) -> None:
-        super().__init__(status)
         self.status, self.body = status, body
 
 
@@ -190,7 +193,9 @@ def registry_commit(stored: LedgerRepository, body: dict) -> dict:
 
 def route(stored: LedgerRepository, method: str, path: str, query: dict, body: dict | None) -> object:
     parts = [unquote(part) for part in path.split("/") if part]
-    head, rest = (parts[0], parts[1:]) if parts else ("", [])
+    if not parts:
+        raise refused(404, Code.NOT_FOUND)
+    head, rest = parts[0], parts[1:]
     if head == Part.REGISTRIES and len(rest) == 1 and method == HTTPMethod.GET:
         return registry_read(stored, rest[0])
     if head == Part.REGISTRIES and not rest and method == HTTPMethod.POST:
@@ -252,11 +257,11 @@ class Handler(BaseHTTPRequestHandler):
     def allowed(self) -> bool:
         if not self.token:
             return True
-        given = self.headers.get("Authorization", "").removeprefix("Bearer ")
+        given = self.headers.get(AUTHORIZATION, "").removeprefix("Bearer ")
         return hmac.compare_digest(given.encode(), self.token.encode())
 
     def body(self) -> dict:
-        length = int(self.headers.get("Content-Length") or 0)
+        length = int(self.headers.get(CONTENT_LENGTH) or 0)
         if not 0 <= length <= MAX_BODY:
             raise ValueError(length)
         value = json.loads(self.rfile.read(length) or b"{}")
@@ -265,10 +270,10 @@ class Handler(BaseHTTPRequestHandler):
         return value
 
     def send(self, answer: Answer) -> None:
-        data = b"" if answer.status == 304 else json.dumps(answer.body, separators=(",", ":")).encode()
+        data = b"" if answer.status == 304 else json.dumps(answer.body).encode()
         self.send_response(answer.status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header(CONTENT_TYPE, JSON)
+        self.send_header(CONTENT_LENGTH, str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 

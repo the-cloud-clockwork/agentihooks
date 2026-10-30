@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import pytest
@@ -305,12 +305,15 @@ def test_an_oversized_body_is_refused_before_it_is_read(api):
     assert refused.value.code == 400
 
 
-def test_the_api_refuses_to_start_without_a_token_unless_told_to_serve_open(monkeypatch):
+def test_the_api_refuses_to_start_without_a_token_unless_told_to_serve_open(monkeypatch, capsys):
     monkeypatch.delenv(store.TOKEN_ENV, raising=False)
 
     with pytest.raises(SystemExit) as stopped:
         store.main(["--port", "0"])
     assert stopped.value.code == 2
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        f"agentihooks-swarm-api: error: {store.TOKEN_ENV} is unset; pass --open to serve without a token"
+    )
 
 
 def test_the_api_refuses_to_start_without_the_shared_database_unless_told_to_serve_a_folder(monkeypatch):
@@ -483,6 +486,8 @@ def test_the_store_owner_serves_the_shared_database_when_its_url_is_set(monkeypa
 
     assert storage.owned(plain) == "built"
     assert built == [(address, plain)]
+    folder = storage.owned(plain, Path("/unused/ledgers.sqlite3"))
+    assert isinstance(folder, storage.Folder) and folder.domain is plain
 
 
 class Listening:
@@ -604,6 +609,7 @@ def test_the_cache_keeps_the_newest_generation_it_has_seen() -> None:
 
     assert repository._remember("split", newer) is newer
     assert repository._remember("split", Entry(3, None, {"title": "old"})) is newer
+    assert repository._remember("split", Entry(5, None, {"title": "same"})) is newer
 
 
 def test_the_remote_repository_applies_checkbox_changes_and_hands_back_a_private_copy(api: tuple) -> None:
@@ -621,15 +627,16 @@ def test_the_last_rerun_still_carries_the_gate(monkeypatch: pytest.MonkeyPatch) 
     repository, gates = offline(), []
 
     def ruled(slug: str, changes: list | None, ops: list | None, gate: object, copy_state: bool) -> tuple:
-        gates.append(gate)
+        gates.append((changes, ops, gate, copy_state))
         if len(gates) < remote.ATTEMPTS:
             raise sqlite.Conflict(slug, 1)
         return {}, []
 
     monkeypatch.setattr(repository, "_ruled", ruled)
 
-    repository.apply_ops("split", ops=[ADD], gate="gate")
-    assert gates == ["gate"] * remote.ATTEMPTS
+    repository.apply_ops("split", ["c1"], ops=[ADD], gate="gate", copy_state=False)
+    assert gates == [(["c1"], [ADD], "gate", False)] * remote.ATTEMPTS
+    assert str(sqlite.Conflict("split", 3)) == "ledger split is at revision 3"
 
 
 def test_a_remote_commit_against_a_moved_revision_raises_conflict_naming_the_stored_revision(api: tuple) -> None:
@@ -752,3 +759,375 @@ def test_a_bound_twin_and_a_carried_cache_share_what_the_repository_has_read(api
     assert (twin.client, twin.generations()) == (repository.client, repository.generations())
     assert adopted.generations() == {"split": entry.generation}
     assert adopted.current("split").state == entry.state
+    assert adopted.export_since("split", 0, lambda fragments: fragments is not None, None) == (entry.generation, True)
+
+
+def test_the_api_serves_the_ledger_folder_and_relays_its_outbox_unless_told_not_to(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    listening, relayed, served = Listening(), [], []
+    monkeypatch.setenv(store.TOKEN_ENV, "secret")
+    monkeypatch.delenv(store.PORT_ENV, raising=False)
+    monkeypatch.setattr(store.storage, "shared", lambda: None)
+    monkeypatch.setattr(store, "repository", lambda: "stored")
+    monkeypatch.setattr(store, "server", lambda *given: served.append(given) or listening)
+    monkeypatch.setattr(store, "relaying", lambda stored, relay: relayed.append((stored, relay)) or nullcontext())
+
+    assert store.main(["--folder"]) == 0
+    assert store.main(["--folder", "--no-relay"]) == 0
+    assert served == [("stored", "0.0.0.0", store.DEFAULT_PORT, "secret")] * 2
+    assert relayed == [("stored", True), ("stored", False)]
+    assert capsys.readouterr().out == "swarm api on 0.0.0.0:4321\n" * 2
+
+
+def test_the_api_names_the_database_it_needs_when_it_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv(store.TOKEN_ENV, "secret")
+    monkeypatch.setattr(store.storage, "shared", lambda: None)
+
+    with pytest.raises(SystemExit):
+        store.main([])
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "agentihooks-swarm-api: error: no shared database URL; pass --folder to serve the ledger folder"
+    )
+
+
+def test_relaying_runs_the_outbox_host_only_when_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm_ledger import outbox_host
+
+    monkeypatch.setattr(outbox_host, "running", lambda stored: ("running", stored))
+
+    assert store.relaying("stored", True) == ("running", "stored")
+    assert isinstance(store.relaying("stored", False), nullcontext)
+
+
+def test_the_api_announces_its_address_on_a_piped_stdout_while_it_serves(tmp_path: Path) -> None:
+    seeded(tmp_path)
+    command = [sys.executable, "-m", "scripts.swarm_ledger.api.store", "--open", "--folder", "--no-relay"]
+    child = subprocess.Popen(
+        [*command, "--host", "127.0.0.1", "--port", "0"],
+        cwd=ROOT,
+        env=child_env(tmp_path),
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    stop = threading.Timer(30, child.kill)
+    stop.start()
+    try:
+        line = child.stdout.readline()
+    finally:
+        stop.cancel()
+        child.terminate()
+        child.wait(timeout=10)
+        child.stdout.close()
+
+    assert line.startswith("swarm api on 127.0.0.1:")
+
+
+def test_the_store_serves_a_bound_handler_on_daemon_threads_and_labels_answers_json(tmp_path: Path) -> None:
+    listening = store.server(seeded(tmp_path), "127.0.0.1", 0, "")
+    listening.server_close()
+    with serving(seeded(tmp_path / "labelled"), "") as base:
+        data = raw(base, b"GET /healthz HTTP/1.1\r\nHost: api\r\nConnection: close\r\n\r\n")
+
+    assert (listening.RequestHandlerClass.__name__, listening.daemon_threads) == ("Bound", True)
+    assert data.startswith(b"HTTP/1.1 200")
+    assert b"\r\nContent-Type: application/json\r\n" in data
+
+
+def test_a_body_is_read_up_to_its_limit_and_must_be_an_object(api: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, base = api
+    client = remote.Client(base, "secret")
+    monkeypatch.setattr(store, "MAX_BODY", 2)
+
+    assert client.call("POST", "/held") == (400, {"code": "unknown_action"})
+    assert client.call("POST", "/held", body={}) == (400, {"code": "unknown_action"})
+    assert client.call("POST", "/held", body=[]) == (400, {"code": "bad_request", "detail": "list"})
+    assert client.call("POST", "/held", body={"a": 1}) == (400, {"code": "bad_request", "detail": "8"})
+
+
+def test_a_bad_request_names_its_cause_and_closes_its_connection(api: tuple) -> None:
+    _, base = api
+    refused = (
+        b"POST /api/v1/store/held HTTP/1.1\r\nHost: api\r\nAuthorization: Bearer secret\r\nContent-Length: 2\r\n\r\n[]"
+    )
+
+    data = raw(base, refused + b"GET /healthz HTTP/1.1\r\nHost: api\r\n\r\n")
+
+    assert remote.Client(base, "secret").call("POST", "/held", body={"action": "hold"}) == (
+        400,
+        {"code": "bad_request", "detail": "'kind'"},
+    )
+    assert data.startswith(b"HTTP/1.1 400") and data.count(b"HTTP/1.1 ") == 1
+
+
+def test_a_request_without_credentials_is_refused_whatever_the_token(tmp_path: Path) -> None:
+    with serving(seeded(tmp_path), "XXXX") as base:
+        assert remote.Client(base).call("GET", "/ledgers") == (401, {"code": "unauthorized"})
+
+
+def test_the_store_reads_the_token_the_whole_ledger_and_every_event_by_default(api: tuple) -> None:
+    stored, base = api
+    client = remote.Client(base, "secret")
+
+    assert client.call("GET", "/ledgers/split/token") == (200, {"token": stored.token("split")})
+    assert client.call("GET", "/ledgers/split/events") == (200, stored.events_since("split", 0))
+    assert client.call("GET", "/ledgers/split/read") == (200, stored.read("split"))
+
+
+def test_the_store_refuses_an_empty_path_an_unknown_ledger_method_and_a_commit_missing_its_drops(api: tuple) -> None:
+    stored, base = api
+    client = remote.Client(base, "secret")
+    revision = stored.current("split").state["_meta"]["rev"]
+    body = dict(revision=revision, changed={}, dropped=[], events=[], summary={})
+
+    assert client.call("GET", "/") == (404, {"code": "not_found"})
+    assert client.call("PUT", "/ledgers/split", body={}) == (404, {"code": "not_found"})
+    assert client.call("POST", "/ledgers/split", body=body) == (404, {"code": "not_found"})
+    assert client.call("GET", "/ledgers/split/read/extra") == (404, {"code": "not_found"})
+    assert remote.changes({"a": 1, "c": 3}, {"a": 1, "b": 2}) == ({"b": 2}, ["c"])
+    with pytest.raises(KeyError), remote.Session(client):
+        raise KeyError("inside")
+    assert client.call("PUT", "/files/media_files/split/m1", body={"data": "aGk=!", "at": 1})[0] == 400
+    for name in body:
+        missing = {key: value for key, value in body.items() if key != name}
+        assert client.call("POST", "/ledgers/split/commit", body=missing) == (
+            400,
+            {"code": "bad_request", "fields": [name]},
+        )
+    status, answer = client.call("POST", "/ledgers/split/commit", body=body)
+    assert (status, answer["revision"]) == (200, stored.current("split").state["_meta"]["rev"])
+
+
+def test_the_client_names_why_a_call_never_reached_the_store() -> None:
+    with socket.socket() as spare:
+        spare.bind(("127.0.0.1", 0))
+        port = spare.getsockname()[1]
+
+    with pytest.raises(remote.Unavailable) as down:
+        remote.Client(f"http://127.0.0.1:{port}").call("GET", "/ledgers")
+    assert "refused" in str(down.value).lower()
+
+
+def test_remote_reads_name_the_missing_ledger_and_the_failed_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    repository = offline()
+    reads = (
+        lambda: repository.read("absent", "title"),
+        lambda: repository.events_since("absent", 0),
+        lambda: repository.nodes("absent", "children"),
+        lambda: repository.nodes("absent", "children", "n1"),
+        lambda: repository.current("absent"),
+        lambda: repository.token("absent"),
+        lambda: repository.commit("absent", 1, {}, {**CONTENT, "_meta": {"rev": 1}}, []),
+    )
+    monkeypatch.setattr(repository.client, "call", lambda *given, **named: (404, {"code": "ledger_not_found"}))
+    for read in reads:
+        with pytest.raises(sqlite.Missing) as missing:
+            read()
+        assert missing.value.args == ("absent",)
+    session = remote.Session(repository.client)
+    session.saved["bin"] = {}
+    monkeypatch.setattr(repository.client, "call", lambda *given, **named: (500, {"code": "store_failed"}))
+    for read in (reads[0], reads[4], session.commit):
+        with pytest.raises(remote.Unavailable) as failed:
+            read()
+        assert str(failed.value) == "500 {'code': 'store_failed'}"
+
+
+def test_a_remote_read_sends_the_generation_it_holds(api: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, base = api
+    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"))
+    call, sent = repository.client.call, []
+
+    def recorded(method: str, path: str, query: dict | None = None, body: object = None) -> tuple[int, object]:
+        sent.append(query)
+        return call(method, path, query, body)
+
+    monkeypatch.setattr(repository.client, "call", recorded)
+    first = repository.current("split")
+
+    assert repository.current("split") is first
+    assert sent == [None, {"read": first.generation}]
+
+
+def test_remote_hierarchy_reads_ask_for_the_relation_they_name(api: tuple) -> None:
+    stored, base = api
+    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"))
+    repository.apply_ops("split", ops=[ADD])
+    node = stored.nodes("split", "children")[0]["node"]
+
+    assert repository.nodes("split", "subtree") == stored.nodes("split", "subtree")
+    assert len(stored.nodes("split", "subtree")) > len(stored.nodes("split", "children"))
+    assert repository.nodes("split", "ancestors", node) == stored.nodes("split", "ancestors", node)
+    assert stored.nodes("split", "ancestors", node) != stored.nodes("split", "children", node)
+
+
+def test_remote_rules_run_with_the_gate_on_private_ops_and_drop_unstored_files_of_the_ledger(
+    api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.repository import mutation
+
+    _, base = api
+    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"))
+    seen, dropped = [], []
+
+    def apply(slug: str, state: dict, domain: object, changes: list, ops: list, gate: object) -> tuple:
+        seen.append((slug, changes, ops, gate))
+        return [], SimpleNamespace(changed=False, events=[], unstored={"f1"})
+
+    monkeypatch.setattr(mutation, "apply", apply)
+    monkeypatch.setattr(artifact_files, "drop", lambda slug, ids: dropped.append(("artifact", slug, ids)))
+    monkeypatch.setattr(media_files, "drop", lambda slug, ids: dropped.append(("media", slug, ids)))
+    changes, ops, gate = [{"id": "c1"}], [dict(ADD)], object()
+
+    repository.apply_ops("split", changes, ops=ops, gate=gate)
+
+    ((seen_slug, seen_changes, seen_ops, seen_gate),) = seen
+    assert seen_slug == "split" and seen_gate is gate and (seen_changes, seen_ops) == (changes, ops)
+    assert seen_changes[0] is not changes[0] and seen_ops[0] is not ops[0]
+    assert dropped == [("artifact", "split", {"f1"}), ("media", "split", {"f1"})]
+
+
+def test_the_remote_repository_keeps_its_domain_document_copies_and_carries_only_moved_ledgers(api: tuple) -> None:
+    _, base = api
+    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"), plain)
+    document = repository.get_document("split")
+    document["title"] = "Changed"
+
+    assert repository.domain is plain and offline().bound(plain).domain is plain
+    assert repository.current("split").state["title"] == "Split"
+    assert repository.carry(repository.generations()) == {}
+
+
+def test_a_file_load_the_store_does_not_hold_reads_no_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = remote.Session(remote.Client("http://unused"))
+    monkeypatch.setattr(session.client, "call", lambda *given, **named: (404, None))
+
+    assert session.execute(media_files.LOAD, ("split", "m1")).fetchall() == []
+
+
+def test_a_file_drop_answers_ok_and_a_failed_expected_answer_names_its_status(
+    api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, base = api
+    client = remote.Client(base, "secret")
+    client.call("PUT", "/files/media_files/split/m1", body={"data": "aGk=", "at": 1})
+
+    assert client.call("DELETE", "/files/media_files/split/m1") == (200, {"ok": True})
+    assert offline().client.token == ""
+    monkeypatch.setattr(client, "call", lambda *given, **named: (500, {"code": "store_failed"}))
+    with pytest.raises(remote.Unavailable) as failed:
+        client.expect("GET", "/held")
+    assert str(failed.value) == "500 {'code': 'store_failed'}"
+
+
+def test_storage_builds_a_remote_repository_without_a_token_when_none_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_DATABASE_URL", raising=False)
+    monkeypatch.delenv(remote.TOKEN_ENV, raising=False)
+    monkeypatch.setenv(remote.URL_ENV, "http://api:8766")
+
+    assert storage.build().client.token == ""
+
+
+def test_a_store_commit_holds_its_ledger_lock_caches_what_it_wrote_and_ignores_absent_drops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "api"
+    seeded(folder)
+    stored = storage.owned(plain, folder / sqlite.DATABASE)
+    revision = stored.current("split").state["_meta"]["rev"]
+    summary = stored.summaries()[0]
+    lock, locked = plain.LOCK, []
+
+    class Recording:
+        def ledger(self, slug: str) -> object:
+            locked.append(slug)
+            return lock.ledger(slug)
+
+    begin = sqlite.request_metrics.begin_ledger
+    monkeypatch.setattr(plain, "LOCK", Recording())
+    monkeypatch.setattr(
+        sqlite.request_metrics,
+        "begin_ledger",
+        lambda connection, slug, statement: locked.append(slug) or begin(connection, slug, statement),
+    )
+    written = stored.commit("split", revision, {"title": "Moved"}, ["absent"], [], summary)
+
+    assert "split" in locked and None not in locked
+    assert stored.generations() == {"split": written.generation}
+    with pytest.raises(sqlite.Conflict) as stale:
+        stored.commit("split", revision, {"title": "Stale"}, [], [], summary)
+    assert stale.value.slug == "split"
+
+
+def test_the_api_process_serves_its_own_repository_on_the_plain_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(store.storage, "owned", lambda domain: ("owned", domain))
+
+    assert store.repository() == ("owned", plain)
+
+
+def test_bin_registries_are_read_through_the_api(api: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm_ledger.repository import bin_storage
+
+    stored, base = api
+    with stored.connect() as connection, connection:
+        stored.save_registry(connection, "bin", {"split": 5})
+    monkeypatch.setattr(storage, "default", lambda: remote.RemoteLedgerRepository(remote.Client(base, "secret")))
+
+    assert bin_storage.entries() == {"split": 5}
+
+
+def test_every_call_to_the_store_waits_at_most_its_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeouts = []
+
+    def opened(request: object, timeout: float | None = None) -> object:
+        timeouts.append(timeout)
+        raise OSError("down")
+
+    monkeypatch.setattr(remote.urllib.request, "urlopen", opened)
+
+    with pytest.raises(remote.Unavailable):
+        remote.Client("http://unused").call("GET", "/held")
+    assert timeouts == [remote.TIMEOUT_S]
+
+
+def test_a_registry_session_hands_out_private_copies_of_what_it_read() -> None:
+    session = remote.Session(remote.Client("http://unused"))
+    session.seen["bin"] = {"split": {"at": 1}}
+
+    session.registry("bin")["split"]["at"] = 2
+
+    assert session.seen["bin"] == {"split": {"at": 1}}
+
+
+def test_remote_task_rows_carry_the_task_revision_fields_and_commits_cache_by_ledger(api: tuple) -> None:
+    _, base = api
+    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"), plain)
+    repository.apply_ops("split", ops=[ADD])
+    meta = repository.current("split").state["_meta"]
+
+    generation, fields, tasks = repository.task_rows("split")
+
+    assert list(repository.generations()) == ["split"]
+    assert fields == {name: meta[name] for name in sqlite.TASK_REVISION_FIELDS} and "rev" in fields
+    assert (generation, len(tasks)) == (repository.generations()["split"], 2)
+
+
+def test_a_purge_of_a_ledger_never_read_removes_it(api: tuple) -> None:
+    stored, base = api
+    repository = remote.RemoteLedgerRepository(remote.Client(base, "secret"))
+
+    with repository.connect() as session:
+        repository.purge("split", session)
+
+    assert not stored.exists("split")
+
+
+def test_storage_builds_the_remote_repository_on_the_domain_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_DATABASE_URL", raising=False)
+    monkeypatch.setenv(remote.URL_ENV, "http://api:8766")
+
+    assert storage.build(domain=plain).domain is plain

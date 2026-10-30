@@ -1,7 +1,6 @@
 import copy
 import http.client
 import json
-import mimetypes
 import threading
 import urllib.error
 import urllib.request
@@ -20,9 +19,9 @@ from .sqlite import BEGIN, SUMMARY_KEYS, TASK_REVISION_FIELDS, Conflict, Missing
 URL_ENV = "AGENTIHOOKS_SWARM_API_URL"
 TOKEN_ENV = "AGENTIHOOKS_SWARM_API_TOKEN"
 PREFIX = "/api/v1/store"
-JSON = mimetypes.types_map[".json"]
 ATTEMPTS = 4
 TIMEOUT_S = 30.0
+AUTHORIZATION = "Authorization"
 
 
 class Unavailable(OSError):
@@ -31,21 +30,19 @@ class Unavailable(OSError):
 
 class RegistryConflict(ValueError):
     def __init__(self, names: list[str]) -> None:
-        super().__init__(names)
         self.names = names
 
 
 class Client:
     def __init__(self, base: str, token: str = "") -> None:
-        self.base, self.token = base.rstrip("/") + PREFIX, token
+        self.base, self.token = base.removesuffix("/") + PREFIX, token
 
     def call(self, method: str, path: str, query: dict | None = None, body: object = None) -> tuple[int, object]:
         address = self.base + path + (f"?{urlencode(query, doseq=True)}" if query else "")
-        data = None if body is None else json.dumps(body, separators=(",", ":")).encode()
+        data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(address, data=data, method=HTTPMethod(method))
-        request.add_header("Content-Type", JSON)
         if self.token:
-            request.add_header("Authorization", f"Bearer {self.token}")
+            request.add_header(AUTHORIZATION, f"Bearer {self.token}")
         try:
             try:
                 with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
@@ -56,8 +53,8 @@ class Client:
         except (OSError, http.client.HTTPException, ValueError) as failure:
             raise Unavailable(str(failure)) from failure
 
-    def expect(self, method: str, path: str, query: dict | None = None, body: object = None) -> object:
-        status, answer = self.call(method, path, query, body)
+    def expect(self, method: str, path: str, body: object = None) -> object:
+        status, answer = self.call(method, path, body=body)
         if status != 200:
             raise Unavailable(f"{status} {answer}")
         return answer
@@ -72,11 +69,11 @@ class Client:
 
 
 def ledger(slug: str, part: str = "") -> str:
-    return f"/ledgers/{quote(slug, safe='')}" + (f"/{part}" if part else "")
+    return f"/ledgers/{quote(slug)}" + (f"/{part}" if part else "")
 
 
 def stored_file(table: str, slug: str, item: str = "") -> str:
-    return f"/files/{table}/{quote(slug, safe='')}" + (f"/{quote(item, safe='')}" if item else "")
+    return f"/files/{table}/{quote(slug)}" + (f"/{quote(item)}" if item else "")
 
 
 def changes(before: dict, after: dict) -> tuple[dict, list]:
@@ -136,7 +133,7 @@ class Session:
 
     def registry(self, name: str) -> dict:
         if name not in self.seen:
-            self.seen[name] = self.client.expect("GET", f"/registries/{quote(name, safe='')}")
+            self.seen[name] = self.client.expect("GET", f"/registries/{quote(name)}")
         return copy.deepcopy(self.seen[name])
 
     def commit(self) -> None:
@@ -145,7 +142,7 @@ class Session:
         body = dict(expected=self.seen, set=self.saved, purge=self.purged)
         status, answer = self.client.call("POST", "/registries", body=body)
         if status == 409:
-            raise RegistryConflict(answer.get("registries", []))
+            raise RegistryConflict(answer["registries"])
         if status != 200:
             raise Unavailable(f"{status} {answer}")
         self.seen.update(self.saved)
