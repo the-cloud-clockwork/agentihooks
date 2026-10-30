@@ -82,6 +82,21 @@ def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step():
     assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
 
 
+@pytest.mark.feature("semgrep-feature-tests")
+def test_feature_fixture_command_runs_recursively():
+    job = _jobs()["feature-tests"]
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert "semgrep --metrics off --test .semgrep/features" in commands
+    assert "if" not in job and "continue-on-error" not in job
+    assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+
+
+def test_feature_map_links_are_required_alongside_feature_rule_fixtures():
+    steps = _jobs()["feature-tests"]["steps"]
+    assert any(step.get("run") == "python -m scripts.feature_map" for step in steps)
+    assert any("pyyaml" in step.get("run", "") for step in steps)
+
+
 def test_scan_excludes_only_the_mutable_action_tag_rule():
     assert _jobs()["scan"]["steps"][-1]["env"]["EXCLUDE_RULES"].split() == [
         "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"

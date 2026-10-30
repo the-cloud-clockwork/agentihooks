@@ -1,0 +1,522 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from scripts import feature_map
+
+
+@pytest.fixture
+def mapped_repo(tmp_path):
+    rules = tmp_path / ".semgrep/features"
+    rules.mkdir(parents=True)
+    (rules / "login.yml").write_text("rules:\n  - id: feature-login\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_login.py").write_text(
+        'import pytest\n@pytest.mark.feature("login")\ndef test_shared():\n    assert True\n'
+    )
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "live.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+    entry = {
+        "id": "login",
+        "origin": "operator",
+        "seam": "The front door launch command",
+        "operator_words": "All front doors use the same stored login.",
+        "ordered_at": "2026-10-25",
+        "ledger_item": "ledger:doctor/tasks/t1",
+        "behaviour": "All front doors share the preferred stored login.",
+        "semgrep_rule": "feature-login",
+        "behaviour_test": "tests/test_login.py::test_shared",
+        "live_check": ["bash", "scripts/live.sh"],
+    }
+    path = tmp_path / "feature-map.json"
+    path.write_text(json.dumps({"features": [entry]}))
+    return tmp_path, path, entry
+
+
+def _rewrite(path, *entries):
+    path.write_text(json.dumps({"features": list(entries)}))
+
+
+def _outside_operator(origin, **fields):
+    return {
+        "id": "login",
+        "origin": origin,
+        "ledger_item": "ledger:rig/tasks/rpin1",
+        "behaviour": "Front doors share a login.",
+        "seam": "launch",
+        "tests": ["tests/test_login.py::test_shared"],
+        **fields,
+    }
+
+
+def test_complete_feature_map_passes(mapped_repo):
+    root, path, _ = mapped_repo
+    assert feature_map.validate(root, path) == 1
+
+
+def test_missing_behaviour_test_fails_with_the_feature_name(mapped_repo):
+    root, path, entry = mapped_repo
+    entry["behaviour_test"] = "tests/test_login.py::test_missing"
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="login.*missing behaviour test"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("id", "^feature: requires id$"),
+        ("origin", "^login: origin must be one of operator, regression, inventory$"),
+        ("seam", "^login: requires seam$"),
+        ("operator_words", "^login: requires operator_words$"),
+        ("ordered_at", "^login: requires ordered_at$"),
+        ("ledger_item", "^login: requires ledger_item$"),
+        ("behaviour", "^login: requires behaviour$"),
+        ("semgrep_rule", "^login: requires semgrep_rule$"),
+        ("behaviour_test", "^login: requires tests$"),
+        ("live_check", "^login: requires live_check argument list$"),
+    ],
+)
+def test_every_link_and_operator_provenance_is_required(mapped_repo, field, message):
+    root, path, entry = mapped_repo
+    del entry[field]
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match=message):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("words", ["", "   ", None, 17])
+def test_a_feature_without_operator_words_is_rejected(mapped_repo, words):
+    root, path, entry = mapped_repo
+    entry["operator_words"] = words
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="operator_words"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("ordered_at", "2026-02-30", "ordered_at"),
+        ("ordered_at", "tomorrow", "ordered_at"),
+        ("ledger_item", "agent memory", "ledger_item"),
+        ("semgrep_rule", "feature-missing", "missing rule"),
+        ("behaviour_test", "tests/gone.py::test_shared", "missing behaviour test"),
+        ("live_check", ["bash", "scripts/gone.sh"], "missing live check"),
+        ("live_check", ["python", "-m", "scripts.gone"], "missing live check"),
+        ("live_check", ["python", "scripts/gone.py"], "missing live check"),
+        ("live_check", ["made-up-check"], "missing live check"),
+        ("live_check", "bash scripts/live.sh", "live_check"),
+        ("live_check", [], "live_check"),
+        ("live_check", ["bash", "../outside.sh"], "live check"),
+    ],
+)
+def test_dangling_or_invalid_references_fail(mapped_repo, field, value, message):
+    root, path, entry = mapped_repo
+    entry[field] = value
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match=message):
+        feature_map.validate(root, path)
+
+
+def test_duplicate_feature_ids_fail(mapped_repo):
+    root, path, entry = mapped_repo
+    _rewrite(path, entry, entry)
+    with pytest.raises(ValueError, match="^duplicate feature login$"):
+        feature_map.validate(root, path)
+
+
+def test_a_feature_rule_no_entry_names_does_not_fail(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / ".semgrep/features/other.yaml").write_text("rules:\n  - id: feature-orphan\n")
+    assert feature_map.validate(root, path) == 1
+
+
+def test_an_unmapped_feature_test_fails(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_orphan.py").write_text(
+        'import pytest\n@pytest.mark.feature("orphan")\ndef test_other():\n    assert True\n'
+    )
+    with pytest.raises(ValueError, match=r"^unmapped feature test: \['tests/test_orphan.py::test_other'\]$"):
+        feature_map.validate(root, path)
+
+
+def test_a_marked_test_no_entry_lists_is_unmapped(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_more.py").write_text('import pytest\n@pytest.mark.feature("login")\ndef test_a():\n    pass\n')
+    with pytest.raises(ValueError, match=r"^unmapped feature test: \['tests/test_more.py::test_a'\]$"):
+        feature_map.validate(root, path)
+
+
+def test_referenced_test_must_carry_matching_feature_metadata(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_login.py").write_text("def test_shared():\n    assert True\n")
+    with pytest.raises(ValueError, match="^login: behaviour test requires matching feature marker$"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("origin", ["", "operators", None, "incident"])
+def test_an_unknown_origin_fails(mapped_repo, origin):
+    root, path, entry = mapped_repo
+    _rewrite(path, {**entry, "origin": origin})
+    with pytest.raises(ValueError, match="^login: origin must be one of operator, regression, inventory$"):
+        feature_map.validate(root, path)
+
+
+def test_an_inventory_entry_needs_only_its_behaviour_seam_and_tests(mapped_repo):
+    root, path, _ = mapped_repo
+    entry = _outside_operator("inventory")
+    del entry["ledger_item"]
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+def test_a_regression_with_its_incident_passes_without_rule_or_live_check(mapped_repo):
+    root, path, _ = mapped_repo
+    _rewrite(path, _outside_operator("regression"))
+    assert feature_map.validate(root, path) == 1
+
+
+@pytest.mark.parametrize("ledger_item", [None, "", "agent memory"])
+def test_a_regression_needs_the_ledger_item_of_its_incident(mapped_repo, ledger_item):
+    root, path, _ = mapped_repo
+    entry = _outside_operator("regression", ledger_item=ledger_item)
+    if ledger_item is None:
+        del entry["ledger_item"]
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="^login: (requires|invalid) ledger_item$"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("origin", ["regression", "inventory"])
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("semgrep_rule", "feature-missing", "^login: missing rule feature-missing$"),
+        ("semgrep_rule", "", "^login: requires semgrep_rule$"),
+        ("live_check", ["bash", "scripts/gone.sh"], "^login: missing live check"),
+        ("live_check", "bash scripts/live.sh", "^login: requires live_check argument list$"),
+        ("ledger_item", "agent memory", "^login: invalid ledger_item$"),
+    ],
+)
+def test_optional_links_outside_operator_are_checked_when_present(mapped_repo, origin, field, value, message):
+    root, path, _ = mapped_repo
+    _rewrite(path, _outside_operator(origin, **{field: value}))
+    with pytest.raises(ValueError, match=message):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("origin", ["regression", "inventory"])
+def test_present_rule_and_live_check_pass_outside_operator(mapped_repo, origin):
+    root, path, _ = mapped_repo
+    entry = _outside_operator(origin, semgrep_rule="feature-login", live_check=["bash", "scripts/live.sh"])
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+def test_every_listed_test_must_exist_and_carry_the_marker(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "tests/test_more.py").write_text(
+        'import pytest\n@pytest.mark.feature("login")\ndef test_a():\n    pass\ndef test_b():\n    pass\n'
+    )
+    _rewrite(path, {**entry, "tests": ["tests/test_more.py::test_a"]})
+    assert feature_map.validate(root, path) == 1
+    _rewrite(path, {**entry, "tests": ["tests/test_more.py::test_a", "tests/test_more.py::test_b"]})
+    with pytest.raises(ValueError, match="^login: behaviour test requires matching feature marker$"):
+        feature_map.validate(root, path)
+    _rewrite(path, {**entry, "tests": ["tests/test_more.py::test_gone"]})
+    with pytest.raises(ValueError, match="^login: missing behaviour test tests/test_more.py::test_gone$"):
+        feature_map.validate(root, path)
+
+
+def test_tests_alone_replace_the_single_behaviour_test(mapped_repo):
+    root, path, entry = mapped_repo
+    del entry["behaviour_test"]
+    _rewrite(path, {**entry, "tests": ["tests/test_login.py::test_shared"]})
+    assert feature_map.validate(root, path) == 1
+
+
+@pytest.mark.parametrize("tests", ["tests/test_login.py::test_shared", [""], ["  "], [17], {"a": 1}])
+def test_tests_must_be_a_list_of_node_ids(mapped_repo, tests):
+    root, path, entry = mapped_repo
+    _rewrite(path, {**entry, "tests": tests})
+    with pytest.raises(ValueError, match="^login: tests must be a list of test node ids$"):
+        feature_map.validate(root, path)
+
+
+def test_an_empty_test_list_fails(mapped_repo):
+    root, path, entry = mapped_repo
+    del entry["behaviour_test"]
+    _rewrite(path, {**entry, "tests": []})
+    with pytest.raises(ValueError, match="^login: requires tests$"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("command", [["python", "-m", "scripts.live"], ["python3", "scripts/live.py"]])
+def test_python_live_targets_are_resolved_inside_the_repo(mapped_repo, command):
+    root, path, entry = mapped_repo
+    (root / "scripts/live.py").write_text("print('ok')\n")
+    entry["live_check"] = command
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+def test_class_test_nodes_are_resolved(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        'import pytest\nclass TestLogin:\n    @pytest.mark.feature("login")\n'
+        "    def test_shared(self):\n        assert True\n"
+    )
+    entry["behaviour_test"] = "tests/test_login.py::TestLogin::test_shared"
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'class Helper:\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        pass\n',
+        'class TestLogin:\n    def __init__(self):\n        pass\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        pass\n',
+        'class TestLogin:\n    __test__ = False\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        pass\n',
+        '__test__ = False\n@pytest.mark.feature("login")\ndef test_shared():\n    pass\n',
+    ],
+)
+def test_noncollectable_ast_names_are_not_suite_tests(mapped_repo, source):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").write_text("import pytest\n" + source)
+    if source.startswith("class"):
+        entry["behaviour_test"] = "tests/test_login.py::" + source.split()[1].rstrip(":") + "::test_shared"
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="missing behaviour test"):
+        feature_map.validate(root, path)
+
+
+def test_suffix_named_feature_tests_cannot_escape_ownership(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/login_test.py").write_text(
+        'import pytest\n@pytest.mark.feature("orphan")\ndef test_other():\n    pass\n'
+    )
+    with pytest.raises(ValueError, match="unmapped feature test.*login_test.py::test_other"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("explicit_root", [False, True])
+def test_cli_reports_the_complete_validated_feature_count(mapped_repo, monkeypatch, capsys, explicit_root):
+    root, _, _ = mapped_repo
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", ["feature-map", *(["--root", str(root)] if explicit_root else [])])
+    feature_map.main()
+    assert capsys.readouterr().out == "Feature map: 1 features, all rule, test and live check links exist\n"
+
+
+def test_duplicate_rule_ids_cannot_hide_a_rule(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / ".semgrep/features/copy.yml").write_text("rules:\n  - id: feature-login\n")
+    with pytest.raises(ValueError, match="^duplicate feature rule id$"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("entries", [[], "features"])
+def test_feature_map_requires_an_entry_list(mapped_repo, entries):
+    root, path, _ = mapped_repo
+    path.write_text(json.dumps({"features": entries}))
+    with pytest.raises(ValueError, match="^features must be a nonempty list$"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["bash"],
+        ["python"],
+        ["python", "-m"],
+        ["python", "-m", "../foreign"],
+        ["python", "-m", "scripts.missing"],
+        [None],
+        ["bash", ""],
+    ],
+)
+def test_live_check_must_identify_a_repository_command(mapped_repo, command):
+    root, path, entry = mapped_repo
+    entry["live_check"] = command
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="live.check"):
+        feature_map.validate(root, path)
+
+
+def test_executable_repo_script_can_be_a_live_check(mapped_repo):
+    root, path, entry = mapped_repo
+    script = root / "scripts/live.sh"
+    script.chmod(0o755)
+    entry["live_check"] = ["./scripts/live.sh"]
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+    script.chmod(0o644)
+    with pytest.raises(ValueError, match="missing live check"):
+        feature_map.validate(root, path)
+
+
+def test_python_package_entry_point_can_be_a_live_check(mapped_repo):
+    root, path, entry = mapped_repo
+    package = root / "scripts/live"
+    package.mkdir()
+    (package / "__main__.py").write_text("print('ok')\n")
+    entry["live_check"] = ["python3", "-m", "scripts.live"]
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+def test_only_rule_documents_are_discovered_alongside_nested_fixtures(mapped_repo):
+    root, path, _ = mapped_repo
+    rules = root / ".semgrep/features"
+    nested = rules / "nested"
+    nested.mkdir()
+    (rules / "README.md").write_text("Feature rules and fixtures")
+    (nested / "login.test.yaml").write_text("example: regression\n---\nexample: passing\n")
+    (nested / "login.test.yml").write_text("example: regression\n---\nexample: passing\n")
+    assert feature_map.validate(root, path) == 1
+
+
+def test_other_pytest_decorators_are_not_feature_metadata(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        'import pytest\n@pytest.mark.feature("login")\n@pytest.mark.parametrize("value", [1])\n'
+        "@pytest.mark.unit\ndef test_shared(value):\n    assert value\n"
+    )
+    assert feature_map.validate(root, path) == 1
+
+
+def test_uppercase_python_module_names_are_valid_live_targets(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "scripts/Live.py").write_text("print('ok')\n")
+    entry["live_check"] = ["python", "-m", "scripts.Live"]
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+def test_non_string_live_arguments_cannot_enter_the_doctor_command(mapped_repo):
+    root, path, entry = mapped_repo
+    entry["live_check"] = ["bash", 42]
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="live_check"):
+        feature_map.validate(root, path)
+
+
+def test_nested_suite_classes_keep_the_full_test_node_id(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        "import pytest\nclass TestOuter:\n    class TestInner:\n"
+        '        @pytest.mark.feature("login")\n        async def test_shared(self):\n            pass\n'
+    )
+    entry["behaviour_test"] = "tests/test_login.py::TestOuter::TestInner::test_shared"
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+def test_support_modules_and_constants_do_not_hide_feature_tests(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/aaa_support.py").write_text("VALUE = 1\n")
+    source = root / "tests/test_login.py"
+    source.write_text("VALUE = 1\n" + source.read_text())
+    assert feature_map.validate(root, path) == 1
+
+
+def test_a_suffix_named_suite_node_can_be_mapped(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").rename(root / "tests/login_test.py")
+    entry["behaviour_test"] = "tests/login_test.py::test_shared"
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+def test_a_class_with_new_is_not_a_suite_test(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        "import pytest\nclass TestLogin:\n    def __new__(cls):\n        pass\n"
+        '    @pytest.mark.feature("login")\n    def test_shared(self):\n        pass\n'
+    )
+    entry["behaviour_test"] = "tests/test_login.py::TestLogin::test_shared"
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="missing behaviour test"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("marker", ["None", "17", '""', '"  "'])
+def test_a_feature_marker_cannot_discard_its_ownership(mapped_repo, marker):
+    root, path, _ = mapped_repo
+    (root / "tests/test_orphan.py").write_text(
+        f"import pytest\n@pytest.mark.feature({marker})\ndef test_other():\n    pass\n"
+    )
+    with pytest.raises(ValueError, match="feature marker requires an id"):
+        feature_map.validate(root, path)
+
+
+def test_unmarked_suite_tests_do_not_need_feature_entries(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_unrelated.py").write_text("def test_other():\n    pass\n")
+    assert feature_map.validate(root, path) == 1
+
+
+def test_the_repository_feature_map_is_valid():
+    root = Path(__file__).resolve().parents[1]
+    assert feature_map.validate(root, root / "feature-map.json") >= 1
+
+
+def _gh(tmp_path, body):
+    gh = tmp_path / "gh"
+    gh.write_text(f"#!{sys.executable}\nimport json, sys\n{body}")
+    gh.chmod(0o755)
+
+
+def _live(tmp_path, *args):
+    script = Path(__file__).resolve().parents[1] / "scripts/feature_checks/semgrep-feature-tests.sh"
+    return subprocess.run(
+        ["bash", str(script), *args],
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
+STEP = "Operator feature regressions and passing fixtures"
+
+
+def test_live_check_default_selects_the_latest_completed_pull_request_run(tmp_path):
+    _gh(
+        tmp_path,
+        'if "/workflows/test.yml/runs?" in sys.argv[2]:\n'
+        '    assert sys.argv[1:] == ["api", "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?event=pull_request&status=completed&per_page=1", "--jq", \'.workflow_runs[0].id // error("No completed pull request Tests run")\']\n'
+        '    print("123")\nelse:\n'
+        '    assert sys.argv[1:] == ["api", "repos/the-cloud-clockwork/agentihooks/actions/runs/123/jobs?per_page=100", "--paginate"]\n'
+        f'    print(json.dumps({{"jobs": [{{"conclusion": "success", "steps": [{{"name": "{STEP}", "conclusion": "success"}}]}}]}}))\n',
+    )
+    result = _live(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "true"
+
+
+@pytest.mark.parametrize(
+    ("jobs", "success"),
+    [
+        ([{"conclusion": "success", "steps": [{"name": STEP, "conclusion": "success"}]}], True),
+        ([], False),
+        ([{"conclusion": "failure", "steps": [{"name": STEP, "conclusion": "success"}]}], False),
+        ([{"conclusion": "success", "steps": [{"name": STEP, "conclusion": "skipped"}]}], False),
+        ([{"conclusion": "success", "steps": [{"name": "Other check", "conclusion": "success"}]}], False),
+    ],
+)
+def test_live_check_requires_the_deployed_feature_job_and_step(tmp_path, jobs, success):
+    _gh(
+        tmp_path,
+        'assert sys.argv[1:] == ["api", "repos/the-cloud-clockwork/agentihooks/actions/runs/123/jobs?per_page=100", "--paginate"]\n'
+        f"print({json.dumps(json.dumps({'jobs': jobs}))})\n",
+    )
+    result = _live(tmp_path, "123")
+    assert (result.returncode == 0) is success, result.stderr
