@@ -2,6 +2,44 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.517 · 2026-10-30
+
+### 2026-10-30 · ae3aafaf487e · #8976 · @agenticore-app
+
+**Watch hub admitted agents on another hive as remote in the tick**
+
+This change fixes a false-positive loss detection in the tick's reap pass: agent records that name a remote hive but haven't yet received a runtime target (as written during hub admission) were wrongly treated as local, so any hive whose startup took longer than the six-minute grace period got marked lost and had its task reopened prematurely. Now such records are treated as remote and held as suspect until their runtime responds, deferring actual loss detection to the hub reconciler's presence check. Records with any runtime target, including local Codex launches, are unaffected and keep their prior behavior.
+
+### 2026-10-30 · a730655d1f5c · #8961 · @agenticore-app
+
+**Split heavy test files across the selected unit legs**
+
+This change fixes uneven CI leg timing by letting `scripts.ci_select.legs_for` break up large test files into their top-level tests or classes before distributing work across unit legs, instead of assigning whole files as indivisible units. Previously, a single heavy file like `tests/test_gate_protected.py` could monopolize one leg (507 stored seconds, causing a 210s vs 138s runtime gap). Now such files split safely—skipping anything pytest can't collect as a standalone node—so the same selection spreads across six legs at roughly 150-152 seconds each, closing the timing gap and keeping CI runs more balanced and predictable.
+
+### 2026-10-30 · 95ea2ea0c22f · #8975 · @agenticore-app
+
+**Inventory the messaging and ledger features in the feature map**
+
+This change adds 54 new inventory entries to feature-map.json covering messaging (inbox, masters channel, ledger reads/writes, artifacts, plans) and the page UI, then tags 161 existing tests with matching feature markers so they trace back to these entries, with no changes to test logic itself. This closes out another slice of the broader feature-mapping effort, improving traceability between code behavior and test coverage. Some tests using unconventional TestCase naming can't be mapped yet and are tracked separately; feature-map validation and lint checks pass cleanly on the final commit.
+
+### 2026-10-30 · 227e1ae5af8e · #8973 · @agenticore-app
+
+**Allow Stop after an accepted swarm handoff**
+
+This change fixes a gap where a finished predecessor task could still be hit with Stop escalation even after its handoff to a successor had been accepted, letting repeated stops potentially block progress while the successor kept working. ClaimStop now checks whether a matching retained handoff transfer exists and, if so, clears the predecessor's refusal streak before any task reading or mutation occurs, so it no longer gets penalized. Normal workers and unrelated transfers are unaffected and continue to be enforced as before, keeping the fix narrowly scoped to the handoff-acceptance case.
+
+### 2026-10-30 · 17d95ffc15ed · #8971 · @agenticore-app
+
+**Allow blocker escalation when the critic has no session capacity**
+
+Previously, if every eligible Claude account was at session capacity, the blind critic couldn't launch, and the blocker protocol would stall the engineer indefinitely since no critic verdict could be produced. This change treats that specific routing refusal as valid critic evidence, letting the engineer escalate with a blocker reason and proceed rather than getting stuck. All other critic failure modes still require the critic step as before, so this only loosens the rule for the capacity-exhaustion case, unblocking engineers without weakening the broader review requirement.
+
+### 2026-10-30 · 887c0bba9345 · #8912 · @agenticore-app
+
+**Issue and check swarm credentials in an auth service with signed tokens**
+
+This change centralizes credential issuing and checking into a single auth service that signs short lived tokens, instead of letting every service inspect shared member maps directly. Agent, ledger, controller, tick, Cloudflare Access, and agent credentials now all route through this service, each backed by its own independent record, while the ledger page and other services simply verify tokens locally with a shared key. It also adds a Helm deployment for the auth service and tests covering agent authentication even when the ledger page is down, closing issue #8848 and tightening credential isolation across the swarm.
+
 ## v2.17.515 · 2026-10-30
 
 ### 2026-10-30 · 7aeca1153cb1 · #8958 · @agenticore-app
