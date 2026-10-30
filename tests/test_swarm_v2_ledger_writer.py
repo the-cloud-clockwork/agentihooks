@@ -345,6 +345,18 @@ def test_the_command_needs_a_subcommand(capsys):
 
 
 @pytest.fixture
+def _ledger_exit_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = os.getpid()
+    original_exit = os._exit
+
+    def exit_process(code: int) -> None:
+        if os.getpid() != owner:
+            original_exit(code)
+        raise AssertionError(f"ledger server exited the test process with status {code}")
+
+    monkeypatch.setattr(os, "_exit", exit_process)
+
+@pytest.fixture
 def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard: None) -> Path:
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "metrics_journal", lambda *args: None)
