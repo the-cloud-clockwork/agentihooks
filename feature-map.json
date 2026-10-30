@@ -18,6 +18,16 @@
       ]
     },
     {
+      "id": "feature-suite-harness",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/fsuite1",
+      "behaviour": "A scripted agent launched with the real launch env reports its profile canary after a set delay, beats and hands off its seat through a ledger server on the real Redis and Postgres services.",
+      "seam": "The binding canary report the launch check confirms, the session heartbeat and the swarm handoff command",
+      "tests": [
+        "tests/features/test_harness.py::test_a_scripted_agent_reports_its_canary_beats_and_hands_off_through_the_ledger_server"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-scope",
       "origin": "inventory",
       "behaviour": "The host tick skips retired, closed and unavailable ledgers before any tick pass.",
