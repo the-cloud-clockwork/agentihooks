@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.503 · 2026-10-30
+
+### 2026-10-30 · 45ad94b4bfab · #8891 · @nestorcolt
+
+**Use each master holder record in shared login home readers**
+
+When a shared Claude login home is used by multiple masters, this change makes sure each joining master sees and validates their own rendered profile and overlays instead of whatever the creating master had, fixing a bug where launch checks, enforcement, status display, and hive profile/brain checks could use the wrong holder's data. It preserves each holder's own chain and overlay records, supports older overlay-only records, and falls back on render stamps when needed, so shared homes behave correctly regardless of which master set them up.
+
 ## v2.17.502 · 2026-10-30
 
 ### 2026-10-30 · 133ed086e8ea · #8879 · @agenticore-app
