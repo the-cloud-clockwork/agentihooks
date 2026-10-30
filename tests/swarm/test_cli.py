@@ -537,7 +537,11 @@ def test_send_message_comes_from_the_named_agent(env, capsys, monkeypatch, flag,
     assert "engineer@a1b2c3-0001" not in json.loads(capsys.readouterr().out)["sent"]
 
 
-def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(env, capsys, monkeypatch):
+def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(
+    env: tuple[RedisStore, FakeLedger, FakeRuntime],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store, ledger, _ = env
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     run("sw", "create", "--repo", "/repo")
@@ -548,8 +552,9 @@ def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(
     assert ledger.said == []
     live = sorted(a.name for a in store.agents("sw"))
     inbox = InboxStore(store.redis)
-    for name in live:
-        [item] = inbox.inbox(name)
+    for agent in store.agents("sw"):
+        address = agent.seat if agent.lane == "master" else agent.name
+        [item] = [i for i in inbox.inbox(address) if not i.fyi]
         assert (item.sender, item.text) == ("operator", "pause new work for a moment")
     assert sorted(json.loads(capsys.readouterr().out)["sent"]) == live and len(live) == 3
 
