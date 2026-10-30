@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.507 · 2026-10-30
+
+### 2026-10-30 · f616c3e518d4 · #8917 · @nestorcolt
+
+**Scan account keys in pages of ten thousand in fleet_held**
+
+This change fixes `accounts.fleet_held` to scan the `accounts:*` keyspace using a SCAN count of 10000, matching what `stored_accounts` already does, instead of redis-py's default page size of 10. The default was taking over 11,000 SCAN calls and 60+ seconds in the hosted controller pod, stalling the quota capacity read long enough that the liveness probe killed the controller before another proof swarm's lease expired. With count 10000, the same scan completes in about 0.58 seconds.
+
 ## v2.17.503 · 2026-10-30
 
 ### 2026-10-30 · 45ad94b4bfab · #8891 · @nestorcolt
