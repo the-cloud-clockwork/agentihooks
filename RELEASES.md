@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.515 · 2026-10-30
+
+### 2026-10-30 · 7aeca1153cb1 · #8958 · @agenticore-app
+
+**Start the writer lock ledger Postgres from the already pulled service image**
+
+This change makes the writer-lock ledger's Postgres container start from the pgvector/pgvector:0.8.0-pg16 image that the job's service container already pulls, using --pull never, instead of retrying a separate pull. It now starts before checkout so readiness checks overlap with setup rather than blocking afterward. This cuts the slow, flaky manifest-inspect-and-pull step (around 23–37 seconds) down to about 1 second, shaving roughly 25–37 seconds off each run and making the writer-lock scenario job noticeably faster and more reliable.
+
+### 2026-10-30 · 4b6b5475b7b6 · #8922 · @agenticore-app
+
+**Allow ledger joins past queued talk and refresh launch evidence**
+
+This change lets a solo authorized ledger join go through to the server even while other ledger talk is still queued, including talk tied to a different ledger, instead of being blocked behind it; normal write ordering is unaffected. It also refreshes join evidence that was missing before the system evaluates pending launches, so launch decisions are made on current data rather than stale records. The existing launch window rules for rejecting late or absent joins are unchanged, and durable join acceptance during a genuine outage remains separate follow-up work, tracked under the still-open parent issue.
+
+### 2026-10-30 · 52d97c022718 · #8952 · @agenticore-app
+
+**Keep moved tasks on their pull request delivery branch**
+
+This change fixes a bug where a task moved between hosts could get stuck because leftover branch records from its old host conflicted with its current one, causing publication to reject the delivery branch. Now, when such a conflict is detected, the system resolves it by checking the open pull request's head branch for the current repository and using that, only falling back to the existing selection if no matching open pull request is found. This prevents moved tasks from losing their correct delivery branch and avoids publication failures caused by stale branch mappings.
+
+### 2026-10-30 · 6cf536b17568 · #8938 · @agenticore-app
+
+**Comment gate for shell scripts, ledger JavaScript and style sheets**
+
+The comment gate now covers shell scripts, the ledger's front-end JavaScript, and its style sheets, using pinned tree-sitter grammars instead of regex so constructs like `${x#y}` or `//` inside strings aren't mistaken for comments. Shell allows only shebang, one header block, and shellcheck directives; JavaScript allows a header, doc blocks before functions/classes, and eslint/ts directives; CSS allows one header. The ten stray comments inside ledger JavaScript catch blocks were removed and those blocks given real logic to satisfy SonarJS S108. New planted-fault tests per language confirm the parser isn't fooled, closing out this enforcement task.
+
 ## v2.17.514 · 2026-10-30
 
 ### 2026-10-30 · f5e69c4d3abf · #8953 · @agenticore-app
