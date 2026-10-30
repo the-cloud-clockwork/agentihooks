@@ -273,7 +273,11 @@ def test_named_master_messages_bypass_pool_rotation(
     if alias:
         inbox.names.alias(address, "sw-master-1")
     question = inbox.send(address, "worker", "question")
-    answer = inbox.reply(question.id, "worker", "answer") if operation == "reply" else inbox.send("worker", address, "answer")
+    answer = (
+        inbox.reply(question.id, "worker", "answer")
+        if operation == "reply"
+        else inbox.send("worker", address, "answer")
+    )
     assert inbox.get(answer.id).address == FRONT
     assert answer.id in {item.id for item in inbox.inbox(FRONT)}
     assert answer.id not in {item.id for item in inbox.inbox(SECOND)}
