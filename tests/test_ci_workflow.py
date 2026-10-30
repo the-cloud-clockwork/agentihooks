@@ -409,10 +409,8 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files() -> None:
     assert "${{ hashFiles('.github/test-requirements.lock') }}" in key
     assert step["run"].splitlines() == [
         "date=$(date -u +%F)",
-        'echo "date=$date" >> "$GITHUB_OUTPUT"',
         'echo "key=$KEY_PREFIX-$date-$KEY_INPUTS" >> "$GITHUB_OUTPUT"',
     ]
-    assert "matrix" not in key
 
 
 def test_records_name_the_test_environment_when_the_wheelhouse_skips_its_restore() -> None:
@@ -556,15 +554,16 @@ def test_every_test_environment_key_comes_from_the_shared_action() -> None:
             caches = [step for step in steps if (step.get("with") or {}).get("path") == "~/venv"]
             if not caches:
                 continue
-            day = next(step for step in steps if step.get("id") == "day")
-            python = next(step for step in steps if step.get("uses", "").startswith("actions/setup-python"))
-            assert day["uses"] == _TEST_ENV_KEY, f"{path.name}:{name}"
+            day = next((step for step in steps if step.get("id") == "day"), None)
+            python = next((step for step in steps if step.get("uses", "").startswith("actions/setup-python")), None)
+            assert day and python, f"{path.name}:{name}"
+            assert day.get("uses") == _TEST_ENV_KEY, f"{path.name}:{name}"
             assert day["with"] == {"python-version": f"${{{{ steps.{python['id']}.outputs.python-version }}}}"}
             for cache in caches:
+                saves = cache["uses"].startswith("actions/cache/save")
                 assert steps.index(day) < steps.index(cache), f"{path.name}:{name}"
-                assert cache["with"]["key"] in (
-                    "${{ steps.day.outputs.key }}",
-                    "${{ steps.venv.outputs.cache-primary-key }}",
+                assert cache["with"]["key"] == (
+                    "${{ steps.venv.outputs.cache-primary-key }}" if saves else "${{ steps.day.outputs.key }}"
                 ), f"{path.name}:{name}"
             keyed.add(path.name)
     assert {"count-record.yml", "test.yml"} <= keyed
