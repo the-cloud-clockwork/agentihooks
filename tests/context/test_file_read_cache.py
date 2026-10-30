@@ -266,3 +266,113 @@ def test_numbered_read_output_tracks_only_returned_lines(partial_read: dict[str,
     on_pre_tool_use({**partial_read, "tool_input": {**partial_read["tool_input"], "offset": 3}})
     with pytest.raises(BlockAction):
         on_pre_tool_use({**partial_read, "tool_input": {**partial_read["tool_input"], "limit": 2}})
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({}, []),
+        ({"startLine": 0, "numLines": 1}, []),
+        ({"startLine": 1, "numLines": 0}, []),
+        ({"startLine": "1", "numLines": 1}, []),
+        ({"startLine": 1, "numLines": "1"}, []),
+        ({"startLine": 1, "numLines": 1}, [(1, 1)]),
+    ],
+)
+def test_delivered_metadata_requires_positive_line_counts(
+    metadata: dict[str, Any], expected: list[tuple[int, int]]
+) -> None:
+    from hooks.context.file_read_cache import _delivered_ranges
+
+    assert _delivered_ranges({"file": metadata}) == expected
+    assert _delivered_ranges({}) == []
+
+
+def test_one_unread_line_and_missing_first_line_stay_readable(partial_read: dict[str, Any]) -> None:
+    from hooks.context.file_read_cache import mark_read_result, was_file_read
+    from hooks.hook_manager import on_post_tool_use, on_pre_tool_use
+
+    on_post_tool_use(partial_read)
+    on_pre_tool_use({**partial_read, "tool_input": {**partial_read["tool_input"], "offset": 403, "limit": 1}})
+    tail = {**partial_read, "tool_response": {"file": {"startLine": 404, "numLines": 1142, "totalLines": 1545}}}
+    on_post_tool_use(tail)
+    on_pre_tool_use({**partial_read, "tool_input": {**partial_read["tool_input"], "offset": 403, "limit": 1}})
+    session_id = "missing-first-line"
+    mark_read_result(
+        {
+            **tail,
+            "session_id": session_id,
+            "tool_response": {"file": {"startLine": 2, "numLines": 1544, "totalLines": 1545}},
+        }
+    )
+    assert not was_file_read(session_id, partial_read["tool_input"]["file_path"])
+
+
+@pytest.mark.parametrize("error_location", ["payload", "response"])
+def test_failed_read_with_line_metadata_never_records_coverage(
+    partial_read: dict[str, Any], error_location: str
+) -> None:
+    from hooks.context.file_read_cache import mark_read_result, was_file_read
+
+    payload = dict(partial_read)
+    if error_location == "payload":
+        payload["is_error"] = True
+    else:
+        payload["tool_response"] = {**payload["tool_response"], "is_error": True}
+    mark_read_result(payload)
+    assert not was_file_read(payload["session_id"], payload["tool_input"]["file_path"], 1, 1)
+
+
+def test_tool_output_records_numbered_lines_without_tool_response(partial_read: dict[str, Any]) -> None:
+    from hooks.context.file_read_cache import mark_read_result, was_file_read
+
+    payload = {key: value for key, value in partial_read.items() if key != "tool_response"}
+    payload["tool_output"] = "1→first line\n2→second line"
+    mark_read_result(payload)
+    assert was_file_read(payload["session_id"], payload["tool_input"]["file_path"], 1, 2)
+    assert not was_file_read(payload["session_id"], payload["tool_input"]["file_path"], 1, 3)
+
+
+@pytest.mark.parametrize("missing", ["session_id", "tool_input", "file_path"])
+def test_read_without_identity_does_not_record_coverage(
+    partial_read: dict[str, Any], missing: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hooks.context import file_read_cache
+
+    recorded: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(file_read_cache, "mark_file_read", lambda *args: recorded.append(args))
+    payload = dict(partial_read)
+    if missing == "file_path":
+        payload["tool_input"] = {}
+    else:
+        payload.pop(missing)
+    file_read_cache.mark_read_result(payload)
+    assert recorded == []
+
+
+def test_redis_range_cache_uses_versioned_session_keys(partial_read: dict[str, Any]) -> None:
+    import json
+
+    from hooks._redis import redis_key
+    from hooks.context import file_read_cache
+
+    redis = file_read_cache.get_redis()
+    if redis is None:
+        return
+    file_read_cache.mark_read_result(partial_read)
+    path = partial_read["tool_input"]["file_path"]
+    encoded = redis.hget(redis_key("file_read_ranges", partial_read["session_id"]), path)
+    assert json.loads(encoded) == [[1, 402]]
+    assert not file_read_cache.was_file_read("another-session", path, 1, 1)
+
+
+@pytest.mark.parametrize("delta", [0.001, 0.01])
+def test_range_revision_threshold_invalidates_cached_lines(
+    partial_read: dict[str, Any], monkeypatch: pytest.MonkeyPatch, delta: float
+) -> None:
+    from hooks.context import file_read_cache
+
+    monkeypatch.setattr(file_read_cache, "_get_mtime", lambda _: 0.0)
+    file_read_cache.mark_read_result(partial_read)
+    monkeypatch.setattr(file_read_cache, "_get_mtime", lambda _: delta)
+    assert not file_read_cache.was_file_read(partial_read["session_id"], partial_read["tool_input"]["file_path"], 1, 1)
