@@ -1913,8 +1913,7 @@ def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
         (root / "blocker.txt").write_text("completed dependency")
         git(root, "commit", "-qam", "Finish dependency")
         base = git(root, "rev-parse", "HEAD")
-        (repository / "blocker.txt").write_text("completed dependency")
-        git(repository, "add", "blocker.txt")
+        git(repository, "merge", "--squash", base)
         git(repository, "commit", "-qm", "Squash dependency")
         if stacked == "dependency-modified":
             (repository / "blocker.txt").write_text("newer dependency")
