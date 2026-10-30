@@ -424,7 +424,7 @@ def _pin(slug: str, ledger: LedgerClient, task: dict, pin: dict, run_id: int) ->
     if pin:
         return []
     pin_id = PIN_PREFIX + task["id"]
-    named = "Pin a test for " + task.get("title", "").removeprefix("Promotion red: ")
+    named = "Pin a test for " + task["title"].removeprefix("Promotion red: ")
     fields = {
         "task": pin_id,
         "title": PIN_UNNAMED if ledger_comments.problems(named, "item") else named,

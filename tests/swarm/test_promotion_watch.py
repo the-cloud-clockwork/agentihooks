@@ -812,6 +812,41 @@ def test_a_pinned_fixer_closes_on_a_later_green_once_its_pinning_task_is_done(st
     assert actions == ["closed promo-900-0, dev push run 903 passed"]
 
 
+def test_every_fixer_without_a_mapped_test_gets_its_own_pinning_task(store):
+    second = fixer(id="promo-900-1", title="Promotion red: lint")
+    ledger = Ledger([fixer(), second])
+    actions = refresh(store, ledger, gh([GREEN]))
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["pin-promo-900-0", "pin-promo-900-1"]
+    assert actions == [
+        "filed pin-promo-900-0 to pin a test for promo-900-0, dev push run 901 passed",
+        "filed pin-promo-900-1 to pin a test for promo-900-1, dev push run 901 passed",
+    ]
+
+
+def test_an_unread_fixer_does_not_hold_the_next_fixer_from_closing(store):
+    answer = gh([GREEN])
+
+    def run(argv, **kwargs):
+        if "/pulls/66" in argv[2]:
+            raise subprocess.CalledProcessError(1, argv, stderr="HTTP 502")
+        return answer(argv, **kwargs)
+
+    ledger = Ledger([fixer(pr_url="https://github.com/o/r/pull/66"), fixer(id="promo-900-1", pr_url=PR_URL)])
+    assert refresh(store, ledger, run) == ["closed promo-900-1, dev push run 901 passed"]
+    assert [t["state"] for t in ledger.tasks] == ["open", "done"]
+
+
+def test_a_former_owner_fixer_reads_its_pull_request_in_the_watched_repo(store, monkeypatch):
+    calls, former, ledger = [], Ledger([fixer(pr_url=PR_URL)]), Ledger()
+    ledger.state = lambda slug: former.doc()
+    ledger.update_task, ledger.comment = former.update_task, former.comment
+    monkeypatch.setattr(promotion_watch.promotion_owner, "history", lambda repo, redis: {SLUG, "former"})
+    refresh(store, ledger, gh([GREEN], calls=calls))
+    assert former.tasks[0]["state"] == "done"
+    pulls = [kwargs["cwd"] for argv, kwargs in calls if "/pulls/" in argv[2] or "/contents/" in argv[2]]
+    assert pulls == ["/repo", "/repo", "/repo"]
+
+
 def test_an_unread_pull_request_leaves_the_fixer_for_the_next_green(store):
     answer = gh([GREEN])
 
