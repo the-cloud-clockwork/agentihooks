@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from http import HTTPMethod
 from pathlib import Path
 from types import ModuleType
 from urllib.parse import quote, urlencode
@@ -40,7 +41,7 @@ class Client:
     def call(self, method: str, path: str, query: dict | None = None, body: object = None) -> tuple[int, object]:
         address = self.base + path + (f"?{urlencode(query, doseq=True)}" if query else "")
         data = None if body is None else json.dumps(body, separators=(",", ":")).encode()
-        request = urllib.request.Request(address, data=data, method=method)
+        request = urllib.request.Request(address, data=data, method=HTTPMethod(method))
         request.add_header("Content-Type", JSON)
         if self.token:
             request.add_header("Authorization", f"Bearer {self.token}")

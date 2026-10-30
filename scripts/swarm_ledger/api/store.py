@@ -80,7 +80,7 @@ def reading(stored: LedgerRepository, slug: str, part: str | None, query: dict) 
     if part == Part.TOKEN:
         token = stored.token(slug)
         if token is None:
-            raise Missing(slug)
+            raise refused(404, Code.LEDGER_NOT_FOUND)
         return dict(token=token)
     if part == Part.EVENTS:
         return stored.events_since(slug, int(first(query, Part.EVENTS, "0")))

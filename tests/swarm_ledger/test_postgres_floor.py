@@ -114,6 +114,22 @@ def test_a_writer_at_or_above_the_stored_version_writes(monkeypatch, floor):
     assert calls == [(connection, "s", "old", {"_meta": {"rev": 3}}, ["e"])]
 
 
+def test_a_write_hands_the_summary_it_was_given_to_the_stored_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    summaries = []
+
+    def write(
+        self: object, connection: object, slug: str, entry: object, state: dict, events: list, summary: dict | None
+    ) -> str:
+        summaries.append(summary)
+        return "entry"
+
+    monkeypatch.setattr(sqlite.SQLiteLedgerRepository, "_write", write)
+
+    repository()._write(Statements({postgres.FLOOR: []}), "s", "old", {"_meta": {"rev": 3}}, [], {"slug": "s"})
+
+    assert summaries == [{"slug": "s"}]
+
+
 def test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_write(monkeypatch):
     calls = written(monkeypatch)
     refused = [("10.0.0.5", 0, 1), ("an unseen client", 1, 2)]
