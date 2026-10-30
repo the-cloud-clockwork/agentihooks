@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import socket
 import subprocess
 import sys
@@ -163,6 +164,20 @@ def swarm(ledger: Ledger) -> Swarm:
     return Swarm(store, ledger)
 
 
+def _launcher_exports(environ: dict[str, str]) -> dict[str, str]:
+    """The swarm identity the init agent shell launcher exports into a launched agent."""
+    from scripts.init_agent import _swarm_exports
+
+    exported = {}
+    for line in _swarm_exports(environ).splitlines():
+        words = shlex.split(line)
+        if words[:1] == ["export"]:
+            key, _, value = words[1].partition("=")
+            if key in environ:
+                exported[key] = value
+    return exported
+
+
 def _home(root: Path) -> Path:
     home = root / PROFILE / scripted_agent.HARNESS
     home.mkdir(parents=True)
@@ -201,9 +216,9 @@ def scripted_agent_launch(swarm: Swarm, tmp_path: Path) -> Iterator[Callable[...
             binding.REPORT: str(report),
             binding.HOMES[scripted_agent.HARNESS]: str(home),
             "AGENTIHOOKS_PROFILE": PROFILE,
-            "AGENTIHOOKS_SWARM": slug,
-            "AGENTIHOOKS_SWARM_LANE": LANE,
-            "AGENTIHOOKS_SWARM_TASK": TASK,
+            **_launcher_exports(
+                {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_SWARM_LANE": LANE, "AGENTIHOOKS_SWARM_TASK": TASK}
+            ),
             "AGENTIHOOKS_AGENT_NAME": name,
             scripted_agent.CANARY_DELAY: str(canary_delay_s),
             scripted_agent.BEAT_EVERY: str(beat_s),
