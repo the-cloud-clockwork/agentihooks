@@ -19,7 +19,7 @@ def test_routing_and_roster_reads_do_not_transfer_the_execution_archive(
 
     store = RedisStore(FakeRedis(decode_responses=True))
     agent = AgentRecord("eng-a", "eng", "task", execution_id="active", generation=2, hive="hive-a")
-    store.put_agent("sw", agent)
+    store.project_agent("sw", agent)
     ended = {**asdict(agent), "input_prompt": "ended execution history " * 1000}
     archive = {f"old-{index}": {**ended, "execution_id": f"old-{index}"} for index in range(archive_size)}
     fencing.write(store, "sw", lambda doc: doc.update(executions={"active": asdict(agent)}, archive=archive))
@@ -50,7 +50,7 @@ def test_a_legacy_writer_cannot_leave_stale_routing_rows(monkeypatch: pytest.Mon
 
     store = RedisStore(FakeRedis(decode_responses=True))
     agent = AgentRecord("eng-a", "eng", "task", execution_id="active", generation=1, hive="hive-a")
-    store.put_agent("sw", agent)
+    store.project_agent("sw", agent)
     fencing.write(store, "sw", lambda doc: doc.update(executions={"active": asdict(agent)}))
     assert store.agents("sw")[0].hive == "hive-a"
     states = state.for_store(store, fencing.BUCKET)
