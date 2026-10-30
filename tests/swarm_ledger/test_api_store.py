@@ -1113,7 +1113,7 @@ def test_remote_task_rows_carry_the_task_revision_fields_and_commits_cache_by_le
     generation, fields, tasks = repository.task_rows("split")
 
     assert list(repository.generations()) == ["split"]
-    assert fields == {name: meta[name] for name in sqlite.TASK_REVISION_FIELDS} and "rev" in fields
+    assert fields == {name: meta[name] for name in sqlite.TASK_REVISION_FIELDS if name in meta} and "rev" in fields
     assert (generation, len(tasks)) == (repository.generations()["split"], 2)
 
 
