@@ -108,7 +108,7 @@ def language(root: Path, name: str) -> str | None:
     if path.is_symlink() or not path.is_file():
         return None
     with path.open("rb") as stream:
-        return "shell" if _BASH.match(stream.readline(256)) else None
+        return "shell" if _BASH.match(stream.readline()) else None
 
 
 @functools.cache
@@ -139,7 +139,7 @@ def _shebang(node: Any) -> bool:
 
 
 def _documents(node: Any, source: bytes) -> bool:
-    line = source[source.rfind(b"\n", 0, node.start_byte) + 1 : node.start_byte]
+    line = source[node.start_byte - node.start_point[1] : node.start_byte]
     following = node.next_named_sibling
     if not node.text.startswith(b"/**") or node.text == b"/**/" or line.strip() or following is None:
         return False

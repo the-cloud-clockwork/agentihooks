@@ -404,6 +404,7 @@ HEADER = "".join(f"# header line {index}\n" for index in range(20))
         (SCRIPT_JS, "f();\n", "f();\n/** planted */\n\nfunction g() {}\n", 2),
         (SCRIPT_JS, "f();\n", "f();\n/** planted */\nconst x = 1;\n", 2),
         (SCRIPT_JS, "f();\n", "f();\n/* planted */\nfunction g() {}\n", 2),
+        (SCRIPT_JS, "f();\n", "f(); /** planted */\nfunction g() {}\n", 1),
         (SCRIPT_JS, "f();\n", "try { f(); } catch (e) { /* storage blocked */ }\n", 1),
         (SCRIPT_JS, "f();\n", "f();\n// eslint-disable-next-line no-undef -- reason\ng();\n", 2),
         (SHEET, "a { color: red; }\n", "a { color: red; /* planted */ }\n", 1),
@@ -434,11 +435,14 @@ def test_planted_tree_comment_is_red(
         (SCRIPT_JS, "f();\n/** Run g. */\nfunction g() {}\n"),
         (SCRIPT_JS, "f();\n/**\n * Run g.\n */\nexport function g() {}\n"),
         (SCRIPT_JS, "f();\n/** Run g. */\nexport const g = () => 1;\n"),
+        (SCRIPT_JS, "f();\n/** Run g. */\nvar g = function () {};\n"),
+        (SCRIPT_JS, "f();\n/*@ts-nocheck*/\n/*eslint-disable*/\n"),
         (SCRIPT_JS, "f();\n/** A. */\nclass A {\n  /** Run m. */\n  m() {}\n}\n"),
         (SCRIPT_JS, "// eslint-disable-next-line no-undef\nf(); // eslint-disable-line no-undef\n/* @ts-nocheck */\n"),
         (SCRIPT_JS, "function g() { try { f(); return true; } catch (e) { return false; } }\n"),
         ("scripts/other/subject.js", "f(); // outside the ledger front end\n"),
         (SHEET, '/* header\n   second line */\na { content: "/* not */"; }\n'),
+        (SHEET, "/* header */a { color: red; }\n"),
     ],
 )
 def test_tree_comment_allowance_is_green(tmp_path: Path, name: str, after: str) -> None:
@@ -474,6 +478,9 @@ def test_listed_script_with_comment_is_red(tmp_path: Path) -> None:
 def test_unparsable_script_is_red(tmp_path: Path) -> None:
     head = _tree(tmp_path / "head", {SCRIPT_JS: "function (\n"})
     assert no_comments.grade(None, head, True) == [f"{SCRIPT_JS}:1: javascript source does not parse"]
+    assert no_comments.tree_violations(b"function (\n", "javascript", SCRIPT_JS) == [
+        (1, 1, "javascript source does not parse")
+    ]
 
 
 def test_missing_grammar_is_red(
