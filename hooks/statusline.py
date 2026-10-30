@@ -25,11 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import hooks.config  # noqa: F401 — side effect: loads env
-
-# ---------------------------------------------------------------------------
-# ANSI helpers
-# ---------------------------------------------------------------------------
+import hooks.config  # noqa: F401
 
 _RESET = "\033[0m"
 _DIM = "\033[2m"
@@ -158,11 +154,6 @@ def _account_slug() -> str:
     return found if found != UNROUTED else os.environ.get("AGENTIHOOKS_ROUTE_ACCOUNT") or "default"
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
@@ -171,7 +162,6 @@ def main() -> None:
         return
 
     try:
-        # ── Extract fields ─────────────────────────────────────────────
         cw = payload.get("context_window") or {}
         cost_data = payload.get("cost") or {}
         model_data = payload.get("model") or {}
@@ -216,24 +206,20 @@ def main() -> None:
         except Exception:
             pass
 
-        # Context window — trust Claude Code's native used_percentage
         used_pct = cw.get("used_percentage") or 0.0
         ctx_size = cw.get("context_window_size") or 0
         current_usage = cw.get("current_usage") or {}
         used = int(ctx_size * used_pct / 100) if ctx_size else 0
         total = ctx_size
 
-        # Model
         model_name = " ".join(filter(None, (model_data.get("display_name"), effort)))
 
-        # Cost
         cost_usd = cost_data.get("total_cost_usd")
         duration_ms = cost_data.get("total_duration_ms")
         api_ms = cost_data.get("total_api_duration_ms")
         lines_added = cost_data.get("total_lines_added", 0) or 0
         lines_removed = cost_data.get("total_lines_removed", 0) or 0
 
-        # ── LINE 1: Context bar + model + cost ─────────────────────────
         bar = _progress_bar(used_pct)
         line1_parts = [f"{bar} {_BOLD}{used_pct:.0f}%{_RESET}"]
 
@@ -248,39 +234,31 @@ def main() -> None:
 
         print(" | ".join(line1_parts))
 
-        # ── LINE 2: Details — tokens, lines, cache, git ───────────────
         line2_parts = []
 
-        # Token counts
         if total:
             line2_parts.append(f"{_DIM}ctx:{_RESET} {_fmt(used)}/{_fmt(total)}")
 
-        # Lines changed
         if lines_added or lines_removed:
             line2_parts.append(f"{_GREEN}+{lines_added}{_RESET}{_RED}-{lines_removed}{_RESET}")
 
-        # Cache ratio
         cache = _cache_ratio(current_usage)
         if cache:
             line2_parts.append(f"{_DIM}cache:{_RESET} {cache}")
 
-        # API wait ratio
         if api_ms and duration_ms and duration_ms > 0:
             api_pct = api_ms / duration_ms * 100
             line2_parts.append(f"{_DIM}api:{_RESET} {api_pct:.0f}%")
 
-        # Git branch
         branch = _git_branch()
         if branch:
             line2_parts.append(f"{_MAGENTA}{branch}{_RESET}")
 
-        # Worktree indicator
         if worktree:
             wt_name = worktree.get("name", "")
             if wt_name:
                 line2_parts.append(f"{_YELLOW}wt:{wt_name}{_RESET}")
 
-        # Vim mode
         if vim:
             mode = vim.get("mode", "")
             if mode:
@@ -290,14 +268,11 @@ def main() -> None:
         if line2_parts:
             print(" | ".join(line2_parts))
 
-        # ── LINE 2b: AgentiHooks — always shown ──────────────────────
-        # Format: ah: profile | sp:none | ovl:none | ch:none
         try:
             import json as _json_ah
 
             from hooks.config import AGENTIHOOKS_HOME
 
-            # --- Global: profile + settings-profile from state.json ---
             _g_profile = "none"
             _g_sp = "none"
             _state_path = Path(AGENTIHOOKS_HOME) / "state.json"
@@ -314,16 +289,12 @@ def main() -> None:
                 _g_profile = _run_profile
                 _g_sp = "none"
 
-            # Channels — env-driven via AGENTIHOOKS_BASE_CHANNELS (single source
-            # of truth in hooks.config; broadcast.py re-exports the same value).
             from hooks.config import BASE_CHANNELS as _BASE_CHANNELS
 
             _l_channels: list[str] = list(_BASE_CHANNELS)
 
-            # --- Build the display ---
             _prof_display = f"{_MAGENTA}{_g_profile}{_RESET}"
 
-            # Settings-profile — show profile name as default when no explicit override
             _sp_value = _g_sp if _g_sp != "none" else _g_profile
             _sp_color = _DIM if _g_sp == "none" else ""
             _sp_display = f"{_sp_color}{_sp_value}{_RESET}"
@@ -356,10 +327,8 @@ def main() -> None:
         except Exception:
             pass
 
-        # ── LINE 3: Rate limits (native) + context warning ────────────
         parts_3 = []
 
-        # Native rate limits from Claude Code
         rl_str = _rate_limit_str(rate_limits)
         if rl_str:
             parts_3.append(rl_str)
@@ -368,7 +337,6 @@ def main() -> None:
         account_color = _DIM if account == "default" else _CYAN
         parts_3.append(f"account:{account_color}{account}{_RESET}")
 
-        # Context threshold warning (compact advisor)
         from hooks.config import TOKEN_CONTROL_ENABLED, TOKEN_MONITOR_ENABLED
 
         if TOKEN_CONTROL_ENABLED and TOKEN_MONITOR_ENABLED and session_id:

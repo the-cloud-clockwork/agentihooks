@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Tool Memory - Cross-session error learning for Claude Code hooks.
-
-Importable module called from hook_manager.py (not standalone).
+"""Tool Memory - Cross-session error learning for Claude Code hooks, imported by hook_manager.py.
 
 Public API:
     inject_memory()            # PreToolUse: print past errors to stdout (Claude sees this)
@@ -27,10 +24,6 @@ import os
 import re
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
 MEMORY_PATH = Path(
     os.environ.get("AGENTICORE_TOOL_MEMORY_PATH", os.path.expanduser("~/.agenticore_tool_memory.ndjson"))
 )
@@ -38,9 +31,6 @@ MAX_ENTRIES = int(os.environ.get("AGENTICORE_TOOL_MEMORY_MAX", "100"))
 MAX_SHOW = int(os.environ.get("AGENTICORE_TOOL_MEMORY_SHOW", "5"))
 ENTRY_CHARS = 160
 
-# ---------------------------------------------------------------------------
-# Error detection
-# ---------------------------------------------------------------------------
 
 ERROR_PATTERNS = [
     "error",
@@ -59,7 +49,6 @@ ERROR_PATTERNS = [
     "unexpected token",
 ]
 
-# Patterns that are false positives (common in successful responses)
 FALSE_POSITIVE_PATTERNS = [
     "no errors",
     "no error",
@@ -73,7 +62,6 @@ FALSE_POSITIVE_PATTERNS = [
     "on error",
     "error log",
     "error_log",
-    # Monitoring / diagnostic output (BTRFS, NVMe, system stats)
     "io_errs",
     "media_errors",
     "corruption_errs",
@@ -85,13 +73,10 @@ FALSE_POSITIVE_PATTERNS = [
     "finding 0 errors",
 ]
 
-# Codex and Claude shell results carry no exit code.
 _ZERO_COUNT_RE = re.compile(
     r"(?<![\w.])0 (?:errors?|failed|exceptions?|timeouts?|denied|refused|invalid|unauthorized|forbidden)\b"
 )
 
-# Their success responses echo file content, so any file mentioning "error"
-# or "not found" would read as a failure under string matching.
 _CONTENT_ECHO_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", "Read"})
 
 
@@ -108,13 +93,15 @@ def _is_error(tool_result, strict=False):
                 Skip string pattern matching which produces false positives
                 on MCP tool responses containing arbitrary text (e.g., Jira
                 issue descriptions with words like "error", "not found").
+
+    A Copilot call that a hook denied or the user rejected never ran, so it is not a failure. A Bash exit
+    code of 0 is trusted over string matching, because successful output often contains words such as
+    error. File tools echo file content and MCP tools return arbitrary text, so both are graded strictly.
     """
     if isinstance(tool_result, dict):
-        # Explicit error flag
         if tool_result.get("is_error"):
             content = tool_result.get("content", tool_result.get("error", ""))
             if isinstance(content, list):
-                # Handle content blocks format: [{"type": "text", "text": "..."}]
                 texts = []
                 for block in content:
                     if isinstance(block, dict) and block.get("text"):
@@ -122,36 +109,27 @@ def _is_error(tool_result, strict=False):
                 content = " ".join(texts) if texts else str(content)
             return True, str(content)[:200]
 
-        # Non-zero exit code (Bash)
         exit_code = tool_result.get("exitCode", tool_result.get("exit_code", 0))
         if exit_code and exit_code != 0:
             stderr = tool_result.get("stderr", "")
             return True, (stderr or str(tool_result.get("stdout", "")))[:200]
 
-        # Copilot: a hook-denied or user-rejected call never ran, so it is not a failed attempt.
         result_type = tool_result.get("resultType")
         if result_type == "failure":
             return True, str(tool_result.get("textResultForLlm", ""))[:200]
         if result_type in ("denied", "rejected"):
             return False, ""
 
-    # In strict mode, skip string pattern matching (MCP tools).
-    # MCP responses contain arbitrary user content that triggers false positives.
     if strict:
         return False, ""
 
-    # If Bash exited with code 0, trust the exit code over string matching.
-    # Successful commands often contain words like "error" in their output
-    # (e.g., btrfs stats: "write_io_errs 0", nvme: "media_errors 0").
     if isinstance(tool_result, dict):
         exit_code = tool_result.get("exitCode", tool_result.get("exit_code"))
         if exit_code is not None and exit_code == 0:
             return False, ""
 
-    # String pattern matching (Bash tools only — structured output)
     result_str = str(tool_result).lower()
 
-    # Check false positives first
     for fp in FALSE_POSITIVE_PATTERNS:
         if fp in result_str:
             return False, ""
@@ -179,11 +157,6 @@ def _contains_secret(value: object) -> bool:
     return isinstance(value, str) and redact(value, mode="memory") != value
 
 
-# ---------------------------------------------------------------------------
-# File I/O
-# ---------------------------------------------------------------------------
-
-
 def _read_entries():
     """Read all NDJSON entries from memory file."""
     if not MEMORY_PATH.exists():
@@ -200,7 +173,7 @@ def _read_entries():
                             entries.append(entry)
                     except json.JSONDecodeError:
                         continue
-    except Exception:  # NOSONAR — hooks must never crash the parent process
+    except Exception:  # NOSONAR
         return []
     return entries
 
@@ -212,23 +185,19 @@ def _append_entry(entry):
     try:
         MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-        # Read existing entries to check count
         entries = _read_entries()
         entries.append(entry)
 
-        # Rotate if exceeded max
         if len(entries) > MAX_ENTRIES:
             entries = entries[-MAX_ENTRIES:]
-            # Rewrite entire file
             with open(MEMORY_PATH, "w") as f:
                 for e in entries:
                     f.write(json.dumps(e, separators=(",", ":")) + "\n")
         else:
-            # Just append
             with open(MEMORY_PATH, "a") as f:
                 f.write(json.dumps(entry, separators=(",", ":")) + "\n")
-    except Exception:  # NOSONAR — hooks must never crash the parent process
-        pass  # Silent failure - never break the agent
+    except Exception:  # NOSONAR
+        pass
 
 
 def _append_entries(new_entries):
@@ -241,21 +210,14 @@ def _append_entries(new_entries):
         entries = _read_entries()
         entries.extend(new_entries)
 
-        # Rotate if exceeded max
         if len(entries) > MAX_ENTRIES:
             entries = entries[-MAX_ENTRIES:]
 
-        # Rewrite entire file
         with open(MEMORY_PATH, "w") as f:
             for e in entries:
                 f.write(json.dumps(e, separators=(",", ":")) + "\n")
-    except Exception:  # NOSONAR — hooks must never crash the parent process
+    except Exception:  # NOSONAR
         pass
-
-
-# ---------------------------------------------------------------------------
-# Input summary extraction
-# ---------------------------------------------------------------------------
 
 
 def _extract_input_summary(tool_input):
@@ -264,15 +226,9 @@ def _extract_input_summary(tool_input):
         for key in ("command", "jql", "query", "pattern", "sql", "issue_key"):
             if key in tool_input:
                 return str(tool_input[key])[:150]
-        # First key-value pair
         for k, v in tool_input.items():
             return f"{k}={str(v)[:120]}"
     return str(tool_input)[:150] if tool_input else ""
-
-
-# ---------------------------------------------------------------------------
-# Transcript scanning
-# ---------------------------------------------------------------------------
 
 
 def _scan_transcript_for_errors(transcript_path, session_id=""):
@@ -295,7 +251,7 @@ def _scan_transcript_for_errors(transcript_path, session_id=""):
 
     new_entries = []
     try:
-        tool_uses = {}  # tool_use_id -> {tool_name, tool_input}
+        tool_uses = {}
         for rec in iter_transcript_records(transcript_path):
             kind = rec.get("kind")
             if kind == "tool_call":
@@ -331,15 +287,10 @@ def _scan_transcript_for_errors(transcript_path, session_id=""):
                     }
                 )
 
-    except Exception:  # NOSONAR — hooks must never crash the parent process
+    except Exception:  # NOSONAR
         pass
 
     return new_entries
-
-
-# ---------------------------------------------------------------------------
-# Public API (called from hook_manager.py)
-# ---------------------------------------------------------------------------
 
 
 def _seen_tools_path(session_id):
@@ -369,7 +320,7 @@ def _mark_tool_seen(session_id, tool_name):
         path = _seen_tools_path(session_id)
         with open(path, "a") as f:
             f.write(tool_name + "\n")
-    except Exception:  # NOSONAR — hooks must never crash the parent process
+    except Exception:  # NOSONAR
         pass
 
 
@@ -383,21 +334,18 @@ def inject_memory(tool_name="", session_id=""):
         tool_name: Current tool being invoked (for dedup tracking).
         session_id: Current session ID (for scoping the dedup).
     """
-    # Skip if already injected for this tool in this session
     if tool_name and session_id and _is_tool_seen(session_id, tool_name):
         return
 
     entries = _read_entries()
     if not entries:
-        return  # Exit silently - no memory yet
+        return
 
-    # Show last N entries
     to_show = entries[-MAX_SHOW:]
 
     lines = []
     for e in to_show:
         ts = e.get("ts", "?")
-        # Trim ISO timestamp to readable format
         if len(ts) >= 16:
             ts = ts[:16].replace("T", " ")
         tool = e.get("tool", "?")
@@ -418,7 +366,6 @@ def inject_memory(tool_name="", session_id=""):
         kind="tool_memory",
     )
 
-    # Mark as seen so we don't inject again for this tool in this session
     if tool_name and session_id:
         _mark_tool_seen(session_id, tool_name)
 
@@ -433,10 +380,8 @@ def record_error(payload):
 
     tool_name = payload.get("tool_name", "unknown")
     tool_input = payload.get("tool_input", {})
-    # Claude Code uses "tool_response" in PostToolUse payload (not "tool_result")
     tool_result = payload.get("tool_response") or payload.get("tool_result")
 
-    # If no result in payload, skip (scan_transcript will catch it at session end)
     if tool_result is None:
         return
 
@@ -444,7 +389,6 @@ def record_error(payload):
     if not detected or _contains_secret(payload):
         return
 
-    # Build NDJSON record
     session_id = payload.get("session_id", "")
     entry = {
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -473,13 +417,11 @@ def scan_transcript(payload):
     if not transcript_path:
         return
 
-    # Scan transcript for errors
     new_entries = _scan_transcript_for_errors(transcript_path, session_id)
 
     if not new_entries:
         return
 
-    # Deduplicate against existing entries (by tool+error combo)
     existing = _read_entries()
     existing_keys = set()
     for e in existing:

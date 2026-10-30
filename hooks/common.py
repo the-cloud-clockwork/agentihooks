@@ -11,25 +11,20 @@ from hooks.config import LOG_ENABLED, LOG_FILE, LOG_HOOKS_COMMANDS, LOG_USE_COLO
 from hooks.logfile import append_text
 
 __all__ = [
-    # Logging (writes to log file - Claude does NOT see this)
     "log",
     "log_command",
     "log_transcript",
     "output_json",
-    # Context injection (prints to STDOUT - Claude SEES this)
     "inject_context",
     "inject_file",
     "inject_banner",
-    # Script runner
     "run_script",
-    # AWS integration (lazy loaded)
     "AWSConfigParser",
     "AWSAccount",
     "get_aws_profiles",
     "get_aws_account_id",
     "get_all_aws_accounts",
     "find_aws_account",
-    # Email integration (lazy loaded)
     "EmailClient",
     "EmailResult",
     "send_email",
@@ -37,18 +32,15 @@ __all__ = [
     "markdown_to_html",
     "wrap_html_body",
     "parse_recipients",
-    # Metrics (lazy loaded)
     "Timer",
     "MetricsCollector",
     "ResultAccumulator",
     "timed",
-    # Session correlation (for stateless sessions)
     "get_correlation_id",
     "get_session_context",
 ]
 
 
-# AWS integration exports
 _AWS_EXPORTS = {
     "AWSConfigParser",
     "AWSAccount",
@@ -58,7 +50,6 @@ _AWS_EXPORTS = {
     "find_aws_account",
 }
 
-# Email integration exports
 _EMAIL_EXPORTS = {
     "EmailClient",
     "EmailResult",
@@ -69,7 +60,6 @@ _EMAIL_EXPORTS = {
     "parse_recipients",
 }
 
-# Metrics exports
 _METRICS_EXPORTS = {
     "Timer",
     "MetricsCollector",
@@ -95,11 +85,6 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# =============================================================================
-# LOGGING
-# =============================================================================
-
-
 _BRAIN_LOG_PREFIXES = ("brain_", "broadcast_", "outbox_", "amygdala_")
 
 
@@ -120,11 +105,9 @@ def log(message: str, payload: dict | None = None) -> None:
             entry["payload"] = payload
 
         append_text(log_path, json.dumps(entry) + "\n")
-    except Exception:  # NOSONAR — hooks must never crash the parent process
-        pass  # Silent failure - never break Claude
+    except Exception:  # NOSONAR
+        pass
 
-    # OTLP log fan-out for brain-tagged events (deterministic audit trail).
-    # Gated by OTEL_HOOK_LOG_FANOUT (inherits OTEL_HOOKS_ENABLED by default).
     try:
         if any(message.startswith(p) for p in _BRAIN_LOG_PREFIXES):
             from hooks.telemetry import emit_log
@@ -155,8 +138,8 @@ def log_command(script_name: str, output: str) -> None:
 {separator}
 """
         append_text(log_path, log_entry)
-    except Exception:  # NOSONAR — hooks must never crash the parent process
-        pass  # Silent failure - never break Claude
+    except Exception:  # NOSONAR
+        pass
 
 
 def log_transcript(conversation_id: str, entry_type: str, content: str) -> None:
@@ -172,7 +155,6 @@ def log_transcript(conversation_id: str, entry_type: str, content: str) -> None:
         separator = "-" * 80
         type_icon = "👤" if entry_type == "user" else "🤖"
 
-        # ANSI colors (disabled for CloudWatch compatibility)
         if LOG_USE_COLORS:
             YELLOW = "\033[93m"
             GREEN = "\033[92m"
@@ -190,22 +172,13 @@ def log_transcript(conversation_id: str, entry_type: str, content: str) -> None:
 {separator}
 """
         append_text(log_path, log_entry)
-    except Exception:  # NOSONAR — hooks must never crash the parent process
-        pass  # Silent failure - never break Claude
+    except Exception:  # NOSONAR
+        pass
 
 
 def output_json(data: dict) -> None:
     """Output JSON response to stdout (for hook responses)."""
     print(json.dumps(data))
-
-
-# =============================================================================
-# CONTEXT INJECTION (Output to Claude's context window)
-# =============================================================================
-# IMPORTANT: These functions print to STDOUT, which gets captured by Claude Code
-# and injected into the agent's context window. This is the ONLY way to make
-# content visible to Claude during a session. The log() functions above write
-# to log files which Claude does NOT see.
 
 
 def inject_context(content: str, also_log: bool = True, skip_compression: bool = False, kind: str = "other") -> None:
@@ -218,8 +191,10 @@ def inject_context(content: str, also_log: bool = True, skip_compression: bool =
         content: The content to inject (will be printed to STDOUT)
         also_log: If True, also write to log file for debugging
         skip_compression: If True, bypass the preprocessor (used when caller already compressed)
+
+    Codex and Copilot parse hook stdout as one JSON object, so under those targets the content is buffered
+    and flushed once by main.
     """
-    # Apply token compression if scope=all and not already compressed
     if not skip_compression:
         try:
             from hooks.config import CONTEXT_COMPRESSION_SCOPE
@@ -233,10 +208,6 @@ def inject_context(content: str, also_log: bool = True, skip_compression: bool =
         except Exception:
             pass
 
-    # Print to STDOUT - this gets injected into Claude's context. Codex and
-    # Copilot parse hook stdout as a single JSON object instead of
-    # concatenating raw lines, so under those targets the content is buffered
-    # and flushed once by main().
     try:
         from hooks.targets import buffers_single_envelope, emitter
 
@@ -251,7 +222,6 @@ def inject_context(content: str, also_log: bool = True, skip_compression: bool =
         print("=== CONTEXT INJECTION ===")
         print(content)
 
-    # Optionally also log the actual content for debugging (not just metadata)
     if also_log and LOG_ENABLED:
         log_command("context_injection", content)
 
@@ -299,20 +269,15 @@ def inject_banner(
     width = 78
     border = "═" * width
 
-    # Format title line
     title_line = f"║  {title}"
     title_line = title_line.ljust(width + 1) + "║"
 
-    # Format content lines
     content_lines = []
     for line in content.strip().split("\n"):
         formatted = f"║  {line}"
         formatted = formatted.ljust(width + 1) + "║"
         content_lines.append(formatted)
 
-    # Print 2 blank lines first (separate prints to avoid stripping)
-
-    # Then print the banner
     banner = f"""
 ╔{border}╗
 {title_line}
@@ -322,11 +287,6 @@ def inject_banner(
     """
 
     inject_context(banner, also_log=also_log, skip_compression=skip_compression, kind=kind)
-
-
-# =============================================================================
-# SCRIPT RUNNER
-# =============================================================================
 
 
 def run_script(script_name: str, *args: str, timeout: int = 30) -> str:
@@ -356,7 +316,6 @@ def run_script(script_name: str, *args: str, timeout: int = 30) -> str:
         )
         output = result.stdout
 
-        # Log command output if enabled
         log_command(script_name, output)
 
         return output
@@ -364,14 +323,6 @@ def run_script(script_name: str, *args: str, timeout: int = 30) -> str:
         return f"Script timed out after {timeout}s: {script_name}"
     except Exception as e:
         return f"Script error: {e}"
-
-
-# =============================================================================
-# SESSION CORRELATION (For stateless session support)
-# =============================================================================
-# When stateless=True is used in API calls, the agent generates a fresh Claude
-# session ID but preserves the external UUID for correlation. These functions
-# help hooks read the correlation context from environment variables.
 
 
 def get_correlation_id(claude_session_id: Optional[str] = None) -> str:
@@ -410,7 +361,6 @@ def get_session_context() -> Dict[str, Optional[str]]:
     correlation_id = os.environ.get("AGENTICORE_CORRELATION_ID")
     claude_session_id = os.environ.get("AGENTICORE_CLAUDE_SESSION_ID")
 
-    # Check if this is a stateless session (different IDs)
     is_stateless = correlation_id is not None and claude_session_id is not None and correlation_id != claude_session_id
 
     return {

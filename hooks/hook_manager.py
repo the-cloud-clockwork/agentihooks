@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Hook Manager - Centralized entry point for all Claude Code hooks.
+"""Hook Manager - Centralized entry point for all Claude Code hooks.
 
 All hooks in settings.json point to this file.
 The event name is passed via stdin JSON payload (hook_event_name field).
@@ -33,10 +32,8 @@ from typing import Any
 from hooks.classifier.child import skip_classifier_child
 from hooks.observability import otel
 
-# Add parent directory to path for direct execution
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Only import lightweight common module at startup
 from hooks.common import log
 from hooks.context import tool_end
 from hooks.prompt_budget import PromptBudget
@@ -51,16 +48,6 @@ _UNSET = "<unset>"
 _QUESTION_CHECK_FAILED = "The question tool is off: the operator presence check failed. Keep working without it."
 
 
-# Heavy imports are lazy-loaded in functions that need them:
-# - hooks.integrations.email.send_email -> only in notify_on_error()
-# - hooks.observability.transcript.log_new_entries -> only in handlers that need it
-
-
-# =============================================================================
-# TRANSCRIPT METRICS PARSER
-# =============================================================================
-
-
 def log_claude_max_output_tokens():
     """Inject the output token limit into Claude's context window.
 
@@ -71,7 +58,6 @@ def log_claude_max_output_tokens():
         max_tokens = os.getenv("CLAUDE_CODE_MAX_OUTPUT_TOKENS")
 
         if max_tokens:
-            # Use inject_banner to output to STDOUT (Claude sees this!)
             from hooks.common import inject_banner
 
             content = f"""Your responses MUST stay under {max_tokens} tokens to avoid errors.
@@ -94,7 +80,7 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
     Returns:
         dict with num_turns, duration_ms, last_response
     """
-    from datetime import datetime  # Lazy import
+    from datetime import datetime
 
     metrics = {
         "num_turns": 0,
@@ -110,9 +96,6 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
         from hooks.memory.transcript_reader import detect_transcript_format
 
         if detect_transcript_format(path) in ("codex", "copilot"):
-            # Codex rollout / copilot session-events log: derive turn count and
-            # last response from the unified record stream (the claude-shaped
-            # scan below would return all-None on either file).
             from hooks.memory.transcript_reader import iter_transcript_records
 
             user_turns = 0
@@ -138,7 +121,6 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
                     entry = json.loads(line.strip())
                     entry_type = entry.get("type")
 
-                    # Track timestamps for duration
                     timestamp_str = entry.get("timestamp")
                     if timestamp_str:
                         try:
@@ -149,11 +131,9 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
                         except (ValueError, TypeError):
                             pass
 
-                    # Count user messages (turns)
                     if entry_type == "user":
                         user_count += 1
 
-                    # Track last assistant response
                     elif entry_type == "assistant":
                         message = entry.get("message", {})
                         content = message.get("content", [])
@@ -167,22 +147,16 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
         metrics["num_turns"] = user_count
         metrics["last_response"] = last_assistant_text
 
-        # Calculate duration
         if first_timestamp and last_timestamp:
             duration = last_timestamp - first_timestamp
             metrics["duration_ms"] = int(duration.total_seconds() * 1000)
 
-    except Exception:  # NOSONAR — hooks must never crash the parent process
-        pass  # Return partial metrics on error
+    except Exception:  # NOSONAR
+        pass
 
     return metrics
 
 
-# =============================================================================
-# ERROR NOTIFICATION
-# =============================================================================
-
-# Error patterns to detect (case-insensitive)
 ERROR_PATTERNS = [
     "api error",
     "error:",
@@ -213,16 +187,13 @@ def notify_on_error(transcript_path: str) -> None:
         if not path.exists():
             return
 
-        # Read entire transcript
         content = path.read_text(encoding="utf-8")
         content_lower = content.lower()
 
-        # Check if any error pattern exists
         detected_patterns = [p for p in ERROR_PATTERNS if p in content_lower]
         if not detected_patterns:
-            return  # No errors found
+            return
 
-        # Extract error context from transcript lines
         error_lines = []
         for line in content.split("\n"):
             line_lower = line.lower()
@@ -241,27 +212,22 @@ def notify_on_error(transcript_path: str) -> None:
                 except json.JSONDecodeError:
                     error_lines.append(line[:500])
 
-        # Build error report
-        error_context = "\n\n---\n\n".join(error_lines[:5])  # Max 5 errors
+        error_context = "\n\n---\n\n".join(error_lines[:5])
         patterns_found = ", ".join(detected_patterns)
 
-        # Lazy import mailer module (only needed here)
         from hooks.integrations.mailer import (
             scan_for_config_files,
             send_error_notification,
         )
 
-        # Scan for email.json configuration file and template
         email_config, template = scan_for_config_files()
 
         if not email_config:
             log("Email notification skipped: email.json not found in working directory")
             return
 
-        # Get agent name from environment or use default
         agent_name = os.getenv("AGENT_NAME", "Agent")
 
-        # Build notification content
         notification_content = f"""# Error Detected in Agent Session
 
 **Agent:** {agent_name}
@@ -276,13 +242,11 @@ def notify_on_error(transcript_path: str) -> None:
 *Automated notification from {agent_name} hook system.*
 """
 
-        # Send notification using error_recipients category with template support
         result = send_error_notification(
             config=email_config,
             template=template,
             content=notification_content,
             subject=f"{agent_name} - Error Detected",
-            # Extra template variables
             error_type="transcript_scan",
             patterns=patterns_found,
             agent_name=agent_name,
@@ -301,13 +265,7 @@ def notify_on_error(transcript_path: str) -> None:
             log("Failed to send error notification", {"error": result.error})
 
     except Exception as e:
-        # Silent failure - never break the agent
         log("notify_on_error failed", {"error": str(e)})
-
-
-# =============================================================================
-# EVENT HANDLERS
-# =============================================================================
 
 
 def _close_master_coding(session_id: str, source: str | None) -> None:
@@ -377,7 +335,6 @@ def on_session_start(payload: dict) -> None:
 
     documentation_session.start(payload)
 
-    # Emit a trace span for session start (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:
         with tracer.start_as_current_span(
@@ -387,9 +344,8 @@ def on_session_start(payload: dict) -> None:
                 "agent.name": os.environ.get("AGENT_NAME", "unknown"),
             },
         ):
-            pass  # span auto-ends on context exit → exported immediately
+            pass
 
-    # Log output token limit so Claude is aware of response size constraints
     log_claude_max_output_tokens()
 
     from hooks.config import MCP_SESSION_ID_BANNER_ENABLED
@@ -405,8 +361,6 @@ def on_session_start(payload: dict) -> None:
             "identity — channel_acknowledge."
         )
 
-    # Codex has no command-backed statusline — the `ah:` status line the
-    # claude statusline renders is surfaced once per session here instead.
     from hooks.targets import is_codex as _is_codex
 
     if _is_codex():
@@ -473,7 +427,6 @@ def on_session_start(payload: dict) -> None:
             )
         inject_context(_hygiene)
 
-    # Thinking/effort policy guidance
     try:
         from hooks.config import (
             DEFAULT_EFFORT,
@@ -491,7 +444,6 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("thinking_policy injection failed", {"error": str(e)})
 
-    # --- Auto dev-switch: if on main/master, switch to dev (create if missing) ---
     try:
         from hooks.config import AGENTIHOOKS_FORCE_DEV_BRANCH
 
@@ -504,7 +456,6 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("auto_dev_switch session_start failed", {"error": str(e)})
 
-    # --- CI Manifesto: inject doctrine at session start ---
     try:
         from hooks.config import CI_MANIFESTO_ENABLED
 
@@ -517,8 +468,6 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("ci_manifesto session_start failed", {"error": str(e)})
 
-    # --- Broadcast: register session + deliver pending ---
-    # Brain adapter FIRST — publishes brain content to broadcast.json
     try:
         from hooks.context.brain_adapter import inject_on_session_start
 
@@ -526,7 +475,6 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("brain_adapter session_start failed", {"error": str(e)})
 
-    # Broadcast SECOND — reads broadcast.json (now includes brain content) and injects
     from hooks.config import BROADCAST_ENABLED
 
     if BROADCAST_ENABLED:
@@ -550,7 +498,6 @@ def on_session_start(payload: dict) -> None:
         except Exception as e:
             log("broadcast session_start failed", {"error": str(e)})
 
-    # Voice output — cleanup stale flags from dead sessions
     try:
         from hooks.context.voice_output import cleanup_stale_flags
 
@@ -560,7 +507,6 @@ def on_session_start(payload: dict) -> None:
     except Exception:
         pass
 
-    # MCP surface area warning
     try:
         import importlib.util
 
@@ -594,7 +540,6 @@ def on_session_end(payload: dict) -> None:
 
     session_event()
 
-    # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}
 
     log(
@@ -610,13 +555,11 @@ def on_session_end(payload: dict) -> None:
 
     documentation_session.end(payload)
 
-    # Log transcript entries to hooks.log (for debugging)
     if session_id and transcript_path:
         from hooks.observability.transcript import log_new_entries
 
         log_new_entries(session_id, transcript_path)
 
-    # Clear file read cache for this session
     from hooks.config import FILE_READ_CACHE_ENABLED
 
     if FILE_READ_CACHE_ENABLED:
@@ -627,7 +570,6 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clear retry breaker state for this session
     from hooks.config import RETRY_BREAKER_ENABLED
 
     if RETRY_BREAKER_ENABLED:
@@ -638,7 +580,6 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clear brain adapter counter for this session
     try:
         from hooks.context.brain_adapter import clear_session_state as _clear_brain
 
@@ -668,7 +609,6 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
-    # Clear context audit state for this session
     from hooks.config import CONTEXT_AUDIT_ENABLED
 
     if CONTEXT_AUDIT_ENABLED:
@@ -679,7 +619,6 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clear all signals at session end (per-turn + session-scoped)
     try:
         from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
         from hooks.context.prod_lockdown import (
@@ -702,7 +641,6 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
-    # Clear voice output flag for this session
     try:
         from hooks.context.voice_output import clear_voice_enabled
 
@@ -710,7 +648,6 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
-    # Clear controls bypass IF this session is the owner (subagent ends are no-ops)
     try:
         from hooks.context.controls_toggle import clear_controls_disabled
 
@@ -725,7 +662,6 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
-    # --- Broadcast: deregister session + prune dead peers ---
     from hooks.config import BROADCAST_ENABLED
 
     if BROADCAST_ENABLED:
@@ -802,7 +738,6 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
         run("gate_lifts", _arm_gate_lifts, payload)
     run("voice", _prompt_voice, payload, session_id, typed)
     run("controls", _prompt_controls, payload, session_id, typed)
-    # --- Broadcast: inject pending messages ---
     if BROADCAST_ENABLED:
         run("broadcasts", _prompt_broadcasts, session_id)
     run("refocus", _inject_refocus, session_id, "prompt")
@@ -842,7 +777,6 @@ def _prompt_quota_policy(payload: dict, session_id: str) -> None:
 
 
 def _prompt_secrets(payload: dict) -> None:
-    # --- Secrets scanning ---
     from hooks.config import SECRETS_MODE
 
     if SECRETS_MODE != "off":
@@ -895,7 +829,6 @@ def _prompt_enforcements(payload: dict, session_id: str) -> None:
 
 
 def _prompt_ci_manifesto(session_id: str) -> None:
-    # --- CI Manifesto: counter-gated re-injection of doctrine ---
     try:
         from hooks.config import CI_MANIFESTO_ENABLED
 
@@ -908,7 +841,6 @@ def _prompt_ci_manifesto(session_id: str) -> None:
 
 
 def _prompt_rules_refresh(session_id: str) -> None:
-    # --- Rules refresh: one-shot re-injection for running sessions ---
     try:
         from hooks.context.rules_refresh import maybe_inject as rules_refresh_inject
 
@@ -918,7 +850,6 @@ def _prompt_rules_refresh(session_id: str) -> None:
 
 
 def _prompt_amygdala(session_id: str) -> None:
-    # --- Amygdala: emergency signal check (every turn, O(1) stat) ---
     try:
         from hooks.config import AMYGDALA_ENABLED
 
@@ -931,7 +862,6 @@ def _prompt_amygdala(session_id: str) -> None:
 
 
 def _prompt_prod_bypass(payload: dict, session_id: str) -> None:
-    # --- Prod lockdown bypass: detect operator override phrase ---
     try:
         from hooks.context.prod_lockdown import contains_bypass_phrase, set_bypass
 
@@ -944,7 +874,6 @@ def _prompt_prod_bypass(payload: dict, session_id: str) -> None:
 
 
 def _prompt_signals(payload: dict, session_id: str, typed: bool) -> None:
-    # --- Release-gate / hotfix / branch / PR signals (CI Manifesto §9, §14, §15) ---
     try:
         from hooks.context.branch_guard import set_branch_signal, set_pr_signal
         from hooks.context.ci_manifesto import (
@@ -990,7 +919,6 @@ def _prompt_signals(payload: dict, session_id: str, typed: bool) -> None:
 
 
 def _prompt_voice(payload: dict, session_id: str, typed: bool) -> None:
-    # --- Voice output: detect enable/disable voice signals ---
     try:
         from hooks.config import VOICE_ENABLED
 
@@ -1028,7 +956,6 @@ def _prompt_voice(payload: dict, session_id: str, typed: bool) -> None:
                         "VOICE",
                         "Voice output DISABLED. Responses will no longer be spoken. This is a system toggle — no action needed from you.",
                     )
-            # Check quota banner (even if no enable/disable signal this turn)
             from hooks.context.voice_output import check_quota_banner
 
             quota_msg = check_quota_banner(session_id)
@@ -1041,7 +968,6 @@ def _prompt_voice(payload: dict, session_id: str, typed: bool) -> None:
 
 
 def _prompt_controls(payload: dict, session_id: str, typed: bool) -> None:
-    # --- Controls toggle: detect "disable controls" / "enable controls" ---
     try:
         from hooks.config import CONTROLS_BYPASS_ENABLED
 
@@ -1323,6 +1249,9 @@ def _wait_nudge_blocks(payload: dict) -> list[str]:
 
 
 def _credential_guard(payload: dict, tool_name: str) -> tuple[dict, str] | None:
+    """Run the credential read guard on a tool input; a crash in the guard fails closed only when the input
+    names a credential path.
+    """
     _credential_rewrite: tuple[dict, str] | None = None
     try:
         from hooks.config import CREDENTIAL_GUARD_ENABLED
@@ -1345,7 +1274,7 @@ def _credential_guard(payload: dict, tool_name: str) -> tuple[dict, str] | None:
                 _credential_rewrite = (_verdict.rewrite, _verdict.note or "")
     except BlockAction:
         raise
-    except Exception as e:  # NOSONAR — a guard that crashes must not crash the hook, unless a credential is in play
+    except Exception as e:  # NOSONAR
         if _near_credential(payload.get("tool_input") or {}):
             raise BlockAction(
                 f"BLOCKED: credential guard internal error near a credential path — refusing ({e})."
@@ -1405,7 +1334,16 @@ def _fit_pretool(blocks: list[tuple[str, str]]) -> str:
 
 
 def on_pre_tool_use(payload: dict) -> None:
-    """Handle PreToolUse event."""
+    """Handle PreToolUse event.
+
+    Conditions run first, so every guard judges the input that will run. Bypass mode lifts the block on
+    secrets written to files, but detection, logging and telemetry still run; inline secrets that write no
+    file are noted, never blocked. The credential read guard runs on every target and blocks rather than
+    redacts, because a value that reaches the transcript must be rotated; bypass mode does not lift it.
+    Broadcast and enforcement context merge into one hookSpecificOutput object, because Claude Code drops
+    a second JSON line. Codex PreToolUse has no context channel, so enforcement is recovered on
+    PostToolUse and broadcasts use their UserPromptSubmit path.
+    """
     from hooks.config import SECRETS_MODE
 
     tool_name = payload.get("tool_name", "unknown")
@@ -1421,7 +1359,6 @@ def on_pre_tool_use(payload: dict) -> None:
     if _gate_block:
         raise BlockAction(_gate_block)
 
-    # Conditions run first so every guard below judges the input that will run.
     _conditions = None
     try:
         from hooks.context.conditions import pre_effect
@@ -1439,7 +1376,6 @@ def on_pre_tool_use(payload: dict) -> None:
         if _conditions.rewrite is not None:
             payload["tool_input"] = tool_input = _conditions.rewrite
 
-    # --- Quota policy: hand off, wait or stop when this session's quota runs out ---
     _quota_policy_ctx = None
     _quota_policy_block = None
     try:
@@ -1489,8 +1425,6 @@ def on_pre_tool_use(payload: dict) -> None:
     else:
         from hooks.secrets import iter_strings, redact, scan
 
-        # Bypass mode lifts the secrets-in-files block (operator decides when to allow it).
-        # Detection still runs — we log and emit telemetry so the operator can audit.
         try:
             from hooks.context.controls_toggle import is_controls_disabled
 
@@ -1498,7 +1432,6 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception:
             _secrets_bypass = False
 
-        # Log command details for Bash
         if tool_name == "Bash":
             command = tool_input.get("command", "")
             safe_command = redact(command, mode=SECRETS_MODE)[:500]
@@ -1509,8 +1442,6 @@ def on_pre_tool_use(payload: dict) -> None:
             hits = scan(command, mode=SECRETS_MODE)
             if hits:
                 names = ", ".join(hits)
-                # Detect file-write operators: >, >>, tee, dd of=
-                # If the command is writing secrets to a file, block.
                 import re as _re
 
                 _writes_file = bool(
@@ -1545,8 +1476,6 @@ def on_pre_tool_use(payload: dict) -> None:
                             "Use environment variables, a vault, or operator-managed secret files. "
                             "To override for this session: say 'disable controls'."
                         )
-                # Inline secrets (no file write): scan + log + note, don't block.
-                # The operator handles transcript secrecy locally (closed system).
                 from hooks.common import inject_context
 
                 inject_context(
@@ -1608,7 +1537,6 @@ def on_pre_tool_use(payload: dict) -> None:
         else:
             log(f"Pre tool use: {tool_name}", {"tool": tool_name})
 
-    # --- Version guard: block version field edits in project manifests ---
     if tool_name in ("Edit", "Write"):
         try:
             from hooks.context.version_guard import check_version_guard
@@ -1621,7 +1549,6 @@ def on_pre_tool_use(payload: dict) -> None:
 
     _check_shell_guards(payload)
 
-    # --- kubectl mutation guard: HARD FLOOR — block live-system state mutation ---
     if tool_name == "Bash":
         try:
             from hooks.config import KUBECTL_MUTATION_GUARD_ENABLED
@@ -1640,7 +1567,6 @@ def on_pre_tool_use(payload: dict) -> None:
                 flush=True,
             )
 
-    # --- Serena edit guard: Python in a worktree is edited by symbol ---
     if tool_name in ("Bash", "Edit", "MultiEdit", "Write"):
         try:
             from hooks.context.serena_edit_guard import check as check_serena_edit
@@ -1656,7 +1582,6 @@ def on_pre_tool_use(payload: dict) -> None:
                 flush=True,
             )
 
-    # --- Dependency install banner (supply chain defense) ---
     if tool_name == "Bash":
         try:
             from hooks.context.dep_banner import check_dep_install
@@ -1665,7 +1590,6 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("dep_banner check failed", {"error": str(e)})
 
-    # --- Prod lockdown: block production operations unless bypass active ---
     if tool_name == "Bash":
         try:
             from hooks.context.prod_lockdown import check_prod_lockdown
@@ -1681,7 +1605,6 @@ def on_pre_tool_use(payload: dict) -> None:
                 flush=True,
             )
 
-    # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
 
@@ -1690,16 +1613,9 @@ def on_pre_tool_use(payload: dict) -> None:
 
         log_new_entries(session_id, transcript_path)
 
-    # Credential-read guard. Runs on every target: it was previously wired
-    # through Claude's settings `hooks` array (and paired with Claude-only
-    # `permissions.deny` rules), so codex and copilot had no credential-read
-    # protection at all. Reading is the exposure — a value reaching the
-    # transcript has to be rotated, not deleted — so this blocks rather than
-    # redacts, and bypass mode does not lift it.
     _credential_rewrite = _credential_guard(payload, tool_name)
     _plan_read_guard(payload, tool_name)
 
-    # File read deduplication
     if tool_name == "Read":
         try:
             from hooks.config import FILE_READ_CACHE_ENABLED
@@ -1707,7 +1623,7 @@ def on_pre_tool_use(payload: dict) -> None:
             if FILE_READ_CACHE_ENABLED:
                 from hooks.context.file_read_cache import check_and_block_redundant_read
 
-                check_and_block_redundant_read(payload)  # raises BlockAction if blocked
+                check_and_block_redundant_read(payload)
         except BlockAction:
             otel.emit_event(
                 "agentihooks.guardrail.read_deduplicated",
@@ -1720,7 +1636,6 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("file_read_cache check failed", {"error": str(e)})
 
-    # CLAUDE.md sanity check — block edits that would bloat CLAUDE.md
     if tool_name in ("Write", "Edit"):
         try:
             from hooks.config import CLAUDE_MD_SANITY_CHECK
@@ -1742,20 +1657,17 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("claude_md_sanity check failed", {"error": str(e)})
 
-    # Inject tool memory (past errors) into Claude's context
-    # Only injects once per tool per session to avoid noise
     from hooks.tool_memory import inject_memory
 
     inject_memory(tool_name=tool_name, session_id=session_id)
 
-    # Retry circuit breaker — hard block on excessive retries
     from hooks.config import RETRY_BREAKER_ENABLED
 
     if RETRY_BREAKER_ENABLED:
         try:
             from hooks.context.retry_breaker import check_hard_block
 
-            check_hard_block(payload)  # raises BlockAction if count >= hard max
+            check_hard_block(payload)
         except BlockAction:
             otel.emit_event(
                 "agentihooks.guardrail.retry_blocked",
@@ -1778,9 +1690,6 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("retry_breaker pre-tool failed", {"error": str(e)})
 
-    # --- Combined PreToolUse context injection: broadcast + enforcement ---
-    # Both sources must merge into a SINGLE hookSpecificOutput JSON; emitting
-    # two separate JSON lines makes Claude Code drop the second.
     from hooks.config import (
         BRAIN_ENABLED,
         BROADCAST_ENABLED,
@@ -1837,8 +1746,6 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("brain_adapter tool-call refresh failed", {"error": str(e)})
 
-    # get_pretool_context/broadcasts own the critical-on-pretool opt-in
-    # internally; this call site only checks whether broadcasts are enabled.
     if BROADCAST_ENABLED:
         try:
             from hooks.context.broadcast import context_kind, get_pretool_context
@@ -1888,7 +1795,6 @@ def on_pre_tool_use(payload: dict) -> None:
         )
     elif _pretool_context:
         if _can_inject_pretool and not _emitter.forced():
-            # Copilot parses one JSON object: the blocks join the end-of-process flush.
             _emitter.buffer_context(_pretool_context)
         elif _can_inject_pretool:
             import json as _json
@@ -1904,9 +1810,6 @@ def on_pre_tool_use(payload: dict) -> None:
                 )
             )
         else:
-            # Codex PreToolUse has no context channel (deny-only output).
-            # Enforcement is recovered on PostToolUse; broadcasts use their
-            # UserPromptSubmit delivery path.
             log(
                 "pretool context dropped — no PreToolUse context channel on this target",
                 {"blocks": len(_pretool_blocks)},
@@ -1926,7 +1829,7 @@ def _near_credential(tool_input: dict) -> bool:
         from hooks.context.credential_guard import near_credential
 
         return near_credential(tool_input)
-    except Exception:  # NOSONAR — the guard module itself may be what broke
+    except Exception:  # NOSONAR
         return bool(_NEAR_CREDENTIAL.search(json.dumps(tool_input, default=str)))
 
 
@@ -2042,7 +1945,6 @@ def on_post_tool_use(payload: dict) -> None:
 
     _inject_ledger_decision(payload)
 
-    # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14, §15) ---
     if tool_name == "AskUserQuestion":
         _trace_mark("ask_user_question_signals", tool_name, _trace_session_id)
         try:
@@ -2140,7 +2042,6 @@ def on_post_tool_use(payload: dict) -> None:
         except Exception as e:
             log("placement answer record failed", {"error": str(e)})
 
-    # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     if session_id and transcript_path:
@@ -2149,7 +2050,6 @@ def on_post_tool_use(payload: dict) -> None:
 
         log_new_entries(session_id, transcript_path)
 
-    # Bash output filtering
     if tool_name == "Bash":
         _trace_mark("bash_output_filter", tool_name, _trace_session_id)
         try:
@@ -2175,7 +2075,6 @@ def on_post_tool_use(payload: dict) -> None:
                             "tool_name": tool_name,
                         },
                     )
-                    # Apply token compression if scope=all
                     try:
                         from hooks.config import CONTEXT_COMPRESSION_SCOPE
 
@@ -2194,19 +2093,15 @@ def on_post_tool_use(payload: dict) -> None:
                     from hooks.targets.capabilities import supports_output_rewrite
 
                     if supports_output_rewrite() and isinstance(_response, dict):
-                        # Replace what the agent reads; a condition's own replacement wins.
                         if _conditions is None or "updatedToolOutput" not in _conditions.hook_fields:
                             emitter.set_fields({"updatedToolOutput": {**_response, "stdout": filtered}})
                     elif buffers_single_envelope() or emitter.forced():
-                        # One-JSON-object rule: joins the single end-of-process
-                        # flush instead of printing its own object.
                         emitter.buffer_context(filtered)
                     else:
                         print(_json.dumps({"additionalContext": filtered}))
         except Exception as e:
             log("bash_output_filter failed", {"error": str(e)})
 
-    # Mark file as read in cache
     if tool_name == "Read":
         _trace_mark("file_read_cache_mark", tool_name, _trace_session_id)
         try:
@@ -2221,13 +2116,11 @@ def on_post_tool_use(payload: dict) -> None:
         except Exception as e:
             log("file_read_cache mark failed", {"error": str(e)})
 
-    # Record tool errors to memory file
     _trace_mark("tool_memory_record_error", tool_name, _trace_session_id)
     from hooks.tool_memory import record_error
 
     record_error(payload)
 
-    # Emit OTEL event if error was recorded
     is_error = payload.get("is_error", False)
     exit_code = payload.get("tool_input", {}).get("exitCode")
     if is_error or (exit_code and str(exit_code) != "0"):
@@ -2240,7 +2133,6 @@ def on_post_tool_use(payload: dict) -> None:
             },
         )
 
-    # Retry circuit breaker — track failures and inject research instructions
     from hooks.config import RETRY_BREAKER_ENABLED
 
     if RETRY_BREAKER_ENABLED:
@@ -2252,7 +2144,6 @@ def on_post_tool_use(payload: dict) -> None:
         except Exception as e:
             log("retry_breaker post-tool failed", {"error": str(e)})
 
-    # Context audit — record tool output size
     _trace_mark("context_audit", tool_name, _trace_session_id)
     try:
         from hooks.config import CONTEXT_AUDIT_ENABLED
@@ -2267,7 +2158,6 @@ def on_post_tool_use(payload: dict) -> None:
     except Exception as e:
         log("context_audit record failed", {"error": str(e)})
 
-    # Thinking/effort policy — check subagent effort alignment
     if tool_name == "Agent":
         _trace_mark("thinking_policy", tool_name, _trace_session_id)
     try:
@@ -2300,7 +2190,12 @@ def _link_codex_rollout(transcript_path: str) -> None:
 
 
 def on_stop(payload: dict) -> None:
-    """Handle Stop event."""
+    """Handle Stop event.
+
+    Marker publishing, error mail, transcript logging and memory save run forked, because each can take
+    seconds and must never block session cleanup. Only per turn signals clear here; session scoped signals
+    persist until SessionEnd.
+    """
     _stop_block = None
     try:
         from hooks.context import conditions, operator_mode
@@ -2316,7 +2211,6 @@ def on_stop(payload: dict) -> None:
     _confirm_inbox(session_id)
     _link_codex_rollout(transcript_path)
 
-    # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}
     _swarm_heartbeat("idle", payload=payload)
     _master_login_checkpoint()
@@ -2337,8 +2231,6 @@ def on_stop(payload: dict) -> None:
         },
     )
 
-    # Brain writer — scan transcript for agent-emitted markers + publish.
-    # Forked: transcript scan + per-marker SSH/HTTP publish can take 10s+.
     try:
         from hooks.config import BRAIN_WRITER_ENABLED
 
@@ -2360,7 +2252,6 @@ def on_stop(payload: dict) -> None:
 
     _request_trace_flush(payload, "stop")
 
-    # Emit a trace span for session end (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:
         with tracer.start_as_current_span(
@@ -2373,8 +2264,6 @@ def on_stop(payload: dict) -> None:
         ):
             pass
 
-    # Check for errors and notify — forked: full transcript scan + SMTP/HTTP
-    # email send can take 5-10s and MUST NOT block session cleanup.
     try:
         from hooks._async import fork_and_call
 
@@ -2387,8 +2276,6 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("notify_on_error dispatch failed", {"error": str(e)})
 
-    # Clear per-turn signals only; session-scoped signals (PR, release, hotfix)
-    # persist until on_session_end
     try:
         from hooks.context.branch_guard import clear_branch_signal
         from hooks.context.conditions import disarm_gate
@@ -2400,13 +2287,10 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})
 
-    # Scan transcript for MCP errors missed by PostToolUse
     from hooks.tool_memory import scan_transcript
 
     scan_transcript(payload)
 
-    # Log transcript entries to hooks.log — forked: Redis GET/SETEX round-trips
-    # + full transcript line scan can take 1-2s.
     if session_id and transcript_path:
         try:
             from hooks._async import fork_and_call
@@ -2422,8 +2306,6 @@ def on_stop(payload: dict) -> None:
         except Exception as e:
             log("log_new_entries dispatch failed", {"error": str(e)})
 
-    # Auto-save session memory — forked: reads full transcript + Redis write
-    # (or blocks on Redis connection timeout if unreachable). Can take 3-8s.
     try:
         from hooks.config import MEMORY_AUTO_SAVE
 
@@ -2441,7 +2323,6 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("Memory auto-save dispatch failed", {"error": str(e)})
 
-    # Context audit — emit report if fill_pct exceeds threshold
     try:
         from hooks.config import CONTEXT_AUDIT_ENABLED, CONTEXT_AUDIT_THRESHOLD_PCT
 
@@ -2465,7 +2346,6 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("context_audit report failed", {"error": str(e)})
 
-    # Voice output — summarize + speak last assistant message
     try:
         from hooks.config import VOICE_ENABLED
 
@@ -2518,7 +2398,6 @@ def on_subagent_start(payload: dict) -> None:
         },
     )
 
-    # CI Manifesto — inject doctrine into subagents too
     try:
         from hooks.config import CI_MANIFESTO_ENABLED
 
@@ -2531,7 +2410,6 @@ def on_subagent_start(payload: dict) -> None:
     except Exception as e:
         log("ci_manifesto subagent_start failed", {"error": str(e)})
 
-    # Brain adapter — publish brain content to the shared broadcast channel
     try:
         from hooks.config import BRAIN_ENABLED
 
@@ -2542,7 +2420,6 @@ def on_subagent_start(payload: dict) -> None:
     except Exception as e:
         log("brain_adapter subagent_start failed", {"error": str(e)})
 
-    # Broadcast — register subagent session and deliver pending broadcasts
     try:
         from hooks.config import BROADCAST_ENABLED
 
@@ -2574,7 +2451,6 @@ def on_subagent_stop(payload: dict) -> None:
     last_msg = payload.get("last_assistant_message", "")
     log("Subagent stopped", {"agent_id": agent_id})
 
-    # Brain writer — forked (same as on_stop).
     try:
         from hooks.config import BRAIN_WRITER_ENABLED
 
@@ -2593,7 +2469,6 @@ def on_subagent_stop(payload: dict) -> None:
     except Exception as e:
         log("brain_writer subagent_stop dispatch failed", {"error": str(e)})
 
-    # Clear any signals set during the subagent's lifetime
     try:
         from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
         from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
@@ -2605,7 +2480,6 @@ def on_subagent_stop(payload: dict) -> None:
     except Exception:
         pass
 
-    # Log transcript entries to hooks.log — forked (Redis GET/SETEX).
     if agent_id and transcript_path:
         try:
             from hooks._async import fork_and_call
@@ -2737,6 +2611,11 @@ def emit_permission_decision(
     being printed. This is what structurally closes the codex path even
     though nothing emits a non-deny decision today — a future "allow"
     fast-path can't leak through it.
+
+    An allow whose rewrite the host cannot apply would approve the original call, so the whole decision is
+    dropped. Copilot command hooks deny with a top level decision block object, the only shape that blocks
+    userPromptSubmitted; hookSpecificOutput is not emitted for Copilot because its command transport
+    ignores it.
     """
     from hooks.targets import current_target
     from hooks.targets.capabilities import allowed_permission_decisions, arg_mutation_field, supports_arg_mutation
@@ -2748,8 +2627,6 @@ def emit_permission_decision(
             {"target": target, "event": event_name, "decision": decision},
         )
         return
-    # An allow whose rewrite the host cannot apply would approve the ORIGINAL
-    # call — drop the whole decision rather than half of it.
     if updated_input is not None and not supports_arg_mutation(target):
         log(
             "permission decision dropped — target cannot mutate tool input",
@@ -2757,12 +2634,6 @@ def emit_permission_decision(
         )
         return
 
-    # Copilot's COMMAND-hook stdout deny shape is a top-level
-    # {"decision": "block", "reason": ...} (proven live, v1.0.80) — the only
-    # channel that blocks userPromptSubmitted, ignored (harmlessly) on
-    # preToolUse where exit 2 already denies. The runtime's native hook-result
-    # union does carry hookSpecificOutput/permissionDecision, but the command
-    # transport does not honor them, so they are not emitted here.
     if target == "copilot":
         if decision != "deny":
             log(
@@ -2804,11 +2675,6 @@ def emit_permission_decision(
     print(json.dumps(output))
 
 
-# =============================================================================
-# EVENT ROUTER
-# =============================================================================
-
-# Track subagent session IDs to prevent signal self-arming (audit finding 6.2)
 _KNOWN_SUBAGENT_IDS: set[str] = set()
 _EVENT_STARTED: float | None = None
 
@@ -2838,22 +2704,21 @@ def main() -> None:
     retries against an unreachable collector. The hook's output is already
     flushed by the handlers (stderr for banners, log() files), so skipping
     atexit handlers is safe.
+
+    Parse failures fail open, except a garbled payload that names a tool permission event, which is
+    denied, because exiting 0 reads as allowed where the tool gate fails closed on non zero. Only the head
+    of the payload is searched for that event name, so a marker embedded deep in a garbled non tool event
+    cannot deny it. On Copilot the event comes from AGENTIHOOKS_COPILOT_EVENT, trusted only on the Copilot
+    target, since a nested hook can inherit it. A block from any call in a Copilot batch denies the whole
+    batch. Codex and Copilot parse stdout as one JSON object, so injected context is buffered and flushed
+    once; on a block that buffered context is folded into the stderr message, and no exit path leaves
+    context buffered for the next event.
     """
-    # Bound before the try so the outer BlockAction handler can name the event
-    # even when the block fires before dispatch resolved one.
     _blocked_event = "Unknown"
     try:
-        # Read payload from stdin. Raw text is kept for the parse-failure path:
-        # fail-open is the rule (a hook must never crash the host), but a
-        # garbled payload that visibly names a tool-permission event gets
-        # deny-on-doubt instead — exiting 0 there reads as "allowed" on hosts
-        # whose tool gate is fail-closed on non-zero (copilot preToolUse), so
-        # fail-open on those events is the one direction that loses a guardrail.
         _raw_stdin = sys.stdin.read()
         payload: dict[str, Any] = json.loads(_raw_stdin)
 
-        # Codex and Copilot payloads get alias-filled into the internal shape;
-        # claude payloads pass through untouched (hooks/targets/normalizer.py).
         from hooks.targets.normalizer import normalize_payload
 
         payload = normalize_payload(payload)
@@ -2862,7 +2727,6 @@ def main() -> None:
 
         record_lifecycle_context(payload)
 
-        # Get event name from payload
         event_name = payload.get("hook_event_name", "Unknown")
         _blocked_event = event_name
 
@@ -2874,7 +2738,6 @@ def main() -> None:
 
         claim_fence(payload)
 
-        # Route to handler
         handler = EVENT_HANDLERS.get(event_name)
 
         from hooks.targets import buffers_single_envelope, emitter
@@ -2883,36 +2746,19 @@ def main() -> None:
         if event_name in ("PreToolUse", "SessionStart", "UserPromptSubmit") and not buffers_single_envelope():
             emitter.force_buffer(plain=event_name != "PreToolUse")
         elif event_name == "PostToolUse" and supports_output_rewrite():
-            # updatedToolOutput / decision only parse when the envelope is all of stdout.
             emitter.force_buffer()
 
         try:
             if handler:
                 handler(payload)
-                # Copilot batches parallel tool calls into ONE preToolUse
-                # payload; every remaining call runs the same pipeline. A
-                # BlockAction from any call denies the whole batch via exit 2 —
-                # the safe over-block. Per-call stdout denial exists in the
-                # wire format but the command-hook shape was not confirmed
-                # live, so batch-wide deny is the conservative choice.
                 for _call in payload.get("copilot_extra_tool_calls") or []:
                     handler({**payload, **_call})
             else:
                 log(f"Unknown event: {event_name}", payload)
 
-            # Codex and Copilot parse hook stdout as ONE JSON object —
-            # everything the handlers injected was buffered and is flushed here
-            # as a single envelope. Claude flushes its budgeted context here too.
             emitter.flush(event_name)
 
         except BlockAction as e:
-            # A BlockAction skips the flush above, so on an envelope target any
-            # context a handler buffered before the block (an inline-secret NOTE
-            # buffered ahead of branch_guard's raise) would otherwise be
-            # silently lost — stdout carries nothing on the block path.
-            # Fold it into the stderr message instead, which is freeform and
-            # still reaches the model with the deny. Plain stdout context
-            # (Claude SessionStart, UserPromptSubmit) is dropped instead.
             reason = str(e)
             if buffers_single_envelope() or emitter.forced():
                 drained = emitter.drain_for_block()
@@ -2920,42 +2766,24 @@ def main() -> None:
                     reason = f"{reason}\n\n{drained}"
             raise BlockAction(reason) from e
         finally:
-            # Belt-and-braces: no exception path — BlockAction or otherwise —
-            # may leave content buffered into the next event's envelope.
-            # flush() already clears on success; this covers every other exit.
             emitter.drain()
 
     except BlockAction as e:
-        # Some hosts treat exit 2 as advisory on events other than their
-        # tool-permission one. Where that is a live risk, state the denial in
-        # the stdout envelope as well — belt and braces, one JSON object.
         try:
             from hooks.targets.capabilities import requires_envelope_block
 
             if requires_envelope_block(_blocked_event):
                 emit_permission_decision(_blocked_event, "deny", str(e))
-        except Exception:  # NOSONAR — a block must never be weakened by this
+        except Exception:  # NOSONAR
             pass
-        print(str(e), file=sys.stderr, flush=True)  # Claude Code reads stderr for hook messages
+        print(str(e), file=sys.stderr, flush=True)
         otel.flush()
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(2)  # blocks the action — skip Python shutdown (OTEL threads)
+        os._exit(2)
     except json.JSONDecodeError:
         import re as _re
 
-        # Search only the head of the payload: the event name is among the
-        # first keys in every real payload shape, and an unanchored search over
-        # the whole stream lets a marker EMBEDDED in a garbled non-tool event
-        # (a raw nested object in a debug field) deny a SessionStart. The
-        # design-target case — a huge tool_input truncated at the END — keeps
-        # its event name well inside this window.
-        # Copilot stdin carries no event-name field — its wrapper passes the
-        # registered event via AGENTIHOOKS_COPILOT_EVENT instead, so the env
-        # var is the marker to sniff on that target. Gate it on the copilot
-        # target: the var can be inherited by a nested claude/codex hook
-        # spawned from within a copilot hook, and trusting it there would deny
-        # an unrelated garbled-stdin claude event that names no tool at all.
         from hooks.targets import is_copilot
 
         _env_event = os.environ.get("AGENTIHOOKS_COPILOT_EVENT", "") if is_copilot() else ""
@@ -2974,11 +2802,9 @@ def main() -> None:
             os._exit(2)
         log("Failed to parse JSON payload")
     except KeyboardInterrupt:
-        # Operator pressed Ctrl+C mid-hook (most common during SessionEnd
-        # while imports are still resolving). Exit silently — no traceback.
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(130)  # standard SIGINT exit code
+        os._exit(130)
     except Exception as e:
         log(f"Hook manager error: {str(e)}")
         otel.flush()
