@@ -43,7 +43,7 @@ def repository():
 def written(monkeypatch):
     calls = []
 
-    def write(self, connection, slug, entry, state, events):
+    def write(self, connection, slug, entry, state, events, summary=None):
         calls.append((connection, slug, entry, state, events))
         return "entry"
 
