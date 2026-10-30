@@ -230,7 +230,7 @@ def refusing(code):
 
 def test_a_remote_write_reports_its_gateway_failure_and_its_success_but_a_read_reports_nothing(monkeypatch):
     reported = []
-    monkeypatch.setattr(ledger.hive_ledger, "report", reported.append)
+    monkeypatch.setattr(ledger.ports.swarm().hive_ledger, "report", reported.append)
     monkeypatch.setattr(ledger, "request", refusing(502))
     with pytest.raises(SystemExit, match="server refused: 502"):
         ledger.remote_call("sw", [{"op": "comment"}], False)
@@ -250,7 +250,7 @@ def test_a_remote_write_reports_its_gateway_failure_and_its_success_but_a_read_r
 @pytest.mark.parametrize("code", [404, 500])
 def test_a_remote_write_refused_without_a_gateway_error_reports_nothing(monkeypatch, code):
     reported = []
-    monkeypatch.setattr(ledger.hive_ledger, "report", reported.append)
+    monkeypatch.setattr(ledger.ports.swarm().hive_ledger, "report", reported.append)
     monkeypatch.setattr(ledger, "request", refusing(code))
     with pytest.raises(SystemExit, match=f"server refused: {code}"):
         ledger.remote_call("sw", [{"op": "comment"}], False)

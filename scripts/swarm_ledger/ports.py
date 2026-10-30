@@ -34,6 +34,7 @@ class Swarm(Protocol):
     task_specs: Any
     authority: Any
     ledger_cutover: Any
+    hive_ledger: Any
 
 
 @runtime_checkable
