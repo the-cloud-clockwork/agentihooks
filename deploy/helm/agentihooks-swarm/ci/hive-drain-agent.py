@@ -21,13 +21,10 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, connect
 
 SLUG = os.environ["DRAIN_SLUG"]
-AGENT = os.environ["DRAIN_AGENT"]
 TASK = os.environ["DRAIN_TASK"]
 SEAT = f"eng-1@{SLUG}"
 DELAY_S = float(os.environ["DRAIN_HANDOFF_DELAY_S"])
-DOCUMENT = (
-    f"## Done\n{AGENT} worked {TASK} on the hive.\n\n## Stopped at\nThe hive rolled.\n\n## Next\nContinue {TASK}.\n"
-)
+DOCUMENT = f"## Done\nWorked {TASK} on the hive.\n\n## Stopped at\nThe hive rolled.\n\n## Next\nContinue {TASK}.\n"
 
 
 def key(name: str) -> str:
@@ -71,16 +68,19 @@ def main() -> None:
     """Keep the hive ready; seat the scripted agent on the first hive only."""
     hive = os.environ["SWARM_HIVE_ID"]
     store = connect()
-    signal.signal(signal.SIGTERM, lambda _signum, _frame: stopped(store, hive))
+    for stop in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(stop, lambda _signum, _frame: stopped(store, hive))
     registry.update(store.redis, hive, ["ui=no"])
     threading.Thread(target=keep_ready, args=(Path(os.environ["HIVE_READY_FILE"]),), daemon=True).start()
     print(f"hive {hive} serving", flush=True)
     if store.redis.set(key("agent-hive"), hive, nx=True):
-        agent = AgentRecord(AGENT, "eng", TASK, seat=SEAT, hive=hive, state="working", started_at=now_ms())
-        store.put_agent(SLUG, agent)
-        print(f"{AGENT} works {TASK} on hive {hive}", flush=True)
+        name = store.next_name(SLUG, "eng", now_ms())
+        seated = AgentRecord(name, "eng", TASK, seat=SEAT, hive=hive, state="working", started_at=now_ms())
+        agent = store.start_execution(SLUG, seated)
+        store.redis.set(key("agent"), agent.name)
+        print(f"{agent.name} works {TASK} on hive {hive}", flush=True)
         hand_off(store, agent)
-        print(f"{AGENT} recorded its handoff", flush=True)
+        print(f"{agent.name} recorded its handoff", flush=True)
     while True:
         signal.pause()
 

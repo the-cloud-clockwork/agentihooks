@@ -9,7 +9,6 @@ hive="$release-worker-hive"
 ledger_pod="$release-ledger-0"
 redis_url="redis://$release-redis:6379/7"
 slug=kind-drain
-agent=engineer@kind-drain-1
 task=drain1
 drain=120
 owner="default/$release"
@@ -50,7 +49,7 @@ apply_hive() {
   helm template "$release" "$chart" "${values[@]}" --set "workers.rollout.release=$1" \
     --show-only templates/worker-hive.yaml | python3 -c '
 import sys, yaml
-drain, redis_url, slug, agent, task = sys.argv[1:]
+drain, redis_url, slug, task = sys.argv[1:]
 docs = [doc for doc in yaml.safe_load_all(sys.stdin) if doc]
 for doc in docs:
     if doc["kind"] != "Deployment":
@@ -68,7 +67,6 @@ for doc in docs:
         {"name": "AGENTIHOOKS_DEPLOYMENT", "value": "local"},
         {"name": "AGENTIHOOKS_SWARM_REDIS_URL", "value": redis_url},
         {"name": "DRAIN_SLUG", "value": slug},
-        {"name": "DRAIN_AGENT", "value": agent},
         {"name": "DRAIN_TASK", "value": task},
         {"name": "DRAIN_HANDOFF_DELAY_S", "value": "5"},
     ]
@@ -76,7 +74,7 @@ for doc in docs:
     container["volumeMounts"].append({"name": "drain-agent", "mountPath": "/opt/drain", "readOnly": True})
     pod["volumes"].append({"name": "drain-agent", "configMap": {"name": "kind-hive-drain-agent"}})
 yaml.safe_dump_all(docs, sys.stdout)
-' "$drain" "$redis_url" "$slug" "$agent" "$task" | kubectl apply -f -
+' "$drain" "$redis_url" "$slug" "$task" | kubectl apply -f -
   kubectl rollout status "deployment/$hive" --timeout 3m
 }
 
@@ -88,12 +86,14 @@ rollout_objects rbac | kubectl apply -f -
 apply_hive first
 
 old=""
+agent=""
 for _ in $(seq 60); do
   old="$(redis GET "kind-drain:$slug:agent-hive")"
-  [[ -n $old ]] && break
+  agent="$(redis GET "kind-drain:$slug:agent")"
+  [[ -n $old && -n $agent ]] && break
   sleep 1
 done
-if [[ -z $old ]]; then
+if [[ -z $old || -z $agent ]]; then
   kubectl logs "deployment/$hive" --tail 50 || true
   printf 'the scripted agent never took its seat on the hive\n' >&2
   exit 1
@@ -157,8 +157,8 @@ if handed["hive"] != old or handed["at"] >= int(stopped):
     sys.exit(f"{agent} handed off at {handed['at']} on {handed['hive']}, not before hive {old} stopped at {stopped}")
 if envelope.get("agent") != agent or envelope.get("reason") != "recycle":
     sys.exit(f"the recorded handoff is not {agent}'s own: {json.dumps(envelope)}")
-if f"hive {old} drained: every agent handed off" not in Path(log).read_text():
-    sys.exit(f"the preStop drain of hive {old} did not end on every agent handing off")
+if f"hive {old} drained: every agent handed off, 1 ordered to hand off" not in Path(log).read_text():
+    sys.exit(f"the preStop drain of hive {old} did not order {agent} and end on its handoff")
 print(
     f"{agent} recorded its handoff {int(stopped) - handed['at']} ms before hive {old} stopped, "
     f"and the roll lease stayed held through {samples} drain readings"
