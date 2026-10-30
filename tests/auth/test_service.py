@@ -133,6 +133,15 @@ def test_tick_and_controller_credentials_exchange_for_operator_tokens(served, hi
         assert tokens.verify(SIGNING, reply["data"]["token"], SLUG) == ""
 
 
+def test_a_cloudflare_access_operator_exchanges_for_an_operator_token(served):
+    with patch.object(authority, "access_operator", return_value=True) as checked:
+        status, reply = post(served, f"/v1/ledgers/{SLUG}/token", **{"Cf-Access-Jwt-Assertion": "assertion"})
+
+    assert status == 200
+    assert tokens.verify(SIGNING, reply["data"]["token"], SLUG) == ""
+    checked.assert_called_once_with("assertion")
+
+
 def test_the_service_keeps_verifying_legacy_credentials_with_the_legacy_switch_off(served, hive, monkeypatch):
     store, _ = hive
     monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "off")

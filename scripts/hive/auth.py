@@ -213,7 +213,9 @@ def ledger_member(redis, credential: str) -> str | None:
 def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     """A hive agent token scoped to one ledger and agent, recorded on its own without reading the member map."""
     store = _store(redis)
-    digest = hive_state.read(store, f"holder.{member_id}") or (member(redis, member_id) or {}).get("ledger")
+    digest = hive_state.read(store, f"holder.{member_id}")
+    if digest is None and tokens.legacy(os.environ):
+        digest = (member(redis, member_id) or {}).get("ledger")
     current = digest and hive_state.read(
         store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
     )
