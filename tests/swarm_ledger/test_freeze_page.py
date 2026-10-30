@@ -136,6 +136,7 @@ def slow_background_paint(tab):
     )
 
 
+@pytest.mark.feature("ledger-freeze-controls")
 def test_every_plan_phase_slice_and_task_row_carries_a_freeze_button(page):
     tab, _ = page
     for selector in ("#item-plans-hier", "#item-phases-p1", "#item-slices-hier\\.hy-page", "#item-tasks-t1"):
@@ -144,6 +145,7 @@ def test_every_plan_phase_slice_and_task_row_carries_a_freeze_button(page):
     assert tab.locator("#item-plans-hier > .plan-head .scope").count() == 1
 
 
+@pytest.mark.feature("ledger-freeze-controls")
 def test_freezing_a_plan_from_its_row_sends_the_freeze_and_disables_its_rows(page):
     tab, sent = page
     tab.click("#item-plans-v2 > .plan-head .freeze")
@@ -183,6 +185,7 @@ def test_a_frozen_plan_dims_and_disables_everything_under_it_while_comments_stay
 
 
 @pytest.mark.parametrize("page", [[freeze("plans/v2")]], indirect=True)
+@pytest.mark.feature("ledger-freeze-controls")
 def test_unfreeze_sends_the_clear_and_restores_the_rows(page):
     tab, sent = page
     slow_background_paint(tab)

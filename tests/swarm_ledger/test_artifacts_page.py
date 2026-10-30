@@ -73,6 +73,7 @@ def open_artifact(tab, title):
     return viewer
 
 
+@pytest.mark.feature("ledger-artifacts-panel")
 def test_icon_lists_every_artifact_newest_first_with_author_task_and_time(page):
     page.get_by_role("button", name="Artifacts").click()
     rows = page.locator("#art-list .art-row")
@@ -131,6 +132,7 @@ def test_json_is_pretty_printed_as_plain_nested_blocks_that_never_fold(page):
     assert not viewer.is_visible()
 
 
+@pytest.mark.feature("ledger-artifacts-panel")
 def test_svg_renders_as_an_image_and_its_script_never_runs(page):
     viewer = open_artifact(page, "Handoff flow diagram")
     viewer.locator(".art-body .hint").wait_for(state="detached")
@@ -178,6 +180,7 @@ def test_delete_marks_the_artifact_pending_until_the_server_moves_it(trash_page)
     assert {"op": "artifact_delete", "target": "art-json"}.items() <= sent[0].items()
 
 
+@pytest.mark.feature("ledger-artifacts-panel")
 def test_the_trash_lists_days_left_and_restore_brings_an_artifact_back(trash_page):
     tab, _ = trash_page
     row = tab.locator("#art-trash .art-row", has_text="Old logo draft")

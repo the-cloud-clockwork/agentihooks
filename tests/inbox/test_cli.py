@@ -116,6 +116,7 @@ def test_a_message_sent_to_the_operator_with_a_clock_time_is_refused_at_send(sto
         ("send", "bob", "--sender=mallory", "hi"),
     ],
 )
+@pytest.mark.feature("inbox-sender-identity")
 def test_a_forged_sender_argument_is_ignored(store, argv):
     assert run(*argv) == 0
     [item] = store.inbox("bob")
@@ -129,6 +130,7 @@ def test_a_sender_option_before_the_address_sends_nothing(store):
     assert store.inbox("bob") == []
 
 
+@pytest.mark.feature("inbox-sender-identity")
 def test_the_session_id_is_the_sender_without_an_agent_name(store, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-1")
@@ -144,6 +146,7 @@ def test_a_session_named_on_its_record_speaks_under_that_name(store, monkeypatch
     assert store.inbox("bob")[0].sender == "sw-master-1"
 
 
+@pytest.mark.feature("inbox-sender-identity")
 def test_a_session_without_identity_is_refused(store, monkeypatch, capsys):
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
     assert run("send", "bob", "hi") == 1
@@ -218,6 +221,7 @@ def test_empty_reply_to_tick_refuses_done_without_mutation(store):
     assert store.history(notice.id) == history
 
 
+@pytest.mark.feature("inbox-fyi")
 def test_send_and_reply_with_fyi_mark_the_item_as_needing_no_work(store, capsys):
     assert run("send", "bob", "--fyi", "thanks,", "merged") == 0
     [thanks] = store.inbox("bob")

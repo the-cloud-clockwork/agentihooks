@@ -1,12 +1,17 @@
 """The Stop gate for a swarm worker holding a claim: the stop passes only on a wait the tick can check or end."""
 
 import json
+from typing import TYPE_CHECKING
 
 from scripts.gates import lift, log
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 from scripts.hive import scope
 from scripts.swarm.naming import lane_of
 from scripts.swarm_ledger import ledger_kinds
+
+if TYPE_CHECKING:
+    from scripts.gates.verdicts import Verdicts
+    from scripts.swarm.store import RedisStore
 
 WORKERS = frozenset({"eng", "ci"})
 ACTIVE = frozenset({"claimed", "pr"})
@@ -81,6 +86,20 @@ def parked_by(store, who, task):
     return any(a.name == who.name and a.state == "finished" for a in store.agents(who.swarm))
 
 
+def accepted_handoff(store: "RedisStore", who: Who) -> bool:
+    from scripts.handoff import transfers
+
+    if not any(
+        agent.name == who.name and agent.task == who.task and agent.state == "finished"
+        for agent in store.agents(who.swarm)
+    ):
+        return False
+    return any(
+        row["predecessor"] == who.name and row["task"] == who.task and row["handoff"]
+        for row in transfers.list_transfers(store, who.swarm)
+    )
+
+
 def release_verification(task, store, ledger, who, now):
     from dataclasses import replace
 
@@ -151,14 +170,14 @@ class ClaimStop:
     def matches(self, call):
         return not call.tool
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: "Verdicts") -> Decision:
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         from scripts.swarm import outage
 
         store, now = self.connect(), self.now()
         streak = Streak(store, who.swarm, who.name)
-        if any(record["kind"] == "ledger" for record in outage.open_records(who.swarm)):
+        if accepted_handoff(store, who) or any(record["kind"] == "ledger" for record in outage.open_records(who.swarm)):
             streak.clear()
             return Decision()
         ledger = self.ledger()
