@@ -102,7 +102,7 @@ def test_a_hosted_fenced_write_checks_the_hosted_lease(store, monkeypatch):
     from dataclasses import asdict
 
     held = lease.Lease("home", 1, 10**13)
-    monkeypatch.setattr(lease, "_address", lambda slug: "https://ledger.example")
+    monkeypatch.setattr(lease, "_address", lambda slug: "https://ledger.example" if slug == "sw" else "")
     monkeypatch.setattr(
         lease,
         "_remote",
