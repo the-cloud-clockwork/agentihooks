@@ -266,9 +266,7 @@ def grade(base: Path | None, head: Path, whole_tree: bool) -> list[str]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Reject new comments and preserve comment free files."
-    )
+    parser = argparse.ArgumentParser(description="Reject new comments and preserve comment free files.")
     parser.add_argument("--base", type=Path)
     parser.add_argument("--head", type=Path, default=Path.cwd())
     parser.add_argument("--all", action="store_true", dest="whole_tree")
