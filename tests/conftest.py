@@ -455,6 +455,19 @@ def _real_ledger_folder_guard():
     assert ledger_guard.touched[before:] == [], "this test reached the operator's real ledger folder"
 
 
+@pytest.fixture
+def _ledger_exit_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = os.getpid()
+    original_exit = os._exit
+
+    def exit_process(code: int) -> None:
+        if os.getpid() != owner:
+            original_exit(code)
+        raise AssertionError(f"ledger server exited the test process with status {code}")
+
+    monkeypatch.setattr(os, "_exit", exit_process)
+
+
 @pytest.fixture(autouse=True)
 def _no_runner_git_config(monkeypatch):
     # CI jobs export maintenance.auto through these; tests that build git config environments start from none.

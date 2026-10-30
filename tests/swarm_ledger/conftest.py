@@ -39,7 +39,7 @@ def relay_journal():
 
 
 @pytest.fixture(autouse=True)
-def request_metrics_journal(monkeypatch: pytest.MonkeyPatch) -> None:
+def request_metrics_journal(monkeypatch: pytest.MonkeyPatch, _ledger_exit_guard: None) -> None:
     from collections import deque
 
     from scripts.swarm_ledger import request_metrics

@@ -345,7 +345,7 @@ def test_the_command_needs_a_subcommand(capsys):
 
 
 @pytest.fixture
-def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard: None) -> Path:
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "metrics_journal", lambda *args: None)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
