@@ -159,8 +159,7 @@ def fenced(store: RedisStore, slug: str, held: Lease | int | None, change: Calla
     if held is None:
         return document.write(store, slug, change)
     if _address(slug):
-        live = current(store, slug)
-        _check({"lease": asdict(live) if live else None}, now_ms(store), held)
+        _check({"lease": _remote(slug, "current")}, now_ms(store), held)
         return document.write(store, slug, change)
 
     def guarded(doc):

@@ -296,3 +296,18 @@ def test_latest_seat_keeps_a_newer_generation_and_uses_the_last_equal_generation
     tied = {**newer, "name": "tie"}
     assert latest([newer, older], "seat") == {"eng-1@sw": newer}
     assert latest([newer, tied], "seat") == {"eng-1@sw": tied}
+
+
+def test_removing_a_swarm_clears_its_fencing_domain_and_preserves_the_epoch(store):
+    from scripts.swarm.store import SwarmConfig
+
+    config = SwarmConfig("sw", "/repo", 1, 1)
+    store.create(config)
+    held = lease.acquire(store, "sw", "home")
+    fencing.write(store, "sw", lambda doc: doc["orphans"].update({"old": "execution"}))
+    store.remove("sw")
+    doc = fencing.read(store, "sw")
+    assert doc == {**fencing.EMPTY, "epoch": held.epoch}
+    store.create(config)
+    replacement = lease.acquire(store, "sw", "other")
+    assert replacement.epoch > held.epoch
