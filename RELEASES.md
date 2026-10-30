@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.510 · 2026-10-30
+
+### 2026-10-30 · d0df00db0692 · #8926 · @agenticore-app
+
+**Inventory the swarm runtime features in the feature map**
+
+This change adds 44 inventory entries to feature-map.json documenting the swarm runtime's internals: tick passes, locks, claim lifecycle, master seat behavior, handoff mechanics, recovery, health findings, and scaling controls. It tags 99 existing tests with feature markers linking them to these entries, without altering test logic. No live checks exist yet for these behaviors. Two files hit the project's line cap so their tests remain unmarked, and worker idle retirement is explicitly deferred to a follow-up. This keeps the feature map accurate as a reference for what's tested versus what still needs coverage.
+
 ## v2.17.508 · 2026-10-30
 
 ### 2026-10-30 · 695a52daf0cb · #8920 · @agenticore-app
