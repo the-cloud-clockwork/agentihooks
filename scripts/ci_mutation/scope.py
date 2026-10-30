@@ -157,14 +157,31 @@ def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
         .decode()
         .split("\0")
     )
+    fork = subprocess.check_output(["git", "merge-base", base, head], cwd=root).decode().strip()
     changes = {}
     for name in names:
         path = Path(name)
         if path.suffix != ".py" or not (root / path).is_file():
             continue
+        if bare_tree(blob(root, fork, name)) == bare_tree(blob(root, head, name)):
+            continue
         diff = subprocess.check_output(["git", "diff", "-U0", comparison, "--", name], cwd=root).decode()
         changes[name] = changed_lines(diff)
     return changes
+
+
+def bare_tree(source: bytes | None) -> str:
+    tree = ast.parse(source or b"")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            if ast.get_docstring(node) is not None:
+                node.body = node.body[1:]
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and not node.decorator_list:
+            node.returns = None
+            for arg in ast.walk(node.args):
+                if isinstance(arg, ast.arg):
+                    arg.annotation = None
+    return ast.dump(tree)
 
 
 def module_name(path: Path) -> str:
