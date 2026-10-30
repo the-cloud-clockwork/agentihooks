@@ -116,6 +116,12 @@ def test_in_worktree_resolves_relative_to_dot_when_cwd_is_empty(monkeypatch):
     assert blocker_window._in_worktree(".", "") is True
 
 
+def test_in_worktree_falls_back_to_dot_after_a_chdir(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(blocker_window, "_WORKTREES", tmp_path)
+    assert blocker_window._in_worktree(".", "") is True
+
+
 def test_slug_defaults_to_empty_string(monkeypatch):
     monkeypatch.setattr(master_coding, "seat", lambda session_id: {})
     assert blocker_window._slug(SID) == ""
@@ -274,6 +280,20 @@ def test_checked_resolves_a_relative_edit_against_the_given_cwd(store, master, m
 def test_open_for_blockers_mkdir_is_idempotent(master):
     master_coding.open_for_blockers(SID)
     master_coding.open_for_blockers(SID)
+
+
+def test_open_for_blockers_mkdir_allows_every_missing_parent(master, monkeypatch):
+    captured = {}
+    original_mkdir = Path.mkdir
+
+    def fake_mkdir(self, mode=0o777, parents=False, exist_ok=False):
+        captured["parents"] = parents
+        captured["exist_ok"] = exist_ok
+        original_mkdir(self, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", fake_mkdir)
+    master_coding.open_for_blockers(SID, now=1.0)
+    assert captured == {"parents": True, "exist_ok": True}
 
 
 def test_open_for_blockers_writes_at_and_reason(master):
