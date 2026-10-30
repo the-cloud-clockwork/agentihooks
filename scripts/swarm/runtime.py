@@ -636,23 +636,11 @@ class HerdrRuntime:
             self._reserve_account(account, lane, agent)
         return account
 
-    def _admitted_account(self, agent, name, lane, environ):
-        from scripts.swarm import capacity
-
-        read = self.quota_accounts or capacity.accounts
-        rows = read(environ, time.time(), refresh=False)
-        rows = capacity.unreserved(rows) if lane == MASTER else rows
-        row = next((row for row in rows if (row.harness, row.name) == (agent, name)), None)
-        if row is None or not capacity.free_seats(row):
-            raise SpawnError(
-                f"admitted account {name} has no {agent} seat on this hive; returned for controller readmission",
-                "unavailable",
-            )
-        return row
-
-    def _route_account(self, agent, saved, task_id, lane, admitted):
+    def _route_account(
+        self, agent: str, saved: dict, task_id: str, lane: str, admitted: bool
+    ) -> tuple[capacity.Account | None, capacity.Account]:
         if admitted:
-            return None, self._admitted_account(agent, saved.get("account"), lane, dict(os.environ))
+            return None, capacity.Account(agent, saved.get("account"), "admitted", 0, None, None)
         account = self._claim_account(agent, saved.get("account") or self.planned_account(task_id, agent), lane)
         return account, account
 
@@ -788,6 +776,7 @@ class HerdrRuntime:
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         argv += ["--claim-fence", json.dumps(task["claim_fence"])] if task.get("claim_fence") else []
         argv += ["--defer-canary"] if lane == MASTER and self.defer_master_canary and agent != "codex" else []
+        argv += ["--launch-until", str(task["launch_until_ms"])] if task.get("launch_until_ms") is not None else []
         argv += title
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)

@@ -7,7 +7,8 @@
     "6d3760e3a1b36cc9a2b53ecdc1d2d6203c8386e7",
     "72cc89f1a9444ec7de5925b77d0cc5988848aca3",
     "c41769ca26466e64255f7e1529464382e7ff3bea",
-    "82e213e63fae4cab1f19d44a3356b0a357148d56"
+    "82e213e63fae4cab1f19d44a3356b0a357148d56",
+    "975fe583cb8714a50d3d6ae962fa8dc08839b08f"
   ],
   ".github/workflows/gate-protected.yml": [
     "d794eee5a317a353e437e19ff2c64498a86d6c5f",
@@ -26,5 +27,9 @@
   ],
   ".github/rulesets/version-tags.json": [
     "6ac0742c47fad096a715b6f9f0cef687b7c589c3"
+  ],
+  "scripts/ci_reuse.py": [
+    "36835a6f3abb51f660443015407532dfc20bcbae",
+    "51bdee4f8ea604c3af9bfa2daa35a9acf6cf2a22"
   ]
 }

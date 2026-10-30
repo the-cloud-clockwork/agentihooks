@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
+from scripts.swarm import timing
 
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 WRITE_ATTEMPTS = 5
@@ -216,7 +217,7 @@ class ExecutionRegistry:
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            self._put(slug, agent)
+            timing.timed(self._put, slug, agent)
 
     def _put(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
@@ -232,10 +233,12 @@ class ExecutionRegistry:
                         self.update(slug, agent)
                         return
                     previous = pipe.hget(self.store.key(slug, "agents"), agent.name)
+                    if previous and _finished_life(json.loads(previous), agent):
+                        agent = replace(agent, state="finished")
                     pipe.multi()
                     _write_projection(pipe, self.store, slug, agent)
                     self.write_status(pipe, slug, agent, previous)
-                    pipe.execute()
+                    timing.timed(pipe.execute)
                     return
                 except WatchError:
                     continue
@@ -359,7 +362,7 @@ class ExecutionRegistry:
 
     def update(self, slug: str, agent: AgentRecord) -> None:
         with _writes(slug):
-            self._update(slug, agent)
+            timing.timed(self._update, slug, agent)
 
     def _update(self, slug: str, agent: AgentRecord) -> None:
         from redis.exceptions import WatchError
@@ -375,6 +378,8 @@ class ExecutionRegistry:
                     current = self.occupants(slug, pipe).get(agent.seat)
                     if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                         self.conflict(slug, "stale or changed execution identity")
+                    if current.state == "finished" and agent.state != "ended":
+                        agent = replace(agent, state="finished")
                     if _read_before_ack(agent.runtime_target, current.runtime_target):
                         agent = replace(agent, **{field: getattr(current, field) for field in LAUNCH_BINDING})
                     _check_binding(
@@ -386,7 +391,7 @@ class ExecutionRegistry:
                         return
                     pipe.multi()
                     self.write(pipe, slug, agent, current)
-                    pipe.execute()
+                    timing.timed(pipe.execute)
                     return
                 except WatchError:
                     continue
@@ -509,6 +514,10 @@ def _check_binding(previous, current, refuse):
 
 def _read_before_ack(written, stored):
     return set(written) == {"host_id"} and stored != written and stored.get("host_id") == written["host_id"]
+
+
+def _finished_life(row, agent):
+    return row["state"] == "finished" and row["pane_id"] == agent.pane_id and agent.state != "ended"
 
 
 def _has_identity(agent):

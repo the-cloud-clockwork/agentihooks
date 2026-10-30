@@ -195,3 +195,30 @@ def test_a_missing_gate_log_and_ledger_meta_read_as_empty(home, tmp_path):
     store = RedisStore(fake_redis())
     records = rates_read.load(store, Ledger({}), "sw", Window(0, 1), Run(RAW), tmp_path)
     assert (records.events, records.tasks, records.gate_log, records.pulls) == ([], {}, [], {})
+
+
+@pytest.mark.parametrize("peer", ["sw", "other", ""])
+def test_load_reads_telemetry_history_only_from_the_matching_doctor(home, tmp_path, peer):
+    from scripts.doctor.priming import doctor_slug
+
+    store = RedisStore(fake_redis())
+    doctor = doctor_slug("sw")
+    store.set_peer(doctor, peer)
+    store.redis.hset(store.key(doctor, "doctor-timer"), "last", 1)
+    found = {"telemetry-stale/agent.1": {"seen_at": 50}}
+    store.redis.hset(store.key(doctor, "doctor-findings"), mapping={k: json.dumps(v) for k, v in found.items()})
+    records = rates_read.load(store, Ledger({}), "sw", Window(0, 100), Run(RAW), tmp_path)
+    assert records.doctor_findings == (found if peer == "sw" else None)
+
+
+def test_load_keeps_unobserved_doctor_history_unknown(home, tmp_path):
+    from scripts.doctor.priming import doctor_slug
+
+    store = RedisStore(fake_redis())
+    doctor = doctor_slug("sw")
+    store.set_peer(doctor, "sw")
+    records = rates_read.load(store, Ledger({}), "sw", Window(0, 100), Run(RAW), tmp_path)
+    assert records.doctor_findings is None
+    store.redis.hset(store.key(doctor, "doctor-timer"), "last", 1)
+    records = rates_read.load(store, Ledger({}), "sw", Window(0, 100), Run(RAW), tmp_path)
+    assert records.doctor_findings == {}

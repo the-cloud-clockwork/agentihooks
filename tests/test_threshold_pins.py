@@ -248,6 +248,37 @@ def test_an_unregistered_floor_or_allowlist_is_red(tmp_path):
     ]
 
 
+def test_a_new_allowlist_registered_in_the_head_is_green(tmp_path):
+    path = "tests/NEW_ALLOWLIST.json"
+    head = _tree(
+        tmp_path / "head",
+        {"scripts/threshold_pins.py": f"SHRINK_ONLY = ({path!r},)\n", path: "{}"},
+    )
+    assert threshold_pins.registry_errors(head, (), ()) == []
+
+
+def test_head_graded_by_does_not_register_a_new_allowlist(tmp_path):
+    path = "tests/NEW_ALLOWLIST.json"
+    head = _tree(
+        tmp_path / "head",
+        {"scripts/threshold_pins.py": f"SHRINK_ONLY = ()\nGRADED_BY = (({path!r}, 'gate'),)\n", path: "{}"},
+    )
+    assert threshold_pins.registry_errors(head, (), ()) == [
+        f"{path} is a floor or allowlist the threshold pin does not register"
+    ]
+
+
+def test_a_registered_allowlist_still_cannot_grow(tmp_path):
+    path = ALLOWLIST
+    source = f"SHRINK_ONLY = ({path!r},)\n"
+    base = _tree(tmp_path / "base", {"scripts/threshold_pins.py": source, path: "{}"})
+    head = _tree(tmp_path / "head", {"scripts/threshold_pins.py": source, path: '{"new": 1}'})
+    assert threshold_pins.registry_errors(head, (), ()) == []
+    errors, compared = threshold_pins.allowlist_errors(base, head, (path,))
+    assert compared == 1
+    assert errors == [f"{path}: new is new; the base does not allow it; allowlists only shrink"]
+
+
 def test_every_pin_and_allowlist_names_a_real_literal_in_this_repository(committed):
     assert threshold_pins.pin_errors(committed, committed) == ([], len(threshold_pins.PINS))
     assert threshold_pins.allowlist_errors(committed, committed) == ([], len(threshold_pins.SHRINK_ONLY))
