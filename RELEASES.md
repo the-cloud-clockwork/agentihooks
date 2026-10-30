@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.499 · 2026-10-30
+
+### 2026-10-30 · 63db7370f00f · #8825 · @nestorcolt
+
+**Recover telemetry exporters from scheduler failures**
+
+This change fixes telemetry exporters that were being terminated by scheduler state conflicts, which could silently drop monitoring data. It now recovers from these conflicts instead of exiting, wraps the entire timer lifecycle within the polling timeout so setup and cleanup are properly bounded, preserves interruption state and prior alarms across restarts, and tags failure records with the exporting session for easier diagnosis. It also adds a Doctor rates report showing distinct telemetry stale incidents per hour, reporting unknown when collection history is missing, giving the operator visibility into recurrence before and after the fix is applied in production.
+
 ## v2.17.498 · 2026-10-30
 
 ### 2026-10-30 · d1b68b08aa13 · #8800 · @nestorcolt
