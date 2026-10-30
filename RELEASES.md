@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.508 · 2026-10-30
+
+### 2026-10-30 · 695a52daf0cb · #8920 · @agenticore-app
+
+**Feature suite harness on real services and scripted agents**
+
+This adds a feature-suite harness that exercises real Redis, Postgres, and a live ledger server instead of the in-process fakes, launching a scripted agent process that joins the ledger, beats its canary, and hands off a document so the full launch-validate-handoff path is tested end to end. A new GitHub Actions workflow runs it with real service containers, gated behind an env flag so the existing unit suite and its Redis refusal stay untouched; this gives genuine confidence that the ledger, swarm, and agent lifecycle work together, not just against mocks.
+
 ## v2.17.507 · 2026-10-30
 
 ### 2026-10-30 · f616c3e518d4 · #8917 · @nestorcolt
