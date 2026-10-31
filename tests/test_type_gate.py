@@ -308,7 +308,7 @@ def test_module_name_maps_a_source_to_its_module(path: str, module: str) -> None
 def test_imported_resolves_absolute_relative_and_nested_imports() -> None:
     source = (
         b"import os.path\nfrom . import sibling\nfrom .. import top\nfrom .inner import name\n"
-        b"from hooks.lib import size\n\n\ndef late() -> None:\n    import json\n"
+        b"from hooks.lib import size\nimport hooks.alias.deep as deep\n\n\ndef late() -> None:\n    import json\n"
     )
     assert type_gate.imported("hooks/pkg/mod.py", source) == {
         "os",
@@ -321,6 +321,8 @@ def test_imported_resolves_absolute_relative_and_nested_imports() -> None:
         "hooks.pkg.inner.name",
         "hooks.lib",
         "hooks.lib.size",
+        "hooks.alias",
+        "hooks.alias.deep",
         "json",
     }
     assert type_gate.imported("hooks/pkg/__init__.py", b"from . import sibling\nfrom .sub import x\n") == {
@@ -354,7 +356,12 @@ def test_importers_follow_imports_through_cycles_and_skip_unparsable_sources(tmp
 
 
 def test_graded_selects_changes_importers_and_edited_baseline_entries(tmp_path: Path) -> None:
-    same = {"hooks/user.py": "from hooks import lib\n", "hooks/still.py": "", "hooks/zero.py": ""}
+    same = {
+        "hooks/user.py": "from hooks import lib\n",
+        "hooks/legacy.py": "from hooks.old import gone\n",
+        "hooks/still.py": "",
+        "hooks/zero.py": "",
+    }
     base = _tree(tmp_path / "base", {**same, "hooks/lib.py": "x = 1\n", "hooks/old.py": ""})
     head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n", "hooks/new.py": ""})
     base_baseline = {"hooks/still.py": 2, "hooks/x.py": 1}
@@ -362,6 +369,7 @@ def test_graded_selects_changes_importers_and_edited_baseline_entries(tmp_path: 
     assert type_gate.graded(base, head, base_baseline, recorded) == {
         "hooks/lib.py",
         "hooks/user.py",
+        "hooks/legacy.py",
         "hooks/old.py",
         "hooks/new.py",
         "hooks/still.py",
