@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -135,7 +136,7 @@ def test_now_ms_combines_seconds_and_microseconds():
     class _Store:
         redis = _Redis()
 
-    assert blocker_window._now_ms(_Store()) == 1_000_500
+    assert blocker_window._now_ms(cast(RedisStore, _Store())) == 1_000_500
 
 
 def test_the_window_records_now_ms_divided_by_1000(store, master, monkeypatch):
