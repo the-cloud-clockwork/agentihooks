@@ -126,12 +126,12 @@ class DepInputs:
         self.current = collected
         self.collecting, self.loose = str(collector.path), set()
         self.named = collector.nodeid
-        original, by_name = builtins.__import__, importlib.import_module
-        builtins.__import__, importlib.import_module = self.importer(original), self.loader(by_name)
+        original = builtins.__import__
+        builtins.__import__ = self.importer(original)
         try:
             yield
         finally:
-            builtins.__import__, importlib.import_module = original, by_name
+            builtins.__import__ = original
             previous[0].update(path for path in self.loose if not path.startswith(self.root + ".github/workflows/"))
             self.collecting = None
             self.current = previous
@@ -151,16 +151,6 @@ class DepInputs:
                 importlib.util.resolve_name("." * level + name, (scope or {}).get("__package__")) if level else name
             )
             self.named_by(sys._getframe(1), [absolute, *(f"{absolute}.{item}" for item in fromlist or ())])
-            return module
-
-        return run
-
-    def loader(self, original: Callable[..., ModuleType]) -> Callable[..., ModuleType]:
-        """Wrap importlib.import_module so a module loaded by name, cached or not, is recorded."""
-
-        def run(name: str, package: str | None = None) -> ModuleType:
-            module = original(name, package)
-            self.named_by(sys._getframe(1), [importlib.util.resolve_name(name, package)])
             return module
 
         return run
@@ -265,12 +255,33 @@ class DepInputs:
         (self.folder / f"{uuid.uuid4().hex}.jsonl").write_text("".join(line + "\n" for line in lines))
 
 
+BY_NAME = importlib.import_module
+RECORDERS = []
+
+
+def import_module(name: str, package: str | None = None) -> ModuleType:
+    """importlib.import_module that tells a collecting recorder which module it loaded.
+
+    Installed when this plugin loads, before conftests, so a name bound to it by an early import is seen too.
+    """
+    module = BY_NAME(name, package)
+    for recorder in RECORDERS:
+        if recorder.collecting:
+            recorder.named_by(sys._getframe(1), [importlib.util.resolve_name(name, package)])
+    return module
+
+
+if os.environ.get("DEP_INPUTS_DIR"):
+    importlib.import_module = import_module
+
+
 def pytest_configure(config):
     folder = os.environ.get("DEP_INPUTS_DIR")
     controller = not hasattr(config, "workerinput") and config.getoption("dist", "no") != "no"
     if not folder or controller:
         return
     plugin = DepInputs(Path(os.path.abspath(folder)), config.rootpath)
+    RECORDERS.append(plugin)
     sys.addaudithook(plugin.audit)
     plugin.follow_children()
     config.pluginmanager.register(plugin, "dep-inputs")

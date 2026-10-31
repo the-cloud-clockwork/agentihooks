@@ -598,6 +598,7 @@ def test_the_recorder_keeps_each_module_an_import_statement_names_during_collect
     assert imports["test_lazy.py"] == ["data.py", "helper.py"]
     assert imports["test_first.py"] == ["data.py"]
     assert imports["test_named.py"] == ["data.py", "plugins.py"]
+    assert imports["test_early.py"] == ["data.py", "early.py"]
 
 
 @pytest.mark.parametrize(
