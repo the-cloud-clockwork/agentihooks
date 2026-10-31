@@ -1,6 +1,7 @@
 """Workstation, hive pinned and needs pinned tasks under the events engine: offers, spoke takes, hub admission, tick."""
 
 from collections.abc import Iterator
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
@@ -142,7 +143,7 @@ def rig() -> Iterator[SimpleNamespace]:
     redis = fakeredis.FakeRedis(decode_responses=True)
     swarm = RedisStore(redis)
     swarm.create(SwarmConfig(SLUG, "/repo", 2, 2))
-    found = doc(PINNED)
+    found = doc(deepcopy(PINNED))
     rows = {row["id"]: row for row in found["tasks"]}
 
     def update_task(slug: str, task_id: str, fields: dict, if_state: tuple = (), if_match: int | None = None) -> dict:
@@ -190,6 +191,15 @@ def test_the_hub_admits_a_needs_task_only_from_a_hive_declaring_every_need(rig: 
     assert rig.admitter.admit(SLUG, ask("gpu", "hive-a")) is None
     registry.update(rig.redis, "hive-c", ["capabilities=gpu"])
     assert rig.admitter.admit(SLUG, ask("gpu", "hive-c"))["hive"] == "hive-c"
+
+
+def test_hub_admission_keeps_shared_placement_rows_open(rig: SimpleNamespace) -> None:
+    registry.update(rig.redis, "hive-c", ["capabilities=gpu"])
+    assert rig.admitter.admit(SLUG, ask("pinned", "hive-b")) is not None
+    assert rig.admitter.admit(SLUG, ask("gpu", "hive-c")) is not None
+
+    offered = readiness.offers(snapshot(doc(PINNED)), NOW)
+    assert [event.key for event in offered] == ["plain", "pinned", "gpu"]
 
 
 def test_a_lane_spoke_skips_an_offer_pinned_to_another_hive_without_asking_the_hub(
