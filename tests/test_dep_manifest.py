@@ -509,6 +509,8 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_aliased.py": "from scripts.aliased import get\n",
         "scripts/bypath.py": "import importlib.util\ndef load(path):\n    return importlib.util.spec_from_file_location('x', path)\n",
         "tests/test_bypath.py": "from scripts.bypath import load\n",
+        "scripts/assigned.py": "import importlib\nLOAD = importlib.import_module\ndef get(name):\n    return LOAD(name)\n",
+        "tests/test_assigned.py": "from scripts.assigned import get\n",
         "tests/test_flat.py": "import flat_helper\n",
         "tests/flat_helper.py": "import flat_data\n",
         "tests/flat_data.py": "DATA = open('flat.txt').read()\n",
@@ -522,6 +524,7 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_plugins.py::test_loaded": {"scripts/plugins.py": [3]},
         "tests/test_aliased.py::test_aliased": {"scripts/aliased.py": [3]},
         "tests/test_bypath.py::test_bypath": {"scripts/bypath.py": [3]},
+        "tests/test_assigned.py::test_assigned": {"scripts/assigned.py": [4]},
     }
     names = [
         "tests/test_eager.py::test_eager",
@@ -551,6 +554,7 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_collected.py::test_collected": (["page.js"], False),
         "tests/test_aliased.py::test_aliased": ([], True),
         "tests/test_bypath.py::test_bypath": ([], True),
+        "tests/test_assigned.py::test_assigned": ([], True),
         "tests/test_flat.py::test_flat": (["flat.txt"], False),
     }
 
@@ -574,10 +578,16 @@ def test_the_recorder_keeps_each_module_an_import_statement_names_during_collect
     (tmp_path / "helper.py").write_text("def load():\n    import data\n    return data.DATA\n")
     (tmp_path / "test_first.py").write_text("import data\ndef test_first():\n    pass\n")
     (tmp_path / "test_lazy.py").write_text("from helper import load\nVALUE = load()\ndef test_lazy():\n    pass\n")
+    (tmp_path / "plugins.py").write_text(
+        "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
+    )
+    (tmp_path / "test_named.py").write_text(
+        "from plugins import load\nVALUE = load('data')\ndef test_named():\n    pass\n"
+    )
     out = tmp_path / "inputs"
     subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", "test_first.py"]
-        + ["test_lazy.py"],
+        + ["test_lazy.py", "test_named.py"],
         cwd=tmp_path,
         env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
         check=True,
@@ -587,6 +597,7 @@ def test_the_recorder_keeps_each_module_an_import_statement_names_during_collect
     imports = {row["module"]: row["imports"] for row in rows if "module" in row}
     assert imports["test_lazy.py"] == ["data.py", "helper.py"]
     assert imports["test_first.py"] == ["data.py"]
+    assert imports["test_named.py"] == ["data.py", "plugins.py"]
 
 
 @pytest.mark.parametrize(

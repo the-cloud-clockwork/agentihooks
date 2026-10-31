@@ -5,6 +5,7 @@ Loaded with `-p tests.dep_inputs`; idle unless DEP_INPUTS_DIR names the folder f
 
 import builtins
 import hashlib
+import importlib
 import importlib.util
 import json
 import os
@@ -125,12 +126,12 @@ class DepInputs:
         self.current = collected
         self.collecting, self.loose = str(collector.path), set()
         self.named = collector.nodeid
-        original = builtins.__import__
-        builtins.__import__ = self.importer(original)
+        original, by_name = builtins.__import__, importlib.import_module
+        builtins.__import__, importlib.import_module = self.importer(original), self.loader(by_name)
         try:
             yield
         finally:
-            builtins.__import__ = original
+            builtins.__import__, importlib.import_module = original, by_name
             previous[0].update(path for path in self.loose if not path.startswith(self.root + ".github/workflows/"))
             self.collecting = None
             self.current = previous
@@ -149,17 +150,28 @@ class DepInputs:
             absolute = (
                 importlib.util.resolve_name("." * level + name, (scope or {}).get("__package__")) if level else name
             )
-            for found in [
-                sys.modules.get(absolute),
-                *(sys.modules.get(f"{absolute}.{item}") for item in fromlist or ()),
-            ]:
-                filename = getattr(found, "__file__", None) or ""
-                if filename.startswith(self.root) and not filename[len(self.root) :].startswith(SKIPPED):
-                    owner = self.importing(sys._getframe(1)) or self.named
-                    self.imports.setdefault(owner, set()).add(filename[len(self.root) :])
+            self.named_by(sys._getframe(1), [absolute, *(f"{absolute}.{item}" for item in fromlist or ())])
             return module
 
         return run
+
+    def loader(self, original: Callable[..., ModuleType]) -> Callable[..., ModuleType]:
+        """Wrap importlib.import_module so a module loaded by name, cached or not, is recorded."""
+
+        def run(name: str, package: str | None = None) -> ModuleType:
+            module = original(name, package)
+            self.named_by(sys._getframe(1), [importlib.util.resolve_name(name, package)])
+            return module
+
+        return run
+
+    def named_by(self, frame: FrameType | None, names: list[str]) -> None:
+        """Record each repository module in names for the module whose top level code runs innermost."""
+        for name in names:
+            filename = getattr(sys.modules.get(name), "__file__", None) or ""
+            if filename.startswith(self.root) and not filename[len(self.root) :].startswith(SKIPPED):
+                owner = self.importing(frame) or self.named
+                self.imports.setdefault(owner, set()).add(filename[len(self.root) :])
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.append_finished(self.module_lines())

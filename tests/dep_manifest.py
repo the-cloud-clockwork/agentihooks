@@ -23,7 +23,15 @@ MODULE = "<module>"
 MEASURED = ("hooks/", "scripts/")
 GLOBAL_FILES = {"pyproject.toml", "uv.lock"}
 GLOBAL_PREFIXES = (".github/", ".test_durations")
-DYNAMIC = {"import_module", "__import__", "spec_from_file_location", "module_from_spec", "run_module", "run_path"}
+DYNAMIC = {
+    "import_module",
+    "__import__",
+    "spec_from_file_location",
+    "module_from_spec",
+    "exec_module",
+    "run_module",
+    "run_path",
+}
 
 
 def _spans(tree: ast.AST) -> list[tuple[int, int, int, str]]:
@@ -137,13 +145,12 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
     except (OSError, SyntaxError, ValueError):
         return [], [None]
     package = Path(path).parent.parts
-    by_name = DYNAMIC | {
-        alias.asname
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util", "builtins", "runpy")
-        for alias in node.names
-        if alias.name in DYNAMIC and alias.asname
-    }
+    by_name = set(DYNAMIC)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util", "builtins", "runpy"):
+            by_name.update(alias.asname for alias in node.names if alias.name in DYNAMIC and alias.asname)
+        elif isinstance(node, ast.Assign) and getattr(node.value, "attr", getattr(node.value, "id", "")) in DYNAMIC:
+            by_name.update(target.id for target in node.targets if isinstance(target, ast.Name))
     edges, dynamic = [], []
     pending = [(tree, False, None)]
     while pending:
@@ -163,9 +170,9 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
             if called in by_name:
                 dynamic.append(line)
         for name in filter(None, names):
-            target = _module_file(root, name) or _module_file(root, name, Path(path).parent.as_posix())
-            if target and target != path:
-                edges.append((target, line))
+            for target in {_module_file(root, name), _module_file(root, name, Path(path).parent.as_posix())}:
+                if target and target != path:
+                    edges.append((target, line))
         body = node.body if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) else []
         body = body if isinstance(body, list) else [body]
         pending.extend(
