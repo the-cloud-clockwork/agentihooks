@@ -209,6 +209,15 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
         assert json.loads(output.out)["displaced"] == [URL[:-1] + str(n) for n in (2, 3, 5, 6)]
 
 
+def test_owners_keeps_only_tasks_whose_pull_request_was_named() -> None:
+    named = {"pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"}
+    other = {"pr_url": URL[:-1] + "4", "claimed_by": "ci@unrelated"}
+    asked = []
+    assert queue_priority.owners([other, named], [URL[:-1] + "2"]) == [named]
+    assert queue_priority.owners(lambda urls: asked.append(urls) or [other, named], [URL[:-1] + "2"]) == [named]
+    assert asked == [[URL[:-1] + "2"]]
+
+
 def test_worker_cannot_prioritize(monkeypatch, capsys):
     from tests.swarm.test_merge_queue import swarm_of
 

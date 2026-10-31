@@ -5,7 +5,6 @@ import uuid
 from collections.abc import Callable, Collection
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
@@ -79,10 +78,10 @@ def owners(tasks: Tasks, urls: Collection[str]) -> list[dict]:
     ]
 
 
-def targeting(ledger: LedgerClient, slug: str) -> Callable[[Collection[str]], list[dict[str, Any]]]:
+def targeting(ledger: LedgerClient, slug: str) -> Callable[[Collection[str]], list[dict]]:
     """A reader of the tasks whose pull request is one of the given urls, asking the ledger only for those urls."""
 
-    def read(urls: Collection[str]) -> list[dict[str, Any]]:
+    def read(urls: Collection[str]) -> list[dict]:
         return [row for url in urls for row in ledger.tasks_targeting(slug, url) if row.get("pr_url") == url]
 
     return read
