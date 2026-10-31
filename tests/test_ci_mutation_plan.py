@@ -1453,3 +1453,10 @@ def test_plan_accepts_shards_that_exactly_fill_the_budget(
     assert output.exists() is (status == 0)
     assert len(sized) == 1 - status
     assert ("split it into at least 2 pull requests" in text) is bool(status)
+
+
+def test_plan_sizes_shards_from_the_requested_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    status, output, sized = _plan_cli(tmp_path, monkeypatch, 194400.0, 2160)
+    assert status == 0
+    assert len(sized) == 1
+    assert f"shards={json.dumps(list(range(30)))}\n" in output.read_text()
