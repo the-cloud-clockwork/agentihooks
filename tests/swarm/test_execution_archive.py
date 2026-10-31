@@ -262,3 +262,43 @@ def test_a_first_read_imports_the_legacy_execution_hashes(store):
     doc = fencing.read(store, "other")
     assert set(doc["executions"]) == {"exe-old"}
     assert set(doc["archive"]) == {"exe-older"}
+
+
+VALIDATION = {"state": "validated", "pid": 7, "revisions": {"/repo": "abc"}, "source_blobs": [{"path": "CLAUDE.md"}]}
+
+
+def validated(store, seat, previous=""):
+    agent = AgentRecord(
+        store.next_name("fixture", "eng"), "eng", "task", seat=seat, profile_decision={"validation": dict(VALIDATION)}
+    )
+    return store.start_execution("fixture", agent, previous)
+
+
+def test_archive_drops_binding_source_blobs_and_keeps_the_rest_of_the_validation(store):
+    first = validated(store, "eng-1@fixture")
+    store.drop_agent("fixture", first.name)
+    second = validated(store, "eng-1@fixture", first.execution_id)
+
+    assert store.execution_registry.archive("fixture") == 1
+
+    archived = section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
+    live = section(store, "executions")[second.execution_id]["profile_decision"]["validation"]
+    assert archived == {key: value for key, value in VALIDATION.items() if key != "source_blobs"}
+    assert live == VALIDATION
+    assert store.execution("fixture", first.execution_id).profile_decision["validation"]["state"] == "validated"
+
+
+def test_archive_compacts_rows_archived_before_it_dropped_source_blobs(store):
+    first = validated(store, "eng-1@fixture")
+    store.drop_agent("fixture", first.name)
+    validated(store, "eng-1@fixture", first.execution_id)
+
+    def legacy(doc):
+        doc["archive"][first.execution_id] = doc["executions"].pop(first.execution_id)
+
+    fencing.write(store, "fixture", legacy)
+    assert "source_blobs" in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
+
+    assert store.execution_registry.archive("fixture") == 0
+    assert "source_blobs" not in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
+    assert store.execution_registry.archive("fixture") == 0
