@@ -172,14 +172,22 @@ def write(head: Path) -> None:
     (head / BASELINE).write_text(json.dumps(measure(head), indent=2) + "\n")
 
 
+def _drifted(recorded: int, head: int, base: int) -> bool:
+    """Return whether an entry records fewer errors than the head has, or more than both the head and the base."""
+    return recorded < head or recorded > max(head, base)
+
+
 def grade(
     base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
 ) -> list[str]:
     """Return every changed file whose errors grew against the base, and drift between the head and its baseline.
 
     Growth and drift are graded on ``touched``, the files the head changes and their importers, drift also on any
-    baseline entry it edits; with ``touched`` None, on every file. An untouched file keeps the
-    count the base recorded until a change to it, or a baseline refresh from the gate's own measurement, rewrites it, so one merge order cannot turn every later head red.
+    baseline entry it edits; with ``touched`` None, on every file, and drift then means any difference. With
+    ``touched`` given, an entry above the head's count but not above the base's is a ceiling the head keeps under, so
+    a head that fixes errors needs no baseline edit and pull requests fixing different files never edit the file.
+    An untouched file keeps the count the base recorded until a baseline refresh from the gate's own measurement
+    rewrites it, so one merge order cannot turn every later head red.
     """
     errors = [
         f"{path} has {count} type errors, more than the {base.get(path, 0)} the base allows"
@@ -191,8 +199,12 @@ def grade(
         f"{BASELINE} records {recorded.get(path, 0)} type errors in {path}, the head has {head.get(path, 0)}; "
         "run python -m scripts.type_gate --write"
         for path in sorted(set(recorded) | set(head))
-        if recorded.get(path, 0) != head.get(path, 0)
-        and (touched is None or path in touched or recorded.get(path, 0) != base.get(path, 0))
+        if (
+            recorded.get(path, 0) != head.get(path, 0)
+            if touched is None
+            else _drifted(recorded.get(path, 0), head.get(path, 0), base.get(path, 0))
+            and (path in touched or recorded.get(path, 0) != base.get(path, 0))
+        )
     ]
     return errors
 
