@@ -202,8 +202,10 @@ def grade(
         if (
             recorded.get(path, 0) != head.get(path, 0)
             if touched is None
-            else _drifted(recorded.get(path, 0), head.get(path, 0), base.get(path, 0))
-            and (path in touched or recorded.get(path, 0) != base.get(path, 0))
+            else (
+                _drifted(recorded.get(path, 0), head.get(path, 0), base.get(path, 0))
+                and (path in touched or recorded.get(path, 0) != base.get(path, 0))
+            )
         )
     ]
     return errors

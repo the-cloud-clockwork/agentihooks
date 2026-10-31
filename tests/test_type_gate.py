@@ -88,10 +88,15 @@ def test_heads_fixing_different_files_merge_without_a_baseline_edit_and_growth_s
     assert _grade(base, first, capsys) == (0, "0 type errors in 0 files, 2 allowed, 0 errors\n")
     assert _grade(base, second, capsys) == (0, "0 type errors in 0 files, 2 allowed, 0 errors\n")
     assert _grade(base, merged, capsys) == (0, "0 type errors in 0 files, 2 allowed, 0 errors\n")
-    grown = _tree(tmp_path / "grown", {"hooks/a.py": ILL_TYPED + ILL_TYPED, "hooks/b.py": ILL_TYPED}, baseline)
-    code, out = _grade(base, grown, capsys)
-    assert code == 1
-    assert "::error::hooks/a.py has 2 type errors, more than the 1 the base allows\n" in out
+    grown_source = ILL_TYPED + ILL_TYPED.replace("planted", "other")
+    grown = _tree(tmp_path / "grown", {"hooks/a.py": grown_source, "hooks/b.py": ILL_TYPED}, baseline)
+    assert _grade(base, grown, capsys) == (
+        1,
+        "2 type errors in 1 files, 2 allowed, 2 errors\n"
+        "::error::hooks/a.py has 2 type errors, more than the 1 the base allows\n"
+        f"::error::{type_gate.BASELINE} records 1 type errors in hooks/a.py, the head has 2; "
+        "run python -m scripts.type_gate --write\n",
+    )
 
 
 def test_a_regenerated_baseline_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
