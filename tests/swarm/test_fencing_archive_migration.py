@@ -116,7 +116,7 @@ def test_historical_execution_readers_and_pane_restore_survive_migration(store: 
 
 
 def test_archived_name_cannot_start_in_another_seat(store: Any) -> None:
-    from scripts.swarm import fencing
+    from scripts.swarm import execution, fencing
     from scripts.swarm.store import AgentRecord, SwarmError
     from tests.swarm.test_execution_archive import history
 
@@ -125,7 +125,7 @@ def test_archived_name_cannot_start_in_another_seat(store: Any) -> None:
     fencing.migrate_archive(store, "fixture", writers_upgraded=True)
     candidate = AgentRecord(first.name, "eng", "task", seat="eng-3@fixture")
     with pytest.raises(SwarmError) as caught:
-        store.start_execution("fixture", candidate)
+        execution.ExecutionRegistry(store).start("fixture", candidate, "")
     assert str(caught.value) == "canonical agent already belongs to another execution seat"
 
 
@@ -150,9 +150,13 @@ def test_archive_reference_missing_fails_closed(store: Any) -> None:
     from scripts.swarm import fencing
     from scripts.swarm.store import SwarmError
 
+    with pytest.raises(SwarmError) as caught:
+        fencing._archive_rows(store, "fixture:archive:missing")
+    assert str(caught.value) == "referenced execution archive is unavailable"
     fencing.write(store, "fixture", lambda doc: doc.update(archive_ref="missing"))
-    with pytest.raises(SwarmError, match="referenced execution archive is unavailable"):
+    with pytest.raises(SwarmError) as read_failure:
         fencing.read(store, "fixture")
+    assert str(read_failure.value) == "referenced execution archive is unavailable"
 
 
 def test_self_contained_snapshot_restores_without_source_chunks(store: Any) -> None:
@@ -328,3 +332,16 @@ def test_registry_history_callback_preserves_chunk_namespace(store: Any) -> None
     assert raw["archive"] == {}
     assert raw["archive_ref"].startswith("fixture:archive:")
     assert fencing.read(store, "fixture")["archive"] == {"old": {"name": "old"}}
+
+
+def test_external_archive_removal_keeps_other_rows(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    rows = {"old": {"name": "old"}, "keep": {"name": "keep"}}
+    reference = fencing._save_archive_chunk(store, "fixture", "", rows, [])
+    doc = {"archive_ref": reference, "archive": {"keep": rows["keep"]}}
+    fencing._externalize_archive(store, "fixture", doc)
+    raw = json.loads(fencing._states(store).get(doc["archive_ref"]).value)
+    assert raw == {"parent": reference, "rows": {}, "removed": ["old"]}
+    assert doc["archive"] == {}
+    assert fencing._archive_rows(store, doc["archive_ref"]) == {"keep": rows["keep"]}
