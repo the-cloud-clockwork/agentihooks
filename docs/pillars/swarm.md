@@ -5089,7 +5089,8 @@ A detection pass reads:
   commands each (`BATCH` in `scripts.doctor.read`). Every distinct address and sender is resolved to its swarm with
   one `NameRegistry.slugs_of` call: one `MGET` for aliases and one `HMGET` for agent codes. The pass keeps the same
   items, in the same order, as the old one key at a time loop. The inbox detector and the handoff detector share
-  this one read.
+  this one read. The store's own open and pending index rebuilds page the same way; see
+  [Inbox index rebuilds in batches](#inbox-index-rebuilds-in-batches).
 - **The inbox receivers, in a fixed number of reads.** The inbox detector then resolves who each address reaches
   in a fixed number of round trips however many addresses the inbox holds, seven against the live store; see
   [Inbox receiver read](#inbox-receiver-read).
@@ -7188,6 +7189,94 @@ the count is 0 by construction, since the detector skips every such item. A late
 [pull request 5742](https://github.com/the-cloud-clockwork/agentihooks/pull/5742), stopped the detector from
 reporting any item that waits for a seat's successor, so the `seat wait` category no longer appears; the
 information only skip still covers the `unread delivery` and `delivered backlog` categories.
+
+### Inbox index rebuilds in batches
+
+Each address keeps two derived indexes beside its full listing, so the hot reads do not walk every item it was
+ever sent:
+
+| Index | Read by | Current when | Rebuilt by |
+|---|---|---|---|
+| Open index: the address's items not yet closed | `InboxStore.open_items` and `open_mail`: swarm exit settling, master wake, seat dispatch and the master inbox pool | the address is in the `open-indexed` set and its stored `open-size` equals the size of the address listing | `InboxStore._index_open` |
+| Pending index: the address's items still `pending` | `InboxStore.pending_items` and `pending_mail`: hook and channel delivery, the tick wake pass and the ledger relay | the address is in the `indexed` set | `InboxStore._try_back_fill` |
+
+A read of a current index costs one `ZRANGE` of that index. A stale or missing index is rebuilt from the full
+listing on the next read. Both rebuilds read the listing through `InboxStore._watched_rows`, in pages of
+`ROW_BATCH` (500) ids:
+
+1. Watch the address listing once on the rebuild's transaction pipeline.
+2. Read the next 500 ids of the listing with `ZRANGE start start+499` on that pipeline.
+3. Watch those 500 item keys, then read their rows through `InboxStore._batch`, one non transactional pipeline of
+   at most 500 `HGETALL` commands. A connection the server closes mid read is read once more.
+4. Repeat until a page comes back shorter than 500 ids.
+
+The rebuild then writes the new index in one `MULTI`/`EXEC`, drops ids whose item record is gone from the listing
+and both indexes, and reports them on stderr as before. No single command or pipeline carries more than 500 ids,
+however many items the address holds. Before this change both rebuilds sent one `ZRANGE 0 -1`, one `WATCH` of every
+item key and one `HGETALL` per item in a single round trip, which on a large mailbox reset the Redis connection the
+same way the receiver read did before it was batched.
+
+The result is the same as the single read. `WATCH` holds per connection and sees writes from every connection, so
+a send, close or state change to the listing or to any item already read aborts the `EXEC`, also when it lands
+between two pages. An aborted rebuild starts again from the first page, up to `MOVE_ATTEMPTS` (3) times; after the
+third abort the call returns ids computed from `InboxStore.inbox`, which pages the listing the same way, and leaves
+the index stale for the next read.
+
+Nothing here is configurable: `ROW_BATCH` and `MOVE_ATTEMPTS` are module constants in `scripts.inbox.store`.
+
+#### Check an address's indexes
+
+A read only look at one address: how many items it holds, how many batches a rebuild would read, and whether each
+index is current. It calls no rebuild, so it writes nothing:
+
+```bash
+cd ~/dev/tcc-ecosystem/agentihooks
+~/dev/tcc-ecosystem/.venv/bin/python - 'master@rig-grade-swarm' <<'PY'
+import sys
+from scripts.inbox.store import ROW_BATCH, InboxStore, _index_current
+from scripts.swarm.store import redis_client
+
+address = sys.argv[1]
+box = InboxStore(redis_client())
+total = box.redis.zcard(box.key("address", address))
+open_current = _index_current(
+    box.redis.sismember(box.key("open-indexed"), address),
+    box.redis.get(box.key("open-size", address)),
+    total,
+)
+print(total, "items;", -(-total // ROW_BATCH), "batches of", ROW_BATCH, ";",
+      "open index", "current" if open_current else "stale", ";",
+      "pending index", "current" if box.redis.sismember(box.key("indexed"), address) else "stale")
+PY
+```
+
+Output for the Doctor master seat on 31 October 2026:
+
+```text
+95 items; 1 batches of 500 ; open index current ; pending index current
+```
+
+A stale index is rebuilt by the next read of that index: for the pending index, the next hook or channel delivery to
+the address. `agentihooks msg inbox` reads the full listing, also in pages of 500, and rebuilds neither index.
+
+#### Troubleshooting
+
+| Symptom | Check and response |
+|---|---|
+| `Connection reset by peer` from a hook delivery, a wake or an exit pass on a large mailbox | Run the check above. Stale indexes on a mailbox over 500 items mean the reading process runs code older than [pull request 9047](https://github.com/the-cloud-clockwork/agentihooks/pull/9047); pull `dev` into the checkout it runs from and restart its session |
+| The open index stays stale after reads | Writes to the address keep aborting all three rebuild attempts; the read still returns the right items from the full listing. Look for a sender looping on that address before suspecting the index |
+| `agentihooks inbox: ... whose record is gone` on stderr during a read | Expected: the rebuild found an id in the listing whose item record no longer exists and dropped it from the listing and both indexes |
+
+#### Delivery evidence
+
+[Pull request 9047](https://github.com/the-cloud-clockwork/agentihooks/pull/9047) closes
+[issue 9045](https://github.com/the-cloud-clockwork/agentihooks/issues/9045). The tests only head failed 11 of
+11 new tests in the [red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41164921235).
+`tests/inbox/test_index_rebuild_batches.py` seeds mailboxes of 0, 1, 500, 501 and 2001 items over four states and
+fails any `ZRANGE`, `WATCH` or pipeline over `ROW_BATCH` with a connection reset; for both rebuilds it asserts the
+same ids as the unbatched read, the stored `open-size` or `indexed` mark, and that a full 500 id page was read. A
+race test changes an item to `done` between the first and second batch of a 501 item mailbox and asserts the
+rebuild aborts, reads again from the first batch and leaves the closed item out of the open index.
 
 ### Local outbox and limits
 
