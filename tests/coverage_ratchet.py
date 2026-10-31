@@ -99,7 +99,14 @@ def _grade(
         ).splitlines()
         if path.endswith(".py")
     }
-    result = grade(head, lambda path: _read(args.head / path), _chain(base, runs), moved, changed_tests=changed_tests, workers=workers)
+    result = grade(
+        head,
+        lambda path: _read(args.head / path),
+        _chain(base, runs),
+        moved,
+        changed_tests=changed_tests,
+        workers=workers,
+    )
     return head, base, result
 
 
