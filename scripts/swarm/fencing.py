@@ -187,7 +187,7 @@ def _externalize_archive(store: Any, slug: str, doc: dict[str, Any]) -> None:
     doc["archive"] = {}
 
 
-def change_with_archive(store: Any, slug: str, doc: dict[str, Any], change: Callable[[dict], T]) -> T:
+def change_with_archive(store: Any, slug: str, doc: dict[str, Any], change: Callable[[dict[str, Any]], T]) -> T:
     hydrate_archive(store, doc)
     result = change(doc)
     _externalize_archive(store, slug, doc)

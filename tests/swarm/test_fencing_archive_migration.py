@@ -122,6 +122,7 @@ def test_empty_archive_and_snapshots_round_trip(store: Any) -> None:
     empty = fencing.read(store, "fixture")
     assert empty["archive"] == {}
     fencing.change_with_archive(store, "fixture", empty, lambda doc: doc["archive"].update({"old": {"name": "old"}}))
+    fencing.hydrate_archive(store, empty)
     fencing.replace(store, "fixture", empty)
     saved = fencing.read(store, "fixture")
     assert saved["archive"] == {"old": {"name": "old"}}
@@ -223,4 +224,26 @@ def test_cas_retry_never_publishes_uncommitted_archive_chunks(store: Any, monkey
     fencing.migrate_archive(store, "fixture", writers_upgraded=True)
     assert len(attempts) == 1
     assert fencing.read(store, "fixture")["archive"] == before["archive"]
+    assert json.loads(fencing._states(store).get("fixture").value)["archive"] == {}
+
+
+def test_migration_command_requires_confirmation_before_connecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import archive_migration
+
+    def refused() -> None:
+        pytest.fail("migration connected before writer rollout confirmation")
+
+    monkeypatch.setattr(archive_migration.store, "connect", refused)
+    with pytest.raises(SystemExit) as caught:
+        archive_migration.main(["fixture"])
+    assert caught.value.code == 2
+
+
+def test_migration_command_runs_the_explicit_migration(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import archive_migration, fencing
+
+    monkeypatch.setattr(archive_migration.store, "connect", lambda: store)
+    fencing.write(store, "fixture", lambda doc: doc["archive"].update({"old": {"name": "old"}}))
+    archive_migration.main(["fixture", "--writers-upgraded"])
+    assert fencing.read(store, "fixture")["archive"] == {"old": {"name": "old"}}
     assert json.loads(fencing._states(store).get("fixture").value)["archive"] == {}
