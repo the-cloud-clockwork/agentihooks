@@ -6,8 +6,9 @@ still recurring in the last RECENT_MS, blocks other work until it is cleared.
 
 import json
 from dataclasses import dataclass
+from typing import Any, cast
 
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import PREFIX, RedisStore
 
 TTL_MS = 24 * 60 * 60 * 1000
 SUSTAINED_MS = 60 * 60 * 1000
@@ -27,12 +28,16 @@ class Blocker:
 
 
 def _key(store: RedisStore, slug: str) -> str:
-    return store.key(slug, KEY)
+    return f"{PREFIX}:{slug}:{KEY}"
+
+
+def _client(store: RedisStore) -> Any:
+    return cast(Any, store).redis
 
 
 def record(store: RedisStore, slug: str, category: str, detail: str, now_ms: int) -> None:
     key = _key(store, slug)
-    raw = store.redis.hget(key, category)
+    raw = _client(store).hget(key, category)
     previous = json.loads(raw) if raw else None
     row = {
         "first_seen": previous["first_seen"] if previous else now_ms,
@@ -40,21 +45,21 @@ def record(store: RedisStore, slug: str, category: str, detail: str, now_ms: int
         "count": (previous["count"] + 1) if previous else 1,
         "detail": detail,
     }
-    store.redis.hset(key, category, json.dumps(row))
-    store.redis.pexpire(key, TTL_MS)
+    _client(store).hset(key, category, json.dumps(row))
+    _client(store).pexpire(key, TTL_MS)
 
 
 def clear(store: RedisStore, slug: str, category: str) -> None:
-    store.redis.hdel(_key(store, slug), category)
+    _client(store).hdel(_key(store, slug), category)
 
 
 def active(store: RedisStore, slug: str, now_ms: int) -> dict[str, Blocker]:
     key = _key(store, slug)
-    found = {}
-    for category, raw in store.redis.hgetall(key).items():
+    found: dict[str, Blocker] = {}
+    for category, raw in _client(store).hgetall(key).items():
         row = json.loads(raw)
         if now_ms - row["first_seen"] >= TTL_MS:
-            store.redis.hdel(key, category)
+            _client(store).hdel(key, category)
             continue
         found[category] = Blocker(category, row["first_seen"], row["last_seen"], row["count"], row["detail"])
     return found
@@ -69,9 +74,9 @@ def sustained(store: RedisStore, slug: str, now_ms: int) -> dict[str, Blocker]:
 
 
 def due_notice(store: RedisStore, slug: str, now_ms: int) -> bool:
-    key = store.key(slug, NOTICE_KEY)
-    last = store.redis.get(key)
+    key = f"{PREFIX}:{slug}:{NOTICE_KEY}"
+    last = _client(store).get(key)
     if last is not None and now_ms - int(last) < NOTICE_MS:
         return False
-    store.redis.set(key, now_ms)
+    _client(store).set(key, now_ms)
     return True

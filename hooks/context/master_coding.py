@@ -9,6 +9,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import cast
 
 OPEN = re.compile(r"(?<![\w-])allow-master-coding(?![\w-])", re.IGNORECASE)
 CLOSE = re.compile(r"(?<![\w-])(?:deny|disallow)-master-coding(?![\w-])", re.IGNORECASE)
@@ -91,7 +92,7 @@ def opened_for_blockers(session_id: str) -> bool:
         data = json.loads(path(session_id).read_text())
     except (OSError, ValueError):
         return False
-    return isinstance(data, dict) and data.get("reason") == "blockers"
+    return isinstance(data, dict) and cast(dict[str, object], data).get("reason") == "blockers"
 
 
 def is_open(session_id: str) -> bool:

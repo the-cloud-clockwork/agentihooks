@@ -9,8 +9,9 @@ import subprocess
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing import Any, cast
 
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import PREFIX, RedisStore
 
 FLEET = "fleet"
 HOUR_MS = 60 * 60 * 1000
@@ -38,8 +39,12 @@ class Panic:
     fixes: tuple[str, ...]
 
 
-def _key(store: RedisStore, part: str) -> str:
-    return store.key(FLEET, part)
+def _key(part: str) -> str:
+    return f"{PREFIX}:{FLEET}:{part}"
+
+
+def _client(store: RedisStore) -> Any:
+    return cast(Any, store).redis
 
 
 def _emit(slug: str, category: str) -> None:
@@ -50,19 +55,19 @@ def _emit(slug: str, category: str) -> None:
 
 def count_error(store: RedisStore, slug: str, category: str, now_ms: int) -> None:
     """Counts one error in the fleet window and on the OpenTelemetry counter."""
-    key = _key(store, "errors")
-    store.redis.zadd(key, {f"{now_ms}:{slug}:{category}:{uuid.uuid4().hex}": now_ms})
-    store.redis.zremrangebyscore(key, "-inf", now_ms - HOUR_MS - 1)
+    key = _key("errors")
+    _client(store).zadd(key, {f"{now_ms}:{slug}:{category}:{uuid.uuid4().hex}": now_ms})
+    _client(store).zremrangebyscore(key, "-inf", now_ms - HOUR_MS - 1)
     _emit(slug, category)
 
 
 def errors_since(store: RedisStore, since_ms: int) -> int:
-    return int(store.redis.zcount(_key(store, "errors"), since_ms, "+inf"))
+    return int(_client(store).zcount(_key("errors"), since_ms, "+inf"))
 
 
 def errors_by_category(store: RedisStore, since_ms: int) -> dict[str, int]:
     found: dict[str, int] = {}
-    for member in store.redis.zrangebyscore(_key(store, "errors"), since_ms, "+inf"):
+    for member in _client(store).zrangebyscore(_key("errors"), since_ms, "+inf"):
         category = str(member).split(":")[-2]
         found[category] = found.get(category, 0) + 1
     return found
@@ -70,14 +75,14 @@ def errors_by_category(store: RedisStore, since_ms: int) -> dict[str, int]:
 
 def count_pass(store: RedisStore, slug: str, ok: bool, now_ms: int) -> None:
     """Records one tick pass and whether every step in it finished without a failure."""
-    key = _key(store, "passes")
-    store.redis.zadd(key, {f"{now_ms}:{slug}:{int(ok)}:{uuid.uuid4().hex}": now_ms})
-    store.redis.zremrangebyscore(key, "-inf", now_ms - WINDOW_MS - 1)
+    key = _key("passes")
+    _client(store).zadd(key, {f"{now_ms}:{slug}:{int(ok)}:{uuid.uuid4().hex}": now_ms})
+    _client(store).zremrangebyscore(key, "-inf", now_ms - WINDOW_MS - 1)
 
 
 def level(store: RedisStore, now_ms: int) -> float:
     """Business-as-usual level: the share of tick passes in the last WINDOW_MS with no failed step."""
-    members = [str(m) for m in store.redis.zrangebyscore(_key(store, "passes"), now_ms - WINDOW_MS, "+inf")]
+    members = [str(m) for m in _client(store).zrangebyscore(_key("passes"), now_ms - WINDOW_MS, "+inf")]
     if not members:
         return 1.0
     return sum(member.split(":")[-2] == "1" for member in members) / len(members)
@@ -88,7 +93,7 @@ def stable(store: RedisStore, now_ms: int) -> bool:
 
 
 def state(store: RedisStore) -> Panic | None:
-    raw = store.redis.get(_key(store, "panic"))
+    raw = _client(store).get(_key("panic"))
     if raw is None:
         return None
     row = json.loads(raw)
@@ -104,7 +109,7 @@ def engage(store: RedisStore, reason: str, auto: bool, fixes: Iterable[str], now
         auto and (current.auto if current else True),
         tuple(sorted({*(current.fixes if current else ()), *fixes})),
     )
-    store.redis.set(_key(store, "panic"), json.dumps(found.__dict__ | {"fixes": list(found.fixes)}))
+    _client(store).set(_key("panic"), json.dumps(found.__dict__ | {"fixes": list(found.fixes)}))
     return found
 
 
@@ -112,7 +117,7 @@ def release(store: RedisStore, now_ms: int) -> bool:
     """Turns panic off only when the fleet is stable and back at RELEASE_LEVEL of business as usual."""
     if not stable(store, now_ms):
         return False
-    store.redis.delete(_key(store, "panic"))
+    _client(store).delete(_key("panic"))
     return True
 
 
@@ -167,7 +172,7 @@ def cancel_runs(fixes: Iterable[str], repos: Iterable[str], run: Runner) -> list
 
 
 def due_cancel(store: RedisStore, now_ms: int) -> bool:
-    return bool(store.redis.set(_key(store, "cancel"), now_ms, nx=True, px=CANCEL_EVERY_MS))
+    return bool(_client(store).set(_key("cancel"), now_ms, nx=True, px=CANCEL_EVERY_MS))
 
 
 def tick_pass(store: RedisStore, slug: str, ok: bool, now_ms: int, run: Runner = gh) -> list[str]:
