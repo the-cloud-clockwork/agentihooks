@@ -4,7 +4,7 @@ from tests.ledger_load import hierarchy_probe
 
 
 class Repository:
-    def __init__(self, events: list) -> None:
+    def __init__(self, events: list[object]) -> None:
         self.events = events
         self.calls = []
 

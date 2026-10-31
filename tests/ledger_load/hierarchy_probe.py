@@ -80,7 +80,7 @@ def align(barrier):
 
 
 def store(repo: SQLiteLedgerRepository, state: dict, replace: bool = False) -> None:
-    """Store state as the probe ledger, then collect the garbage the import left, so no measured read pays for it."""
+    """Store state as the probe ledger, then run a full garbage collection."""
     repo.import_document(SLUG, state, token="hierarchy-proof", replace=replace)
     gc.collect()
 
