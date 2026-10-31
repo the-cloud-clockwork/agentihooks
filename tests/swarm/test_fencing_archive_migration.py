@@ -247,3 +247,56 @@ def test_migration_command_runs_the_explicit_migration(store: Any, monkeypatch: 
     archive_migration.main(["fixture", "--writers-upgraded"])
     assert fencing.read(store, "fixture")["archive"] == {"old": {"name": "old"}}
     assert json.loads(fencing._states(store).get("fixture").value)["archive"] == {}
+
+
+def test_repeating_migration_does_not_write_more_chunks(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    fencing.write(store, "fixture", lambda doc: doc["archive"].update({"old": {"name": "old"}}))
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    states = fencing._states(store)
+    before = states.get("fixture")
+    assert json.loads(before.value)["archive_ref"].startswith("fixture:archive:")
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    assert states.get("fixture") == before
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_failed_chunk_persistence_never_removes_inline_history(
+    store: Any, monkeypatch: pytest.MonkeyPatch, corrupt: bool
+) -> None:
+    from scripts.events.bus import StateConflict
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.swarm import fencing
+
+    fencing.write(store, "fixture", lambda doc: doc["archive"].update({"old": {"name": "old"}}))
+    before = fencing.read(store, "fixture")
+    create = RedisStateStore.create
+
+    def refused(self: Any, key: str, value: bytes) -> int:
+        if ":archive:" in key:
+            if corrupt:
+                create(self, key, b"corrupt")
+            raise StateConflict("archive persistence refused")
+        return create(self, key, value)
+
+    monkeypatch.setattr(RedisStateStore, "create", refused)
+    with pytest.raises(StateConflict, match="archive persistence refused"):
+        fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    assert fencing.read(store, "fixture") == before
+
+
+def test_migration_module_help_is_safe_before_connecting() -> None:
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.swarm.archive_migration", "--help"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "Migrate execution history after the fencing reader rollout" in result.stdout
+    assert "--writers-upgraded" in result.stdout
+    assert "slug" in result.stdout

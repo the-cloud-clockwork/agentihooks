@@ -11,7 +11,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if not args.writers_upgraded:
         parser.error("upgrade every live fencing writer before migrating the archive")
-    fencing.migrate_archive(store.connect(), args.slug, writers_upgraded=args.writers_upgraded)
+    connected = store.connect()  # pyright: ignore[reportUnknownMemberType]
+    fencing.migrate_archive(connected, args.slug, writers_upgraded=args.writers_upgraded)
 
 
 if __name__ == "__main__":
