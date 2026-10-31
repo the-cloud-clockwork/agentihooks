@@ -928,29 +928,21 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         ]
 
 
-def test_each_file_runs_first_only_the_branch_tests_its_selection_holds(tmp_path, monkeypatch):
+def test_every_file_carries_the_branch_tests_to_run_first(tmp_path, monkeypatch):
     import json
 
     from scripts.ci_mutation.runner import mutate_files
 
-    selected = {
-        "hooks/sample.py": ({2}, ["tests/test_sample.py"]),
-        "scripts/other.py": ({3}, ["tests/test_o.py::TestO::test_x"]),
-    }
-    first = (
-        "tests/test_o.py::TestO::test_x",
-        "tests/test_o.py::TestO::test_y",
-        "tests/test_sample.py::test_new",
-        "tests/test_far.py::test_far",
-    )
+    selected = {"hooks/sample.py": ({2}, ["tests/test_sample.py"]), "scripts/other.py": ({3}, ["tests/test_o.py"])}
+    first = ("tests/test_o.py::TestO::test_x", "tests/test_sample.py::test_new")
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", lambda root, work, paths, tests: work.mkdir())
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", lambda command, cwd, timeout, log: None)
     monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
     assert mutate_files(tmp_path, tmp_path / "work", selected, 20, (0, 1), None, first) == ({}, "over budget")
     written = json.loads((tmp_path / "work/changed-lines.json").read_text())
     assert {path: entry["first"] for path, entry in written.items()} == {
-        "hooks/sample.py": ["tests/test_sample.py::test_new"],
-        "scripts/other.py": ["tests/test_o.py::TestO::test_x"],
+        "hooks/sample.py": list(first),
+        "scripts/other.py": list(first),
     }
 
 

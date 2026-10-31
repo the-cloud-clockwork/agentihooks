@@ -16,7 +16,7 @@ from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
 from scripts.ci_mutation.probe import mark_probe_results, probe_elapsed, probe_results
 from scripts.ci_mutation.report import evaluate, survivor_text
-from scripts.ci_mutation.scope import select_tests, selects
+from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 IDENTITY = "scripts/ci_mutation/identity.py"
@@ -343,7 +343,7 @@ def mutate_files(
                     "lines": sorted(lines),
                     "tests": chosen,
                     "direct": direct.get(path, []),
-                    "first": [test for test in first if any(selects(entry, test) for entry in chosen)],
+                    "first": list(first),
                 }
                 for path, (lines, chosen) in selected.items()
             }

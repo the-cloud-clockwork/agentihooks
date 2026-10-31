@@ -573,6 +573,7 @@ def _killers(files: dict[str, str]) -> bytes:
 
 def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_preflight(pair, monkeypatch, capsys):
     root, _, base, head = pair
+    first, second = "a" * 64, "0123456789abcdef" * 4
     calls = []
     artifacts = [
         {"id": 70, "name": "mutation-killers-0", "expired": False},
@@ -581,10 +582,17 @@ def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_prefli
         {"id": 73, "name": "mutation-stats-0", "expired": False},
     ]
     answers = {
-        f"{EXACT}{head}&branch=a%26b": {"workflow_runs": [_run(8, head, "failure"), _run(7, head)]},
+        f"{EXACT}{head}&branch=a%26b": {
+            "workflow_runs": [_run(9, head, "failure"), _run(8, head, "failure"), _run(7, head)]
+        },
+        "actions/runs/9/artifacts?per_page=100": {
+            "artifacts": [{"id": 90, "name": "mutation-killers-0", "expired": True}]
+        },
         "actions/runs/8/artifacts?per_page=100": {"artifacts": artifacts},
-        "actions/artifacts/70/zip": _killers({"abc": "tests/test_a.py::test_one", "nested/def.cost": "{}"}),
-        "actions/artifacts/72/zip": _killers({"ghi": "tests/test_b.py::test_two"}),
+        "actions/artifacts/70/zip": _killers(
+            {first: "tests/test_a.py::test_one", f"nested/{first}.cost": "{}", f"{first[:63]}g": "x"}
+        ),
+        "actions/artifacts/72/zip": _killers({f"nested/{second}": "tests/test_b.py::test_two", "A" * 64: "x"}),
     }
 
     def api(path, binary=False):
@@ -600,15 +608,16 @@ def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_prefli
     assert output.read_text() == "reused=false\n"
     folder = root / ".mutation-killers-restored/killers"
     assert {path.name: path.read_text() for path in folder.iterdir()} == {
-        "abc": "tests/test_a.py::test_one",
-        "def.cost": "{}",
-        "ghi": "tests/test_b.py::test_two",
+        first: "tests/test_a.py::test_one",
+        second: "tests/test_b.py::test_two",
     }
     assert "actions/artifacts/71/zip" not in calls
     assert "actions/artifacts/73/zip" not in calls
+    assert "actions/artifacts/90/zip" not in calls
+    assert "actions/runs/7/artifacts?per_page=100" not in calls[calls.index("actions/artifacts/70/zip") :]
     assert capsys.readouterr().out.endswith(
         "No green mutation report covers this head; mutating\n"
-        "Restored 3 kill memory records from this head's branch preflight\n"
+        "Restored 2 kill memory records from this head's branch preflight\n"
     )
 
 

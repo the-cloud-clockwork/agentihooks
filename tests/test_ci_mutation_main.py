@@ -447,7 +447,10 @@ def test_branch_tests_name_every_test_the_branch_adds_or_changes(tmp_path):
                 "def test_kept():\n    pass\n\n\ndef test_changed():\n    assert 2\n\n\n"
                 "def helper():\n    pass\n\n\ndef test_new():\n    pass\n"
             ),
-            "tests/test_b.py": "class TestB:\n    def test_x(self):\n        pass\n",
+            "tests/test_b.py": (
+                "class TestB:\n    def test_x(self):\n        pass\n\n\n"
+                "class Helper:\n    def test_y(self):\n        pass\n"
+            ),
             "tests/test_gone.py": None,
             "tests/helper.py": "def test_like():\n    assert 1\n",
         },

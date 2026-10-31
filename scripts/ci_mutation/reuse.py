@@ -2,6 +2,7 @@ import argparse
 import io
 import json
 import os
+import re
 import subprocess
 import time
 import zipfile
@@ -127,19 +128,20 @@ def unpack(archive: bytes, row: dict) -> None:
 
 
 def restore_killers(head: str, branch: str, current: int, folder: Path = KILLERS) -> int:
-    """Unpack the killing tests the newest finished preflight of this head recorded; return how many it held."""
-    found = runs(f"head_sha={head}&branch={quote(branch)}", current)
-    if not found:
-        return 0
-    artifacts = api(f"actions/runs/{found[0]['id']}/artifacts?per_page=100")["artifacts"]
-    folder.mkdir(parents=True, exist_ok=True)
-    for artifact in artifacts:
-        if artifact["name"].startswith("mutation-killers-") and not artifact["expired"]:
+    """Unpack the killing tests the newest preflight of this head kept; return how many records it held."""
+    for row in runs(f"head_sha={head}&branch={quote(branch)}", current):
+        artifacts = api(f"actions/runs/{row['id']}/artifacts?per_page=100")["artifacts"]
+        kept = [found for found in artifacts if found["name"].startswith("mutation-killers-") and not found["expired"]]
+        if not kept:
+            continue
+        folder.mkdir(parents=True, exist_ok=True)
+        for artifact in kept:
             with zipfile.ZipFile(io.BytesIO(api(f"actions/artifacts/{artifact['id']}/zip", binary=True))) as zipped:
                 for name in zipped.namelist():
-                    if not name.endswith("/"):
+                    if re.fullmatch(r"[0-9a-f]{64}", Path(name).name):
                         (folder / Path(name).name).write_bytes(zipped.read(name))
-    return len(list(folder.iterdir()))
+        return len(list(folder.iterdir()))
+    return 0
 
 
 def reuse(head: str, branch: str, current: int, base: str | None = None, grader: str | None = None) -> dict | None:

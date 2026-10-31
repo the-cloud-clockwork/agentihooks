@@ -20,7 +20,8 @@ def branch_tests(root: Path, base: str, head: str) -> tuple[str, ...]:
             continue
         old = blob(root, fork, name)
         for unit in changed_units(old.decode() if old is not None else None, new.decode()):
-            if unit.rpartition(".")[2].startswith("test"):
+            *classes, function = unit.split(".")
+            if function.startswith("test") and all(part.startswith("Test") for part in classes):
                 found.add(f"{name}::{unit.replace('.', '::')}")
     return tuple(sorted(found))
 
