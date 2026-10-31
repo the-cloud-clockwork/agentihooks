@@ -327,3 +327,20 @@ def test_checked_defaults_missing_payload_fields(monkeypatch):
     monkeypatch.setattr(blocker_window, "pretool", fake_pretool)
     blocker_window.checked({})
     assert captured == {"tool_name": "", "tool_input": {}, "session_id": "", "cwd": ""}
+
+
+def test_checked_injects_the_notice_text(store, master, monkeypatch):
+    captured = []
+    monkeypatch.setattr("hooks.common.inject_context", lambda *args, **kwargs: captured.append(args))
+    _sustain(store)
+    blocker_window.checked({"tool_name": "Read", "tool_input": {}, "session_id": SID})
+    assert len(captured) == 1
+    assert captured[0][0].startswith(f"BLOCKER QUEUE on swarm {SLUG}: cat for 60 minutes")
+
+
+def test_in_worktree_resolves_a_parent_against_the_process_cwd(tmp_path, monkeypatch):
+    worktrees = tmp_path / "wt"
+    worktrees.mkdir()
+    monkeypatch.chdir(worktrees)
+    monkeypatch.setattr(blocker_window, "_WORKTREES", worktrees)
+    assert blocker_window._in_worktree("..", "") is False

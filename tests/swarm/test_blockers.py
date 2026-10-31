@@ -149,7 +149,7 @@ def test_cmd_blockers_clears_a_category(store, capsys):
 
 def test_cmd_blockers_clear_without_a_category_refuses(store):
     args = cli.build_parser().parse_args([SLUG, "blockers", "clear"])
-    with pytest.raises(cli.SwarmError, match="blockers clear needs a category"):
+    with pytest.raises(cli.SwarmError, match="^blockers clear needs a category$"):
         args.handler(store, args)
 
 
@@ -171,6 +171,11 @@ def test_blockers_action_choices_reject_unknown_values():
 def test_blockers_action_accepts_list_explicitly():
     args = cli.build_parser().parse_args([SLUG, "blockers", "list"])
     assert args.action == "list"
+
+
+def test_due_notice_stamps_the_notice_key(store):
+    blockers.due_notice(store, SLUG, 42)
+    assert store.redis.get(store.key(SLUG, blockers.NOTICE_KEY)) == "42"
 
 
 class _Ledger:
