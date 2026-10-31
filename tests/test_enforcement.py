@@ -15,19 +15,18 @@ def _git(*args: str, cwd) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_enforcement(tmp_path):
+def _clean_enforcement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect enforcement state files to tmp dir; disable bundle/profile loading by default."""
+    from hooks.context import enforcement
+
     store = tmp_path / "enforcements.json"
     counters = tmp_path / "enforcement_counters.json"
     delivery = tmp_path / "enforcement_delivery_state.json"
-    with (
-        patch("hooks.context.enforcement._store_path", return_value=store),
-        patch("hooks.context.enforcement._counter_path", return_value=counters),
-        patch("hooks.context.enforcement._delivery_path", return_value=delivery),
-        patch("hooks.context.enforcement._get_bundle_path", return_value=None),
-        patch("hooks.context.enforcement._get_active_profile", return_value=None),
-    ):
-        yield
+    monkeypatch.setattr(enforcement, "_store_path", lambda: store)
+    monkeypatch.setattr(enforcement, "_counter_path", lambda: counters)
+    monkeypatch.setattr(enforcement, "_delivery_path", lambda: delivery)
+    monkeypatch.setattr(enforcement, "_get_bundle_path", lambda: None)
+    monkeypatch.setattr(enforcement, "_get_active_profile", lambda: None)
 
 
 @pytest.fixture()
