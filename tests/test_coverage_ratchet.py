@@ -113,9 +113,15 @@ def test_the_grade_from_summaries_matches_the_grade_from_databases_byte_for_byte
                 *[str(path.relative_to(shard)) for path in written],
             ]
         )
+    for n in (1, 2):
+        coverage_summary.write_statements(
+            tmp_path, n, 2, summaries / f"executed-lines-3.12-{n}" / coverage_summary.STATEMENTS
+        )
     monkeypatch.chdir(tmp_path)
     reports = []
     for flag, folder in (("--head-shards", databases), ("--head-summaries", summaries)):
+        if flag == "--head-summaries":
+            monkeypatch.setattr(ratchet, "_analysed", lambda *args: pytest.fail("summarized modules were analysed"))
         out = tmp_path / f"out{flag}"
         status = ratchet.main(
             [
