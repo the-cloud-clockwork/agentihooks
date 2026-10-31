@@ -562,3 +562,85 @@ def test_the_parser_reads_paths_and_defaults_the_head_to_the_working_directory(
     monkeypatch.chdir(tmp_path)
     args = type_gate.build_parser().parse_args(["--base", "b"])
     assert (args.base, args.head) == (Path("b"), Path.cwd())
+
+
+def test_refresh_lowers_only_entries_above_their_measured_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorded = {"hooks/fixed.py": 3, "hooks/gone.py": 2, "hooks/grown.py": 1, "hooks/same.py": 2, "hooks/clean.py": 1}
+    head = _tree(tmp_path, {f"hooks/{name}.py": "" for name in ("fixed", "grown", "same", "clean", "new")}, recorded)
+    counts = {"hooks/fixed.py": 1, "hooks/grown.py": 4, "hooks/same.py": 2, "hooks/new.py": 5}
+    measured: list[list[str]] = []
+
+    def measure(tree: Path, files: list[str] | None = None) -> dict[str, int]:
+        assert tree == head and files is not None
+        measured.append(sorted(files))
+        return {path: counts[path] for path in files if path in counts}
+
+    monkeypatch.setattr(type_gate, "measure", measure)
+    assert type_gate.refresh(head) == {"hooks/fixed.py": 1, "hooks/grown.py": 1, "hooks/same.py": 2}
+    assert measured[0] == ["hooks/clean.py", "hooks/fixed.py", "hooks/grown.py", "hooks/same.py"]
+    assert measured[-1] == ["hooks/clean.py", "hooks/fixed.py"]
+
+
+def test_refresh_measures_the_lowered_entries_again_until_their_counts_hold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorded = {"hooks/a.py": 2, "hooks/b.py": 2, "hooks/c.py": 2}
+    head = _tree(tmp_path, {"hooks/a.py": "", "hooks/b.py": "", "hooks/c.py": ""}, recorded)
+    measured: list[list[str]] = []
+
+    def measure(tree: Path, files: list[str] | None = None) -> dict[str, int]:
+        assert files is not None
+        measured.append(sorted(files))
+        with_c = "hooks/c.py" in files
+        return {path: 2 if path == "hooks/c.py" or (path == "hooks/a.py" and not with_c) else 1 for path in files}
+
+    monkeypatch.setattr(type_gate, "measure", measure)
+    assert type_gate.refresh(head) == {"hooks/a.py": 2, "hooks/b.py": 1, "hooks/c.py": 2}
+    assert measured == [["hooks/a.py", "hooks/b.py", "hooks/c.py"], ["hooks/a.py", "hooks/b.py"], ["hooks/b.py"]]
+
+
+def test_refresh_without_a_lower_count_measures_once_and_keeps_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {"hooks/a.py": ""}, {"hooks/a.py": 1})
+    calls: list[list[str] | None] = []
+
+    def measure(tree: Path, files: list[str] | None = None) -> dict[str, int]:
+        calls.append(files)
+        return {"hooks/a.py": 1}
+
+    monkeypatch.setattr(type_gate, "measure", measure)
+    assert type_gate.refresh(head) == {"hooks/a.py": 1}
+    assert [files for files in calls if files] == [["hooks/a.py"]]
+
+
+def test_the_refresh_command_writes_the_lowered_baseline(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {"hooks/a.py": "", "hooks/b.py": ""}, {"hooks/a.py": 3, "hooks/b.py": 1})
+    monkeypatch.setattr(type_gate, "_basedpyright_version", lambda: type_gate.BASEDPYRIGHT_VERSION)
+    monkeypatch.setattr(type_gate, "measure", lambda tree, files=None: {"hooks/a.py": 2, "hooks/b.py": 1})
+    assert type_gate.main(["--refresh", "--head", str(head)]) == 0
+    assert (head / type_gate.BASELINE).read_text() == '{\n  "hooks/a.py": 2,\n  "hooks/b.py": 1\n}\n'
+    assert capsys.readouterr().out == "Lowered 1 of 2 type baseline entries by 1 errors\n"
+
+
+def test_the_refresh_command_drops_an_entry_measured_clean_and_counts_it_lowered(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {"hooks/a.py": "", "hooks/b.py": ""}, {"hooks/a.py": 3, "hooks/b.py": 1})
+    monkeypatch.setattr(type_gate, "_basedpyright_version", lambda: type_gate.BASEDPYRIGHT_VERSION)
+    monkeypatch.setattr(type_gate, "measure", lambda tree, files=None: {"hooks/a.py": 2})
+    assert type_gate.main(["--refresh", "--head", str(head)]) == 0
+    assert (head / type_gate.BASELINE).read_text() == '{\n  "hooks/a.py": 2\n}\n'
+    assert capsys.readouterr().out == "Lowered 2 of 2 type baseline entries by 2 errors\n"
+
+
+def test_a_refreshed_baseline_grades_green_against_its_base(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _tree(tmp_path / "base", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 2})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 2})
+    (head / type_gate.BASELINE).write_text(json.dumps(type_gate.refresh(head)))
+    assert type_gate.load(head) == {}
+    assert _grade(base, head, capsys)[0] == 0

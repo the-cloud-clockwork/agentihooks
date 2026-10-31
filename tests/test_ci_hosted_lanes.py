@@ -45,6 +45,7 @@ LANE_USERS = {
     "chart-release.yml",
     "changelog.yml",
     "changelog-seed.yml",
+    "type-baseline-refresh.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}

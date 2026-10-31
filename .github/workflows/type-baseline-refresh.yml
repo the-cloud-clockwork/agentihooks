@@ -1,0 +1,181 @@
+name: Type baseline refresh
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
+    permissions:
+      contents: read
+    outputs:
+      pull: ${{ steps.pull.outputs.pull }}
+      head: ${{ steps.pull.outputs.head }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          persist-credentials: false
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Stamp the day
+        id: day
+        uses: ./.github/actions/test-env-key
+        with:
+          python-version: ${{ steps.python.outputs.python-version }}
+      - name: Restore the test environment
+        id: venv
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/venv
+          key: ${{ steps.day.outputs.key }}
+      - name: Set up uv
+        if: steps.venv.outputs.cache-hit != 'true'
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: 0.12.23
+          checksum: 9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6
+          enable-cache: false
+      - name: Install dependencies
+        if: steps.venv.outputs.cache-hit != 'true'
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+      - name: Use the test environment
+        run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+      - name: Lower every baseline entry above the count the type gate measures
+        run: python -m scripts.type_gate --refresh --head "$GITHUB_WORKSPACE"
+      - name: Find a lowered entry
+        id: diff
+        run: |
+          if git diff --quiet -- tests/TYPE_BASELINE.json; then
+            echo "::notice::No type baseline entry sits above its measured count."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --stat -- tests/TYPE_BASELINE.json
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Mint the promotion App token
+        id: app-token
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Push the refresh branch and open its pull request into dev
+        id: pull
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: type-baseline-refresh
+        run: |
+          pull=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base dev --state open --json number -q '.[0].number // ""')
+          if [[ -n "$pull" ]]; then
+            held=$(gh api "repos/$GITHUB_REPOSITORY/contents/tests/TYPE_BASELINE.json?ref=refs/heads/$BRANCH" -q .sha || true)
+            if [[ "$held" == "$(git hash-object tests/TYPE_BASELINE.json)" ]]; then
+              echo "::notice::Pull request $pull already holds this baseline; its head stays."
+              echo "pull=$pull" >> "$GITHUB_OUTPUT"
+              echo "head=$(gh pr view "$pull" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          parent=$(git rev-parse HEAD)
+          jq -n --rawfile content tests/TYPE_BASELINE.json '{content: $content, encoding: "utf-8"}' > "$RUNNER_TEMP/blob.json"
+          blob=$(gh api "repos/$GITHUB_REPOSITORY/git/blobs" --input "$RUNNER_TEMP/blob.json" -q .sha)
+          jq -n --arg base "$(git rev-parse 'HEAD^{tree}')" --arg blob "$blob" \
+            '{base_tree: $base, tree: [{path: "tests/TYPE_BASELINE.json", mode: "100644", type: "blob", sha: $blob}]}' > "$RUNNER_TEMP/tree.json"
+          tree=$(gh api "repos/$GITHUB_REPOSITORY/git/trees" --input "$RUNNER_TEMP/tree.json" -q .sha)
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/commits" -f message="Lower the type baseline to the measured counts" \
+            -f tree="$tree" -f "parents[]=$parent" -q .sha)
+          if ! gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$head" -F force=true >/dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$head" >/dev/null
+          fi
+          if [[ -z "$pull" ]]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --base dev --head "$BRANCH" \
+              --title "Lower the type baseline to the measured counts" \
+              --body "The daily type baseline refresh lowered every entry above the count the type gate measures for it on dev. No entry is raised or added. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            pull=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base dev --state open --json number -q '.[0].number')
+          fi
+          echo "pull=$pull" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+  enqueue:
+    needs: refresh
+    if: needs.refresh.outputs.pull != ''
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Mint the promotion App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: read
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Wait for the required gate and enqueue the pull request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PULL: ${{ needs.refresh.outputs.pull }}
+          HEAD: ${{ needs.refresh.outputs.head }}
+        run: |
+          deadline=$((SECONDS + 2400))
+          state=""
+          while (( SECONDS < deadline )); do
+            state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD/check-runs?check_name=Gate%20%E2%80%94%20Required" \
+              -q '.check_runs | sort_by(.started_at) | last | if . == null then "pending" else "\(.status):\(.conclusion)" end' || echo unread)
+            case "$state" in
+              completed:success) break ;;
+              completed:*) echo "::error::Gate — Required ended $state on pull request $PULL"; exit 1 ;;
+            esac
+            sleep 60
+          done
+          if [[ "$state" != "completed:success" ]]; then
+            echo "::error::Gate — Required did not finish on pull request $PULL in time"
+            exit 1
+          fi
+          for attempt in 1 2 3; do
+            node=$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json id -q .id || true)
+            queued=$(gh api graphql -f query='query($pull: ID!) { node(id: $pull) { ... on PullRequest { mergeQueueEntry { position } } } }' \
+              -f pull="$node" -q '.data.node.mergeQueueEntry != null' || true)
+            if [[ "$queued" == "true" ]]; then
+              echo "::notice::Pull request $PULL already waits in the merge queue"
+              exit 0
+            fi
+            if [[ -n "$node" ]] && gh api graphql \
+              -f query='mutation($pull: ID!, $head: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $pull, expectedHeadOid: $head}) { mergeQueueEntry { position } } }' \
+              -f pull="$node" -f head="$HEAD"; then
+              exit 0
+            fi
+            echo "::warning::Enqueue attempt $attempt for pull request $PULL failed"
+            sleep 30
+          done
+          exit 1
