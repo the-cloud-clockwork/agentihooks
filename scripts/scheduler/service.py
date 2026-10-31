@@ -12,7 +12,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
-from typing import TextIO
+from typing import TextIO, cast
 from urllib.parse import urlsplit
 
 from scripts.scheduler.core import Scheduler
@@ -138,7 +138,7 @@ def _take_over() -> None:
     """A supervisor started by its unit drains one started outside it, so systemd keeps owning the scheduler."""
     if not os.environ.get(UNIT_ENV):
         return
-    pid = int((holder(os.environ) or {}).get("pid") or 0)
+    pid = int(cast(dict[str, int], holder(os.environ) or {}).get("pid") or 0)
     if pid and pid != os.getpid():
         print(f"the scheduler unit takes over from supervisor {pid}, started outside it", file=sys.stderr)
         drain(pid, os.environ)
