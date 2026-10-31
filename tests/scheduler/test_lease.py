@@ -192,6 +192,29 @@ def test_an_idle_pass_takes_no_dispatch_lease_and_writes_nothing(monkeypatch, st
     assert "lease" not in scheduler.document()
 
 
+def test_a_busy_pass_reaps_process_timers_abandoned_for_an_hour(monkeypatch, state):
+    from scripts.scheduler import lease
+    from scripts.scheduler.core import ABANDONED_S, PROCESS_OWNER, Scheduler
+
+    monkeypatch.setattr(lease, "Thread", Mock())
+    scheduler = Scheduler(state, machine="proof")
+    leaked = scheduler.timer(owner=PROCESS_OWNER, payload="never started", delay=1, now=0)
+    fired = scheduler.timer(owner=PROCESS_OWNER, payload="rang", delay=1, now=0)
+    fired.start(now=0)
+    assert scheduler.run_due(now=1) == 1
+    late = ABANDONED_S + 1
+    recent = scheduler.timer(owner=PROCESS_OWNER, payload="recent", delay=1, now=late - 1)
+    user = scheduler.timer(owner="master@proof", payload="user", delay=1, now=0)
+    due = scheduler.timer(owner="operator", payload="due", delay=1, now=late - 1)
+    due.start(now=late - 1)
+    assert scheduler.run_due(now=late - 1) == 0
+    assert {leaked.id, fired.id} <= set(scheduler.document()["entries"])
+    assert scheduler.run_due(now=late) == 1
+    entries = scheduler.document()["entries"]
+    assert leaked.id not in entries and fired.id not in entries
+    assert {recent.id, user.id, due.id} <= set(entries)
+
+
 @pytest.mark.parametrize("stored", [None, {"token": "successor", "expires": 10**12}, {"token": "owner", "expires": 0}])
 def test_lease_verification_rejects_absent_changed_or_expired_ownership(state, stored):
     from scripts.scheduler import lease
