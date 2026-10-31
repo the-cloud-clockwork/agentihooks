@@ -73,6 +73,38 @@ def test_fits_reads_capabilities_only_for_an_offer_with_needs() -> None:
     assert readiness.fits(offered["gpu"], "hive-a", lambda: ["gpu"])
 
 
+def test_an_empty_hive_pin_accepts_any_hive() -> None:
+    assert readiness.placeable({"hive": ""}, "hive-a", no_capabilities)
+
+
+def test_declared_capabilities_default_to_empty_when_registration_omits_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.hive import registry
+
+    backing = object()
+    registered = Mock(return_value={"hive": "hive-a"})
+    monkeypatch.setattr(registry, "show", registered)
+
+    assert readiness.declared(SimpleNamespace(redis=backing), "hive-a")() == []
+    registered.assert_called_once_with(backing, "hive-a")
+
+
+def test_lane_fit_preserves_hive_and_registered_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import registry
+
+    backing = object()
+    registered = Mock(return_value={"capabilities": ["gpu"]})
+    monkeypatch.setattr(registry, "show", registered)
+    configured = lanes.fit(SimpleNamespace(redis=backing), "hive-a")
+    offered = {event.key: event for event in readiness.offers(snapshot(doc(PINNED)), NOW)}
+
+    assert configured(offered["plain"])
+    assert not configured(offered["pinned"])
+    assert configured(offered["gpu"])
+    registered.assert_called_once_with(backing, "hive-a")
+
+
 def test_a_hive_leaves_an_offer_pinned_elsewhere_in_the_queue_for_its_own_hive(bus: Bus, clock: Clock) -> None:  # noqa: F811
     readiness.publish(bus, snapshot(doc([task("pinned", hive="hive-b"), task("plain")])), NOW)
     queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
@@ -175,6 +207,19 @@ def test_a_lane_spoke_skips_an_offer_pinned_to_another_hive_without_asking_the_h
     scoped.close()
 
 
+def test_lane_spokes_bind_fit_to_their_store_and_hive(monkeypatch: pytest.MonkeyPatch) -> None:
+    configs = SimpleNamespace(slugs=lambda: [SLUG], config=lambda slug: SwarmConfig(slug, "/repo", 1, 1))
+    expected = Mock()
+    fit = Mock(return_value=expected)
+    monkeypatch.setattr(lanes, "fit", fit)
+    scoped, runtime = Mock(), Mock()
+
+    current = lanes.spokes(configs, scoped, runtime, "hive-a", ("eng",), {})
+
+    fit.assert_called_once_with(configs, "hive-a")
+    assert current[0].config.fit is expected
+
+
 def test_a_workstation_task_launches_from_the_workstation_tick_under_events(store: RedisStore) -> None:  # noqa: F811
     store.update("sw", engine="events")
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
@@ -185,6 +230,23 @@ def test_a_workstation_task_launches_from_the_workstation_tick_under_events(stor
     assert [task_id for _, _, task_id in runtime.spawned] == ["t2"]
     assert ledger.rows["t1"]["state"] == "open"
     assert ledger.rows["t2"]["state"] == "claimed"
+
+
+def test_events_tick_does_not_run_placement_without_workstation_tasks(
+    store: RedisStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm import tick as tick_module
+
+    store.update("sw", engine="events")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    spawn = Mock()
+    monkeypatch.setattr(tick_module, "_spawn", spawn)
+
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+
+    spawn.assert_not_called()
+    assert ledger.rows["t1"]["state"] == "open"
 
 
 def test_under_events_the_tick_collects_acknowledgements_only_for_workstation_launches(store: RedisStore) -> None:  # noqa: F811

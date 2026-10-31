@@ -5,7 +5,7 @@ An offer's id carries the task's claim generation, so the bus drops a repeat onl
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
@@ -139,7 +139,8 @@ def placeable(task: Mapping[str, Any], hive: str, capabilities: Callable[[], Ite
 
 
 def fits(event: Envelope, hive: str, capabilities: Callable[[], Iterable[str]]) -> bool:
-    return placeable(cast("Mapping[str, Any]", event.data), hive, capabilities)
+    data: Any = event.data
+    return placeable(data, hive, capabilities)
 
 
 def declared(store: Any, hive: str) -> Callable[[], list[str]]:
@@ -148,7 +149,7 @@ def declared(store: Any, hive: str) -> Callable[[], list[str]]:
     def capabilities() -> list[str]:
         from scripts.hive import registry
 
-        record = cast("Mapping[str, list[str]] | None", registry.show(store.redis, hive)) or {}
+        record: Any = registry.show(store.redis, hive) or {}
         return list(record.get("capabilities", []))
 
     return capabilities
@@ -170,7 +171,7 @@ def tick_places(engine: str, rows: Mapping[str, Mapping[str, Any]]) -> bool:
 
 
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
-    rows = cast("Mapping[str, dict[str, Any]]", view.rows)
+    rows: Any = view.rows
     return [
         offer(task, view, now_ms)
         for task in rows.values()
