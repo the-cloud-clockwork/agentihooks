@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.526 · 2026-10-31
+
+### 2026-10-31 · 56a7b44d795b · #9116 · @agenticore-app
+
+**Keep workstation and hive pinned tasks off events hive offers**
+
+This change fixes a bug in the events engine where tasks marked as workstation-only, hive-pinned, or needs-pinned could be offered to, claimed by, or admitted onto hives that could never run them, leaving orphaned claims with no agent. Now offer generation, spoke takes, and hub admission all honor these three flags consistently, and the workstation tick itself handles launching workstation tasks under events. This prevents stuck claims and ensures tasks land only where they're actually runnable, matching the legacy engine's behavior.
+
+### 2026-10-31 · db667f7fb6ed · #9130 · @agenticore-app
+
+**Bound Redis state history and trim old document copies**
+
+This change trims Redis document history retention from 64 rows down to just the current document and one prior revision, reducing memory usage significantly. A maintenance routine now safely removes excess old entries using atomic single-row deletions and a resumable cursor, processing up to 16 entries per run by default (max 128), so operators can repeatedly invoke it until both cursor and removed count reach zero. This matters because unchecked history growth was straining Redis memory, and the fix is irreversible for discarded revisions, so verify backups or acceptable data loss before running cleanup broadly.
+
+### 2026-10-31 · bc66b2def2d2 · #9123 · @nestorcolt
+
+**Reap process timers abandoned for an hour so scheduler documents stop growing**
+
+This change fixes scheduler documents growing unbounded because failed `process_timer` starts or retires under write contention left orphaned entries behind, which bloated the shared entries document, slowed every write under the bucket-wide WATCH, and caused the observed scheduler delivery lag. Now a busy `Scheduler.run_due` pass also reaps `process`-owned timers that are finished or never started once they're an hour or more past due, using the same removal path as normal retirement, so the document stops accumulating leaked entries and write latency stays bounded.
+
+### 2026-10-31 · d96138f5b397 · #9118 · @agenticore-app
+
+**Open the inbox seat bus off the ledger request path behind one lock**
+
+This change fixes a ledger stall: the inbox seat publisher used to open its NATS connection inside the ledger request thread with no lock, so a down bus made every write wait out the full connect timeout, and concurrent writers each started their own connect. Now a single background daemon thread opens the bus under one lock; only the triggering sender waits, capped at 0.25s, and others return immediately. If the bus isn't open, the event drops and relies on the existing Redis wake-outbox replay to deliver it later. Ledger writes now stay fast even when the bus is down.
+
 ## v2.17.525 · 2026-10-31
 
 ### 2026-10-31 · 37ee75d4c899 · #9033 · @nestorcolt
