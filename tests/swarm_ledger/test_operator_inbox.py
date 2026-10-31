@@ -64,6 +64,31 @@ def test_an_agent_write_through_the_server_sends_nothing(inbox):
     assert ledger_server.relay_to_inbox(SLUG, state) == []
 
 
+def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(inbox, monkeypatch):
+    import threading
+    import time
+
+    from scripts.inbox import bus
+
+    release = threading.Event()
+
+    def hanging():
+        release.wait(5)
+        raise OSError("nats connect timed out")
+
+    publisher = bus.SeatPublisher(hanging)
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
+    phase = make_ledger()
+    state, _ = core.sync(SLUG, ops=[comment(phase, "c-3")])
+    start = time.monotonic()
+    [item] = ledger_server.relay_to_inbox(SLUG, state)
+    took = time.monotonic() - start
+    release.set()
+    assert took < 1
+    assert inbox.get(item.id).state == "pending"
+
+
 def hook_state(*revs):
     events = [
         {

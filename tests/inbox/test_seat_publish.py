@@ -120,3 +120,40 @@ def test_a_failed_publish_keeps_the_redis_send_and_says_so(monkeypatch, capsys):
     assert store.get(later.id).state == "pending"
     assert attempts == [1]
     assert capsys.readouterr().err == ""
+
+
+def test_a_hanging_connect_holds_no_publish_and_is_attempted_once():
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from scripts.inbox import bus
+
+    release = threading.Event()
+    attempts = []
+
+    def hanging():
+        attempts.append(1)
+        release.wait(5)
+        raise OSError("nats connect timed out")
+
+    publisher = bus.SeatPublisher(hanging)
+    took = []
+
+    def write(n):
+        item = SimpleNamespace(
+            id=f"i{n}", address=SEAT, sender="alice", text="work", ref="", fyi=False, task="", created_at=0
+        )
+        start = time.monotonic()
+        publisher.publish(item)
+        took.append(time.monotonic() - start)
+
+    writers = [threading.Thread(target=write, args=(n,), daemon=True) for n in range(8)]
+    for writer in writers:
+        writer.start()
+    for writer in writers:
+        writer.join(2)
+    release.set()
+    assert len(took) == 8
+    assert max(took) < 1
+    assert attempts == [1]
