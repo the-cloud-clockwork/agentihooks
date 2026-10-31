@@ -8,7 +8,7 @@ import pytest
 from scripts.swarm import cli, commands, ledger_events, merge_queue, queue_priority, queue_record
 from scripts.swarm.store import SwarmError
 from tests.swarm.test_cli import env
-from tests.swarm.test_merge_queue import swarm_of
+from tests.swarm.test_merge_queue import scoped_ledger, swarm_of
 from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue, Killed
 
 pytestmark = pytest.mark.unit
@@ -24,8 +24,8 @@ def priority(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    tasks = [{"pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"}]
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: tasks))
+    tasks = [{"id": "t2", "pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"}]
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger(tasks))
     queue = FakeQueue()
     reorder = merge_queue.prioritize
 

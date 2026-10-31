@@ -157,19 +157,18 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
     store.config = lambda slug: None
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    from tests.swarm.test_merge_queue import scoped_ledger
+
     tasks = [
-        {"pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"},
-        {"pr_url": URL[:-1] + "3", "claimed_by": ""},
-        {"pr_url": URL[:-1] + "4", "claimed_by": "ci@unrelated"},
-        {"pr_url": URL[:-1] + "5", "claimed_by": "ci@released", "state": "pr", "awaiting": "merge"},
-        {"pr_url": URL[:-1] + "6", "claimed_by": "ci@done", "state": "done"},
+        {"id": "t2", "pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"},
+        {"id": "t3", "pr_url": URL[:-1] + "3", "claimed_by": ""},
+        {"id": "t4", "pr_url": URL[:-1] + "4", "claimed_by": "ci@unrelated"},
+        {"id": "t5", "pr_url": URL[:-1] + "5", "claimed_by": "ci@released", "state": "pr", "awaiting": "merge"},
+        {"id": "t6", "pr_url": URL[:-1] + "6", "claimed_by": "ci@done", "state": "done"},
+        {"id": "t7", "pr_url": URL[:-1] + "7", "split_pulls": [URL[:-1] + "2"], "claimed_by": "ci@other-half"},
     ]
-
-    def ledger_tasks(slug):
-        assert slug == "sw"
-        return tasks
-
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=ledger_tasks))
+    reads = []
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger(tasks, reads))
 
     def prioritize(url, journal, **kwargs):
         assert url == URL
@@ -196,6 +195,7 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
             {"fyi": True},
         )
     ]
+    assert reads == [("targeting", "sw", URL[:-1] + str(n)) for n in (2, 3, 5, 6)]
     output = capsys.readouterr()
     if errors:
         assert output.err == "swarm: restore refused; second refusal\n"
