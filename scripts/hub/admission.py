@@ -45,12 +45,22 @@ class Admission:
         view = self.source.snapshot(slug)
         if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
             return None
+        if not self._placeable(view.rows[task_id], request["hive"]):
+            print(f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused", file=sys.stderr)
+            return None
         from scripts.swarm import tick
 
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
             print(f"hub: events claim cap swarm={slug} task={task_id}: {reason}", file=sys.stderr)
             return None
         return self._claim(slug, request, view.rows)
+
+    def _placeable(self, row: dict, hive: str) -> bool:
+        """A workstation task, a task pinned to another hive or one needing what the hive lacks is never admitted."""
+        from scripts.hive import registry
+
+        declared = (registry.show(self.store.redis, hive) or {}).get("capabilities", []) if row.get("needs") else ()
+        return readiness.placeable(row, hive, declared)
 
     def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
         from scripts.swarm import tick

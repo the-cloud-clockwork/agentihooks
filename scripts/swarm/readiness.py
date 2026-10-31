@@ -3,7 +3,7 @@
 An offer's id carries the task's claim generation, so the bus drops a repeat only inside its dedupe window.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from scripts.events import subjects
@@ -17,6 +17,7 @@ from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError, connect
 from scripts.swarm_ledger.repository import hierarchy
 
 AUTHOR = "readiness"
+UNFIT_NAK_MS = 5_000
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ def queue_name(slug: str, lane: str) -> str:
 
 
 def offer(task: dict, view: Snapshot, now_ms: int) -> Envelope:
+    pins = {"hive": task.get("hive"), "needs": list(task.get("needs") or ())}
     return Envelope(
         id=offer_id(view.slug, task),
         type="task.ready",
@@ -116,7 +118,33 @@ def offer(task: dict, view: Snapshot, now_ms: int) -> Envelope:
         version=generation(task),
         time=now_ms,
         author=AUTHOR,
-        data={"lane": task["lane"], "generation": generation(task)},
+        data={"lane": task["lane"], "generation": generation(task), **{k: v for k, v in pins.items() if v}},
+    )
+
+
+def placeable(task: dict, hive: str, capabilities: Iterable[str]) -> bool:
+    """A hive never takes a workstation task, a task pinned to another hive or one needing what it lacks."""
+    return (
+        not task.get("workstation")
+        and task.get("hive") in (None, "", hive)
+        and set(task.get("needs") or ()) <= set(capabilities)
+    )
+
+
+def fits(event: Envelope, hive: str, capabilities: Callable[[], Iterable[str]]) -> bool:
+    """Capabilities are read only for an offer that names needs."""
+    needs = event.data.get("needs")
+    return placeable(event.data, hive, capabilities() if needs else ())
+
+
+def tick_launches(engine: str, task: dict) -> bool:
+    """Under the events engine hives take every task but a workstation task, which the workstation tick launches."""
+    return engine != EVENTS_ENGINE or bool(task.get("workstation"))
+
+
+def tick_places(engine: str, rows: dict) -> bool:
+    return engine != EVENTS_ENGINE or any(
+        row.get("state") == "open" and tick_launches(engine, row) for row in rows.values()
     )
 
 
@@ -124,7 +152,7 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
     return [
         offer(task, view, now_ms)
         for task in view.rows.values()
-        if task.get("lane") and claimable(task, task["lane"], view)
+        if task.get("lane") and not task.get("workstation") and claimable(task, task["lane"], view)
     ]
 
 
@@ -157,9 +185,18 @@ def withdrawal(event: Envelope, view: Snapshot) -> str:
     return "" if view.admits(task) else "a release or apply wait holds it"
 
 
-def take(queue: WorkQueue, view: Snapshot | Callable[[], Snapshot | None], timeout_ms: int) -> Delivery | None:
-    """A view that yields no snapshot leaves the recheck to the hub, which admits the offer."""
+def take(
+    queue: WorkQueue,
+    view: Snapshot | Callable[[], Snapshot | None],
+    timeout_ms: int,
+    fit: Callable[[Envelope], bool] = lambda event: True,
+) -> Delivery | None:
+    """A view that yields no snapshot leaves the recheck to the hub, which admits the offer; an offer this hive may
+    not take goes back to the queue for another hive."""
     while (delivery := queue.take(timeout_ms)) is not None:
+        if not fit(delivery.event):
+            delivery.nak(UNFIT_NAK_MS)
+            continue
         current = view() if callable(view) else view
         if current is None or not withdrawal(delivery.event, current):
             return delivery

@@ -171,3 +171,31 @@ def test_a_workstation_task_launches_from_the_workstation_tick_under_events(stor
     assert [task_id for _, _, task_id in runtime.spawned] == ["t2"]
     assert ledger.rows["t1"]["state"] == "open"
     assert ledger.rows["t2"]["state"] == "claimed"
+
+
+def test_under_events_the_tick_collects_acknowledgements_only_for_workstation_launches(store) -> None:  # noqa: F811
+    from scripts.swarm.tick import _collect_acks
+    from tests.swarm.test_tick import HiveAcks
+
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
+    ledger.rows["t2"]["workstation"] = True
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    desk = ledger.rows["t2"]["claimed_by"]
+    store.update("sw", engine="events")
+    doc = {"tasks": list(ledger.rows.values())}
+
+    _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
+
+    assert runtime.collected == [desk]
+
+
+def test_under_events_the_tick_places_only_while_a_workstation_task_is_open() -> None:
+    from scripts.swarm.store import EVENTS_ENGINE
+
+    rows = {"a": task("a"), "b": task("b", workstation=True, state="claimed")}
+    assert readiness.tick_places("legacy", {})
+    assert not readiness.tick_places(EVENTS_ENGINE, rows)
+    rows["b"]["state"] = "open"
+    assert readiness.tick_places(EVENTS_ENGINE, rows)
+    assert readiness.tick_launches("legacy", task("a"))
+    assert not readiness.tick_launches(EVENTS_ENGINE, task("a"))
