@@ -5,6 +5,7 @@ import sqlite3
 from .rows import changes, encode
 
 LAST = "SELECT MAX(position) FROM events WHERE slug=?"
+READ = "SELECT value FROM events WHERE slug=? ORDER BY position"
 APPEND = "INSERT INTO events VALUES (?, ?, ?, ?, ?)"
 TRIM = (
     "DELETE FROM events WHERE slug=? AND position NOT IN "
@@ -13,8 +14,7 @@ TRIM = (
 
 
 def read_events(connection: sqlite3.Connection, slug: str) -> list[dict[str, object]]:
-    query = "SELECT value FROM events WHERE slug=? ORDER BY position"
-    return [json.loads(value) for (value,) in connection.execute(query, (slug,))]
+    return [json.loads(value) for (value,) in connection.execute(READ, (slug,))]
 
 
 def write_events(connection, slug: str, events: list) -> None:
