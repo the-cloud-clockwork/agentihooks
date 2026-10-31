@@ -1,5 +1,8 @@
 import re
 import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode
 
 import pytest
 
@@ -185,3 +188,65 @@ def test_a_hundred_concurrent_task_list_walks_return_the_stored_pages_within_bud
     warnings.warn(f"a hundred concurrent task list walks took {elapsed:.2f} s", stacklevel=1)
     assert len(expected) == 10 and all(pages == expected for pages in walks)
     assert elapsed < 5, f"a hundred concurrent task list walks took {elapsed:.2f} s"
+
+
+def test_a_targets_read_returns_only_the_tasks_naming_that_pull_request(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import routes
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    url = "https://github.com/o/r/pull/7"
+    tasks = [
+        {"id": "t1", "title": "Own", "pr_url": url},
+        {"id": "t2", "title": "Half", "split_pulls": ["https://github.com/o/r/pull/6", url]},
+        {"id": "t3", "title": "Scope", "pull_scopes": {url: {"kind": "prerequisite"}}},
+        {"id": "t4", "title": "Other", "pr_url": "https://github.com/o/r/pull/70"},
+    ]
+    repository = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3")
+    repository.import_document("one", {"title": "One", "tasks": tasks, "_meta": {"task_revision": 3, "rev": 13}})
+    host: Any = SimpleNamespace(repository=repository)
+    handler = SimpleNamespace(path=f"/api/v1/ledgers/one/tasks?{urlencode({'targets': url})}", headers={})
+    found: Any = routes.ledger_get(handler, host, "one", "tasks")
+    assert [row["title"] for row in found["data"]] == ["Own", "Half", "Scope"]
+    assert found["next_cursor"] is None
+    assert [row["title"] for row in routes.ledger_read(host, "one", "tasks", {})["data"]][3] == "Other"
+
+
+def test_a_targets_read_returns_every_match_in_one_reply() -> None:
+    from scripts.swarm_ledger.api import resources, task_list
+
+    url = "https://github.com/o/r/pull/7"
+    rows = [{"id": f"t{n}", "pr_url": url, "comments": [{"id": "c"}]} for n in range(120)]
+    found = task_list.targeting(rows, url)
+    assert [row["id"] for row in found["data"]] == [f"t{n}" for n in range(120)]
+    assert found["next_cursor"] is None
+    assert found["data"][0]["comments_count"] == 1 and "comments" not in found["data"][0]
+    assert found["data"][0]["revision"] == resources.revision(rows[0])
+    assert found["revision"] == resources.revision(rows)
+
+
+@pytest.mark.parametrize(
+    ("path", "query"),
+    [
+        ("phases", {"targets": "u"}),
+        ("tasks", {"targets": "u", "state": "done"}),
+        ("tasks", {"targets": ""}),
+        ("tasks", {"targets": "u", "limit": 5}),
+        ("tasks", {"targets": "u", "q": "x"}),
+        ("tasks", {"targets": "u", "offset": 0}),
+        ("tasks", {"targets": "u", "cursor": "a" * 64 + ":1"}),
+    ],
+)
+def test_a_targets_read_is_refused_outside_a_plain_tasks_read(path: str, query: dict) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import routes
+    from scripts.swarm_ledger.api.errors import APIError
+
+    handler = SimpleNamespace(path=f"/api/v1/ledgers/one/{path}?{urlencode(query)}", headers={})
+    services: Any = SimpleNamespace()
+    with pytest.raises(APIError) as refused:
+        routes.ledger_get(handler, services, "one", path)
+    assert (refused.value.status, refused.value.code) == (400, "schema_invalid")
+    assert query["targets"] == "" or str(refused.value) == "Only a plain tasks read takes targets"
