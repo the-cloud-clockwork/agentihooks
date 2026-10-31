@@ -305,3 +305,15 @@ def test_archive_compacts_rows_archived_before_it_dropped_source_blobs(store):
     assert "source_blobs" not in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
     assert section(store, "archive")["exe-bare"] == bare
     assert store.execution_registry.archive("fixture") == 0
+
+
+def test_the_tick_reconcile_archives_without_source_blobs(store):
+    first = validated(store, "eng-1@fixture")
+    store.drop_agent("fixture", first.name)
+    validated(store, "eng-1@fixture", first.execution_id)
+    runtime = MagicMock()
+    runtime.live_names.return_value = set()
+
+    ExecutionRegistry(store).reconcile("fixture", runtime, 0)
+
+    assert "source_blobs" not in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
