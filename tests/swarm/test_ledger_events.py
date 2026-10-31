@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_events, priority_sweep
+from scripts.swarm import ledger_events, priority_sweep, ready
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
 MINUTE = 60_000
@@ -529,11 +529,26 @@ def _owner_left(store, monkeypatch, owners=()):
     monkeypatch.setattr(ready, "_owners", lambda run, task_id: list(owners))
 
 
+def _pass(store: RedisStore, ledger: ReopenLedger) -> ready.Pass:
+    return ready.Pass(store, "sw", ledger, lambda url: None, lambda url: None, 100_000)
+
+
+def test_a_red_task_held_on_an_open_dependency_stays_in_pull_request(store, monkeypatch):
+    from scripts.swarm import ready
+
+    ledger = ReopenLedger()
+    _owner_left(store, monkeypatch)
+    task, other = in_pr()["tasks"][0], {"id": "t2", "state": "pr"}
+    ready.save(store, "sw", "t1", {"url": URL, "agent": "sw-eng-1", "dependency": {"kind": "task", "target": "t2"}})
+    assert ready.reopen_red(_pass(store, ledger), task, {"t1": task, "t2": other}, ()) == []
+    assert ledger.updates == [] and ledger.comments == []
+
+
 def test_red_checks_after_the_owner_left_reopen_the_task_without_the_master(store, monkeypatch):
     red, ledger = answer("open_red"), ReopenLedger()
     _owner_left(store, monkeypatch)
     run(store, recorded(), ledger=ledger)
-    told = run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    told = run(store, in_pr(), now_ms=(red.red_at or 0) + 20 * MINUTE, ledger=ledger, github=lambda url: red)
     ((task_id, fields, if_state, if_match),) = ledger.updates
     assert (task_id, fields, if_state) == ("t1", {"state": "open", "claimed_by": "", "awaiting": "fix"}, ("pr",))
     assert if_match["claimed_by"] == "sw-eng-1" and if_match["pr_url"] == URL
@@ -547,7 +562,7 @@ def test_a_red_task_whose_reopen_is_refused_still_sends_its_notice(store, monkey
     red, ledger = answer("open_red"), ReopenLedger()
     _owner_left(store, monkeypatch, owners=[AgentRecord("sw-eng-9", "eng", "t1")])
     run(store, recorded(), ledger=ledger)
-    told = run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    told = run(store, in_pr(), now_ms=(red.red_at or 0) + 20 * MINUTE, ledger=ledger, github=lambda url: red)
     assert ledger.updates == [] and told == [f"told {MASTER_SEAT}: {URL}:red:{red.head}"]
     (notice,) = texts(store, MASTER_SEAT)
     assert "has red checks and no push" in notice
@@ -556,7 +571,7 @@ def test_a_red_task_whose_reopen_is_refused_still_sends_its_notice(store, monkey
 def test_red_checks_for_a_live_owner_only_send_the_notice(store, monkeypatch):
     red, ledger = answer("open_red"), ReopenLedger()
     run(store, recorded(), ledger=ledger)
-    run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    run(store, in_pr(), now_ms=(red.red_at or 0) + 20 * MINUTE, ledger=ledger, github=lambda url: red)
     assert ledger.updates == [] and texts(store, MASTER_SEAT) == []
     assert len(texts(store, ENG_SEAT)) == 1
 
@@ -567,7 +582,7 @@ def test_a_reopen_for_red_checks_with_no_named_failure_says_red_checks(store, mo
     ledger = ReopenLedger()
     _owner_left(store, monkeypatch)
     task = in_pr()["tasks"][0]
-    assert ready.reopen_red(store, "sw", ledger, task, (), 100_000) == [f"task t1 reopened, {URL} has red checks"]
+    assert ready.reopen_red(_pass(store, ledger), task, {"t1": task}, ()) == [f"task t1 reopened, {URL} has red checks"]
     ((_, _, text, _),) = ledger.comments
     assert text.startswith(f"Reopened by the swarm: its pull request {URL} has red checks. ")
 
@@ -578,7 +593,7 @@ def test_a_red_task_with_no_claimant_reopens_and_says_so(store, monkeypatch):
     ledger = ReopenLedger(live={"state": "open", "claimed_by": "", "claim_generation": 0})
     _owner_left(store, monkeypatch)
     task = {key: value for key, value in in_pr()["tasks"][0].items() if key != "claimed_by"}
-    assert ready.reopen_red(store, "sw", ledger, task, (), 100_000) == [f"task t1 reopened, {URL} has red checks"]
+    assert ready.reopen_red(_pass(store, ledger), task, {"t1": task}, ()) == [f"task t1 reopened, {URL} has red checks"]
     ((_, _, _, if_match),) = ledger.updates
     assert if_match["claimed_by"] == "" and len(ledger.comments) == 1
 
