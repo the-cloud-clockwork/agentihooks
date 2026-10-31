@@ -336,6 +336,7 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--tls-key", help="PEM private key for --tls-cert")
     settings = sub.add_parser("set", help=f"Set {', '.join(registry.SETTINGS)} as key=value")
     settings.add_argument("--keep", action="store_true", help="Leave max-agents, excluded, ui and ephemeral as stored")
+    settings.add_argument("--reason", default="hive set", help="Why the draining setting changes, kept in its history")
     settings.add_argument("id")
     settings.add_argument("settings", nargs="*", metavar="key=value")
     trust = sub.add_parser(
@@ -424,7 +425,8 @@ def _local_agents(redis: "Redis", reported: set[tuple[str, str]]) -> dict[str, l
 
 def _registry(args: argparse.Namespace) -> None:
     if args.command == "set":
-        print(json.dumps(registry.update(redis_client(), args.id, args.settings, keep=args.keep)))
+        drain = registry.Drain(registry.drain_owner(), args.reason)
+        print(json.dumps(registry.update(redis_client(), args.id, args.settings, keep=args.keep, drain=drain)))
     elif args.command == "show":
         record = registry.show(redis_client(), args.id)
         if record is None:

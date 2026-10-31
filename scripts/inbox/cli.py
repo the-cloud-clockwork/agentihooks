@@ -22,6 +22,7 @@ from hooks.filters import check as filters
 from scripts.inbox import links, outbox
 from scripts.inbox.store import (
     OPERATOR,
+    ROW_BATCH,
     DuplicateItem,
     InboxError,
     InboxStore,
@@ -89,11 +90,21 @@ def cmd_send(store, me, args):
     submit(store, outbox.record("send", me, {"address": args.address, "text": text, "fyi": fyi}))
 
 
-def cmd_inbox(store, me, args):
+def cmd_inbox(store: InboxStore, me: str, args: argparse.Namespace) -> None:
     if args.of:
         links.check_observe(store, me, args.of)
-    for item in store.mailbox(args.of or me):
+    items = store.mailbox(args.of or me)
+    if args.page:
+        items = items[(args.page - 1) * args.size : args.page * args.size]
+    for item in items:
         print(f"{item.id}\t{item.state}\t{item.sender}\t{item.text.splitlines()[0]}")
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"{value} must be at least 1")
+    return number
 
 
 def cmd_read(store, me, args):
@@ -203,6 +214,8 @@ def build_parser():
     send.set_defaults(func=cmd_send)
     inbox = sub.add_parser("inbox")
     inbox.add_argument("--of", default="", metavar="ADDRESS")
+    inbox.add_argument("--page", type=positive_int)
+    inbox.add_argument("--size", type=positive_int, default=ROW_BATCH)
     inbox.set_defaults(func=cmd_inbox)
     read = sub.add_parser("read")
     read.add_argument("id")

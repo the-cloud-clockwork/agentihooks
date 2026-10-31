@@ -10,6 +10,7 @@ import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, fields, replace
+from typing import Any
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
@@ -184,18 +185,21 @@ class InboxStore:
             "",
         )
 
-    def send(self, sender, address, text, ref="", fyi=False, task="", item_id=""):
+    def send(
+        self, sender: str, address: str, text: str, ref: str = "", fyi: bool = False, task: str = "", item_id: str = ""
+    ) -> Item:
         """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
         work, so a bare close names no outcome; a given item_id refuses a second write of that item."""
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         from scripts.hive import scope
 
-        sender, address = self.names.resolve(sender), self.names.resolve(address)
+        requested = self.names.resolve(address)
+        sender, address = self.names.resolve(sender), self.seats.recipient(requested)
         home = self.home(address)
         if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
-            return routed.send(sender, address, text, ref, fyi, task, item_id)
+            return routed.send(sender, requested, text, ref, fyi, task, item_id)
         at = now_ms()
         item = Item(
             item_id or new_item_id(),
@@ -211,7 +215,7 @@ class InboxStore:
             task=task,
         )
         key = self.key("item", item.id)
-        masters = self.pool.masters_for(sender, address) if home == self.world else []
+        masters = self.pool.masters_for(sender, requested) if home == self.world else []
         with self.redis.pipeline() as pipe:
             if item_id:
                 pipe.watch(key)
@@ -305,13 +309,10 @@ class InboxStore:
                 continue
         return [item.id for item in self.inbox(address) if item.state not in CLOSED]
 
-    def _index_open(self, address):
+    def _index_open(self, address: str) -> list[str]:
         with self.redis.pipeline() as pipe:
-            pipe.watch(self.key("address", address))
-            ids = pipe.zrange(self.key("address", address), 0, -1)
-            if ids:
-                pipe.watch(*(self.key("item", item_id) for item_id in ids))
-            items, gone = _present(ids, [pipe.hgetall(self.key("item", item_id)) for item_id in ids])
+            ids, rows = self._watched_rows(pipe, address)
+            items, gone = _present(ids, rows)
             opened = {item.id: item.created_at for item in items if item.state not in CLOSED}
             pipe.multi()
             self._stage_drop(pipe, address, gone)
@@ -323,6 +324,22 @@ class InboxStore:
             pipe.execute()
         self._report_gone(address, gone)
         return list(opened)
+
+    def _watched_rows(self, pipe: Any, address: str) -> tuple[list[str], list[dict[str, str]]]:
+        """Every id the address index lists and its row, read in pages of ROW_BATCH with each page's item keys
+        watched on pipe before its rows are read."""
+        index = self.key("address", address)
+        pipe.watch(index)
+        ids: list[str] = []
+        rows: list[dict[str, str]] = []
+        while True:
+            page = pipe.zrange(index, len(ids), len(ids) + ROW_BATCH - 1)
+            if page:
+                pipe.watch(*(self.key("item", item_id) for item_id in page))
+                rows.extend(self._batch(page))
+            ids.extend(page)
+            if len(page) < ROW_BATCH:
+                return ids, rows
 
     def _listed(self, item_ids, address):
         return self._listed_at(dict.fromkeys(item_ids, address))
@@ -1008,13 +1025,10 @@ class InboxStore:
                 continue
         return [item.id for item in self.inbox(address) if item.state == "pending"]
 
-    def _try_back_fill(self, address):
+    def _try_back_fill(self, address: str) -> list[str]:
         with self.redis.pipeline() as pipe:
-            pipe.watch(self.key("address", address))
-            ids = pipe.zrange(self.key("address", address), 0, -1)
-            if ids:
-                pipe.watch(*(self.key("item", item_id) for item_id in ids))
-            items, gone = _present(ids, [pipe.hgetall(self.key("item", item_id)) for item_id in ids])
+            ids, rows = self._watched_rows(pipe, address)
+            items, gone = _present(ids, rows)
             pooled = self.pool.waiting(pipe, address)
             pending = {item.id: item.created_at for item in items if item.state == "pending" and item.id not in pooled}
             pipe.multi()

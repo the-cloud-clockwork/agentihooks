@@ -1,6 +1,9 @@
 import hashlib
 import json
 import os
+from pathlib import Path
+
+import pytest
 
 from scripts.swarm_ledger import ledger_server, server_code
 
@@ -131,8 +134,12 @@ def test_a_server_is_current_only_while_its_own_record_matches_the_code_on_disk(
     assert not server_code.stale(tmp_path, 4242)
 
 
-def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch, tmp_path):
+def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from unittest.mock import ANY, Mock
+
     recorded = []
+    closing = Mock(wraps=ledger_server.close_server)
+    monkeypatch.setattr(ledger_server, "close_server", closing)
 
     class Server:
         def __init__(self, *args, **kwargs):
@@ -164,7 +171,14 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch, tmp_p
         lambda *args, **kwargs: recorded.append((*args, kwargs, (tmp_path / ".server.pid").exists())),
     )
     ledger_server.serve()
+    closing.assert_called_once_with(ANY, True)
     assert recorded == [
-        (tmp_path, os.getpid(), ledger_server.LOADED_STAMP, {"digest": ledger_server.LOADED_DIGEST}, False)
+        (
+            tmp_path,
+            os.getpid(),
+            ledger_server.LOADED_STAMP,
+            {"digest": ledger_server.LOADED_DIGEST, "files": ledger_server.LOADED_CODE.files},
+            False,
+        )
     ]
     assert ledger_server.LOADED_STAMP > 0

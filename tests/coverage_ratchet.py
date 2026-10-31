@@ -1,17 +1,43 @@
 import argparse
 import os
+import resource
 import subprocess
 import sys
 import tempfile
+import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from coverage import Coverage, CoverageData
 from coverage.exceptions import NotPython
 
-from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map, pair_moves
+from tests.coverage_grade import (
+    Measurement,
+    Result,
+    Unmeasured,
+    executed,
+    grade,
+    graded_modules,
+    line_map,
+    pair_moves,
+)
 from tests.coverage_history import dev_runs, git, renamed
+from tests.coverage_summary import NAME as SUMMARY
+from tests.coverage_summary import STATEMENTS, digest, statements
+from tests.coverage_summary import executed as summarized
 
-__all__ = ["Measurement", "Result", "Unmeasured", "executed", "grade", "line_map", "main", "pair_moves", "report"]
+__all__ = [
+    "Measurement",
+    "Result",
+    "Unmeasured",
+    "executed",
+    "grade",
+    "graded_modules",
+    "line_map",
+    "main",
+    "pair_moves",
+    "report",
+]
 
 
 def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int], base_covered: dict[str, int]) -> str:
@@ -31,27 +57,69 @@ def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int]
     return "\n".join(out) + "\n"
 
 
-def _missed(head: Path, lines: dict[str, set[int]], out: Path) -> dict[str, list[int]]:
-    combined = CoverageData(basename=str(out.resolve() / ".coverage"))
-    combined.add_lines(lines)
-    combined.write()
-    coverage = Coverage(data_file=combined.base_filename(), config_file=False)
+def _missed(
+    head: Path, lines: dict[str, set[int]], out: Path, workers: int = 1, summaries: dict[str, dict] | None = None
+) -> dict[str, list[int]]:
+    modules = graded_modules(head)
+    found = {
+        path: sorted(set(known["statements"]) - {known["first"].get(str(line), line) for line in lines.get(path, ())})
+        for path, known in (summaries or {}).items()
+        if (head / path).is_file() and digest((head / path).read_bytes()) == known["digest"]
+    }
+    rest = [path for path in modules if path not in found]
+    if rest:
+        combined = CoverageData(basename=str(out.resolve() / ".coverage"))
+        combined.add_lines(lines)
+        combined.write()
+        chunks = [rest[index::workers] for index in range(workers)]
+        if workers > 1:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                parts = list(pool.map(_analysed, [combined.base_filename()] * workers, [head] * workers, chunks))
+        else:
+            parts = [_analysed(combined.base_filename(), head, rest)]
+        found.update(item for part in parts for item in part.items())
+    return {path: found[path] for path in modules}
+
+
+def _head_statements(summaries: Path | None) -> dict[str, dict]:
+    """The statement summaries the shards uploaded beside their executed lines summaries."""
+    return statements(sorted(summaries.glob(f"executed-lines-3.12-*/{STATEMENTS}"))) if summaries else {}
+
+
+def _analysed(data_file: str, head: Path, modules: list[str]) -> dict[str, list[int]]:
+    coverage = Coverage(data_file=data_file, config_file=False)
     coverage.set_option("run:relative_files", True)
     coverage.load()
     cwd = Path.cwd()
     os.chdir(head)
     try:
-        modules = sorted(str(path) for root in GRADED for path in Path(root).rglob("*.py"))
         return {path: sorted(coverage.analysis2(path)[3]) for path in modules}
     finally:
         os.chdir(cwd)
 
 
-def _grade(args: argparse.Namespace, head_files: list[Path], scratch: Path) -> tuple[dict, Measurement, Result]:
+def _cpus(limit: Path = Path("/sys/fs/cgroup/cpu.max")) -> int:
+    """CPUs this process may use: its affinity, capped by the cgroup CPU quota."""
+    cpus = len(os.sched_getaffinity(0))
+    quota, _, period = limit.read_text().partition(" ") if limit.is_file() else ("max", "", "")
+    return cpus if quota == "max" else max(1, min(cpus, -(-int(quota) // int(period))))
+
+
+def _usage(stat: Path = Path("/sys/fs/cgroup/cpu.stat")) -> tuple[float, float]:
+    """CPU seconds of this process and its reaped children, and the cgroup's throttled seconds."""
+    own, children = resource.getrusage(resource.RUSAGE_SELF), resource.getrusage(resource.RUSAGE_CHILDREN)
+    cpu = own.ru_utime + own.ru_stime + children.ru_utime + children.ru_stime
+    fields = dict(line.split() for line in stat.read_text().splitlines()) if stat.is_file() else {}
+    return cpu, int(fields.get("throttled_usec", 0)) / 1e6
+
+
+def _grade(
+    args: argparse.Namespace, head_files: list[Path], scratch: Path, workers: int = 1
+) -> tuple[dict, Measurement, Result]:
     missing = [str(f) for f in head_files if not f.is_file()]
     if missing:
         raise Unmeasured(f"head shard coverage missing: {', '.join(missing)}")
-    head = executed(head_files)
+    head = summarized(head_files) if args.head_summaries else executed(head_files, workers)
     wanted = git("rev-parse", args.base, cwd=args.head).strip()
     if getattr(args, "base_baseline", None):
         runs = _cached_runs(args.head, wanted, args.base_baseline)
@@ -95,16 +163,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", required=True, help="base revision")
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--shards", type=int, required=True)
-    parser.add_argument("--head-shards", type=Path, required=True, help="downloaded coverage-3.12-N artifacts")
+    head_input = parser.add_mutually_exclusive_group(required=True)
+    head_input.add_argument("--head-shards", type=Path, help="downloaded coverage-3.12-N artifacts")
+    head_input.add_argument("--head-summaries", type=Path, help="downloaded executed-lines-3.12-N artifacts")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--base-baseline", type=Path, help="exact base measurement restored from the Actions cache")
     args = parser.parse_args(argv)
-    head_files = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
-    head_files += sorted(args.head_shards.glob("coverage-3.12-*/reused-coverage/.coverage"))
+    if args.head_summaries:
+        head_files = [args.head_summaries / f"executed-lines-3.12-{n}" / SUMMARY for n in range(1, args.shards + 1)]
+    else:
+        head_files = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
+        head_files += sorted(args.head_shards.glob("coverage-3.12-*/reused-coverage/.coverage"))
     args.out.mkdir(parents=True, exist_ok=True)
+    workers = _cpus()
+    started, (cpu, throttled) = time.monotonic(), _usage()
     with tempfile.TemporaryDirectory() as scratch:
         try:
-            head, base, result = _grade(args, head_files, Path(scratch))
+            head, base, result = _grade(args, head_files, Path(scratch), workers)
             if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
                 changed = set(git("diff", "--name-only", "--no-renames", "HEAD^", "HEAD", cwd=args.head).splitlines())
                 result.lost = {path: lines for path, lines in result.lost.items() if path in changed}
@@ -113,9 +188,14 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     text = report(
         result,
-        _missed(args.head, head, args.out),
+        _missed(args.head, head, args.out, workers, _head_statements(args.head_summaries)),
         {path: len(lines) for path, lines in head.items()},
         {path: len(lines) for path, lines in base.executed.items()},
+    )
+    spent, held = _usage()
+    print(
+        f"Coverage grade took {time.monotonic() - started:.1f} s wall and {spent - cpu:.1f} CPU seconds"
+        f" across its process tree on {workers} CPUs; the runner cgroup was throttled {held - throttled:.1f} s."
     )
     (args.out / "report.txt").write_text(text)
     print(text)

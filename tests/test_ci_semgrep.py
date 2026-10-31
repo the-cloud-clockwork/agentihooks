@@ -243,7 +243,7 @@ def test_scan_holds_the_status_the_dev_rulesets_require():
     assert gate["name"] == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
     assert "semgrep" in gate["needs"]
     grader = next(step for step in gate["steps"] if step.get("name") == "Require every gate to succeed")
-    assert '["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]' in grader["run"]
+    assert '["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]' in grader["run"]
     for ruleset in ("dev-history.json", "dev-no-delete.json"):
         rules = json.loads((_ROOT / ".github/rulesets" / ruleset).read_text())["rules"]
         checks = next(rule for rule in rules if rule["type"] == "required_status_checks")

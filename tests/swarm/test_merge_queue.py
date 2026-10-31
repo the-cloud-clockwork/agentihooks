@@ -445,15 +445,29 @@ def test_queue_names_all_failing_required_checks():
 
 @pytest.fixture(autouse=True)
 def task_ledger(monkeypatch):
+    monkeypatch.setattr(ledger_events, "view", READ_PULL)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger([{"id": "t1", "pr_url": URL}]))
+
+
+def scoped_ledger(rows: list[dict], reads: list | None = None) -> object:
     from types import SimpleNamespace
 
-    monkeypatch.setattr(ledger_events, "view", READ_PULL)
+    from scripts.swarm_ledger.api import task_list
 
-    def tasks(slug):
-        assert slug == "sw"
-        return [{"id": "t1", "pr_url": URL}]
+    reads = [] if reads is None else reads
 
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=tasks))
+    def task(slug: str, task_id: str) -> dict | None:
+        reads.append(("task", slug, task_id))
+        return next((row for row in rows if row["id"] == task_id), None)
+
+    def targeting(slug: str, url: str) -> list[dict]:
+        reads.append(("targeting", slug, url))
+        return [row for row in rows if url in task_list.pull_links(row)]
+
+    def tasks(slug: str) -> list[dict]:
+        pytest.fail("swarm merge read the whole tasks collection")
+
+    return SimpleNamespace(task=task, tasks_targeting=targeting, tasks=tasks)
 
 
 def test_state_reports_an_open_pull_request_without_a_queue_entry():
@@ -815,13 +829,11 @@ def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypat
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])
 def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
-    from types import SimpleNamespace
-
     first = "https://github.com/o/r/pull/6"
     task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": [first, URL]}
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [task]))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger([task]))
     seen = []
     monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append((verb, url)) or {})
     assert cli.main(["sw", "merge", action, first]) == 0
@@ -829,12 +841,10 @@ def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
 
 
 def test_cli_refuses_an_unlisted_pull_before_a_queue_call(monkeypatch):
-    from types import SimpleNamespace
-
     task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/6", URL]}
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [task]))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger([task]))
     seen = []
     monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append((verb, url)) or {})
     assert cli.main(["sw", "merge", "queue", "https://github.com/o/r/pull/99"]) == 1
@@ -859,15 +869,13 @@ def test_cli_refuses_distributed_final_mutations_before_provider_calls(monkeypat
 
 @pytest.mark.parametrize("same_link", [False, True])
 def test_cli_refuses_another_distributed_tasks_pull_request(monkeypatch, same_link):
-    from types import SimpleNamespace
-
     state = swarm_of("eng")
     rows = [
         {"id": "t1", "pr_url": URL if same_link else "https://github.com/o/r/pull/8"},
         {"id": "t2", "pr_url": URL},
     ]
     monkeypatch.setattr(cli, "connect", lambda: state)
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: rows))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger(rows))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(merge_queue, "operate", lambda *args: pytest.fail("foreign provider mutation"))
     state.redis.set(state.key("sw", "task-authority", "t2"), "{}")
@@ -1103,3 +1111,17 @@ def test_state_runs_with_the_installed_gh_api_interface(tmp_path, monkeypatch):
         "queued": False,
         "entry": None,
     }
+
+
+@pytest.mark.parametrize("action", ["queue", "dequeue"])
+def test_cli_target_check_reads_its_task_and_the_tasks_naming_the_pull_only(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    rows = [{"id": "t1", "pr_url": URL}, {"id": "t2", "pr_url": "https://github.com/o/r/pull/8"}]
+    reads = []
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger(rows, reads))
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: {})
+    assert cli.main(["sw", "merge", action, URL]) == 0
+    assert reads == [("task", "sw", "t1"), ("targeting", "sw", URL)]

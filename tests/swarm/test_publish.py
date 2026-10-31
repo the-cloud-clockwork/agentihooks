@@ -1893,6 +1893,101 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
     assert (root / "task.txt").read_text() == "parked work"
 
 
+@pytest.mark.parametrize(
+    ("stacked", "replayed", "failure"),
+    [
+        ("rebased", "2", ""),
+        ("dependency", "1", ""),
+        ("dependency-rebased", "1", ""),
+        ("dependency-modified", "1", ""),
+        ("dependency-spaced", "1", ""),
+        ("dependency-modified", "1", "the task shares no history with dev"),
+        ("dependency-modified", "1", "cannot resolve the completed rebase tree"),
+        ("dependency-modified", "1", "the stacked base shares no history with dev"),
+        ("dependency-modified", "1", "cannot list dependency files"),
+        ("dependency-modified", "1", "cannot read completed dependency history"),
+    ],
+)
+def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, stacked: str, replayed: str, failure: str
+) -> None:
+    from scripts.swarm import stack
+
+    p = publication
+    root, repository = p.root, p.repo
+    (root / "chosen.txt").write_text("before")
+    base = git(repository, "rev-parse", "dev")
+    dependency_file = "dependency work\nfile.txt" if stacked == "dependency-spaced" else "blocker.txt"
+    if stacked.startswith("dependency"):
+        (root / dependency_file).write_text("dependency")
+        git(root, "add", dependency_file)
+        git(root, "commit", "-qm", "Dependency work")
+        (root / dependency_file).write_text("completed dependency")
+        git(root, "commit", "-qam", "Finish dependency")
+        base = git(root, "rev-parse", "HEAD")
+        git(repository, "merge", "--squash", base)
+        git(repository, "commit", "-qm", "Squash dependency")
+        if stacked in {"dependency-modified", "dependency-spaced"}:
+            (repository / dependency_file).write_text("newer dependency")
+            git(repository, "commit", "-qam", "Advance dependency after squash")
+    (root / "task.txt").write_text("parked work")
+    git(root, "add", "task.txt")
+    git(root, "commit", "-qm", "Parked task work")
+    for number in range(21):
+        (repository / f"upstream{number}.txt").write_text(str(number))
+        git(repository, "add", f"upstream{number}.txt")
+        git(repository, "commit", "-qm", f"Upstream {number}")
+    git(repository, "push", "origin", "dev")
+    if stacked != "dependency":
+        git(root, "fetch", "origin")
+        git(root, "rebase", "--onto", "origin/dev", base)
+        (repository / "later.txt").write_text("after manual rebase")
+        git(repository, "add", "later.txt")
+        git(repository, "commit", "-qm", "Advance dev after manual rebase")
+        git(repository, "push", "origin", "dev")
+    git(root, "push", "origin", "HEAD:engineer-test")
+    p.task.update(parked_on=["dependency"], stacked_base=base)
+    p.ledger.state = lambda slug: {"tasks": [p.task, {"id": "dependency", "state": "done"}]}
+    counted = []
+    native = stack._rebase
+
+    def rebase(start: str) -> None:
+        counted.append(git(root, "rev-list", "--count", f"{start}..HEAD"))
+        native(start)
+
+    native_shell = stack.shell
+
+    def shell(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        failures = {
+            "the task shares no history with dev": argv[1:] == ["merge-base", "HEAD", "origin/dev"],
+            "cannot resolve the completed rebase tree": argv[1:2] == ["rev-parse"] and argv[-1].endswith("^{tree}"),
+            "the stacked base shares no history with dev": argv[1:3] == ["merge-base", base],
+            "cannot list dependency files": argv[1:3] == ["diff", "--name-only"],
+            "cannot read completed dependency history": argv[1:3] == ["--literal-pathspecs", "rev-list"],
+        }
+        if failures.get(failure):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="deliberate failure")
+        return native_shell(argv)
+
+    monkeypatch.setattr(stack, "_rebase", rebase)
+    monkeypatch.setattr(stack, "shell", shell)
+    monkeypatch.chdir(root)
+
+    if failure:
+        with pytest.raises(stack.SwarmError) as caught:
+            stack.restack("swarm", p.agent, p.ledger)
+        assert str(caught.value) == f"{failure}: deliberate failure"
+        assert p.task["parked_on"] == ["dependency"]
+        assert counted == []
+        return
+
+    stack.restack("swarm", p.agent, p.ledger)
+
+    assert counted == [replayed]
+    assert git(root, "rev-list", "--count", "origin/dev..HEAD") == replayed
+    assert (root / "task.txt").read_text() == "parked work"
+
+
 @pytest.mark.parametrize("fields", [{"claimed_by": "another"}, {"state": "done"}])
 def test_only_the_task_owner_can_publish(publication, fields):
     from scripts.swarm import publish

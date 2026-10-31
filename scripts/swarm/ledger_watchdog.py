@@ -126,13 +126,22 @@ def failed_reload(host: Host, pid: int, reason: str, error: str) -> None:
         log.write(json.dumps(record) + "\n")
 
 
+def code_identity(folder: Path) -> dict[str, object] | None:
+    held = server_code.loaded(folder)
+    return None if held is None else {key: held.get(key) for key in ("pid", "stamp", "digest")}
+
+
 def reload_stale(host: Host, command: list[str]) -> str:
+    before = code_identity(host.folder)
     error = relaunch(host, command, "--reload")
     if not error:
+        record = {"at": time.time(), "reload": "completed", "before": before, "after": code_identity(host.folder)}
+        with (host.folder / LOG).open("a") as log:
+            log.write(json.dumps(record) + "\n")
         return ""
     pid = ledger_host.server_pid(host.folder)
     failed_reload(host, pid, STALE_REASON, error)
-    return restart(host, pid, command, STALE_REASON)
+    return error
 
 
 def restart(host: Host, pid: int, command: list[str], reason: str) -> str:

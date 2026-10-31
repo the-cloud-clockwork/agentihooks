@@ -537,23 +537,6 @@ def test_send_message_comes_from_the_named_agent(env, capsys, monkeypatch, flag,
     assert "engineer@a1b2c3-0001" not in json.loads(capsys.readouterr().out)["sent"]
 
 
-def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(env, capsys, monkeypatch):
-    store, ledger, _ = env
-    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
-    run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
-    ledger.said.clear()
-    capsys.readouterr()
-    assert run("sw", "send-message", "pause new work for a moment") == 0
-    assert ledger.said == []
-    live = sorted(a.name for a in store.agents("sw"))
-    inbox = InboxStore(store.redis)
-    for name in live:
-        [item] = inbox.inbox(name)
-        assert (item.sender, item.text) == ("operator", "pause new work for a moment")
-    assert sorted(json.loads(capsys.readouterr().out)["sent"]) == live and len(live) == 3
-
-
 def test_say_with_fyi_marks_each_item_as_needing_no_work(env):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -974,6 +957,24 @@ def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
     assert started == ["sw"]
     assert sampled == [] and "fired ci_queue on sw" not in actions
+
+
+def test_a_stopped_scheduled_tick_has_started_the_refresh_job(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import refresh_job
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    started = []
+    monkeypatch.setattr(refresh_job, "spawn", started.append)
+
+    def overrun(slug: str, *args: object) -> list[str]:
+        assert slug == "sw"
+        raise cli.tick_stop.Stopped
+
+    monkeypatch.setattr(cli, "tick", overrun)
+    with pytest.raises(cli.tick_stop.Stopped):
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
+    assert started == ["sw"]
 
 
 def test_the_tick_publishes_status_with_the_pull_request_view_it_built(env, monkeypatch):

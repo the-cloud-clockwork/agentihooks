@@ -22,8 +22,6 @@ from typing import Any
 
 from hooks.common import log
 
-# ── Inline marker regex (same patterns as brain-tools/markers.py) ────
-
 _BLOCK_RE = re.compile(
     r"<!--\s*@(\w+)((?:\s+\w+=[^\s>]+|\s+\w+=\"[^\"]*\")*)\s*-->"
     r"(.*?)"
@@ -69,9 +67,6 @@ def _markers_at(text: str) -> list[tuple[dict[str, Any], int]]:
     return results
 
 
-# ── Transcript parsing ───────────────────────────────────────────────
-
-
 def _parse_transcript_for_markers(transcript_path: str, max_markers: int) -> list[dict]:
     """Extract markers from assistant text in a transcript (claude or codex)."""
     from bisect import bisect_right
@@ -99,9 +94,6 @@ def _parse_transcript_for_markers(transcript_path: str, max_markers: int) -> lis
             marker["at"] = stamp
         markers.append(marker)
     return markers
-
-
-# ── Outbox write ─────────────────────────────────────────────────────
 
 
 def _destination() -> dict | None:
@@ -133,21 +125,27 @@ def _scoped_outbox(outbox: Path, destination: dict | None) -> Path:
 
 
 def _drain_folders(outbox: Path, destination: dict) -> list[Path]:
+    """Return the outbox folders to drain, oldest first.
+
+    Unbound legacy markers and the backlog belong to the personal path only; a swarm brain
+    never adopts them. The backlog drains first so append-only vault targets stay chronological.
+    """
     from hooks.context.brain_adapter import brain_id
 
     if destination["brain"] != brain_id():
         return []
     folders = [_scoped_outbox(outbox, destination)]
     if destination["audience"] == "personal":
-        # Unbound legacy markers belong to the personal path only; a swarm brain never adopts them.
-        # Backlog first: months older than the live outbox, and append-only vault
-        # targets keep arrival order — oldest-first stays chronological.
         folders = [outbox.with_name(outbox.name + "-backlog"), outbox, *folders]
     return folders
 
 
 def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> int:
-    """Write markers as individual JSON files to the outbox directory."""
+    """Write markers as individual JSON files to the outbox directory.
+
+    Each file is written to a temp name and renamed, so a killed hook never leaves a
+    truncated JSON for the drain to quarantine.
+    """
     destination = _destination()
     outbox = _scoped_outbox(Path(outbox_dir), destination)
     outbox.mkdir(parents=True, exist_ok=True)
@@ -171,17 +169,11 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
         }
         if destination is not None:
             payload["destination"] = destination
-        # Atomic write: a killed hook process mid-write leaves a truncated
-        # JSON that the outbox drain must quarantine. temp + rename makes the
-        # file appear fully-formed or not at all.
         tmp = outbox / f".{filename}.tmp"
         tmp.write_text(json.dumps(payload, indent=2))
         tmp.replace(outbox / filename)
         count += 1
     return count
-
-
-# ── HTTP publish ─────────────────────────────────────────────────────
 
 
 def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tuple[dict, str]:
@@ -271,6 +263,10 @@ def _drain_outbox(outbox_dir: str) -> int:
     caller/server conditions where retrying the rest is futile and deleting
     anything would destroy good markers. Each file's original ``ts`` rides in
     attrs so brain-api backdates the marker instead of stamping replay time.
+
+    401/403/429 never quarantine: those are credential or rate conditions, and
+    quarantining on them would destroy the whole queue over a stale token. The outbox
+    may be shared, so a file a concurrent drain already removed is skipped, never fatal.
     """
     from hooks._brain_http import brain_http_enabled, post
 
@@ -298,7 +294,7 @@ def _drain_outbox(outbox_dir: str) -> int:
                 f.rename(f.with_name(f.name + ".bad"))
                 log("brain_writer: quarantined unparseable outbox file", {"file": f.name})
             except OSError:
-                pass  # vanished mid-quarantine — a concurrent drain got it
+                pass
             continue
         if payload.get("destination", destination) != destination:
             continue
@@ -309,10 +305,6 @@ def _drain_outbox(outbox_dir: str) -> int:
         response = post("/marker", body=body, idempotency_key=idem, surface_http_errors=True)
         status = (response or {}).get("__http_status__")
         if status in (400, 404, 422):
-            # Server rejected THIS payload — permanent, retrying is futile.
-            # 401/403/429 stay out of this bucket: those are caller-credential
-            # or rate conditions, and quarantining on them would destroy the
-            # whole queue over a stale token.
             try:
                 f.rename(f.with_name(f.name + ".bad"))
                 log(
@@ -324,19 +316,12 @@ def _drain_outbox(outbox_dir: str) -> int:
             continue
         if not (response and response.get("ok")):
             break
-        # The outbox may be shared (Stop + SubagentStop, concurrent sessions,
-        # fleet AGENTIHOOKS_HOME on EFS). A concurrent drain that already
-        # unlinked this file made the same idempotent POST — same outcome, and
-        # a crash here would abort the caller before its own new markers ship.
         try:
             f.unlink()
         except FileNotFoundError:
             pass
         drained += 1
     return drained
-
-
-# ── Main entry point ─────────────────────────────────────────────────
 
 
 def write_markers(session_id: str, transcript_path: str, last_message: str = "") -> dict:
@@ -346,6 +331,9 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
         last_message: The last assistant message from the Stop payload.
             Used as fallback when the JSONL transcript hasn't been flushed yet
             (race condition in -p mode).
+
+    Markers buffered by earlier runs are retried before new ones. HTTP is the only
+    transport; any marker that fails to POST stays in the outbox for the next drain.
     """
     from hooks.config import (
         BRAIN_WRITER_ENABLED,
@@ -366,8 +354,6 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
             "source": "transcript" if transcript_path else "last_message",
         },
     ) as span:
-        # Retry markers buffered by earlier runs before touching new ones —
-        # the outbox self-empties the moment brain-api is reachable again.
         drained = _drain_outbox(BRAIN_WRITER_OUTBOX)
 
         if transcript_path:
@@ -376,7 +362,6 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
             observe_transcript(session_id, transcript_path)
         markers = _parse_transcript_for_markers(transcript_path, BRAIN_WRITER_MAX_MARKERS)
 
-        # Fallback: if transcript had no markers but last_message does, parse that
         if not markers and last_message:
             now = datetime.now(timezone.utc).isoformat()
             markers = [{**m, "at": now} for m in _find_markers(last_message)[:BRAIN_WRITER_MAX_MARKERS]]
@@ -390,8 +375,6 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
         scopes = [m["scope"] for m in markers if m["scope"] is not None]
         span.set_attrs({"unattributed_session_events_total": unattributed_session_events_total(scopes)})
 
-        # HTTP is the only transport — any marker we fail to POST buffers in
-        # the outbox for the retry-drain above.
         http_count, pending = _publish_to_http(markers, session_id)
         outbox_count = _write_to_outbox(pending, session_id, BRAIN_WRITER_OUTBOX) if pending else 0
 
