@@ -399,6 +399,10 @@ def run_tick(
             store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = _phase_steps(inbox, store, slug, doc, ledger)
+            if scheduled:
+                from scripts.swarm import refresh_job
+
+                timing.call(refresh_job.start, store, slug)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judged = worker.submit(copy_context().run, _intent_pass, inbox, store, slug, doc, ledger, config)
@@ -455,10 +459,6 @@ def run_tick(
                 doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms(), config.watchdog_address
             )
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
-            if scheduled:
-                from scripts.swarm import refresh_job
-
-                timing.call(refresh_job.start, store, slug)
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )

@@ -224,15 +224,21 @@ def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
 
 
 def resource(
-    slug: str, path: str, service: bool = False, collection: bool = False, headers: dict | None = None
+    slug: str,
+    path: str,
+    service: bool = False,
+    collection: bool = False,
+    headers: dict | None = None,
+    timeout: float = REQUEST_TIMEOUT,
+    attempts: int = REMOTE_READ_ATTEMPTS,
 ) -> dict | list:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
+        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
+    return retried(read, attempts) if ledger_link.remote(slug=slug) else read()
 
 
 def export(slug: str, service: bool = False) -> dict:
