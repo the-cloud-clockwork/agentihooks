@@ -520,17 +520,20 @@ class _Firsts:
                 self.settled.set()
 
 
-def _tick_while_others_run(store, slug, firsts, until):
+def _tick_while_others_run(store: RedisStore, slug: str, firsts: _Firsts, until: float) -> None:
+    """An extra pass starts only when this swarm's longest pass so far still ends by the extra pass cutoff."""
     started = time.monotonic()
     try:
         _tick_one(store, slug)
     finally:
         firsts.done()
+    longest = time.monotonic() - started
     while not firsts.settled.wait(max(0.0, started + TICK_SECONDS - time.monotonic())):
         started = time.monotonic()
-        if started > until or tick_stop.STOP.is_set():
+        if started + longest > until or tick_stop.STOP.is_set():
             return
         _tick_one(store, slug)
+        longest = max(longest, time.monotonic() - started)
 
 
 def _reconcile_services():
