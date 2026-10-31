@@ -110,6 +110,7 @@ def supervise(stop: Event | None = None) -> None:
     loaded = revision(ROOT)
     starter = int(os.environ.get(STARTER) or 0)
     _mark_unit()
+    _take_over()
     with machine_lock("supervisor"):
         _identify(loaded)
         while not stopped.is_set():
@@ -131,6 +132,16 @@ def _mark_unit() -> None:
     directory = runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / UNIT).write_text(UNIT)
+
+
+def _take_over() -> None:
+    """A supervisor started by its unit drains one started outside it, so systemd keeps owning the scheduler."""
+    if not os.environ.get(UNIT_ENV):
+        return
+    pid = int((holder(os.environ) or {}).get("pid") or 0)
+    if pid and pid != os.getpid():
+        print(f"the scheduler unit takes over from supervisor {pid}, started outside it", file=sys.stderr)
+        drain(pid, os.environ)
 
 
 def _unit_owns(directory: Path) -> bool:
