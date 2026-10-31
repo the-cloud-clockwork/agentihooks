@@ -4,6 +4,7 @@ import sys
 import urllib.error
 import uuid
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from scripts.swarm import notice_text
@@ -73,7 +74,7 @@ class LedgerClient:
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
         return state
 
-    def _resource(self, slug: str, path: str, collection: bool = False) -> dict | list:
+    def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
         if self.read_timeout is None:
             return _ledger().resource(slug, path, service=self.service, collection=collection)
         return _ledger().resource(

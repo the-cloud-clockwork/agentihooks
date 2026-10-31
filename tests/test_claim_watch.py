@@ -294,6 +294,24 @@ def test_other_ledger_clients_keep_three_ten_second_attempts(hosted: list) -> No
     ]
 
 
+def test_a_bounded_read_forwards_the_service_and_collection_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    class Module:
+        @staticmethod
+        def resource(slug: str, path: str, **options: object) -> list:
+            calls.append((slug, path, options))
+            return []
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: Module)
+    client = ledger_client.LedgerClient(service=True, read_timeout=2)
+
+    assert client.tasks("sw") == []
+    assert calls == [
+        ("sw", "tasks", {"service": True, "collection": True, "timeout": 2, "attempts": 1}),
+    ]
+
+
 def test_a_bounded_client_reads_collections_once_with_its_timeout(hosted: list) -> None:
     with pytest.raises(TimeoutError):
         ledger_client.LedgerClient(read_timeout=3).tasks("sw")
