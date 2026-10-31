@@ -1,4 +1,5 @@
 import cProfile
+import gc
 import gzip
 import io
 import json
@@ -78,6 +79,12 @@ def align(barrier):
         time.sleep(0.05)
 
 
+def store(repo: SQLiteLedgerRepository, state: dict, replace: bool = False) -> None:
+    """Store state as the probe ledger, then collect the garbage the import left, so no measured read pays for it."""
+    repo.import_document(SLUG, state, token="hierarchy-proof", replace=replace)
+    gc.collect()
+
+
 def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     assert Path(server.__file__).resolve().is_relative_to(Path.cwd().resolve())
     corpus = Path(__file__).parents[1] / "swarm_ledger" / "operations_corpus.json.gz"
@@ -121,7 +128,7 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     observations = []
     try:
         state = recorded["state"]
-        repo.import_document(SLUG, state, token="hierarchy-proof")
+        store(repo, state)
         server.HUB.open(SLUG, lambda: {"ledger": server.ledger_view(state)})
         align(os.environ.get("HIERARCHY_START_BARRIER"))
         observations.append(observe(port, samples, state))
@@ -131,7 +138,7 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
         changed = json.loads(json.dumps(state))
         changed["tasks"][0]["state"] = "claimed"
         changed["phases"][0]["done"] = not bool(changed["phases"][0].get("done"))
-        repo.import_document(SLUG, changed, token="hierarchy-proof", replace=True)
+        store(repo, changed, replace=True)
         observations.append(observe(port, samples, changed))
         assert observations[0]["outputs"] != observations[1]["outputs"]
     finally:
