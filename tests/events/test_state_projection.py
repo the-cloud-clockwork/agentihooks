@@ -1,5 +1,6 @@
 import base64
 import json
+from typing import Any
 
 import pytest
 
@@ -72,3 +73,55 @@ def test_an_older_writer_invalidates_views_until_a_new_writer_clears_them() -> N
     assert states.get_projection("one") is None
     assert projected(states, "two").value == b"view:fresh"
     assert present(states.get("one")).value == b"old writer"
+
+
+class Counting:
+    def __init__(self, redis: Any) -> None:
+        self.redis = redis
+        self.pipelines = 0
+        self.direct: list[str] = []
+
+    def pipeline(self) -> Any:
+        self.pipelines += 1
+        return self.redis.pipeline()
+
+    def __getattr__(self, name: str) -> Any:
+        self.direct.append(name)
+        return getattr(self.redis, name)
+
+
+def test_a_lost_watch_keeps_every_other_projection_in_use() -> None:
+    from fakeredis import FakeRedis
+
+    redis = FakeRedis(decode_responses=True)
+    rival = RedisStateStore(redis, "probe", projection=project)
+    rival.create("two", b"other")
+    third = rival.create("three", b"kept")
+    raced: list[int] = []
+
+    def racing(value: bytes) -> bytes:
+        if not raced:
+            raced.append(rival.update("three", b"raced", third))
+        return project(value)
+
+    states = RedisStateStore(redis, "probe", projection=racing)
+    first = states.create("one", b"first")
+    assert raced
+    assert first > raced[0]
+    assert projected(states, "two").value == b"view:other"
+    assert projected(states, "three").value == b"view:raced"
+    assert projected(states, "one").value == b"view:first"
+    assert redis.get(states._revision) == redis.get(states._published) == str(first)
+
+
+def test_a_write_raises_its_revision_inside_its_one_transaction() -> None:
+    from fakeredis import FakeRedis
+
+    redis = Counting(FakeRedis(decode_responses=True))
+    states = RedisStateStore(redis, "probe", projection=project)
+    first = states.create("one", b"first")
+    second = states.update("one", b"second", first)
+    assert second == first + 1
+    assert redis.pipelines == 2
+    assert redis.direct == []
+    assert projected(states, "one").revision == second
