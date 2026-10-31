@@ -18,6 +18,7 @@ from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 # Traced test seconds: every unit of a split mutant reruns the fastest tests, where most mutants die, then one slice.
 HEAD_SECONDS = 20.0
 SLICE_SECONDS = 120.0
+SHARD_LIMIT = 10
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
@@ -188,10 +189,27 @@ def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
     return {**measured_plan(measured, KillMemory(stats.folder / "killers")), "keys": keys, "head": stats.head}
 
 
+def budget_overrun(plan: dict, budget: float) -> str:
+    """Describe a plan whose slowest shard cannot finish within the shard budget, or return an empty string."""
+    slowest, workers = max(plan["shard_worker_seconds"]), plan["workers"]
+    if slowest <= workers * budget:
+        return ""
+    total = plan["estimated_worker_seconds"]
+    capacity = SHARD_LIMIT * workers * budget
+    parts = max(2, math.ceil(total / capacity))
+    return (
+        f"The slowest mutation shard needs {slowest:.0f} worker seconds, {slowest / workers:.0f} seconds on"
+        f" {workers} workers, against the {budget:.0f} second shard budget. The change needs {total:.0f} worker"
+        f" seconds and {SHARD_LIMIT} shards hold at most {capacity:.0f}, so split it into at least {parts} pull"
+        " requests."
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bases", required=True)
     parser.add_argument("--stats", type=Path, required=True)
+    parser.add_argument("--budget", type=float, default=1080)
     args = parser.parse_args()
     root = Path.cwd()
     changes = discover_changes(root, args.bases.split(","), "HEAD")
@@ -207,6 +225,9 @@ def main() -> int:
     (args.stats / "plan.json").write_text(json.dumps(plan))
     print(f"Measured mutation worker seconds: {plan['estimated_worker_seconds']:.1f}")
     print(f"Measured mutation shards: {plan['shards']}; assigned mutants: {len(plan['assignments'])}")
+    if overrun := budget_overrun(plan, args.budget):
+        print(f"::error title=Mutation plan over budget::{overrun}")
+        return 1
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(plan['shards'])))}\n")
