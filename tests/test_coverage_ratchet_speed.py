@@ -169,7 +169,7 @@ GRADE_HEAD = {
     "scripts/renamed.py": {1, 2},
 }
 GRADE_MOVES: dict[str, str | tuple[str, ...]] = {
-    "hooks/split.py": ("scripts/first.py", "scripts/second.py"),
+    "hooks/split.py": ("scripts/first.py", "scripts/absent.py", "scripts/second.py"),
     "hooks/old.py": "scripts/renamed.py",
 }
 
@@ -186,11 +186,11 @@ def test_parallel_grade_equals_the_serial_grade() -> None:
 
 
 def test_parallel_grade_maps_each_file_in_a_pool_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    pools = []
+    workers_seen, tasks_seen = [], []
 
     class Pool(ThreadPoolExecutor):
         def __init__(self, max_workers: int) -> None:
-            pools.append(max_workers)
+            workers_seen.append(max_workers)
             super().__init__(max_workers=max_workers)
 
         def map(
@@ -201,12 +201,13 @@ def test_parallel_grade_maps_each_file_in_a_pool_task(monkeypatch: pytest.Monkey
             chunksize: int = 1,
         ) -> Iterator[object]:
             listed = [list(items) for items in iterables]
-            pools.append(len(listed[0]))
+            tasks_seen.append(len(listed[0]))
             return super().map(fn, *listed)
 
     monkeypatch.setattr(coverage_grade, "ProcessPoolExecutor", Pool)
     assert _graded(2).lost == _graded(1).lost
-    assert pools == [2, len(GRADE_RAN)]
+    assert workers_seen == [2]
+    assert tasks_seen == [len(GRADE_RAN)]
 
 
 def test_parallel_grade_still_refuses_an_unparsable_source() -> None:
