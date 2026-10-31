@@ -99,6 +99,17 @@ def test_heads_fixing_different_files_merge_without_a_baseline_edit_and_growth_s
     )
 
 
+def test_an_entry_kept_for_a_deleted_file_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _tree(tmp_path / "base", {"hooks/gone.py": ILL_TYPED}, {"hooks/gone.py": 2})
+    head = _tree(tmp_path / "head", {}, {"hooks/gone.py": 2})
+    assert _grade(base, head, capsys) == (
+        1,
+        "0 type errors in 0 files, 0 allowed, 1 errors\n"
+        f"::error::{type_gate.BASELINE} records 2 type errors in hooks/gone.py, the head has 0; "
+        "run python -m scripts.type_gate --write\n",
+    )
+
+
 def test_a_regenerated_baseline_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 1})
     head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 1})
