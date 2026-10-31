@@ -47,6 +47,7 @@ def _ranked(value) -> bool:
 RESULT = {"test": _text, "outcome": _known, "pid": _pid}
 FLAKE = {"test": _text, "outcome": _ranked}
 INPUT = {"test": _text, "files": _texts, "escapes": _flag}
+MODULE = {"module": _text, "files": _texts, "escapes": _flag}
 
 
 def _row(line: str, fields: dict) -> dict | None:
@@ -147,10 +148,11 @@ def record(args: argparse.Namespace) -> tuple[dict, str]:
     results, readable = _rows(sorted(args.results.glob("*.jsonl")), RESULT)
     flakes, flakes_readable = _rows([args.flakes], FLAKE)
     outcomes, pids = _outcomes(results + flakes)
-    inputs = _rows(sorted(args.inputs.rglob("*.jsonl")), INPUT)[0]
+    reports = sorted(args.inputs.rglob("*.jsonl"))
+    inputs, modules = _rows(reports, INPUT)[0], _rows(reports, MODULE)[0]
     with tempfile.TemporaryDirectory() as scratch:
         coverage, surviving, state = _coverage(args.coverage_dir, Path(scratch))
-        manifest = _manifest(coverage, inputs, args, Path(scratch))
+        manifest = _manifest(coverage, inputs + modules, args, Path(scratch))
     provable = manifest is not None and readable and flakes_readable
     measured = {dep_manifest.node(row["test"]) for row in inputs} if provable else set()
     candidates = sorted(test for test, outcome in outcomes.items() if outcome == "passed")

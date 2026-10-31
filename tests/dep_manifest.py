@@ -23,6 +23,7 @@ MODULE = "<module>"
 MEASURED = ("hooks/", "scripts/")
 GLOBAL_FILES = {"pyproject.toml", "uv.lock"}
 GLOBAL_PREFIXES = (".github/", ".test_durations")
+DYNAMIC = {"import_module", "__import__", "spec_from_file_location"}
 
 
 def _spans(tree: ast.AST) -> list[tuple[int, int, int, str]]:
@@ -114,6 +115,105 @@ def _executed(coverage_file: Path, root: Path) -> tuple[dict[str, set[str]], dic
     }
 
 
+def _module_file(root: Path, name: str) -> str | None:
+    found = root.joinpath(*name.split("."))
+    for candidate in (found.with_suffix(".py"), found / "__init__.py"):
+        if candidate.is_file():
+            return candidate.relative_to(root).as_posix()
+    return None
+
+
+def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], list[int | None]]:
+    """The repository modules a file imports and its calls that import by name.
+
+    Each carries the line of its statement inside a function, or None at module level where it runs on import.
+    A file that cannot be parsed reports a module level call so its importers escape.
+    """
+    try:
+        tree = ast.parse((root / path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [], []
+    except (OSError, SyntaxError, ValueError):
+        return [], [None]
+    package = Path(path).parent.parts
+    edges, dynamic = [], []
+    pending = [(tree, False, None)]
+    while pending:
+        node, inside, statement = pending.pop()
+        if isinstance(node, ast.stmt):
+            statement = node.lineno
+        line = statement if inside else None
+        names = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            base = package[: len(package) - node.level + 1] if node.level else ()
+            module = ".".join([*base, *([node.module] if node.module else [])])
+            names = [module, *(f"{module}.{alias.name}" for alias in node.names)]
+        elif isinstance(node, ast.Call):
+            called = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if called in DYNAMIC:
+                dynamic.append(line)
+        for name in filter(None, names):
+            target = _module_file(root, name)
+            if target and target != path:
+                edges.append((target, line))
+        nested = inside or isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)
+        pending.extend((child, nested, statement) for child in ast.iter_child_nodes(node))
+    return edges, dynamic
+
+
+def _packages(root: Path, path: str) -> list[str]:
+    parts = path.split("/")[:-1]
+    found = ["/".join([*parts[:end], "__init__.py"]) for end in range(1, len(parts) + 1)]
+    return [package for package in found if package != path and (root / package).is_file()]
+
+
+def attribute(tests: dict, modules: dict, root: Path, lines: dict) -> None:
+    """Give each test the collection reads and escapes of every repository module it reaches.
+
+    A test reaches its test module, every measured file it executed, the packages holding each, and every module
+    those import at module level or through a function level import line the test executed. Files outside the
+    measured trees are not traced, so all their imports count. A call that imports by name on a counted line
+    makes the test escape, since the module it loads is unknown.
+    """
+    graphs, reached = {}, {}
+
+    def graph(path: str) -> tuple[list[tuple[str, int | None]], list[int | None], list[str]]:
+        if path not in graphs:
+            graphs[path] = (*module_graph(root, path), _packages(root, path))
+        return graphs[path]
+
+    for test, found in tests.items():
+        ran = lines.get(test, {})
+        start = frozenset({test.split("::", 1)[0], *ran})
+        taken = set()
+        for path, numbers in ran.items():
+            edges, dynamic, _ = graph(path)
+            wanted = {line for _, line in edges if line is not None} | {line for line in dynamic if line is not None}
+            taken.update((path, line) for line in wanted.intersection(numbers))
+        key = start, frozenset(taken)
+        if key not in reached:
+            seen, pending, escapes = set(start), list(start), False
+            while pending:
+                path = pending.pop()
+                edges, dynamic, packages = graph(path)
+                counted = not path.startswith(MEASURED)
+                escapes = escapes or any(line is None or counted or (path, line) in taken for line in dynamic)
+                follow = [target for target, line in edges if line is None or counted or (path, line) in taken]
+                for target in [*packages, *follow]:
+                    if target not in seen:
+                        seen.add(target)
+                        pending.append(target)
+            reads = set().union(*(modules[path]["files"] for path in seen if path in modules))
+            escapes = escapes or any(modules[path]["escapes"] for path in seen if path in modules)
+            reached[key] = reads, escapes
+        reads, escapes = reached[key]
+        if not reads.issubset(found["files"]):
+            found["files"] = sorted(reads.union(found["files"]))
+        found["escapes"] = found["escapes"] or escapes
+
+
 def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, environment: str) -> dict:
     executed, lines = _executed(coverage_file, root)
     units = sorted(set().union(*executed.values()))
@@ -122,12 +222,19 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
         test: {"units": sorted(index[name] for name in found), "files": [], "escapes": False}
         for test, found in executed.items()
     }
+    modules = {}
     for report in inputs:
         for line in filter(str.strip, report.read_text().splitlines()):
             seen = json.loads(line)
+            if "module" in seen:
+                module = modules.setdefault(seen["module"], {"files": set(), "escapes": False})
+                module["files"].update(seen["files"])
+                module["escapes"] = module["escapes"] or seen["escapes"]
+                continue
             test = tests.setdefault(seen["test"], {"units": [], "files": [], "escapes": False})
             test["files"] = sorted(set(test["files"]) | set(seen["files"]))
             test["escapes"] = test["escapes"] or seen["escapes"]
+    attribute(tests, modules, root, lines)
     return {
         "version": 2,
         "commit": commit,

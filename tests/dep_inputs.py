@@ -38,8 +38,6 @@ class DepInputs:
         self.shared_files = {}
         self.collecting = None
         self.loose = set()
-        self.parsed = {}
-        self.closures = {}
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -106,6 +104,10 @@ class DepInputs:
                 if self.collecting:
                     self.loose.add(opened)
         elif event in ESCAPES and test is not self.shared:
+            owner = self.importing(sys._getframe(1)) if self.collecting else None
+            if owner is not None:
+                self.collections.setdefault(owner, [set(), False])[1] = True
+                return
             test[1] = True
             self.escaping.update(self.setting_up)
 
@@ -116,7 +118,6 @@ class DepInputs:
             return
         previous = self.current
         collected = self.collections.setdefault(collector.nodeid, [set(), False])
-        imported = set(sys.modules)
         self.current = collected
         self.collecting, self.loose = str(collector.path), set()
         try:
@@ -125,62 +126,18 @@ class DepInputs:
             previous[0].update(path for path in self.loose if not path.startswith(self.root + ".github/workflows/"))
             self.collecting = None
             self.current = previous
-            for name in set(sys.modules) - imported:
-                filename = getattr(sys.modules[name], "__file__", "") or ""
-                if filename.startswith(self.root) and filename.endswith(".py"):
-                    found = self.collections.setdefault(filename[len(self.root) :], [set(), False])
-                    found[1] = found[1] or collected[1]
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
-        imports = {}
-        for path in self.collections:
-            imports[path], dynamic = self.module_imports(path)
-            self.collections[path][1] = self.collections[path][1] or dynamic
-        for _ in self.collections:
-            before = sum(len(found[0]) + found[1] for found in self.collections.values())
-            for path, names in imports.items():
-                found = self.collections[path]
-                for name in names & self.collections.keys():
-                    dependency = self.collections[name]
-                    found[0].update(dependency[0])
-                    found[1] = found[1] or dependency[1]
-            if before == sum(len(found[0]) + found[1] for found in self.collections.values()):
-                break
+        self.finished.parent.mkdir(parents=True, exist_ok=True)
+        with self.finished.open("a") as finished:
+            finished.writelines(line + "\n" for line in self.module_lines())
 
-    def module_imports(self, path: str) -> tuple[set[str], bool]:
-        """Repository files a module's imports and parent packages load now, and whether it imports by name."""
-        if path not in self.parsed:
-            from scripts.ci_mutation.scope import imported_names
-
-            text = (Path(self.root) / path).read_text()
-            names = imported_names(text, Path(path).parent.parts)
-            dynamic = "__import__" in text or any(
-                name == "importlib" or name.startswith("importlib.") for name in names
-            )
-            parts = [name.split(".") for name in names]
-            self.parsed[path] = {".".join(part[:end]) for part in parts for end in range(1, len(part) + 1)}, dynamic
-        names, dynamic = self.parsed[path]
-        filenames = {getattr(sys.modules.get(name), "__file__", "") or "" for name in names}
-        found = {name[len(self.root) :] for name in filenames if name.startswith(self.root)}
-        return {name for name in found if not name.startswith(SKIPPED)}, dynamic
-
-    def closure(self, path: str) -> tuple[set[str], bool]:
-        """The collection reads of a module and of every repository module it reaches through the modules loaded now."""
-        loaded = len(sys.modules), next(reversed(sys.modules), None)
-        cached = self.closures.get(path)
-        if cached and cached[0] == loaded:
-            return cached[1]
-        reads, escapes, pending, seen = set(), False, [path], {path}
-        while pending:
-            current = pending.pop()
-            found = self.collections.get(current, [set(), False])
-            reads.update(found[0])
-            names, dynamic = self.module_imports(current) if (Path(self.root) / current).is_file() else (set(), False)
-            escapes = escapes or found[1] or dynamic
-            pending.extend(names - seen)
-            seen.update(names)
-        self.closures[path] = loaded, (reads, escapes)
-        return reads, escapes
+    def module_lines(self) -> list[str]:
+        """One line per repository module with the files its collection read and whether it started a process."""
+        return [
+            json.dumps({"module": path, "files": self.relative(found[0]), "escapes": found[1]})
+            for path, found in sorted(self.collections.items())
+        ]
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_fixture_setup(self, fixturedef, request):
@@ -203,9 +160,6 @@ class DepInputs:
             yield
         finally:
             self.register(self.children / f"{os.getpid()}-shared")
-            reads, escapes = self.closure(item.nodeid.split("::", 1)[0])
-            self.current[0].update(reads)
-            self.current[1] = self.current[1] or escapes
             self.current = self.shared
             self.finish(item.nodeid)
 
@@ -254,7 +208,7 @@ class DepInputs:
         shared = set(self.relative(self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")))
         for test, log in self.logs.items():
             self.tests[test][0].update(self.child_reads(log))
-        lines = [self.line(test, shared) for test in self.tests]
+        lines = [self.line(test, shared) for test in self.tests] + self.module_lines()
         (self.folder / f"{uuid.uuid4().hex}.jsonl").write_text("".join(line + "\n" for line in lines))
 
 
