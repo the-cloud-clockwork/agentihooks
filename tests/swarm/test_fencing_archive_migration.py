@@ -3,9 +3,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 @pytest.fixture
 def store() -> Any:
     import fakeredis
