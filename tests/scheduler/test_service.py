@@ -8,9 +8,13 @@ import sys
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
 import pytest
+
+if TYPE_CHECKING:
+    from scripts.scheduler.core import Scheduler
 
 pytestmark = pytest.mark.unit
 
@@ -147,7 +151,7 @@ async def test_runner_keeps_dispatching_after_a_pass_without_the_dispatch_lock(m
             raise getattr(lease, lost)("the lock moved")
         stop.set()
 
-    await service.run(SimpleNamespace(run_due=drain), stop)
+    await service.run(cast("Scheduler", SimpleNamespace(run_due=drain)), stop)
     assert passes == [1, 1]
     assert capsys.readouterr().err == "scheduler pass ended: the lock moved\n"
 

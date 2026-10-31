@@ -1,5 +1,6 @@
 import json
 from threading import Event
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -41,7 +42,7 @@ def test_dispatch_lease_renews_until_stopped_and_joins_before_release(monkeypatc
     def counted(store, held, **kwargs):
         renewed.append(held.token)
         if lose_ownership:
-            raise RuntimeError("scheduler lost its dispatch lock")
+            raise lease.LostLock("scheduler lost its dispatch lock")
         renew(store, held, **kwargs)
 
     monkeypatch.setattr(lease, "Event", lambda: stopped)
@@ -63,7 +64,7 @@ def test_renewal_extends_the_expiry_and_a_stale_lease_cannot_renew(state):
     lease.renew(state, held, now=120.0)
     lease.verify_lease(state, held, now=100.0 + lease.LEASE_SECONDS + 5)
     with pytest.raises(RuntimeError, match="^scheduler lost its dispatch lock$"):
-        lease.renew(state, held, now=200.0)
+        lease.renew(state, held, now=120.0 + lease.LEASE_SECONDS)
 
 
 def test_a_conflicted_renewal_renews_again_on_the_next_beat(monkeypatch, state):
@@ -103,7 +104,7 @@ def test_a_renewal_stamps_its_expiry_at_the_attempt_that_writes(monkeypatch, sta
 
     held = lease.acquire(state, "proof.lock", now=100.0)
     clock = iter([110.0, 125.0])
-    monkeypatch.setattr(lease.time, "time", lambda: next(clock))
+    monkeypatch.setattr(lease, "time", SimpleNamespace(time=lambda: next(clock)))
     update, raced = state.update, []
 
     def conflicted_once(key, value, revision):
@@ -114,7 +115,10 @@ def test_a_renewal_stamps_its_expiry_at_the_attempt_that_writes(monkeypatch, sta
 
     monkeypatch.setattr(state, "update", conflicted_once)
     lease.renew(state, held)
-    assert json.loads(state.get("proof.lock").value)["lease"] == {"token": held.token, "expires": 155.0}
+    assert json.loads(state.get("proof.lock").value)["lease"] == {
+        "token": held.token,
+        "expires": 125.0 + lease.LEASE_SECONDS,
+    }
 
 
 def test_a_lost_lock_and_a_busy_lock_name_their_own_errors(state):
@@ -167,6 +171,23 @@ def test_fenced_dispatch_accepts_both_redis_response_encodings(monkeypatch, deco
     assert timer.state == "fired"
 
 
+def test_an_idle_pass_takes_no_dispatch_lease_and_writes_nothing(monkeypatch, state):
+    from scripts.scheduler import lease
+    from scripts.scheduler.core import Scheduler
+
+    monkeypatch.setattr(lease, "Thread", Mock())
+    scheduler = Scheduler(state, machine="proof")
+    scheduler.timer(owner="operator", payload="never started", delay=1, now=0)
+    later = scheduler.timer(owner="operator", payload="later", delay=60, now=0)
+    later.start(now=0)
+    before = state.get(scheduler.name("entries"))
+    assert scheduler.run_due(now=30) == 0
+    assert state.get(scheduler.name("entries")) == before
+    assert scheduler.run_due(now=60) == 1
+    assert later.state == "fired"
+    assert "lease" not in scheduler.document()
+
+
 @pytest.mark.parametrize("stored", [None, {"token": "successor", "expires": 10**12}, {"token": "owner", "expires": 0}])
 def test_lease_verification_rejects_absent_changed_or_expired_ownership(state, stored):
     from scripts.scheduler import lease
@@ -183,7 +204,7 @@ def test_a_lease_is_written_with_sorted_keys(state, monkeypatch):
     monkeypatch.setattr(lease.uuid, "uuid4", lambda: Mock(hex="owner"))
     state.create("proof.lock", b'{"z": 1}')
     lease.acquire(state, "proof.lock", now=100.0)
-    assert state.get("proof.lock").value == b'{"lease": {"expires": 130.0, "token": "owner"}, "z": 1}'
+    assert state.get("proof.lock").value == b'{"lease": {"expires": 190.0, "token": "owner"}, "z": 1}'
 
 
 def test_a_lease_is_lost_at_its_exact_expiry(state):

@@ -7,35 +7,6 @@ from .bus import StateConflict, StateEntry
 
 HISTORY = 64
 WRITE_TRIES = 16
-_WRITE = """
-local found = redis.call('HGET', KEYS[1], ARGV[1])
-local stored = ''
-if found then
-  stored = string.match(found, '"revision":%s*(%d+)') or '?'
-end
-if stored ~= ARGV[2] then
-  return -1
-end
-local published = redis.call('GET', KEYS[3])
-local consistent = redis.call('GET', KEYS[2]) == published
-local written = redis.call('INCR', KEYS[2])
-local row = '{"revision": ' .. written .. ', "value": "' .. ARGV[3] .. '"}'
-if ARGV[4] == '1' or published then
-  if not consistent then
-    redis.call('DEL', KEYS[4])
-  end
-  if ARGV[4] == '1' then
-    redis.call('HSET', KEYS[4], ARGV[1], '{"revision": ' .. written .. ', "value": "' .. ARGV[5] .. '"}')
-  else
-    redis.call('HDEL', KEYS[4], ARGV[1])
-  end
-  redis.call('SET', KEYS[3], written)
-end
-redis.call('HSET', KEYS[1], ARGV[1], row)
-redis.call('RPUSH', KEYS[5], row)
-redis.call('LTRIM', KEYS[5], -tonumber(ARGV[6]), -1)
-return written
-"""
 
 
 def _prefix() -> str:
@@ -102,27 +73,42 @@ class RedisStateStore:
         return self._write(key, value, revision, f"state key {key!r} is not at revision {revision}")
 
     def _write(self, key: str, value: bytes, revision: int | None, conflict: str) -> int:
-        """Compare the key's own revision and write it in one script, so writes to other keys never conflict."""
-        written = int(
-            self.redis.eval(
-                _WRITE,
-                5,
-                self._current,
-                self._revision,
-                self._published,
-                self._projected,
-                self._history + key,
-                key,
-                "" if revision is None else str(revision),
-                base64.b64encode(value).decode(),
-                "0" if self.projection is None else "1",
-                "" if self.projection is None else base64.b64encode(self.projection(value)).decode(),
-                HISTORY,
-            )
-        )
-        if written < 0:
-            raise StateConflict(conflict)
-        return written
+        from redis.exceptions import WatchError
+
+        for _ in range(WRITE_TRIES):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(self._current, self._revision)
+                    found = pipe.hget(self._current, key)
+                    if (None if found is None else json.loads(found)["revision"]) != revision:
+                        raise StateConflict(conflict)
+                    published = pipe.get(self._published)
+                    current = pipe.get(self._revision)
+                    consistent = current == published
+                    written = int(current or 0) + 1
+                    row = json.dumps({"revision": written, "value": base64.b64encode(value).decode()})
+                    pipe.multi()
+                    pipe.incr(self._revision)
+                    if self.projection is not None or published is not None:
+                        self._project(pipe, key, value, written, consistent)
+                    pipe.hset(self._current, key, row)
+                    pipe.rpush(self._history + key, row)
+                    pipe.ltrim(self._history + key, -HISTORY, -1)
+                    pipe.execute()
+                    return written
+                except WatchError:
+                    continue
+        raise StateConflict(f"state key {key!r} kept changing")
+
+    def _project(self, pipe: Any, key: str, value: bytes, revision: int, consistent: bool) -> None:
+        if not consistent:
+            pipe.delete(self._projected)
+        if self.projection is None:
+            pipe.hdel(self._projected, key)
+        else:
+            row = json.dumps({"revision": revision, "value": base64.b64encode(self.projection(value)).decode()})
+            pipe.hset(self._projected, key, row)
+        pipe.set(self._published, revision)
 
     def watch(self, key: str, from_revision: int = 0) -> Iterator[StateEntry]:
         for raw in self.redis.lrange(self._history + key, 0, -1):

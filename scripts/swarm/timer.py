@@ -24,6 +24,7 @@ DRAIN_S = 30
 KILL_WAIT_S = 10
 STOP_TIMEOUT_S = 120
 CGROUP_FILE = Path("/proc/self/cgroup")
+LOCKS_FILE = Path("/proc/locks")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
@@ -275,15 +276,19 @@ def recycle() -> None:
 
 
 def _ticking(env: dict[str, str]) -> bool:
-    """True while a swarm tick pass holds the machine tick lock of the scheduler's domain."""
-    from scripts.scheduler.service import AlreadyRunning, machine_lock
+    """True while a swarm tick pass holds the tick lock, read from the kernel lock table so the probe never takes it."""
+    import re
+
+    from scripts.scheduler.service import runtime_dir
     from scripts.swarm.scheduled_tick import LOCK
 
     try:
-        with machine_lock(LOCK, environ=env):
-            return False
-    except AlreadyRunning:
-        return True
+        inode = (runtime_dir(env) / f"{LOCK}.lock").stat().st_ino
+        table = LOCKS_FILE.read_text()
+    except OSError:
+        return False
+    held = re.findall(r"FLOCK\s+\S+\s+\S+\s+\d+\s+[0-9a-f]+:[0-9a-f]+:(\d+)\s", table)
+    return str(inode) in held
 
 
 def _proven():

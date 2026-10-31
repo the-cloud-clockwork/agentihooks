@@ -1,5 +1,6 @@
 import json
 import math
+import sys
 import time
 import uuid
 from collections.abc import Iterator
@@ -9,7 +10,7 @@ from threading import Event, Thread
 
 from scripts.events.bus import StateConflict, StateStore
 
-LEASE_SECONDS = 30
+LEASE_SECONDS = 90
 RENEW_SECONDS = 10
 WAIT_POLL_S = 0.1
 WRITE_TRIES = 64
@@ -114,8 +115,8 @@ def _renew(state: StateStore, lease: Lease, stopped: Event) -> None:
             renew(state, lease)
         except LostLock:
             return
-        except backends.unavailable():
-            continue
+        except backends.unavailable() as exc:
+            print(f"scheduler lease renewal retries next beat: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 @contextmanager
