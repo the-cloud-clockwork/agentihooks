@@ -2,6 +2,7 @@
 
 import threading
 import types
+from typing import Any, cast
 
 import pytest
 
@@ -37,19 +38,19 @@ class _Unsettled:
 
 
 def _firsts(rounds: int) -> cli._Firsts:
-    firsts = cli._Firsts(1)
+    firsts = cast(Any, cli._Firsts(1))
     firsts.settled = _Unsettled(rounds)
     firsts.lock = threading.Lock()
-    return firsts
+    return cast(cli._Firsts, firsts)
 
 
 def test_no_extra_pass_starts_when_the_longest_pass_would_end_past_the_cutoff(monkeypatch: pytest.MonkeyPatch) -> None:
     starts = _clocked(monkeypatch, 120.0)
-    cli._tick_while_others_run(None, "sw", _firsts(5), 200.0)
+    cli._tick_while_others_run(cast(Any, None), "sw", _firsts(5), 200.0)
     assert starts == [0.0]
 
 
 def test_extra_passes_run_while_the_longest_pass_still_ends_by_the_cutoff(monkeypatch: pytest.MonkeyPatch) -> None:
     starts = _clocked(monkeypatch, 100.0)
-    cli._tick_while_others_run(None, "sw", _firsts(5), 400.0)
+    cli._tick_while_others_run(cast(Any, None), "sw", _firsts(5), 400.0)
     assert starts == [0.0, 100.0, 200.0, 300.0]
