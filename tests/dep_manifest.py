@@ -23,7 +23,7 @@ MODULE = "<module>"
 MEASURED = ("hooks/", "scripts/")
 GLOBAL_FILES = {"pyproject.toml", "uv.lock"}
 GLOBAL_PREFIXES = (".github/", ".test_durations")
-DYNAMIC = {"import_module", "__import__"}
+DYNAMIC = {"import_module", "__import__", "spec_from_file_location", "module_from_spec", "run_module", "run_path"}
 
 
 def _spans(tree: ast.AST) -> list[tuple[int, int, int, str]]:
@@ -140,7 +140,7 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
     by_name = DYNAMIC | {
         alias.asname
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util")
+        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util", "builtins", "runpy")
         for alias in node.names
         if alias.name in DYNAMIC and alias.asname
     }

@@ -507,6 +507,8 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_collected.py": "from scripts.lazy import serve\nPAGE = serve()\n",
         "scripts/aliased.py": "from importlib import import_module as load\ndef get(name):\n    return load(name)\n",
         "tests/test_aliased.py": "from scripts.aliased import get\n",
+        "scripts/bypath.py": "import importlib.util\ndef load(path):\n    return importlib.util.spec_from_file_location('x', path)\n",
+        "tests/test_bypath.py": "from scripts.bypath import load\n",
         "tests/test_flat.py": "import flat_helper\n",
         "tests/flat_helper.py": "import flat_data\n",
         "tests/flat_data.py": "DATA = open('flat.txt').read()\n",
@@ -519,6 +521,7 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_lazy.py::test_served": {"scripts/lazy.py": [1, 2, 3]},
         "tests/test_plugins.py::test_loaded": {"scripts/plugins.py": [3]},
         "tests/test_aliased.py::test_aliased": {"scripts/aliased.py": [3]},
+        "tests/test_bypath.py::test_bypath": {"scripts/bypath.py": [3]},
     }
     names = [
         "tests/test_eager.py::test_eager",
@@ -547,6 +550,7 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_defaults.py::test_defaults": ([], True),
         "tests/test_collected.py::test_collected": (["page.js"], False),
         "tests/test_aliased.py::test_aliased": ([], True),
+        "tests/test_bypath.py::test_bypath": ([], True),
         "tests/test_flat.py::test_flat": (["flat.txt"], False),
     }
 

@@ -50,14 +50,16 @@ INPUT = {"test": _text, "files": _texts, "escapes": _flag}
 MODULE = {"module": _text, "files": _texts, "escapes": _flag}
 
 
+def _matches(row: object, fields: dict) -> bool:
+    return isinstance(row, dict) and all(check(row.get(key)) for key, check in fields.items())
+
+
 def _row(line: str, fields: dict) -> dict | None:
     try:
         row = json.loads(line)
     except ValueError:
         return None
-    if isinstance(row, dict) and all(check(row.get(key)) for key, check in fields.items()):
-        return row
-    return None
+    return row if _matches(row, fields) else None
 
 
 def _rows(paths: list[Path], fields: dict) -> tuple[list[dict], bool]:
@@ -149,8 +151,8 @@ def record(args: argparse.Namespace) -> tuple[dict, str]:
     flakes, flakes_readable = _rows([args.flakes], FLAKE)
     outcomes, pids = _outcomes(results + flakes)
     rows = _rows(sorted(args.inputs.rglob("*.jsonl")), {"files": _texts, "escapes": _flag})[0]
-    inputs = [row for row in rows if all(check(row.get(key)) for key, check in INPUT.items())]
-    modules = [row for row in rows if all(check(row.get(key)) for key, check in MODULE.items())]
+    inputs = [row for row in rows if _matches(row, INPUT)]
+    modules = [row for row in rows if _matches(row, MODULE)]
     with tempfile.TemporaryDirectory() as scratch:
         coverage, surviving, state = _coverage(args.coverage_dir, Path(scratch))
         manifest = _manifest(coverage, inputs + modules, args, Path(scratch))
