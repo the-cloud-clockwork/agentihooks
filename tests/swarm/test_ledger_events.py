@@ -561,6 +561,17 @@ def test_red_checks_for_a_live_owner_only_send_the_notice(store, monkeypatch):
     assert len(texts(store, ENG_SEAT)) == 1
 
 
+def test_a_reopen_for_red_checks_with_no_named_failure_says_red_checks(store, monkeypatch):
+    from scripts.swarm import ready
+
+    ledger = ReopenLedger()
+    _owner_left(store, monkeypatch)
+    task = in_pr()["tasks"][0]
+    assert ready.reopen_red(store, "sw", ledger, task, (), 100_000) == [f"task t1 reopened, {URL} has red checks"]
+    ((_, _, text, _),) = ledger.comments
+    assert text.startswith(f"Reopened by the swarm: its pull request {URL} has red checks. ")
+
+
 def _notices():
     red, closed, merged = answer("open_red"), answer("closed_unmerged"), answer("merged")
     url = "https://github.com/o/r/pull/9"

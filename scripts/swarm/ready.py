@@ -432,6 +432,13 @@ def _reopen(run, row, found, what):
     return [f"task {task_id} reopened, {url} {what}"]
 
 
+def reopen_red(store: RedisStore, slug: str, ledger: object, task: dict, failed: tuple[str, ...], now_ms: int) -> list[str]:
+    """Reopen a task in pull request whose red checks have no live owner to fix them, keeping its handoff."""
+    run = Pass(store, slug, ledger, github=lambda url: None, reread=lambda url: None, now_ms=now_ms)
+    found = {"url": task["pr_url"], "agent": task.get("claimed_by")}
+    return _reopen(run, task, found, f"has red checks: {', '.join(failed)}" if failed else "has red checks")
+
+
 def _release(run, row, found, wait):
     task_id = row["id"]
     owners = _owners(run, task_id)
