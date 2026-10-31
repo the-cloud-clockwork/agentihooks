@@ -36,14 +36,14 @@ def seat_path(session_id: str) -> Path:
     return home / "master_seats" / (re.sub(r"[^A-Za-z0-9_.@-]", "_", session_id) + ".json")
 
 
-def seat(session_id: str | None) -> dict:
+def seat(session_id: str | None) -> dict[str, object]:
     if not session_id:
         return {}
     try:
         data = json.loads(seat_path(session_id).read_text())
     except (OSError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
+    return cast(dict[str, object], data) if isinstance(data, dict) else {}
 
 
 def record_seat(session_id: str, slug: str, name: str) -> None:

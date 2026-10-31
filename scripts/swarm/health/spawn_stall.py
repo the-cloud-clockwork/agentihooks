@@ -2,6 +2,7 @@ import json
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from scripts.hive import admission, placement_waits
 from scripts.hive.placement import LOCAL_FULL
@@ -10,6 +11,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import blockers, capacity, freeze, panic, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerGone
+from scripts.swarm.store import RedisStore
 
 STALL_MS = 600_000
 REF = "spawn-stall:"
@@ -168,7 +170,7 @@ def deliver(store, slug: str, ledger, at: int) -> None:
 
 
 @contextmanager
-def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterator[None]:
+def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], runtime: Any) -> Iterator[None]:
     previous = None
 
     def failed(step, error):

@@ -6,6 +6,7 @@ import sys
 import time
 from collections.abc import Callable
 from threading import Lock, Thread
+from typing import Any
 
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import blockers, panic, sd_notify, tick_heartbeat, timing
@@ -89,7 +90,7 @@ class Repair:
         return actions + self.respawn(slug)
 
 
-def _alert(store, slug, now, episode, evidence) -> list[str]:
+def _alert(store: RedisStore, slug: str, now: int, episode: dict[str, Any] | None, evidence: list[str]) -> list[str]:
     episode = episode or {"since": now, "told": []}
     fresh = [address for address in recipients(store, slug) if address not in episode["told"]]
     text = ALERT.format(slug=slug, evidence="; ".join(evidence))

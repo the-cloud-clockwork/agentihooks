@@ -44,7 +44,7 @@ _WORKTREES = Path.home() / "dev" / "worktrees"
 
 
 def _slug(session_id: str) -> str:
-    return str(cast(dict[str, Any], master_coding.seat(session_id)).get("slug", ""))
+    return str(master_coding.seat(session_id).get("slug", ""))
 
 
 def _store() -> "RedisStore | None":
