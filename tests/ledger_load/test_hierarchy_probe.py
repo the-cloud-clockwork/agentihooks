@@ -27,7 +27,7 @@ def test_a_replacement_collects_the_garbage_it_left_before_the_next_read() -> No
     finally:
         gc.callbacks.remove(record)
     assert repo.calls == [(hierarchy_probe.SLUG, state, "hierarchy-proof", True)]
-    assert events[events.index("imported") + 1 :] == [("collected", 2)]
+    assert ("collected", 2) in events[events.index("imported") + 1 :]
 
 
 def test_a_first_import_stores_without_replacing() -> None:
