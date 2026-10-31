@@ -12,6 +12,8 @@ from scripts.ci_mutation.stats import SharedStats
 def test_units(source: bytes | None) -> dict[str, str]:
     """Map each collectable test function in a test module to the text of its syntax tree."""
     found = {}
+    if source is None:
+        return found
 
     def visit(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
@@ -20,7 +22,7 @@ def test_units(source: bytes | None) -> dict[str, str]:
             elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) and child.name.startswith("test"):
                 found[prefix + child.name] = ast.dump(child)
 
-    visit(ast.parse(source or b""), "")
+    visit(ast.parse(source), "")
     return found
 
 
@@ -64,7 +66,7 @@ def main() -> int:
     changes = discover_changes(root, bases, args.head)
     print(f"Changed Python files: {len(changes)}", flush=True)
     first = branch_tests(root, bases[0] if isinstance(bases, list) else bases, args.head) if changes else ()
-    print(f"Tests new or changed on the branch, run first: {len(first)}", flush=True)
+    print(f"Tests new or changed on the branch, run first: {len(first)}")
     stats = None
     if args.stats:
         head = subprocess.run(["git", "rev-parse", args.head], cwd=root, capture_output=True, text=True, check=True)

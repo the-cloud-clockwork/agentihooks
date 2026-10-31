@@ -583,8 +583,14 @@ def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_prefli
     ]
     answers = {
         f"{EXACT}{head}&branch=a%26b": {
-            "workflow_runs": [_run(9, head, "failure"), _run(8, head, "failure"), _run(7, head)]
+            "workflow_runs": [
+                _run(99, head, "failure"),
+                _run(9, head, "failure"),
+                _run(8, head, "failure"),
+                _run(7, head),
+            ]
         },
+        "actions/runs/99/artifacts?per_page=100": {"artifacts": artifacts},
         "actions/runs/9/artifacts?per_page=100": {
             "artifacts": [{"id": 90, "name": "mutation-killers-0", "expired": True}]
         },
@@ -596,6 +602,7 @@ def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_prefli
     }
 
     def api(path, binary=False):
+        assert binary is path.endswith("/zip")
         calls.append(path)
         return answers[path]
 
@@ -604,9 +611,11 @@ def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_prefli
     output.write_text("")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", head, "--base", base, "--grader", base])
+    folder = root / ".mutation-killers-restored/killers"
+    folder.mkdir(parents=True)
     assert reuse.main() == 0
     assert output.read_text() == "reused=false\n"
-    folder = root / ".mutation-killers-restored/killers"
+    assert "actions/runs/99/artifacts?per_page=100" not in calls
     assert {path.name: path.read_text() for path in folder.iterdir()} == {
         first: "tests/test_a.py::test_one",
         second: "tests/test_b.py::test_two",
