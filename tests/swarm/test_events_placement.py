@@ -208,7 +208,9 @@ def test_a_lane_spoke_skips_an_offer_pinned_to_another_hive_without_asking_the_h
 
 
 def test_lane_spokes_bind_fit_to_their_store_and_hive(monkeypatch: pytest.MonkeyPatch) -> None:
-    configs = SimpleNamespace(slugs=lambda: [SLUG], config=lambda slug: SwarmConfig(slug, "/repo", 1, 1))
+    configs = SimpleNamespace(
+        slugs=lambda: [SLUG], config=lambda slug: SwarmConfig(slug, "/repo", 1, 1, engine="events")
+    )
     expected = Mock()
     fit = Mock(return_value=expected)
     monkeypatch.setattr(lanes, "fit", fit)
