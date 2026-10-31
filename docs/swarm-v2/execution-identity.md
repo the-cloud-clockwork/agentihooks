@@ -62,8 +62,8 @@ The tests in `tests/swarm/test_execution_concurrency.py` cover this behavior. Th
 
 Each swarm's fencing document holds its current executions in `executions` and its superseded attempts in
 `archive`. `ExecutionRegistry.archive` moves a superseded attempt there once its name has left the swarm's agent list;
-only a pane update for that exact attempt moves it back. The archive grows with the swarm's history: the profile taken
-for pull request 9002 found nearly twenty megabytes of archived executions in the watched swarm's document. Hive
+only a pane update for that exact attempt moves it back. The archive grows with the swarm's history: the description of
+[pull request 9002](https://github.com/the-cloud-clockwork/agentihooks/pull/9002) reports nearly twenty megabytes of archived executions in the watched swarm's document. Hive
 routing and roster reads used to load the whole document, archive included, on every call. A controller that is not a
 hive member makes such a call for each agent it checks while hives are joined, so tick passes ran until they were
 stopped at their 450 second deadline and sent no alert, nudge, merge or spawn.
@@ -157,8 +157,8 @@ print(len(rows), "passes;", sum(r["outcome"] == "stopped" for r in rows), "stopp
 Add `grep "\"slug\": \"$SLUG\""` before `sed` to read one swarm. The Doctor source task measured these on the
 workstation journal on 30 October 2026, after pull request 8616 and before pull request 9002: the routing reads of one
 twenty minute window took 403 seconds over 272 calls, against 11 seconds over 1746 calls in the 24 minutes before 8616 reached the checkout, and both Doctor
-passes of the following hour stopped at the deadline. A live read only profile of three of these lookups, recorded
-with pull request 9002, took 8.9 seconds, 6.5 of them loading the whole document.
+passes of the following hour stopped at the deadline. A live read only profile of three of these lookups, kept in
+the source task's proof on the Doctor ledger, took 8.9 seconds, 6.5 of them loading the whole document.
 
 ### Tests
 
