@@ -27,6 +27,7 @@ _meter = None
 _log_emitter = None
 _initialized = False
 _gauges: dict[str, Any] = {}
+_counters: dict[str, Any] = {}
 _providers: list = []
 FLUSH_TIMEOUT_SEC = 1.0
 FLUSH_COOLDOWN_SEC = 60
@@ -128,6 +129,14 @@ def _dispatch_op(op: tuple) -> None:
         if name not in _gauges:
             _gauges[name] = _meter.create_gauge(name)
         _gauges[name].set(value, {**_correlation(attrs), **attrs})
+    elif kind == "counter":
+        _, name, value, attrs = op
+        if _meter is None:
+            _count(attrs, "counters", "unsupported")
+            return
+        if name not in _counters:
+            _counters[name] = _meter.create_counter(name)
+        _counters[name].add(value, attrs)
     elif kind == "flush":
         try:
             succeeded = True
@@ -285,6 +294,11 @@ def emit_event(name: str, attributes: dict[str, str] | None = None) -> None:
 def record_gauge(name: str, value: float, attributes: dict[str, str] | None = None) -> None:
     """Enqueue a gauge metric for the worker thread. Always non-blocking."""
     _enqueue("gauges", ("gauge", name, float(value), dict(attributes or {})))
+
+
+def add_counter(name: str, value: float, attributes: dict[str, str] | None = None) -> None:
+    """Enqueue a counter increment for the worker thread. Always non-blocking."""
+    _enqueue("counters", ("counter", name, float(value), dict(attributes or {})))
 
 
 def _count(attrs: dict, signal: str, outcome: str) -> None:

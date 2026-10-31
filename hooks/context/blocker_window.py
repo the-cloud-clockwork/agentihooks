@@ -1,6 +1,7 @@
 """PreToolUse enforcement for sustained swarm blockers: a category stuck for an hour or more opens the master coding
 window automatically, injects a once-a-minute notice naming each sustained category, and denies any tool call that
-is not part of the fix. Never fires for a non-master session; fails open on a store error."""
+is not part of the fix. Fleet panic mode opens the same window and denies every other session's pushes, reruns,
+dispatches and deploys. Fails open on a store error."""
 
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,7 +14,23 @@ if TYPE_CHECKING:
 NOTICE = (
     "BLOCKER QUEUE on swarm {slug}: {categories} sustained for an hour or more. Fix this now: the master coding "
     "window is open; other work stays denied until each category is cleared with "
-    "agentihooks swarm {slug} blockers clear <category>."
+    "agentihooks swarm {slug} blockers clear <category>. Stop everything unnecessary for the fix: "
+    "agentihooks swarm {slug} panic on --fix <pr url> pauses agent starts and cancels every CI run but the fix "
+    "and the merge queue, printing what it cancelled."
+)
+FROZEN = (
+    "BLOCKED: panic mode holds the fleet ({reason}). Pushes, reruns, dispatches and deploys wait until the master's "
+    "fix brings the fleet back to business as usual; agentihooks swarm <slug> panic status shows the level."
+)
+_FROZEN_COMMANDS = (
+    ("git", "push"),
+    ("gh", "run", "rerun"),
+    ("gh", "workflow", "run"),
+    ("kubectl", "apply"),
+    ("kubectl", "rollout"),
+    ("helm", "upgrade"),
+    ("helm", "install"),
+    ("argocd", "app", "sync"),
 )
 BLOCK = (
     "BLOCKED: sustained blockers on swarm {slug} ({categories}) hold the master to the fix: reads, read-only shell, "
@@ -71,7 +88,7 @@ def _allowed_tokens(tokens: list[str], slug: str) -> bool:
     if name != "agentihooks" or len(tokens) < 2:
         return False
     if tokens[1] == "swarm":
-        return len(tokens) >= 4 and tokens[2] == slug and tokens[3] in ("merge", "blockers")
+        return len(tokens) >= 4 and tokens[2] == slug and tokens[3] in ("merge", "blockers", "panic")
     return tokens[1] in ("msg", "ledger")
 
 
@@ -100,8 +117,10 @@ def _now_ms(store: "RedisStore") -> int:
 
 def pretool(tool_name: str, tool_input: dict, session_id: str, cwd: str = "") -> tuple[str | None, str | None]:
     """Returns (notice, block): the notice to inject and the reason to deny this call, either may be None."""
-    if not (session_id and master_coding.is_master(session_id)):
+    if not session_id:
         return None, None
+    if not master_coding.is_master(session_id):
+        return None, _frozen(tool_name, tool_input)
     slug = _slug(session_id)
     if not slug:
         return None, None
@@ -111,7 +130,7 @@ def pretool(tool_name: str, tool_input: dict, session_id: str, cwd: str = "") ->
     from scripts.swarm import blockers
 
     now_ms = _now_ms(store)
-    found = _sustained(store, slug, now_ms)
+    found = {**_sustained(store, slug, now_ms), **_panic_found(store, now_ms)}
     if not found:
         if master_coding.opened_for_blockers(session_id):
             master_coding.close(session_id)
@@ -123,6 +142,39 @@ def pretool(tool_name: str, tool_input: dict, session_id: str, cwd: str = "") ->
     if _allowed(tool_name, tool_input, cwd, slug):
         return notice, None
     return notice, BLOCK.format(slug=slug, categories=categories)
+
+
+def _panic_found(store: "RedisStore", now_ms: int) -> dict:
+    from redis.exceptions import RedisError
+
+    from scripts.swarm import blockers, panic
+
+    try:
+        current = panic.state(store)
+    except RedisError:
+        return {}
+    if current is None:
+        return {}
+    return {"panic": blockers.Blocker("panic", current.since, now_ms, 0, current.reason)}
+
+
+def _freezes(tokens: list[str]) -> bool:
+    words = [Path(tokens[0]).name, *tokens[1:]] if tokens else []
+    return any(words[: len(prefix)] == list(prefix) for prefix in _FROZEN_COMMANDS)
+
+
+def _frozen(tool_name: str, tool_input: dict) -> str | None:
+    if tool_name != "Bash":
+        return None
+    from hooks.context.shell_commands import commands
+
+    if not any(_freezes(tokens) for tokens in commands(str(tool_input.get("command") or ""))):
+        return None
+    store = _store()
+    if store is None:
+        return None
+    found = _panic_found(store, 0)
+    return FROZEN.format(reason=found["panic"].detail) if found else None
 
 
 def checked(payload: dict) -> str | None:
