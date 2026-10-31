@@ -10,9 +10,11 @@ from contextvars import ContextVar
 from functools import wraps
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from scripts.swarm import tick_stop
 
+PASS: ContextVar[dict[str, Any] | None] = ContextVar("tick_pass", default=None)
 STORE: ContextVar[Any] = ContextVar("tick_store", default=None)
 SWARM = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
@@ -57,6 +59,49 @@ def acting(name: str) -> Iterator[None]:
         AGENT.reset(token)
 
 
+def append_record(store: Any, slug: str, stream: str, record: dict[str, Any]) -> None:
+    from redis.exceptions import RedisError
+
+    try:
+        store.redis.xadd(store.key(slug, stream), {"record": json.dumps(record)}, maxlen=50000, approximate=False)
+    except RedisError:
+        emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": stream}))
+
+
+@contextmanager
+def pass_record(store: Any, slug: str) -> Iterator[None]:
+    if store is None:
+        yield
+        return
+    started = time.perf_counter()
+    record = {"pass_id": uuid4().hex, "start_ms": time.time_ns() // 1000000, "failed_steps": [], "outcome": "success"}
+    token = PASS.set(record)
+    try:
+        yield
+    except tick_stop.Stopped:
+        record["outcome"] = "stopped"
+        raise
+    except BaseException:
+        record["outcome"] = "error"
+        raise
+    finally:
+        try:
+            record.update(end_ms=time.time_ns() // 1000000, wall_s=time.perf_counter() - started)
+            finish_pass(store, slug, record)
+        finally:
+            PASS.reset(token)
+
+
+def finish_pass(store: Any, slug: str, record: dict[str, Any]) -> None:
+    from redis.exceptions import RedisError
+
+    try:
+        record["agent_count"] = sum(agent.state != "finished" for agent in store.agents(slug))
+        append_record(store, slug, "tick:passes", record)
+    except RedisError:
+        emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": "tick:passes"}))
+
+
 @contextmanager
 def step(name: str, report: bool = True) -> Iterator[None]:
     slug = SWARM.get()
@@ -74,6 +119,8 @@ def step(name: str, report: bool = True) -> Iterator[None]:
         "step": name,
         "started": started,
     }
+    if (current := PASS.get()) is not None:
+        record["pass_id"] = current["pass_id"]
     if (agent := AGENT.get()) is not None:
         record["agent"] = agent
     emit(sys.stderr, json.dumps(record))
@@ -101,10 +148,10 @@ def step(name: str, report: bool = True) -> Iterator[None]:
             reaped_child_cpu_s=(child_end.ru_utime - child.ru_utime) + (child_end.ru_stime - child.ru_stime),
         )
         emit(sys.stderr, json.dumps(record))
+        if outcome != "success" and (current := PASS.get()) is not None:
+            current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:
-            store.redis.xadd(
-                store.key(slug, "tick:steps"), {"record": json.dumps(record)}, maxlen=50000, approximate=False
-            )
+            append_record(store, slug, "tick:steps", record)
 
 
 def keep() -> None:
@@ -128,10 +175,13 @@ def timed(function: Callable, *args, **kwargs) -> Any:
         return function(*args, **kwargs)
 
 
-def instrument_tick(function: Callable) -> Callable:
+def instrument_tick(function: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(function)
-    def wrapped(store, slug, *args, **kwargs):
-        with tick(slug), step(function.__name__):
+    def wrapped(store: Any, slug: str, *args: Any, **kwargs: Any) -> Any:
+        from scripts.swarm.store import RedisStore
+
+        recording = store if isinstance(store, RedisStore) else None
+        with tick(slug, recording), pass_record(recording, slug), step(function.__name__):
             return function(store, slug, *args, **kwargs)
 
     return wrapped
