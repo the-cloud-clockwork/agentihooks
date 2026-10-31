@@ -84,7 +84,7 @@ def _grade(
     missing = [str(f) for f in head_files if not f.is_file()]
     if missing:
         raise Unmeasured(f"head shard coverage missing: {', '.join(missing)}")
-    head = summarized(head_files) if getattr(args, "head_summaries", None) else executed(head_files, workers)
+    head = summarized(head_files) if args.head_summaries else executed(head_files, workers)
     wanted = git("rev-parse", args.base, cwd=args.head).strip()
     if getattr(args, "base_baseline", None):
         runs = _cached_runs(args.head, wanted, args.base_baseline)
