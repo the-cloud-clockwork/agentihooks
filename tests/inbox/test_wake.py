@@ -541,6 +541,27 @@ def test_a_claude_pane_takes_its_items_through_the_inbox_channel_never_a_typed_w
     assert events(inbox, item.id) == ["escalated_master"]
 
 
+@pytest.mark.feature("inbox-wake")
+def test_a_stalled_claude_channel_wakes_after_one_window_and_confirms(inbox: InboxStore) -> None:
+    from scripts.inbox.seen import claim
+
+    agent = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="claude")
+    item = inbox.send(MASTER_NAME, agent.name, "read the reply")
+    herdr = FakeHerdr({"p1": "idle"})
+    ledger = FakeLedger()
+    start = sent_at(item)
+    run(inbox, herdr, ledger, start + W - 1, [agent, AGENTS[1]])
+    assert herdr.prompts == []
+    run(inbox, herdr, ledger, start + W, [agent, AGENTS[1]])
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert events(inbox, item.id) == ["woken"]
+    assert [shown.id for shown in claim(inbox, agent.name)] == [item.id]
+    inbox.confirm(item.id, agent.name)
+    assert inbox.get(item.id).state == "confirmed"
+    run(inbox, herdr, ledger, start + W * 2, [agent, AGENTS[1]])
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+
+
 def test_a_codex_master_pane_is_never_woken_the_moment_an_item_lands(inbox):
     master = AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm", harness="codex")
     codex = AgentRecord("sw-eng-2", "eng", "t2", pane_id="p2", harness="codex")
