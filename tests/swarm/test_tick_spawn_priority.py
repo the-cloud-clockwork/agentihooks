@@ -1,5 +1,6 @@
 import pytest
 
+from scripts.swarm import automated_gc
 from scripts.swarm import tick as tick_module
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -12,6 +13,7 @@ class OrderingRuntime(FakeRuntime):
     def __init__(self, order):
         super().__init__()
         self.order = order
+        self.actions: list[str] = []
 
     def spawn(self, config, lane, name, task):
         if lane != "master":
@@ -26,7 +28,7 @@ def _ordered(store, monkeypatch):
     order = []
     monkeypatch.setattr(tick_module, "_reap", lambda *a, **k: order.append("reap") or [])
     monkeypatch.setattr(tick_module.exits, "sweep", lambda *a, **k: order.append("exits.sweep") or [])
-    monkeypatch.setattr(tick_module.automated_gc, "run", lambda *a, **k: ["collected before the spawn"])
+    monkeypatch.setattr(automated_gc, "run", lambda *a, **k: ["collected before the spawn"])
     runtime = OrderingRuntime(order)
     runtime.actions = tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=1_000)
     return order, runtime
