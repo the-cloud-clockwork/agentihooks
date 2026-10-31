@@ -153,10 +153,9 @@ class _Owners:
         """The earliest history record with this agent name, or an empty record."""
         return next(iter(self.by_name.get(name, [])), {})
 
-    def owner(self, task_id: str, at: int, name: str = "") -> dict[str, Any]:
+    def owner(self, task_id: str, at: int, name: str | None = None) -> dict[str, Any]:
         """The latest started agent with the name, else the latest started agent holding the task at the time."""
-        named = self.by_name.get(name, []) if name else []
-        candidates = named or [
+        candidates = (self.by_name.get(name) if name else None) or [
             agent for agent in self.by_task.get(task_id, []) if agent["started_at"] <= at <= agent.get("ended_at", at)
         ]
         return max(candidates, key=lambda agent: agent["started_at"], default={})
@@ -191,7 +190,7 @@ def agent_rows(slug: str, doc: dict, agents: list) -> list[dict]:
         if source["kind"] != "task claimed":
             continue
         task_id = source["target"].removeprefix("tasks/")
-        agent = owners.owner(task_id, source["at"], source.get("by", ""))
+        agent = owners.owner(task_id, source["at"], source.get("by"))
         rows.append(_with_finding_kind(_event(slug, tasks.get(task_id), agent, source["at"], "claim", source)))
     return rows
 
@@ -243,7 +242,7 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
         if source["kind"] not in kinds:
             continue
         task = {**tasks.get(task_id), **{key: source[key] for key in ("pr_url", "branch") if key in source}}
-        agent = owners.owner(task_id, source["at"], source.get("by", ""))
+        agent = owners.owner(task_id, source["at"], source.get("by"))
         rows.append(
             _delivery(
                 _event(slug, task, agent, source["at"], kinds[source["kind"]], source.get("review_id", source)), task
