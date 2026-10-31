@@ -26,8 +26,9 @@ def _ordered(store, monkeypatch):
     order = []
     monkeypatch.setattr(tick_module, "_reap", lambda *a, **k: order.append("reap") or [])
     monkeypatch.setattr(tick_module.exits, "sweep", lambda *a, **k: order.append("exits.sweep") or [])
+    monkeypatch.setattr(tick_module.automated_gc, "run", lambda *a, **k: ["collected before the spawn"])
     runtime = OrderingRuntime(order)
-    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=1_000)
+    runtime.actions = tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=1_000)
     return order, runtime
 
 
@@ -35,6 +36,7 @@ def test_a_pass_after_one_that_never_reached_its_spawn_spawns_before_exits_sweep
     store.redis.set(store.key("sw", tick_module.SPAWN_DUE), 500)
     order, runtime = _ordered(store, monkeypatch)
     assert order[:4] == ["spawn", "end", "exits.sweep", "reap"]
+    assert "collected before the spawn" in runtime.actions
     assert [(lane, task) for lane, _, task in runtime.spawned if lane != "master"] == [("eng", "t1")]
     assert not store.redis.exists(store.key("sw", tick_module.SPAWN_DUE))
 
