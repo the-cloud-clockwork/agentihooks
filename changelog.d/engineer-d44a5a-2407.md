@@ -1,0 +1,1 @@
+Idle receivers can recover pending mail when channel delivery progress expires. Healthy channel and dispatcher owners suppress typed wake prompts; busy panes, typed input and operator quiet windows remain protected.

@@ -4,6 +4,8 @@ import pytest
 
 from scripts.handoff import transfers
 from scripts.inbox import wake
+from scripts.inbox.dispatch import Dispatcher
+from scripts.inbox.progress import ChannelProgress
 from scripts.inbox.store import InboxStore
 from scripts.profiles import codex_master
 from scripts.swarm import capabilities, prompt
@@ -67,11 +69,16 @@ def test_each_execution_advertises_capabilities_from_its_harness_and_transport(h
         ("codex", APP_SERVER_TRANSPORT, False),
     ],
 )
-def test_the_waker_skips_a_recipient_whose_transport_owns_delivery(harness, transport, typed):
+def test_the_waker_skips_a_recipient_whose_transport_owns_delivery(harness: str, transport: str, typed: bool) -> None:
     import fakeredis
 
     inbox = InboxStore(fakeredis.FakeRedis(decode_responses=True))
     worker = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness=harness, transport=transport)
+    assert wake.typed_wake(inbox, worker) is True
+    if harness == "claude":
+        ChannelProgress(inbox, worker.name).polled()
+    elif transport == APP_SERVER_TRANSPORT:
+        Dispatcher(inbox).own(worker.name, "pump")
     assert wake.typed_wake(inbox, worker) is typed
     assert wake.typed_wake(inbox, replace(worker, lane=MASTER)) is False
     assert wake.typed_wake(inbox, replace(worker, pane_id="")) is False

@@ -14,10 +14,10 @@ class Session:
         self.shown.append(message.message.root.params["meta"]["item_id"])
 
 
-def _pass(inbox, session, pushed):
+def _pass(inbox: channel.InboxStore, session: Session, pushed: channel.Pushed) -> None:
     import anyio
 
-    anyio.run(channel._deliver, inbox, "bob", session, pushed)
+    anyio.run(channel._deliver, inbox, "bob", session, pushed, channel.ChannelProgress(inbox, "bob"))
 
 
 def test_a_running_channel_never_pushes_an_item_into_its_session_again(channel_backend):
