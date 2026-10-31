@@ -42,7 +42,8 @@ def observe(state: dict, hives: list[dict], readings: dict, refused: list[dict],
         drains = {
             hive["id"]: drained[-1]
             for hive in hives
-            if hive["id"] in pooled and (drained := [d for d in hive.get("drains", []) if d["draining"] == "yes"])
+            if members.get(hive["id"]) == name
+            and (drained := [d for d in hive.get("drains", []) if d["draining"] == "yes"])
         }
         down[name] = {
             "since": entry["since"],

@@ -14,7 +14,7 @@ def client(monkeypatch):
     import fakeredis
 
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
-    monkeypatch.setattr(registry, "now_ms", lambda: NOW)
+    monkeypatch.setattr(registry, "wall_ms", lambda: NOW)
     return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
 

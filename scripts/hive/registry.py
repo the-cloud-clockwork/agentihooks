@@ -200,7 +200,7 @@ class Drain:
     deadline_at: int = 0
 
 
-def now_ms() -> int:
+def wall_ms() -> int:
     return int(time.time() * 1000)
 
 
@@ -217,7 +217,7 @@ def _drained(record: dict, stored: dict, drain: Drain | None) -> dict:
     if record.get("draining", "no") == stored.get("draining", "no"):
         return record
     drain = drain or Drain(drain_owner(), "hive set")
-    at = now_ms()
+    at = wall_ms()
     entry = {
         "at": at,
         "draining": record["draining"],
