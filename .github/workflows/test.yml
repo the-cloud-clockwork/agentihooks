@@ -2679,6 +2679,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: python -m ruff format --check hooks/ scripts/ tests/
 
+      - name: Reject overlapping fixture mock patches and monkeypatch overrides
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/fixture_patch_lint.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.fixture_patch_lint --root "$GITHUB_WORKSPACE"
+
       - name: Check every pull request job is a need of Gate Required
         if: ${{ !cancelled() }}
         run: python -m scripts.ci_wiring

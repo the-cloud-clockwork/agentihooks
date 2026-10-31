@@ -4,7 +4,6 @@ import pytest
 
 from scripts import fixture_patch_lint
 
-
 MOCK_FIXTURE = """
 from unittest.mock import patch as replace
 import pytest

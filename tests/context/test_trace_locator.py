@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -13,7 +14,7 @@ SID = "sess-locator-1"
 
 
 @pytest.fixture()
-def stores(tmp_path):
+def stores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     bundle = tmp_path / "bundle"
     profile = bundle / "profiles" / "anton"
     profile.mkdir(parents=True)
@@ -29,18 +30,16 @@ def stores(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    with (
-        patch("hooks.context.enforcement._store_path", return_value=runtime),
-        patch("hooks.context.enforcement._counter_path", return_value=tmp_path / "counters.json"),
-        patch("hooks.context.enforcement._delivery_path", return_value=tmp_path / "delivery.json"),
-        patch("hooks.context.enforcement._get_bundle_path", return_value=bundle),
-        patch("hooks.context.enforcement._get_active_profile", return_value="anton"),
-    ):
-        from hooks.context import enforcement
+    from hooks.context import enforcement
 
-        local = enforcement._local_store_path(repo, create_parent=True)
-        local.write_text(json.dumps({"enforcements": [{"id": "l-1", "message": "l", "cadence": 3}]}))
-        yield {"bundle": bundle, "profile": profile, "runtime": runtime, "local": local, "repo": repo}
+    monkeypatch.setattr(enforcement, "_store_path", lambda: runtime)
+    monkeypatch.setattr(enforcement, "_counter_path", lambda: tmp_path / "counters.json")
+    monkeypatch.setattr(enforcement, "_delivery_path", lambda: tmp_path / "delivery.json")
+    monkeypatch.setattr(enforcement, "_get_bundle_path", lambda: bundle)
+    monkeypatch.setattr(enforcement, "_get_active_profile", lambda: "anton")
+    local = enforcement._local_store_path(repo, create_parent=True)
+    local.write_text(json.dumps({"enforcements": [{"id": "l-1", "message": "l", "cadence": 3}]}))
+    return {"bundle": bundle, "profile": profile, "runtime": runtime, "local": local, "repo": repo}
 
 
 @pytest.fixture()

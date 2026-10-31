@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -49,7 +50,7 @@ def _condition(directory):
 
 
 @pytest.fixture()
-def layers(tmp_path):
+def layers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     from hooks import config
 
     bundle = _git_repo(tmp_path / "bundle")
@@ -89,27 +90,25 @@ def layers(tmp_path):
         )
     )
 
-    with (
-        patch("hooks.context.enforcement._store_path", return_value=runtime),
-        patch("hooks.context.enforcement._get_bundle_path", return_value=bundle),
-        patch("hooks.context.enforcement._get_active_profile", return_value="anton"),
-        patch("hooks.context.enforcement._get_linked_profiles", return_value={}),
-        patch("hooks.context.conditions.profile_chain.read_state", return_value={}),
-        patch("hooks.context.broadcast._broadcast_path", return_value=broadcasts),
-    ):
-        yield {
-            "dev": dev,
-            "bundle": bundle,
-            "bundle_store": bundle_store,
-            "profile_store": profile_store,
-            "runtime": runtime,
-            "tracked_repo": tracked_repo,
-            "tracked_store": tracked_store,
-            "loose_store": loose_store,
-            "loose_condition": loose_condition,
-            "runtime_condition": runtime_condition,
-            "broadcasts": broadcasts,
-        }
+    monkeypatch.setattr("hooks.context.enforcement._store_path", lambda: runtime)
+    monkeypatch.setattr("hooks.context.enforcement._get_bundle_path", lambda: bundle)
+    monkeypatch.setattr("hooks.context.enforcement._get_active_profile", lambda: "anton")
+    monkeypatch.setattr("hooks.context.enforcement._get_linked_profiles", lambda: {})
+    monkeypatch.setattr("hooks.context.conditions.profile_chain.read_state", lambda: {})
+    monkeypatch.setattr("hooks.context.broadcast._broadcast_path", lambda: broadcasts)
+    return {
+        "dev": dev,
+        "bundle": bundle,
+        "bundle_store": bundle_store,
+        "profile_store": profile_store,
+        "runtime": runtime,
+        "tracked_repo": tracked_repo,
+        "tracked_store": tracked_store,
+        "loose_store": loose_store,
+        "loose_condition": loose_condition,
+        "runtime_condition": runtime_condition,
+        "broadcasts": broadcasts,
+    }
 
 
 def _correct(source="bad-1", text=TEXT, at="2026-10-05T10:00:00Z"):
