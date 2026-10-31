@@ -5068,8 +5068,8 @@ The next pass acquires a new lease with a higher epoch when no other controller 
 only the rest of that pass's work.
 
 Passes that stop at the deadline in every swarm at once point at a read that grew with the swarm's history rather
-than at one long step. Hive routing reads once loaded every archived execution; how they now read current executions
-only, and how to measure `scope.readings` and stopped passes, is in
+than at one long step. Hive routing and roster reads used to load every archived execution on each read. How they now
+read current executions only, and how to measure `scope.readings` and stopped passes, is in
 [Current execution reads](../swarm-v2/execution-identity.md#current-execution-reads).
 
 ### Doctor timer pass

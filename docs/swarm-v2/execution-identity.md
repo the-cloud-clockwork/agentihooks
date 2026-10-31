@@ -60,18 +60,20 @@ The tests in `tests/swarm/test_execution_concurrency.py` cover this behavior. Th
 
 ## Current execution reads
 
-Each swarm's fencing document holds its current executions in `executions` and its ended ones in `archive`.
-`ExecutionRegistry.archive` moves a superseded attempt there once its name has left the swarm's agent list, so the
-archive only grows. On the watched swarm it reached nearly twenty megabytes. Hive routing and roster reads used to
-load the whole document, archive included, on every call. Every tick pass makes such a call for each agent it checks,
-so a pass ran until it was stopped at its 450 second deadline and sent no alert, nudge, merge or spawn.
+Each swarm's fencing document holds its current executions in `executions` and its superseded attempts in
+`archive`. `ExecutionRegistry.archive` moves a superseded attempt there once its name has left the swarm's agent list;
+only a pane update for that exact attempt moves it back. The archive grows with the swarm's history: the profile taken
+for pull request 9002 found nearly twenty megabytes of archived executions in the watched swarm's document. Hive
+routing and roster reads used to load the whole document, archive included, on every call. A controller that is not a
+hive member makes such a call for each agent it checks while hives are joined, so tick passes ran until they were
+stopped at their 450 second deadline and sent no alert, nudge, merge or spawn.
 
 Since [pull request 9002](https://github.com/the-cloud-clockwork/agentihooks/pull/9002), every fenced write also
 publishes a copy of the swarm's `executions` alone, and these reads take that copy:
 
 | Read | Used by | Reads |
 |---|---|---|
-| `ExecutionRegistry.hive` | `scripts.hive.scope.host`, and through it `scope.readings` for every agent the tick checks | current executions |
+| `ExecutionRegistry.hive` | `scripts.hive.scope.host`, and through it `scope.readings` for every agent the controller checks | current executions |
 | `ExecutionRegistry.agents` | `RedisStore.agents`, the agent roster | current executions |
 | `ExecutionRegistry.occupants` | `RedisStore.execution_occupants` | current executions |
 | `ExecutionRegistry.records`, `managed`, `archive` and the fenced writes | seat history, cleanup, admission | the whole document, archive included |
@@ -96,14 +98,17 @@ The fencing state lives in one Redis state bucket shared by every swarm, under `
 - **Read.** `fencing.read_executions` reads `revision`, `published` and the swarm's copy in one pipeline. It returns
   the copy only when `revision` equals `published`. Otherwise it falls back to `fencing.read` and takes
   `executions` from the whole document.
-- **Older writers.** A writer running code from before pull request 9002 raises `revision` without touching
-  `published`, so every swarm's copy stops being used at once and reads fall back. The next new write sees
-  the gap, deletes the whole `projected` hash and publishes only its own swarm's copy. Every other swarm reads through
-  the fallback until its own next write publishes a fresh copy. A stale copy is never returned.
+- **Gaps.** Two things leave `revision` ahead of `published`: a writer running code from before pull request 9002,
+  which raises `revision` without touching `published`, and a write that lost its watch to a concurrent write of any
+  swarm, because the writer raises `revision` before its transaction and retries. Every swarm's copy then stops being
+  used at once and reads fall back. The next write that commits sees the gap, deletes the whole `projected` hash and
+  publishes only its own swarm's copy. Every other swarm reads through the fallback until its own next write
+  publishes a fresh copy. A stale copy is never returned; a gap costs only the whole document read.
 - **Writers with no copy.** A `RedisStateStore` opened without a projection, such as the hive credentials and hive
   registry stores, touches `projected` and `published` only when its bucket already has a `published` key. There it
-  deletes its own key's copy and sets `published`, so only that key falls back. The Redis command inventory lists both
-  keys and the `GET`, `SET`, `DEL` and `HDEL` commands for every such store.
+  deletes its own key's copy, or every copy when the bucket already had a gap, and sets `published`. `python -m scripts.swarm.redis_commands`
+  lists both keys and the `GET`, `SET`, `DEL` and `HDEL` commands for each state store it maps; see the
+  [Redis command map](../reference/redis-command-map.md).
 
 Nothing is configured. The copy is used only with the Redis state backend (`AGENTIHOOKS_STATE_BACKEND` unset or
 `redis`); with the `bus` backend these reads load the whole document as before.
@@ -113,14 +118,16 @@ Nothing is configured. The copy is used only with the Redis state backend (`AGEN
 Compare `revision` with `published`, and the size of a swarm's copy with its whole document (read only):
 
 ```bash
-K=agentihooks:swarm:state:fencing
+K="${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}:swarm:state:fencing"
 SLUG=rig-grade-swarm
-redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET "$K:revision"
-redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET "$K:published"
-redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HSTRLEN "$K:projected" "$SLUG"
-redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HSTRLEN "$K:current" "$SLUG"
+URL="$AGENTIHOOKS_SWARM_REDIS_URL"
+redis-cli -u "$URL" GET "$K:revision"
+redis-cli -u "$URL" GET "$K:published"
+redis-cli -u "$URL" HSTRLEN "$K:projected" "$SLUG"
+redis-cli -u "$URL" HSTRLEN "$K:current" "$SLUG"
 ```
 
+On a hive outside local mode, the swarm talks to `AGENTIHOOKS_HIVE_REDIS_URL` when it is set; use that URL there.
 Equal `revision` and `published` mean every swarm with a copy reads it. A missing copy (`HSTRLEN` of `0`) or a lower
 `published` means reads of that swarm fall back to the whole document until its next fenced write. Never write these
 keys by hand; a fenced write such as the tick's next pass republishes the copy.
@@ -128,10 +135,11 @@ keys by hand; a fenced write such as the tick's next pass republishes the copy.
 ### Measuring tick passes
 
 `scope.readings` and the whole pass (`run_tick`) both write `swarm_tick_step` records to the user journal. Total the
-routing reads over a window, and count passes stopped at their deadline:
+routing reads over a window, and count passes with outcome `stopped`, which covers a stop at the deadline and a stop by
+the service:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-20 min" \
+journalctl --user -t agentihooks-swarm --since "-20min" \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep '"step": "scripts.hive.scope.readings"' | sed 's/^[^{]*//' \
   | python3 -c 'import sys, json
@@ -146,9 +154,11 @@ rows = [json.loads(l) for l in sys.stdin]
 print(len(rows), "passes;", sum(r["outcome"] == "stopped" for r in rows), "stopped")'
 ```
 
-Add `grep "\"slug\": \"$SLUG\""` before `sed` to read one swarm. On 30 October 2026, before the fix, the routing reads
-of one twenty minute window took 403 seconds over 272 calls, and both Doctor passes of an hour stopped at the deadline.
-A live profile of three of these lookups then took 8.9 seconds, 6.5 of them loading the whole document.
+Add `grep "\"slug\": \"$SLUG\""` before `sed` to read one swarm. The Doctor source task measured these on the
+workstation journal on 30 October 2026, after pull request 8616 and before pull request 9002: the routing reads of one
+twenty minute window took 403 seconds over 272 calls, against 11 seconds over 1746 calls in the 24 minutes before 8616 reached the checkout, and both Doctor
+passes of the following hour stopped at the deadline. A live read only profile of three of these lookups, recorded
+with pull request 9002, took 8.9 seconds, 6.5 of them loading the whole document.
 
 ### Tests
 
