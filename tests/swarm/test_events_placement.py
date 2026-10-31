@@ -143,7 +143,7 @@ def rig() -> Iterator[SimpleNamespace]:
     redis = fakeredis.FakeRedis(decode_responses=True)
     swarm = RedisStore(redis)
     swarm.create(SwarmConfig(SLUG, "/repo", 2, 2))
-    found = doc(PINNED)
+    found = doc(deepcopy(PINNED))
     rows = {row["id"]: row for row in found["tasks"]}
 
     def update_task(slug: str, task_id: str, fields: dict, if_state: tuple = (), if_match: int | None = None) -> dict:
