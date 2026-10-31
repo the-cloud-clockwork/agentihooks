@@ -309,7 +309,7 @@ class InboxStore:
                 continue
         return [item.id for item in self.inbox(address) if item.state not in CLOSED]
 
-    def _index_open(self, address):
+    def _index_open(self, address: str) -> list[str]:
         with self.redis.pipeline() as pipe:
             ids, rows = self._watched_rows(pipe, address)
             items, gone = _present(ids, rows)
@@ -1025,7 +1025,7 @@ class InboxStore:
                 continue
         return [item.id for item in self.inbox(address) if item.state == "pending"]
 
-    def _try_back_fill(self, address):
+    def _try_back_fill(self, address: str) -> list[str]:
         with self.redis.pipeline() as pipe:
             ids, rows = self._watched_rows(pipe, address)
             items, gone = _present(ids, rows)
