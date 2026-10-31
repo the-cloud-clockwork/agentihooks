@@ -782,13 +782,17 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
 
     run = budget.run
     run("secrets", _prompt_secrets, payload)
+    typed = bool(run("operator_words", _operator_words, payload))
+    run("operator_mode", _operator_mode, payload, typed)
+    run("master_coding", _master_coding, payload, typed)
+    run("prod_bypass", _prompt_prod_bypass, payload, session_id)
+    run("signals", _prompt_signals, payload, session_id, typed)
+    if typed:
+        run("gate_lifts", _arm_gate_lifts, payload)
     run("amygdala", _prompt_amygdala, session_id)
     run("confirm_inbox", _confirm_inbox, session_id)
     run("swarm_heartbeat", _swarm_heartbeat, "working", payload.get("prompt", ""))
     run("swarm_ledger", _swarm_ledger, payload)
-    typed = bool(run("operator_words", _operator_words, payload))
-    run("operator_mode", _operator_mode, payload, typed)
-    run("master_coding", _master_coding, payload, typed)
     run("trace_flush", _request_trace_flush, payload, "prompt")
     run("quota_usage", _prompt_quota_usage, session_id)
     run("quota_policy", _prompt_quota_policy, payload, session_id)
@@ -796,10 +800,6 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     run("enforcements", _prompt_enforcements, payload, session_id)
     run("ci_manifesto", _prompt_ci_manifesto, session_id)
     run("rules_refresh", _prompt_rules_refresh, session_id)
-    run("prod_bypass", _prompt_prod_bypass, payload, session_id)
-    run("signals", _prompt_signals, payload, session_id, typed)
-    if typed:
-        run("gate_lifts", _arm_gate_lifts, payload)
     run("voice", _prompt_voice, payload, session_id, typed)
     run("controls", _prompt_controls, payload, session_id, typed)
     # --- Broadcast: inject pending messages ---
