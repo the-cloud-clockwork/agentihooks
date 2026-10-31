@@ -457,6 +457,17 @@ def test_the_plan_names_the_tests_whose_recorded_lines_reach_each_changed_line(t
     assert direct == {}
 
 
+def test_the_plan_names_direct_tests_when_the_record_drifted_past_its_narrowing(tmp_path, monkeypatch):
+    manifest, source = _line_project(tmp_path, monkeypatch, "line")
+    (tmp_path / "scripts/core.py").write_text(source.replace("value - 1", "value - 2"))
+    _commit(tmp_path, "edited branch")
+    del manifest["lines"]["tests/test_core.py::test_other"]["scripts/core.py"]
+    monkeypatch.setattr(plan, "record_drift", lambda *args: None)
+    direct = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {4}}, {}, manifest, direct=direct)
+    assert direct == {"scripts/core.py": ["tests/test_core.py::test_g", "tests/test_helper.py::test_helper"]}
+
+
 def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path, monkeypatch):
     from coverage import CoverageData
 
