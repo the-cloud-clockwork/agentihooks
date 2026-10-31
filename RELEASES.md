@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.524 · 2026-10-31
+
+### 2026-10-31 · 4d0d1fc2e730 · #9049 · @nestorcolt
+
+**Read coverage ratchet base sources through one git cat-file batch**
+
+This change replaces the coverage ratchet's per-path `git show` reads with a single long-lived `git cat-file --batch` process that serves every source lookup for a revision, and has `renamed` build one source per revision instead of one per path. Output stays byte-for-byte identical to the old reader, but it cuts process spawning dramatically: a full-source probe dropped from 11.98s to 1.38s, and the dev test shard's wall time fell from 26.5s to 22.6s, so CI's "hold every line the base ran" step should get noticeably faster without changing results.
+
 ## v2.17.518 · 2026-10-30
 
 ### 2026-10-30 · 03e07b5c3dca · #8990 · @agenticore-app
