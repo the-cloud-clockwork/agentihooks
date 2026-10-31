@@ -97,6 +97,29 @@ def test_a_renewal_within_one_tick_of_the_last_writes_nothing(store, clock):
     assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 241001)
 
 
+def test_renew_refuses_a_stolen_lease_without_writing_through_the_cheap_projection(store, clock):
+    held = lease.acquire(store, "sw", "home")
+    before = fencing.state.for_store(store, fencing.BUCKET).get("sw").revision
+    clock[0] = held.expires_at
+    stolen = lease.acquire(store, "sw", "other")
+    clock[0] = stolen.expires_at - 1
+    with pytest.raises(SwarmError) as error:
+        lease.renew(store, "sw", held)
+    assert str(error.value) == "the controller lease is stale"
+    assert fencing.state.for_store(store, fencing.BUCKET).get("sw").revision == before + 1
+    assert lease.current(store, "sw") == stolen
+
+
+def test_renew_falls_back_to_the_full_document_when_the_projection_is_stale(store, clock, monkeypatch):
+    held = lease.acquire(store, "sw", "home")
+    monkeypatch.setattr(fencing, "read_lease", lambda store, slug: None)
+    clock[0] = 61000
+    assert lease.renew(store, "sw", held) == held
+    clock[0] = 61001
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 241001)
+    assert lease.current(store, "sw") == lease.Lease("home", 1, 241001)
+
+
 def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
     store.create(SwarmConfig("sw", ".", 1, 0))
     held = lease.acquire(store, "sw", "home")

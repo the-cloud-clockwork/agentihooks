@@ -159,8 +159,7 @@ def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen) -> int:
             code = _finish(popen(command(timer.entry_point()), env=env, pass_fds=(fd,)))
     except AlreadyRunning:
         return 0
-    if not code:
-        _delivered(time.time())
+    _delivered(time.time())
     return code
 
 

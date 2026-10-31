@@ -61,14 +61,22 @@ def now_ms() -> int:
     return round(time.time() * 1000)
 
 
-def _project_executions(value: bytes) -> bytes:
-    return _encode(json.loads(value)["executions"])
+def _project_hot(value: bytes) -> bytes:
+    doc = json.loads(value)
+    return _encode(
+        {
+            "executions": doc["executions"],
+            "lease": doc["lease"],
+            "epoch": doc["epoch"],
+            "legacy_owner": doc["legacy_owner"],
+        }
+    )
 
 
 def _states(store: Any) -> Any:
     states = state.for_store(store, BUCKET)
     if isinstance(states, RedisStateStore):
-        states.projection = _project_executions
+        states.projection = _project_hot
     return states
 
 
@@ -137,12 +145,23 @@ def read(store: Any, slug: str) -> dict[str, Any]:
 
 
 def read_executions(store: Any, slug: str) -> dict[str, Any]:
-    states = _states(store)
-    if isinstance(states, RedisStateStore):
-        entry = states.get_projection(slug)
-        if entry is not None:
-            return json.loads(entry.value)
+    hot = _read_hot(store, slug)
+    if hot is not None:
+        return hot["executions"]
     return read(store, slug)["executions"]
+
+
+def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
+    hot = _read_hot(store, slug)
+    return {"lease": hot["lease"]} if hot is not None else None
+
+
+def _read_hot(store: Any, slug: str) -> dict[str, Any] | None:
+    states = _states(store)
+    if not isinstance(states, RedisStateStore):
+        return None
+    entry = states.get_projection(slug)
+    return json.loads(entry.value) if entry is not None else None
 
 
 def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
@@ -152,8 +171,9 @@ def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
     for _ in range(ATTEMPTS):
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
+        before = copy.deepcopy(doc)
         result = change(doc)
-        if doc == _decode(entry.value):
+        if doc == before:
             return result
         try:
             states.update(slug, _encode(doc), entry.revision)
