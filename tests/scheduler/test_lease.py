@@ -66,6 +66,68 @@ def test_renewal_extends_the_expiry_and_a_stale_lease_cannot_renew(state):
         lease.renew(state, held, now=200.0)
 
 
+def test_a_conflicted_renewal_renews_again_on_the_next_beat(monkeypatch, state):
+    from scripts.events.bus import StateConflict
+    from scripts.scheduler import lease
+
+    held = lease.acquire(state, "proof.lock")
+    stopped = Mock(spec=Event)
+    stopped.wait.side_effect = [False, False, True]
+    calls, renew = [], lease.renew
+
+    def conflicted_once(store, renewed, **kwargs):
+        calls.append(renewed.token)
+        if len(calls) == 1:
+            raise StateConflict("scheduler lease 'proof.lock' kept changing")
+        renew(store, renewed, **kwargs)
+
+    monkeypatch.setattr(lease, "renew", conflicted_once)
+    lease._renew(state, held, stopped)
+    assert calls == [held.token, held.token]
+    lease.verify_lease(state, held)
+
+
+def test_a_lost_lease_ends_the_renewal_without_another_beat(monkeypatch, state):
+    from scripts.scheduler import lease
+
+    held = lease.acquire(state, "proof.lock", now=100.0)
+    stopped = Mock(spec=Event)
+    stopped.wait.side_effect = [False, False, True]
+    lease._renew(state, held, stopped)
+    assert stopped.wait.call_count == 1
+
+
+def test_a_renewal_stamps_its_expiry_at_the_attempt_that_writes(monkeypatch, state):
+    from scripts.events.bus import StateConflict
+    from scripts.scheduler import lease
+
+    held = lease.acquire(state, "proof.lock", now=100.0)
+    clock = iter([110.0, 125.0])
+    monkeypatch.setattr(lease.time, "time", lambda: next(clock))
+    update, raced = state.update, []
+
+    def conflicted_once(key, value, revision):
+        if not raced:
+            raced.append(revision)
+            raise StateConflict(f"state key {key!r} is not at revision {revision}")
+        return update(key, value, revision)
+
+    monkeypatch.setattr(state, "update", conflicted_once)
+    lease.renew(state, held)
+    assert json.loads(state.get("proof.lock").value)["lease"] == {"token": held.token, "expires": 155.0}
+
+
+def test_a_lost_lock_and_a_busy_lock_name_their_own_errors(state):
+    from scripts.scheduler import lease
+
+    held = lease.acquire(state, "proof.lock", now=100.0)
+    with pytest.raises(lease.Busy, match="^another scheduler is dispatching on this machine$"):
+        lease.acquire(state, "proof.lock", now=101.0)
+    with pytest.raises(lease.LostLock, match="^scheduler lost its dispatch lock$"):
+        lease.verify_lease(state, held, now=100.0 + lease.LEASE_SECONDS)
+    assert issubclass(lease.LostLock, RuntimeError) and issubclass(lease.Busy, RuntimeError)
+
+
 def test_release_leaves_a_successor_lease_in_place(state):
     from scripts.scheduler import lease
 

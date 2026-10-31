@@ -258,12 +258,13 @@ def _off_installed(held):
     return ""
 
 
-def recycle():
+def recycle() -> None:
+    """Drain a supervisor off the installed code, only between swarm tick passes so a recycle never splits one."""
     from scripts.scheduler import service
 
     env = _scheduler_env()
     held = service.holder(env)
-    if held is None or not (why := _off_installed(held)):
+    if held is None or not (why := _off_installed(held)) or _ticking(env):
         return
     print(f"recycling the scheduler supervisor: {why}", file=sys.stderr)
     if not service.drain(held["pid"], env):
@@ -271,6 +272,18 @@ def recycle():
             f"the scheduler supervisor {held['pid']} still holds its lock; the next wait pass tries again",
             file=sys.stderr,
         )
+
+
+def _ticking(env: dict[str, str]) -> bool:
+    """True while a swarm tick pass holds the machine tick lock of the scheduler's domain."""
+    from scripts.scheduler.service import AlreadyRunning, machine_lock
+    from scripts.swarm.scheduled_tick import LOCK
+
+    try:
+        with machine_lock(LOCK, environ=env):
+            return False
+    except AlreadyRunning:
+        return True
 
 
 def _proven():

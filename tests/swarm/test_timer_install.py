@@ -865,6 +865,21 @@ def test_guard_says_when_a_drained_supervisor_holds_on_and_recycles_it_on_a_late
     )
 
 
+def test_guard_recycles_a_supervisor_off_the_installed_code_only_between_tick_passes(tmp_path, monkeypatch, capsys):
+    from scripts.scheduler.service import machine_lock
+    from scripts.swarm import scheduled_tick
+
+    order = []
+    _supervisor(monkeypatch, {**CURRENT, "revision": "older"}, order)
+    with machine_lock(scheduled_tick.LOCK, environ=timer._scheduler_env()):
+        assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["supervise"]
+    assert capsys.readouterr().err == ""
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["supervise", "drain 4242", "supervise"]
+    assert capsys.readouterr().err.startswith("recycling the scheduler supervisor: ")
+
+
 def _delivering(monkeypatch):
     import fakeredis
 

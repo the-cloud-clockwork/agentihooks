@@ -6,7 +6,7 @@ import pytest
 from scripts.events import memory, state
 from scripts.events.bus import StateConflict, StateStore
 from scripts.events.config import BusConfig
-from scripts.events.redis_state import WRITE_TRIES, RedisStateStore
+from scripts.events.redis_state import RedisStateStore
 
 from . import nats_server
 
@@ -122,29 +122,6 @@ def test_redis_state_history_keeps_the_newest_revisions():
     assert values[-1] == b"69"
 
 
-def test_redis_state_retries_a_write_raced_on_another_key(monkeypatch):
-    import fakeredis
-
-    client = fakeredis.FakeRedis(decode_responses=True)
-    store = RedisStateStore(client, "work")
-    other = RedisStateStore(client, "work")
-    raced = []
-    pipeline_class = type(client.pipeline())
-    execute = pipeline_class.execute
-
-    def racing(self):
-        if not raced:
-            raced.append(None)
-            raced[0] = other.create("other", b"raced")
-        return execute(self)
-
-    monkeypatch.setattr(pipeline_class, "execute", racing)
-    revision = store.create("key", b"mine")
-    assert raced and store.get("key").value == b"mine"
-    assert store.get("key").revision == revision
-    assert store.get("other").value == b"raced"
-
-
 def test_redis_state_conflicts_name_the_key_and_revision():
     import fakeredis
 
@@ -156,28 +133,6 @@ def test_redis_state_conflicts_name_the_key_and_revision():
     with pytest.raises(StateConflict) as stale:
         store.update("key", b"two", revision + 1)
     assert str(stale.value) == f"state key 'key' is not at revision {revision + 1}"
-
-
-def test_redis_state_gives_up_on_a_key_that_keeps_changing(monkeypatch):
-    import fakeredis
-
-    client = fakeredis.FakeRedis(decode_responses=True)
-    store = RedisStateStore(client, "work")
-    pipeline_class = type(client.pipeline())
-    execute = pipeline_class.execute
-    races = []
-
-    def racing(self):
-        races.append(None)
-        client.hset(store._current, "other", "{}")
-        return execute(self)
-
-    monkeypatch.setattr(pipeline_class, "execute", racing)
-    with pytest.raises(StateConflict) as changing:
-        store.create("key", b"mine")
-    assert str(changing.value) == "state key 'key' kept changing"
-    assert len(races) == WRITE_TRIES
-    assert store.get("key") is None
 
 
 def test_the_process_environment_opens_the_default_redis_client(monkeypatch):

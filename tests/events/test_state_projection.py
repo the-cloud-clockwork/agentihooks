@@ -122,6 +122,6 @@ def test_a_write_raises_its_revision_inside_its_one_transaction() -> None:
     first = states.create("one", b"first")
     second = states.update("one", b"second", first)
     assert second == first + 1
-    assert redis.pipelines == 2
-    assert redis.direct == []
+    assert redis.pipelines == 0
+    assert redis.direct == ["eval", "eval"]
     assert projected(states, "one").revision == second
