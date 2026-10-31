@@ -76,7 +76,8 @@ class DepInputs:
                     opened = os.path.abspath(os.fsdecode(path))
                 except OSError:
                     return
-                if not opened.startswith(self.own):
+                imported = opened.endswith(".py") and (test is self.shared or mode is None or "b" in str(mode))
+                if not opened.startswith(self.own) and not imported:
                     test[0].add(opened)
         elif event in ESCAPES and test is not self.shared:
             test[1] = True
@@ -94,7 +95,11 @@ class DepInputs:
         try:
             yield
         finally:
-            previous[0].update(path for path in collected[0] if not path.startswith(self.root + ".github/workflows/"))
+            previous[0].update(
+                path
+                for path in collected[0]
+                if not path.startswith(self.root + ".github/workflows/") and not path.endswith(".py")
+            )
             self.current = previous
             for name in set(sys.modules) - imported:
                 filename = getattr(sys.modules[name], "__file__", "") or ""
@@ -157,7 +162,7 @@ class DepInputs:
             if not full.startswith(self.root):
                 continue
             relative = full[len(self.root) :]
-            if relative.endswith((".py", ".pyc")) or relative.startswith(SKIPPED) or "__pycache__" in relative:
+            if relative.endswith(".pyc") or relative.startswith(SKIPPED) or "__pycache__" in relative:
                 continue
             if not Path(full).is_relative_to(self.folder):
                 kept[full] = relative

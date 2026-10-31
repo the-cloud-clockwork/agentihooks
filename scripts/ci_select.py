@@ -85,13 +85,22 @@ def reshaped(root: Path, base: str, head: str) -> bool:
     return result.returncode == 1
 
 
+def recorded_tests(manifest: dict, changed: list[str]) -> set[str]:
+    """Test files whose recorded run executed a changed unit or read a changed file that not every test reads."""
+    units = {index for index, unit in enumerate(manifest["units"]) if unit.partition("::")[0] in changed}
+    lists = {tuple(found.get("files", ())) for found in manifest["tests"].values()}
+    read = set(changed) - set.intersection(*map(set, lists))
+    return {
+        test.partition("::")[0]
+        for test, found in manifest["tests"].items()
+        if units.intersection(found["units"]) or read.intersection(found.get("files", ()))
+    }
+
+
 def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest: dict | None = None) -> set[str]:
     tests = {path for path in changed if is_test(path)}
     if manifest is not None:
-        units = {index for index, unit in enumerate(manifest["units"]) if unit.partition("::")[0] in changed}
-        tests.update(
-            test.partition("::")[0] for test, found in manifest["tests"].items() if units.intersection(found["units"])
-        )
+        tests.update(recorded_tests(manifest, changed))
     if tree_reshaped:
         tests.update(TREE_CHECKS)
     needles = set()
@@ -244,11 +253,7 @@ def main(argv: list[str] | None = None) -> int:
             durations.update(json.loads(path.read_text()))
         changed = changed_files(args.root, args.base, args.head)
         manifest = None
-        if (
-            args.repository
-            and not needs_full_suite(changed)
-            and any(path.endswith(".py") and path.startswith(SOURCES) for path in changed)
-        ):
+        if args.repository and not needs_full_suite(changed) and not all(is_doc(path) for path in changed):
             if found := find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")):
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds runtime dependent tests.")
