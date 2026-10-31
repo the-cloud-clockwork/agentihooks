@@ -234,3 +234,36 @@ def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch,
     logged.clear()
     assert swarm_gates.pretool("Bash", {}, "s1") == "handoff"
     assert logged == [("claim watch failed", {"error": "no transcript"})]
+
+
+def test_a_slow_hosted_ledger_costs_one_short_read_and_the_call_passes(hive, monkeypatch):
+    from hooks.context import context_recycle, swarm_gates
+    from scripts.swarm import ledger_client
+    from scripts.swarm_ledger.api import client
+
+    reads, logged = [], []
+
+    class Slow:
+        def __init__(self, base, credentials, timeout=10):
+            self.timeout = timeout
+
+        def request(self, slug, path, payload=None):
+            reads.append((slug, path, self.timeout))
+            raise TimeoutError("timed out")
+
+    module = ledger_client._ledger()
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
+    monkeypatch.setattr(client, "ResourceClient", Slow)
+    monkeypatch.setattr(module.ledger_link, "remote", lambda environ=None, slug="": True)
+    monkeypatch.setattr(module, "base", lambda slug="": "http://hosted.test")
+    monkeypatch.setattr(module, "credentials", lambda slug, service=False: {})
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: reads.append(("slept", seconds)))
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: None)
+    monkeypatch.setattr(swarm_gates, "log", lambda message, payload: logged.append((message, payload)))
+
+    assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") is None
+    assert reads == [("sw", "tasks/t1", claim_watch.READ_TIMEOUT)]
+    assert claim_watch.READ_TIMEOUT == 2
+    assert logged == [("claim watch failed", {"error": "timed out"})]
