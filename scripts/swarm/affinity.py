@@ -4,7 +4,7 @@ import json
 
 from scripts import agent_choice
 from scripts.inbox.store import InboxStore
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
 
 ORDER = (
@@ -30,7 +30,7 @@ def pending(store, slug):
     return json.loads(raw) if raw else None
 
 
-def live_master(store, slug):
+def live_master(store: RedisStore, slug: str) -> AgentRecord | None:
     return next((a for a in store.agents(slug) if masters.is_lead(slug, a) and a.state != "finished"), None)
 
 

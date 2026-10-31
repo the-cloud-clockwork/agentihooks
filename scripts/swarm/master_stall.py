@@ -3,13 +3,14 @@ seat with a recovery handoff. A proof swarm whose parent task is blocked stops i
 
 import re
 from dataclasses import replace
+from typing import Any
 
 from scripts.gates import quiet as quiet_gate
 from scripts.handoff import envelope, transfers
 from scripts.swarm import affinity, launch_check, master_retire, naming
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 STALLED = "stalled"
 RESUMED = "the master resumed work"
@@ -87,7 +88,9 @@ def run(slug, config, store, ledger, runtime, now_ms):
     return [f"recycled master {master.name} in its seat after {minutes} minutes busy with no tool call"]
 
 
-def recycle(slug, store, ledger, master, text, now_ms, reason):
+def recycle(
+    slug: str, store: RedisStore, ledger: Any, master: AgentRecord, text: str, now_ms: int, reason: str
+) -> None:
     found = envelope.build(store, slug, master, "recycle", ledger.state(slug)["tasks"], now_ms)
     store.put_handoff(slug, MASTER, text, seat=master.seat, envelope=found)
     transfers.record(store, slug, master, reason, text, now_ms)
