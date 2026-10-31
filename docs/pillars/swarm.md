@@ -5067,6 +5067,11 @@ with lease.kept(store, slug, held):
 The next pass acquires a new lease with a higher epoch when no other controller holds it, so one stale pass loses
 only the rest of that pass's work.
 
+Passes that stop at the deadline in every swarm at once point at a read that grew with the swarm's history rather
+than at one long step. Hive routing reads once loaded every archived execution; how they now read current executions
+only, and how to measure `scope.readings` and stopped passes, is in
+[Current execution reads](../swarm-v2/execution-identity.md#current-execution-reads).
+
 ### Doctor timer pass
 
 A `doctor` swarm runs the Doctor timer, `scripts.doctor.cli.timer`, as one step of its own tick pass, inside the
