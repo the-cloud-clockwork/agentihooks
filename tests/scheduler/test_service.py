@@ -668,19 +668,23 @@ def test_a_supervisor_started_by_its_unit_marks_its_runtime_folder_before_it_loc
     assert (tmp_path / "scheduler" / "agentihooks-scheduler.service").read_text() == "agentihooks-scheduler.service"
 
 
-def test_a_supervisor_started_by_its_unit_drains_one_started_outside_it_then_takes_the_lock(monkeypatch, tmp_path):
+def test_a_supervisor_started_by_its_unit_drains_one_started_outside_it_then_takes_the_lock(
+    monkeypatch, tmp_path, capsys
+):
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setattr(service, "revision", lambda root: "loaded")
     monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", "1")
-    drained = []
-    monkeypatch.setattr(service, "holder", lambda environ: {"pid": 4242})
-    monkeypatch.setattr(service, "drain", lambda pid, environ: drained.append(pid) or True)
+    asked, drained = [], []
+    monkeypatch.setattr(service, "holder", lambda environ: asked.append(environ) or {"pid": 4242})
+    monkeypatch.setattr(service, "drain", lambda pid, environ: drained.append((pid, environ)) or True)
     stopped = Event()
     stopped.set()
     service.supervise(stopped)
-    assert drained == [4242]
+    assert asked == [os.environ]
+    assert drained == [(4242, os.environ)]
+    assert capsys.readouterr() == ("", "the scheduler unit takes over from supervisor 4242, started outside it\n")
     assert json.loads((tmp_path / "supervisor.json").read_text())["pid"] == os.getpid()
 
 
