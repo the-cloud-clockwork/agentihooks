@@ -696,7 +696,7 @@
   "scripts/swarm/reboot.py": 232,
   "scripts/swarm/recovery_view.py": 82,
   "scripts/swarm/redis_budget.py": 50,
-  "scripts/swarm/redis_commands.py": 9,
+  "scripts/swarm/redis_commands.py": 7,
   "scripts/swarm/redis_wire.py": 15,
   "scripts/swarm/refresh_job.py": 125,
   "scripts/swarm/release_wait.py": 33,

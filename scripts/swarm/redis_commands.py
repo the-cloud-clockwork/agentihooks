@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from unittest import mock
 
 from scripts.swarm.code_reach import Program, parse
@@ -39,7 +39,7 @@ KEYLESS = frozenset({"MULTI", "EXEC"})
 @dataclass(frozen=True)
 class Store:
     opener: str
-    open: Callable
+    open: Callable[[], Any]
     # Reached only through scope.members, which a hive member's hooks skip: they read their own scope alone.
     skipped: tuple[str, ...] = ()
 
@@ -75,7 +75,7 @@ def store_keys(store: Store) -> list[str]:
     from scripts.hive import hive_state
 
     with mock.patch.object(hive_state, "on_redis", lambda: True):
-        opened = cast(Any, store.open())
+        opened = store.open()
     return [opened._current, opened._revision, f"{opened._history}probe", opened._projected, opened._published]
 
 
