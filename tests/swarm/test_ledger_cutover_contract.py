@@ -9,6 +9,7 @@ import pytest
 
 from scripts import swarm
 from scripts.events import state as event_state
+from scripts.events.redis_state import RedisStateStore
 from scripts.gates import Who
 from scripts.swarm import fencing, lease, ledger_client, ledger_cutover
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -423,8 +424,9 @@ def test_a_first_transfer_starts_at_epoch_one_with_an_expiring_lease(store, monk
         "epoch": 1,
         "expires_at": NOW + lease.ttl_ms(),
     }
-    current_key = event_state.for_store(store, "fencing")._current
-    assert watched == [(current_key,), (current_key,)]
+    states = event_state.for_store(store, "fencing")
+    assert isinstance(states, RedisStateStore)
+    assert watched == [(states.watch_key, states.revision_key), (states.watch_key, states.revision_key)]
 
 
 def test_a_transfer_moves_a_live_lease_held_by_its_owner_to_a_higher_epoch(store):

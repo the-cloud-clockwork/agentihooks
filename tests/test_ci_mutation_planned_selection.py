@@ -232,7 +232,13 @@ def test_refine_grades_the_planned_selection_without_selecting_again(tmp_path, m
 
     def refine(root, selected, stats):
         refined.append(selected)
-        return {"shards": 1, "estimated_worker_seconds": 0.0, "assignments": {}}
+        return {
+            "shards": 1,
+            "estimated_worker_seconds": 0.0,
+            "assignments": {},
+            "shard_worker_seconds": [0.0],
+            "workers": 3,
+        }
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)

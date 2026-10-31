@@ -50,6 +50,7 @@
         "swarm:sv2-ux-05:agents",
         "swarm:sv2-ux-05:config",
         "swarm:sv2-ux-05:context-evidence",
+        "swarm:sv2-ux-05:lease-cache",
         "swarm:sv2-ux-05:published",
         "swarm:sv2-ux-05:state-since",
         "swarm:sv2-ux-05:task-context-packs",
