@@ -292,13 +292,16 @@ def test_archive_compacts_rows_archived_before_it_dropped_source_blobs(store):
     first = validated(store, "eng-1@fixture")
     store.drop_agent("fixture", first.name)
     validated(store, "eng-1@fixture", first.execution_id)
+    bare = {"name": "old@fixture", "seat": "eng-9@fixture", "generation": 1, "execution_id": "exe-bare"}
 
     def legacy(doc):
         doc["archive"][first.execution_id] = doc["executions"].pop(first.execution_id)
+        doc["archive"]["exe-bare"] = dict(bare)
 
     fencing.write(store, "fixture", legacy)
     assert "source_blobs" in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
 
     assert store.execution_registry.archive("fixture") == 0
     assert "source_blobs" not in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
+    assert section(store, "archive")["exe-bare"] == bare
     assert store.execution_registry.archive("fixture") == 0
