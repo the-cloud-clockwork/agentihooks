@@ -232,6 +232,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/coverage_grade.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
+        "tests/coverage_summary.py",
         "tests/branch_record.py",
         "tests/dep_manifest.py",
         "tests/dev_durations.py",
