@@ -194,7 +194,11 @@ def test_parallel_grade_maps_each_file_in_a_pool_task(monkeypatch: pytest.Monkey
             super().__init__(max_workers=max_workers)
 
         def map(
-            self, fn: Callable[..., object], *iterables: Iterable[object], timeout: float | None = None, chunksize: int = 1
+            self,
+            fn: Callable[..., object],
+            *iterables: Iterable[object],
+            timeout: float | None = None,
+            chunksize: int = 1,
         ) -> Iterator[object]:
             listed = [list(items) for items in iterables]
             pools.append(len(listed[0]))
