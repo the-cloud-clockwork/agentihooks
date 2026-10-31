@@ -50,6 +50,60 @@ def test_routing_and_roster_reads_do_not_transfer_the_execution_archive(
     assert fencing.read(store, "sw")["archive"] == archive
 
 
+def test_lease_renewal_does_not_transfer_the_execution_archive(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fakeredis import FakeRedis
+
+    from scripts.swarm import lease
+
+    store = RedisStore(FakeRedis(decode_responses=True))
+    agent = AgentRecord("eng-a", "eng", "task", execution_id="active", generation=2, hive="hive-a")
+    store.project_agent("sw", agent)
+    ended = {**asdict(agent), "input_prompt": "ended execution history " * 1000}
+    archive = {f"old-{index}": {**ended, "execution_id": f"old-{index}"} for index in range(400)}
+    fencing.write(store, "sw", lambda doc: doc.update(archive=archive))
+    monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    connection_type = store.redis.connection_pool.connection_class
+    original = connection_type.read_response
+    transferred = []
+
+    def reply_bytes(value: Any) -> int:
+        if isinstance(value, (str, bytes)):
+            return len(value)
+        if isinstance(value, (list, tuple)):
+            return sum(reply_bytes(part) for part in value)
+        return 0
+
+    def traced(connection: Any, *args: Any, **kwargs: Any) -> Any:
+        result = original(connection, *args, **kwargs)
+        transferred.append(reply_bytes(result))
+        return result
+
+    monkeypatch.setattr(connection_type, "read_response", traced)
+    monkeypatch.setattr(lease, "now_ms", lambda saved: 50000)
+    assert lease.renew(store, "sw", held) == held
+    assert lease.current(store, "sw") == held
+    assert max(transferred) < 10000
+
+
+def test_the_lease_cache_never_changes_what_read_executions_returns() -> None:
+    from fakeredis import FakeRedis
+
+    from scripts.swarm import lease
+
+    store = RedisStore(FakeRedis(decode_responses=True))
+    agent = AgentRecord("eng-a", "eng", "task", execution_id="active", generation=2, hive="hive-a")
+    store.project_agent("sw", agent)
+    fencing.write(store, "sw", lambda doc: doc.update(executions={"active": asdict(agent)}))
+    lease.acquire(store, "sw", "home")
+    before = fencing.read_executions(store, "sw")
+    held = lease.current(store, "sw")
+    assert held is not None
+    lease.renew(store, "sw", held)
+    assert fencing.read_executions(store, "sw") == before == {"active": asdict(agent)}
+
+
 def test_a_legacy_writer_cannot_leave_stale_routing_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     from fakeredis import FakeRedis
 
