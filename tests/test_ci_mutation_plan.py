@@ -406,6 +406,7 @@ def test_the_head_takes_the_direct_tests_of_a_changed_line_first_within_its_budg
     assert split["costs"] == pytest.approx(
         [5.6 + 1.25 * (20.0 + sum(seconds[node] for node in chosen)) for chosen in split["slices"]]
     )
+    assert split_tests(set(), seconds, 10, {"d1"}) is None
     for direct in ({"a3"}, {"d1"}):
         fallback = split_tests({"a3", "a2", "a1", "d2"}, seconds, 10, direct)
         assert fallback is not None and fallback["head"] == ["a1"]

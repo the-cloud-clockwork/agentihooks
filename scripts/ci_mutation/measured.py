@@ -67,7 +67,7 @@ def split_tests(
         if spent + seconds[node] <= HEAD_SECONDS:
             head.append(node)
             spent += seconds[node]
-    if not head:
+    if nodes and not head:
         head = [min(nodes, key=lambda node: (seconds[node], node))]
         spent = seconds[head[0]]
     ordered = [node for node in nodes if node not in head]
