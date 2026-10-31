@@ -47,7 +47,7 @@ def problems(agentihooks: Path, antoncore: Path) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     """Print the comparison and return 1 when the two ceilings differ."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser()
     parser.add_argument("--agentihooks", type=Path, required=True)
     parser.add_argument("--antoncore", type=Path, required=True)
     args = parser.parse_args(argv)

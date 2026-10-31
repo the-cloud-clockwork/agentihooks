@@ -39,10 +39,19 @@ def test_the_reader_finds_the_planner_constant_in_this_head() -> None:
 
 
 def test_equal_ceilings_pass(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    agentihooks = _agentihooks(tmp_path, "WORKERS = 4\nBATCH_RUNNERS = 40\n")
+    agentihooks = _agentihooks(tmp_path, "WORKERS = 4\nsettings.BATCH_RUNNERS = 9\nBATCH_RUNNERS = 40\n")
     status, lines = _run(capsys, agentihooks, _antoncore(tmp_path, 40))
     assert status == 0
     assert lines == [f"{ceiling.PLANNER} BATCH_RUNNERS and antoncore {ceiling.BATCH_VALUES} maxRunners are both 40."]
+
+
+@pytest.mark.parametrize("missing", ["--agentihooks", "--antoncore"])
+def test_both_checkouts_are_required(tmp_path: Path, missing: str) -> None:
+    roots = {"--agentihooks": _agentihooks(tmp_path, "BATCH_RUNNERS = 40\n"), "--antoncore": _antoncore(tmp_path, 40)}
+    argv = [part for flag, root in roots.items() if flag != missing for part in (flag, str(root))]
+    with pytest.raises(SystemExit) as exit_info:
+        ceiling.main(argv)
+    assert exit_info.value.code == 2
 
 
 @pytest.mark.parametrize(("ours", "theirs"), [(41, 40), (40, 39)])
