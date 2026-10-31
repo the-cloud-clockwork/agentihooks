@@ -78,6 +78,8 @@ def test_hive_reports_are_dispatched_at_start_and_end(
     hook_manager.EVENT_HANDLERS["SessionStart"](payload)
     flag = voice_output._FLAG_DIR / "session.voice"
     assert flag.resolve().is_relative_to(Path.home().resolve())
+    assert voice_output._QUOTA_FLAG == flag.parent / "quota_exhausted"
+    assert voice_output._LAST_SPOKE_FLAG == flag.parent / "last_spoke_ts"
     voice_output.set_voice_enabled("session")
     assert flag.read_text() == "1"
     hook_manager.EVENT_HANDLERS["SessionEnd"](payload)
