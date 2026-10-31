@@ -170,15 +170,16 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     )
     inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + wait_s
-    ended = ""
     while remaining := _unhanded(store, hive):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
             ended = _recover(store, hive, wait_s, remaining, host)
             break
         host.sleep(POLL_S)
+    else:
+        ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
     _withdraw(inbox, ordered, hive)
-    return ended or f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
+    return ended
 
 
 def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
