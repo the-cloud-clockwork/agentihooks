@@ -374,7 +374,9 @@ def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys
     runs = Runs({repo: [_row(7, "busy"), _row(8, "fix-branch")] for repo in panic.REPOS}, {FIX: "fix-branch"})
     monkeypatch.setattr(panic, "gh", runs)
     args = cli.build_parser().parse_args([SLUG, "panic", "on", "--fix", FIX])
+    before = cli.now_ms()
     args.handler(store, args)
+    after = cli.now_ms()
     out = json.loads(capsys.readouterr().out)
     assert out == {
         "panic": "on",
@@ -385,6 +387,12 @@ def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys
     assert current is not None
     assert current.reason == f"pressed on swarm {SLUG}"
     assert current.auto is False
+    assert before <= current.since <= after
+
+
+def test_the_panic_button_refuses_an_unknown_action():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args([SLUG, "panic", "maybe"])
 
 
 def test_the_panic_button_off_refuses_below_business_as_usual(store, counted):
