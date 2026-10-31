@@ -10,6 +10,14 @@ One entry per change merged into dev, newest release first. Each entry names its
 
 This change replaces the coverage ratchet's per-path `git show` reads with a single long-lived `git cat-file --batch` process that serves every source lookup for a revision, and has `renamed` build one source per revision instead of one per path. Output stays byte-for-byte identical to the old reader, but it cuts process spawning dramatically: a full-source probe dropped from 11.98s to 1.38s, and the dev test shard's wall time fell from 26.5s to 22.6s, so CI's "hold every line the base ran" step should get noticeably faster without changing results.
 
+## v2.17.523 · 2026-10-31
+
+### 2026-10-31 · 5b9f5adc6266 · #9113 · @nestorcolt
+
+**Index tasks and agents once per metrics row builder instead of scanning per row**
+
+The metrics row builders in scripts.swarm.metrics_swarm were scanning the full agent history on every row to find a matching task or owning agent, which made them scale linearly with history size; on rig-grade-swarm this pushed metrics._collect to about 85-95 s and caused run_tick to brush against its 450 s deadline, missing it twice. This change adds one-time indexes (_Tasks, _Owners) built per builder instead of per row, cutting measured runtimes from seconds down to tens of milliseconds while producing byte-identical output, verified against live inputs and a new test bounding per-record reads.
+
 ## v2.17.518 · 2026-10-30
 
 ### 2026-10-30 · 03e07b5c3dca · #8990 · @agenticore-app
