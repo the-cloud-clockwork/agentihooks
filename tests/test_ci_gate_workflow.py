@@ -785,8 +785,14 @@ def test_coverage_ratchet_refuses_a_base_without_its_grader(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "coverage_ratchet.py").write_text("from pathlib import Path\nPath('head-graded').touch()\n")
     (tmp_path / "runner").mkdir()
-    env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / "runner"), GITHUB_WORKSPACE=str(tmp_path))
-    step = _step("coverage-ratchet", "Hold every line the base ran")
+    env = dict(
+        os.environ,
+        BASE=base,
+        RUNNER_TEMP=str(tmp_path / "runner"),
+        GITHUB_WORKSPACE=str(tmp_path),
+        GITHUB_OUTPUT=str(tmp_path / "output"),
+    )
+    step = _step("coverage-ratchet", "Check out the base grader")
     result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
     assert result.returncode == 1
     assert "The base carries no tests/coverage_ratchet.py, so nothing trusted can grade." in result.stdout
