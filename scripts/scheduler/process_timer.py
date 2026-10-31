@@ -5,7 +5,7 @@ from threading import Event
 from typing import TYPE_CHECKING
 
 from scripts.scheduler import service
-from scripts.scheduler.core import Scheduler
+from scripts.scheduler.core import PROCESS_OWNER, Scheduler
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
@@ -32,7 +32,7 @@ class Timer:
         self.closed = False
         self.cancelled = Event()
         scheduler = Scheduler(state)
-        self.entry = scheduler.timer(owner="process", payload=json.dumps({"delay": delay}), delay=delay)
+        self.entry = scheduler.timer(owner=PROCESS_OWNER, payload=json.dumps({"delay": delay}), delay=delay)
         self.entry.start()
         try:
             service.ensure_running()

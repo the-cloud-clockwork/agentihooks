@@ -17,6 +17,7 @@ def mail(monkeypatch):
 
     shared = memory.open_bus(BusConfig())
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setattr(bus, "OPEN_WAIT_S", 30.0)
     publisher = bus.SeatPublisher(lambda: shared)
     monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
     yield InboxStore(fakeredis.FakeRedis(decode_responses=True)), shared
@@ -120,3 +121,68 @@ def test_a_failed_publish_keeps_the_redis_send_and_says_so(monkeypatch, capsys):
     assert store.get(later.id).state == "pending"
     assert attempts == [1]
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.wall_clock
+def test_a_hanging_connect_holds_no_publish_and_is_attempted_once() -> None:
+    import threading
+    import time
+    from typing import cast
+
+    from scripts.events.bus import Bus
+    from scripts.inbox import bus
+    from scripts.inbox.store import Item
+
+    release = threading.Event()
+    attempts = []
+
+    def hanging() -> Bus:
+        attempts.append(threading.current_thread().daemon)
+        release.wait(5)
+        return cast(Bus, memory.open_bus(BusConfig()))
+
+    publisher = bus.SeatPublisher(hanging)
+    took = []
+
+    def write(n: int) -> None:
+        item = Item(id=f"i{n}", sender="alice", address=SEAT, text="work", state="pending", created_at=0, updated_at=0)
+        start = time.monotonic()
+        publisher.publish(item)
+        took.append(time.monotonic() - start)
+
+    writers = [threading.Thread(target=write, args=(n,), daemon=True) for n in range(8)]
+    for writer in writers:
+        writer.start()
+    for writer in writers:
+        writer.join(2)
+    release.set()
+    assert len(took) == 8
+    assert max(took) < 1
+    assert attempts == [True]
+
+
+def test_a_hanging_open_runs_on_a_daemon_thread_and_frees_the_sender() -> None:
+    import threading
+    from typing import cast
+
+    from scripts.events.bus import Bus
+    from scripts.inbox import bus
+    from scripts.inbox.store import Item
+
+    release = threading.Event()
+    attempts = []
+
+    def hanging() -> Bus:
+        attempts.append(threading.current_thread().daemon)
+        release.wait(5)
+        return cast(Bus, memory.open_bus(BusConfig()))
+
+    publisher = bus.SeatPublisher(hanging)
+    item = Item(id="i1", sender="alice", address=SEAT, text="work", state="pending", created_at=0, updated_at=0)
+    sender = threading.Thread(target=publisher.publish, args=(item,), daemon=False)
+    sender.start()
+    sender.join(2)
+    held = sender.is_alive()
+    release.set()
+    assert not held
+    assert attempts == [True]
