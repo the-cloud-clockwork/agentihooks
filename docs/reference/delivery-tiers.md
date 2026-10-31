@@ -1185,6 +1185,84 @@ Replace the example run ID with the intended run. Repeat `--run-id` to select se
 
 GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). The **queue journal**, written on the machine running the swarm tooling for every queue mutation that tooling performs, keeps that link. It does not change what the queue does. It was delivered by [pull request 4355](https://github.com/the-cloud-clockwork/agentihooks/pull/4355).
 
+### Deferred priority replay on scheduled ticks
+
+A merge priority can wait for the head merge group's run to finish instead of
+interrupting its build. The request is retained for replay by the swarm's
+detached refresh job. A scheduled tick starts that job after its phase steps,
+before intent, spawn and reap work. If that later work overruns and stops the
+tick, the refresh job has already been started and can still replay deferred
+priorities and run the other refreshes. This does not depend on the pull
+request's engineer remaining in its seat.
+
+#### Usage and configuration
+
+For a critical pull request, request priority and inspect its queue state:
+
+```bash
+agentihooks swarm example-swarm merge priority https://github.com/example/project/pull/123
+agentihooks swarm example-swarm merge state https://github.com/example/project/pull/123
+```
+
+A `priority-deferred` journal record means the request was saved; it does not
+mean the pull request entered the queue. Once replay succeeds, the journal
+records `priority-applied`. Failed replays use `priority-failed`; a pull
+request that closed, changed its base away from `dev`, or became a draft is
+dropped with `priority-dropped` and a reason. See [The queue journal](#the-queue-journal)
+for the record fields and queue snapshots.
+
+The earlier start is automatic and adds no configuration flag. Keep the swarm's
+scheduled tick delivery active; an ordinary, unscheduled tick does not start
+this refresh job. Its existing start interval and lock still control when a
+new detached job starts, so a scheduled tick is not a promise of immediate
+queue admission. Inspect the configured swarm and its delivery using:
+
+```bash
+agentihooks swarm example-swarm status --json
+```
+
+Follow the [scheduled tick delivery guard](../pillars/swarm.md#scheduled-tick-delivery-guard)
+for timer and supervisor configuration and inspection. The operator can use
+`merge priority --lift <url>` to skip the running head group's wait; that
+interrupts the normal deferral and is not required to enable replay.
+
+#### Troubleshooting a priority that never queues
+
+Read the journal on the machine running the tooling, using its configured
+AgentiHooks home:
+
+```bash
+jq -c --arg pull 'https://github.com/example/project/pull/123' \
+  'select(.pull == $pull) | {at, action, run_id, group_head, reason, errors}' \
+  "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/merge-queue-events.jsonl"
+```
+
+Compare the deferred record's `run_id` with the GitHub run's completion time.
+If no replay or drop follows a finished run, inspect the scheduled tick journal
+and refresh job log for the same UTC window. Repeated stopped ticks without
+refresh job starts matched the pre-fix failure: the job used to start only
+after spawn and reap. A stopped tick alone no longer explains a missed replay;
+check whether the refresh job started, its interval and lock, and any job
+failure. Use `priority-failed` errors or `priority-dropped` reasons when present
+instead of interpreting a green pull request as proof of queue admission.
+
+#### Delivery evidence and limits
+
+[Pull request 9075](https://github.com/the-cloud-clockwork/agentihooks/pull/9075)
+records the incident: the head run blocking pull request 8999 finished at
+23:19:59 UTC on 30 October 2026, but no replay, drop or wait record followed
+before a second priority at 00:39:55 UTC. The Doctor journal from 22:00 UTC on
+30 October to 06:00 UTC on 31 October showed zero refresh job starts and zero
+merge pass finishes, with ticks stopping inside spawn and reap after 430–477
+seconds. Moving the refresh start ahead of that work addresses the starvation.
+
+The [red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41176997943)
+failed because a stopped scheduled tick had not started the refresh job; the
+[green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41177158965)
+passed after the move. This proves start ordering, not a production latency
+bound or successful completion of every detached job. A stop before the start
+point, or a failure in the refresh job itself, still needs investigation.
+
 ### The queue journal
 
 Every record is one JSON line appended to `merge-queue-events.jsonl` in the AgentiHooks home (`$AGENTIHOOKS_HOME`, else `~/.agentihooks`). Nothing needs to be enabled. A write that fails prints `merge queue record not written: <error>` on stderr, and the queue operation still completes.
