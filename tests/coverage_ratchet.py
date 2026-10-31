@@ -58,12 +58,12 @@ def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int]
 
 
 def _missed(
-    head: Path, lines: dict[str, set[int]], out: Path, workers: int = 1, statements: dict[str, dict] | None = None
+    head: Path, lines: dict[str, set[int]], out: Path, workers: int = 1, summaries: dict[str, dict] | None = None
 ) -> dict[str, list[int]]:
     modules = graded_modules(head)
     found = {
         path: sorted(set(known["statements"]) - {known["first"].get(str(line), line) for line in lines.get(path, ())})
-        for path, known in (statements or {}).items()
+        for path, known in (summaries or {}).items()
         if (head / path).is_file() and digest((head / path).read_bytes()) == known["digest"]
     }
     rest = [path for path in modules if path not in found]
@@ -77,7 +77,7 @@ def _missed(
                 parts = list(pool.map(_analysed, [combined.base_filename()] * workers, [head] * workers, chunks))
         else:
             parts = [_analysed(combined.base_filename(), head, rest)]
-        found.update(missed for part in parts for missed in part.items())
+        found.update(item for part in parts for item in part.items())
     return {path: found[path] for path in modules}
 
 

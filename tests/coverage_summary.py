@@ -43,20 +43,20 @@ def digest(source: bytes) -> str:
 
 
 def write_statements(head: Path, part: int, parts: int, out: Path) -> None:
-    """Record statement lines and multi line first lines for one slice of the graded modules, as the ratchet reads them."""
+    """Record statement lines and multi line first lines for one slice of graded modules, as the ratchet reads them."""
     coverage = Coverage(data_file=None, config_file=False)
     coverage.set_option("run:relative_files", True)
     found = {}
     for path in graded_modules(head)[part - 1 :: parts]:
         reporter = PythonFileReporter(str(head / path), coverage)
         try:
-            statements = reporter.lines()
+            lines = reporter.lines()
             first = reporter.multiline_map()
         except NotPython:
             continue
         found[path] = {
             "digest": digest((head / path).read_bytes()),
-            "statements": sorted(statements),
+            "statements": sorted(lines),
             "first": {str(line): start for line, start in sorted(first.items()) if line != start},
         }
     out.write_text(json.dumps(found, sort_keys=True))

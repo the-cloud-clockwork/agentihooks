@@ -204,7 +204,7 @@ def test_missed_lines_from_shard_statement_summaries_match_the_analysis_byte_for
 
     monkeypatch.setattr(ratchet, "_analysed", refuse_analysis)
     (tmp_path / "summarized").mkdir()
-    listed = ratchet._missed(head, measured, tmp_path / "summarized", statements=statements)
+    listed = ratchet._missed(head, measured, tmp_path / "summarized", summaries=statements)
     assert listed == expected
     assert list(listed) == list(expected)
     assert expected["scripts/untested.py"] == [1]
@@ -219,7 +219,7 @@ def test_a_module_whose_source_differs_from_its_statement_summary_is_analysed(tm
     (tmp_path / "analysed").mkdir()
     (tmp_path / "summarized").mkdir()
     expected = ratchet._missed(head, measured, tmp_path / "analysed")
-    assert ratchet._missed(head, measured, tmp_path / "summarized", statements=statements) == expected
+    assert ratchet._missed(head, measured, tmp_path / "summarized", summaries=statements) == expected
     assert expected["hooks/pkg/m.py"] == [2]
     assert expected["scripts/untested.py"] == [1]
 
