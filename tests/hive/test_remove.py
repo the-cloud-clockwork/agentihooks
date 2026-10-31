@@ -443,8 +443,10 @@ def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_it
     assert not remove.is_notice(replace(order, sender="operator"))
     other = inbox.send(remove.SENDER, "engineer@1", "Read the review on the ledger.")
     elsewhere = _member(store, "anton-8")
-    successor = AgentRecord("engineer@2", "eng", "t1", seat=SEAT, hive=elsewhere, state="working")
+    successor = AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working")
     RedisStore(store.redis).put_agent(SLUG, successor)
+    store.put_agent(SLUG, replace(successor, hive=elsewhere))
+    assert remove.hosted(store, elsewhere) == [(SLUG, replace(successor, hive=elsewhere))]
     inbox.seats.occupy(SEAT, "engineer@2", other.created_at + 1)
 
     exits.settle(inbox, "engineer@1", SEAT, "handed off its seat")
