@@ -6,7 +6,9 @@ import json
 import os
 import re
 import time
+import uuid
 from dataclasses import asdict, is_dataclass, replace
+from itertools import count
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -42,7 +44,11 @@ RUNTIME_WRITES = ("spawn", "retire", "reap_name", "nudge", "name_pane", "close_s
 def spy(target: Any, methods: tuple[str, ...], monkeypatch: pytest.MonkeyPatch) -> Mock:
     calls = Mock()
     for name in methods:
-        wrapped = Mock(wraps=getattr(target, name))
+        method = getattr(target, name)
+        wrapped = Mock(wraps=method)
+        wrapped.__qualname__ = method.__qualname__
+        wrapped.__name__ = method.__name__
+        wrapped.__module__ = method.__module__
         calls.attach_mock(wrapped, name)
         monkeypatch.setattr(target, name, wrapped)
     return calls
@@ -111,10 +117,27 @@ def prepare(scenario: str, store: RedisStore, ledger: FakeLedger, runtime: FakeR
             runtime.live.add(agent.name)
 
 
+def github_reply(repo: str, args: list[str]) -> dict[str, Any]:
+    if args[0] == "repo":
+        return {"nameWithOwner": "fixture/repo"}
+    if args[1] == "graphql":
+        return {"data": {"repository": {"mergeQueue": {"entries": {"totalCount": 0}}}}}
+    return {"workflow_runs": []}
+
+
 def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     import fakeredis
 
-    from scripts.swarm import timing
+    from scripts.swarm import commands, timing
+    from scripts.swarm.health import merge_stall
+
+    monkeypatch.setattr(merge_stall, "request", github_reply)
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "fixture-hive")
+    identities = count(1)
+    monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(identities)))
+    for module in ("execution", "health.verdicts", "launch_evidence", "promotion_owner", "incidents"):
+        monkeypatch.setattr(importlib.import_module(f"scripts.swarm.{module}"), "uuid4", uuid.uuid4)
 
     monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
@@ -158,6 +181,10 @@ def compare(record: dict[str, Any], scenario: str, entry: str) -> None:
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_tick_matches_golden(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     record = replay(scenario, entry, monkeypatch, tmp_path)
+    if output := os.environ.get("TICK_CHARACTERISATION_OUTPUT"):
+        directory = Path(output)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{entry}-{scenario}.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
     compare(record, scenario, entry)
 
 
