@@ -101,6 +101,8 @@ def test_lane_fit_preserves_hive_and_registered_capabilities(monkeypatch: pytest
 
     assert configured(offered["plain"])
     assert not configured(offered["pinned"])
+    home = readiness.offers(snapshot(doc([task("home", hive="hive-a")])), NOW)[0]
+    assert configured(home)
     assert configured(offered["gpu"])
     registered.assert_called_once_with(backing, "hive-a")
 
