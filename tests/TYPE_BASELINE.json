@@ -457,7 +457,7 @@
   "scripts/inbox/cli.py": 231,
   "scripts/inbox/codex.py": 160,
   "scripts/inbox/dispatch.py": 228,
-  "scripts/inbox/exits.py": 309,
+  "scripts/inbox/exits.py": 303,
   "scripts/inbox/intent.py": 64,
   "scripts/inbox/links.py": 76,
   "scripts/inbox/migration.py": 92,

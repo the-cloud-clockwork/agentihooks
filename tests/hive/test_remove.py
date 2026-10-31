@@ -3,6 +3,8 @@ import json
 import subprocess
 import urllib.error
 from dataclasses import replace
+from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -12,8 +14,8 @@ from scripts.handoff.transfers import first_next
 from scripts.hive import auth, cli, create, machine, registry, remove
 from scripts.hive.placement import choose, place_master
 from scripts.inbox.seats import SeatRegistry
-from scripts.inbox.store import InboxStore
-from scripts.swarm.store import AgentRecord
+from scripts.inbox.store import InboxStore, Item
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger.ledger_workspace import folder
 
 PUBLIC = "redis://hive.example:6380/2"
@@ -206,7 +208,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
         f"manifests: opened pull request {PR} deleting {', '.join(OWNED)}; it merges once its checks pass",
         "openbao: deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
     ]
-    assert [item.text for item in _orders(store, SEAT)] == [remove.ORDER.format(hive=member, slug=SLUG)]
+    assert [item.text for item in _orders(store, "engineer@1")] == [remove.ORDER.format(hive=member, slug=SLUG)]
     assert not auth.member(store.redis, member)
     assert f"hive-{member}" not in store.redis.acl_users()
     assert member not in store.redis.smembers(registry.INDEX)
@@ -255,7 +257,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
     ]
     assert _written(store, tmp_path) == before
     assert [argv for argv, _ in run.calls[calls:]] == READS
-    assert len(_orders(store, SEAT)) == 1
+    assert len(_orders(store, "engineer@1")) == 1
 
 
 def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_name(store, tmp_path):
@@ -351,7 +353,7 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     assert "draining" not in registry.show(store.redis, member)
     assert [argv for argv, _ in run.calls] == READS
     assert bao.opener.requests == []
-    assert _orders(store, SEAT) == []
+    assert _orders(store, "engineer@1") == []
 
 
 def test_a_hive_whose_agents_stay_is_left_draining_with_its_member(store, tmp_path):
@@ -410,8 +412,8 @@ def test_an_ended_agent_on_the_hive_does_not_hold_the_drain(store):
     assert remove.hosted(store, member) == []
 
 
-def _orders(store, seat):
-    return [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(seat)]
+def _orders(store: Swarm, address: str) -> list[Item]:
+    return [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(address)]
 
 
 def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_are_gone(store, tmp_path):
@@ -424,7 +426,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
     assert settled == f"hive {member} drained: every agent handed off, 1 ordered to hand off"
     assert (clock.now, clock.slept) == (2 * remove.POLL_S, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
-    orders = _orders(store, SEAT)
+    orders = _orders(store, "engineer@1")
     assert [(item.sender, item.text) for item in orders] == [
         (remove.SENDER, remove.ROLL.format(hive=member, slug=SLUG))
     ]
@@ -441,7 +443,46 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
 
     assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
     assert clock.slept == 0
-    assert _orders(store, SEAT) == []
+    assert _orders(store, "engineer@1") == []
+
+
+def _found(store: Swarm, item_id: str) -> Item:
+    return next(item for inbox in InboxStore(store.redis).worlds() if (item := inbox.get(item_id)))
+
+
+def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_its_predecessor(
+    store: Swarm, tmp_path: Path
+) -> None:
+    from scripts.inbox import exits
+
+    member = _member(store)
+    _agent(store, member)
+    inbox = InboxStore(store.redis)
+    inbox.seats.occupy(SEAT, "engineer@1", 1)
+    plan = remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9")
+    remove.drain(cast(RedisStore, store), plan, _host(Clock(store, member, 1), Run(), tmp_path))
+    [order] = _orders(store, "engineer@1")
+    assert remove.is_notice(order)
+    assert not remove.is_notice(replace(order, sender="operator"))
+    assert remove.is_notice(replace(order, text=remove.ROLL.format(hive=member, slug=SLUG)))
+    other = inbox.send(remove.SENDER, "engineer@1", "Read the review on the ledger.")
+    elsewhere = _member(store, "anton-8")
+    successor = AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working")
+    RedisStore(store.redis).put_agent(SLUG, successor)
+    store.put_agent(SLUG, replace(successor, hive=elsewhere))
+    assert remove.hosted(cast(RedisStore, store), elsewhere) == [(SLUG, replace(successor, hive=elsewhere))]
+    inbox.seats.occupy(SEAT, "engineer@2", other.created_at + 1)
+
+    exits.settle(inbox, "engineer@1", SEAT, "handed off its seat")
+
+    mail = [item for world in inbox.worlds() for item in world.pending_mail("engineer@2")]
+    assert [item.id for item in mail] == [other.id]
+    ended = _found(store, order.id)
+    assert (ended.address, ended.state, ended.reason) == (
+        "engineer@1",
+        "done",
+        "done: engineer@1 handed off its seat; its hive drain order ended with it",
+    )
 
 
 class Successor:
@@ -452,7 +493,7 @@ class Successor:
         self.slept += 1
         self.now += seconds
         for agent in self.store.agents(SLUG):
-            if _orders(self.store, agent.seat):
+            if _orders(self.store, agent.name):
                 self.store.put_agent(SLUG, replace(agent, state="finished"))
 
     def __call__(self):
@@ -473,9 +514,9 @@ def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_
 
 
 class Answering(Successor):
-    def sleep(self, seconds):
-        for item in _orders(self.store, SEAT):
-            InboxStore(self.store.redis).close(item.id, SEAT, "done", "handed off")
+    def sleep(self, seconds: int) -> None:
+        for item in _orders(self.store, "engineer@1"):
+            InboxStore(self.store.redis).close(item.id, "engineer@1", "done", "handed off")
         super().sleep(seconds)
 
 
@@ -484,42 +525,46 @@ def _withdrawn(member):
 
 
 def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_a_later_occupant_reads_none(
-    store, tmp_path
-):
+    store: Swarm, tmp_path: Path
+) -> None:
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
 
-    remove.settle(store, member, 3600, _host(Successor(store), Run(), tmp_path))
+    remove.settle(cast(RedisStore, store), member, 3600, _host(Successor(store), Run(), tmp_path))
 
-    for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
-        assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _withdrawn(member))]
+    for seat, predecessor, successor in ((SEAT, "engineer@1", "engineer@2"), (f"ci-1@{SLUG}", "ci@1", "ci@2")):
+        assert [(item.state, item.reason) for item in _orders(store, predecessor)] == [
+            ("cancelled", _withdrawn(member))
+        ]
         SeatRegistry(store.redis).occupy(seat, successor, 1)
         assert InboxStore(store.redis).open_mail(successor) == []
 
 
-def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, tmp_path):
+def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store: Swarm, tmp_path: Path) -> None:
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
 
-    remove.settle(store, member, 3600, _host(Answering(store), Run(), tmp_path))
+    remove.settle(cast(RedisStore, store), member, 3600, _host(Answering(store), Run(), tmp_path))
 
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("done", "done: handed off")]
-    assert [(item.state, item.reason) for item in _orders(store, f"ci-1@{SLUG}")] == [("cancelled", _withdrawn(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("done", "done: handed off")]
+    assert [(item.state, item.reason) for item in _orders(store, "ci@1")] == [("cancelled", _withdrawn(member))]
 
 
-def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(store, tmp_path, monkeypatch):
+def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(
+    store: Swarm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.handoff import envelope
 
     member = _member(store)
     _agent(store, member)
     monkeypatch.setattr(envelope, "build", lambda swarm, slug, agent, reason, rows, at, run: {"agent": agent.name})
 
-    settled = remove.settle(store, member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
+    settled = remove.settle(cast(RedisStore, store), member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
 
     assert settled.startswith(f"hive {member} stops after 30 seconds; engineer@1 did not hand off")
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("cancelled", _withdrawn(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("cancelled", _withdrawn(member))]
 
 
 def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(
@@ -545,7 +590,7 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
         "so each got a recovery handoff and its task reopens once the swarm retires it"
     )
     assert (clock.now, clock.slept) == (30, 2)
-    assert [len(_orders(store, seat)) for seat in (SEAT, f"eng-2@{SLUG}")] == [1, 1]
+    assert [len(_orders(store, name)) for name in ("engineer@1", "engineer@2")] == [1, 1]
     for name, task, seat in (("engineer@1", "t1", SEAT), ("engineer@2", "t2", f"eng-2@{SLUG}")):
         text = remove.RECOVERY.format(name=name, task=task, hive=member, wait=30, folder=folder(SLUG, task))
         assert store.handoffs[(SLUG, task)] == (text, seat)

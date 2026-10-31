@@ -16,12 +16,12 @@ from scripts.swarm.keyspace import ROOT
 if TYPE_CHECKING:
     from redis import Redis
 
-    from scripts.inbox.store import InboxStore
+    from scripts.inbox.store import InboxStore, Item
     from scripts.swarm.store import AgentRecord, RedisStore
 
 ENDED = ("finished", "ended")
 POLL_S = 15
-SENDER = "operator"
+SENDER = "swarm"
 ORDER = (
     "The operator is removing hive {hive}, which runs you. Finish the step you are on, then hand off with the "
     "handoff skill: run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your "
@@ -152,8 +152,16 @@ def _order(
 ) -> None:
     for slug, agent in remaining:
         if (slug, agent.name) not in ordered:
-            sent = inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
+            sent = inbox.send(SENDER, agent.name, text.format(hive=hive, slug=slug))
             ordered[(slug, agent.name)] = sent.id
+
+
+def is_notice(item: "Item") -> bool:
+    """Whether item is a hive drain order, meant only for the life the draining hive runs."""
+    return item.sender == SENDER and any(
+        re.fullmatch(re.escape(text).replace(r"\{hive\}", ".+").replace(r"\{slug\}", ".+"), item.text)
+        for text in (ORDER, ROLL)
+    )
 
 
 def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
