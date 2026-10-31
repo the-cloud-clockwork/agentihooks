@@ -36,6 +36,7 @@ STATE_LIMITS = {"hub-timers": {"history": 1, "max_bytes": 1 << 30}}
 MIN_FETCH_MS = 10
 LOOP_START_S = 5
 LOOP_STOP_S = 5
+FIRST_CONNECT_S = 2
 ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
 
 
@@ -55,6 +56,23 @@ def auth_options(credentials: str | None) -> dict:
         "user_jwt_cb": lambda: jwt.encode(),
         "signature_cb": lambda nonce: base64.b64encode(user.sign(nonce.encode())),
         "inbox_prefix": inbox(user.public),
+    }
+
+
+async def _unreported(error: Exception) -> None:
+    """Drop a connect attempt error; the open that gives up raises once to its caller."""
+
+
+def connect_options(config: BusConfig) -> dict:
+    """Retry forever for a reconnecting client; otherwise try twice within seconds and log no attempt."""
+    if config.reconnect:
+        return {"allow_reconnect": True, "max_reconnect_attempts": -1}
+    return {
+        "allow_reconnect": False,
+        "max_reconnect_attempts": 1,
+        "reconnect_time_wait": 0,
+        "connect_timeout": FIRST_CONNECT_S,
+        "error_cb": _unreported,
     }
 
 
@@ -447,12 +465,7 @@ class NatsBus:
         self._views: dict[str, Bus] = {}
         try:
             self._nc = self._loop.run(
-                nats_client.connect(
-                    url,
-                    allow_reconnect=config.reconnect,
-                    **({"max_reconnect_attempts": -1} if config.reconnect else {}),
-                    **auth_options(config.credentials),
-                )
+                nats_client.connect(url, **connect_options(config), **auth_options(config.credentials))
             )
             self._js = self._nc.jetstream()
             event_stream, dead_stream = EVENT_STREAM, DEAD_STREAM

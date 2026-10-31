@@ -2,6 +2,7 @@ import re
 import sqlite3
 import time
 from collections.abc import Callable
+from typing import Any
 
 from scripts.events import catalogue, envelope, subjects
 
@@ -17,6 +18,11 @@ ADD_SENT_AT = "ALTER TABLE outbox_sent ADD COLUMN sent_at INTEGER NOT NULL DEFAU
 DUPLICATE = "duplicate column name: sent_at"
 PRUNE_ROWS = "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox_sent WHERE sent_at < ?)"
 PRUNE_MARKS = "DELETE FROM outbox_sent WHERE sent_at < ?"
+CAP_UNSENT = (
+    "DELETE FROM outbox WHERE id NOT IN (SELECT id FROM outbox_sent) AND id NOT IN (SELECT id FROM outbox"
+    " WHERE id NOT IN (SELECT id FROM outbox_sent) ORDER BY revision DESC, subject DESC, id DESC LIMIT ?)"
+)
+MAX_UNSENT = 10_000
 BATCH = 100
 AUTHOR = "ledger"
 RESERVED = re.compile(r"[%.*>\s]")
@@ -86,3 +92,9 @@ def prune(repository, window_ms: int, clock: Callable[[], int] = now_ms) -> int:
         deleted = connection.execute(PRUNE_ROWS, (cutoff,)).rowcount
         connection.execute(PRUNE_MARKS, (cutoff,))
     return deleted
+
+
+def cap(repository: Any, limit: int) -> int:
+    """Delete the oldest unsent rows past the limit, so an outbox no bus drains stays bounded."""
+    with repository.connect() as connection, connection:
+        return connection.execute(CAP_UNSENT, (limit,)).rowcount
