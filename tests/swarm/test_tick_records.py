@@ -7,9 +7,7 @@ from scripts.swarm import tick_stop, timing
 
 
 @pytest.mark.parametrize("outcome", ["success", "error", "stopped"])
-def test_step_history_is_bounded_and_keeps_the_journal(
-    outcome: str, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_step_history_is_bounded_and_keeps_the_journal(outcome: str, capsys: pytest.CaptureFixture[str]) -> None:
     import fakeredis
 
     from scripts.swarm.store import RedisStore
