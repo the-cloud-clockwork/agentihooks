@@ -215,6 +215,29 @@ def test_a_busy_pass_reaps_process_timers_abandoned_for_an_hour(monkeypatch, sta
     assert {recent.id, user.id, due.id} <= set(entries)
 
 
+def test_a_pass_that_loses_its_lease_before_the_reap_reaps_nothing(monkeypatch, state):
+    from scripts.scheduler import lease
+    from scripts.scheduler.core import Scheduler
+
+    monkeypatch.setattr(lease, "Thread", Mock())
+    scheduler = Scheduler(state, machine="proof")
+    retired = scheduler.timer(owner="operator", payload="retired", delay=1, now=0)
+    scheduler.retire(retired.id)
+    due = scheduler.timer(owner="operator", payload="due", delay=1, now=0)
+    due.start(now=0)
+    deliver = scheduler._deliver
+
+    def lapsing(entry_id, now, held):
+        deliver(entry_id, now, held)
+        scheduler.change(lambda document: document["lease"].__setitem__("expires", 0))
+
+    monkeypatch.setattr(scheduler, "_deliver", lapsing)
+    with pytest.raises(lease.LostLock):
+        scheduler.run_due(now=1)
+    assert due.state == "fired"
+    assert retired.id in scheduler.document()["entries"]
+
+
 @pytest.mark.parametrize("stored", [None, {"token": "successor", "expires": 10**12}, {"token": "owner", "expires": 0}])
 def test_lease_verification_rejects_absent_changed_or_expired_ownership(state, stored):
     from scripts.scheduler import lease
