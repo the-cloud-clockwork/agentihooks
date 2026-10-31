@@ -94,6 +94,7 @@ def test_the_lease_cache_never_changes_what_read_executions_returns() -> None:
     store = RedisStore(FakeRedis(decode_responses=True))
     agent = AgentRecord("eng-a", "eng", "task", execution_id="active", generation=2, hive="hive-a")
     store.project_agent("sw", agent)
+    fencing.write(store, "sw", lambda doc: doc.update(executions={"active": asdict(agent)}))
     lease.acquire(store, "sw", "home")
     before = fencing.read_executions(store, "sw")
     lease.renew(store, "sw", lease.current(store, "sw"))

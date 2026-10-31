@@ -424,7 +424,8 @@ def test_a_first_transfer_starts_at_epoch_one_with_an_expiring_lease(store, monk
         "expires_at": NOW + lease.ttl_ms(),
     }
     current_key = event_state.for_store(store, "fencing")._current
-    assert watched == [(current_key,), (current_key,)]
+    revision_key = event_state.for_store(store, "fencing")._revision
+    assert watched == [(current_key, revision_key), (current_key, revision_key)]
 
 
 def test_a_transfer_moves_a_live_lease_held_by_its_owner_to_a_higher_epoch(store):
