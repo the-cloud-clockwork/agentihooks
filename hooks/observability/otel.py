@@ -20,13 +20,14 @@ import hashlib
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 _tracer = None
 _meter = None
 _log_emitter = None
 _initialized = False
 _gauges: dict[str, Any] = {}
+_counters: dict[str, Any] = {}
 _providers: list = []
 FLUSH_TIMEOUT_SEC = 1.0
 FLUSH_COOLDOWN_SEC = 60
@@ -128,6 +129,8 @@ def _dispatch_op(op: tuple) -> None:
         if name not in _gauges:
             _gauges[name] = _meter.create_gauge(name)
         _gauges[name].set(value, {**_correlation(attrs), **attrs})
+    elif kind == "counter":
+        _add_counter(cast(tuple[str, str, float, dict[str, str]], op))
     elif kind == "flush":
         try:
             succeeded = True
@@ -137,6 +140,18 @@ def _dispatch_op(op: tuple) -> None:
             op[2][0] = succeeded
         finally:
             op[1].set()
+
+
+def _add_counter(op: tuple[str, str, float, dict[str, str]]) -> None:
+    """Adds a queued counter increment, creating the counter on first use."""
+    _, name, value, attrs = op
+    meter: Any = _meter
+    if meter is None:
+        _count(attrs, "counters", "unsupported")
+        return
+    if name not in _counters:
+        _counters[name] = meter.create_counter(name)
+    _counters[name].add(value, attrs)
 
 
 def _correlation(attrs: dict) -> dict:
@@ -285,6 +300,11 @@ def emit_event(name: str, attributes: dict[str, str] | None = None) -> None:
 def record_gauge(name: str, value: float, attributes: dict[str, str] | None = None) -> None:
     """Enqueue a gauge metric for the worker thread. Always non-blocking."""
     _enqueue("gauges", ("gauge", name, float(value), dict(attributes or {})))
+
+
+def add_counter(name: str, value: float, attributes: dict[str, str] | None = None) -> None:
+    """Enqueue a counter increment for the worker thread. Always non-blocking."""
+    _enqueue("counters", ("counter", name, float(value), dict(attributes or {})))
 
 
 def _count(attrs: dict, signal: str, outcome: str) -> None:

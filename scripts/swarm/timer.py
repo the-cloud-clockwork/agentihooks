@@ -24,6 +24,7 @@ DRAIN_S = 30
 KILL_WAIT_S = 10
 STOP_TIMEOUT_S = 120
 CGROUP_FILE = Path("/proc/self/cgroup")
+LOCKS_FILE = Path("/proc/locks")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
@@ -258,12 +259,13 @@ def _off_installed(held):
     return ""
 
 
-def recycle():
+def recycle() -> None:
+    """Drain a supervisor off the installed code, only between swarm tick passes so a recycle never splits one."""
     from scripts.scheduler import service
 
     env = _scheduler_env()
     held = service.holder(env)
-    if held is None or not (why := _off_installed(held)):
+    if held is None or not (why := _off_installed(held)) or _ticking():
         return
     print(f"recycling the scheduler supervisor: {why}", file=sys.stderr)
     if not service.drain(held["pid"], env):
@@ -271,6 +273,23 @@ def recycle():
             f"the scheduler supervisor {held['pid']} still holds its lock; the next wait pass tries again",
             file=sys.stderr,
         )
+
+
+def _ticking() -> bool:
+    """True while a swarm tick pass holds the tick lock, read from the kernel lock table so the probe never takes it."""
+    import re
+
+    from scripts.scheduler.service import runtime_dir
+    from scripts.swarm.scheduled_tick import LOCK
+
+    try:
+        stat = (runtime_dir() / f"{LOCK}.lock").stat()
+        table = LOCKS_FILE.read_text()
+    except OSError:
+        return False
+    holders = re.findall(r"^\d+:\s+FLOCK\s+\S+\s+\S+\s+\d+\s+([0-9a-f]+):([0-9a-f]+):(\d+)\s", table, re.MULTILINE)
+    held = (os.major(stat.st_dev), os.minor(stat.st_dev), stat.st_ino)
+    return any((int(major, 16), int(minor, 16), int(inode)) == held for major, minor, inode in holders)
 
 
 def _proven():
