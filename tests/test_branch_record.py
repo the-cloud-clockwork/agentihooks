@@ -111,6 +111,24 @@ def test_a_complete_leg_keeps_every_passed_test_with_inputs_under_its_normalized
     assert _units(found, "tests/test_x.py::test_b@slow") == {"hooks/sample.py::second", "hooks/sample.py::<module>"}
 
 
+def test_a_modules_collection_reads_reach_the_branch_manifest_tests_that_executed_it(tmp_path: Path) -> None:
+    leg = _leg(tmp_path)
+    (leg / "elapsed.json").write_text("{}")
+    _coverage(leg / ".coverage", {"tests/test_x.py::test_a|run": FIRST})
+    _lines(tmp_path / "results" / "9.jsonl", [{"test": "tests/test_x.py::test_a", "outcome": "passed", "pid": 9}])
+    _inputs(tmp_path, "tests/test_x.py::test_a")
+    _lines(
+        tmp_path / "inputs" / "2.jsonl",
+        [
+            {"module": "hooks/sample.py", "files": ["page.js"], "escapes": True},
+            {"module": "hooks/other.py", "files": ["other.js"], "escapes": True},
+        ],
+    )
+    found = _record(tmp_path)
+    assert found["manifest"]["tests"]["tests/test_x.py::test_a"]["files"] == ["page.js"]
+    assert found["manifest"]["tests"]["tests/test_x.py::test_a"]["escapes"] is True
+
+
 def test_coverage_without_per_test_contexts_proves_no_pass(tmp_path):
     leg = _leg(tmp_path)
     (leg / "elapsed.json").write_text("{}")

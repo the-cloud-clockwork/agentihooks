@@ -150,6 +150,28 @@ def test_the_manifest_holds_the_functions_each_test_executed(tmp_path):
     }
 
 
+def test_the_build_gives_a_modules_collection_reads_to_the_tests_that_executed_it(tmp_path: Path) -> None:
+    package = tmp_path / "hooks"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "sample.py").write_text(SOURCE)
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    data.set_context("tests/test_a.py::test_double|run")
+    data.add_arcs({str(package / "sample.py"): [(-6, 7), (7, -6)]})
+    data.write()
+    (tmp_path / "w.jsonl").write_text(
+        json.dumps({"module": "hooks/sample.py", "files": ["docs/page.js"], "escapes": True})
+        + "\n"
+        + json.dumps({"test": "tests/test_c.py::test_nothing", "files": [], "escapes": False})
+        + "\n"
+    )
+    manifest = dep_manifest.build(tmp_path / ".coverage", [tmp_path / "w.jsonl"], tmp_path, "abc", "py3.12-x")
+    assert {name: (found["files"], found["escapes"]) for name, found in manifest["tests"].items()} == {
+        "tests/test_a.py::test_double": (["docs/page.js"], True),
+        "tests/test_c.py::test_nothing": ([], False),
+    }
+
+
 def test_the_manifest_preserves_each_contexts_executed_lines(tmp_path):
     manifest = _measure(tmp_path)
     assert manifest["lines"]["tests/test_a.py::test_double"] == {"hooks/sample.py": [7]}
@@ -227,7 +249,8 @@ def test_the_inputs_plugin_records_opened_files_and_escapes(tmp_path):
         check=True,
         capture_output=True,
     )
-    lines = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    lines = [row for row in rows if "test" in row]
     assert sorted(lines, key=lambda line: line["test"]) == [
         {"test": "test_sample.py::test_first", "files": ["shared.txt"], "escapes": True},
         {"test": "test_sample.py::test_reads", "files": ["data.txt", "shared.txt"], "escapes": False},
@@ -253,7 +276,8 @@ def test_the_inputs_plugin_records_files_a_child_process_reads_for_its_test_only
         check=True,
         capture_output=True,
     )
-    lines = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    lines = [row for row in rows if "test" in row]
     assert sorted(lines, key=lambda line: line["test"]) == [
         {"test": "test_sample.py::test_child_reads", "files": ["child.txt"], "escapes": True},
         {"test": "test_sample.py::test_child_reads_nothing", "files": [], "escapes": True},
@@ -374,7 +398,13 @@ def _recorded_inputs(root: Path, modules: list[str]) -> list[dict]:
         check=True,
         capture_output=True,
     )
-    return [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    tests = {
+        row["test"]: {"units": [], "files": row["files"], "escapes": row["escapes"]} for row in rows if "test" in row
+    }
+    found = {row["module"]: {"files": set(row["files"]), "escapes": row["escapes"]} for row in rows if "module" in row}
+    dep_manifest.attribute(tests, found, root, {})
+    return [{"test": test, "files": sorted(row["files"]), "escapes": row["escapes"]} for test, row in tests.items()]
 
 
 @pytest.mark.parametrize("shared_import", [None, "helper", "test_reader", "dynamic"])
@@ -458,6 +488,122 @@ def test_files_a_module_reads_while_imported_during_collection_belong_only_to_it
         },
         {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
     ]
+
+
+def test_a_test_reaches_collection_reads_through_module_imports_and_the_function_imports_it_ran(tmp_path: Path) -> None:
+    files = {
+        "scripts/__init__.py": "",
+        "scripts/pages.py": "PAGE = open('page.js').read()\n",
+        "scripts/eager.py": "from scripts import pages\n",
+        "scripts/lazy.py": "def serve():\n    from scripts import pages\n    return pages.PAGE\n",
+        "scripts/plugins.py": "import importlib\ndef load(name):\n    return importlib.import_module(name)\n",
+        "scripts/spawn.py": "VALUE = 1\n",
+        "tests/test_eager.py": "import scripts.eager\n",
+        "tests/test_lazy.py": "from scripts.lazy import serve\n",
+        "tests/test_plugins.py": "from scripts.plugins import load\n",
+        "tests/test_spawn.py": "import scripts.spawn\n",
+        "scripts/defaults.py": "def chosen(module=__import__('json')):\n    return module\n",
+        "tests/test_defaults.py": "import scripts.defaults\n",
+        "tests/test_collected.py": "from scripts.lazy import serve\nPAGE = serve()\n",
+        "scripts/aliased.py": "from importlib import import_module as load\ndef get(name):\n    return load(name)\n",
+        "tests/test_aliased.py": "from scripts.aliased import get\n",
+        "scripts/bypath.py": "import importlib.util\ndef load(path):\n    return importlib.util.spec_from_file_location('x', path)\n",
+        "tests/test_bypath.py": "from scripts.bypath import load\n",
+        "scripts/assigned.py": "import importlib\nLOAD = importlib.import_module\ndef get(name):\n    return LOAD(name)\n",
+        "tests/test_assigned.py": "from scripts.assigned import get\n",
+        "tests/test_flat.py": "import flat_helper\n",
+        "tests/flat_helper.py": "import flat_data\n",
+        "tests/flat_data.py": "DATA = open('flat.txt').read()\n",
+    }
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    lines = {
+        "tests/test_lazy.py::test_unused": {"scripts/lazy.py": [1]},
+        "tests/test_lazy.py::test_served": {"scripts/lazy.py": [1, 2, 3]},
+        "tests/test_plugins.py::test_loaded": {"scripts/plugins.py": [3]},
+        "tests/test_aliased.py::test_aliased": {"scripts/aliased.py": [3]},
+        "tests/test_bypath.py::test_bypath": {"scripts/bypath.py": [3]},
+        "tests/test_assigned.py::test_assigned": {"scripts/assigned.py": [4]},
+    }
+    names = [
+        "tests/test_eager.py::test_eager",
+        *lines,
+        "tests/test_plugins.py::test_kept",
+        "tests/test_spawn.py::test_spawn",
+        "tests/test_defaults.py::test_defaults",
+        "tests/test_collected.py::test_collected",
+        "tests/test_flat.py::test_flat",
+    ]
+    tests = {name: {"units": [], "files": [], "escapes": False} for name in names}
+    modules = {
+        "scripts/pages.py": {"files": {"page.js"}, "escapes": False},
+        "scripts/spawn.py": {"files": set(), "escapes": True},
+        "tests/test_collected.py": {"files": set(), "escapes": False, "imports": {"scripts/pages.py"}},
+        "tests/flat_data.py": {"files": {"flat.txt"}, "escapes": False},
+    }
+    dep_manifest.attribute(tests, modules, tmp_path, lines)
+    assert {name: (sorted(found["files"]), found["escapes"]) for name, found in tests.items()} == {
+        "tests/test_eager.py::test_eager": (["page.js"], False),
+        "tests/test_lazy.py::test_unused": ([], False),
+        "tests/test_lazy.py::test_served": (["page.js"], False),
+        "tests/test_plugins.py::test_loaded": ([], True),
+        "tests/test_plugins.py::test_kept": ([], False),
+        "tests/test_spawn.py::test_spawn": ([], True),
+        "tests/test_defaults.py::test_defaults": ([], True),
+        "tests/test_collected.py::test_collected": (["page.js"], False),
+        "tests/test_aliased.py::test_aliased": ([], True),
+        "tests/test_bypath.py::test_bypath": ([], True),
+        "tests/test_assigned.py::test_assigned": ([], True),
+        "tests/test_flat.py::test_flat": (["flat.txt"], False),
+    }
+
+
+def test_a_process_started_while_a_module_is_imported_escapes_only_that_modules_importers(tmp_path: Path) -> None:
+    (tmp_path / "spawner.py").write_text(
+        "import subprocess, sys\nsubprocess.run([sys.executable, '-c', 'pass'], check=True)\n"
+    )
+    (tmp_path / "clean.py").write_text("VALUE = 1\n")
+    (tmp_path / "test_spawning.py").write_text("import spawner\nimport clean\ndef test_spawning():\n    pass\n")
+    (tmp_path / "test_clean.py").write_text("import clean\ndef test_clean():\n    pass\n")
+    rows = _recorded_inputs(tmp_path, ["test_spawning.py", "test_clean.py"])
+    assert sorted(rows, key=lambda row: row["test"]) == [
+        {"test": "test_clean.py::test_clean", "files": [], "escapes": False},
+        {"test": "test_spawning.py::test_spawning", "files": [], "escapes": True},
+    ]
+
+
+def test_the_recorder_keeps_each_module_an_import_statement_names_during_collection(tmp_path: Path) -> None:
+    (tmp_path / "data.py").write_text("DATA = 1\n")
+    (tmp_path / "helper.py").write_text("def load():\n    import data\n    return data.DATA\n")
+    (tmp_path / "test_first.py").write_text("import data\ndef test_first():\n    pass\n")
+    (tmp_path / "test_lazy.py").write_text("from helper import load\nVALUE = load()\ndef test_lazy():\n    pass\n")
+    (tmp_path / "plugins.py").write_text(
+        "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
+    )
+    (tmp_path / "test_named.py").write_text(
+        "from plugins import load\nVALUE = load('data')\ndef test_named():\n    pass\n"
+    )
+    (tmp_path / "early.py").write_text(
+        "from importlib import import_module\ndef load(name):\n    return import_module(name)\n"
+    )
+    (tmp_path / "conftest.py").write_text("import early\n")
+    (tmp_path / "test_early.py").write_text("import early\nVALUE = early.load('data')\ndef test_early():\n    pass\n")
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", "test_first.py"]
+        + ["test_lazy.py", "test_named.py", "test_early.py"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    imports = {row["module"]: row["imports"] for row in rows if "module" in row}
+    assert imports["test_lazy.py"] == ["data.py", "helper.py"]
+    assert imports["test_first.py"] == ["data.py"]
+    assert imports["test_named.py"] == ["data.py", "plugins.py"]
+    assert imports["test_early.py"] == ["data.py", "early.py"]
 
 
 @pytest.mark.parametrize(

@@ -3,15 +3,18 @@
 Loaded with `-p tests.dep_inputs`; idle unless DEP_INPUTS_DIR names the folder for one JSON line per test.
 """
 
+import builtins
 import hashlib
+import importlib
+import importlib.util
 import json
 import os
 import sys
 import sysconfig
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from types import FrameType
+from types import FrameType, ModuleType
 
 import pytest
 
@@ -38,8 +41,8 @@ class DepInputs:
         self.shared_files = {}
         self.collecting = None
         self.loose = set()
-        self.parsed = {}
-        self.closures = {}
+        self.imports = {}
+        self.named = ""
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -106,6 +109,10 @@ class DepInputs:
                 if self.collecting:
                     self.loose.add(opened)
         elif event in ESCAPES and test is not self.shared:
+            owner = self.importing(sys._getframe(1)) if self.collecting else None
+            if owner is not None:
+                self.collections.setdefault(owner, [set(), False])[1] = True
+                return
             test[1] = True
             self.escaping.update(self.setting_up)
 
@@ -116,71 +123,60 @@ class DepInputs:
             return
         previous = self.current
         collected = self.collections.setdefault(collector.nodeid, [set(), False])
-        imported = set(sys.modules)
         self.current = collected
         self.collecting, self.loose = str(collector.path), set()
+        self.named = collector.nodeid
+        original = builtins.__import__
+        builtins.__import__ = self.importer(original)
         try:
             yield
         finally:
+            builtins.__import__ = original
             previous[0].update(path for path in self.loose if not path.startswith(self.root + ".github/workflows/"))
             self.collecting = None
             self.current = previous
-            for name in set(sys.modules) - imported:
-                filename = getattr(sys.modules[name], "__file__", "") or ""
-                if filename.startswith(self.root) and filename.endswith(".py"):
-                    found = self.collections.setdefault(filename[len(self.root) :], [set(), False])
-                    found[1] = found[1] or collected[1]
+
+    def importer(self, original: Callable[..., ModuleType]) -> Callable[..., ModuleType]:
+        """Wrap the import statement so every repository module it names, cached or not, is recorded."""
+
+        def run(
+            name: str,
+            scope: dict | None = None,
+            local: dict | None = None,
+            fromlist: Sequence[str] = (),
+            level: int = 0,
+        ) -> ModuleType:
+            module = original(name, scope, local, fromlist, level)
+            absolute = (
+                importlib.util.resolve_name("." * level + name, (scope or {}).get("__package__")) if level else name
+            )
+            self.named_by(sys._getframe(1), [absolute, *(f"{absolute}.{item}" for item in fromlist or ())])
+            return module
+
+        return run
+
+    def named_by(self, frame: FrameType | None, names: list[str]) -> None:
+        """Record each repository module in names for the module whose top level code runs innermost."""
+        for name in names:
+            filename = getattr(sys.modules.get(name), "__file__", None) or ""
+            if filename.startswith(self.root) and not filename[len(self.root) :].startswith(SKIPPED):
+                owner = self.importing(frame) or self.named
+                self.imports.setdefault(owner, set()).add(filename[len(self.root) :])
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
-        imports = {}
-        for path in self.collections:
-            imports[path], dynamic = self.module_imports(path)
-            self.collections[path][1] = self.collections[path][1] or dynamic
-        for _ in self.collections:
-            before = sum(len(found[0]) + found[1] for found in self.collections.values())
-            for path, names in imports.items():
-                found = self.collections[path]
-                for name in names & self.collections.keys():
-                    dependency = self.collections[name]
-                    found[0].update(dependency[0])
-                    found[1] = found[1] or dependency[1]
-            if before == sum(len(found[0]) + found[1] for found in self.collections.values()):
-                break
+        self.append_finished(self.module_lines())
 
-    def module_imports(self, path: str) -> tuple[set[str], bool]:
-        """Repository files a module's imports and parent packages load now, and whether it imports by name."""
-        if path not in self.parsed:
-            from scripts.ci_mutation.scope import imported_names
-
-            text = (Path(self.root) / path).read_text()
-            names = imported_names(text, Path(path).parent.parts)
-            dynamic = "__import__" in text or any(
-                name == "importlib" or name.startswith("importlib.") for name in names
+    def module_lines(self) -> list[str]:
+        """One line per repository module with the files its collection read, whether it started a process and the
+        modules its import statements named while collecting."""
+        lines = []
+        for path in sorted(self.collections.keys() | self.imports.keys()):
+            found = self.collections.get(path, [set(), False])
+            imports = sorted(self.imports.get(path, set()) - {path})
+            lines.append(
+                json.dumps({"module": path, "files": self.relative(found[0]), "escapes": found[1], "imports": imports})
             )
-            parts = [name.split(".") for name in names]
-            self.parsed[path] = {".".join(part[:end]) for part in parts for end in range(1, len(part) + 1)}, dynamic
-        names, dynamic = self.parsed[path]
-        filenames = {getattr(sys.modules.get(name), "__file__", "") or "" for name in names}
-        found = {name[len(self.root) :] for name in filenames if name.startswith(self.root)}
-        return {name for name in found if not name.startswith(SKIPPED)}, dynamic
-
-    def closure(self, path: str) -> tuple[set[str], bool]:
-        """The collection reads of a module and of every repository module it reaches through the modules loaded now."""
-        loaded = len(sys.modules), next(reversed(sys.modules), None)
-        cached = self.closures.get(path)
-        if cached and cached[0] == loaded:
-            return cached[1]
-        reads, escapes, pending, seen = set(), False, [path], {path}
-        while pending:
-            current = pending.pop()
-            found = self.collections.get(current, [set(), False])
-            reads.update(found[0])
-            names, dynamic = self.module_imports(current) if (Path(self.root) / current).is_file() else (set(), False)
-            escapes = escapes or found[1] or dynamic
-            pending.extend(names - seen)
-            seen.update(names)
-        self.closures[path] = loaded, (reads, escapes)
-        return reads, escapes
+        return lines
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_fixture_setup(self, fixturedef, request):
@@ -203,9 +199,6 @@ class DepInputs:
             yield
         finally:
             self.register(self.children / f"{os.getpid()}-shared")
-            reads, escapes = self.closure(item.nodeid.split("::", 1)[0])
-            self.current[0].update(reads)
-            self.current[1] = self.current[1] or escapes
             self.current = self.shared
             self.finish(item.nodeid)
 
@@ -243,9 +236,13 @@ class DepInputs:
 
     def finish(self, test: str) -> None:
         self.tests[test][0].update(self.child_reads(self.logs[test]))
+        self.append_finished([self.line(test, self.shared_relative())])
+
+    def append_finished(self, lines: list[str]) -> None:
+        """Append lines to this worker's finished report, which outlives a worker killed before session end."""
         self.finished.parent.mkdir(parents=True, exist_ok=True)
         with self.finished.open("a") as finished:
-            finished.write(self.line(test, self.shared_relative()) + "\n")
+            finished.writelines(line + "\n" for line in lines)
 
     def pytest_sessionfinish(self, session):
         if not self.tests:
@@ -254,8 +251,30 @@ class DepInputs:
         shared = set(self.relative(self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")))
         for test, log in self.logs.items():
             self.tests[test][0].update(self.child_reads(log))
-        lines = [self.line(test, shared) for test in self.tests]
+        lines = [self.line(test, shared) for test in self.tests] + self.module_lines()
         (self.folder / f"{uuid.uuid4().hex}.jsonl").write_text("".join(line + "\n" for line in lines))
+
+
+BY_NAME = importlib.import_module
+RECORDERS = []
+
+
+def import_module(name: str, package: str | None = None) -> ModuleType:
+    """importlib.import_module that tells a collecting recorder which module it loaded.
+
+    Installed before conftests load, so a name bound to it by an early import is seen too.
+    """
+    module = BY_NAME(name, package)
+    for recorder in RECORDERS:
+        if recorder.collecting:
+            recorder.named_by(sys._getframe(1), [importlib.util.resolve_name(name, package)])
+    return module
+
+
+def pytest_load_initial_conftests(early_config: pytest.Config, parser: pytest.Parser, args: list[str]) -> None:
+    """Install the by-name recorder before conftests load, so a name they bind to import_module is seen."""
+    if os.environ.get("DEP_INPUTS_DIR"):
+        importlib.import_module = import_module
 
 
 def pytest_configure(config):
@@ -264,6 +283,7 @@ def pytest_configure(config):
     if not folder or controller:
         return
     plugin = DepInputs(Path(os.path.abspath(folder)), config.rootpath)
+    RECORDERS.append(plugin)
     sys.addaudithook(plugin.audit)
     plugin.follow_children()
     config.pluginmanager.register(plugin, "dep-inputs")

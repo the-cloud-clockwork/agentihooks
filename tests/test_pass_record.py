@@ -201,7 +201,7 @@ def test_a_killed_run_keeps_the_teardown_coverage_and_inputs_of_every_test_it_re
         name = hashlib.sha256(str(inputs / "children").encode()).hexdigest()[:16]
         (Path(sysconfig.get_path("purelib")) / f"agentihooks-dep-inputs-{name}.pth").unlink(missing_ok=True)
     assert not (tmp_path / "elapsed.json").exists()
-    assert [row["test"] for row in _results(inputs / "finished")] == ["test_one.py::test_a"]
+    assert [row["test"] for row in _results(inputs / "finished") if "test" in row] == ["test_one.py::test_a"]
     out = tmp_path / "record.json"
     argv = ["--coverage-dir", str(tmp_path), "--inputs", str(inputs), "--results", str(tmp_path / "results")]
     argv += ["--flakes", str(tmp_path / "flakes.jsonl"), "--root", str(tmp_path), "--commit", "c1", "--head", "h1"]
