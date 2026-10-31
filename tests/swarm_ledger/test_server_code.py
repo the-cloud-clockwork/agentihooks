@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -161,6 +162,7 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch: pytes
             pass
 
     monkeypatch.setattr(ledger_server.threading, "Thread", lambda **kw: type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(ledger_server.server_lifetime, "watch", lambda *args: ledger_server.threading.Event())
     monkeypatch.setattr(ledger_server.legacy, "adopt", lambda stored: None)

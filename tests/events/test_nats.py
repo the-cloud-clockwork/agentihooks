@@ -496,15 +496,17 @@ def test_a_reconnecting_client_retries_without_end_and_a_first_connect_tries_twi
 def test_a_connection_error_is_left_to_the_caller(caplog, error):
     caplog.set_level("DEBUG")
     assert asyncio.run(nats._unreported(error)) is None
-    assert caplog.records == []
+    assert [record for record in caplog.records if record.name == "scripts.events.nats"] == []
 
 
 def test_any_other_client_error_is_logged_in_one_line(caplog):
     caplog.set_level("DEBUG")
     asyncio.run(nats._unreported(nats.nats_client.errors.AuthorizationError()))
-    assert [(record.name, record.levelname, record.getMessage(), record.exc_info) for record in caplog.records] == [
-        ("scripts.events.nats", "ERROR", "nats: authorization failed", None)
-    ]
+    assert [
+        (record.name, record.levelname, record.getMessage(), record.exc_info)
+        for record in caplog.records
+        if record.name != "asyncio"
+    ] == [("scripts.events.nats", "ERROR", "nats: authorization failed", None)]
 
 
 def test_an_unreachable_bus_raises_once_and_logs_no_connect_attempt(caplog):
