@@ -249,6 +249,12 @@ def test_grade_holds_drift_only_on_touched_files_and_edited_entries() -> None:
     ]
 
 
+def test_grade_reds_an_entry_raised_for_a_file_neither_the_head_nor_the_base_measures() -> None:
+    assert type_gate.grade({}, {}, {"a.py": 1}, set()) == [
+        f"{type_gate.BASELINE} records 1 type errors in a.py, the head has 0; run python -m scripts.type_gate --write"
+    ]
+
+
 def test_grade_holds_growth_only_on_touched_files() -> None:
     assert type_gate.grade({"a.py": 2}, {"a.py": 3}, {"a.py": 2}, set()) == []
     assert type_gate.grade({}, {"a.py": 169}, {}, {"b.py"}) == []
