@@ -651,7 +651,7 @@
   "scripts/swarm/metrics_ledger.py": 197,
   "scripts/swarm/metrics_outbox.py": 114,
   "scripts/swarm/metrics_service.py": 65,
-  "scripts/swarm/metrics_swarm.py": 489,
+  "scripts/swarm/metrics_swarm.py": 461,
   "scripts/swarm/model_catalog.py": 75,
   "scripts/swarm/model_pick.py": 38,
   "scripts/swarm/mutation_wait.py": 275,
