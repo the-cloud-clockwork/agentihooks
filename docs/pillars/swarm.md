@@ -162,6 +162,8 @@ a Handoff v2, waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5
 recovery handoff and the reason `busy with no tool call for <n> minutes`. When the stall ends before the deadline (the
 master makes a tool call, its pane leaves `working` or it declares a wait), the request is withdrawn with `the master
 resumed work`. A stalled master of a proof swarm whose parent task is blocked stops the proof swarm instead.
+A master held at the context hard gate for fifteen minutes without its handoff landing is recycled the same way,
+with transfer reason `gated`: see [Master held at the hard gate](#master-held-at-the-hard-gate).
 
 The quiet time counts from the master's last finished tool call, or from its session start when that is later.
 The check does not count while:
@@ -3268,6 +3270,22 @@ successor on the same task with the document in its opening prompt. A task that 
 keeps it and stays in `pr` state under its successor. `agentihooks swarm <id> set compact-limit=N`
 sets the limit for one swarm's next agents; 0 keeps the default.
 
+A master keeps more past the hard gate, because a handoff that cannot land during an outage would otherwise leave
+it unable to reach anyone. A session counts as a master when `AGENTIHOOKS_SWARM_LANE=master` or its
+`AGENTIHOOKS_AGENT_NAME` names the master lane. On top of the list above it may run:
+
+| Command | Use at the gate |
+|---|---|
+| `agentihooks msg send <address> <text>` | Tell another seat its handoff is refused and why |
+| `agentihooks msg reply <id> <text>`, `msg close <id> <outcome>` | Settle items it holds before it goes |
+| `agentihooks msg read <id>`, `msg inbox` | Read what waits for it |
+| `agentihooks swarm <id> master up --replace` | Launch its own replacement when its handoff cannot land |
+
+Each is still one command with no chaining. `master up --replace` passes only with the master's own swarm id and
+exactly that flag; `master up --new`, another swarm's id and `msg watch` stay denied, as does every command for
+the other lanes. The deny reason a master receives lists these commands after the shared ones. A master that
+stays at the gate anyway is recycled by the tick, as in [Master held at the hard gate](#master-held-at-the-hard-gate).
+
 Every agent's opening prompt carries its seat's priming chain, in order: the handoff document, the swarm
 culture, the latest recap, the learned notes, then up to three older recaps (the count of any further ones is
 stated). A missing piece is named, not skipped; a seat with no history and a swarm with no culture get a prompt
@@ -3338,6 +3356,7 @@ The command prints 0 once the finding is gone.
 | The snapshot reads under the limit while the pane shows more | `<session id>.json`, field `used_tokens` | The statusline has not refreshed the snapshot; the directive fires on the next hook after it does. |
 | A `context overrun` finding names the wrong limit | `<session id>.swarm`, field `compact_limit` | The pin keeps the limit from when it was written; `swarm set compact-limit` reaches only agents launched after it. |
 | An operator lane session gets no directive | `AGENTIHOOKS_SWARM_LANE` | Expected: operator sessions are never recycled or pinned. |
+| A master at the hard gate is refused `agentihooks msg send` | `AGENTIHOOKS_SWARM_LANE` and `AGENTIHOOKS_AGENT_NAME` in its environment | Neither names the master lane, so the gate treats it as another lane. A chained command (`msg send ...; git push`) is refused for every lane. |
 
 [Pull request #4024](https://github.com/the-cloud-clockwork/agentihooks/pull/4024) delivered the pin and the
 detector; its red Proofs run reproduced a stripped identity master whose directive returned nothing.
@@ -5736,6 +5755,55 @@ grep '"gate": "reset"' ~/.agentihooks/swarm/<id>/gates/log.jsonl
 # Enforce
 agentihooks swarm <id> set reset-gate=deny
 ```
+
+### Master held at the hard gate
+
+A master past the [context recycle](#context-recycle) hard gate whose handoff never lands, for example because
+Redis or the ledger is out, is recycled by its swarm's tick fifteen minutes after it met the gate. No outside
+session has to run `master up --replace` for it.
+
+Every tick of a swarm that is not `stopping` or `stopped` checks its live master. The master counts as held when
+both hold:
+
+| Held only when | Reason |
+|---|---|
+| Its session's context usage snapshot reads at or over the swarm's compact limit plus `AGENTIHOOKS_HANDOFF_MARGIN` | A master that came back under the gate is not held. |
+| `~/.agentihooks/context_usage/<session id>.recycle` exists | The hard gate directive writes this marker once, the first time the session meets the gate; its modification time starts the clock. |
+
+The compact limit is the swarm's `compact-limit` setting, else `AGENTIHOOKS_COMPACT_LIMIT` (default 600), plus the
+margin (default 50), so 650 thousand tokens by default. The runtime launches swarm agents with
+`AGENTIHOOKS_COMPACT_LIMIT` set to the swarm's limit, so the hook and the tick measure the same gate.
+
+At fifteen minutes held the tick stores a recovery handoff in the master seat, records a transfer with reason
+`gated`, and marks the master `finished`, the same path as the [stalled master recycle](#stalled-master-recycle).
+The next master starts in the same seat from that handoff. The journal line is
+`recycled master <name> in its seat after <n> minutes held at the context hard gate`.
+
+The recovery handoff's Intent names the old master and the minutes it sat at the gate; Done, Stopped at and
+Decisions and promises read `unknown`, and Next tells the successor to re-read the ledger and the master inbox,
+which it reads first.
+
+The fifteen minute bound is fixed in code and has no setting or switch. Before the bound passes, the master can
+still reach the swarm through the commands its hard gate allows, including launching its own replacement.
+
+#### Check a gated master
+
+```bash
+# Gated master recycles from the tick journal
+journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+  | grep "held at the context hard gate"
+
+# Recorded transfers; a gated master recycle has reason "gated"
+agentihooks swarm <id> status --json | jq '.transfers[] | select(.reason == "gated")'
+
+# When the master met the hard gate: the recycle marker's time
+stat -c '%y' ~/.agentihooks/context_usage/<session id>.recycle
+```
+
+| Symptom | Cause and check |
+|---|---|
+| A master past the gate for over fifteen minutes is not recycled | The swarm is stopping or stopped, the session has no `.recycle` marker (its hook never fired the hard gate directive; see [Sessions that lose their swarm identity](#sessions-that-lose-their-swarm-identity)), or its snapshot now reads under the gate. |
+| The successor starts with unknown Done and Stopped at | Expected for a recovery handoff; it rebuilds its state from the ledger and the master inbox. |
 
 ### Spawn stall findings
 
