@@ -151,7 +151,6 @@ class DepInputs:
     def module_imports(self, path: str) -> tuple[set[str], bool]:
         """The repository files a module's imports and their parent packages load now, and whether it imports by name."""
         if path not in self.parsed:
-            # -p loads this plugin before pytest-cov starts; a module level import leaves scripts import lines unmeasured.
             from scripts.ci_mutation.scope import imported_names
 
             text = (Path(self.root) / path).read_text()
