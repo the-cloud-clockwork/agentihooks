@@ -137,11 +137,14 @@ def plan_shards(
     seconds = sum(costs[name] for name in sorted(costs))
     widest = max(map(len, units.values()), default=1)
     count = max(min(limit, widest), shard_count(seconds, len(items), target, limit, budget))
-    assignments, loads = assign_units(items, units, count)
     ceiling = max(count, min(BATCH_RUNNERS, len(items)))
-    while max(loads) > shard_workers() * budget and count < ceiling:
-        count += 1
-        assignments, loads = assign_units(items, units, count)
+    fits = (
+        count
+        for count in range(count, ceiling)
+        if max(assign_units(items, units, count)[1]) <= shard_workers() * budget
+    )
+    count = next(fits, ceiling)
+    assignments, loads = assign_units(items, units, count)
     return {
         "shards": count,
         "assignments": assignments,
