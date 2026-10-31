@@ -973,7 +973,10 @@ def test_main_reads_the_recorded_reads_for_a_change_without_python_source(repo, 
     monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
     manifest = {
         "units": [],
-        "tests": {"tests/test_workflows.py::test_scan": {"units": [], "files": ["deploy/values.yaml"]}},
+        "tests": {
+            "tests/test_workflows.py::test_scan": {"units": [], "files": ["deploy/values.yaml"]},
+            "tests/test_other.py::test_other": {"units": [], "files": []},
+        },
     }
     monkeypatch.setattr(ci_select, "find_record", lambda *_: ({"id": 7}, manifest))
     output = run_main(repo, monkeypatch, tmp_path, "pull_request")

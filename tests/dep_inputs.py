@@ -10,11 +10,27 @@ import sys
 import sysconfig
 import uuid
 from pathlib import Path
+from types import FrameType
 
 import pytest
 
 ESCAPES = {"subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork", "os.forkpty"}
 SKIPPED = (".git/", ".venv/", ".playwright/", "node_modules/")
+LOADERS = (
+    "<frozen importlib",
+    f"{os.sep}importlib{os.sep}",
+    f"{os.sep}_pytest{os.sep}assertion{os.sep}",
+    "linecache.py",
+)
+
+
+def loading(frame: FrameType | None) -> bool:
+    """Whether an open comes from an import, assertion rewriting or traceback source lookup rather than test code."""
+    while frame is not None:
+        if any(loader in frame.f_code.co_filename for loader in LOADERS):
+            return True
+        frame = frame.f_back
+    return False
 
 
 class DepInputs:
@@ -76,7 +92,7 @@ class DepInputs:
                     opened = os.path.abspath(os.fsdecode(path))
                 except OSError:
                     return
-                imported = opened.endswith(".py") and (test is self.shared or mode is None or "b" in str(mode))
+                imported = opened.endswith(".py") and (test is self.shared or loading(sys._getframe(1)))
                 if not opened.startswith(self.own) and not imported:
                     test[0].add(opened)
         elif event in ESCAPES and test is not self.shared:

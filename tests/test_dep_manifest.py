@@ -671,7 +671,7 @@ def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_u
     assert upload["with"]["if-no-files-found"] == "error"
 
 
-def test_the_inputs_plugin_records_python_files_a_test_reads_as_text_but_not_its_imports(tmp_path):
+def test_the_inputs_plugin_records_python_files_a_test_reads_as_data_but_not_its_imports(tmp_path):
     (tmp_path / "source.py").write_text("VALUE = 1\n")
     (tmp_path / "helper.py").write_text("VALUE = 2\n")
     (tmp_path / "module.py").write_text("VALUE = 3\n")
@@ -706,6 +706,6 @@ def test_the_inputs_plugin_records_python_files_a_test_reads_as_text_but_not_its
     assert {row["test"]: row["files"] for row in rows} == {
         "test_sample.py::test_reads_source": ["module.py", "source.py"],
         "test_sample.py::test_imports_helper": ["module.py"],
-        "test_sample.py::test_reads_bytes": ["module.py"],
+        "test_sample.py::test_reads_bytes": ["module.py", "source.py"],
         "test_unrelated.py::test_other": [],
     }
