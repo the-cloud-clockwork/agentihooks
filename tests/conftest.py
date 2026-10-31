@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import zlib
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -211,7 +212,9 @@ def pytest_ignore_collect(collection_path, config):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_real_user_paths(tmp_path, monkeypatch, request):
+def _isolate_real_user_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Iterator[None]:
     """Redirect every real-home path away from the developer's machine.
 
     `install.py` reaches the real home through more routes than the obvious
@@ -342,6 +345,9 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     # the operator's real condition scripts and write the real cache and counters.
     fake_state_dir = fake_home / ".agentihooks"
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.voice_output._FLAG_DIR", fake_state_dir / "voice_flags")
+    monkeypatch.setattr("hooks.context.voice_output._QUOTA_FLAG", fake_state_dir / "voice_flags" / "quota_exhausted")
+    monkeypatch.setattr("hooks.context.voice_output._LAST_SPOKE_FLAG", fake_state_dir / "voice_flags" / "last_spoke_ts")
     # A stale stamp makes SessionStart spawn a detached `agentihooks deps ensure` that mutmut's runner then reaps.
     (fake_state_dir / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     monkeypatch.setattr("hooks.config.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
@@ -362,6 +368,9 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     monkeypatch.setattr("hooks.context.prod_lockdown.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.controls_toggle._FLAG_DIR", fake_state_dir / "controls_flags")
     monkeypatch.setattr("hooks.context.controls_toggle._GLOBAL_FLAG", fake_state_dir / "controls_flags" / "active.flag")
+    monkeypatch.setattr("hooks.context.voice_output._FLAG_DIR", fake_state_dir / "voice_flags")
+    monkeypatch.setattr("hooks.context.voice_output._QUOTA_FLAG", fake_state_dir / "voice_flags" / "quota_exhausted")
+    monkeypatch.setattr("hooks.context.voice_output._LAST_SPOKE_FLAG", fake_state_dir / "voice_flags" / "last_spoke_ts")
     monkeypatch.setattr("hooks.observability.agent_trace.CURSOR_DIR", fake_state_dir / "agent_trace")
     monkeypatch.setattr("hooks.context.brain_adapter._HASH_CACHE_FILE", fake_state_dir / "brain_feed_hash")
     monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")

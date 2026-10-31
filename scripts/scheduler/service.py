@@ -12,7 +12,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
-from typing import TextIO
+from typing import TextIO, cast
 from urllib.parse import urlsplit
 
 from scripts.scheduler.core import Scheduler
@@ -77,7 +77,9 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
 
 
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
+    """Dispatch due work every second until stopped; a pass that loses or cannot take the dispatch lock ends alone."""
     from scripts.events import state
+    from scripts.scheduler.lease import Busy, LostLock
 
     transient = state.unavailable()
     stopped = stop if stop is not None else _on_signals()
@@ -85,6 +87,8 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
         while not stopped.is_set():
             try:
                 await asyncio.to_thread(scheduler.run_due)
+            except (LostLock, Busy) as exc:
+                print(f"scheduler pass ended: {exc}", file=sys.stderr)
             except transient:
                 print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             try:
@@ -110,6 +114,7 @@ def supervise(stop: Event | None = None) -> None:
     loaded = revision(ROOT)
     starter = int(os.environ.get(STARTER) or 0)
     _mark_unit()
+    _take_over()
     with machine_lock("supervisor"):
         _identify(loaded)
         while not stopped.is_set():
@@ -131,6 +136,16 @@ def _mark_unit() -> None:
     directory = runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / UNIT).write_text(UNIT)
+
+
+def _take_over() -> None:
+    """A supervisor started by its unit drains one started outside it, so systemd keeps owning the scheduler."""
+    if not os.environ.get(UNIT_ENV):
+        return
+    pid = int(cast(dict[str, int], holder(os.environ) or {}).get("pid") or 0)
+    if pid and pid != os.getpid():
+        print(f"the scheduler unit takes over from supervisor {pid}, started outside it", file=sys.stderr)
+        drain(pid, os.environ)
 
 
 def _unit_owns(directory: Path) -> bool:

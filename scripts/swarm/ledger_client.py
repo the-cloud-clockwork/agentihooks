@@ -49,8 +49,9 @@ def _ledger():
 
 
 class LedgerClient:
-    def __init__(self, service=False):
+    def __init__(self, service: bool = False, read_timeout: float | None = None) -> None:
         self.service = service
+        self.read_timeout = read_timeout
 
     def _call(self, slug, ops=None):
         from scripts.swarm import lease
@@ -74,7 +75,8 @@ class LedgerClient:
         return state
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
-        return _ledger().resource(slug, path, service=self.service, collection=collection)
+        bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
+        return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
 
     def state(self, slug):
         return self._call(slug)

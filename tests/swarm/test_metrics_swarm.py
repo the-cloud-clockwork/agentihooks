@@ -60,6 +60,49 @@ def assert_node(row):
     }
 
 
+class Counted(dict[str, object]):
+    reads = 0
+
+    def __getitem__(self, key: str) -> object:
+        Counted.reads += 1
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: object = None) -> object:
+        Counted.reads += 1
+        return super().get(key, default)
+
+
+def test_row_builders_read_each_history_record_a_bounded_number_of_times(monkeypatch: pytest.MonkeyPatch) -> None:
+    size = 1000
+    tasks = [Counted({**TASK, "id": f"t{i}"}) for i in range(size)]
+    agents = [
+        Counted(
+            {**AGENT, "name": f"worker-{i}", "task": f"t{i}", "started_at": NOW + i, "ended_at": NOW + i + 1}
+            | {"reason": "done"}
+        )
+        for i in range(size)
+    ]
+    launches = [
+        {"state": "failed", "agent": f"worker-{i}", "task": f"t{i}", "at": NOW + i, "error": "e"} for i in range(size)
+    ]
+    handoffs = [
+        {"task": f"t{i}", "at": NOW + i, "predecessor": f"worker-{i}", "id": f"h{i}", "reason": "r"}
+        for i in range(size)
+    ]
+    claims = [
+        {"kind": "task claimed", "target": f"tasks/t{i}", "at": NOW + i, "by": f"worker-{i}"} for i in range(size)
+    ]
+    ledger = {"tasks": tasks, "_meta": {"events": claims}}
+    monkeypatch.setattr(Counted, "reads", 0)
+    spawned = metrics_swarm.agent_rows(SLUG, ledger, agents)
+    failed = metrics_swarm.launch_rows(SLUG, ledger, launches, agents)
+    handed = metrics_swarm.signal_rows(SLUG, ledger, agents, handoffs, [])
+    assert Counted.reads < 200 * size
+    assert (len(spawned), len(failed), len(handed)) == (3 * size, size, size)
+    assert [(row["task"], row["agent"]) for row in handed[:2]] == [("t0", "worker-0"), ("t1", "worker-1")]
+    assert [(row["task"], row["agent"]) for row in failed[-1:]] == [(f"t{size - 1}", f"worker-{size - 1}")]
+
+
 def test_full_task_lifecycle_keeps_identity_and_actual_merge_time():
     events = [event("task claimed", NOW), event("task pr", NOW + 1_000)]
     agent = {**AGENT, "ended_at": NOW + 5_000, "reason": "finished"}
