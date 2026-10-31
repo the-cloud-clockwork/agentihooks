@@ -86,6 +86,7 @@ from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import (
     affinity,
     agent_up,
+    blockers,
     bottleneck,
     bottleneck_status,
     claim_lost,
@@ -114,6 +115,7 @@ from scripts.swarm import (
     outage,
     overlays,
     overrun,
+    panic,
     phase_planning,
     phase_state,
     phases,
@@ -1516,6 +1518,63 @@ def cmd_verdict(store, args):
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
 
 
+def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
+    if args.action == "clear":
+        if not args.category:
+            raise SwarmError("blockers clear needs a category")
+        blockers.clear(store, args.slug, args.category)
+        print(json.dumps({"cleared": args.category}))
+        return
+    found = sorted(blockers.active(store, args.slug, now_ms()).values(), key=lambda row: row.category)
+    print(
+        json.dumps(
+            [
+                {
+                    "category": row.category,
+                    "first_seen": row.first_seen,
+                    "last_seen": row.last_seen,
+                    "count": row.count,
+                    "detail": row.detail,
+                }
+                for row in found
+            ]
+        )
+    )
+
+
+def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
+    """The panic button: on stops agent starts and cancels CI runs but the fixes, off clears it once stable."""
+    now = now_ms()
+    if args.action == "on":
+        found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
+        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.gh)
+        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
+        return
+    if args.action == "off":
+        if not panic.release(store, now):
+            raise SwarmError(
+                f"panic holds: business as usual is at {panic.level(store, now):.2f} with "
+                f"{panic.errors_since(store, now - panic.WINDOW_MS)} errors in the last 15 minutes; it clears at "
+                f"{panic.RELEASE_LEVEL:.2f} with fewer than {panic.RELEASE_ERRORS}"
+            )
+        print(json.dumps({"panic": "off"}))
+        return
+    current = panic.state(store)
+    print(
+        json.dumps(
+            {
+                "panic": "on" if current else "off",
+                "since": current.since if current else None,
+                "reason": current.reason if current else "",
+                "fixes": list(current.fixes) if current else [],
+                "errors_last_hour": panic.errors_by_category(store, now - panic.HOUR_MS),
+                "threshold": panic.THRESHOLD,
+                "level": round(panic.level(store, now), 3),
+            }
+        )
+    )
+
+
 def cmd_classify(store, args):
     from scripts.swarm_v2.runtime import observe
 
@@ -2451,6 +2510,14 @@ def build_parser():
     merge.add_argument(
         "--lift", action="store_true", help="operator: prioritize immediately despite a running head group"
     )
+    blockers_cmd = sub.add_parser("blockers")
+    blockers_cmd.add_argument("action", nargs="?", default="list", choices=("list", "clear"))
+    blockers_cmd.add_argument("category", nargs="?", default="")
+    blockers_cmd.set_defaults(handler=cmd_blockers)
+    panic_cmd = sub.add_parser("panic")
+    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status"))
+    panic_cmd.add_argument("--fix", action="append", default=[])
+    panic_cmd.set_defaults(handler=cmd_panic)
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)

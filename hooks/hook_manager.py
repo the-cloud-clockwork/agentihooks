@@ -1378,6 +1378,10 @@ def _check_shell_guards(payload: dict) -> None:
 
     check_local_tests(payload)
     check_github_watch(payload)
+    from hooks.context.blocker_window import checked as _blocker_checked
+
+    if _blocker_block := _blocker_checked(payload):
+        raise BlockAction(_blocker_block)
     if payload.get("tool_name") != "Bash":
         return
     try:
