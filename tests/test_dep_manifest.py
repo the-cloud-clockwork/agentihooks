@@ -432,6 +432,44 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
     ]
 
 
+def test_files_a_module_reads_while_imported_during_collection_belong_only_to_its_importers(tmp_path):
+    (tmp_path / "page.js").write_text("x")
+    (tmp_path / "helper.py").write_text(
+        "from pathlib import Path\n"
+        "def digest():\n    return Path(__file__).with_name('page.js').read_text()\n"
+        "DIGEST = digest()\n"
+    )
+    (tmp_path / "test_reader.py").write_text("from helper import DIGEST\ndef test_reads():\n    assert DIGEST\n")
+    (tmp_path / "test_consumer.py").write_text("import helper\ndef test_cached():\n    assert helper.DIGEST\n")
+    (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "tests.dep_inputs",
+            "-p",
+            "no:cacheprovider",
+            "test_reader.py",
+            "test_consumer.py",
+            "test_unrelated.py",
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    assert sorted(rows, key=lambda row: row["test"]) == [
+        {"test": "test_consumer.py::test_cached", "files": ["page.js"], "escapes": False},
+        {"test": "test_reader.py::test_reads", "files": ["page.js"], "escapes": False},
+        {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
+    ]
+
+
 @pytest.mark.parametrize(
     "new",
     [
