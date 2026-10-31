@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
+UNACKED_LAUNCH_STATES = ("pending", "acknowledging", "launching", "waiting")
 MASTER = "master"
 PROJECTION_ATTEMPTS = 5
 PROJECTION_CONTENTION = "agent registry kept changing; the agent was not shown"
@@ -583,6 +584,7 @@ class RedisStore:
                 try:
                     pipe.watch(self.key(slug, "agents"))
                     previous = pipe.hget(self.key(slug, "agents"), name)
+                    launch = pipe.hget(self.key(slug, "launches"), name)
                     doc = fencing.read(self, slug)
                     executions = [a for a in occupants_of(doc).values() if a.name == name]
                     lives = records_of(doc) if previous else []
@@ -610,6 +612,19 @@ class RedisStore:
                         pipe.rpush(
                             self.key(slug, "history"),
                             json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
+                        )
+                    launch_row = json.loads(launch) if launch else None
+                    if launch_row and launch_row["state"] in UNACKED_LAUNCH_STATES:
+                        pipe.hset(
+                            self.key(slug, "launches"),
+                            name,
+                            json.dumps(
+                                {
+                                    **launch_row,
+                                    "state": "failed",
+                                    "error": launch_row["error"] or "the agent was dropped before it acknowledged",
+                                }
+                            ),
                         )
                     pipe.hdel(self.key(slug, "agents"), name)
                     pipe.hdel(self.key(slug, "desired-routes"), name)

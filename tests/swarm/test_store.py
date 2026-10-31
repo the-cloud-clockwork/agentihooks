@@ -366,6 +366,25 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 0
 
 
+def test_drop_agent_closes_a_dangling_unacknowledged_launch(store):
+    agent = AgentRecord("stuck", "eng", "t1", state="launching")
+    store.put_agent("smoke", agent)
+    store.record_launch("smoke", agent, "acknowledging")
+    store.drop_agent("smoke", agent.name)
+    [row] = [r for r in store.launches("smoke") if r["agent"] == "stuck"]
+    assert row["state"] == "failed"
+    assert row["error"] == "the agent was dropped before it acknowledged"
+
+
+def test_drop_agent_leaves_a_started_launch_untouched(store):
+    agent = AgentRecord("running", "eng", "t1")
+    store.put_agent("smoke", agent)
+    store.record_launch("smoke", agent, "started")
+    store.drop_agent("smoke", agent.name)
+    [row] = [r for r in store.launches("smoke") if r["agent"] == "running"]
+    assert row["state"] == "started"
+
+
 def test_the_store_offers_no_unconditional_claim_refund(store):
     assert not hasattr(store, "refund_claim")
 
