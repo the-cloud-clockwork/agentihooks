@@ -59,6 +59,14 @@ def test_a_every_live_resolver_points_inside_the_test_directory(tmp_path):
     assert "VAULT_ROOT" not in os.environ
 
 
+def test_a_session_end_clears_the_voice_flag_inside_the_test_directory(tmp_path: Path) -> None:
+    from hooks.context import voice_output
+
+    for flag in (voice_output._FLAG_DIR, voice_output._QUOTA_FLAG, voice_output._LAST_SPOKE_FLAG):
+        assert flag.resolve().is_relative_to(tmp_path.resolve())
+    voice_output.clear_voice_enabled("isolation-fixture")
+
+
 def test_a_live_roots_cover_the_brain_vault_kube_herdr_and_every_configured_home(tmp_path):
     home = tmp_path / "home"
     environ = {
