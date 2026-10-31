@@ -144,7 +144,7 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(time, "time", lambda: BASE_MS / 1000)
     monkeypatch.setattr(cli, "now_ms", lambda: BASE_MS)
     monkeypatch.setattr(timing, "time", Mock(monotonic=Mock(return_value=0.0)))
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
     runtime, messenger = FakeRuntime(), FakeHerdr({})
