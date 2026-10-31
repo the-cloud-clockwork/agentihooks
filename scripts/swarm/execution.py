@@ -93,7 +93,7 @@ class ExecutionRegistry:
         return records_of(fencing.read(self.store, slug))
 
     def occupants(self, slug: str) -> dict[str, AgentRecord]:
-        return occupants_of(fencing.read(self.store, slug))
+        return occupants_of({"executions": fencing.read_executions(self.store, slug)})
 
     def managed(self, slug: str, name: str) -> bool:
         doc = fencing.read(self.store, slug)
@@ -119,13 +119,13 @@ class ExecutionRegistry:
     def hive(self, slug: str, name: str) -> str:
         if name not in self.store.listed(slug):
             return ""
-        rows = [row for row in fencing.read(self.store, slug)["executions"].values() if row["name"] == name]
+        rows = [row for row in fencing.read_executions(self.store, slug).values() if row["name"] == name]
         hive = max(rows, key=lambda row: row["generation"]).get("hive") if rows else None
         return hive if isinstance(hive, str) else ""
 
     def agents(self, slug: str) -> list[AgentRecord]:
         projections, desired = self.store.projections(slug)
-        attempts = [row for row in fencing.read(self.store, slug)["executions"].values() if row["name"] in projections]
+        attempts = [row for row in fencing.read_executions(self.store, slug).values() if row["name"] in projections]
         heads = latest(attempts, "name")
         result = []
         for name, row in sorted(projections.items()):

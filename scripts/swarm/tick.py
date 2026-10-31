@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import Protocol
+from typing import Any, Protocol
 
 from hooks.context import context_recycle
 from scripts.doctor import priming
@@ -109,6 +109,7 @@ SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
+SPAWN_DUE = "spawn-due"
 HOST_SPENDS = f"{PREFIX}:host-spends"
 HOST_SPENDS_KEPT = 1000
 HOST_START_LAG_MS = 30 * 1000
@@ -201,7 +202,7 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-def tick(slug, store, ledger, runtime, now_ms):
+def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     from scripts.swarm import automated_gc
 
     config = store.ensure_code(slug)
@@ -227,6 +228,12 @@ def tick(slug, store, ledger, runtime, now_ms):
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
+    due = store.key(slug, SPAWN_DUE)
+    if config.state == "running" and config.engine != EVENTS_ENGINE and not lifetime.sleeping(slug, store, rows):
+        if store.redis.exists(due):
+            with PLACING, _placement_pass(runtime):
+                actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+        store.redis.set(due, now_ms)
     actions += skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
@@ -294,6 +301,7 @@ def tick(slug, store, ledger, runtime, now_ms):
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
                 with _placement_pass(runtime):
                     actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+                store.redis.delete(due)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
