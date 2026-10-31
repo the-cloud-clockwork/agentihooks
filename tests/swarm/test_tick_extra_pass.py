@@ -32,6 +32,9 @@ class _Unsettled:
         self.left -= 1
         return self.left < 0
 
+    def set(self) -> None:
+        return None
+
 
 def _firsts(rounds: int) -> cli._Firsts:
     firsts = cli._Firsts(1)
