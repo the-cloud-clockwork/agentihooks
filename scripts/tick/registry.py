@@ -1,11 +1,21 @@
 from itertools import combinations
+from math import isfinite
 
 from scripts.tick.step import Step
 
 __all__ = ["Registry", "register", "registry", "validate", "waves"]
 
 
+def _validate_timing(steps: list[Step]) -> None:
+    for step in steps:
+        if not isfinite(step.budget_s) or step.budget_s <= 0:
+            raise ValueError(f"Invalid budget for {step.name}: expected finite positive seconds")
+        if not isfinite(step.interval_s) or step.interval_s < 0:
+            raise ValueError(f"Invalid interval for {step.name}: expected finite nonnegative seconds")
+
+
 def _dependency_waves(steps: list[Step]) -> tuple[tuple[Step, ...], ...]:
+    _validate_timing(steps)
     names: set[str] = set()
     for step in steps:
         if step.name in names:
