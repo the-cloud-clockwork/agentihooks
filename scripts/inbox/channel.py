@@ -11,11 +11,13 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from scripts.inbox.bus import FeedError, feed_for
 from scripts.inbox.cli import check_answer, identity
+from scripts.inbox.progress import ChannelProgress
 from scripts.inbox.seen import CLAIM_BATCH, claim
-from scripts.inbox.store import NOTIFY, InboxError, connect
+from scripts.inbox.store import NOTIFY, InboxError, InboxStore, connect
 
 NAME = "inbox"
 FLAG = f"--dangerously-load-development-channels=server:{NAME}"
@@ -163,24 +165,30 @@ def _held(store, item_id):
         return False
 
 
-async def _push(store, me, write, ready, feed=None):
+async def _push(store: InboxStore, me: str, write: Any, ready: Any, feed: Any = None) -> None:
     import anyio
     from redis.exceptions import RedisError
 
     pubsub, delay, pushed = None, 1.0, Pushed()
     try:
         await ready.wait()
+        progress = ChannelProgress(store, me)
         await anyio.sleep(SETTLE_S)
         while True:
             try:
+                progress.save()
                 if pubsub is None and feed is None:
                     pubsub = store.redis.pubsub()
                     pubsub.subscribe(NOTIFY)
+                shown = len(pushed.shown)
                 await _deliver(store, me, write, pushed)
+                if len(pushed.shown) > shown:
+                    progress.delivered()
                 if feed is None:
                     await _recheck(store, me, pubsub)
-                else:
-                    await _pull(feed)
+                    progress.polled()
+                elif await _pull(feed):
+                    progress.polled()
                 delay = 1.0
             except RedisError:
                 if pubsub is not None:
@@ -195,14 +203,15 @@ async def _push(store, me, write, ready, feed=None):
             feed.close()
 
 
-async def _pull(feed):
+async def _pull(feed: Any) -> bool:
     import anyio
 
     try:
         await anyio.to_thread.run_sync(feed.settle)
         await anyio.to_thread.run_sync(feed.wait, int(RECHECK_S * 1000))
     except FeedError:
-        pass
+        return False
+    return True
 
 
 async def run(store, me, read, write, active=True, feed=None):

@@ -40,9 +40,14 @@ class FakePubSub:
 class FakeStore:
     """The inbox calls the channel server makes, in memory; the Redis store itself is covered in test_realtime."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        from unittest.mock import Mock
+
         self.items, self.subs = {}, []
-        self.redis = SimpleNamespace(pubsub=self._pubsub, publish=self._publish)
+        self.redis = SimpleNamespace(pubsub=self._pubsub, publish=self._publish, set=Mock())
+
+    def key(self, *parts: str) -> str:
+        return ":".join(parts)
 
     def _pubsub(self):
         self.subs.append(FakePubSub())

@@ -12,6 +12,7 @@ from typing import Any
 from scripts.hive import reports
 from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
+from scripts.inbox.progress import healthy
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
 from scripts.inbox.store import CLOSED, InboxStore, Item, redelivery_ms
@@ -45,7 +46,12 @@ def quiet_ms(environ):
 
 
 def typed_wake(inbox: InboxStore, agent: AgentRecord) -> bool:
-    return bool(agent.pane_id) and agent.lane != MASTER and not Dispatcher(inbox).owner(agent.name)
+    return (
+        bool(agent.pane_id)
+        and agent.lane != MASTER
+        and not Dispatcher(inbox).owner(agent.name)
+        and not healthy(inbox, agent.name)
+    )
 
 
 def decide(item, pane, history, now_ms, window, slug, since=0):
