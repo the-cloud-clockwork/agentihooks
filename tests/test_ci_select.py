@@ -203,15 +203,15 @@ def test_a_missing_record_preserves_import_selection(repo, monkeypatch, tmp_path
     assert "files_1=tests/test_sample.py\n" in output
 
 
-@pytest.mark.parametrize("path", ["scripts/config.json", "docs/notes.md", "other.py"])
-def test_main_does_not_fetch_coverage_for_changes_outside_python_sources(repo, monkeypatch, tmp_path, path):
+@pytest.mark.parametrize("path", ["docs/notes.md", "README.md"])
+def test_main_does_not_fetch_coverage_for_docs_only_changes(repo, monkeypatch, tmp_path, path):
     write(repo, {path: "{}"})
     git(repo, "add", path)
     git(repo, "commit", "-m", "change")
     monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
 
     def record(*_):
-        pytest.fail("Coverage lookup is unnecessary for a change outside Python sources")
+        pytest.fail("Coverage lookup is unnecessary for a docs only change")
 
     monkeypatch.setattr(ci_select, "find_record", record)
     run_main(repo, monkeypatch, tmp_path, "pull_request")

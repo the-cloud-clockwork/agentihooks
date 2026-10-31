@@ -16,6 +16,7 @@ import pytest
 
 ESCAPES = {"subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork", "os.forkpty"}
 SKIPPED = (".git/", ".venv/", ".playwright/", "node_modules/")
+HELPERS = (f"{os.sep}pathlib.py", f"{os.sep}tokenize.py")
 LOADERS = (
     "<frozen importlib",
     f"{os.sep}importlib{os.sep}",
@@ -25,12 +26,11 @@ LOADERS = (
 
 
 def loading(frame: FrameType | None) -> bool:
-    """Whether an open comes from an import, assertion rewriting or traceback source lookup rather than test code."""
-    while frame is not None:
-        if any(loader in frame.f_code.co_filename for loader in LOADERS):
-            return True
+    """Whether the code that opened a file, past pathlib and tokenize helpers, is an import, assertion rewriting or
+    traceback source lookup rather than test code."""
+    while frame is not None and frame.f_code.co_filename.endswith(HELPERS):
         frame = frame.f_back
-    return False
+    return frame is not None and any(loader in frame.f_code.co_filename for loader in LOADERS)
 
 
 class DepInputs:
