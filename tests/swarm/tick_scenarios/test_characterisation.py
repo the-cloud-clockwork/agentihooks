@@ -64,7 +64,11 @@ def canonical(value: Any, roots: tuple[str, ...]) -> Any:
             value = value.replace(root, "<fixture>")
         value = re.sub(r"test-[0-9a-f]+(?=:)", "test-run", value)
         if value.startswith(("{", "[")):
-            return canonical(json.loads(value), roots)
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                return value
+            return canonical(decoded, roots)
     return value
 
 
