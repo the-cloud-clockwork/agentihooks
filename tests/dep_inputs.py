@@ -9,6 +9,7 @@ import os
 import sys
 import sysconfig
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from types import FrameType
 
@@ -19,7 +20,7 @@ SKIPPED = (".git/", ".venv/", ".playwright/", "node_modules/")
 
 
 class DepInputs:
-    def __init__(self, folder: Path, root: Path):
+    def __init__(self, folder: Path, root: Path) -> None:
         self.folder = folder
         self.root = str(root) + os.sep
         self.shared = [set(), False]
@@ -37,6 +38,8 @@ class DepInputs:
         self.shared_files = {}
         self.collecting = None
         self.loose = set()
+        self.parsed = {}
+        self.closures = {}
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -72,7 +75,12 @@ class DepInputs:
         """Whether a repository module other than the one being collected is running its top level code."""
         while frame is not None:
             name = frame.f_code.co_filename
-            if frame.f_code.co_name == "<module>" and name != self.collecting and name.startswith(self.root):
+            if (
+                frame.f_code.co_name == "<module>"
+                and name != self.collecting
+                and name.startswith(self.root)
+                and not name[len(self.root) :].startswith(SKIPPED)
+            ):
                 return True
             frame = frame.f_back
         return False
@@ -102,7 +110,7 @@ class DepInputs:
             self.escaping.update(self.setting_up)
 
     @pytest.hookimpl(hookwrapper=True)
-    def pytest_make_collect_report(self, collector):
+    def pytest_make_collect_report(self, collector: pytest.Collector) -> Iterator[None]:
         if not isinstance(collector, pytest.Module):
             yield
             return
@@ -124,19 +132,11 @@ class DepInputs:
                     found[0].update(collected[0])
                     found[1] = found[1] or collected[1]
 
-    def pytest_collection_finish(self, session):
-        # -p loads this plugin before pytest-cov starts; a module level import leaves scripts import lines unmeasured.
-        from scripts.ci_mutation.scope import imported_names
-
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
         imports = {}
         for path in self.collections:
-            source = Path(self.root) / path
-            text = source.read_text()
-            names = imported_names(text, Path(path).parent.parts)
-            if "__import__" in text or any(name == "importlib" or name.startswith("importlib.") for name in names):
-                self.collections[path][1] = True
-            filenames = {getattr(sys.modules.get(name), "__file__", "") or "" for name in names}
-            imports[path] = {name[len(self.root) :] for name in filenames if name.startswith(self.root)}
+            imports[path], dynamic = self.module_imports(path)
+            self.collections[path][1] = self.collections[path][1] or dynamic
         for _ in self.collections:
             before = sum(len(found[0]) + found[1] for found in self.collections.values())
             for path, names in imports.items():
@@ -148,6 +148,40 @@ class DepInputs:
             if before == sum(len(found[0]) + found[1] for found in self.collections.values()):
                 break
 
+    def module_imports(self, path: str) -> tuple[set[str], bool]:
+        """The repository files a module's imports and their parent packages load now, and whether it imports by name."""
+        if path not in self.parsed:
+            # -p loads this plugin before pytest-cov starts; a module level import leaves scripts import lines unmeasured.
+            from scripts.ci_mutation.scope import imported_names
+
+            text = (Path(self.root) / path).read_text()
+            names = imported_names(text, Path(path).parent.parts)
+            dynamic = "__import__" in text or any(
+                name == "importlib" or name.startswith("importlib.") for name in names
+            )
+            parts = [name.split(".") for name in names]
+            self.parsed[path] = {".".join(part[:end]) for part in parts for end in range(1, len(part) + 1)}, dynamic
+        names, dynamic = self.parsed[path]
+        filenames = {getattr(sys.modules.get(name), "__file__", "") or "" for name in names}
+        return {name[len(self.root) :] for name in filenames if name.startswith(self.root)}, dynamic
+
+    def closure(self, path: str) -> tuple[set[str], bool]:
+        """The collection reads of a module and of every repository module it reaches through the modules loaded now."""
+        cached = self.closures.get(path)
+        if cached and cached[0] == len(sys.modules):
+            return cached[1]
+        reads, escapes, pending, seen = set(), False, [path], {path}
+        while pending:
+            current = pending.pop()
+            found = self.collections.get(current, [set(), False])
+            reads.update(found[0])
+            names = self.module_imports(current)[0] if (Path(self.root) / current).is_file() else set()
+            escapes = escapes or found[1]
+            pending.extend(names - seen)
+            seen.update(names)
+        self.closures[path] = len(sys.modules), (reads, escapes)
+        return reads, escapes
+
     @pytest.hookimpl(hookwrapper=True)
     def pytest_fixture_setup(self, fixturedef, request):
         self.setting_up.append(fixturedef.argname)
@@ -157,7 +191,7 @@ class DepInputs:
             self.setting_up.pop()
 
     @pytest.hookimpl(hookwrapper=True)
-    def pytest_runtest_protocol(self, item, nextitem):
+    def pytest_runtest_protocol(self, item: pytest.Item, nextitem: pytest.Item | None) -> Iterator[None]:
         collected = self.collections.get(item.nodeid.split("::", 1)[0], [set(), False])
         self.current = self.tests.setdefault(item.nodeid, [set(), False])
         self.current[0].update(collected[0])
@@ -169,6 +203,9 @@ class DepInputs:
             yield
         finally:
             self.register(self.children / f"{os.getpid()}-shared")
+            reads, escapes = self.closure(item.nodeid.split("::", 1)[0])
+            self.current[0].update(reads)
+            self.current[1] = self.current[1] or escapes
             self.current = self.shared
             self.finish(item.nodeid)
 
