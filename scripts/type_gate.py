@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tomllib
+from itertools import accumulate
 from pathlib import Path, PurePosixPath
 
 BASEDPYRIGHT_VERSION = "1.40.2"
@@ -134,7 +135,7 @@ def imported(path: str, source: bytes) -> set[str]:
             target = ".".join([*prefix, *([node.module] if node.module else [])])
             names.add(target)
             names.update(f"{target}.{alias.name}" for alias in node.names)
-    return {".".join(name.split(".")[:end]) for name in names for end in range(1, name.count(".") + 2)}
+    return {prefix for name in names for prefix in accumulate(name.split("."), lambda left, right: f"{left}.{right}")}
 
 
 def importers(head: Path, files: list[str], modules: set[str]) -> set[str]:
@@ -147,7 +148,7 @@ def importers(head: Path, files: list[str], modules: set[str]) -> set[str]:
             imports[path] = set()
     found: set[str] = set()
     frontier = modules
-    while frontier:
+    for _ in files:
         reached = {path for path, names in imports.items() if path not in found and names & frontier}
         found |= reached
         frontier = {module_name(path) for path in reached}
@@ -224,8 +225,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         recorded = load(args.head)
         base = load(args.base)
-        touched = None if base is None else graded(args.base, args.head)
-        checked = None if touched is None else touched | edited(base, recorded or {})
+        touched = checked = None
+        if base is not None:
+            touched = graded(args.base, args.head)
+            checked = touched | edited(base, recorded or {})
         head = measure(args.head, None if checked is None else [path for path in sources(args.head) if path in checked])
     except (GradeError, ValueError, KeyError, OSError) as exc:
         print(f"::error::{exc}")

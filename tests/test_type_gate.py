@@ -374,6 +374,7 @@ def test_graded_selects_changes_importers_and_edited_baseline_entries(tmp_path: 
         "hooks/new.py",
     }
     assert type_gate.edited(base_baseline, recorded) == {"hooks/still.py"}
+    assert type_gate.edited({"hooks/gone.py": 0}, {}) == set()
 
 
 def _fake_checker(
