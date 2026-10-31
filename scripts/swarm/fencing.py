@@ -145,6 +145,36 @@ def read_executions(store: Any, slug: str) -> dict[str, Any]:
     return read(store, slug)["executions"]
 
 
+LEASE_CACHE = "lease-cache"
+
+
+def _lease_cache_key(store: Any, slug: str) -> str:
+    return store.key(slug, LEASE_CACHE)
+
+
+def _cache_lease(store: Any, states: Any, slug: str, doc: dict[str, Any], revision: int) -> None:
+    if not isinstance(states, RedisStateStore):
+        return
+    payload = json.dumps(
+        {"revision": revision, "lease": doc["lease"], "epoch": doc["epoch"], "legacy_owner": doc["legacy_owner"]}
+    )
+    store.redis.set(_lease_cache_key(store, slug), payload)
+
+
+def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
+    states = _states(store)
+    if not isinstance(states, RedisStateStore):
+        return None
+    raw = store.redis.get(_lease_cache_key(store, slug))
+    revision = store.redis.get(states._revision)
+    if raw is None or revision is None:
+        return None
+    cached = json.loads(raw)
+    if str(cached["revision"]) != str(revision):
+        return None
+    return {"lease": cached["lease"]}
+
+
 def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
     from scripts.swarm.store import SwarmError
 
@@ -157,9 +187,10 @@ def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
         if doc == before:
             return result
         try:
-            states.update(slug, _encode(doc), entry.revision)
+            written = states.update(slug, _encode(doc), entry.revision)
         except StateConflict:
             continue
+        _cache_lease(store, states, slug, doc, written)
         return result
     raise SwarmError(CONTENTION)
 
