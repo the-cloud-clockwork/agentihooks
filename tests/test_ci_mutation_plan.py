@@ -417,18 +417,18 @@ def test_a_kept_split_whose_head_lacks_a_fitting_direct_test_is_cut_again(tmp_pa
     from scripts.ci_mutation import killers, measured
 
     function = "scripts.sample.x_f"
-    nodes = ["fast", "a", "b", "c[p]"]
-    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c[p]": 19.5}
+    nodes = ["fast", "a", "b", "c[p[1]]"]
+    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c[p[1]]": 19.5}
     memory = killers.KillMemory(tmp_path)
-    memory.keep_splits({function: {"head": ["fast"], "slices": [["a", "c[p]"], ["b"]], "costs": [1.0] * 2}})
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a", "c[p[1]]"], ["b"]], "costs": [1.0] * 2}})
     results = [{"tests": {function: nodes}, "durations": durations}]
     names = [f"{function}__mutmut_1"]
-    kept = {"head": ["fast"], "slices": [["a", "c[p]"], ["b"]]}
+    kept = {"head": ["fast"], "slices": [["a", "c[p[1]]"], ["b"]]}
     assert measured.measured_splits(names, results, 10, memory)[function].items() >= kept.items()
     split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["fast"]})[function]
     assert split.items() >= kept.items()
     split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["c"]})[function]
-    assert split["head"] == ["c[p]"]
+    assert split["head"] == ["c[p[1]]"]
     assert sorted(node for chosen in split["slices"] for node in chosen) == ["a", "b", "fast"]
 
 
