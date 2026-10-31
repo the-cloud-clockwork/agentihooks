@@ -1405,7 +1405,6 @@ def test_defined_tests_name_test_functions_and_methods_but_not_their_nested_help
     assert plan.defined_tests(path) == {"test_one", "TestGroup.test_two"}
 
 
-
 def _plan_cli(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seconds: float, budget: int | None
 ) -> tuple[int, Path, list[tuple]]:
