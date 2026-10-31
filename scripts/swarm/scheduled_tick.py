@@ -159,8 +159,7 @@ def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen) -> int:
             code = _finish(popen(command(timer.entry_point()), env=env, pass_fds=(fd,)))
     except AlreadyRunning:
         return 0
-    if not code:
-        _delivered(time.time())
+    _delivered(time.time())
     return code
 
 
@@ -186,7 +185,12 @@ def restart(
     schedule: Callable[[], bool] | None = None,
     wait: Callable[[float], None] = time.sleep,
 ) -> str:
-    """The supervisor runs the code it started from, so a restart from the installed watcher replaces stale code."""
+    """The supervisor runs the code it started from, so a restart from the installed watcher replaces stale code.
+
+    A tick in flight proves the scheduler delivers, so the restart leaves it to finish its pass.
+    """
+    if _held(LOCK):
+        return "left the scheduler alone: a swarm tick is still running"
     if _held("supervisor"):
         kill(int((runtime_dir() / "supervisor.lock").read_text()), signal.SIGTERM)
         for _ in range(STOP_S):

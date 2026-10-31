@@ -5,7 +5,7 @@ import socket
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 from hooks._redis import redis_key
 from scripts.events.bus import StateConflict
@@ -150,7 +150,7 @@ class Scheduler:
     def document(self) -> dict:
         return self._read()[0]
 
-    def _read(self) -> tuple[dict, int | None]:
+    def _read(self) -> tuple[dict[str, Any], int | None]:
         from scripts.events.scheduler_state import read
 
         stored = read(self.state, self.name("entries"), self.key("entries"))
@@ -343,8 +343,21 @@ class Scheduler:
 
         self.change(reap, lease=lease)
 
+    @staticmethod
+    def _has_work(document: dict[str, Any], now: float) -> bool:
+        """True when an entry is due or pending, or a retired entry waits to be reaped."""
+        if document["retired"]:
+            return True
+        return any(
+            entry["state"] == "pending" or (entry["state"] == "active" and entry["due"] <= now)
+            for entry in document["entries"].values()
+        )
+
     def run_due(self, *, now: float | None = None) -> int:
+        """Dispatch due entries under the dispatch lease; a pass with nothing due, pending or retired writes nothing."""
         now = time.time() if now is None else now
+        if not self._has_work(self._read()[0], now):
+            return 0
         with dispatch_lock(self.state, self.name("entries")) as lease:
             fired = self.change(lambda document: self._claim(document, now), lease=lease)
             for entry_id, entry in self.document()["entries"].items():
