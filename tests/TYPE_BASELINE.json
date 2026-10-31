@@ -469,7 +469,7 @@
   "scripts/inbox/relay.py": 18,
   "scripts/inbox/seats.py": 223,
   "scripts/inbox/seen.py": 150,
-  "scripts/inbox/store.py": 1519,
+  "scripts/inbox/store.py": 1471,
   "scripts/inbox/wake.py": 753,
   "scripts/inbox/waker.py": 54,
   "scripts/init_agent.py": 106,
