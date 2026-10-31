@@ -134,7 +134,7 @@ def test_a_hanging_connect_holds_no_publish_and_is_attempted_once() -> None:
     attempts = []
 
     def hanging() -> memory.MemoryBus:
-        attempts.append(1)
+        attempts.append(threading.current_thread().daemon)
         release.wait(5)
         return memory.open_bus(BusConfig())
 
@@ -157,4 +157,4 @@ def test_a_hanging_connect_holds_no_publish_and_is_attempted_once() -> None:
     release.set()
     assert len(took) == 8
     assert max(took) < 1
-    assert attempts == [1]
+    assert attempts == [True]
