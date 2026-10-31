@@ -166,12 +166,14 @@ class AgentRecord:
     desired_route_kind: str = ""
 
 
-def _closed_launch(raw: str | None) -> str | None:
+def _close_dangling_launch(pipe, key: str, name: str, raw: str | None) -> None:
     row = json.loads(raw) if raw else None
     if row is None or row["state"] not in UNACKED_LAUNCH_STATES:
-        return None
-    return json.dumps(
-        {**row, "state": "failed", "error": row["error"] or "the agent was dropped before it acknowledged"}
+        return
+    pipe.hset(
+        key,
+        name,
+        json.dumps({**row, "state": "failed", "error": row["error"] or "the agent was dropped before it acknowledged"}),
     )
 
 
@@ -622,8 +624,7 @@ class RedisStore:
                             self.key(slug, "history"),
                             json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
                         )
-                    if closed := _closed_launch(launch):
-                        pipe.hset(self.key(slug, "launches"), name, closed)
+                    _close_dangling_launch(pipe, self.key(slug, "launches"), name, launch)
                     pipe.hdel(self.key(slug, "agents"), name)
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
