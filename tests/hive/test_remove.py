@@ -11,6 +11,7 @@ from scripts.handoff import transfers
 from scripts.handoff.transfers import first_next
 from scripts.hive import auth, cli, create, machine, registry, remove
 from scripts.hive.placement import choose, place_master
+from scripts.inbox.seats import SeatRegistry
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger.ledger_workspace import folder
@@ -491,9 +492,10 @@ def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_
 
     remove.settle(store, member, 3600, _host(Successor(store), Run(), tmp_path))
 
-    for seat in (SEAT, f"ci-1@{SLUG}"):
+    for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
         assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _withdrawn(member))]
-        assert [item for inbox in InboxStore(store.redis).worlds() for item in inbox.open_items(seat)] == []
+        SeatRegistry(store.redis).occupy(seat, successor, 1)
+        assert InboxStore(store.redis).open_mail(successor) == []
 
 
 def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, tmp_path):
