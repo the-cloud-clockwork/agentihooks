@@ -298,7 +298,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
                 placement = partial(preempt.probe, runtime)
                 seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order, placement)
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
-            if config.state == "running" and readiness.tick_places(config.engine, rows):
+            if config.state == "running" and readiness.tick_places(config.engine, rows) and panic.state(store) is None:
                 with _placement_pass(runtime):
                     actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
                 store.redis.delete(due)
