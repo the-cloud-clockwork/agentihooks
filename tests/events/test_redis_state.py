@@ -2,7 +2,7 @@ import pytest
 
 from scripts.events.redis_state import RedisStateStore
 
-pytestmark = [pytest.mark.unit, pytest.mark.fakeredis]
+pytestmark = pytest.mark.unit
 
 
 def test_a_guarded_transaction_aborts_when_the_bucket_changes():
