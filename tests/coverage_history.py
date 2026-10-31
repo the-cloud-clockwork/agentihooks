@@ -33,7 +33,7 @@ def renamed(repo: Path, base: str) -> dict[str, str | tuple[str, ...]]:
             side[paths[0]] = _show(repo, commit)(paths[0])
     if not gone:
         return moves
-    graded = git("ls-tree", "-r", "--name-only", "HEAD", "--", *GRADED, cwd=repo).split()
+    graded = git("ls-tree", "-r", "--name-only", "HEAD", "--", *GRADED, cwd=repo).splitlines()
     head = ((repo / path).read_text() for path in graded if path.endswith(".py"))
     return moves | pair_moves(gone, added, head)
 
