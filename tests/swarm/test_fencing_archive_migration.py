@@ -31,9 +31,9 @@ def test_migration_moves_history_outside_fenced_writes(store: Any) -> None:
     assert len(entry.value) < 1_000_000
     assert json.loads(entry.value)["archive"] == {}
     assert fencing.read(store, "fixture")["archive"] == rows
-    fencing.write(store, "fixture", lambda doc: doc["counters"].update({"sample": 1}))
+    fencing.write(store, "fixture", lambda doc: doc.update(epoch=1))
     assert fencing.read(store, "fixture")["archive"] == rows
-    assert fencing.read(store, "fixture")["counters"]["sample"] == 1
+    assert fencing.read(store, "fixture")["epoch"] == 1
 
 
 def test_migration_requires_the_reader_rollout(store: Any) -> None:
@@ -61,8 +61,8 @@ def test_migrated_generic_writes_never_load_history(store: Any, monkeypatch: pyt
         return original(self, key)
 
     monkeypatch.setattr(RedisStateStore, "get", current_only)
-    fencing.write(store, "fixture", lambda doc: doc["counters"].update({"sample": 2}))
-    assert json.loads(fencing._states(store).get("fixture").value)["counters"]["sample"] == 2
+    fencing.write(store, "fixture", lambda doc: doc.update(epoch=2))
+    assert json.loads(fencing._states(store).get("fixture").value)["epoch"] == 2
 
 
 def test_inline_overlay_is_preserved_after_external_migration(store: Any) -> None:
@@ -76,7 +76,7 @@ def test_inline_overlay_is_preserved_after_external_migration(store: Any) -> Non
     inline["archive"] = {"old": {"name": "changed"}, "new": {"name": "new"}}
     states.update("fixture", json.dumps(inline).encode(), entry.revision)
     assert fencing.read(store, "fixture")["archive"] == inline["archive"]
-    fencing.write(store, "fixture", lambda doc: doc["counters"].update({"sample": 3}))
+    fencing.write(store, "fixture", lambda doc: doc.update(epoch=3))
     assert fencing.read(store, "fixture")["archive"] == inline["archive"]
     assert json.loads(states.get("fixture").value)["archive"] == {}
 
@@ -97,7 +97,9 @@ def test_historical_execution_readers_and_pane_restore_survive_migration(store: 
     assert registry.agents("fixture") == agents
     assert registry.managed("fixture", first.name)
     assert not registry.managed("fixture", "nobody@fixture")
-    assert store.execution("fixture", second.execution_id) == second
+    assert store.execution("fixture", second.execution_id) == next(
+        row for row in records if row.execution_id == second.execution_id
+    )
     registry.set_pane("fixture", first.execution_id, "old-pane")
     assert store.execution("fixture", first.execution_id).pane_id == "old-pane"
     assert first.execution_id not in fencing.read(store, "fixture")["archive"]
@@ -136,3 +138,89 @@ def test_archive_reference_missing_fails_closed(store: Any) -> None:
     fencing.write(store, "fixture", lambda doc: doc.update(archive_ref="missing"))
     with pytest.raises(SwarmError, match="referenced execution archive is unavailable"):
         fencing.read(store, "fixture")
+
+
+def test_self_contained_snapshot_restores_without_source_chunks(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    fencing.write(store, "fixture", lambda doc: doc["archive"].update({"old": {"name": "old"}}))
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    saved = fencing.read(store, "fixture")
+    store.redis.flushdb()
+    fencing.replace(store, "fixture", saved)
+    assert fencing.read(store, "fixture")["archive"] == saved["archive"]
+    assert json.loads(fencing._states(store).get("fixture").value)["archive"] == {}
+
+
+def test_archive_chunks_retain_only_changes(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    rows = {str(index): {"name": str(index), "payload": "x" * 2048} for index in range(130)}
+    fencing.write(store, "fixture", lambda doc: doc["archive"].update(rows))
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    initial = fencing.read(store, "fixture")
+    original = initial["archive_ref"]
+    fencing.write(store, "fixture", lambda doc: doc["archive"].update({"new": {"name": "new"}}))
+    saved = fencing.read(store, "fixture")
+    reference = saved["archive_ref"]
+    assert reference != original
+    latest = json.loads(fencing._states(store).get(reference).value)
+    assert latest == {"parent": original, "rows": {"new": {"name": "new"}}, "removed": []}
+    total = 0
+    count = 0
+    while reference:
+        chunk = json.loads(fencing._states(store).get(reference).value)
+        assert len(chunk["rows"]) <= 64
+        total += len(chunk["rows"])
+        count += 1
+        reference = chunk["parent"]
+    assert total == 131
+    assert count == 4
+    assert saved["archive"] == {**rows, "new": {"name": "new"}}
+    fencing.replace(store, "fixture", initial)
+    assert fencing.read(store, "fixture")["archive"] == rows
+
+
+def test_active_updates_and_idle_archive_pass_never_load_history(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.swarm import fencing
+    from tests.swarm.test_execution_archive import history
+
+    first, second, third, other = history(store)
+    registry = store.execution_registry
+    registry.archive("fixture")
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    original = RedisStateStore.get
+
+    def current_only(self: Any, key: str) -> Any:
+        assert ":archive:" not in key
+        return original(self, key)
+
+    monkeypatch.setattr(RedisStateStore, "get", current_only)
+    registry.update("fixture", third)
+    assert registry.archive("fixture") == 0
+    assert registry.occupants("fixture")["eng-1@fixture"].execution_id == third.execution_id
+
+
+def test_cas_retry_never_publishes_uncommitted_archive_chunks(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.events.bus import StateConflict
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.swarm import fencing
+
+    fencing.write(store, "fixture", lambda doc: doc["archive"].update({"old": {"name": "old"}}))
+    before = fencing.read(store, "fixture")
+    original = RedisStateStore.update
+    attempts = []
+
+    def conflict_once(self: Any, key: str, value: bytes, revision: int) -> int:
+        if key == "fixture" and not attempts:
+            attempts.append(value)
+            assert fencing.read(store, "fixture") == before
+            raise StateConflict("concurrent writer")
+        return original(self, key, value, revision)
+
+    monkeypatch.setattr(RedisStateStore, "update", conflict_once)
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    assert len(attempts) == 1
+    assert fencing.read(store, "fixture")["archive"] == before["archive"]
+    assert json.loads(fencing._states(store).get("fixture").value)["archive"] == {}

@@ -133,29 +133,56 @@ def _decode(value: bytes) -> dict[str, Any]:
     return {**copy.deepcopy(EMPTY), **json.loads(value)}
 
 
-def hydrate_archive(store: Any, doc: dict[str, Any]) -> None:
-    reference = doc.get("archive_ref")
-    if reference:
-        entry = state.for_store(store, BUCKET).get(reference)
-        if entry is None:
-            from scripts.swarm.store import SwarmError
+def _archive_rows(store: Any, reference: str) -> dict[str, Any]:
+    from scripts.swarm.store import SwarmError
 
+    rows: dict[str, Any] = {}
+    seen: set[str] = set()
+    states = state.for_store(store, BUCKET)
+    while reference:
+        entry = states.get(reference)
+        if entry is None:
             raise SwarmError("referenced execution archive is unavailable")
-        doc["archive"] = {**json.loads(entry.value), **doc["archive"]}
+        chunk = json.loads(entry.value)
+        for key, row in chunk["rows"].items():
+            if key not in seen:
+                rows[key] = row
+        seen.update(chunk["rows"])
+        seen.update(chunk["removed"])
+        reference = chunk["parent"]
+    return rows
+
+
+def _save_archive_chunk(store: Any, slug: str, parent: str, rows: dict[str, Any], removed: list[str]) -> str:
+    value = _encode({"parent": parent, "rows": rows, "removed": removed})
+    reference = f"{slug}:archive:{sha256(value).hexdigest()}"
+    states = state.for_store(store, BUCKET)
+    try:
+        states.create(reference, value)
+    except StateConflict:
+        entry = states.get(reference)
+        if entry is None or entry.value != value:
+            raise
+    return reference
+
+
+def hydrate_archive(store: Any, doc: dict[str, Any]) -> None:
+    doc["archive"] = {**_archive_rows(store, doc.get("archive_ref", "")), **doc["archive"]}
 
 
 def _externalize_archive(store: Any, slug: str, doc: dict[str, Any]) -> None:
     if "archive_ref" not in doc:
         return
-    value = _encode(doc["archive"])
-    reference = f"{slug}:archive:{sha256(value).hexdigest()}"
-    if reference != doc["archive_ref"]:
-        try:
-            state.for_store(store, BUCKET).create(reference, value)
-        except StateConflict:
-            entry = state.for_store(store, BUCKET).get(reference)
-            if entry is None or entry.value != value:
-                raise
+    reference = doc["archive_ref"]
+    previous = _archive_rows(store, reference)
+    rows = doc["archive"]
+    changed = [key for key, row in rows.items() if key not in previous or previous[key] != row]
+    removed = sorted(previous.keys() - rows.keys())
+    for start in range(0, max(len(changed), 1), 64):
+        batch = {key: rows[key] for key in changed[start : start + 64]}
+        if batch or removed:
+            reference = _save_archive_chunk(store, slug, reference, batch, removed)
+        removed = []
     doc["archive_ref"] = reference
     doc["archive"] = {}
 
@@ -293,5 +320,8 @@ def replace(store: Any, slug: str, saved: dict | None) -> None:
     def change(doc: dict[str, Any]) -> Any:
         doc.clear()
         doc.update(restored)
+        if "archive_ref" in doc:
+            doc["archive_ref"] = ""
+            _externalize_archive(store, slug, doc)
 
     write(store, slug, change)
