@@ -1,12 +1,14 @@
 """Workstation, hive pinned and needs pinned tasks under the events engine: offers, spoke takes, hub admission, tick."""
 
+from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig, QueuePolicy
-from scripts.events.memory import open_bus
+from scripts.events.memory import Clock, open_bus
 from scripts.hive import lanes, registry, spoke
 from scripts.hub import admission, slots
 from scripts.swarm import readiness
@@ -69,7 +71,7 @@ def test_fits_reads_capabilities_only_for_an_offer_with_needs() -> None:
     assert readiness.fits(offered["gpu"], "hive-a", lambda: ["gpu"])
 
 
-def test_a_hive_leaves_an_offer_pinned_elsewhere_in_the_queue_for_its_own_hive(bus, clock) -> None:  # noqa: F811
+def test_a_hive_leaves_an_offer_pinned_elsewhere_in_the_queue_for_its_own_hive(bus: Bus, clock: Clock) -> None:  # noqa: F811
     readiness.publish(bus, snapshot(doc([task("pinned", hive="hive-b"), task("plain")])), NOW)
     queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
 
@@ -96,7 +98,7 @@ def test_a_skipped_offer_is_released_for_another_hive_not_terminated() -> None:
 
 
 @pytest.fixture
-def rig():
+def rig() -> Iterator[SimpleNamespace]:
     import fakeredis
 
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -105,7 +107,7 @@ def rig():
     found = doc(PINNED)
     rows = {row["id"]: row for row in found["tasks"]}
 
-    def update_task(slug, task_id, fields, if_state=(), if_match=None):
+    def update_task(slug: str, task_id: str, fields: dict, if_state: tuple = (), if_match: int | None = None) -> dict:
         row = rows[task_id]
         if row["state"] in if_state:
             row["claim_generation"] = row.get("claim_generation", 0) + 1
@@ -124,14 +126,16 @@ def ask(task_id: str, hive: str) -> dict:
     return {"hive": hive, "task": task_id, "lane": "eng", "generation": 0}
 
 
-def test_the_hub_never_admits_a_workstation_task_from_a_hive(rig, capsys) -> None:
+def test_the_hub_never_admits_a_workstation_task_from_a_hive(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert rig.admitter.admit(SLUG, ask("desk", "hive-a")) is None
     assert rig.store.claimant(SLUG, "desk") is None
     assert rig.store.agents(SLUG) == []
     assert f"hub: events placement swarm={SLUG} task=desk hive=hive-a" in capsys.readouterr().err
 
 
-def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig) -> None:
+def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig: SimpleNamespace) -> None:
     assert rig.admitter.admit(SLUG, ask("pinned", "hive-a")) is None
     assert rig.store.claimant(SLUG, "pinned") is None
     admitted = rig.admitter.admit(SLUG, ask("pinned", "hive-b"))
@@ -139,14 +143,16 @@ def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig) -> None:
     assert rig.store.claimant(SLUG, "pinned") == admitted["name"]
 
 
-def test_the_hub_admits_a_needs_task_only_from_a_hive_declaring_every_need(rig) -> None:
+def test_the_hub_admits_a_needs_task_only_from_a_hive_declaring_every_need(rig: SimpleNamespace) -> None:
     registry.update(rig.redis, "hive-a", ["capabilities=headed"])
     assert rig.admitter.admit(SLUG, ask("gpu", "hive-a")) is None
     registry.update(rig.redis, "hive-c", ["capabilities=gpu"])
     assert rig.admitter.admit(SLUG, ask("gpu", "hive-c"))["hive"] == "hive-c"
 
 
-def test_a_lane_spoke_skips_an_offer_pinned_to_another_hive_without_asking_the_hub(monkeypatch) -> None:
+def test_a_lane_spoke_skips_an_offer_pinned_to_another_hive_without_asking_the_hub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     scoped = open_bus(BusConfig(scoped=True))
     hub = Mock()
     slots.serve(scoped, admitter=hub)
@@ -161,7 +167,7 @@ def test_a_lane_spoke_skips_an_offer_pinned_to_another_hive_without_asking_the_h
     scoped.close()
 
 
-def test_a_workstation_task_launches_from_the_workstation_tick_under_events(store) -> None:  # noqa: F811
+def test_a_workstation_task_launches_from_the_workstation_tick_under_events(store: RedisStore) -> None:  # noqa: F811
     store.update("sw", engine="events")
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
     ledger.rows["t2"]["workstation"] = True
@@ -173,7 +179,7 @@ def test_a_workstation_task_launches_from_the_workstation_tick_under_events(stor
     assert ledger.rows["t2"]["state"] == "claimed"
 
 
-def test_under_events_the_tick_collects_acknowledgements_only_for_workstation_launches(store) -> None:  # noqa: F811
+def test_under_events_the_tick_collects_acknowledgements_only_for_workstation_launches(store: RedisStore) -> None:  # noqa: F811
     from scripts.swarm.tick import _collect_acks
     from tests.swarm.test_tick import HiveAcks
 

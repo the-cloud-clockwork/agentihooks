@@ -59,8 +59,11 @@ class Admission:
         """A workstation task, a task pinned to another hive or one needing what the hive lacks is never admitted."""
         from scripts.hive import registry
 
-        declared = (registry.show(self.store.redis, hive) or {}).get("capabilities", []) if row.get("needs") else ()
-        return readiness.placeable(row, hive, declared)
+        return readiness.fits(
+            SimpleNamespace(data=row),
+            hive,
+            lambda: (registry.show(self.store.redis, hive) or {}).get("capabilities", []),
+        )
 
     def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
         from scripts.swarm import tick
