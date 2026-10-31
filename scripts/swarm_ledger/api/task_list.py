@@ -1,5 +1,6 @@
 import json
 import threading
+from typing import Any
 
 from . import resources
 
@@ -28,7 +29,8 @@ def row_revision(row: object) -> str | None:
 class Tasks:
     def __init__(self, repository: object) -> None:
         self.repository, self.lock = repository, threading.Lock()
-        self.stored, self.revision, self.revisions, self.pages = None, None, [], {}
+        self.stored: tuple[Any, ...] | None = None
+        self.revision, self.revisions, self.pages = None, [], {}
 
     def refresh(self, slug: str) -> None:
         stored = self.repository.task_rows(slug, self.stored)
@@ -54,7 +56,7 @@ HELD: dict = {}
 GUARD = threading.Lock()
 
 
-def read(repository: object, slug: str, query: dict) -> Page | dict:
+def read(repository: object, slug: str, query: dict[str, Any]) -> dict[str, Any]:
     with GUARD:
         held = HELD.pop(slug, None)
         if held is None or held.repository is not repository:
@@ -69,13 +71,13 @@ def read(repository: object, slug: str, query: dict) -> Page | dict:
         return held.page(query)
 
 
-def targeting(rows: list, url: str) -> dict:
+def targeting(rows: list[Any], url: str) -> dict[str, Any]:
     """The tasks whose pull request, split halves or pull scopes name this pull request URL, in one reply."""
-    found = [row for row in rows if isinstance(row, dict) and url in pull_links(row)]
-    data = [{**resources.project(row), "revision": resources.revision(row)} for row in found]
+    found: list[dict[str, Any]] = [row for row in rows if isinstance(row, dict) and url in pull_links(row)]
+    data = [resources.project({**row, "revision": resources.revision(row)}) for row in found]
     return resources.bounded({"data": data, "revision": resources.revision(found), "next_cursor": None})
 
 
-def pull_links(row: dict) -> set:
+def pull_links(row: dict[str, Any]) -> set[Any]:
     """Every pull request URL a task row names."""
     return {row.get("pr_url"), *(row.get("split_pulls") or []), *(row.get("pull_scopes") or {})}

@@ -7,20 +7,23 @@ one still open two more limits later reaches the operator's Priorities and ntfy.
 """
 
 import base64
+import functools
 import json
 import os
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, fields
+from typing import Any
 
 from scripts.gates.base import Who
 from scripts.gates.enforcement import STALL_WATCH
 from scripts.hive import join_report
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
-from scripts.swarm import capacity, idle, outage, ready, waits
+from scripts.swarm import capacity, freeze, idle, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.ledger_events import Mail
+from scripts.swarm.store import RedisStore
 
 KIND = "stall"
 SENDER = "swarm"
@@ -312,6 +315,20 @@ def _lane_full(watch, lane, decision):
 def _lane_tasks(watch, rows, lane):
     tasks = [rows.get(task["id"], task) for task in watch.claimable(lane)]
     return [task for task in tasks if task.get("state", "open") == "open" and not task.get("claimed_by")]
+
+
+def ready_lanes(
+    slug: str, store: RedisStore, ledger: Any, doc: dict[str, Any], now_ms: int
+) -> Callable[[str], list[dict[str, Any]]]:
+    """Each lane's ready tasks as the capacity decision counts its demand: a watched focus and a fresh placement
+    refusal hold the same tasks from the alert."""
+
+    @functools.cache
+    def lanes() -> dict[str, list[dict[str, Any]]]:
+        ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, doc))[1]
+        return capacity.placement_ready(store, slug, ready, now_ms)[0]
+
+    return lambda lane: lanes()[lane]
 
 
 def _unclaimed(watch, mail, rows, limit, marks, seen):

@@ -10,7 +10,7 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import function_name
-from scripts.ci_mutation.plan import MUTANT_SECONDS, shard_count, shard_workers
+from scripts.ci_mutation.plan import BATCH_RUNNERS, MUTANT_SECONDS, shard_count, shard_workers
 from scripts.ci_mutation.scope import discover_changes, select_tests
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -97,12 +97,31 @@ def measured_splits(
     return splits
 
 
+def assign_units(
+    items: list[tuple[float, str, int | None]], units: dict[str, list[float]], count: int
+) -> tuple[dict[str, int | list[int]], list[float]]:
+    loads = [0.0] * count
+    placed: dict[str, dict[int, int]] = {name: {} for name in units}
+    whole: dict[str, int] = {}
+    for cost, name, position in sorted(items, key=lambda item: (-item[0], item[1])):
+        taken = placed[name].values() if position is not None else ()
+        index = min((index for index in range(count) if index not in taken), key=lambda index: (loads[index], index))
+        if position is None:
+            whole[name] = index
+        else:
+            placed[name][position] = index
+        loads[index] += cost
+    split = {name: [shards[position] for position in range(len(units[name]))] for name, shards in placed.items()}
+    return {**split, **whole}, loads
+
+
 def plan_shards(
     costs: dict[str, float],
     target: float = 240,
     limit: int = 10,
     splits: dict | None = None,
     unit_costs: dict | None = None,
+    budget: float = 1080,
 ) -> dict:
     splits = splits or {}
     units = {
@@ -111,21 +130,21 @@ def plan_shards(
         if (function := function_name(name)) in splits
     }
     costs = {name: sum(units[name]) if name in units else cost for name, cost in costs.items()}
-    items = [(cost, name, None) for name, cost in costs.items() if name not in units]
+    items: list[tuple[float, str, int | None]] = [
+        (cost, name, None) for name, cost in costs.items() if name not in units
+    ]
     items += [(cost, name, position) for name, unit in units.items() for position, cost in enumerate(unit)]
     seconds = sum(costs[name] for name in sorted(costs))
     widest = max(map(len, units.values()), default=1)
-    count = max(min(limit, widest), shard_count(seconds, len(items), target, limit))
-    loads = [0.0] * count
-    assignments = {name: [None] * len(unit) for name, unit in units.items()}
-    for cost, name, position in sorted(items, key=lambda item: (-item[0], item[1])):
-        taken = assignments[name] if position is not None else []
-        index = min((index for index in range(count) if index not in taken), key=lambda index: (loads[index], index))
-        if position is None:
-            assignments[name] = index
-        else:
-            assignments[name][position] = index
-        loads[index] += cost
+    count = max(min(limit, widest), shard_count(seconds, len(items), target, limit, budget))
+    ceiling = max(count, min(BATCH_RUNNERS, len(items)))
+    fits = (
+        count
+        for count in range(count, ceiling)
+        if max(assign_units(items, units, count)[1]) <= shard_workers() * budget
+    )
+    count = next(fits, ceiling)
+    assignments, loads = assign_units(items, units, count)
     return {
         "shards": count,
         "assignments": assignments,
