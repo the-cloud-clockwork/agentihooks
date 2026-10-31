@@ -165,3 +165,23 @@ def test_set_up_inside_another_repository_write_does_not_wait_for_its_lock(tmp_p
     finally:
         writer.rollback()
         writer.close()
+
+
+def test_the_cap_deletes_the_oldest_unsent_rows_past_the_limit_and_keeps_every_sent_row(repo, bus):
+    created = rows(repo)
+    outbox.relay(repo, bus.events, clock=lambda: SENT_AT)
+    repo.apply_ops("ledger", ops=[CLAIM])
+    repo.apply_ops("ledger", ops=[{**CLAIM, "id": "u2", "fields": {"state": "open"}}])
+    [older, newer] = [row_id for row_id in rows(repo) if row_id not in created]
+    assert outbox.cap(repo, 1) == 1
+    assert rows(repo) == [*created, newer]
+    assert [row_id for row_id, _ in marks(repo)] == sorted(created)
+    assert older not in rows(repo)
+
+
+def test_the_cap_keeps_every_unsent_row_within_the_limit(repo):
+    created = rows(repo)
+    assert outbox.cap(repo, len(created)) == 0
+    assert rows(repo) == created
+    assert outbox.cap(repo, len(created) - 1) == 1
+    assert rows(repo) == created[1:]

@@ -465,7 +465,53 @@ def test_the_bus_connects_without_reconnecting(url, monkeypatch):
     monkeypatch.setattr(nats.nats_client, "connect", connect)
     opened = nats.open_bus(BusConfig(backend="nats", url=url))
     opened.close()
-    connect.assert_called_once_with(url, allow_reconnect=False)
+    connect.assert_called_once_with(
+        url,
+        allow_reconnect=False,
+        max_reconnect_attempts=1,
+        reconnect_time_wait=0,
+        connect_timeout=nats.FIRST_CONNECT_S,
+        error_cb=nats._unreported,
+    )
+
+
+def _closed_port() -> str:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return f"nats://127.0.0.1:{probe.getsockname()[1]}"
+
+
+def test_a_reconnecting_client_retries_without_end_and_a_first_connect_tries_twice_quickly():
+    assert nats.connect_options(BusConfig(backend="nats", reconnect=True)) == {
+        "allow_reconnect": True,
+        "max_reconnect_attempts": -1,
+    }
+    assert nats.connect_options(BusConfig(backend="nats")) == {
+        "allow_reconnect": False,
+        "max_reconnect_attempts": 1,
+        "reconnect_time_wait": 0,
+        "connect_timeout": 2,
+        "error_cb": nats._unreported,
+    }
+    assert nats.FIRST_CONNECT_S == 2
+    assert asyncio.run(nats._unreported(OSError("refused"))) is None
+
+
+def test_an_unreachable_bus_raises_once_and_logs_no_connect_attempt(caplog):
+    caplog.set_level("DEBUG")
+    with pytest.raises(nats.nats_client.errors.NoServersError):
+        nats.open_bus(BusConfig(backend="nats", url=_closed_port()))
+    assert [record.getMessage() for record in caplog.records if record.name.startswith("nats")] == []
+
+
+@pytest.mark.wall_clock
+def test_an_unreachable_bus_gives_up_within_seconds():
+    started = time.monotonic()
+    with pytest.raises(nats.nats_client.errors.NoServersError):
+        nats.open_bus(BusConfig(backend="nats", url=_closed_port()))
+    assert time.monotonic() - started < nats.FIRST_CONNECT_S * 2
 
 
 def test_close_closes_the_server_connection(url):
