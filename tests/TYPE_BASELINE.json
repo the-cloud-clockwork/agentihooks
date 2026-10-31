@@ -1796,7 +1796,7 @@
   "tests/test_context_recycle.py": 17,
   "tests/test_copilot_target.py": 2,
   "tests/test_count_floor.py": 5,
-  "tests/test_coverage_ratchet.py": 5,
+  "tests/test_coverage_ratchet.py": 2,
   "tests/test_credential_guard.py": 7,
   "tests/test_dep_manifest.py": 4,
   "tests/test_deps_preflight.py": 2,
