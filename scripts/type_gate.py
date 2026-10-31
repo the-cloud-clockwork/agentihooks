@@ -172,6 +172,35 @@ def write(head: Path) -> None:
     (head / BASELINE).write_text(json.dumps(measure(head), indent=2) + "\n")
 
 
+def refresh(head: Path) -> dict[str, int]:
+    """Return the head's baseline with every entry above its measured count lowered to it, none raised or added.
+
+    The gate grades a baseline edit by measuring only the edited entries, and a count can depend on which files one
+    run checks, so the measurement repeats over the entries it lowers until that set holds and the refresh grades green.
+    """
+    recorded = load(head) or {}
+    present = set(sources(head))
+    lowering = set(recorded)
+    while True:
+        counts = measure(head, [path for path in lowering if path in present])
+        lowered = {path for path in lowering if counts.get(path, 0) < recorded[path]}
+        if lowered == lowering:
+            break
+        lowering = lowered
+    refreshed = {path: counts.get(path, 0) if path in lowering else count for path, count in recorded.items()}
+    return dict(sorted((path, count) for path, count in refreshed.items() if count))
+
+
+def rewrite(head: Path) -> str:
+    """Record the head's refreshed baseline and return a line naming how many entries and errors it lowered."""
+    recorded = load(head) or {}
+    refreshed = refresh(head)
+    (head / BASELINE).write_text(json.dumps(refreshed, indent=2) + "\n")
+    lowered = sum(1 for path, count in recorded.items() if refreshed.get(path, 0) < count)
+    errors = sum(recorded.values()) - sum(refreshed.values())
+    return f"Lowered {lowered} of {len(recorded)} type baseline entries by {errors} errors"
+
+
 def grade(
     base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
 ) -> list[str]:
@@ -204,6 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--head", type=Path, default=Path.cwd())
     parser.add_argument("--measured", type=Path)
     parser.add_argument("--write", action="store_true")
+    parser.add_argument("--refresh", action="store_true")
     return parser
 
 
@@ -211,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     """Grade the head against the base, or record the head's baseline with --write."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not (args.write or args.base):
+    if not (args.write or args.refresh or args.base):
         parser.error("grading needs --base")
     if (version := _basedpyright_version()) != BASEDPYRIGHT_VERSION:
         print(f"::error::The type gate needs basedpyright {BASEDPYRIGHT_VERSION}, found {version or 'none'}.")
@@ -222,6 +252,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.write:
             write(args.head)
+            return 0
+        if args.refresh:
+            print(rewrite(args.head))
             return 0
         recorded = load(args.head)
         base = load(args.base)

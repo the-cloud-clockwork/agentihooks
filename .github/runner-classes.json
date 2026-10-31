@@ -97,6 +97,8 @@
   "test.yml/unit-lost": "light",
   "test.yml/unit-rerun": "standard",
   "test.yml/unit-selected": "standard",
+  "type-baseline-refresh.yml/enqueue": "light",
+  "type-baseline-refresh.yml/refresh": "batch",
   "worker-resources.yml/measure": "batch",
   "writer-lock.yml/inputs": "light",
   "writer-lock.yml/scenario": "standard"
