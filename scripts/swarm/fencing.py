@@ -4,6 +4,7 @@ import copy
 import json
 import time
 from collections.abc import Callable
+from hashlib import sha256
 from typing import Any, TypeVar
 
 from scripts.events import state
@@ -132,8 +133,59 @@ def _decode(value: bytes) -> dict[str, Any]:
     return {**copy.deepcopy(EMPTY), **json.loads(value)}
 
 
+def hydrate_archive(store: Any, doc: dict[str, Any]) -> None:
+    reference = doc.get("archive_ref")
+    if reference:
+        entry = state.for_store(store, BUCKET).get(reference)
+        if entry is None:
+            from scripts.swarm.store import SwarmError
+
+            raise SwarmError("referenced execution archive is unavailable")
+        doc["archive"] = {**json.loads(entry.value), **doc["archive"]}
+
+
+def _externalize_archive(store: Any, slug: str, doc: dict[str, Any]) -> None:
+    if "archive_ref" not in doc:
+        return
+    value = _encode(doc["archive"])
+    reference = f"{slug}:archive:{sha256(value).hexdigest()}"
+    if reference != doc["archive_ref"]:
+        try:
+            state.for_store(store, BUCKET).create(reference, value)
+        except StateConflict:
+            entry = state.for_store(store, BUCKET).get(reference)
+            if entry is None or entry.value != value:
+                raise
+    doc["archive_ref"] = reference
+    doc["archive"] = {}
+
+
+def change_with_archive(store: Any, slug: str, doc: dict[str, Any], change: Callable[[dict], T]) -> T:
+    hydrate_archive(store, doc)
+    result = change(doc)
+    _externalize_archive(store, slug, doc)
+    return result
+
+
+def migrate_archive(store: Any, slug: str, *, writers_upgraded: bool = False) -> None:
+    """Enable external history only after every live writer has the dual reader."""
+    from scripts.swarm.store import SwarmError
+
+    if not writers_upgraded:
+        raise SwarmError("upgrade every live fencing writer before migrating the archive")
+
+    def migrate(doc: dict[str, Any]) -> None:
+        hydrate_archive(store, doc)
+        doc.setdefault("archive_ref", "")
+        _externalize_archive(store, slug, doc)
+
+    write(store, slug, migrate)
+
+
 def read(store: Any, slug: str) -> dict[str, Any]:
-    return _decode(_entry(_states(store), store, slug).value)
+    doc = _decode(_entry(_states(store), store, slug).value)
+    hydrate_archive(store, doc)
+    return doc
 
 
 def read_executions(store: Any, slug: str) -> dict[str, Any]:
@@ -184,6 +236,9 @@ def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
         doc = _decode(entry.value)
         before = copy.deepcopy(doc)
         result = change(doc)
+        if doc["archive"] and "archive_ref" in doc:
+            hydrate_archive(store, doc)
+            _externalize_archive(store, slug, doc)
         if doc == before:
             return result
         try:

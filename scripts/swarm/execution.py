@@ -87,7 +87,10 @@ class ExecutionRegistry:
     def _fenced(self, slug: str, change: Callable[[dict[str, Any]], Any]) -> Any:
         from scripts.swarm import lease
 
-        return lease.fenced(self.store, slug, lease.EPOCH.get(), change)
+        def history(doc: dict[str, Any]) -> Any:
+            return fencing.change_with_archive(self.store, slug, doc, change)
+
+        return lease.fenced(self.store, slug, lease.EPOCH.get(), history)
 
     def records(self, slug: str) -> list[AgentRecord]:
         return records_of(fencing.read(self.store, slug))
@@ -206,7 +209,7 @@ class ExecutionRegistry:
                 }
             return current, previous
 
-        current, previous = lease.fenced(self.store, slug, epoch, admit)
+        current, previous = self._fenced(slug, admit)
         removed = previous.name if previous and previous.name != current.name else ""
         self.store.project_agent(slug, current, removed=removed)
         return current
