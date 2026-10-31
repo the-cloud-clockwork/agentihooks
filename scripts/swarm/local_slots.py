@@ -26,9 +26,9 @@ def running(store: RedisStore, slug: str, task: str, cache: PassCache | None = N
     return len(_workers(_records(store, cache), f"{slug}/{task}"))
 
 
-def occupancy(store: RedisStore, machine: str, cache: PassCache | None = None) -> tuple[int, int]:
-    running = len(_workers(_records(store, cache), None))
-    held, _ = _held(store, store.redis.hgetall(key(machine)), None, lease.now_ms(store), cache)
+def occupancy(store: RedisStore, machine: str) -> tuple[int, int]:
+    running = len(_workers(_records(store), None))
+    held, _ = _held(store, store.redis.hgetall(key(machine)), None, lease.now_ms(store))
     return running, len(held)
 
 

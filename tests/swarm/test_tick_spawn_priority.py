@@ -18,6 +18,9 @@ class OrderingRuntime(FakeRuntime):
             self.order.append("spawn")
         return super().spawn(config, lane, name, task)
 
+    def end_placement_pass(self):
+        self.order.append("end")
+
 
 def _ordered(store, monkeypatch):
     order = []
@@ -31,14 +34,14 @@ def _ordered(store, monkeypatch):
 def test_a_pass_after_one_that_never_reached_its_spawn_spawns_before_exits_sweep_and_reap(store, monkeypatch):
     store.redis.set(store.key("sw", tick_module.SPAWN_DUE), 500)
     order, runtime = _ordered(store, monkeypatch)
-    assert order == ["spawn", "exits.sweep", "reap"]
+    assert order[:4] == ["spawn", "end", "exits.sweep", "reap"]
     assert [(lane, task) for lane, _, task in runtime.spawned if lane != "master"] == [("eng", "t1")]
     assert not store.redis.exists(store.key("sw", tick_module.SPAWN_DUE))
 
 
 def test_a_pass_after_a_completed_one_spawns_after_reap_and_clears_its_due_mark(store, monkeypatch):
     order, runtime = _ordered(store, monkeypatch)
-    assert order == ["exits.sweep", "reap", "spawn"]
+    assert order[:4] == ["exits.sweep", "reap", "spawn", "end"]
     assert [(lane, task) for lane, _, task in runtime.spawned if lane != "master"] == [("eng", "t1")]
     assert not store.redis.exists(store.key("sw", tick_module.SPAWN_DUE))
 
