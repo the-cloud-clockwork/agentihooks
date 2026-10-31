@@ -1,6 +1,7 @@
 """Workstation, hive pinned and needs pinned tasks under the events engine: offers, spoke takes, hub admission, tick."""
 
 from collections.abc import Iterator
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
@@ -178,11 +179,14 @@ def test_the_hub_never_admits_a_workstation_task_from_a_hive(
 
 
 def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig: SimpleNamespace) -> None:
+    original = deepcopy(PINNED)
     assert rig.admitter.admit(SLUG, ask("pinned", "hive-a")) is None
     assert rig.store.claimant(SLUG, "pinned") is None
     admitted = rig.admitter.admit(SLUG, ask("pinned", "hive-b"))
     assert admitted["hive"] == "hive-b"
     assert rig.store.claimant(SLUG, "pinned") == admitted["name"]
+    assert PINNED == original
+    assert [event.key for event in readiness.offers(snapshot(doc(PINNED)), NOW)] == ["plain", "pinned", "gpu"]
 
 
 def test_the_hub_admits_a_needs_task_only_from_a_hive_declaring_every_need(rig: SimpleNamespace) -> None:
