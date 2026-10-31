@@ -4,6 +4,7 @@ import subprocess
 import urllib.error
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -14,7 +15,7 @@ from scripts.hive import auth, cli, create, machine, registry, remove
 from scripts.hive.placement import choose, place_master
 from scripts.inbox.seats import SeatRegistry
 from scripts.inbox.store import InboxStore, Item
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger.ledger_workspace import folder
 
 PUBLIC = "redis://hive.example:6380/2"
@@ -453,14 +454,13 @@ def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_it
     store: Swarm, tmp_path: Path
 ) -> None:
     from scripts.inbox import exits
-    from scripts.swarm.store import RedisStore
 
     member = _member(store)
     _agent(store, member)
     inbox = InboxStore(store.redis)
     inbox.seats.occupy(SEAT, "engineer@1", 1)
     plan = remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9")
-    remove.drain(store, plan, _host(Clock(store, member, 1), Run(), tmp_path))
+    remove.drain(cast(RedisStore, store), plan, _host(Clock(store, member, 1), Run(), tmp_path))
     [order] = _orders(store, "engineer@1")
     assert remove.is_notice(order)
     assert not remove.is_notice(replace(order, sender="operator"))
@@ -470,7 +470,7 @@ def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_it
     successor = AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working")
     RedisStore(store.redis).put_agent(SLUG, successor)
     store.put_agent(SLUG, replace(successor, hive=elsewhere))
-    assert remove.hosted(store, elsewhere) == [(SLUG, replace(successor, hive=elsewhere))]
+    assert remove.hosted(cast(RedisStore, store), elsewhere) == [(SLUG, replace(successor, hive=elsewhere))]
     inbox.seats.occupy(SEAT, "engineer@2", other.created_at + 1)
 
     exits.settle(inbox, "engineer@1", SEAT, "handed off its seat")
@@ -531,7 +531,7 @@ def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
 
-    remove.settle(store, member, 3600, _host(Successor(store), Run(), tmp_path))
+    remove.settle(cast(RedisStore, store), member, 3600, _host(Successor(store), Run(), tmp_path))
 
     for seat, predecessor, successor in ((SEAT, "engineer@1", "engineer@2"), (f"ci-1@{SLUG}", "ci@1", "ci@2")):
         assert [(item.state, item.reason) for item in _orders(store, predecessor)] == [
@@ -546,7 +546,7 @@ def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store: 
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
 
-    remove.settle(store, member, 3600, _host(Answering(store), Run(), tmp_path))
+    remove.settle(cast(RedisStore, store), member, 3600, _host(Answering(store), Run(), tmp_path))
 
     assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("done", "done: handed off")]
     assert [(item.state, item.reason) for item in _orders(store, "ci@1")] == [("cancelled", _withdrawn(member))]
@@ -561,7 +561,7 @@ def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(
     _agent(store, member)
     monkeypatch.setattr(envelope, "build", lambda swarm, slug, agent, reason, rows, at, run: {"agent": agent.name})
 
-    settled = remove.settle(store, member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
+    settled = remove.settle(cast(RedisStore, store), member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
 
     assert settled.startswith(f"hive {member} stops after 30 seconds; engineer@1 did not hand off")
     assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("cancelled", _withdrawn(member))]
