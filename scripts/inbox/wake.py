@@ -169,7 +169,7 @@ def _wake_world(
     clock: _Clock,
     items: list[Item],
 ) -> list[str]:
-    now_ms, window, quiet = clock.now_ms, clock.window, clock.quiet
+    now_ms, quiet = clock.now_ms, clock.quiet
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
     boss = next((a for a in agents if a.lane == MASTER), None)
