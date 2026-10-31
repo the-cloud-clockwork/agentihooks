@@ -142,7 +142,7 @@ def read_executions(store: Any, slug: str) -> dict[str, Any]:
         entry = states.get_projection(slug)
         if entry is not None:
             return json.loads(entry.value)
-    return cast("dict[str, Any]", read(store, slug)["executions"])
+    return cast(dict[str, Any], read(store, slug)["executions"])
 
 
 def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
