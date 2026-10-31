@@ -77,6 +77,8 @@ def estimate(
                 continue
             path, _, name = node(test).partition("[")[0].partition("::")
             recorded.setdefault(path, set()).add(name)
+    elif direct is not None and manifest and "lines" in manifest and "commit" in manifest and manifest["commit"]:
+        direct.update(direct_tests(manifest, recorded_lines(root, manifest, changes)[0], changes))
     for path, lines in changes.items():
         chosen = every_test(root) if everything else select_tests(root, Path(path))
         if manifest is not None:

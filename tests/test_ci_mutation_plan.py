@@ -391,7 +391,8 @@ def test_the_head_takes_the_fastest_tests_to_its_budget_and_slices_balance_the_r
         "costs": [pytest.approx(5.6 + 1.25 * 150), pytest.approx(5.6 + 1.25 * 130)],
     }
     assert split_tests(set(seconds) - {"a1", "a2", "a3"}, seconds, 10) is None
-    assert split_tests({"a4", "a3", "a2"}, seconds, 10)["head"] == ["a2"]
+    over = split_tests({"a4", "a3", "a2"}, seconds, 10)
+    assert over is not None and over["head"] == ["a2"]
 
 
 def test_the_head_takes_the_direct_tests_of_a_changed_line_first_within_its_budget():
@@ -399,13 +400,15 @@ def test_the_head_takes_the_direct_tests_of_a_changed_line_first_within_its_budg
 
     seconds = {"h1": 5.0, "h2": 5.0, "h3": 10.0, "d1[x]": 15.0, "d2": 40.0, "a3": 60.0, "a2": 50.0, "a1": 30.0}
     split = split_tests(set(seconds), seconds, 10, {"d1", "d2"})
+    assert split is not None
     assert split["head"] == ["d1[x]", "h1"]
     assert sorted([*split["head"], *(node for chosen in split["slices"] for node in chosen)]) == sorted(seconds)
     assert split["costs"] == pytest.approx(
-        [5.6 + 1.25 * (20.0 + sum(map(seconds.get, chosen))) for chosen in split["slices"]]
+        [5.6 + 1.25 * (20.0 + sum(seconds[node] for node in chosen)) for chosen in split["slices"]]
     )
-    assert split_tests({"a3", "a2", "a1", "d2"}, seconds, 10, {"a3"})["head"] == ["a1"]
-    assert split_tests({"a3", "a2", "a1", "d2"}, seconds, 10, {"d1"})["head"] == ["a1"]
+    for direct in ({"a3"}, {"d1"}):
+        fallback = split_tests({"a3", "a2", "a1", "d2"}, seconds, 10, direct)
+        assert fallback is not None and fallback["head"] == ["a1"]
 
 
 def test_a_kept_split_whose_head_lacks_a_fitting_direct_test_is_cut_again(tmp_path):
@@ -418,10 +421,10 @@ def test_a_kept_split_whose_head_lacks_a_fitting_direct_test_is_cut_again(tmp_pa
     memory.keep_splits({function: {"head": ["fast"], "slices": [["a", "c"], ["b"]], "costs": [1.0] * 2}})
     results = [{"tests": {function: nodes}, "durations": durations}]
     names = [f"{function}__mutmut_1"]
-    assert measured.measured_splits(names, results, 10, memory)[function]["head"] == ["fast"]
-    assert measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["fast"]})[function]["head"] == [
-        "fast"
-    ]
+    kept = {"head": ["fast"], "slices": [["a", "c"], ["b"]]}
+    assert measured.measured_splits(names, results, 10, memory)[function].items() >= kept.items()
+    split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["fast"]})[function]
+    assert split.items() >= kept.items()
     split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["c"]})[function]
     assert split["head"] == ["c"]
     assert sorted(node for chosen in split["slices"] for node in chosen) == ["a", "b", "fast"]
