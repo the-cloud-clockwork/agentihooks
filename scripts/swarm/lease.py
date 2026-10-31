@@ -97,8 +97,7 @@ def current(store: RedisStore, slug: str) -> Lease | None:
     if _address(slug):
         data = _remote(slug, "current")
         return Lease(**data) if data is not None else None
-    cheap = document.read_lease(store, slug)
-    return _live(cheap if cheap is not None else document.read(store, slug), now_ms(store))
+    return _live(document.read(store, slug), now_ms(store))
 
 
 def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
@@ -182,14 +181,6 @@ def require(store: RedisStore, slug: str, held: Lease) -> None:
 def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
     if _address(slug):
         return Lease(**_remote(slug, "renew", {"owner": held.owner, "epoch": held.epoch}))
-
-    cheap = document.read_lease(store, slug)
-    if cheap is not None:
-        at = now_ms(store)
-        _check(cheap, at, held)
-        live = _recorded(cheap)
-        if live.expires_at - at >= ttl_ms() - tick_ms():
-            return live
 
     def extend(doc: dict[str, Any]) -> Any:
         at = now_ms(store)
