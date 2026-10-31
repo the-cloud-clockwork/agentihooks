@@ -2,10 +2,10 @@ import hashlib
 import json
 import socket
 from collections.abc import Callable, Sequence
-from typing import Any
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from hooks.classifier import decision_log
 from scripts import agent_choice
