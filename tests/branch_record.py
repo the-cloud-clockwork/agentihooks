@@ -148,8 +148,9 @@ def record(args: argparse.Namespace) -> tuple[dict, str]:
     results, readable = _rows(sorted(args.results.glob("*.jsonl")), RESULT)
     flakes, flakes_readable = _rows([args.flakes], FLAKE)
     outcomes, pids = _outcomes(results + flakes)
-    reports = sorted(args.inputs.rglob("*.jsonl"))
-    inputs, modules = _rows(reports, INPUT)[0], _rows(reports, MODULE)[0]
+    rows = _rows(sorted(args.inputs.rglob("*.jsonl")), {"files": _texts, "escapes": _flag})[0]
+    inputs = [row for row in rows if all(check(row.get(key)) for key, check in INPUT.items())]
+    modules = [row for row in rows if all(check(row.get(key)) for key, check in MODULE.items())]
     with tempfile.TemporaryDirectory() as scratch:
         coverage, surviving, state = _coverage(args.coverage_dir, Path(scratch))
         manifest = _manifest(coverage, inputs + modules, args, Path(scratch))

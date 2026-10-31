@@ -502,6 +502,8 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_lazy.py": "from scripts.lazy import serve\n",
         "tests/test_plugins.py": "from scripts.plugins import load\n",
         "tests/test_spawn.py": "import scripts.spawn\n",
+        "scripts/defaults.py": "def chosen(module=__import__('json')):\n    return module\n",
+        "tests/test_defaults.py": "import scripts.defaults\n",
     }
     for path, text in files.items():
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
@@ -516,6 +518,7 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         *lines,
         "tests/test_plugins.py::test_kept",
         "tests/test_spawn.py::test_spawn",
+        "tests/test_defaults.py::test_defaults",
     ]
     tests = {name: {"units": [], "files": [], "escapes": False} for name in names}
     modules = {
@@ -530,6 +533,7 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_plugins.py::test_loaded": ([], True),
         "tests/test_plugins.py::test_kept": ([], False),
         "tests/test_spawn.py::test_spawn": ([], True),
+        "tests/test_defaults.py::test_defaults": ([], True),
     }
 
 

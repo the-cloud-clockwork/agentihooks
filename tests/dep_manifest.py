@@ -158,8 +158,11 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
             target = _module_file(root, name)
             if target and target != path:
                 edges.append((target, line))
-        nested = inside or isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)
-        pending.extend((child, nested, statement) for child in ast.iter_child_nodes(node))
+        body = node.body if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) else []
+        body = body if isinstance(body, list) else [body]
+        pending.extend(
+            (child, inside or any(child is part for part in body), statement) for child in ast.iter_child_nodes(node)
+        )
     return edges, dynamic
 
 

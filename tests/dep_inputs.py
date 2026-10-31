@@ -128,9 +128,7 @@ class DepInputs:
             self.current = previous
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
-        self.finished.parent.mkdir(parents=True, exist_ok=True)
-        with self.finished.open("a") as finished:
-            finished.writelines(line + "\n" for line in self.module_lines())
+        self.append_finished(self.module_lines())
 
     def module_lines(self) -> list[str]:
         """One line per repository module with the files its collection read and whether it started a process."""
@@ -197,9 +195,13 @@ class DepInputs:
 
     def finish(self, test: str) -> None:
         self.tests[test][0].update(self.child_reads(self.logs[test]))
+        self.append_finished([self.line(test, self.shared_relative())])
+
+    def append_finished(self, lines: list[str]) -> None:
+        """Append lines to this worker's finished report, which outlives a worker killed before session end."""
         self.finished.parent.mkdir(parents=True, exist_ok=True)
         with self.finished.open("a") as finished:
-            finished.write(self.line(test, self.shared_relative()) + "\n")
+            finished.writelines(line + "\n" for line in lines)
 
     def pytest_sessionfinish(self, session):
         if not self.tests:
