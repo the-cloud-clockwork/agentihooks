@@ -632,7 +632,7 @@
   "scripts/swarm/lifetime.py": 47,
   "scripts/swarm/linked_issues.py": 53,
   "scripts/swarm/live_binding.py": 144,
-  "scripts/swarm/local_slots.py": 72,
+  "scripts/swarm/local_slots.py": 67,
   "scripts/swarm/lost_runner.py": 7,
   "scripts/swarm/master_alarm.py": 138,
   "scripts/swarm/master_launch.py": 413,
