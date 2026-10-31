@@ -1,9 +1,12 @@
 import re
 import time
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlencode
 
 import pytest
+
+from scripts.swarm_ledger.api.services import Services
 
 pytestmark = pytest.mark.unit
 
@@ -204,9 +207,10 @@ def test_a_targets_read_returns_only_the_tasks_naming_that_pull_request(tmp_path
     ]
     repository = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3")
     repository.import_document("one", {"title": "One", "tasks": tasks, "_meta": {"task_revision": 3, "rev": 13}})
-    host = SimpleNamespace(repository=repository)
+    host = cast(Services, SimpleNamespace(repository=repository))
     handler = SimpleNamespace(path=f"/api/v1/ledgers/one/tasks?{urlencode({'targets': url})}", headers={})
     found = routes.ledger_get(handler, host, "one", "tasks")
+    assert found is not None
     assert [row["title"] for row in found["data"]] == ["Own", "Half", "Scope"]
     assert found["next_cursor"] is None
     assert [row["title"] for row in routes.ledger_read(host, "one", "tasks", {})["data"]][3] == "Other"
@@ -245,6 +249,6 @@ def test_a_targets_read_is_refused_outside_a_plain_tasks_read(path: str, query: 
 
     handler = SimpleNamespace(path=f"/api/v1/ledgers/one/{path}?{urlencode(query)}", headers={})
     with pytest.raises(APIError) as refused:
-        routes.ledger_get(handler, SimpleNamespace(), "one", path)
+        routes.ledger_get(handler, cast(Services, SimpleNamespace()), "one", path)
     assert (refused.value.status, refused.value.code) == (400, "schema_invalid")
     assert query["targets"] == "" or str(refused.value) == "Only a plain tasks read takes targets"

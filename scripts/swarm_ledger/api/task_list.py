@@ -50,11 +50,11 @@ class Tasks:
         return self.pages[key]
 
 
-HELD: dict = {}
+HELD: dict[str, Tasks] = {}
 GUARD = threading.Lock()
 
 
-def read(repository: object, slug: str, query: dict) -> Page | dict:
+def read(repository: object, slug: str, query: dict[str, object]) -> Page:
     with GUARD:
         held = HELD.pop(slug, None)
         if held is None or held.repository is not repository:
@@ -65,17 +65,27 @@ def read(repository: object, slug: str, query: dict) -> Page | dict:
     with held.lock:
         held.refresh(slug)
         if "targets" in query:
-            return targeting(held.stored[2], query["targets"])
+            return targeting(held.stored[2] if held.stored else [], query["targets"])
         return held.page(query)
 
 
-def targeting(rows: list, url: str) -> dict:
+def targeting(rows: object, url: object) -> Page:
     """The tasks whose pull request, split halves or pull scopes name this pull request URL, in one reply."""
-    found = [row for row in rows if isinstance(row, dict) and url in pull_links(row)]
+    listed: list[object] = list(rows) if isinstance(rows, list) else []
+    found = [row for row in listed if url in pull_links(row)]
     data = [{**resources.project(row), "revision": resources.revision(row)} for row in found]
-    return resources.bounded({"data": data, "revision": resources.revision(found), "next_cursor": None})
+    return Page(resources.bounded({"data": data, "revision": resources.revision(found), "next_cursor": None}))
 
 
-def pull_links(row: dict) -> set:
+def pull_links(row: object) -> set[object]:
     """Every pull request URL a task row names."""
-    return {row.get("pr_url"), *(row.get("split_pulls") or []), *(row.get("pull_scopes") or {})}
+    if not isinstance(row, dict):
+        return set()
+    fields: dict[str, object] = row
+    split = fields.get("split_pulls")
+    scopes = fields.get("pull_scopes")
+    return {
+        fields.get("pr_url"),
+        *(split if isinstance(split, list) else []),
+        *(scopes if isinstance(scopes, dict) else {}),
+    }

@@ -1802,7 +1802,7 @@ def _hotfix_master(store, args) -> bool:
     return _me(store, args).lane == MASTER and master_coding.is_open(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
 
-def cmd_merge(store, args):
+def cmd_merge(store: RedisStore, args: argparse.Namespace) -> None:
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
@@ -1814,10 +1814,8 @@ def cmd_merge(store, args):
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
-            ledger = LedgerClient()
-            own = [row for row in [ledger.task(args.slug, agent.task)] if row]
-            targeting = ledger.tasks_targeting(args.slug, args.url)
-            done_gate.require_target(store, args.slug, agent.task, args.url, own + targeting)
+            rows = ledger_client.target_rows(LedgerClient(), args.slug, agent.task, args.url)
+            done_gate.require_target(store, args.slug, agent.task, args.url, rows)
         if args.action == "queue":
             result = merge_queue.operate(
                 args.action,

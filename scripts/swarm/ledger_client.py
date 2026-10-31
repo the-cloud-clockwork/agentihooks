@@ -4,6 +4,7 @@ import sys
 import urllib.error
 import uuid
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
@@ -72,7 +73,7 @@ class LedgerClient:
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
         return state
 
-    def _resource(self, slug, path, collection=False):
+    def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
         return _ledger().resource(slug, path, service=self.service, collection=collection)
 
     def state(self, slug):
@@ -84,7 +85,7 @@ class LedgerClient:
     def tasks(self, slug):
         return self._resource(slug, "tasks", collection=True)
 
-    def tasks_targeting(self, slug: str, url: str) -> list[dict]:
+    def tasks_targeting(self, slug: str, url: str) -> list[dict[str, object]]:
         """The tasks naming this pull request, read by a scoped query instead of the whole tasks collection.
 
         A ledger server older than the targets query refuses it as schema_invalid; only then is the whole
@@ -93,15 +94,15 @@ class LedgerClient:
         from scripts.swarm_ledger.api.task_list import pull_links
 
         try:
-            rows = self._resource(slug, f"tasks?{urlencode({'targets': url})}")
+            rows = cast("list[object]", self._resource(slug, f"tasks?{urlencode({'targets': url})}"))
         except urllib.error.HTTPError as exc:
             from scripts.swarm_ledger.api.client import failure
 
-            replay, error = failure(exc)
+            replay, error = cast("tuple[urllib.error.HTTPError, dict[str, object]]", failure(exc))
             if exc.code != 400 or error.get("code") != "schema_invalid":
                 raise replay from None
-            rows = self.tasks(slug)
-        return [row for row in rows if url in pull_links(row)]
+            rows = cast("list[object]", self.tasks(slug))
+        return [cast("dict[str, object]", row) for row in rows if url in pull_links(row)]
 
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
@@ -344,3 +345,9 @@ class LedgerClient:
 
 def _op(kind, by, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": by, **fields}
+
+
+def target_rows(ledger: LedgerClient, slug: str, task_id: str, url: str) -> list[dict[str, object]]:
+    """This task and every task naming the pull request, the rows the final integration target check reads."""
+    own = cast("dict[str, object] | None", ledger.task(slug, task_id))
+    return [*([own] if own else []), *ledger.tasks_targeting(slug, url)]
