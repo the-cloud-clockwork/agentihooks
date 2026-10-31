@@ -1520,6 +1520,69 @@ There is no setting for the ratio, and no log line prints it. Compare `Measured 
 
 [Pull request 4786](https://github.com/the-cloud-clockwork/agentihooks/pull/4786) delivered the adjustment. Replaying the planner on the same statistics artifacts, the account scan head of [run 39207424222](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39207424222) fell from 48.2 to 16.2 estimated minutes per mutant and from 100 to 60 units on ten shards; five other recent pull request runs fell between two and four times, and two of them needed fewer shards (10 to 6, and 5 to 3). Predicted over actual shard wall stayed between 1.6 and 4.9 across all six runs, so the estimate still exceeds observed work. On the account scan head every one of the 1881 traced tests executes the changed one statement function, so line level narrowing could not have cut its test set.
 
+### Plans over the shard budget
+
+Each mutation shard runs its **Mutate changed Python files** step under a 1080 second budget. With at most ten shards and three planned workers, a change has a fixed ceiling, and a shard planned past it can only end in a budget exhaustion. The measured planner checks this before any shard starts: when the slowest shard in the plan cannot finish within the budget, the **Refine mutation shards from measured statistics** step fails and names the estimate and how far to split the change.
+
+| Value | Source |
+|---|---|
+| Slowest shard | The largest entry in the plan's `shard_worker_seconds` |
+| Workers | The plan's `workers`, from [`MUTATION_SHARD_CPU_QUOTA`](#shard-planning-from-the-batch-runner-cpu-quota), three on the batch runner |
+| Shard budget | `--budget` of `scripts.ci_mutation.measured`, default 1080 seconds, the same budget the shards receive |
+| Fits | Slowest shard worker seconds at or below `workers * budget`, 3240 at three workers |
+| Ten shard capacity | `10 * workers * budget`, 32400 worker seconds at three workers |
+| Pull requests to split into | `max(2, ceil(estimated_worker_seconds / capacity))` |
+
+A shard exactly at `workers * budget` passes. Over it, the step:
+
+1. writes `plan.json` as usual;
+2. prints `Measured mutation worker seconds` and `Measured mutation shards`;
+3. prints a `::error title=Mutation plan over budget::` annotation;
+4. exits 1 without writing `shards` or `probe` to the step output, so no mutation shard is started.
+
+For example, a shared storage change planned ten shards of 31000 worker seconds each. Before this check the shards started and ran until they used up their budget. The planner now stops with:
+
+```text
+::error title=Mutation plan over budget::The slowest mutation shard needs 31000 worker seconds, 10333 seconds on 3 workers, against the 1080 second shard budget. The change needs 310000 worker seconds and 10 shards hold at most 32400, so split it into at least 10 pull requests.
+```
+
+The split count never reads below two: a plan whose total fits the ten shard capacity but whose slowest shard does not, such as shards of 3250 and 10 worker seconds, asks for at least two pull requests.
+
+#### Configuration
+
+Both preflight steps that build the measured plan, in the single job `stats` path and in `refine`, run the planner with its default budget, so a workflow change needs no new input. Pass `--budget` when a shard budget other than 1080 seconds is in force, and change it together with `--budget` on the shard steps:
+
+```yaml
+      - name: Refine mutation shards from measured statistics
+        env:
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats --budget 1080
+```
+
+`SHARD_LIMIT` in `scripts.ci_mutation.measured` holds the ten shard cap used in the message. The check has no environment variable or dispatch input to turn it off.
+
+#### Inspect a failed plan
+
+The upload of `mutation-plan` runs only after a successful refine step, so a plan over budget leaves no plan artifact. Read the numbers from the step log:
+
+```bash
+gh run view RUN_ID --log-failed \
+  | grep -E 'Measured mutation (worker seconds|shards)|Mutation plan over budget'
+```
+
+The annotation also appears on the run summary page under the refine job.
+
+| Symptom | Check |
+|---|---|
+| `Mutation plan over budget` on a change that looks small | One mutant unit can outweigh the budget alone, for instance a function whose every covering test is slow and that has no recorded killing test; splitting the pull request does not shrink that unit. Read the killing test cache restore line and the plan's `splits` from a smaller rerun before splitting |
+| The estimate is far above earlier runs on the same branch | The first preflight on a branch has no [killing test cache](#pricing-from-recorded-killing-tests) and prices every mutant from all its traced tests; compare against a run that restored `mutation-killers-v1` |
+| A shard still runs out of budget after a passing plan | The check compares estimates only. Compare planned over actual shard wall on the run before changing `--budget` |
+| `KeyError: 'shard_worker_seconds'` or `'workers'` in a planner test | The test stubs `refine_plan` with a plan missing those fields; `plan_shards` always writes both, so add them to the stub |
+
+#### Delivery evidence
+
+[Pull request 9060](https://github.com/the-cloud-clockwork/agentihooks/pull/9060), for [issue 9059](https://github.com/the-cloud-clockwork/agentihooks/issues/9059), added the check. `test_measured_cli_fails_at_plan_time_when_ten_shards_cannot_fit_the_budget` plants the ten shard plan above and asserts exit 1, the exact annotation, a written `plan.json` and no step output. `test_measured_cli_accepts_a_shard_that_exactly_fills_its_budget` passes a 3240 worker second shard at the default budget and fails it at `--budget 1079`, which asks for two pull requests.
+
 ### Combined grading
 
 A shard grades its unsplit mutants normally and records split results under `units` for the final `mutation` merge job. A successful unit or shard alone does not establish a successful gate.
