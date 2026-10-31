@@ -103,7 +103,7 @@
   "hooks/filters/rounds.py": 25,
   "hooks/filters/runner.py": 193,
   "hooks/filters/schema.py": 49,
-  "hooks/hook_manager.py": 590,
+  "hooks/hook_manager.py": 585,
   "hooks/integrations/__init__.py": 3,
   "hooks/integrations/aws.py": 1,
   "hooks/integrations/base.py": 17,
