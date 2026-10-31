@@ -131,12 +131,32 @@ def _module_file(root: Path, name: str, folder: str = "") -> str | None:
     return None
 
 
+def _by_name(tree: ast.AST) -> set[str]:
+    names = set(DYNAMIC)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util", "builtins", "runpy"):
+            names.update(alias.asname for alias in node.names if alias.name in DYNAMIC and alias.asname)
+        elif isinstance(node, ast.Assign) and getattr(node.value, "attr", getattr(node.value, "id", "")) in DYNAMIC:
+            names.update(target.id for target in node.targets if isinstance(target, ast.Name))
+    return names
+
+
+def _imported(node: ast.AST, package: tuple[str, ...]) -> list[str]:
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom):
+        base = package[: len(package) - node.level + 1] if node.level else ()
+        module = ".".join([*base, *([node.module] if node.module else [])])
+        return [module, *(f"{module}.{alias.name}" for alias in node.names)]
+    return []
+
+
 def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], list[int | None]]:
     """The repository modules a file imports and its calls that import by name.
 
     Each carries the line of its statement inside a function, or None at module level where it runs on import.
-    A name resolves from the repository root or the file's own folder. A file that cannot be parsed reports a
-    module level call so its importers escape.
+    A name resolves from the repository root and from the file's own folder. A file that cannot be parsed reports
+    a module level call so its importers escape.
     """
     try:
         tree = ast.parse((root / path).read_text(encoding="utf-8"))
@@ -144,35 +164,19 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
         return [], []
     except (OSError, SyntaxError, ValueError):
         return [], [None]
-    package = Path(path).parent.parts
-    by_name = set(DYNAMIC)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util", "builtins", "runpy"):
-            by_name.update(alias.asname for alias in node.names if alias.name in DYNAMIC and alias.asname)
-        elif isinstance(node, ast.Assign) and getattr(node.value, "attr", getattr(node.value, "id", "")) in DYNAMIC:
-            by_name.update(target.id for target in node.targets if isinstance(target, ast.Name))
+    package, folder, by_name = Path(path).parent.parts, Path(path).parent.as_posix(), _by_name(tree)
     edges, dynamic = [], []
     pending = [(tree, False, None)]
     while pending:
         node, inside, statement = pending.pop()
-        if isinstance(node, ast.stmt):
-            statement = node.lineno
+        statement = node.lineno if isinstance(node, ast.stmt) else statement
         line = statement if inside else None
-        names = []
-        if isinstance(node, ast.Import):
-            names = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            base = package[: len(package) - node.level + 1] if node.level else ()
-            module = ".".join([*base, *([node.module] if node.module else [])])
-            names = [module, *(f"{module}.{alias.name}" for alias in node.names)]
-        elif isinstance(node, ast.Call):
-            called = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
-            if called in by_name:
-                dynamic.append(line)
-        for name in filter(None, names):
-            for target in {_module_file(root, name), _module_file(root, name, Path(path).parent.as_posix())}:
-                if target and target != path:
-                    edges.append((target, line))
+        called = getattr(getattr(node, "func", None), "attr", getattr(getattr(node, "func", None), "id", ""))
+        if isinstance(node, ast.Call) and called in by_name:
+            dynamic.append(line)
+        for name in filter(None, _imported(node, package)):
+            found = {_module_file(root, name), _module_file(root, name, folder)} - {None, path}
+            edges.extend((target, line) for target in found)
         body = node.body if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) else []
         body = body if isinstance(body, list) else [body]
         pending.extend(
