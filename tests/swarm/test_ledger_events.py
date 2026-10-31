@@ -523,8 +523,6 @@ class ReopenLedger(FakeLedger):
 
 
 def _owner_left(store, monkeypatch, owners=()):
-    from scripts.swarm import ready
-
     store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat=ENG_SEAT, state="finished"))
     monkeypatch.setattr(ready, "_owners", lambda run, task_id: list(owners))
 
@@ -534,8 +532,6 @@ def _pass(store: RedisStore, ledger: ReopenLedger) -> ready.Pass:
 
 
 def test_a_red_task_held_on_an_open_dependency_stays_in_pull_request(store, monkeypatch):
-    from scripts.swarm import ready
-
     ledger = ReopenLedger()
     _owner_left(store, monkeypatch)
     task, other = in_pr()["tasks"][0], {"id": "t2", "state": "pr"}
@@ -577,8 +573,6 @@ def test_red_checks_for_a_live_owner_only_send_the_notice(store, monkeypatch):
 
 
 def test_a_reopen_for_red_checks_with_no_named_failure_says_red_checks(store, monkeypatch):
-    from scripts.swarm import ready
-
     ledger = ReopenLedger()
     _owner_left(store, monkeypatch)
     task = in_pr()["tasks"][0]
@@ -588,8 +582,6 @@ def test_a_reopen_for_red_checks_with_no_named_failure_says_red_checks(store, mo
 
 
 def test_a_red_task_with_no_claimant_reopens_and_says_so(store, monkeypatch):
-    from scripts.swarm import ready
-
     ledger = ReopenLedger(live={"state": "open", "claimed_by": "", "claim_generation": 0})
     _owner_left(store, monkeypatch)
     task = {key: value for key, value in in_pr()["tasks"][0].items() if key != "claimed_by"}
