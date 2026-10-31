@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
@@ -13,11 +14,12 @@ from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.events.subjects import subject
 from scripts.inbox.seats import is_seat
-from scripts.inbox.store import CLOSED, InboxError
+from scripts.inbox.store import CLOSED, InboxError, Item
 
 FEED_BACKEND = "nats"
 FEED_BATCH = 10
 REOPEN_S = 30.0
+OPEN_WAIT_S = 0.25
 
 
 def _identity(*parts: str) -> str:
@@ -202,21 +204,52 @@ def seat_of(store, me: str) -> str:
 
 
 class SeatPublisher:
-    def __init__(self, opener: Callable[[], Bus]):
-        self._opener = opener
-        self._bus = None
-        self._retry_at = 0.0
+    """Open the bus once on a background thread behind one lock, so no sender waits on a connect."""
 
-    def publish(self, item, swarm="") -> None:
+    def __init__(self, opener: Callable[[], Bus]) -> None:
+        self._opener = opener
+        self._bus: Bus | None = None
+        self._retry_at = 0.0
+        self._lock = threading.Lock()
+        self._opening: threading.Event | None = None
+
+    def _ready(self) -> Bus | None:
+        with self._lock:
+            if self._bus is not None or time.monotonic() < self._retry_at:
+                return self._bus
+            opening = self._opening
+            if opening is None:
+                opening = self._opening = threading.Event()
+                threading.Thread(target=self._open, args=(opening,), daemon=True).start()
+        opening.wait(OPEN_WAIT_S)
+        return self._bus
+
+    def _open(self, opening: threading.Event) -> None:
+        try:
+            bus = self._opener()
+        except Exception as exc:
+            with self._lock:
+                self._retry_at = time.monotonic() + REOPEN_S
+            print(f"agentihooks inbox: bus open failed ({exc}); the Redis recheck delivers its items", file=sys.stderr)
+        else:
+            with self._lock:
+                self._bus = bus
+        finally:
+            with self._lock:
+                self._opening = None
+            opening.set()
+
+    def publish(self, item: Item, swarm: str = "") -> None:
         swarm = _swarm_of(item.address) if is_seat(item.address) else swarm
-        if not swarm or (self._bus is None and time.monotonic() < self._retry_at):
+        if not swarm:
+            return
+        bus = self._ready()
+        if bus is None:
             return
         try:
-            if self._bus is None:
-                self._bus = self._opener()
             message = Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
             if is_seat(item.address):
-                SeatInbox(self._bus, swarm).send(item.address, message)
+                SeatInbox(bus, swarm).send(item.address, message)
             else:
                 event = Envelope(
                     id=item.id,
@@ -229,10 +262,14 @@ class SeatPublisher:
                     author=item.sender,
                     data=asdict(message),
                 )
-                publish_wake(self._bus, event)
+                publish_wake(bus, event)
         except Exception as exc:
-            _drop(self._bus)
-            self._bus, self._retry_at = None, time.monotonic() + REOPEN_S
+            with self._lock:
+                lost = self._bus is bus
+                if lost:
+                    self._bus, self._retry_at = None, time.monotonic() + REOPEN_S
+            if lost:
+                _drop(bus)
             print(
                 f"agentihooks inbox: bus publish of {item.id} failed ({exc}); the Redis recheck delivers it",
                 file=sys.stderr,
