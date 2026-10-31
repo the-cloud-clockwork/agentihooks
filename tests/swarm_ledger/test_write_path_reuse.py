@@ -158,15 +158,16 @@ def write(state: Doc) -> Doc:
     return writer
 
 
-def test_written_keeps_replaced_stamp_records_shared_with_the_writer_copy() -> None:
+def test_written_copies_apart_only_the_replaced_stamp_record() -> None:
     state = ledger()
     previous = document(state)
     writer = write(state)
     record = writer["_meta"]["stamps"]["tasks/t1"]
     fragment, copy = writer_copy.written(writer, previous)
     stored = cast(Doc, part(part(fragment, "_meta"), "stamps").value)
-    assert stored["tasks/t1"] is record
-    assert copy["_meta"]["stamps"]["tasks/t1"] is record
+    assert stored["tasks/t1"] == record and stored["tasks/t1"] is not record
+    assert copy["_meta"]["stamps"]["tasks/t1"] is stored["tasks/t1"]
+    assert stored["tasks/t2"] is cast(Doc, part(part(previous, "_meta"), "stamps").value)["tasks/t2"]
     assert copy["_meta"]["stamps"] is not stored
     copy["_meta"]["stamps"]["tasks/t2"] = {"at": 100, "rev": 3, "by": "c"}
     assert stored["tasks/t2"]["at"] == 2

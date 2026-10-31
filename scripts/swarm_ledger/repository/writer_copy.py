@@ -1,20 +1,30 @@
+from typing import Any, cast
+
 from . import refresh
 from .entry import thawed
 from .events import read_events
 from .fragments import Fragment, document
 
 
-def written(state: dict, previous: Fragment | None) -> tuple[Fragment, dict]:
-    """The stored fragments of state and the writer copy the next write takes; stamp records are replaced, never
-    changed in place, so the stamps fragment keeps sharing them and is not detached record by record."""
+def written(state: dict[str, Any], previous: Fragment | None) -> tuple[Fragment, dict[str, Any]]:
+    """The stored fragments of state and the writer copy the next write takes; the stamps mapping is detached in one
+    pass that copies apart only the records the previous fragments do not hold."""
     fragment = document(state, previous)
-    meta = fragment.parts.get("_meta")
-    stamps = meta.parts.get("stamps") if meta is not None and isinstance(meta.parts, dict) else None
-    shared = stamps if isinstance(stamps, Fragment) and isinstance(stamps.parts, dict) else None
-    fragment, writer = detached(fragment, previous, state, shared)
-    if shared is not None:
-        writer["_meta"]["stamps"] = dict(shared.value)
-    return fragment, writer
+    fragment, writer = detached(fragment, previous, state, stamps_of(fragment))
+    copy = cast("dict[str, Any]", writer)
+    stamps = stamps_of(fragment)
+    if stamps is not None:
+        copy["_meta"]["stamps"] = dict(cast("dict[str, object]", stamps.value))
+    return fragment, copy
+
+
+def stamps_of(fragment: Fragment) -> Fragment | None:
+    """The stamps mapping fragment of a document fragment, or None when it holds no stamps mapping."""
+    meta = cast("dict[str, object]", fragment.parts).get("_meta") if isinstance(fragment.parts, dict) else None
+    if not isinstance(meta, Fragment) or not isinstance(meta.parts, dict):
+        return None
+    stamps = cast("dict[str, object]", meta.parts).get("stamps")
+    return stamps if isinstance(stamps, Fragment) and isinstance(stamps.parts, dict) else None
 
 
 def refreshed(connection, slug: str, cached, paths: set) -> tuple[dict | None, dict | None]:
@@ -28,11 +38,30 @@ def refreshed(connection, slug: str, cached, paths: set) -> tuple[dict | None, d
     return state, writer
 
 
+def records_apart(fragment: Fragment, previous: Fragment | None) -> Fragment:
+    """The stamps mapping with every record fragment previous does not hold copied apart, as detached copies leaves."""
+    parts = cast("dict[str, Fragment]", fragment.parts)
+    known = (
+        cast("dict[str, Fragment]", previous.parts) if previous is not None and isinstance(previous.parts, dict) else {}
+    )
+    fresh = {
+        key: Fragment(thawed(part.value), signature=part.signature)
+        for key, part in parts.items()
+        if part is not known.get(key)
+    }
+    merged, values = dict(parts), dict(cast("dict[str, object]", fragment.value))
+    merged.update(fresh)
+    values.update({key: part.value for key, part in fresh.items()})
+    return Fragment(values, merged)
+
+
 def detached(
     fragment: Fragment, previous: Fragment | None, value: object, shared: Fragment | None = None
 ) -> tuple[Fragment, object]:
-    if fragment is previous or fragment is shared:
+    if fragment is previous:
         return fragment, value
+    if fragment is shared:
+        return records_apart(fragment, previous), value
     if fragment.parts is None:
         return Fragment(thawed(fragment.value), signature=fragment.signature), thawed(fragment.value)
     old = previous.parts if previous is not None and type(previous.parts) is type(fragment.parts) else None
