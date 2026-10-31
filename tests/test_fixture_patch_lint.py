@@ -1,4 +1,6 @@
+from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -246,3 +248,17 @@ def test_invalid_source_fails_with_its_location(tmp_path: Path, capsys: pytest.C
     write(tmp_path, "test_invalid.py", "def broken(")
     assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 1
     assert "tests/test_invalid.py: cannot parse" in capsys.readouterr().out
+
+
+class PlantedTarget:
+    value = "original"
+
+
+@pytest.fixture
+def planted_mock_fixture() -> Iterator[None]:
+    with patch.object(PlantedTarget, "value", "fixture"):
+        yield
+
+
+def test_planted_fixture_mix(planted_mock_fixture: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(PlantedTarget, "value", "test")
