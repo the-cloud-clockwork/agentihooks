@@ -4,6 +4,7 @@ import copy
 import json
 import time
 from collections.abc import Callable
+from hashlib import sha256
 from typing import Any, TypeVar
 
 from scripts.events import state
@@ -132,8 +133,86 @@ def _decode(value: bytes) -> dict[str, Any]:
     return {**copy.deepcopy(EMPTY), **json.loads(value)}
 
 
+def _archive_rows(store: Any, reference: str) -> dict[str, Any]:
+    from scripts.swarm.store import SwarmError
+
+    rows: dict[str, Any] = {}
+    seen: set[str] = set()
+    states = state.for_store(store, BUCKET)
+    while reference != "":
+        entry = states.get(reference)
+        if entry is None:
+            raise SwarmError("referenced execution archive is unavailable")
+        chunk = json.loads(entry.value)
+        for key, row in chunk["rows"].items():
+            if key not in seen:
+                rows[key] = row
+        seen.update(chunk["rows"])
+        seen.update(chunk["removed"])
+        reference = chunk["parent"]
+    return rows
+
+
+def _save_archive_chunk(store: Any, slug: str, parent: str, rows: dict[str, Any], removed: list[str]) -> str:
+    value = _encode({"parent": parent, "rows": rows, "removed": removed})
+    reference = f"{slug}:archive:{sha256(value).hexdigest()}"
+    states = state.for_store(store, BUCKET)
+    try:
+        states.create(reference, value)
+    except StateConflict:
+        entry = states.get(reference)
+        if entry is None or entry.value != value:
+            raise
+    return reference
+
+
+def hydrate_archive(store: Any, doc: dict[str, Any]) -> None:
+    doc["archive"] = {**_archive_rows(store, doc.get("archive_ref", "")), **doc["archive"]}
+
+
+def _externalize_archive(store: Any, slug: str, doc: dict[str, Any]) -> None:
+    if "archive_ref" not in doc:
+        return
+    reference = doc["archive_ref"]
+    previous = _archive_rows(store, reference)
+    rows = doc["archive"]
+    changed = [key for key, row in rows.items() if key not in previous or previous[key] != row]
+    removed = sorted(previous.keys() - rows.keys())
+    if removed:
+        reference = _save_archive_chunk(store, slug, reference, {}, removed)
+    for start in range(0, len(changed), 64):
+        batch = {key: rows[key] for key in changed[start : start + 64]}
+        reference = _save_archive_chunk(store, slug, reference, batch, [])
+    doc["archive_ref"] = reference
+    doc["archive"] = {}
+
+
+def change_with_archive(store: Any, slug: str, doc: dict[str, Any], change: Callable[[dict[str, Any]], T]) -> T:
+    hydrate_archive(store, doc)
+    result = change(doc)
+    _externalize_archive(store, slug, doc)
+    return result
+
+
+def migrate_archive(store: Any, slug: str, *, writers_upgraded: bool = False) -> None:
+    """Enable external history only after every live writer has the dual reader."""
+    from scripts.swarm.store import SwarmError
+
+    if not writers_upgraded:
+        raise SwarmError("upgrade every live fencing writer before migrating the archive")
+
+    def migrate(doc: dict[str, Any]) -> None:
+        hydrate_archive(store, doc)
+        doc.setdefault("archive_ref", "")
+        _externalize_archive(store, slug, doc)
+
+    write(store, slug, migrate)
+
+
 def read(store: Any, slug: str) -> dict[str, Any]:
-    return _decode(_entry(_states(store), store, slug).value)
+    doc = _decode(_entry(_states(store), store, slug).value)
+    hydrate_archive(store, doc)
+    return doc
 
 
 def read_executions(store: Any, slug: str) -> dict[str, Any]:
@@ -184,6 +263,9 @@ def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
         doc = _decode(entry.value)
         before = copy.deepcopy(doc)
         result = change(doc)
+        if doc["archive"] and "archive_ref" in doc:
+            hydrate_archive(store, doc)
+            _externalize_archive(store, slug, doc)
         if doc == before:
             return result
         try:
@@ -238,5 +320,8 @@ def replace(store: Any, slug: str, saved: dict | None) -> None:
     def change(doc: dict[str, Any]) -> Any:
         doc.clear()
         doc.update(restored)
+        if "archive_ref" in doc:
+            doc["archive_ref"] = ""
+            _externalize_archive(store, slug, doc)
 
     write(store, slug, change)
