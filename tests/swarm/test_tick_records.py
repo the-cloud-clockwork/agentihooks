@@ -5,7 +5,10 @@ import pytest
 
 from scripts.swarm import tick_stop, timing
 
+pytestmark = pytest.mark.unit
 
+
+@pytest.mark.feature("swarm-tick-cost-report")
 @pytest.mark.parametrize("outcome", ["success", "error", "stopped"])
 def test_step_history_is_bounded_and_keeps_the_journal(outcome: str, capsys: pytest.CaptureFixture[str]) -> None:
     import fakeredis
@@ -53,6 +56,7 @@ def test_recording_scope_restores_the_parent_store() -> None:
     assert parent.redis.xlen(parent.key("outside", "tick:steps")) == 0
 
 
+@pytest.mark.feature("swarm-tick-cost-report")
 @pytest.mark.parametrize("outcome", ["success", "error", "stopped", "caught"])
 def test_tick_pass_is_recorded_even_when_a_step_raises(outcome: str) -> None:
     import fakeredis

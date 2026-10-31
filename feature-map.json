@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "swarm-tick-cost-report",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
+      "behaviour": "Tick steps and passes retain bounded timing records and the report exposes step cost statistics and pass gaps.",
+      "seam": "timing.step, instrumented run_tick and swarm tick-report",
+      "tests": [
+        "tests/swarm/test_tick_records.py::test_step_history_is_bounded_and_keeps_the_journal",
+        "tests/swarm/test_tick_records.py::test_tick_pass_is_recorded_even_when_a_step_raises",
+        "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps"
+      ]
+    },
+    {
       "id": "semgrep-feature-tests",
       "origin": "operator",
       "operator_words": "We need to put a fucking feature semgrep test. You know semgrep? We're going to start to establish testing for features. We're going to start establishing the use of semgrep for features and we're going to establish a system for semgrep. Semgrep is going to fucking put a feature test so that if it fails again we know that we had a regression.",

@@ -5,7 +5,10 @@ import pytest
 
 from scripts.swarm import cli, tick_report
 
+pytestmark = pytest.mark.unit
 
+
+@pytest.mark.feature("swarm-tick-cost-report")
 def test_report_aggregates_step_costs_and_pass_gaps() -> None:
     passes = [
         {"pass_id": "a", "start_ms": 1000, "end_ms": 11000, "wall_s": 10.0},
