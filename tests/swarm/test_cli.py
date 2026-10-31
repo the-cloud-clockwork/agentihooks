@@ -959,7 +959,7 @@ def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
     assert sampled == [] and "fired ci_queue on sw" not in actions
 
 
-def test_a_scheduled_tick_stopped_inside_spawn_and_reap_has_started_the_refresh_job(env, monkeypatch):
+def test_a_stopped_scheduled_tick_has_started_the_refresh_job(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import refresh_job
 
     store, ledger, rt = env
