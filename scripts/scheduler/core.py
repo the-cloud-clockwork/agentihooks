@@ -346,8 +346,9 @@ class Scheduler:
         self.get(entry_id).cancel()
         self.change(lambda document: document["retired"].__setitem__(entry_id, True))
 
-    def _reap(self, lease: Lease, now: float) -> None:
+    def _reap(self, lease: Lease, now: float | None = None) -> None:
         """Drop retired entries, and process timers left finished or never started for longer than ABANDONED_S."""
+        now = time.time() if now is None else now
 
         def reap(document: dict[str, Any]) -> None:
             for entry_id in document["retired"]:
