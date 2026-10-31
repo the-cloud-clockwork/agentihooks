@@ -126,6 +126,12 @@ def overlaps(module: list[Function], parents: list[Function]) -> list[str]:
         for fixture in active:
             for patched, patch_line in fixture.patches:
                 for owner in [test, *active]:
+                    if (
+                        owner.path != fixture.path
+                        and owner.path.name == "conftest.py"
+                        and fixture.path.is_relative_to(owner.path.parent)
+                    ):
+                        continue
                     for overridden, override_line in owner.overrides:
                         if patched == overridden:
                             problems.add(

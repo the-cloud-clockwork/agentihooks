@@ -60,6 +60,42 @@ def test_parent_autouse_mock_fixture_is_checked_against_descendant_overrides(tmp
     assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 1
 
 
+def test_ancestor_monkeypatch_setup_before_a_mock_fixture_does_not_leak(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "conftest.py",
+        """
+import pytest
+
+@pytest.fixture(autouse=True)
+def parent(monkeypatch):
+    monkeypatch.setattr("hooks.context.enforcement._get_bundle_path", lambda: None)
+""",
+    )
+    path = write(tmp_path, "nested/test_mix.py", MOCK_FIXTURE + "\ndef test_plain():\n    pass\n")
+    assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 0
+    path.write_text(MOCK_FIXTURE + OVERRIDE)
+    assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 1
+
+
+def test_only_requested_mock_fixtures_and_their_dependencies_are_checked(tmp_path: Path) -> None:
+    source = MOCK_FIXTURE.replace("autouse=True", "")
+    path = write(tmp_path, "test_requested.py", source + OVERRIDE)
+    assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 0
+    path.write_text(
+        source
+        + """
+import pytest
+
+@pytest.fixture
+def dependent(isolated):
+    return None
+"""
+        + OVERRIDE.replace("def test_override(monkeypatch):", "def test_override(dependent, monkeypatch):")
+    )
+    assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 1
+
+
 def test_sibling_conftest_and_unrelated_attributes_do_not_overlap(tmp_path: Path) -> None:
     write(tmp_path, "other/conftest.py", MOCK_FIXTURE)
     write(tmp_path, "test_clean.py", OVERRIDE)
