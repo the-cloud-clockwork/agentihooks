@@ -116,15 +116,16 @@ def write(head: Path) -> None:
 def grade(
     base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
 ) -> list[str]:
-    """Return every file whose errors grew against the base, and drift between the head and its baseline.
+    """Return every changed file whose errors grew against the base, and drift between the head and its baseline.
 
-    Drift is graded on files the head changes and on baseline entries it edits; with ``touched`` None, on every file.
-    A stale entry for an untouched file stays as the base recorded it until a change to that file rewrites it.
+    Growth and drift are graded on files the head changes, drift also on baseline entries it edits; with ``touched``
+    None, on every file. An untouched file keeps the count the base recorded until a change to it, or a baseline
+    refresh from the gate's own measurement, rewrites it, so one merge order cannot turn every later head red.
     """
     errors = [
         f"{path} has {count} type errors, more than the {base.get(path, 0)} the base allows"
         for path, count in head.items()
-        if count > base.get(path, 0)
+        if count > base.get(path, 0) and (touched is None or path in touched)
     ]
     recorded = recorded or {}
     errors += [

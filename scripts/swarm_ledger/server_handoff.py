@@ -4,6 +4,7 @@ import os
 import select
 import socket
 import subprocess
+import time
 
 LISTEN_FD = "LEDGER_LISTEN_FD"
 READY_FD = "LEDGER_READY_FD"
@@ -60,3 +61,8 @@ def hand_off(
 ) -> bytes | None:
     child, read = spawn(listener, argv, popen, extra)
     return ready(child, read, timeout)
+
+
+def wait_predecessor(parent: int) -> None:
+    while os.getppid() == parent:
+        time.sleep(0.05)
