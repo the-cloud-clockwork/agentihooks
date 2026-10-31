@@ -146,7 +146,10 @@ def _push_step(
     clock: _Clock,
     since: int | None,
     slug: str,
+    push: bool,
 ) -> str | None:
+    if not push:
+        return decide(item, pane, history, clock.now_ms, clock.window, slug, since)
     if item.state != "pending" or item.fyi or since is None:
         return None
     wakes = [entry for entry in history if entry.get("event") == WOKEN]
@@ -190,10 +193,15 @@ def _wake_world(
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         since = reads.clocks[item.address]
-        if agent and capabilities.of_agent(agent).push_inbox:
-            step = _push_step(item, statuses.get(receiver), reads.histories[item.id], clock, since, slug)
-        else:
-            step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
+        step = _push_step(
+            item,
+            statuses.get(receiver),
+            reads.histories[item.id],
+            clock,
+            since,
+            slug,
+            bool(agent and capabilities.of_agent(agent).push_inbox),
+        )
         if (
             step == WOKEN
             and agent is not None
