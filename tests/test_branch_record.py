@@ -117,7 +117,13 @@ def test_a_modules_collection_reads_reach_the_branch_manifest_tests_that_execute
     _coverage(leg / ".coverage", {"tests/test_x.py::test_a|run": FIRST})
     _lines(tmp_path / "results" / "9.jsonl", [{"test": "tests/test_x.py::test_a", "outcome": "passed", "pid": 9}])
     _inputs(tmp_path, "tests/test_x.py::test_a")
-    _lines(tmp_path / "inputs" / "2.jsonl", [{"module": "hooks/sample.py", "files": ["page.js"], "escapes": True}])
+    _lines(
+        tmp_path / "inputs" / "2.jsonl",
+        [
+            {"module": "hooks/sample.py", "files": ["page.js"], "escapes": True},
+            {"module": "hooks/other.py", "files": ["other.js"], "escapes": True},
+        ],
+    )
     found = _record(tmp_path)
     assert found["manifest"]["tests"]["tests/test_x.py::test_a"]["files"] == ["page.js"]
     assert found["manifest"]["tests"]["tests/test_x.py::test_a"]["escapes"] is True

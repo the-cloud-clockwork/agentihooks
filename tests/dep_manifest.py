@@ -23,7 +23,7 @@ MODULE = "<module>"
 MEASURED = ("hooks/", "scripts/")
 GLOBAL_FILES = {"pyproject.toml", "uv.lock"}
 GLOBAL_PREFIXES = (".github/", ".test_durations")
-DYNAMIC = {"import_module", "__import__", "spec_from_file_location"}
+DYNAMIC = {"import_module", "__import__"}
 
 
 def _spans(tree: ast.AST) -> list[tuple[int, int, int, str]]:
@@ -115,8 +115,8 @@ def _executed(coverage_file: Path, root: Path) -> tuple[dict[str, set[str]], dic
     }
 
 
-def _module_file(root: Path, name: str) -> str | None:
-    found = root.joinpath(*name.split("."))
+def _module_file(root: Path, name: str, folder: str = "") -> str | None:
+    found = root.joinpath(folder, *name.split("."))
     for candidate in (found.with_suffix(".py"), found / "__init__.py"):
         if candidate.is_file():
             return candidate.relative_to(root).as_posix()
@@ -127,7 +127,8 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
     """The repository modules a file imports and its calls that import by name.
 
     Each carries the line of its statement inside a function, or None at module level where it runs on import.
-    A file that cannot be parsed reports a module level call so its importers escape.
+    A name resolves from the repository root or the file's own folder. A file that cannot be parsed reports a
+    module level call so its importers escape.
     """
     try:
         tree = ast.parse((root / path).read_text(encoding="utf-8"))
@@ -136,6 +137,13 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
     except (OSError, SyntaxError, ValueError):
         return [], [None]
     package = Path(path).parent.parts
+    by_name = DYNAMIC | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util")
+        for alias in node.names
+        if alias.name in DYNAMIC and alias.asname
+    }
     edges, dynamic = [], []
     pending = [(tree, False, None)]
     while pending:
@@ -152,10 +160,10 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
             names = [module, *(f"{module}.{alias.name}" for alias in node.names)]
         elif isinstance(node, ast.Call):
             called = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
-            if called in DYNAMIC:
+            if called in by_name:
                 dynamic.append(line)
         for name in filter(None, names):
-            target = _module_file(root, name)
+            target = _module_file(root, name) or _module_file(root, name, Path(path).parent.as_posix())
             if target and target != path:
                 edges.append((target, line))
         body = node.body if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) else []
@@ -176,9 +184,10 @@ def attribute(tests: dict, modules: dict, root: Path, lines: dict) -> None:
     """Give each test the collection reads and escapes of every repository module it reaches.
 
     A test reaches its test module, every measured file it executed, the packages holding each, and every module
-    those import at module level or through a function level import line the test executed. Files outside the
-    measured trees are not traced, so all their imports count. A call that imports by name on a counted line
-    makes the test escape, since the module it loads is unknown.
+    those import at module level or through a function level import line the test executed, plus every module an
+    import statement named while the test module was collected. Files outside the measured trees are not traced,
+    so all their imports count. A call that imports by name on a counted line makes the test escape, since the
+    module it loads is unknown.
     """
     graphs, reached = {}, {}
 
@@ -204,6 +213,7 @@ def attribute(tests: dict, modules: dict, root: Path, lines: dict) -> None:
                 counted = not path.startswith(MEASURED)
                 escapes = escapes or any(line is None or counted or (path, line) in taken for line in dynamic)
                 follow = [target for target, line in edges if line is None or counted or (path, line) in taken]
+                follow += modules.get(path, {}).get("imports", ())
                 for target in [*packages, *follow]:
                     if target not in seen:
                         seen.add(target)
@@ -230,8 +240,9 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
         for line in filter(str.strip, report.read_text().splitlines()):
             seen = json.loads(line)
             if "module" in seen:
-                module = modules.setdefault(seen["module"], {"files": set(), "escapes": False})
+                module = modules.setdefault(seen["module"], {"files": set(), "escapes": False, "imports": set()})
                 module["files"].update(seen["files"])
+                module["imports"].update(seen.get("imports", ()))
                 module["escapes"] = module["escapes"] or seen["escapes"]
                 continue
             test = tests.setdefault(seen["test"], {"units": [], "files": [], "escapes": False})

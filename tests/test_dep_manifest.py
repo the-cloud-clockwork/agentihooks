@@ -504,6 +504,12 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_spawn.py": "import scripts.spawn\n",
         "scripts/defaults.py": "def chosen(module=__import__('json')):\n    return module\n",
         "tests/test_defaults.py": "import scripts.defaults\n",
+        "tests/test_collected.py": "from scripts.lazy import serve\nPAGE = serve()\n",
+        "scripts/aliased.py": "from importlib import import_module as load\ndef get(name):\n    return load(name)\n",
+        "tests/test_aliased.py": "from scripts.aliased import get\n",
+        "tests/test_flat.py": "import flat_helper\n",
+        "tests/flat_helper.py": "import flat_data\n",
+        "tests/flat_data.py": "DATA = open('flat.txt').read()\n",
     }
     for path, text in files.items():
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
@@ -512,6 +518,7 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_lazy.py::test_unused": {"scripts/lazy.py": [1]},
         "tests/test_lazy.py::test_served": {"scripts/lazy.py": [1, 2, 3]},
         "tests/test_plugins.py::test_loaded": {"scripts/plugins.py": [3]},
+        "tests/test_aliased.py::test_aliased": {"scripts/aliased.py": [3]},
     }
     names = [
         "tests/test_eager.py::test_eager",
@@ -519,11 +526,15 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_plugins.py::test_kept",
         "tests/test_spawn.py::test_spawn",
         "tests/test_defaults.py::test_defaults",
+        "tests/test_collected.py::test_collected",
+        "tests/test_flat.py::test_flat",
     ]
     tests = {name: {"units": [], "files": [], "escapes": False} for name in names}
     modules = {
         "scripts/pages.py": {"files": {"page.js"}, "escapes": False},
         "scripts/spawn.py": {"files": set(), "escapes": True},
+        "tests/test_collected.py": {"files": set(), "escapes": False, "imports": {"scripts/pages.py"}},
+        "tests/flat_data.py": {"files": {"flat.txt"}, "escapes": False},
     }
     dep_manifest.attribute(tests, modules, tmp_path, lines)
     assert {name: (sorted(found["files"]), found["escapes"]) for name, found in tests.items()} == {
@@ -534,6 +545,9 @@ def test_a_test_reaches_collection_reads_through_module_imports_and_the_function
         "tests/test_plugins.py::test_kept": ([], False),
         "tests/test_spawn.py::test_spawn": ([], True),
         "tests/test_defaults.py::test_defaults": ([], True),
+        "tests/test_collected.py::test_collected": (["page.js"], False),
+        "tests/test_aliased.py::test_aliased": ([], True),
+        "tests/test_flat.py::test_flat": (["flat.txt"], False),
     }
 
 
@@ -549,6 +563,26 @@ def test_a_process_started_while_a_module_is_imported_escapes_only_that_modules_
         {"test": "test_clean.py::test_clean", "files": [], "escapes": False},
         {"test": "test_spawning.py::test_spawning", "files": [], "escapes": True},
     ]
+
+
+def test_the_recorder_keeps_each_module_an_import_statement_names_during_collection(tmp_path: Path) -> None:
+    (tmp_path / "data.py").write_text("DATA = 1\n")
+    (tmp_path / "helper.py").write_text("def load():\n    import data\n    return data.DATA\n")
+    (tmp_path / "test_first.py").write_text("import data\ndef test_first():\n    pass\n")
+    (tmp_path / "test_lazy.py").write_text("from helper import load\nVALUE = load()\ndef test_lazy():\n    pass\n")
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", "test_first.py"]
+        + ["test_lazy.py"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    imports = {row["module"]: row["imports"] for row in rows if "module" in row}
+    assert imports["test_lazy.py"] == ["data.py", "helper.py"]
+    assert imports["test_first.py"] == ["data.py"]
 
 
 @pytest.mark.parametrize(

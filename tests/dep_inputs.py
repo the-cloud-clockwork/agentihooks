@@ -3,15 +3,17 @@
 Loaded with `-p tests.dep_inputs`; idle unless DEP_INPUTS_DIR names the folder for one JSON line per test.
 """
 
+import builtins
 import hashlib
+import importlib.util
 import json
 import os
 import sys
 import sysconfig
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from types import FrameType
+from types import FrameType, ModuleType
 
 import pytest
 
@@ -38,6 +40,8 @@ class DepInputs:
         self.shared_files = {}
         self.collecting = None
         self.loose = set()
+        self.imports = {}
+        self.named = ""
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -120,22 +124,57 @@ class DepInputs:
         collected = self.collections.setdefault(collector.nodeid, [set(), False])
         self.current = collected
         self.collecting, self.loose = str(collector.path), set()
+        self.named = collector.nodeid
+        original = builtins.__import__
+        builtins.__import__ = self.importer(original)
         try:
             yield
         finally:
+            builtins.__import__ = original
             previous[0].update(path for path in self.loose if not path.startswith(self.root + ".github/workflows/"))
             self.collecting = None
             self.current = previous
+
+    def importer(self, original: Callable[..., ModuleType]) -> Callable[..., ModuleType]:
+        """Wrap the import statement so every repository module it names, cached or not, is recorded."""
+
+        def run(
+            name: str,
+            scope: dict | None = None,
+            local: dict | None = None,
+            fromlist: Sequence[str] = (),
+            level: int = 0,
+        ) -> ModuleType:
+            module = original(name, scope, local, fromlist, level)
+            absolute = (
+                importlib.util.resolve_name("." * level + name, (scope or {}).get("__package__")) if level else name
+            )
+            for found in [
+                sys.modules.get(absolute),
+                *(sys.modules.get(f"{absolute}.{item}") for item in fromlist or ()),
+            ]:
+                filename = getattr(found, "__file__", None) or ""
+                if filename.startswith(self.root) and not filename[len(self.root) :].startswith(SKIPPED):
+                    owner = self.importing(sys._getframe(1)) or self.named
+                    self.imports.setdefault(owner, set()).add(filename[len(self.root) :])
+            return module
+
+        return run
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.append_finished(self.module_lines())
 
     def module_lines(self) -> list[str]:
-        """One line per repository module with the files its collection read and whether it started a process."""
-        return [
-            json.dumps({"module": path, "files": self.relative(found[0]), "escapes": found[1]})
-            for path, found in sorted(self.collections.items())
-        ]
+        """One line per repository module with the files its collection read, whether it started a process and the
+        modules its import statements named while collecting."""
+        lines = []
+        for path in sorted(self.collections.keys() | self.imports.keys()):
+            found = self.collections.get(path, [set(), False])
+            imports = sorted(self.imports.get(path, set()) - {path})
+            lines.append(
+                json.dumps({"module": path, "files": self.relative(found[0]), "escapes": found[1], "imports": imports})
+            )
+        return lines
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_fixture_setup(self, fixturedef, request):
