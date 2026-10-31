@@ -10,8 +10,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 def store() -> Any:
     import fakeredis
 
-    from scripts.swarm.models import SwarmConfig
-    from scripts.swarm.store import RedisStore
+    from scripts.swarm.store import RedisStore, SwarmConfig
 
     result = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     result.create(SwarmConfig("fixture", "agentihooks", 1, 0))
