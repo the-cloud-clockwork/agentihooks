@@ -4,12 +4,13 @@ is not part of the fix. Fleet panic mode opens the same window and denies every 
 dispatches and deploys. Fails open on a store error."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import master_coding
 
 if TYPE_CHECKING:
     from scripts.swarm.blockers import Blocker
+    from scripts.swarm.panic import Panic
     from scripts.swarm.store import RedisStore
 
 NOTICE = (
@@ -52,7 +53,7 @@ def _store() -> "RedisStore | None":
     from scripts.swarm.store import SwarmError, Unreachable
 
     try:
-        return cast(Any, store).connect()
+        return getattr(store, "connect")()
     except (SwarmError, Unreachable):
         return None
 
@@ -113,7 +114,7 @@ def _allowed(tool_name: str, tool_input: dict[str, Any], cwd: str, slug: str) ->
 
 
 def _now_ms(store: "RedisStore") -> int:
-    seconds, microseconds = cast(tuple[int, int], cast(Any, store).redis.time())
+    seconds, microseconds = getattr(store, "redis").time()
     return seconds * 1000 + microseconds // 1000
 
 
@@ -148,15 +149,21 @@ def pretool(
     return notice, BLOCK.format(slug=slug, categories=categories)
 
 
-def _panic_found(store: "RedisStore", now_ms: int) -> "dict[str, Blocker]":
+def _panic_state(store: "RedisStore") -> "Panic | None":
     from redis.exceptions import RedisError
 
-    from scripts.swarm import blockers, panic
+    from scripts.swarm import panic
 
     try:
-        current = panic.state(store)
+        return panic.state(store)
     except RedisError:
-        return {}
+        return None
+
+
+def _panic_found(store: "RedisStore", now_ms: int) -> "dict[str, Blocker]":
+    from scripts.swarm import blockers
+
+    current = _panic_state(store)
     if current is None:
         return {}
     return {"panic": blockers.Blocker("panic", current.since, now_ms, 0, current.reason)}
@@ -172,19 +179,18 @@ def _frozen(tool_name: str, tool_input: dict[str, Any]) -> str | None:
         return None
     from hooks.context.shell_commands import commands
 
-    if not any(_freezes(tokens) for tokens in commands(str(tool_input.get("command") or ""))):
+    if not any(_freezes(tokens) for tokens in commands(str(tool_input.get("command")))):
         return None
     store = _store()
-    if store is None:
-        return None
-    found = _panic_found(store, 0)
-    return FROZEN.format(reason=found["panic"].detail) if found else None
+    current = None if store is None else _panic_state(store)
+    return None if current is None else FROZEN.format(reason=current.reason)
 
 
 def checked(payload: dict[str, Any]) -> str | None:
+    tool_input: dict[str, Any] = payload.get("tool_input") or {}
     notice, block = pretool(
         str(payload.get("tool_name") or ""),
-        cast(dict[str, Any], payload.get("tool_input") or {}),
+        tool_input,
         str(payload.get("session_id", "")),
         str(payload.get("cwd", "")),
     )

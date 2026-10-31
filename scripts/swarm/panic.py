@@ -5,11 +5,12 @@ THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures 
 """
 
 import json
+import math
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm.store import PREFIX, RedisStore
 
@@ -44,7 +45,7 @@ def _key(part: str) -> str:
 
 
 def _client(store: RedisStore) -> Any:
-    return cast(Any, store).redis
+    return getattr(store, "redis")
 
 
 def _emit(slug: str, category: str) -> None:
@@ -56,36 +57,36 @@ def _emit(slug: str, category: str) -> None:
 def count_error(store: RedisStore, slug: str, category: str, now_ms: int) -> None:
     """Counts one error in the fleet window and on the OpenTelemetry counter."""
     key = _key("errors")
-    _client(store).zadd(key, {f"{now_ms}:{slug}:{category}:{uuid.uuid4().hex}": now_ms})
-    _client(store).zremrangebyscore(key, "-inf", now_ms - HOUR_MS - 1)
+    _client(store).zadd(key, {f"{category}|{now_ms}|{uuid.uuid4().hex}": now_ms})
+    _client(store).zremrangebyscore(key, 0, now_ms - HOUR_MS - 1)
     _emit(slug, category)
 
 
 def errors_since(store: RedisStore, since_ms: int) -> int:
-    return int(_client(store).zcount(_key("errors"), since_ms, "+inf"))
+    return int(_client(store).zcount(_key("errors"), since_ms, math.inf))
 
 
 def errors_by_category(store: RedisStore, since_ms: int) -> dict[str, int]:
     found: dict[str, int] = {}
-    for member in _client(store).zrangebyscore(_key("errors"), since_ms, "+inf"):
-        category = str(member).split(":")[-2]
+    for member in _client(store).zrangebyscore(_key("errors"), since_ms, math.inf):
+        category = str(member).split("|")[0]
         found[category] = found.get(category, 0) + 1
     return found
 
 
-def count_pass(store: RedisStore, slug: str, ok: bool, now_ms: int) -> None:
+def count_pass(store: RedisStore, ok: bool, now_ms: int) -> None:
     """Records one tick pass and whether every step in it finished without a failure."""
-    key = _key("passes")
-    _client(store).zadd(key, {f"{now_ms}:{slug}:{int(ok)}:{uuid.uuid4().hex}": now_ms})
-    _client(store).zremrangebyscore(key, "-inf", now_ms - WINDOW_MS - 1)
+    key = _key("passes-ok" if ok else "passes-failed")
+    _client(store).zadd(key, {f"{now_ms}|{uuid.uuid4().hex}": now_ms})
+    _client(store).zremrangebyscore(key, 0, now_ms - WINDOW_MS - 1)
 
 
 def level(store: RedisStore, now_ms: int) -> float:
     """Business-as-usual level: the share of tick passes in the last WINDOW_MS with no failed step."""
-    members = [str(m) for m in _client(store).zrangebyscore(_key("passes"), now_ms - WINDOW_MS, "+inf")]
-    if not members:
-        return 1.0
-    return sum(member.split(":")[-2] == "1" for member in members) / len(members)
+    since = now_ms - WINDOW_MS
+    ok = int(_client(store).zcount(_key("passes-ok"), since, math.inf))
+    failed = int(_client(store).zcount(_key("passes-failed"), since, math.inf))
+    return ok / (ok + failed) if ok + failed else 1.0
 
 
 def stable(store: RedisStore, now_ms: int) -> bool:
@@ -109,7 +110,7 @@ def engage(store: RedisStore, reason: str, auto: bool, fixes: Iterable[str], now
         auto and (current.auto if current else True),
         tuple(sorted({*(current.fixes if current else ()), *fixes})),
     )
-    _client(store).set(_key("panic"), json.dumps(found.__dict__ | {"fixes": list(found.fixes)}))
+    _client(store).set(_key("panic"), json.dumps(found.__dict__))
     return found
 
 
@@ -175,9 +176,9 @@ def due_cancel(store: RedisStore, now_ms: int) -> bool:
     return bool(_client(store).set(_key("cancel"), now_ms, nx=True, px=CANCEL_EVERY_MS))
 
 
-def tick_pass(store: RedisStore, slug: str, ok: bool, now_ms: int, run: Runner = gh) -> list[str]:
+def tick_pass(store: RedisStore, ok: bool, now_ms: int, run: Runner = gh) -> list[str]:
     """Counts the pass, runs the alarm and, while panic holds, cancels the fleet's other CI runs once a minute."""
-    count_pass(store, slug, ok, now_ms)
+    count_pass(store, ok, now_ms)
     actions = [changed] if (changed := alarm(store, now_ms)) else []
     current = state(store)
     if current is None or not due_cancel(store, now_ms):

@@ -53,7 +53,7 @@ def test_sustained_uses_the_span_not_the_sum(store):
 
 
 def test_key_combines_slug_and_bucket(store):
-    assert blockers._key(store, SLUG) == store.key(SLUG, blockers.KEY)
+    assert blockers._key(SLUG) == store.key(SLUG, blockers.KEY)
 
 
 def test_a_category_that_stops_recurring_ages_out_of_sustained(store):

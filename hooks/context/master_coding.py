@@ -9,7 +9,6 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import cast
 
 OPEN = re.compile(r"(?<![\w-])(?:allow-master-coding|troubleshoot(?:ing)?[ -]mode)(?![\w-])", re.IGNORECASE)
 CLOSE = re.compile(r"(?<![\w-])(?:deny|disallow)-master-coding(?![\w-])", re.IGNORECASE)
@@ -43,7 +42,7 @@ def seat(session_id: str | None) -> dict[str, object]:
         data = json.loads(seat_path(session_id).read_text())
     except (OSError, ValueError):
         return {}
-    return cast(dict[str, object], data) if isinstance(data, dict) else {}
+    return data if isinstance(data, dict) else {}  # pyright: ignore[reportUnknownVariableType]
 
 
 def record_seat(session_id: str, slug: str, name: str) -> None:
@@ -92,7 +91,7 @@ def opened_for_blockers(session_id: str) -> bool:
         data = json.loads(path(session_id).read_text())
     except (OSError, ValueError):
         return False
-    return isinstance(data, dict) and cast(dict[str, object], data).get("reason") == "blockers"
+    return isinstance(data, dict) and bool(data.get("reason") == "blockers")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def is_open(session_id: str) -> bool:

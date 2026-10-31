@@ -2513,7 +2513,7 @@ def build_parser():
     blockers_cmd.set_defaults(handler=cmd_blockers)
     panic_cmd = sub.add_parser("panic")
     panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status"))
-    panic_cmd.add_argument("--fix", action="append", default=[], help="pull request url whose CI runs are spared")
+    panic_cmd.add_argument("--fix", action="append", default=[])
     panic_cmd.set_defaults(handler=cmd_panic)
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")

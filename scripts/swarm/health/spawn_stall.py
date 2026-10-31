@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -189,8 +190,8 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
         yield
     finally:
         timing.ON_FAILURE.reset(token)
-        for line in panic.tick_pass(store, slug, previous is None, clock()):
-            print(json.dumps({"event": "swarm_panic", "slug": slug, "action": line}), flush=True)
+        for line in panic.tick_pass(store, previous is None, clock()):
+            timing.emit(sys.stdout, json.dumps({"event": "swarm_panic", "slug": slug, "action": line}))
         observe(store, slug, ledger, clock(), runtime)
         deliver(store, slug, ledger, clock())
         if found := findings(store, slug):

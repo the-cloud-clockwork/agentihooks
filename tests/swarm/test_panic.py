@@ -68,9 +68,9 @@ def _errors(store: RedisStore, count: int, at: int, category: str = "SpawnError"
 
 def _passes(store: RedisStore, ok: int, bad: int, at: int) -> None:
     for _ in range(ok):
-        panic.count_pass(store, SLUG, True, at)
+        panic.count_pass(store, True, at)
     for _ in range(bad):
-        panic.count_pass(store, SLUG, False, at)
+        panic.count_pass(store, False, at)
 
 
 def test_an_error_lands_on_the_otel_counter_by_swarm_and_category(store, counted):
@@ -105,6 +105,7 @@ def test_otel_add_counter_creates_one_counter_and_adds(monkeypatch):
         made = 0
 
         def create_counter(self, name: str) -> Counter:
+            assert name == "c"
             Meter.made += 1
             return Counter()
 
@@ -146,12 +147,12 @@ def test_a_failed_tick_step_counts_an_error(store, counted, monkeypatch):
     assert counted == [(panic.METRIC, 1, {"swarm": SLUG, "category": "RuntimeError"})]
 
 
-def test_a_tick_pass_records_whether_any_step_failed(store, counted, monkeypatch):
+def test_a_tick_pass_records_whether_any_step_failed(store, counted, monkeypatch, capsys):
     monkeypatch.setattr(spawn_stall, "observe", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
-    seen: list[tuple[str, bool, int]] = []
-    monkeypatch.setattr(panic, "tick_pass", lambda store, slug, ok, now: seen.append((slug, ok, now)) or ["x"])
+    seen: list[tuple[bool, int]] = []
+    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now: seen.append((ok, now)) or ["x"])
     from scripts.swarm import timing
 
     with spawn_stall.watch(store, SLUG, None, lambda: 7_000, None):
@@ -160,12 +161,37 @@ def test_a_tick_pass_records_whether_any_step_failed(store, counted, monkeypatch
         failed = timing.ON_FAILURE.get()
         assert failed is not None
         failed("step", RuntimeError("boom"))
-    assert seen == [(SLUG, True, 7_000), (SLUG, False, 8_000)]
+    assert seen == [(True, 7_000), (False, 8_000)]
+    line = '{"event": "swarm_panic", "slug": "sw", "action": "x"}'
+    assert [row for row in capsys.readouterr().out.splitlines() if "swarm_panic" in row] == [line, line]
+
+
+def test_the_pass_window_drops_passes_older_than_fifteen_minutes(store):
+    panic.count_pass(store, True, 0)
+    panic.count_pass(store, True, 1)
+    panic.count_pass(store, True, WINDOW + 1)
+    assert store.redis.zcard(f"{PREFIX}:{panic.FLEET}:passes-ok") == 2
+    panic.count_pass(store, False, 0)
+    assert store.redis.zcard(f"{PREFIX}:{panic.FLEET}:passes-failed") == 1
+
+
+def test_the_error_window_keeps_errors_inside_the_hour(store, counted):
+    _errors(store, 1, 1)
+    _errors(store, 1, HOUR + 1)
+    assert store.redis.zcard(f"{PREFIX}:{panic.FLEET}:errors") == 2
+
+
+def test_due_cancel_holds_the_cancel_key_for_a_minute(store):
+    assert panic.due_cancel(store, 0) is True
+    assert panic.due_cancel(store, 1) is False
+    ttl = store.redis.pttl(f"{PREFIX}:{panic.FLEET}:cancel")
+    assert 0 < ttl <= panic.CANCEL_EVERY_MS
 
 
 def test_a_stale_tick_counts_an_error(store, counted):
     _alert(store, SLUG, 10_000, None, ["late"])
     assert panic.errors_by_category(store, 0) == {STALE_TICK: 1}
+    assert counted == [(panic.METRIC, 1, {"swarm": SLUG, "category": STALE_TICK})]
 
 
 def test_the_alarm_engages_panic_at_the_threshold(store, counted):
@@ -269,7 +295,11 @@ def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs():
     )
     cancelled = panic.cancel_runs([FIX], ["o/a", "o/b"], runs)
     assert cancelled == ["o/a run 1 on feature", "o/a run 5 on waiting", "o/b run 6 on other"]
-    assert runs.cancelled() == ["o/a:1", "o/a:5", "o/b:6"]
+    assert [argv for argv in runs.calls if argv[:3] == ["gh", "run", "cancel"]] == [
+        ["gh", "run", "cancel", "1", "--repo", "o/a"],
+        ["gh", "run", "cancel", "5", "--repo", "o/a"],
+        ["gh", "run", "cancel", "6", "--repo", "o/b"],
+    ]
     assert ["gh", "pr", "view", FIX, "--json", "headRefName", "--jq", ".headRefName"] in runs.calls
     listing = ["gh", "run", "list", "--repo", "o/a", "--limit", "100", "--json", "databaseId,event,headBranch,status"]
     assert listing in runs.calls
@@ -304,15 +334,15 @@ def test_gh_runs_the_command_and_returns_stdout(monkeypatch):
 def test_tick_pass_cancels_once_a_minute_while_panic_holds(store, counted):
     runs = Runs({repo: [_row(1, "busy")] for repo in panic.REPOS})
     panic.engage(store, "pressed", False, [], 0)
-    first = panic.tick_pass(store, SLUG, True, 1_000, runs)
+    first = panic.tick_pass(store, True, 1_000, runs)
     assert first == [f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS]
-    assert panic.tick_pass(store, SLUG, True, 1_000 + panic.CANCEL_EVERY_MS - 1, runs) == []
+    assert panic.tick_pass(store, True, 1_000 + panic.CANCEL_EVERY_MS - 1, runs) == []
     assert len(runs.cancelled()) == len(panic.REPOS)
 
 
 def test_tick_pass_without_panic_cancels_nothing(store, counted):
     runs = Runs({repo: [_row(1, "busy")] for repo in panic.REPOS})
-    assert panic.tick_pass(store, SLUG, True, 1_000, runs) == []
+    assert panic.tick_pass(store, True, 1_000, runs) == []
     assert runs.calls == []
     assert panic.level(store, 1_000) == 1.0
 
@@ -320,9 +350,7 @@ def test_tick_pass_without_panic_cancels_nothing(store, counted):
 def test_tick_pass_engages_and_cancels_in_one_pass(store, counted):
     _errors(store, panic.THRESHOLD, 1_000)
     runs = Runs({})
-    assert panic.tick_pass(store, SLUG, False, 1_000, runs) == [
-        f"panic engaged: {panic.THRESHOLD} errors in the last hour"
-    ]
+    assert panic.tick_pass(store, False, 1_000, runs) == [f"panic engaged: {panic.THRESHOLD} errors in the last hour"]
     assert panic.level(store, 1_000) == 0.0
 
 
@@ -332,7 +360,7 @@ def test_tick_pass_reports_a_failed_cancel(store, counted):
     def broken(argv: list[str]) -> str:
         raise subprocess.CalledProcessError(1, argv)
 
-    found = panic.tick_pass(store, SLUG, True, 1_000, broken)
+    found = panic.tick_pass(store, True, 1_000, broken)
     assert len(found) == 1
     assert found[0].startswith("panic cancel failed: ")
 
@@ -363,9 +391,11 @@ def test_the_panic_button_off_refuses_below_business_as_usual(store, counted):
     panic.engage(store, "pressed", False, [], 0)
     now = cli.now_ms()
     _passes(store, 1, 1, now)
+    _errors(store, 1, now)
+    _errors(store, 1, now - WINDOW - 1)
     args = cli.build_parser().parse_args([SLUG, "panic", "off"])
     message = (
-        r"^panic holds: business as usual is at 0\.50 with 0 errors in the last 15 minutes; "
+        r"^panic holds: business as usual is at 0\.50 with 1 errors in the last 15 minutes; "
         r"it clears at 0\.90 with fewer than 15$"
     )
     with pytest.raises(cli.SwarmError, match=message):
@@ -400,6 +430,35 @@ def test_panic_status_reports_the_counter_and_level(store, counted, capsys):
     args.handler(store, args)
     out = json.loads(capsys.readouterr().out)
     assert (out["panic"], out["since"], out["reason"], out["fixes"]) == ("on", 5, "pressed", [FIX])
+
+
+def test_panic_status_rounds_the_level_to_three_places(store, counted, capsys):
+    _passes(store, 2, 1, cli.now_ms())
+    args = cli.build_parser().parse_args([SLUG, "panic"])
+    args.handler(store, args)
+    assert json.loads(capsys.readouterr().out)["level"] == 0.667
+
+
+def test_the_panic_button_without_a_fix_spares_only_the_merge_queue(store, counted, monkeypatch, capsys):
+    runs = Runs({})
+    monkeypatch.setattr(panic, "gh", runs)
+    args = cli.build_parser().parse_args([SLUG, "panic", "on"])
+    assert args.fix == []
+    args.handler(store, args)
+    assert json.loads(capsys.readouterr().out) == {"panic": "on", "fixes": [], "cancelled": []}
+
+
+def test_panic_found_names_the_panic_since_its_start(store):
+    from scripts.swarm.blockers import Blocker
+
+    panic.engage(store, "reason", True, [], 3)
+    assert blocker_window._panic_found(store, 5) == {"panic": Blocker("panic", 3, 5, 0, "reason")}
+
+
+def test_the_panic_notice_is_rate_limited_per_swarm(store, master):
+    panic.engage(store, "reason", True, [], blocker_window._now_ms(store))
+    blocker_window.pretool("Read", {}, SID)
+    assert store.redis.get(store.key(SLUG, "blockers-notice")) is not None
 
 
 @pytest.fixture

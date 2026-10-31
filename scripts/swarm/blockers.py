@@ -6,7 +6,7 @@ still recurring in the last RECENT_MS, blocks other work until it is cleared.
 
 import json
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm.store import PREFIX, RedisStore
 
@@ -27,16 +27,16 @@ class Blocker:
     detail: str
 
 
-def _key(store: RedisStore, slug: str) -> str:
+def _key(slug: str) -> str:
     return f"{PREFIX}:{slug}:{KEY}"
 
 
 def _client(store: RedisStore) -> Any:
-    return cast(Any, store).redis
+    return getattr(store, "redis")
 
 
 def record(store: RedisStore, slug: str, category: str, detail: str, now_ms: int) -> None:
-    key = _key(store, slug)
+    key = _key(slug)
     raw = _client(store).hget(key, category)
     previous = json.loads(raw) if raw else None
     row = {
@@ -50,11 +50,11 @@ def record(store: RedisStore, slug: str, category: str, detail: str, now_ms: int
 
 
 def clear(store: RedisStore, slug: str, category: str) -> None:
-    _client(store).hdel(_key(store, slug), category)
+    _client(store).hdel(_key(slug), category)
 
 
 def active(store: RedisStore, slug: str, now_ms: int) -> dict[str, Blocker]:
-    key = _key(store, slug)
+    key = _key(slug)
     found: dict[str, Blocker] = {}
     for category, raw in _client(store).hgetall(key).items():
         row = json.loads(raw)
