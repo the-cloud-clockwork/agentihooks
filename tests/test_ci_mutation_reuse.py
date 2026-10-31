@@ -571,7 +571,10 @@ def _killers(files: dict[str, str]) -> bytes:
     return data.getvalue()
 
 
-def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_preflight(pair, monkeypatch, capsys):
+@pytest.mark.parametrize("existing", [True, False])
+def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_preflight(
+    pair, monkeypatch, capsys, existing
+):
     root, _, base, head = pair
     first, second = "a" * 64, "0123456789abcdef" * 4
     calls = []
@@ -612,7 +615,8 @@ def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_prefli
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", head, "--base", base, "--grader", base])
     folder = root / ".mutation-killers-restored/killers"
-    folder.mkdir(parents=True)
+    if existing:
+        folder.mkdir(parents=True)
     assert reuse.main() == 0
     assert output.read_text() == "reused=false\n"
     assert "actions/runs/99/artifacts?per_page=100" not in calls
