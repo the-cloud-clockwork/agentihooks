@@ -450,7 +450,7 @@ class RedisStore:
         mine = [row for row in rows if row.get("task") == task and row.get("lane") != MASTER]
         return [row["name"] for row in sorted(mine, key=lambda row: row.get("ended_at") or 0, reverse=True)]
 
-    def ensure_code(self, slug):
+    def ensure_code(self, slug: str) -> SwarmConfig:
         config = self.config(slug)
         if config.code:
             self.names.adopt(slug, config.code, slug, config.repo)
