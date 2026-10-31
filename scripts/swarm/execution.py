@@ -74,11 +74,6 @@ def _archivable(row: dict) -> bool:
     )
 
 
-def _shed_binding_evidence(row: dict[str, Any]) -> None:
-    """Drops the profile binding source blobs from an archived row; no reader needs them after the run ends."""
-    row.get("profile_decision", {}).get("validation", {}).pop("source_blobs", None)
-
-
 class ExecutionRegistry:
     def __init__(self, store: RedisStore) -> None:
         self.store = store
@@ -118,7 +113,7 @@ class ExecutionRegistry:
             for key in old:
                 doc["archive"][key] = doc["executions"].pop(key)
             for row in doc["archive"].values():
-                _shed_binding_evidence(row)
+                row.get("profile_decision", {}).get("validation", {}).pop("source_blobs", None)
             return len(old)
 
         return self._fenced(slug, move)

@@ -304,7 +304,9 @@ def test_archive_compacts_rows_archived_before_it_dropped_source_blobs(store):
     assert store.execution_registry.archive("fixture") == 0
     assert "source_blobs" not in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
     assert section(store, "archive")["exe-bare"] == bare
+    compacted = fencing._states(store).get("fixture").revision
     assert store.execution_registry.archive("fixture") == 0
+    assert fencing._states(store).get("fixture").revision == compacted
 
 
 def test_the_tick_reconcile_archives_without_source_blobs(store):
