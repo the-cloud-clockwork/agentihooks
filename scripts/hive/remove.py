@@ -16,6 +16,7 @@ from scripts.swarm.keyspace import ROOT
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.inbox.store import Item
     from scripts.swarm.store import AgentRecord, RedisStore
 
 ENDED = ("finished", "ended")
@@ -138,8 +139,20 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
 def _order(inbox, ordered: set, remaining: list[tuple[str, "AgentRecord"]], text: str, hive: str) -> None:
     for slug, agent in remaining:
         if (slug, agent.name) not in ordered:
-            inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
+            inbox.send(SENDER, agent.name, text.format(hive=hive, slug=slug))
             ordered.add((slug, agent.name))
+
+
+def _shape(template: str) -> "re.Pattern[str]":
+    return re.compile(re.escape(template).replace(r"\{hive\}", ".+").replace(r"\{slug\}", ".+"))
+
+
+NOTICES = (_shape(ORDER), _shape(ROLL))
+
+
+def is_notice(item: "Item") -> bool:
+    """Whether item is a hive drain order, meant only for the life the draining hive runs."""
+    return item.sender == SENDER and any(shape.fullmatch(item.text) for shape in NOTICES)
 
 
 def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
