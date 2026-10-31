@@ -19,8 +19,7 @@ from scripts.swarm.naming import NameRegistry
 PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
-# The swarm Redis over TLS closes connections mid pipeline on reads of a thousand item rows or more.
-ROW_BATCH = 500
+ROW_BATCH = 50
 STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
 REDELIVER_ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
 DEFAULT_REDELIVER_S = 300
