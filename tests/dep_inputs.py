@@ -262,7 +262,7 @@ RECORDERS = []
 def import_module(name: str, package: str | None = None) -> ModuleType:
     """importlib.import_module that tells a collecting recorder which module it loaded.
 
-    Installed when this plugin loads, before conftests, so a name bound to it by an early import is seen too.
+    Installed before conftests load, so a name bound to it by an early import is seen too.
     """
     module = BY_NAME(name, package)
     for recorder in RECORDERS:
@@ -271,8 +271,10 @@ def import_module(name: str, package: str | None = None) -> ModuleType:
     return module
 
 
-if os.environ.get("DEP_INPUTS_DIR"):
-    importlib.import_module = import_module
+def pytest_load_initial_conftests(early_config: pytest.Config, parser: pytest.Parser, args: list[str]) -> None:
+    """Install the by-name recorder before conftests load, so a name they bind to import_module is seen."""
+    if os.environ.get("DEP_INPUTS_DIR"):
+        importlib.import_module = import_module
 
 
 def pytest_configure(config):
