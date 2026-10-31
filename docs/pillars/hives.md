@@ -420,12 +420,62 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
 | `max-agents` | whole number, 1 or more | `20` on `ui=no`, `10` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. |
+| `draining` | `yes`, `no` | `no` | Placement sends the hive no new agent or master. Each change is kept in its [drain history](#drain-history). |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
 role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
 `max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
 stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
+
+### Drain history
+
+`draining=yes` keeps placement from sending the hive any new agent or master; `draining=no` takes it back. Each
+change of that flag appends one entry to the `drains` list on the hive record, so a hive that was drained and then
+undrained still shows who drained it, why and when. A write that leaves the flag as stored, such as `draining=no` on a
+hive that is not draining, appends nothing. The record keeps the newest 20 entries.
+
+| Field | Meaning |
+|---|---|
+| `at` | Wall clock time of the change, in milliseconds. |
+| `draining` | The new value, `yes` or `no`. |
+| `owner` | Who changed it: the session's `AGENTIHOOKS_AGENT_NAME`, else the machine's host name; `operator` from the ledger page. |
+| `reason` | Why it changed. |
+| `deadline_at` | Time in milliseconds by which the hive's agents must have handed off, or `0` when the change sets none. |
+| `ready_before`, `ready_after` | Whether the hive was ready, live within 90 seconds and not draining, before and after the change. |
+
+Every path that writes the flag names its owner and reason:
+
+| Path | Owner | Reason | Deadline |
+|---|---|---|---|
+| `agentihooks hive set <id> draining=... [--reason <text>]` | session agent name or host name | `--reason`, default `hive set` | none |
+| `agentihooks hive drain --wait <s>`, a worker pod's preStop | session agent name or host name | `the hive is stopping` | now plus `--wait` |
+| `agentihooks hive remove <name>`, drain step | session agent name or host name | `hive remove` | now plus `--wait` |
+| A worker pod's start, which sets `draining=no` | the pod's agent name or host name | `the worker started` | none |
+| The ledger [Hives panel](#ledger-hives-panel) and `PATCH /api/v1/hives/<id>` | `operator` | `ledger hive settings` | none |
+
+Drain a hive for maintenance, take it back, and read the history:
+
+```bash
+agentihooks hive set pod-1 --reason "node kernel upgrade" draining=yes
+agentihooks hive set pod-1 --reason "upgrade finished" draining=no
+agentihooks hive show pod-1 | jq '.drains'
+# [
+#   {"at": 1793166000000, "draining": "yes", "owner": "engineer@d44a5a-2351", "reason": "node kernel upgrade",
+#    "deadline_at": 0, "ready_before": true, "ready_after": false},
+#   {"at": 1793166600000, "draining": "no", "owner": "engineer@d44a5a-2351", "reason": "upgrade finished",
+#    "deadline_at": 0, "ready_before": false, "ready_after": true}
+# ]
+```
+
+The [Doctor hive pool detector](swarm.md#doctor-hive-pool-detector) reads each down hive's latest `draining=yes`
+entry into its finding.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `hive show` has no `drains` key | The flag never changed since the release that records it, or every write left it as stored. | Nothing to fix; the first change adds the list. |
+| An entry's owner is a host name | The writing session had no `AGENTIHOOKS_AGENT_NAME`. | Run the command from an agent session, or read the host name as the machine that wrote it. |
+| An older drain is missing | More than 20 changes since it. | Read older changes from the tick and pod journals. |
 
 ### Capabilities and task needs
 
@@ -1099,14 +1149,16 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
    max-agents=<workers.maxAgents> prefer=<workers.prefer>`, by default `excluded=master master-swarms= max-agents=20
-   prefer=`. `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to
-   the lowest ranked hive while admission leaves it room.
+   prefer=`, with the reason `the worker started` in its [drain history](#drain-history). `workers.prefer` takes
+   `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to the lowest ranked hive while
+   admission leaves it room.
 6. Runs `agentihooks hive run`.
 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
 <workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, sends
 each agent it hosts one inbox order to hand off, so the agent's successor starts on another hive, and waits until no
-agent it hosts is running. The drain writes its result to the pod log. The grace period is `workers.drainSeconds` plus
+agent it hosts is running. The drain records its owner, the reason `the hive is stopping` and its deadline in the
+hive's [drain history](#drain-history) and writes its result to the pod log. The grace period is `workers.drainSeconds` plus
 30 seconds, so a Recreate rollout starts the new pod as soon as the old hive's agents hand off, or when the wait runs
 out.
 
