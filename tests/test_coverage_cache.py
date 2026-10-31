@@ -73,7 +73,7 @@ def test_cached_grading_hands_its_worker_count_to_the_grade(
     monkeypatch.setattr(
         ratchet, "grade", lambda *args, **kwargs: workers.append(kwargs["workers"]) or graded(*args, **kwargs)
     )
-    args = argparse.Namespace(head=root, base="base", shards=1, base_baseline=target)
+    args = argparse.Namespace(head=root, base="base", shards=1, base_baseline=target, head_summaries=None)
     assert ratchet._grade(args, [shard], root, 3)[2].lost == {}
     assert workers == [3]
 
