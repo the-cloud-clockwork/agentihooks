@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
+from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
@@ -60,6 +61,12 @@ def lanes(excluded: str | None) -> tuple[str, ...]:
     return tuple(lane for lane in LANES if lane not in left_out)
 
 
+def fit(store: Any, hive: str) -> Callable[[Envelope], bool]:
+    """Offers this hive may not take stay in the queue; its declared capabilities are read only for needs."""
+    capabilities = readiness.declared(store, hive)
+    return lambda event: readiness.fits(event, hive, capabilities)
+
+
 def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> list[Spoke]:
     current = []
     for slug in readiness.Source(store).slugs():
@@ -67,7 +74,8 @@ def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> 
         for lane in taken:
             if (slug, lane) not in held:
                 tasks = LaneTasks(bus, hive, store.config)
-                held[slug, lane] = Spoke(SpokeConfig(config, lane, hive), bus, runtime, tasks, view=lambda: None)
+                spoke_config = SpokeConfig(config, lane, hive, fit=fit(store, hive))
+                held[slug, lane] = Spoke(spoke_config, bus, runtime, tasks, view=lambda: None)
                 queue = readiness.queue_name(slug, lane)
                 print(f"hive spoke for swarm {slug} lane {lane} takes {queue}", file=sys.stderr)
             current.append(held[slug, lane])
