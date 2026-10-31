@@ -119,7 +119,13 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
         names = ", ".join(agent.name for _, agent in hosted(store, plan.hive)) or "no agents"
         return [f"would stop placement on {plan.hive} and wait up to {plan.wait_s} seconds for {names} to hand off"]
     if registry.show(store.redis, plan.hive) is not None:
-        registry.update(store.redis, plan.hive, ["draining=yes"])
+        deadline_at = int((host.wall() + plan.wait_s) * 1000)
+        registry.update(
+            store.redis,
+            plan.hive,
+            ["draining=yes"],
+            drain=registry.Drain(registry.drain_owner(), "hive remove", deadline_at),
+        )
     inbox, ordered = InboxStore(store.redis), set()
     deadline = host.clock() + plan.wait_s
     while remaining := hosted(store, plan.hive):
@@ -147,7 +153,13 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
 
     if registry.show(store.redis, hive) is None:
         raise auth.HiveError(f"hive {hive} has no record to drain")
-    registry.update(store.redis, hive, ["draining=yes"])
+    deadline_at = int((host.wall() + wait_s) * 1000)
+    registry.update(
+        store.redis,
+        hive,
+        ["draining=yes"],
+        drain=registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at),
+    )
     inbox, ordered = InboxStore(store.redis), set()
     deadline = host.clock() + wait_s
     while remaining := _unhanded(store, hive):

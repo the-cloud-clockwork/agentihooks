@@ -1901,13 +1901,18 @@ jobs:
           jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
 
       # Sonar takes a leg's branch coverage in place of this artifact, so a leg uploads its database once.
+      - name: Stamp coverage with its attempt
+        if: &upload-selected-coverage matrix.python-version == '3.12' && (github.base_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository || hashFiles('branch-record/record.json') == '' || hashFiles('.coverage') == '')
+        run: if [[ -f .coverage ]]; then echo "$GITHUB_RUN_ATTEMPT" > coverage-attempt; fi
+
       - name: Upload coverage
-        if: matrix.python-version == '3.12' && (github.base_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository || hashFiles('branch-record/record.json') == '' || hashFiles('.coverage') == '')
+        if: *upload-selected-coverage
         uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
           path: |
             .coverage
+            coverage-attempt
             js-coverage/
           include-hidden-files: true
           if-no-files-found: error
@@ -2181,12 +2186,15 @@ jobs:
           shopt -s nullglob
           declare -A latest
           for folder in .coverage-shards/branch-coverage-3.12-*; do
-            [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ ]] || continue
+            [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ && -f "$folder/.coverage" ]] || continue
             if (( BASH_REMATCH[2] > ${latest[${BASH_REMATCH[1]}]:-0} )); then latest[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}; fi
           done
           for leg in "${!latest[@]}"; do
-            if [[ ! -e ".coverage-shards/coverage-3.12-$leg" ]]; then
-              mv ".coverage-shards/branch-coverage-3.12-$leg-${latest[$leg]}" ".coverage-shards/coverage-3.12-$leg"
+            shard=".coverage-shards/coverage-3.12-$leg"
+            uploaded=$(cat "$shard/coverage-attempt" 2>/dev/null || echo 0)
+            if (( latest[$leg] > uploaded )); then
+              rm -rf "$shard"
+              mv ".coverage-shards/branch-coverage-3.12-$leg-${latest[$leg]}" "$shard"
             fi
           done
           rm -rf .coverage-shards/branch-coverage-3.12-*

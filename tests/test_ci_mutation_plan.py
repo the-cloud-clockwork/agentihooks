@@ -413,7 +413,45 @@ def test_the_head_takes_the_fastest_tests_to_its_budget_and_slices_balance_the_r
         "costs": [pytest.approx(5.6 + 1.25 * 150), pytest.approx(5.6 + 1.25 * 130)],
     }
     assert split_tests(set(seconds) - {"a1", "a2", "a3"}, seconds, 10) is None
-    assert split_tests({"a4", "a3", "a2"}, seconds, 10)["head"] == ["a2"]
+    over = split_tests({"a4", "a3", "a2"}, seconds, 10)
+    assert over is not None and over["head"] == ["a2"]
+
+
+def test_the_head_takes_the_direct_tests_of_a_changed_line_first_within_its_budget():
+    from scripts.ci_mutation.measured import split_tests
+
+    seconds = {"h1": 5.0, "h2": 5.0, "h3": 10.0, "d1[x]": 15.0, "d2": 40.0, "a3": 60.0, "a2": 50.0, "a1": 30.0}
+    split = split_tests(set(seconds), seconds, 10, {"d1", "d2"})
+    assert split is not None
+    assert split["head"] == ["d1[x]", "h1"]
+    assert sorted([*split["head"], *(node for chosen in split["slices"] for node in chosen)]) == sorted(seconds)
+    assert split["costs"] == pytest.approx(
+        [5.6 + 1.25 * (20.0 + sum(seconds[node] for node in chosen)) for chosen in split["slices"]]
+    )
+    assert split_tests(set(), seconds, 10, {"d1"}) is None
+    late = {"z1": 30.0, "a2": 60.0, "a3": 70.0}
+    for direct in ({"a3"}, {"d1"}):
+        fallback = split_tests(set(late), late, 10, direct)
+        assert fallback is not None and fallback["head"] == ["z1"]
+
+
+def test_a_kept_split_whose_head_lacks_a_fitting_direct_test_is_cut_again(tmp_path):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    nodes = ["fast", "a", "b", "c[p[1]]"]
+    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c[p[1]]": 19.5}
+    memory = killers.KillMemory(tmp_path)
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a", "c[p[1]]"], ["b"]], "costs": [1.0] * 2}})
+    results = [{"tests": {function: nodes}, "durations": durations}]
+    names = [f"{function}__mutmut_1"]
+    kept = {"head": ["fast"], "slices": [["a", "c[p[1]]"], ["b"]]}
+    assert measured.measured_splits(names, results, 10, memory)[function].items() >= kept.items()
+    split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["fast"]})[function]
+    assert split.items() >= kept.items()
+    split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["c"]})[function]
+    assert split["head"] == ["c[p[1]]"]
+    assert sorted(node for chosen in split["slices"] for node in chosen) == ["a", "b", "fast"]
 
 
 def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan(tmp_path, monkeypatch):
@@ -439,6 +477,26 @@ def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan
     assert len(refined["assignments"]) >= 10 and refined["shards"] > 10
     assert max(refined["shard_worker_seconds"]) <= 4 * 1080
     assert all(len(shards) == 10 for shards in refined["assignments"].values())
+
+
+def test_the_refined_plan_heads_each_split_with_the_planned_direct_tests(tmp_path, monkeypatch):
+    from scripts.ci_mutation import measured
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
+    durations = {**dict.fromkeys(nodes, 130.0), nodes[0]: 1.0, nodes[1]: 5.0, nodes[12]: 15.0}
+    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": durations}]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    (tmp_path / "scripts/sample.py").write_text("def f(a, b):\n    return a - b + 1 - 2 + 3 - 4 + 5 - 6\n")
+    selected = {"scripts/sample.py": ({2}, ["tests/test_sample.py"])}
+    stats = SharedStats(tmp_path / "stats", "head")
+    write_part(stats.group(0).folder / "part-0.json", stats_key("head", selected), (0, 1), results)
+    assert measured.refine_plan(tmp_path, selected, stats)["splits"]["scripts.sample.x_f"]["head"] == nodes[:2]
+    (tmp_path / ".mutation-direct.json").write_text(json.dumps({"scripts/sample.py": [nodes[12]]}))
+    refined = measured.refine_plan(tmp_path, selected, stats)
+    assert refined["splits"]["scripts.sample.x_f"]["head"] == [nodes[0], nodes[12]]
 
 
 def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mutants_and_covers_every_test():
