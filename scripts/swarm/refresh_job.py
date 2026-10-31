@@ -60,7 +60,7 @@ def refreshes(store, slug, ledger, now_ms):
 
     doctor_pass = [lambda: timing.call(doctor.timer, store, slug, now_ms, True)] if config.template == "doctor" else []
     return doctor_pass + [
-        lambda: queue_priority.refresh(store, slug, ledger.state(slug)["tasks"], ledger),
+        lambda: queue_priority.refresh(store, slug, queue_priority.targeting(ledger, slug), ledger),
         lambda: ci_speed.refresh(slug, config, store, now_ms),
         lambda: defects.refresh(slug, config, store, now_ms),
         lambda: flakes.refresh(slug, config, store, ledger, now_ms),

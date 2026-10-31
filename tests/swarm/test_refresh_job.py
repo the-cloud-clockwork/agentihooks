@@ -21,8 +21,11 @@ REFRESH_SPAWN = True
 
 
 class Ledger:
-    def state(self, slug):
-        return {"tasks": [{"id": f"{slug}-t1"}]}
+    def state(self, slug: str) -> dict:
+        pytest.fail("the refresh job read the whole ledger state")
+
+    def tasks_targeting(self, slug: str, url: str) -> list[dict]:
+        return [{"id": f"{slug}-t1", "pr_url": url}]
 
 
 @pytest.fixture
@@ -52,8 +55,10 @@ def test_the_job_runs_every_refresh_with_its_own_arguments(store, called):
     ledger = Ledger()
     assert refresh_job.run(store, "sw", ledger, 5) == ["applied", "updated", "filed", "fired"]
     config = store.config("sw")
+    reader = called[0][1][2]
+    assert reader(["https://github.com/o/r/pull/7"]) == [{"id": "sw-t1", "pr_url": "https://github.com/o/r/pull/7"}]
     assert called == [
-        ("queue", (store, "sw", [{"id": "sw-t1"}], ledger)),
+        ("queue", (store, "sw", reader, ledger)),
         ("speed", ("sw", config, store, 5)),
         ("defects", ("sw", config, store, 5)),
         ("flakes", ("sw", config, store, ledger, 5)),

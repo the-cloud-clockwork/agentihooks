@@ -248,7 +248,7 @@ def replay(
     slug: str,
     url: str,
     record: dict,
-    tasks: list[dict],
+    tasks: Tasks,
     journal: queue_record.Journal,
     ledger: LedgerClient | None,
 ) -> None:
@@ -261,7 +261,7 @@ def replay(
         raise
 
 
-def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
+def refresh(store: RedisStore, slug: str, tasks: Tasks, ledger: LedgerClient | None = None) -> list[str]:
     try:
         with exclusive(store, slug):
             return requeue(store, slug, tasks, ledger) + pending(store, slug, tasks, ledger)
@@ -269,7 +269,7 @@ def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
         return [f"merge queue priority waits: {exc}"]
 
 
-def pending(store: RedisStore, slug: str, tasks: list[dict], ledger) -> list[str]:
+def pending(store: RedisStore, slug: str, tasks: Tasks, ledger: LedgerClient | None) -> list[str]:
     actions = []
     records = [(url, json.loads(raw)) for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items()]
     records.sort(key=lambda item: item[1].get("order", 0))
