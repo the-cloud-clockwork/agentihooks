@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 ENDED = ("finished", "ended")
 POLL_S = 15
-SENDER = "operator"
+SENDER = "swarm"
 ORDER = (
     "The operator is removing hive {hive}, which runs you. Finish the step you are on, then hand off with the "
     "handoff skill: run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your "

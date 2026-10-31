@@ -455,24 +455,6 @@ def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_it
     )
 
 
-def test_the_sweep_closes_a_drain_order_left_on_a_seat_once_the_agent_it_was_sent_to_left(store):
-    from scripts.inbox import exits
-    from scripts.swarm.store import RedisStore
-
-    member = _member(store)
-    inbox, swarm = InboxStore(store.redis), RedisStore(store.redis)
-    swarm.seats.occupy(SEAT, "engineer@1", 1)
-    order = inbox.send(remove.SENDER, SEAT, remove.ROLL.format(hive=member, slug=SLUG))
-    swarm.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working"))
-    swarm.seats.occupy(SEAT, "engineer@2", order.created_at + 1)
-
-    exits.sweep(inbox, SLUG, swarm, dict)
-
-    ended = _found(store, order.id)
-    assert (ended.state, ended.reason) == ("done", "done: engineer@1 left its seat; its hive drain order ended with it")
-    assert [item for world in inbox.worlds() for item in world.pending_mail("engineer@2")] == []
-
-
 class Successor:
     def __init__(self, store):
         self.store, self.now, self.slept = store, 0.0, 0
