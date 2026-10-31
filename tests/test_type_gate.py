@@ -110,6 +110,24 @@ def test_an_entry_kept_for_a_deleted_file_is_red(tmp_path: Path, capsys: pytest.
     )
 
 
+def test_an_entry_for_a_file_absent_from_both_trees_does_not_red_another_head(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _tree(tmp_path / "base", {"hooks/x.py": ""}, {"hooks/gone.py": 2})
+    head = _tree(tmp_path / "head", {"hooks/x.py": "x = 1\n"}, {"hooks/gone.py": 2})
+    assert _grade(base, head, capsys) == (0, "0 type errors in 0 files, 2 allowed, 0 errors\n")
+
+
+def test_a_file_recreated_at_a_deleted_path_starts_from_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _tree(tmp_path / "base", {}, {})
+    head = _tree(tmp_path / "head", {"hooks/gone.py": ILL_TYPED}, {})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "::error::hooks/gone.py has 1 type errors, more than the 0 the base allows\n" in out
+
+
 def test_a_regenerated_baseline_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 1})
     head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 1})

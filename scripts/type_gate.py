@@ -243,9 +243,11 @@ def main(argv: list[str] | None = None) -> int:
         if base is not None:
             touched = graded(args.base, args.head)
             checked = touched | edited(base, recorded or {})
-            present = set(sources(args.head))
-            base = {path: count for path, count in base.items() if path in present}
-        head = measure(args.head, None if checked is None else [path for path in sources(args.head) if path in checked])
+        present = sources(args.head)
+        if base is not None:
+            deleted = set(sources(args.base)) - set(present)
+            base = {path: count for path, count in base.items() if path not in deleted}
+        head = measure(args.head, None if checked is None else [path for path in present if path in checked])
     except (GradeError, ValueError, KeyError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
