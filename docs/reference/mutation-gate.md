@@ -799,7 +799,7 @@ variable can lower the planned workers but never raise them above four.
 
 | Planner call | Step | Effect of fewer workers |
 |---|---|---|
-| `shard_count` | **Size mutation shards from stored timings** (`plan`, target 120 s) and **Refine mutation shards from measured statistics** (`refine`, target 240 s) | Shards = `ceil(worker seconds / (workers * target))`, capped by the shard limit of ten and the mutant count, so more shards are planned for the same work |
+| `shard_count` | **Size mutation shards from stored timings** (`plan`, target 120 s) and **Refine mutation shards from measured statistics** (`refine`, target 240 s) | Preferred shards = `ceil(worker seconds / (workers * target))`, capped by the shard limit of ten and the mutant count. Budget sizing can require more shards, up to the batch runner capacity; the [pull request budget check](#pull-request-mutation-plan-budget) rejects an estimate that still cannot fit |
 | `slowest_bucket` and `stats_part_count` | **Size mutation shards from stored timings** | Each statistics part forks one bucket per worker; the slowest bucket grows, so the step can choose more `Stats parts` to stay within the 60 s statistics target |
 | `plan_shards` | **Refine mutation shards from measured statistics** | The measured plan records the count in its `workers` field |
 
@@ -877,6 +877,77 @@ passed 151 plan, preflight and selection tests. The regression
 `test_shards_are_sized_by_the_workers_the_batch_runner_quota_starts` covers
 quotas of 3 and 4 across `shard_count`, `slowest_bucket` and `plan_shards`.
 No shard wall time comparison was recorded for this change.
+
+## Pull request mutation plan budget
+
+The Tests `mutation-plan` job rejects an oversized change during **Size mutation
+shards from stored timings**. The initial estimate uses 5.6 worker seconds per
+changed line mutant. After sizing shards, the planner divides estimated worker
+seconds by the shard count and planned workers. If that per shard estimate
+exceeds `--budget`, it prints `Mutation plan over budget` and exits with status
+1 before sizing statistics parts or publishing the plan to `GITHUB_OUTPUT`.
+Dependent statistics and mutation jobs cannot start from that failed plan, and
+`Gate — Required` stays red.
+
+### Budget configuration
+
+| Input | Default or CI value | Meaning |
+|---|---|---|
+| `--budget` | `1080` seconds | Maximum estimated time per shard; equality passes |
+| `MUTATION_SHARD_CPU_QUOTA` | `3` in Tests | Planned workers, using the [batch quota rule](#shard-planning-from-the-batch-runner-cpu-quota) |
+| `--target` | `120` seconds | Preferred shard duration |
+| `--limit` | `10` | Preferred shard count limit; budget sizing can expand the plan up to the 40 batch runners |
+
+The planner accounts for the budget when choosing the shard count, then checks
+whether that count can hold the estimate. With three workers, 40 shards and a
+1080 second budget, total capacity is `40 * 3 * 1080 = 129600` worker seconds.
+An estimate of 129600 passes exactly; with `--budget 1079` it fails.
+
+The existing Tests step relies on the default budget. An explicit equivalent
+configuration for a CI planning step is:
+
+```yaml
+- name: Size mutation shards from stored timings
+  env:
+    MUTATION_SHARD_CPU_QUOTA: "3"
+  run: >-
+    python -m scripts.ci_mutation.plan
+    --base origin/dev
+    --repository "$GITHUB_REPOSITORY"
+    --budget 1080
+```
+
+The surrounding workflow supplies dependencies and `GH_TOKEN` as in
+[Usage and configuration](#usage-and-configuration). Run mutation in CI. A
+custom budget is a planner CLI argument, not a workflow dispatch input. Keep
+it aligned with the execution budget, currently `--budget 1080`; increasing
+only the planning budget does not give execution shards more time.
+
+### Oversized plan troubleshooting
+
+For 324000 estimated worker seconds on three workers and 40 shards, the
+planner reports:
+
+```text
+::error title=Mutation plan over budget::The change has an estimated 324000 worker seconds of changed line mutation, 2700 seconds per shard on 3 workers across 40 shards, against the 1080 second shard budget. 40 shards hold at most 129600 worker seconds, so split it into at least 3 pull requests.
+```
+
+Read this annotation in the `mutation-plan` log:
+
+```bash
+gh run view RUN_ID --log-failed
+```
+
+Split the change into smaller pull requests and push each for a fresh plan.
+The suggested minimum is `max(2, ceil(estimate / capacity))`; it assumes the
+work can be distributed evenly. Each resulting change must pass its own plan.
+Rerunning the same oversized estimate does not change capacity.
+
+This check uses an initial estimate, before measured statistics refine the
+work. Passing it does not guarantee the actual shards finish within budget;
+execution still enforces its own deadline. The behavior and boundary examples
+are covered by the planner regressions in
+[pull request 9081](https://github.com/the-cloud-clockwork/agentihooks/pull/9081).
 
 ## Single shard plans in the statistics job
 
