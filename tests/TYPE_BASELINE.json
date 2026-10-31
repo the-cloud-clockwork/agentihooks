@@ -252,7 +252,7 @@
   "scripts/ci_reuse.py": 283,
   "scripts/ci_runner_classes.py": 31,
   "scripts/ci_runner_trust.py": 72,
-  "scripts/ci_select.py": 41,
+  "scripts/ci_select.py": 34,
   "scripts/ci_semgrep_floors.py": 53,
   "scripts/ci_stats_minutes.py": 35,
   "scripts/ci_stats_seed.py": 31,

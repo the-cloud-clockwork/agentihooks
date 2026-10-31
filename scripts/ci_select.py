@@ -7,7 +7,7 @@ import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NotRequired, TypedDict, cast
+from typing import Any, NotRequired, TypedDict
 
 from scripts import locked_tests
 from scripts.ci_mutation.scope import select_tests
@@ -91,10 +91,10 @@ def reshaped(root: Path, base: str, head: str) -> bool:
     return result.returncode == 1
 
 
-def recorded_tests(manifest: dict[str, object], changed: list[str]) -> set[str]:
+def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
     """Test files whose recorded run executed a changed unit or read a changed file that not every test reads."""
-    names = cast("list[str]", manifest["units"])
-    records = cast("dict[str, Record]", manifest["tests"])
+    names: list[str] = manifest["units"]
+    records: dict[str, Record] = manifest["tests"]
     units = {index for index, unit in enumerate(names) if unit.partition("::")[0] in changed}
     lists = {tuple(found.get("files", [])) for found in records.values()}
     read = set(changed) - set.intersection(*map(set, lists))
