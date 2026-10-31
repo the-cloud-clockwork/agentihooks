@@ -8,6 +8,7 @@ from scripts.swarm.tick import SpawnError
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_local_overflow import fill_anton, hybrid, local_agents, workstation
+from tests.hive.test_local_overflow import no_host_agents as no_host_agents
 
 
 def test_successful_root_selection_still_obeys_the_swarm_limit(setup, monkeypatch):

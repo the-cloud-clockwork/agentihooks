@@ -60,6 +60,7 @@ PAGINATION = {
         "state": {"enum": ["done"]},
         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "q": {"type": "string", "maxLength": 200},
+        "targets": {"type": "string", "minLength": 1, "maxLength": 500},
     },
 }
 

@@ -231,6 +231,15 @@ def test_a_move_rewritten_below_git_rename_similarity_is_followed(tmp_path):
     assert ratchet.grade({"scripts/b.py": {4, 5}}, head_source, iter([base]), moved).lost == {"hooks/a.py": [3]}
 
 
+def test_a_graded_path_holding_a_space_is_listed_whole(tmp_path: Path) -> None:
+    source = _module({"first": "return 1", "second": "return 2"})
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    _repo(tmp_path, {"hooks/old.py": source})
+    (tmp_path / "hooks/old.py").unlink()
+    _repo(tmp_path, {"hooks/with space.py": source})
+    assert coverage_history.renamed(tmp_path, "HEAD~1") == {"hooks/old.py": "hooks/with space.py"}
+
+
 @pytest.mark.parametrize("missing", [None, "first", "second"])
 @pytest.mark.parametrize("rewritten", [False, True])
 def test_a_split_module_grades_each_destination_by_its_own_definitions(tmp_path, missing, rewritten):
