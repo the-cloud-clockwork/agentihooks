@@ -621,7 +621,7 @@
   "scripts/swarm/launch_job.py": 211,
   "scripts/swarm/launch_model.py": 53,
   "scripts/swarm/lease.py": 66,
-  "scripts/swarm/ledger_client.py": 516,
+  "scripts/swarm/ledger_client.py": 515,
   "scripts/swarm/ledger_cutover.py": 124,
   "scripts/swarm/ledger_events.py": 1242,
   "scripts/swarm/ledger_host.py": 27,
