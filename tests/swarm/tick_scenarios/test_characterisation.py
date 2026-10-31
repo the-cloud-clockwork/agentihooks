@@ -128,12 +128,14 @@ def github_reply(repo: str, args: list[str]) -> dict[str, Any]:
 def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     import fakeredis
 
-    from scripts.swarm import commands, timing
+    from scripts.swarm import commands, incidents, reboot, timing
     from scripts.swarm.health import merge_stall
 
     monkeypatch.setattr(merge_stall, "request", github_reply)
 
     monkeypatch.setattr(commands, "hive_id", lambda: "fixture-hive")
+    monkeypatch.setattr(incidents.socket, "gethostname", lambda: "fixture-host")
+    monkeypatch.setattr(reboot, "boot_id", lambda: "00000000-0000-0000-0000-000000000001")
     identities = count(1)
     monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(identities)))
     for module in ("execution", "health.verdicts", "launch_evidence", "promotion_owner", "incidents"):
