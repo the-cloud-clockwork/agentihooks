@@ -192,7 +192,7 @@ def test_a_source_change_invalidates_the_tests_that_read_it_as_data():
             "tests/test_other.py::test_other": {"units": [], "files": [], "escapes": False},
         },
     }
-    changed = [("hooks/scanned.py", "VALUE = 1\n", "VALUE = 2\n")]
+    changed: list[tuple[str, str | None, str | None]] = [("hooks/scanned.py", "VALUE = 1\n", "VALUE = 2\n")]
     assert dep_manifest.invalidated(manifest, changed)[0] == {"tests/test_reader.py::test_scan"}
 
 

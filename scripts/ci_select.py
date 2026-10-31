@@ -7,6 +7,7 @@ import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NotRequired, TypedDict, cast
 
 from scripts import locked_tests
 from scripts.ci_mutation.scope import select_tests
@@ -51,6 +52,11 @@ LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
 
 
+class Record(TypedDict):
+    units: list[int]
+    files: NotRequired[list[str]]
+
+
 def changed_files(root: Path, base: str, head: str) -> list[str]:
     command = ["git", "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}"]
     return [name for name in subprocess.check_output(command, cwd=root).decode().split("\0") if name]
@@ -85,15 +91,17 @@ def reshaped(root: Path, base: str, head: str) -> bool:
     return result.returncode == 1
 
 
-def recorded_tests(manifest: dict, changed: list[str]) -> set[str]:
+def recorded_tests(manifest: dict[str, object], changed: list[str]) -> set[str]:
     """Test files whose recorded run executed a changed unit or read a changed file that not every test reads."""
-    units = {index for index, unit in enumerate(manifest["units"]) if unit.partition("::")[0] in changed}
-    lists = {tuple(found.get("files", ())) for found in manifest["tests"].values()}
+    names = cast("list[str]", manifest["units"])
+    records = cast("dict[str, Record]", manifest["tests"])
+    units = {index for index, unit in enumerate(names) if unit.partition("::")[0] in changed}
+    lists = {tuple(found.get("files", [])) for found in records.values()}
     read = set(changed) - set.intersection(*map(set, lists))
     return {
         test.partition("::")[0]
-        for test, found in manifest["tests"].items()
-        if units.intersection(found["units"]) or read.intersection(found.get("files", ()))
+        for test, found in records.items()
+        if units.intersection(found["units"]) or read.intersection(found.get("files", []))
     }
 
 

@@ -964,6 +964,14 @@ def test_a_recorded_read_selects_the_tests_that_read_the_changed_file_as_data(re
         assert ci_select.selected_tests(repo, changed, False, manifest) == expected
 
 
+def test_a_recorded_method_unit_selects_its_test_by_the_file_before_the_first_separator():
+    manifest = {
+        "units": ["hooks/sample.py::Box::size"],
+        "tests": {"tests/test_box.py::test_size": {"units": [0]}, "tests/test_other.py::test_other": {"units": []}},
+    }
+    assert ci_select.recorded_tests(manifest, ["hooks/sample.py"]) == {"tests/test_box.py"}
+
+
 def test_main_reads_the_recorded_reads_for_a_change_without_python_source(repo, monkeypatch, tmp_path):
     write(repo, {"tests/test_workflows.py": "import os\n", "deploy/values.yaml": "a: 1\n"})
     git(repo, "add", ".")
