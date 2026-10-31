@@ -64,6 +64,11 @@ def measured_lines(shard: Path) -> dict[str, set[int]]:
     return {path: set(ran) for path, ran in measured.items() if ran}
 
 
+def graded_modules(head: Path) -> list[str]:
+    """Every Python module under the graded trees of a checkout, as sorted paths relative to it."""
+    return sorted(str(path.relative_to(head)) for root in GRADED for path in (head / root).rglob("*.py"))
+
+
 @functools.lru_cache(maxsize=512)
 def line_map(old: str, new: str) -> dict[int, int]:
     old_lines, new_lines = old.splitlines(), new.splitlines()

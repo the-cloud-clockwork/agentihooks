@@ -11,12 +11,33 @@ from pathlib import Path
 from coverage import Coverage, CoverageData
 from coverage.exceptions import NotPython
 
-from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map, pair_moves
+from tests.coverage_grade import (
+    Measurement,
+    Result,
+    Unmeasured,
+    executed,
+    grade,
+    graded_modules,
+    line_map,
+    pair_moves,
+)
 from tests.coverage_history import dev_runs, git, renamed
 from tests.coverage_summary import NAME as SUMMARY
+from tests.coverage_summary import STATEMENTS, digest, statements
 from tests.coverage_summary import executed as summarized
 
-__all__ = ["Measurement", "Result", "Unmeasured", "executed", "grade", "line_map", "main", "pair_moves", "report"]
+__all__ = [
+    "Measurement",
+    "Result",
+    "Unmeasured",
+    "executed",
+    "grade",
+    "graded_modules",
+    "line_map",
+    "main",
+    "pair_moves",
+    "report",
+]
 
 
 def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int], base_covered: dict[str, int]) -> str:
@@ -36,19 +57,33 @@ def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int]
     return "\n".join(out) + "\n"
 
 
-def _missed(head: Path, lines: dict[str, set[int]], out: Path, workers: int = 1) -> dict[str, list[int]]:
-    combined = CoverageData(basename=str(out.resolve() / ".coverage"))
-    combined.add_lines(lines)
-    combined.write()
-    modules = sorted(str(path.relative_to(head)) for root in GRADED for path in (head / root).rglob("*.py"))
-    chunks = [modules[index::workers] for index in range(workers)]
-    if workers > 1:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            parts = list(pool.map(_analysed, [combined.base_filename()] * workers, [head] * workers, chunks))
-    else:
-        parts = [_analysed(combined.base_filename(), head, modules)]
-    found = {path: missed for part in parts for path, missed in part.items()}
+def _missed(
+    head: Path, lines: dict[str, set[int]], out: Path, workers: int = 1, statements: dict[str, dict] | None = None
+) -> dict[str, list[int]]:
+    modules = graded_modules(head)
+    found = {
+        path: sorted(set(known["statements"]) - {known["first"].get(str(line), line) for line in lines.get(path, ())})
+        for path, known in (statements or {}).items()
+        if (head / path).is_file() and digest((head / path).read_bytes()) == known["digest"]
+    }
+    rest = [path for path in modules if path not in found]
+    if rest:
+        combined = CoverageData(basename=str(out.resolve() / ".coverage"))
+        combined.add_lines(lines)
+        combined.write()
+        chunks = [rest[index::workers] for index in range(workers)]
+        if workers > 1:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                parts = list(pool.map(_analysed, [combined.base_filename()] * workers, [head] * workers, chunks))
+        else:
+            parts = [_analysed(combined.base_filename(), head, rest)]
+        found.update(missed for part in parts for missed in part.items())
     return {path: found[path] for path in modules}
+
+
+def _head_statements(summaries: Path | None) -> dict[str, dict]:
+    """The statement summaries the shards uploaded beside their executed lines summaries."""
+    return statements(sorted(summaries.glob(f"executed-lines-3.12-*/{STATEMENTS}"))) if summaries else {}
 
 
 def _analysed(data_file: str, head: Path, modules: list[str]) -> dict[str, list[int]]:
@@ -153,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     text = report(
         result,
-        _missed(args.head, head, args.out, workers),
+        _missed(args.head, head, args.out, workers, _head_statements(args.head_summaries)),
         {path: len(lines) for path, lines in head.items()},
         {path: len(lines) for path, lines in base.executed.items()},
     )

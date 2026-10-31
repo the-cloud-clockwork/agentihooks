@@ -550,7 +550,9 @@ def test_coverage_ratchet_downloads_only_the_executed_lines_summaries_a_base_gra
     assert unit.index("Check the coverage database") < unit.index(summarize["name"]) < unit.index(upload["name"])
     assert "python -m tests.coverage_summary --out executed-lines.json" in summarize["run"]
     assert upload["with"]["name"] == "executed-lines-${{ matrix.python-version }}-${{ matrix.shard }}"
-    assert upload["with"]["path"] == "executed-lines.json"
+    assert upload["with"]["path"].split() == ["executed-lines.json", "statement-lines.json"]
+    assert '--statements statement-lines.json --slice "$SHARD/20"' in summarize["run"]
+    assert summarize["env"]["SHARD"] == "${{ matrix.shard }}"
     steps = [step.get("name") for step in jobs["coverage-ratchet"]["steps"]]
     grader = _step("coverage-ratchet", "Check out the base grader")
     summaries = _step("coverage-ratchet", "Download the executed lines summaries")

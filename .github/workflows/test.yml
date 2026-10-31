@@ -1624,14 +1624,19 @@ jobs:
         run: |
           databases=(.coverage)
           if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
-          python -m tests.coverage_summary --out executed-lines.json "${databases[@]}"
+          python -m tests.coverage_summary --out executed-lines.json "${databases[@]}" \
+            --statements statement-lines.json --slice "$SHARD/20"
+        env:
+          SHARD: ${{ matrix.shard }}
 
       - name: Upload the executed lines summary
         if: matrix.python-version == '3.12'
         uses: ./.github/actions/retry-upload
         with:
           name: executed-lines-${{ matrix.python-version }}-${{ matrix.shard }}
-          path: executed-lines.json
+          path: |
+            executed-lines.json
+            statement-lines.json
           if-no-files-found: error
           retention-days: 7
 
