@@ -1,7 +1,10 @@
 """Tests for the enforcement drumbeat injection system."""
 
 import json
+import os
 import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -458,6 +461,29 @@ def test_shared_login_enforcements_use_each_holders_overlay(bundle_dir, tmp_path
         found = enforcement.get_pretool_enforcements(f"{slug}-holder")
         assert f"{slug} holder rule" in (found or "")
         assert f"{other} holder rule" not in (found or "")
+
+
+def test_a_monkeypatched_bundle_path_does_not_outlive_its_test(tmp_path: Path) -> None:
+    """The bundle and profile getters a test monkeypatches return to the real ones for the next test."""
+    root = Path(__file__).resolve().parents[1]
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {k: v for k, v in os.environ.items() if k not in {"AGENTIHOOKS_HOME", "PYTEST_ADDOPTS"}} | {"HOME": str(home)}
+    leaker = f"{Path(__file__).resolve()}::{test_shared_login_enforcements_use_each_holders_overlay.__name__}"
+    victim = (
+        f"{root / 'tests' / 'test_user_bundle_runtime.py'}::test_enforcements_merge_root_then_user_then_profile_by_id"
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:xdist", "-p", "no:cacheprovider", "-p", "no:randomly"]
+        + ["-c", str(root / "pyproject.toml"), "--rootdir", str(root), leaker, victim],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
 
 
 class TestThreeSourceMerge:
