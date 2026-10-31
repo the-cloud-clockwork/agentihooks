@@ -129,6 +129,30 @@ def test_a_superseded_claim_is_still_refused_after_a_transient_read_failure(monk
     kill.assert_called_once_with(4321)
 
 
+@pytest.mark.parametrize("recovers", [True, False])
+def test_a_failed_claim_state_read_is_retried_before_blocking(monkeypatch, recovers):
+    from hooks.context import claim_fence
+
+    bus = Mock()
+    owned = Mock(value=b'{"state":"launching"}', revision=5)
+    failure = RuntimeError("read timeout")
+    bus.state.return_value.get.side_effect = [failure, owned] if recovers else [failure, failure, failure]
+    monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": 5}))
+    with (
+        patch.object(claim_fence, "open_bus", return_value=bus),
+        patch.object(claim_fence, "sleep") as pause,
+        patch.object(claim_fence, "terminate") as kill,
+    ):
+        message = claim_fence.check({"hook_event_name": "UserPromptSubmit"})
+    attempts = 2 if recovers else 3
+    assert message == (None if recovers else claim_fence.CHECK_FAILED)
+    assert bus.state.call_args_list == [(("spoke-work",), {})] * attempts
+    assert bus.state.return_value.get.call_args_list == [(("claim-a",), {})] * attempts
+    assert bus.close.call_count == attempts
+    assert pause.call_args_list == [((0.5,), {})] * (attempts - 1)
+    kill.assert_not_called()
+
+
 @pytest.mark.parametrize("message", [None, "claim revoked"])
 def test_shared_dispatch_fence_denies_an_action_before_its_handler(message):
     from hooks.context import claim_fence
