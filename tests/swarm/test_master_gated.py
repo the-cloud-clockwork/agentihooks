@@ -82,9 +82,16 @@ def test_the_bound_counts_from_exactly_the_hard_gate(
 def test_the_swarm_compact_limit_sets_the_hard_gate(
     store: RedisStore, recycling: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    agent, _ = master(store, recycling)
+    agent, _ = master(store, recycling, gated_at=None)
     store.update("sw", compact_limit=100)
+    monkeypatch.setattr(context_recycle, "COMPACT_LIMIT", 100)
     use(monkeypatch, 150_000)
+    assert "CONTEXT RECYCLE" in str(
+        context_recycle.directive("conv-1", {"AGENTIHOOKS_AGENT_NAME": agent.name, "AGENTIHOOKS_SWARM": "sw"})
+    )
+    marker = recycling / "context_usage" / "conv-1.recycle"
+    os.utime(marker, (START / 1000, START / 1000))
+    monkeypatch.setattr(context_recycle, "COMPACT_LIMIT", 600)
     assert run(store, START + 15 * MINUTE) == [recycled_line(agent, 15)]
 
 
