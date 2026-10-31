@@ -444,11 +444,12 @@ def test_branch_tests_name_every_test_the_branch_adds_or_changes(tmp_path):
         root,
         {
             "tests/test_a.py": (
-                "def test_kept():\n    pass\n\n\ndef test_changed():\n    assert 2\n\n\n"
+                "import os\n\n\ndef test_kept():\n    pass\n\n\ndef test_changed():\n    assert 2\n\n\n"
                 "def helper():\n    pass\n\n\ndef test_new():\n    pass\n"
             ),
             "tests/test_b.py": (
-                "class TestB:\n    def test_x(self):\n        pass\n\n\n"
+                "class TestB:\n    def test_x(self):\n        pass\n\n"
+                "    class TestInner:\n        async def test_z(self):\n            pass\n\n\n"
                 "class Helper:\n    def test_y(self):\n        pass\n"
             ),
             "tests/test_gone.py": None,
@@ -459,6 +460,7 @@ def test_branch_tests_name_every_test_the_branch_adds_or_changes(tmp_path):
     assert branch_tests(root, base, head) == (
         "tests/test_a.py::test_changed",
         "tests/test_a.py::test_new",
+        "tests/test_b.py::TestB::TestInner::test_z",
         "tests/test_b.py::TestB::test_x",
     )
 

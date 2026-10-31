@@ -1,4 +1,5 @@
 import argparse
+import ast
 import os
 import subprocess
 from pathlib import Path
@@ -6,7 +7,21 @@ from pathlib import Path
 from scripts.ci_mutation.runner import run_gate
 from scripts.ci_mutation.scope import blob, discover_changes, is_test_file
 from scripts.ci_mutation.stats import SharedStats
-from tests.dep_manifest import changed_units
+
+
+def test_units(source: bytes | None) -> dict[str, str]:
+    """Map each collectable test function in a test module to the text of its syntax tree."""
+    found = {}
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef) and child.name.startswith("Test"):
+                visit(child, f"{prefix}{child.name}::")
+            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) and child.name.startswith("test"):
+                found[prefix + child.name] = ast.dump(child)
+
+    visit(ast.parse(source or b""), "")
+    return found
 
 
 def branch_tests(root: Path, base: str, head: str) -> tuple[str, ...]:
@@ -15,14 +30,12 @@ def branch_tests(root: Path, base: str, head: str) -> tuple[str, ...]:
     command = ["git", "diff", "--name-only", "--no-renames", "-z", fork, head, "--", "tests"]
     found = set()
     for name in subprocess.check_output(command, cwd=root).decode().split("\0"):
-        new = blob(root, head, name) if is_test_file(name) else None
-        if new is None:
+        if not is_test_file(name):
             continue
-        old = blob(root, fork, name)
-        for unit in changed_units(old.decode() if old is not None else None, new.decode()):
-            *classes, function = unit.split(".")
-            if function.startswith("test") and all(part.startswith("Test") for part in classes):
-                found.add(f"{name}::{unit.replace('.', '::')}")
+        before = test_units(blob(root, fork, name))
+        found.update(
+            f"{name}::{unit}" for unit, tree in test_units(blob(root, head, name)).items() if before.get(unit) != tree
+        )
     return tuple(sorted(found))
 
 
