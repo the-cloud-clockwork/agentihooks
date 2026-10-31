@@ -16,6 +16,7 @@ from scripts.swarm.keyspace import ROOT
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.inbox.store import InboxStore
     from scripts.swarm.store import AgentRecord, RedisStore
 
 ENDED = ("finished", "ended")
@@ -32,6 +33,7 @@ ROLL = (
     "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
     "another hive."
 )
+WITHDRAWN = "hive {hive} stopped draining for its release, so its hand off order no longer applies"
 RECOVERY = """## Intent
 Continue task {task}; hive {hive} stopped for a release while {name} still worked it.
 
@@ -126,7 +128,7 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
             ["draining=yes"],
             drain=registry.Drain(registry.drain_owner(), "hive remove", deadline_at),
         )
-    inbox, ordered = InboxStore(store.redis), set()
+    inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + plan.wait_s
     while remaining := hosted(store, plan.hive):
         _order(inbox, ordered, remaining, ORDER, plan.hive)
@@ -141,11 +143,17 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     return [f"drained {plan.hive}: {len(ordered)} agents handed off: {handed}"]
 
 
-def _order(inbox, ordered: set, remaining: list[tuple[str, "AgentRecord"]], text: str, hive: str) -> None:
+def _order(
+    inbox: "InboxStore",
+    ordered: dict[tuple[str, str], str],
+    remaining: list[tuple[str, "AgentRecord"]],
+    text: str,
+    hive: str,
+) -> None:
     for slug, agent in remaining:
         if (slug, agent.name) not in ordered:
-            inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
-            ordered.add((slug, agent.name))
+            sent = inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
+            ordered[(slug, agent.name)] = sent.id
 
 
 def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
@@ -160,14 +168,25 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
         ["draining=yes"],
         drain=registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at),
     )
-    inbox, ordered = InboxStore(store.redis), set()
+    inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + wait_s
     while remaining := _unhanded(store, hive):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
-            return _recover(store, hive, wait_s, remaining, host)
+            ended = _recover(store, hive, wait_s, remaining, host)
+            break
         host.sleep(POLL_S)
-    return f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
+    else:
+        ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
+    _withdraw(inbox, ordered, hive)
+    return ended
+
+
+def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
+    worlds = inbox.worlds()
+    for item_id in ordered.values():
+        for world in worlds:
+            world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
 
 
 def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
