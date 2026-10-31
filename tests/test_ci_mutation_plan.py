@@ -1403,3 +1403,54 @@ def test_defined_tests_name_test_functions_and_methods_but_not_their_nested_help
         "class TestGroup:\n    def test_two(self):\n        pass\n    def setup(self):\n        pass\n"
     )
     assert plan.defined_tests(path) == {"test_one", "TestGroup.test_two"}
+
+
+
+def _plan_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seconds: float, budget: int | None
+) -> tuple[int, Path, list[tuple]]:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    monkeypatch.setattr(plan, "estimate", lambda *args: (seconds, 10**5, []))
+    monkeypatch.setattr(plan, "validate_tests", lambda *args: None)
+    monkeypatch.setattr(plan, "needs_browser", lambda *args: False)
+    sized: list[tuple] = []
+    monkeypatch.setattr(plan, "stats_part_count", lambda *args: sized.append(args) or (1, 0.0))
+    budget_args = [] if budget is None else ["--budget", str(budget)]
+    monkeypatch.setattr("sys.argv", ["plan", *budget_args])
+    return plan.main(), output, sized
+
+
+def test_plan_fails_before_sizing_statistics_when_every_batch_shard_cannot_fit_the_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status, output, sized = _plan_cli(tmp_path, monkeypatch, 324000.0, None)
+    text = capsys.readouterr().out
+    assert status == 1
+    assert not output.exists()
+    assert sized == []
+    assert (
+        "::error title=Mutation plan over budget::The change has an estimated 324000 worker seconds of changed line"
+        " mutation, 2700 seconds per shard on 3 workers across 40 shards, against the 1080 second shard budget."
+        " 40 shards hold at most 129600 worker seconds, so split it into at least 3 pull requests." in text
+    )
+
+
+@pytest.mark.parametrize(("budget", "status"), [(None, 0), (1079, 1)])
+def test_plan_accepts_shards_that_exactly_fill_the_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    budget: int | None,
+    status: int,
+) -> None:
+    result, output, sized = _plan_cli(tmp_path, monkeypatch, 129600.0, budget)
+    text = capsys.readouterr().out
+    assert result == status
+    assert output.exists() is (status == 0)
+    assert len(sized) == 1 - status
+    assert ("split it into at least 2 pull requests" in text) is bool(status)
