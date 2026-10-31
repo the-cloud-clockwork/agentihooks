@@ -70,16 +70,18 @@ def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(
 ) -> None:
     import threading
     import time
+    from typing import cast
 
     from scripts.events import memory
+    from scripts.events.bus import Bus
     from scripts.events.config import BusConfig
     from scripts.inbox import bus
 
     release = threading.Event()
 
-    def hanging() -> memory.MemoryBus:
+    def hanging() -> Bus:
         release.wait(5)
-        return memory.open_bus(BusConfig())
+        return cast(Bus, memory.open_bus(BusConfig()))
 
     publisher = bus.SeatPublisher(hanging)
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")

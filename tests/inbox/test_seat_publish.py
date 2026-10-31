@@ -127,25 +127,25 @@ def test_a_failed_publish_keeps_the_redis_send_and_says_so(monkeypatch, capsys):
 def test_a_hanging_connect_holds_no_publish_and_is_attempted_once() -> None:
     import threading
     import time
-    from types import SimpleNamespace
+    from typing import cast
 
+    from scripts.events.bus import Bus
     from scripts.inbox import bus
+    from scripts.inbox.store import Item
 
     release = threading.Event()
     attempts = []
 
-    def hanging() -> memory.MemoryBus:
+    def hanging() -> Bus:
         attempts.append(threading.current_thread().daemon)
         release.wait(5)
-        return memory.open_bus(BusConfig())
+        return cast(Bus, memory.open_bus(BusConfig()))
 
     publisher = bus.SeatPublisher(hanging)
     took = []
 
     def write(n: int) -> None:
-        item = SimpleNamespace(
-            id=f"i{n}", address=SEAT, sender="alice", text="work", ref="", fyi=False, task="", created_at=0
-        )
+        item = Item(id=f"i{n}", sender="alice", address=SEAT, text="work", state="pending", created_at=0, updated_at=0)
         start = time.monotonic()
         publisher.publish(item)
         took.append(time.monotonic() - start)
@@ -158,4 +158,31 @@ def test_a_hanging_connect_holds_no_publish_and_is_attempted_once() -> None:
     release.set()
     assert len(took) == 8
     assert max(took) < 1
+    assert attempts == [True]
+
+
+def test_a_hanging_open_runs_on_a_daemon_thread_and_frees_the_sender() -> None:
+    import threading
+    from typing import cast
+
+    from scripts.events.bus import Bus
+    from scripts.inbox import bus
+    from scripts.inbox.store import Item
+
+    release = threading.Event()
+    attempts = []
+
+    def hanging() -> Bus:
+        attempts.append(threading.current_thread().daemon)
+        release.wait(5)
+        return cast(Bus, memory.open_bus(BusConfig()))
+
+    publisher = bus.SeatPublisher(hanging)
+    item = Item(id="i1", sender="alice", address=SEAT, text="work", state="pending", created_at=0, updated_at=0)
+    sender = threading.Thread(target=publisher.publish, args=(item,), daemon=True)
+    sender.start()
+    sender.join(2)
+    held = sender.is_alive()
+    release.set()
+    assert not held
     assert attempts == [True]

@@ -452,7 +452,7 @@
   "scripts/hub/slots.py": 26,
   "scripts/hub/timers.py": 14,
   "scripts/inbox/addresses.py": 71,
-  "scripts/inbox/bus.py": 79,
+  "scripts/inbox/bus.py": 46,
   "scripts/inbox/channel.py": 166,
   "scripts/inbox/cli.py": 233,
   "scripts/inbox/codex.py": 160,
