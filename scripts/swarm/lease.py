@@ -188,6 +188,7 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
         at = now_ms(store)
         _check(cheap, at, held)
         live = _recorded(cheap)
+        assert live is not None
         if live.expires_at - at >= ttl_ms() - tick_ms():
             return live
 
@@ -195,6 +196,7 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
         at = now_ms(store)
         _check(doc, at, held)
         live = _recorded(doc)
+        assert live is not None
         if live.expires_at - at >= ttl_ms() - tick_ms():
             return live
         doc["lease"] = asdict(Lease(held.owner, held.epoch, at + ttl_ms()))

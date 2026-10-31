@@ -43,6 +43,10 @@ class RedisStateStore:
     def watch_key(self) -> str:
         return self._current
 
+    @property
+    def revision_key(self) -> str:
+        return self._revision
+
     def guard(self, pipe: Any) -> None:
         pipe.watch(self._current)
 

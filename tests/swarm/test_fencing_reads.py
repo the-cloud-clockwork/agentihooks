@@ -63,6 +63,7 @@ def test_lease_renewal_does_not_transfer_the_execution_archive(monkeypatch: pyte
     fencing.write(store, "sw", lambda doc: doc.update(archive=archive))
     monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
     held = lease.acquire(store, "sw", "home")
+    assert held is not None
     connection_type = store.redis.connection_pool.connection_class
     original = connection_type.read_response
     transferred = []
@@ -97,7 +98,9 @@ def test_the_lease_cache_never_changes_what_read_executions_returns() -> None:
     fencing.write(store, "sw", lambda doc: doc.update(executions={"active": asdict(agent)}))
     lease.acquire(store, "sw", "home")
     before = fencing.read_executions(store, "sw")
-    lease.renew(store, "sw", lease.current(store, "sw"))
+    held = lease.current(store, "sw")
+    assert held is not None
+    lease.renew(store, "sw", held)
     assert fencing.read_executions(store, "sw") == before == {"active": asdict(agent)}
 
 

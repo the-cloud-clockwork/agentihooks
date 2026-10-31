@@ -128,7 +128,7 @@ def _entry(states: Any, store: Any, slug: str) -> Any:
     return states.get(slug)
 
 
-def _decode(value: bytes) -> dict:
+def _decode(value: bytes) -> dict[str, Any]:
     return {**copy.deepcopy(EMPTY), **json.loads(value)}
 
 
@@ -166,7 +166,7 @@ def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
     if not isinstance(states, RedisStateStore):
         return None
     raw = store.redis.get(_lease_cache_key(store, slug))
-    revision = store.redis.get(states._revision)
+    revision = store.redis.get(states.revision_key)
     if raw is None or revision is None:
         return None
     cached = json.loads(raw)

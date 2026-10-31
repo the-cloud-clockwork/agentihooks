@@ -258,7 +258,7 @@ def test_consecutive_timeouts_never_age_past_fresh_so_the_legacy_timer_is_not_re
     monkeypatch.setattr(time, "time", lambda: now[0])
     for _ in range(10):
         now[0] += 60
-        assert scheduled_tick.main(lambda argv, **kwargs: _Tick([None, 143])) == 143
+        assert scheduled_tick.main(lambda argv, **kwargs: _Tick([None, 143])) == 143  # pyright: ignore[reportArgumentType]
         assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, now[0]) == ""
 
 
