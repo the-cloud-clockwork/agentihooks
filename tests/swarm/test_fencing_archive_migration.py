@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+
 @pytest.fixture
 def store() -> Any:
     import fakeredis
