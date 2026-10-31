@@ -298,6 +298,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
                 placement = partial(preempt.probe, runtime)
                 seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order, placement)
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
+            if config.state == "running" and readiness.tick_places(config.engine, rows) and panic.state(store) is None:
                 with _placement_pass(runtime):
                     actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
                 store.redis.delete(due)
@@ -1564,15 +1565,25 @@ def _finished_launch(slug, store, doc, agent):
     return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
 
 
-def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
-    if config.engine == EVENTS_ENGINE:
-        return []
+def _collect_acks(
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, doc: dict[str, Any], now_ms: int
+) -> list[str]:
     from scripts.swarm import launch_job
     from scripts.swarm_v2.runtime import codex
 
     rows = {t["id"]: t for t in doc["tasks"]}
-    actions, pending = launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
-    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a) and a.name not in pending]:
+    actions, pending = (
+        ([], set())
+        if config.engine == EVENTS_ENGINE
+        else launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
+    )
+    for agent in [
+        a
+        for a in store.agents(slug)
+        if readiness.tick_launches(config.engine, rows.get(a.task, {}))
+        and _acknowledging(slug, store, a)
+        and a.name not in pending
+    ]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
@@ -1597,7 +1608,15 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     return actions
 
 
-def _spawn_order(slug, config, store, agents, rows, doc, runtime):
+def _spawn_order(
+    slug: str,
+    config: SwarmConfig,
+    store: RedisStore,
+    agents: list[AgentRecord],
+    rows: dict[str, Any],
+    doc: dict[str, Any],
+    runtime: Any,
+) -> tuple[list[Any], list[Any]]:
     from scripts.swarm import capacity, focus_budget
 
     if begin := getattr(runtime, "begin_placement_pass", None):
@@ -1616,6 +1635,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ]
         busy = len(running)
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
+        ready = [task for task in ready if readiness.tick_launches(config.engine, task)]
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
