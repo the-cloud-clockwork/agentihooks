@@ -1,9 +1,10 @@
 import ast
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from scripts.ci_mutation.__main__ import main
+from scripts.ci_mutation.__main__ import branch_tests, main
 
 
 @pytest.fixture(autouse=True)
@@ -410,8 +411,6 @@ def test_browser_cycles_do_not_hide_later_tests_or_revisit_modules(tmp_path, mon
 
 
 def _commit(root: Path, files: dict[str, str | None], message: str) -> str:
-    import subprocess
-
     for name, text in files.items():
         path = root / name
         if text is None:
@@ -426,8 +425,6 @@ def _commit(root: Path, files: dict[str, str | None], message: str) -> str:
 
 
 def _repository(tmp_path: Path) -> tuple[Path, str]:
-    import subprocess
-
     subprocess.run(["git", "init", "-q", "-b", "dev", str(tmp_path)], check=True)
     base = _commit(
         tmp_path,
@@ -442,8 +439,6 @@ def _repository(tmp_path: Path) -> tuple[Path, str]:
 
 
 def test_branch_tests_name_every_test_the_branch_adds_or_changes(tmp_path):
-    from scripts.ci_mutation.__main__ import branch_tests
-
     root, base = _repository(tmp_path)
     head = _commit(
         root,
@@ -466,18 +461,12 @@ def test_branch_tests_name_every_test_the_branch_adds_or_changes(tmp_path):
 
 
 def test_branch_tests_are_empty_when_the_branch_leaves_every_test_alone(tmp_path):
-    from scripts.ci_mutation.__main__ import branch_tests
-
     root, base = _repository(tmp_path)
     head = _commit(root, {"hooks/sample.py": "def f():\n    return 1\n"}, "branch")
     assert branch_tests(root, base, head) == ()
 
 
 def test_branch_tests_measure_from_where_the_branch_left_its_base(tmp_path):
-    import subprocess
-
-    from scripts.ci_mutation.__main__ import branch_tests
-
     root, base = _repository(tmp_path)
     subprocess.run(["git", "checkout", "-q", "-b", "topic"], cwd=root, check=True)
     head = _commit(root, {"tests/test_c.py": "def test_c():\n    pass\n"}, "topic")

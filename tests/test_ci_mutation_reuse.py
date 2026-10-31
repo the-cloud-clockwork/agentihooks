@@ -545,12 +545,13 @@ def test_a_run_answered_for_another_head_is_never_reused(pair, monkeypatch):
     assert written == "reused=false\n"
 
 
-def test_the_exact_mode_reads_only_the_runs_of_its_head_on_its_branch(pair, monkeypatch):
+def test_the_exact_mode_reads_only_the_runs_of_its_head_on_its_branch(pair, monkeypatch, capsys):
     root, _, base, head = pair
     written, calls = _exact(monkeypatch, root, base, head, [], {})
     assert written == "reused=false\n"
     assert calls == [f"{EXACT}{head}&branch=a%26b", f"{EXACT}{head}&branch=a%26b"]
     assert not (root / ".mutation-killers-restored").exists()
+    assert capsys.readouterr().out.endswith("Restored 0 kill memory records from this head's branch preflight\n")
 
 
 def test_a_newer_red_preflight_on_the_same_head_blocks_an_older_green(pair, monkeypatch):
@@ -561,7 +562,7 @@ def test_a_newer_red_preflight_on_the_same_head_blocks_an_older_green(pair, monk
     assert written == "reused=false\n"
 
 
-def _killers(files):
+def _killers(files: dict[str, str]) -> bytes:
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as zipped:
         zipped.writestr(zipfile.ZipInfo("nested/"), "")
