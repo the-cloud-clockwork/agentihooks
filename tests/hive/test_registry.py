@@ -358,7 +358,7 @@ def test_cli_now_ms_reads_the_wall_clock(monkeypatch):
 def test_cli_set_takes_any_number_of_key_value_settings(redis, monkeypatch, capsys):
     monkeypatch.setenv("COLUMNS", "300")
     parser = cli._parser()._subparsers._group_actions[0].choices["set"]
-    assert parser.format_usage() == "usage: agentihooks hive set [-h] [--keep] id [key=value ...]\n"
+    assert parser.format_usage() == "usage: agentihooks hive set [-h] [--keep] [--reason REASON] id [key=value ...]\n"
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     assert cli.main(["set", "box"]) == 1
     assert capsys.readouterr().err == "hive set refused: hive set needs at least one setting\n"

@@ -15,6 +15,7 @@ STOP = (
     "run no other tool and end your turn now."
 )
 NOTE = "{at} {name} ended at its next tool call: the task claim names {owner}\n"
+READ_TIMEOUT = 2
 
 
 def check(
@@ -36,7 +37,7 @@ def check(
     if ledger is None:
         from scripts.swarm.ledger_client import LedgerClient
 
-        ledger = LedgerClient()
+        ledger = LedgerClient(read_timeout=READ_TIMEOUT)
     row = ledger.task(slug, task)
     if not lost(name, row, bool(scope.member(env))):
         return None

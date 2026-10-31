@@ -4,7 +4,8 @@ import sys
 import urllib.error
 import uuid
 from pathlib import Path
-from urllib.parse import quote
+from typing import Any
+from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
 from scripts.swarm.store import SwarmError
@@ -48,8 +49,9 @@ def _ledger():
 
 
 class LedgerClient:
-    def __init__(self, service=False):
+    def __init__(self, service: bool = False, read_timeout: float | None = None) -> None:
         self.service = service
+        self.read_timeout = read_timeout
 
     def _call(self, slug, ops=None):
         from scripts.swarm import lease
@@ -72,8 +74,9 @@ class LedgerClient:
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
         return state
 
-    def _resource(self, slug, path, collection=False):
-        return _ledger().resource(slug, path, service=self.service, collection=collection)
+    def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
+        bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
+        return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
 
     def state(self, slug):
         return self._call(slug)
@@ -83,6 +86,27 @@ class LedgerClient:
 
     def tasks(self, slug):
         return self._resource(slug, "tasks", collection=True)
+
+    def tasks_targeting(self, slug: str, url: str) -> list[dict[str, Any]]:
+        """The tasks naming this pull request, read by a scoped query instead of the whole tasks collection.
+
+        A ledger server older than the targets query refuses it as schema_invalid; only then is the whole
+        collection read and filtered here, so queueing keeps working until that server is redeployed.
+        """
+        from scripts.swarm_ledger.api.task_list import pull_links
+
+        rows: list[Any]
+        try:
+            rows = self._resource(slug, f"tasks?{urlencode({'targets': url})}")
+        except urllib.error.HTTPError as exc:
+            from scripts.swarm_ledger.api.client import failure
+
+            replay, error = failure(exc)
+            if exc.code != 400 or error.get("code") != "schema_invalid":
+                raise replay from None
+            rows = self.tasks(slug)
+        found: list[dict[str, Any]] = [row for row in rows if url in pull_links(row)]
+        return found
 
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""

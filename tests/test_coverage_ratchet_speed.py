@@ -66,3 +66,70 @@ def test_identical_source_is_parsed_once_for_different_measurements(monkeypatch)
     assert parsed == [source, changed]
     with pytest.raises(NotPython):
         coverage_grade.statements_of("def broken(:", {1})
+
+
+def _write_shards(tmp_path: Path, count: int) -> list[Path]:
+    shards = []
+    for index in range(count):
+        shard = tmp_path / f"parallel-shard-{index}"
+        data = CoverageData(basename=str(shard))
+        data.add_lines({f"hooks/m{module}.py": [1, 2 + (index + module) % 2] for module in range(4)})
+        data.write()
+        shards.append(shard)
+    return shards
+
+
+def test_parallel_shard_reads_equal_the_serial_read(tmp_path: Path) -> None:
+    shards = _write_shards(tmp_path, 6)
+    serial = ratchet.executed(shards, workers=1)
+    assert ratchet.executed(shards, workers=2) == serial
+    assert serial["hooks/m0.py"] == {1, 2, 3}
+
+
+def test_parallel_shard_read_still_refuses_an_unmeasured_shard(tmp_path: Path) -> None:
+    shards = _write_shards(tmp_path, 2)
+    empty = CoverageData(basename=str(tmp_path / "empty"))
+    empty.add_lines({"docs/x.py": [1]})
+    empty.write()
+    with pytest.raises(ratchet.Unmeasured, match="measured no line"):
+        ratchet.executed([*shards, tmp_path / "empty"], workers=2)
+
+
+def test_parallel_missed_report_equals_the_serial_report(tmp_path: Path) -> None:
+    (tmp_path / "hooks").mkdir()
+    for module in range(5):
+        (tmp_path / f"hooks/m{module}.py").write_text("a = 1\nb = 2\nc = 3\nd = 4\n")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/untested.py").write_text("value = 1\n")
+    measured = ratchet.executed(_write_shards(tmp_path, 3), workers=1)
+    (tmp_path / "serial").mkdir()
+    (tmp_path / "parallel").mkdir()
+    serial = ratchet._missed(tmp_path, measured, tmp_path / "serial", workers=1)
+    parallel = ratchet._missed(tmp_path, measured, tmp_path / "parallel", workers=2)
+    assert parallel == serial
+    assert list(parallel) == sorted(parallel)
+    assert serial["scripts/untested.py"] == [1]
+    assert serial["hooks/m3.py"] == [4]
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [("max 100000\n", 4), ("200000 100000\n", 2), ("150000 100000\n", 2), ("50000 100000\n", 1), (None, 4)],
+)
+def test_worker_count_follows_the_cgroup_cpu_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str | None, expected: int
+) -> None:
+    monkeypatch.setattr(ratchet.os, "sched_getaffinity", lambda pid: {0, 1, 2, 3})
+    path = tmp_path / "cpu.max"
+    if limit is not None:
+        path.write_text(limit)
+    assert ratchet._cpus(path) == expected
+
+
+def test_usage_reads_cpu_seconds_and_throttled_time(tmp_path: Path) -> None:
+    stat = tmp_path / "cpu.stat"
+    stat.write_text("usage_usec 10\nnr_throttled 3\nthrottled_usec 2500000\n")
+    cpu, throttled = ratchet._usage(stat)
+    assert cpu > 0
+    assert throttled == 2.5
+    assert ratchet._usage(tmp_path / "absent")[1] == 0.0
