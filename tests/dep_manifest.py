@@ -166,7 +166,7 @@ def module_graph(root: Path, path: str) -> tuple[list[tuple[str, int | None]], l
         return [], [None]
     package, folder, by_name = Path(path).parent.parts, Path(path).parent.as_posix(), _by_name(tree)
     edges, dynamic = [], []
-    pending = [(tree, False, None)]
+    pending: list[tuple[ast.AST, bool, int | None]] = [(tree, False, None)]
     while pending:
         node, inside, statement = pending.pop()
         statement = node.lineno if isinstance(node, ast.stmt) else statement
