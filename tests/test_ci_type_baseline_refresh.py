@@ -64,4 +64,5 @@ def test_the_pull_request_enqueues_only_after_its_required_gate_succeeds() -> No
     assert "completed:*)" in run and "exit 1" in run
     assert run.index("completed:success") < run.index("enqueuePullRequest")
     assert "expectedHeadOid: $head" in run
+    assert run.index("mergeQueueEntry != null") < run.index("enqueuePullRequest")
     assert "gh pr merge" not in run

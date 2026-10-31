@@ -162,9 +162,15 @@ jobs:
             echo "::error::Gate — Required did not finish on pull request $PULL in time"
             exit 1
           fi
-          node=$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json id -q .id)
           for attempt in 1 2 3; do
-            if gh api graphql \
+            node=$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json id -q .id || true)
+            queued=$(gh api graphql -f query='query($pull: ID!) { node(id: $pull) { ... on PullRequest { mergeQueueEntry { position } } } }' \
+              -f pull="$node" -q '.data.node.mergeQueueEntry != null' || true)
+            if [[ "$queued" == "true" ]]; then
+              echo "::notice::Pull request $PULL already waits in the merge queue"
+              exit 0
+            fi
+            if [[ -n "$node" ]] && gh api graphql \
               -f query='mutation($pull: ID!, $head: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $pull, expectedHeadOid: $head}) { mergeQueueEntry { position } } }' \
               -f pull="$node" -f head="$HEAD"; then
               exit 0
