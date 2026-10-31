@@ -1802,6 +1802,15 @@ def _hotfix_master(store, args) -> bool:
     return _me(store, args).lane == MASTER and master_coding.is_open(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
 
+def _require_target(store: object, args: argparse.Namespace, task_id: str) -> None:
+    """Refuse a final integration this task does not target, reading only its own task and the tasks naming the pull
+    request, never the whole tasks collection."""
+    ledger = LedgerClient()
+    own = ledger.task(args.slug, task_id)
+    rows: list[dict[str, object]] = [own] if own else []
+    done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
+
+
 def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
@@ -1814,7 +1823,7 @@ def cmd_merge(store, args):
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
-            done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
+            _require_target(store, args, agent.task)
         if args.action == "queue":
             result = merge_queue.operate(
                 args.action,

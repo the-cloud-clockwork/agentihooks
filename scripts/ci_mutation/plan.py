@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 from functools import cache
 from itertools import accumulate
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -37,6 +38,7 @@ from tests.dep_manifest import changes as recorded_changes
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
 WORKERS = 4
+BATCH_RUNNERS = 40
 RECORD_RETRY_SECONDS = 10
 STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
@@ -561,6 +563,12 @@ def direct_tests(manifest: dict, lines: dict[str, set[int]], changes: dict[str, 
     }
 
 
+def recorded_direct(root: Path, manifest: dict[str, Any] | None, changes: dict[str, set[int]]) -> dict[str, list[str]]:
+    if not manifest or "lines" not in manifest or not manifest.get("commit"):
+        return {}
+    return direct_tests(manifest, recorded_lines(root, manifest, changes)[0], changes)
+
+
 @cache
 def file_text(path: Path) -> str:
     return path.read_text() if path.is_file() else ""
@@ -585,8 +593,10 @@ def narrow(
     return sorted(kept) or chosen
 
 
-def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
-    return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
+def shard_count(seconds: float, mutants: int, target: float, limit: int, budget: float = 1080) -> int:
+    wanted = min(limit, math.ceil(seconds / (shard_workers() * target)))
+    needed = min(BATCH_RUNNERS, math.ceil(seconds / (shard_workers() * budget)))
+    return max(1, min(mutants, max(wanted, needed)))
 
 
 def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, float] | None = None) -> float:
@@ -660,8 +670,10 @@ def main() -> int:
             else:
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
-    selection, direct = {}, {}
+    selection: dict[str, list[str]] = {}
+    direct: dict[str, list[str]] = {}
     seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure), direct)
+    direct = direct or recorded_direct(root, manifest, changes)
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")

@@ -310,6 +310,24 @@ def test_the_drain_names_every_agent_it_waits_for_and_every_agent_that_handed_of
     ]
 
 
+def test_a_hive_remove_drain_records_its_owner_reason_and_deadline(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@1")
+    member = _member(store)
+    plan = remove.Plan(member, "anton-9", "p", wait_s=600)
+
+    remove.drain(store, plan, _host(Clock(store, member, 1), Run(), tmp_path))
+
+    record = registry.show(store.redis, member)
+    assert record is not None
+    [entry] = record["drains"]
+    assert (entry["draining"], entry["owner"], entry["reason"], entry["deadline_at"]) == (
+        "yes",
+        "engineer@1",
+        "hive remove",
+        2_393_500,
+    )
+
+
 def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     member, run, bao, plan = _removal(store, tmp_path)
     host = _host(Clock(store, member, 99), run, tmp_path)
