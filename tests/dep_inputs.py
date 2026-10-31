@@ -149,7 +149,7 @@ class DepInputs:
                 break
 
     def module_imports(self, path: str) -> tuple[set[str], bool]:
-        """The repository files a module's imports and their parent packages load now, and whether it imports by name."""
+        """Repository files a module's imports and parent packages load now, and whether it imports by name."""
         if path not in self.parsed:
             from scripts.ci_mutation.scope import imported_names
 
@@ -174,8 +174,8 @@ class DepInputs:
             current = pending.pop()
             found = self.collections.get(current, [set(), False])
             reads.update(found[0])
-            names = self.module_imports(current)[0] if (Path(self.root) / current).is_file() else set()
-            escapes = escapes or found[1]
+            names, dynamic = self.module_imports(current) if (Path(self.root) / current).is_file() else (set(), False)
+            escapes = escapes or found[1] or dynamic
             pending.extend(names - seen)
             seen.update(names)
         self.closures[path] = len(sys.modules), (reads, escapes)
