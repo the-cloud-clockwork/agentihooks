@@ -134,30 +134,48 @@ def _split_map(old: str, new: str) -> dict[int, int]:
 
 
 def _lost(
-    base: Measurement, head: dict[str, set[int]], head_source: Source, renamed: dict[str, str | tuple[str, ...]]
+    base: Measurement,
+    head: dict[str, set[int]],
+    head_source: Source,
+    renamed: dict[str, str | tuple[str, ...]],
+    workers: int = 1,
 ) -> dict[str, list[int]]:
-    lost = {}
-    for path, ran in sorted(base.executed.items()):
+    paths = sorted(base.executed)
+    olds, targets, splits = [], [], []
+    for path in paths:
         moved = renamed.get(path, path)
-        targets = (moved,) if isinstance(moved, str) else moved
-        gone = set()
         old = base.source(path)
-        base_statements = statements_of(old, ran) if old is not None else {}
-        for target in targets:
-            new = head_source(target)
-            if old is None or new is None:
-                continue
-            mapped = line_map(old, new) if isinstance(moved, str) else _split_map(old, new)
-            head_statements = statements_of(new, [mapped[line] for line in base_statements if line in mapped])
-            covered = set(statements_of(new, head.get(target, set())).values())
-            gone.update(
-                statement
-                for line, statement in base_statements.items()
-                if line in mapped and head_statements.get(mapped[line]) not in covered
-            )
-        if gone:
-            lost[path] = sorted(gone)
-    return lost
+        olds.append(old)
+        splits.append(not isinstance(moved, str))
+        names = (moved,) if isinstance(moved, str) else moved
+        targets.append([(head_source(name), head.get(name, set())) for name in names])
+    ran = [base.executed[path] for path in paths]
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            gone = list(pool.map(_file_lost, olds, targets, ran, splits))
+    else:
+        gone = list(map(_file_lost, olds, targets, ran, splits))
+    return {path: lines for path, lines in zip(paths, gone, strict=True) if lines}
+
+
+def _file_lost(old: str | None, targets: list[tuple[str | None, set[int]]], ran: set[int], split: bool) -> list[int]:
+    """Base statements of one file that no head target still runs, mapped through the file's line map."""
+    if old is None:
+        return []
+    gone = set()
+    base_statements = statements_of(old, ran)
+    for new, covered_lines in targets:
+        if new is None:
+            continue
+        mapped = _split_map(old, new) if split else line_map(old, new)
+        head_statements = statements_of(new, [mapped[line] for line in base_statements if line in mapped])
+        covered = set(statements_of(new, covered_lines).values())
+        gone.update(
+            statement
+            for line, statement in base_statements.items()
+            if line in mapped and head_statements.get(mapped[line]) not in covered
+        )
+    return sorted(gone)
 
 
 def statements_of(source: str, lines: Iterable[int]) -> dict[int, int]:
@@ -250,11 +268,12 @@ def grade(
     renamed: dict[str, str | tuple[str, ...]] | None = None,
     *,
     changed_tests: set[str] | None = None,
+    workers: int = 1,
 ) -> Result:
     base = next(runs, None)
     if base is None:
         raise Unmeasured("no measured base run within the searched dev history")
-    lost = _lost(base, head, head_source, renamed or {})
+    lost = _lost(base, head, head_source, renamed or {}, workers)
     if not lost:
         return Result(base.commit, {})
     protected = _protected(base, head_source, changed_tests or set(), lost, renamed or {})

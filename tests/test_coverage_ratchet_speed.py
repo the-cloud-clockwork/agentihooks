@@ -205,8 +205,8 @@ def test_parallel_grade_maps_each_file_in_a_pool_task(monkeypatch: pytest.Monkey
             return super().map(fn, *listed)
 
     monkeypatch.setattr(coverage_grade, "ProcessPoolExecutor", Pool)
-    assert _graded(3).lost == _graded(1).lost
-    assert pools == [3, len(GRADE_RAN)]
+    assert _graded(2).lost == _graded(1).lost
+    assert pools == [2, len(GRADE_RAN)]
 
 
 def test_parallel_grade_still_refuses_an_unparsable_source() -> None:
