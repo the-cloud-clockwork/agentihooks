@@ -8,6 +8,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from scripts.events import state
 from scripts.hive import hive_state, scope
@@ -208,11 +209,11 @@ def drain_owner(environ: Mapping[str, str] = os.environ) -> str:
     return environ.get("AGENTIHOOKS_AGENT_NAME") or socket.gethostname()
 
 
-def _ready(record: dict, at: int) -> bool:
-    return live({"heartbeat_at": 0, **record}, at) and record.get("draining") != "yes"
+def _ready(record: dict[str, Any], at: int) -> bool:
+    return "heartbeat_at" in record and live(record, at) and record.get("draining") != "yes"
 
 
-def _drained(record: dict, stored: dict, drain: Drain | None) -> dict:
+def _drained(record: dict[str, Any], stored: dict[str, Any], drain: Drain | None) -> dict[str, Any]:
     """Appends a drain flag change to the record's retained history, keeping the newest DRAINS_KEPT entries."""
     if record.get("draining", "no") == stored.get("draining", "no"):
         return record

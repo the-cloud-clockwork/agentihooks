@@ -86,7 +86,7 @@ def _write(handler: object, services: Services, store: object, hive_id: str, pay
     if registry.show(store.redis, hive_id) is None:
         raise APIError(404, MISSING, "No such hive")
     try:
-        registry.update(store.redis, hive_id, pairs(payload), drain=registry.Drain("operator", "ledger hive settings"))
+        registry.update(store.redis, hive_id, pairs(payload))
     except HiveError as exc:
         raise APIError(400, "schema_invalid", str(exc)) from None
 
