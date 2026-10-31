@@ -205,7 +205,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
         f"manifests: opened pull request {PR} deleting {', '.join(OWNED)}; it merges once its checks pass",
         "openbao: deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
     ]
-    assert [item.text for item in _orders(store, SEAT)] == [remove.ORDER.format(hive=member, slug=SLUG)]
+    assert [item.text for item in _orders(store, "engineer@1")] == [remove.ORDER.format(hive=member, slug=SLUG)]
     assert not auth.member(store.redis, member)
     assert f"hive-{member}" not in store.redis.acl_users()
     assert member not in store.redis.smembers(registry.INDEX)
@@ -254,7 +254,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
     ]
     assert _written(store, tmp_path) == before
     assert [argv for argv, _ in run.calls[calls:]] == READS
-    assert len(_orders(store, SEAT)) == 1
+    assert len(_orders(store, "engineer@1")) == 1
 
 
 def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_name(store, tmp_path):
@@ -332,7 +332,7 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     assert "draining" not in registry.show(store.redis, member)
     assert [argv for argv, _ in run.calls] == READS
     assert bao.opener.requests == []
-    assert _orders(store, SEAT) == []
+    assert _orders(store, "engineer@1") == []
 
 
 def test_a_hive_whose_agents_stay_is_left_draining_with_its_member(store, tmp_path):
@@ -391,8 +391,8 @@ def test_an_ended_agent_on_the_hive_does_not_hold_the_drain(store):
     assert remove.hosted(store, member) == []
 
 
-def _orders(store, seat):
-    return [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(seat)]
+def _orders(store, address):
+    return [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(address)]
 
 
 def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_are_gone(store, tmp_path):
@@ -405,7 +405,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
     assert settled == f"hive {member} drained: every agent handed off, 1 ordered to hand off"
     assert (clock.now, clock.slept) == (2 * remove.POLL_S, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
-    orders = _orders(store, SEAT)
+    orders = _orders(store, "engineer@1")
     assert [(item.sender, item.text) for item in orders] == [
         (remove.SENDER, remove.ROLL.format(hive=member, slug=SLUG))
     ]
@@ -422,7 +422,55 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
 
     assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
     assert clock.slept == 0
-    assert _orders(store, SEAT) == []
+    assert _orders(store, "engineer@1") == []
+
+
+def _found(store, item_id):
+    return next(item for inbox in InboxStore(store.redis).worlds() if (item := inbox.get(item_id)))
+
+
+def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_its_predecessor(store, tmp_path):
+    from scripts.inbox import exits
+    from scripts.swarm.store import RedisStore
+
+    member = _member(store)
+    _agent(store, member)
+    inbox = InboxStore(store.redis)
+    inbox.seats.occupy(SEAT, "engineer@1", 1)
+    remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
+    [order] = _orders(store, "engineer@1")
+    other = inbox.send(remove.SENDER, "engineer@1", "Read the review on the ledger.")
+    RedisStore(store.redis).put_agent(SLUG, AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working"))
+    inbox.seats.occupy(SEAT, "engineer@2", other.created_at + 1)
+
+    exits.settle(inbox, "engineer@1", SEAT, "handed off its seat")
+
+    mail = [item for world in inbox.worlds() for item in world.pending_mail("engineer@2")]
+    assert [item.id for item in mail] == [other.id]
+    ended = _found(store, order.id)
+    assert (ended.address, ended.state, ended.reason) == (
+        "engineer@1",
+        "done",
+        "done: engineer@1 handed off its seat; its hive drain order ended with it",
+    )
+
+
+def test_the_sweep_closes_a_drain_order_left_on_a_seat_once_the_agent_it_was_sent_to_left(store):
+    from scripts.inbox import exits
+    from scripts.swarm.store import RedisStore
+
+    member = _member(store)
+    inbox, swarm = InboxStore(store.redis), RedisStore(store.redis)
+    swarm.seats.occupy(SEAT, "engineer@1", 1)
+    order = inbox.send(remove.SENDER, SEAT, remove.ROLL.format(hive=member, slug=SLUG))
+    swarm.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working"))
+    swarm.seats.occupy(SEAT, "engineer@2", order.created_at + 1)
+
+    exits.sweep(inbox, SLUG, swarm, dict)
+
+    ended = _found(store, order.id)
+    assert (ended.state, ended.reason) == ("done", "done: engineer@1 left its seat; its hive drain order ended with it")
+    assert [item for world in inbox.worlds() for item in world.pending_mail("engineer@2")] == []
 
 
 class Successor:
@@ -433,7 +481,7 @@ class Successor:
         self.slept += 1
         self.now += seconds
         for agent in self.store.agents(SLUG):
-            if _orders(self.store, agent.seat):
+            if _orders(self.store, agent.name):
                 self.store.put_agent(SLUG, replace(agent, state="finished"))
 
     def __call__(self):
@@ -476,7 +524,7 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
         "so each got a recovery handoff and its task reopens once the swarm retires it"
     )
     assert (clock.now, clock.slept) == (30, 2)
-    assert [len(_orders(store, seat)) for seat in (SEAT, f"eng-2@{SLUG}")] == [1, 1]
+    assert [len(_orders(store, name)) for name in ("engineer@1", "engineer@2")] == [1, 1]
     for name, task, seat in (("engineer@1", "t1", SEAT), ("engineer@2", "t2", f"eng-2@{SLUG}")):
         text = remove.RECOVERY.format(name=name, task=task, hive=member, wait=30, folder=folder(SLUG, task))
         assert store.handoffs[(SLUG, task)] == (text, seat)
