@@ -112,6 +112,8 @@ class ExecutionRegistry:
             ]
             for key in old:
                 doc["archive"][key] = doc["executions"].pop(key)
+            for row in doc["archive"].values():
+                row.get("profile_decision", {}).get("validation", {}).pop("source_blobs", None)
             return len(old)
 
         return self._fenced(slug, move)

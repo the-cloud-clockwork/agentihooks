@@ -399,6 +399,10 @@ def run_tick(
             store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = _phase_steps(inbox, store, slug, doc, ledger)
+            if scheduled:
+                from scripts.swarm import refresh_job
+
+                timing.call(refresh_job.start, store, slug)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judged = worker.submit(copy_context().run, _intent_pass, inbox, store, slug, doc, ledger, config)
@@ -455,10 +459,6 @@ def run_tick(
                 doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms(), config.watchdog_address
             )
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
-            if scheduled:
-                from scripts.swarm import refresh_job
-
-                timing.call(refresh_job.start, store, slug)
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
@@ -518,17 +518,20 @@ class _Firsts:
                 self.settled.set()
 
 
-def _tick_while_others_run(store, slug, firsts, until):
+def _tick_while_others_run(store: RedisStore, slug: str, firsts: _Firsts, until: float) -> None:
+    """An extra pass starts only when this swarm's longest pass so far still ends by the extra pass cutoff."""
     started = time.monotonic()
     try:
         _tick_one(store, slug)
     finally:
         firsts.done()
+    longest = time.monotonic() - started
     while not firsts.settled.wait(max(0.0, started + TICK_SECONDS - time.monotonic())):
         started = time.monotonic()
-        if started > until or tick_stop.STOP.is_set():
+        if started + longest > until or tick_stop.STOP.is_set():
             return
         _tick_one(store, slug)
+        longest = max(longest, time.monotonic() - started)
 
 
 def _reconcile_services():

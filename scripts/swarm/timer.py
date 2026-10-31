@@ -75,7 +75,7 @@ def units(binary):
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{sys.executable}" -m scripts.scheduler.service supervise\n'
-        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2\n\n"
+        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2\nKillMode=process\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
     return {

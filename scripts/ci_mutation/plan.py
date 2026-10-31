@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 from functools import cache
 from itertools import accumulate
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -562,6 +563,12 @@ def direct_tests(manifest: dict, lines: dict[str, set[int]], changes: dict[str, 
     }
 
 
+def recorded_direct(root: Path, manifest: dict[str, Any] | None, changes: dict[str, set[int]]) -> dict[str, list[str]]:
+    if not manifest or "lines" not in manifest or not manifest.get("commit"):
+        return {}
+    return direct_tests(manifest, recorded_lines(root, manifest, changes)[0], changes)
+
+
 @cache
 def file_text(path: Path) -> str:
     return path.read_text() if path.is_file() else ""
@@ -663,8 +670,10 @@ def main() -> int:
             else:
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
-    selection, direct = {}, {}
+    selection: dict[str, list[str]] = {}
+    direct: dict[str, list[str]] = {}
     seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure), direct)
+    direct = direct or recorded_direct(root, manifest, changes)
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")

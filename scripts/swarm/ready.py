@@ -426,7 +426,7 @@ def _retry(run, row, found, action):
     return [action]
 
 
-def _reopen(run, row, found, what):
+def _reopen(run: Any, row: dict[str, Any], found: dict[str, Any], what: str) -> list[str]:
     task_id, url = row["id"], found["url"]
     if not _release(run, row, found, FIX):
         return []
