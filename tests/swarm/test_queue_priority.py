@@ -2,13 +2,15 @@ import json
 import os
 import subprocess
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from scripts.swarm import cli, commands, ledger_events, merge_queue, queue_priority, queue_record
+from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
 from tests.swarm.test_cli import env
-from tests.swarm.test_merge_queue import swarm_of
+from tests.swarm.test_merge_queue import scoped_ledger, swarm_of
 from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue, Killed
 
 pytestmark = pytest.mark.unit
@@ -24,8 +26,8 @@ def priority(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    tasks = [{"pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"}]
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: tasks))
+    tasks = [{"id": "t2", "pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"}]
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger(tasks))
     queue = FakeQueue()
     reorder = merge_queue.prioritize
 
@@ -772,7 +774,7 @@ def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypat
 
 
 @pytest.mark.parametrize("head", ["head2", "moved"])
-def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch, head):
+def test_refresh_keeps_an_entry_it_could_not_requeue(priority: Any, monkeypatch: Any, head: str) -> None:
     from scripts.inbox.store import InboxError
 
     p = priority
@@ -792,7 +794,7 @@ def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch, head
     displaced.add({"id": "P2", "url": URL[:-1] + "2", "headRefOid": head})
     alerts = []
     ledger = SimpleNamespace(raise_alert=lambda *args: alerts.append(args))
-    assert queue_priority.refresh(p.store, "sw", p.tasks, ledger) == [
+    assert queue_priority.refresh(p.store, "sw", p.tasks, cast(LedgerClient, ledger)) == [
         f"could not requeue {URL[:-1]}2 after an interrupted priority: GitHub unavailable"
     ]
     assert [pull["url"] for pull in displaced.pulls()] == [URL[:-1] + "2"]

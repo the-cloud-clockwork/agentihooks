@@ -1814,7 +1814,7 @@ def _require_target(store: object, args: argparse.Namespace, task_id: str) -> No
 def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
-        tasks = LedgerClient().tasks(args.slug)
+        tasks = queue_priority.targeting(LedgerClient(), args.slug)
         if args.lift and not clearance.is_operator(store, Who.from_env()):
             raise SwarmError("only the operator lifts a running merge group priority hold")
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)

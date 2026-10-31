@@ -157,19 +157,18 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
     store.config = lambda slug: None
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    from tests.swarm.test_merge_queue import scoped_ledger
+
     tasks = [
-        {"pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"},
-        {"pr_url": URL[:-1] + "3", "claimed_by": ""},
-        {"pr_url": URL[:-1] + "4", "claimed_by": "ci@unrelated"},
-        {"pr_url": URL[:-1] + "5", "claimed_by": "ci@released", "state": "pr", "awaiting": "merge"},
-        {"pr_url": URL[:-1] + "6", "claimed_by": "ci@done", "state": "done"},
+        {"id": "t2", "pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"},
+        {"id": "t3", "pr_url": URL[:-1] + "3", "claimed_by": ""},
+        {"id": "t4", "pr_url": URL[:-1] + "4", "claimed_by": "ci@unrelated"},
+        {"id": "t5", "pr_url": URL[:-1] + "5", "claimed_by": "ci@released", "state": "pr", "awaiting": "merge"},
+        {"id": "t6", "pr_url": URL[:-1] + "6", "claimed_by": "ci@done", "state": "done"},
+        {"id": "t7", "pr_url": URL[:-1] + "6", "split_pulls": [URL[:-1] + "2"], "claimed_by": "ci@other-half"},
     ]
-
-    def ledger_tasks(slug):
-        assert slug == "sw"
-        return tasks
-
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=ledger_tasks))
+    reads = []
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger(tasks, reads))
 
     def prioritize(url, journal, **kwargs):
         assert url == URL
@@ -194,13 +193,29 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
             "ci@owner",
             f"Your pull request {URL[:-1]}2 was requeued in its original order after priority request {URL}.",
             {"fyi": True},
-        )
+        ),
+        (
+            "engineer@a1b2c3-0001",
+            "ci@other-half",
+            f"Your pull request {URL[:-1]}6 was requeued in its original order after priority request {URL}.",
+            {"fyi": True},
+        ),
     ]
+    assert reads == [("targeting", "sw", URL[:-1] + str(n)) for n in (2, 3, 5, 6)]
     output = capsys.readouterr()
     if errors:
         assert output.err == "swarm: restore refused; second refusal\n"
     else:
         assert json.loads(output.out)["displaced"] == [URL[:-1] + str(n) for n in (2, 3, 5, 6)]
+
+
+def test_owners_keeps_only_tasks_whose_pull_request_was_named() -> None:
+    named = {"pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"}
+    other = {"pr_url": URL[:-1] + "4", "claimed_by": "ci@unrelated"}
+    asked = []
+    assert queue_priority.owners([other, named], [URL[:-1] + "2"]) == [named]
+    assert queue_priority.owners(lambda urls: asked.append(urls) or [other, named], [URL[:-1] + "2"]) == [named]
+    assert asked == [[URL[:-1] + "2"]]
 
 
 def test_worker_cannot_prioritize(monkeypatch, capsys):
