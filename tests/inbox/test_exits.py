@@ -619,6 +619,20 @@ def test_mail_passed_to_a_gone_successor_master_reaches_the_live_one_in_the_same
     assert inbox.get(item.id).address == live
 
 
+def test_a_master_leaving_before_its_successor_spawns_keeps_its_own_mail_waiting(redis: object) -> None:
+    from scripts.swarm.naming import NameRegistry
+
+    inbox = InboxStore(redis)
+    names = NameRegistry(redis)
+    names.mint_code("sw", "sw", "/repo")
+    master = names.next("sw", "master")
+    item = inbox.send("sender", master, "for the next master")
+    assert inbox.get(item.id).address == master
+    exits.settle(inbox, master, "", "retired")
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (master, "pending")
+    assert inbox.pending_items("sender") == []
+
+
 @pytest.mark.parametrize(
     ("state", "exit_text"), [("done", "finished its task and exited"), ("blocked", "blocked its task and exited")]
 )

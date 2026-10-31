@@ -4,6 +4,7 @@ annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
 attrs==26.1.0
+basedpyright==1.40.2
 boto3==1.43.120
 botocore==1.43.120
 certifi==2026.10.23
@@ -40,6 +41,7 @@ mdit-py-plugins==0.6.1
 mdurl==0.1.2
 mutmut==3.6.0
 nats-py==2.16.0
+nodejs-wheel-binaries==24.19.0
 opentelemetry-api==1.45.1
 opentelemetry-exporter-http-transport==0.66b1
 opentelemetry-exporter-otlp-common==0.66b1

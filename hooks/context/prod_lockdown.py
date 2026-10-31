@@ -16,11 +16,9 @@ from hooks.config import AGENTIHOOKS_HOME
 from hooks.hook_manager import BlockAction
 
 BYPASS_TYPE = "prod_lockdown_bypass"
-BYPASS_TTL = 300  # 5 min — per-turn legacy bypass (--emergency-prod)
-_SESSION_SIGNAL_TTL = 14400  # 4 hours — session-scoped signals (release, hotfix)
+BYPASS_TTL = 300
+_SESSION_SIGNAL_TTL = 14400
 
-# Legacy hotfix/emergency vocabulary — kept for backwards-compat.
-# Full signal vocabulary now sourced from CI Manifesto via ci_manifesto.py.
 BYPASS_PHRASES: list[str] = ["--emergency-prod", "prod override", "emergency"]
 
 _MERGE_QUEUE = (

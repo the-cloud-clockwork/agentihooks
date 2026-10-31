@@ -1,5 +1,9 @@
 from dataclasses import replace
+from pathlib import Path
 
+import pytest
+
+from hooks.context import voice_output
 from tests.test_hook_manager import quiet_session_start as quiet_session_start
 
 
@@ -60,7 +64,9 @@ def test_workstation_hook_does_not_connect(monkeypatch):
     assert hive_join.run({"session_id": "session"}, "start") is None
 
 
-def test_hive_reports_are_dispatched_at_start_and_end(quiet_session_start, monkeypatch, tmp_path):
+def test_hive_reports_are_dispatched_at_start_and_end(
+    quiet_session_start: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from hooks import hook_manager
     from hooks.context import hive_join
 
@@ -70,7 +76,14 @@ def test_hive_reports_are_dispatched_at_start_and_end(quiet_session_start, monke
     monkeypatch.setattr(hook_manager, "_request_trace_flush", lambda *args: None)
     payload = {"session_id": "session", "cwd": str(tmp_path)}
     hook_manager.EVENT_HANDLERS["SessionStart"](payload)
+    flag = voice_output._FLAG_DIR / "session.voice"
+    assert flag.resolve().is_relative_to(Path.home().resolve())
+    assert voice_output._QUOTA_FLAG == flag.parent / "quota_exhausted"
+    assert voice_output._LAST_SPOKE_FLAG == flag.parent / "last_spoke_ts"
+    voice_output.set_voice_enabled("session")
+    assert flag.read_text() == "1"
     hook_manager.EVENT_HANDLERS["SessionEnd"](payload)
+    assert not flag.exists()
     assert called == [(payload, "start"), (payload, "end")]
 
 

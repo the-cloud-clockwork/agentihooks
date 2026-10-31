@@ -278,6 +278,33 @@ def test_master_placement_and_spawn_hand_the_pass_memo_to_the_workstation_check(
     assert memos[0] is pass_memo
 
 
+def test_workstation_room_reads_local_slots_through_the_pass_cache_only_inside_a_pass(
+    setup,  # noqa: F811
+    monkeypatch,
+):
+    from scripts.swarm import local_slots
+
+    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
+    caches = []
+
+    def held(store, machine, slug, task, cache=None):
+        caches.append(cache)
+        raise _Stop
+
+    monkeypatch.setattr(local_slots, "running", lambda store, slug, task, cache=None: caches.append(cache) or 0)
+    monkeypatch.setattr(local_slots, "held", held)
+    runtime.begin_placement_pass()
+    with pytest.raises(_Stop):
+        runtime._workstation_room("workstation", {"id": "one"})
+    assert isinstance(caches[0], local_slots.PassCache)
+    assert caches[1] is caches[0]
+    runtime.end_placement_pass()
+    with pytest.raises(_Stop):
+        runtime._workstation_room("workstation", {"id": "one"})
+    assert caches[2:] == [None, None]
+
+
 @pytest.mark.parametrize("in_pass", [False, True])
 def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_pass):  # noqa: F811
     from dataclasses import replace

@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm.store import MASTER, AgentRecord, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed, tick
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
 
@@ -16,7 +16,7 @@ class RecoveryRuntime(FakeRuntime):
 
 
 @pytest.mark.parametrize("record", ["stale", "missing"])
-def test_tick_recovers_live_master_without_spawning_or_moving_mail(store, record):  # noqa: F811
+def test_tick_recovers_live_master_without_spawning_or_moving_mail(store: RedisStore, record: str) -> None:  # noqa: F811
     store.update("sw", state="paused")
     dead = store.next_name("sw", MASTER)
     live = store.next_name("sw", MASTER)
@@ -37,7 +37,7 @@ def test_tick_recovers_live_master_without_spawning_or_moving_mail(store, record
     assert masters(store)[0].pane_id == "hand:p1"
     assert masters(store)[0].harness == "codex"
     assert store.seats.occupant(seat).generation == generation
-    assert inbox.get(item.id).address == live
+    assert inbox.get(item.id).address == seat
     assert f"adopted live master {live}" in actions
     tick("sw", store, tasks(), runtime, STARTUP_GRACE_MS + 3)
     assert runtime.masters == []

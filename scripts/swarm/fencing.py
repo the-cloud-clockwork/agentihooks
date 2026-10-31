@@ -61,8 +61,15 @@ def now_ms() -> int:
     return round(time.time() * 1000)
 
 
+def _project_executions(value: bytes) -> bytes:
+    return _encode(json.loads(value)["executions"])
+
+
 def _states(store: Any) -> Any:
-    return state.for_store(store, BUCKET)
+    states = state.for_store(store, BUCKET)
+    if isinstance(states, RedisStateStore):
+        states.projection = _project_executions
+    return states
 
 
 def _task(key: str) -> str:
@@ -121,12 +128,51 @@ def _entry(states: Any, store: Any, slug: str) -> Any:
     return states.get(slug)
 
 
-def _decode(value: bytes) -> dict:
+def _decode(value: bytes) -> dict[str, Any]:
     return {**copy.deepcopy(EMPTY), **json.loads(value)}
 
 
-def read(store: Any, slug: str) -> dict:
+def read(store: Any, slug: str) -> dict[str, Any]:
     return _decode(_entry(_states(store), store, slug).value)
+
+
+def read_executions(store: Any, slug: str) -> dict[str, Any]:
+    states = _states(store)
+    if isinstance(states, RedisStateStore):
+        entry = states.get_projection(slug)
+        if entry is not None:
+            return json.loads(entry.value)
+    return read(store, slug)["executions"]
+
+
+LEASE_CACHE = "lease-cache"
+
+
+def _lease_cache_key(store: Any, slug: str) -> str:
+    return store.key(slug, LEASE_CACHE)
+
+
+def _cache_lease(store: Any, states: Any, slug: str, doc: dict[str, Any], revision: int) -> None:
+    if not isinstance(states, RedisStateStore):
+        return
+    payload = json.dumps(
+        {"revision": revision, "lease": doc["lease"], "epoch": doc["epoch"], "legacy_owner": doc["legacy_owner"]}
+    )
+    store.redis.set(_lease_cache_key(store, slug), payload)
+
+
+def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
+    states = _states(store)
+    if not isinstance(states, RedisStateStore):
+        return None
+    raw = store.redis.get(_lease_cache_key(store, slug))
+    revision = store.redis.get(states.revision_key)
+    if raw is None or revision is None:
+        return None
+    cached = json.loads(raw)
+    if str(cached["revision"]) != str(revision):
+        return None
+    return {"lease": cached["lease"]}
 
 
 def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
@@ -136,13 +182,15 @@ def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
     for _ in range(ATTEMPTS):
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
+        before = copy.deepcopy(doc)
         result = change(doc)
-        if doc == _decode(entry.value):
+        if doc == before:
             return result
         try:
-            states.update(slug, _encode(doc), entry.revision)
+            written = states.update(slug, _encode(doc), entry.revision)
         except StateConflict:
             continue
+        _cache_lease(store, states, slug, doc, written)
         return result
     raise SwarmError(CONTENTION)
 

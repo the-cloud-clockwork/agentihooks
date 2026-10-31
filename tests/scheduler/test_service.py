@@ -668,6 +668,41 @@ def test_a_supervisor_started_by_its_unit_marks_its_runtime_folder_before_it_loc
     assert (tmp_path / "scheduler" / "agentihooks-scheduler.service").read_text() == "agentihooks-scheduler.service"
 
 
+def test_a_supervisor_started_by_its_unit_drains_one_started_outside_it_then_takes_the_lock(
+    monkeypatch, tmp_path, capsys
+):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", "1")
+    asked, drained = [], []
+    monkeypatch.setattr(service, "holder", lambda environ: asked.append(environ) or {"pid": 4242})
+    monkeypatch.setattr(service, "drain", lambda pid, environ: drained.append((pid, environ)) or True)
+    stopped = Event()
+    stopped.set()
+    service.supervise(stopped)
+    assert asked == [os.environ]
+    assert drained == [(4242, os.environ)]
+    assert capsys.readouterr() == ("", "the scheduler unit takes over from supervisor 4242, started outside it\n")
+    assert json.loads((tmp_path / "supervisor.json").read_text())["pid"] == os.getpid()
+
+
+@pytest.mark.parametrize(("unit", "held"), [("1", None), ("1", "self"), ("", 4242)])
+def test_a_supervisor_drains_no_holder_unless_its_unit_started_it_and_another_holds(monkeypatch, tmp_path, unit, held):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", unit)
+    pid = os.getpid() if held == "self" else held
+    monkeypatch.setattr(service, "holder", lambda environ: None if pid is None else {"pid": pid})
+    monkeypatch.setattr(service, "drain", Mock(side_effect=AssertionError("drained without cause")))
+    stopped = Event()
+    stopped.set()
+    service.supervise(stopped)
+
+
 def test_a_supervisor_started_by_its_unit_creates_and_marks_a_new_runtime_folder(monkeypatch, tmp_path):
     from scripts.scheduler import service
 

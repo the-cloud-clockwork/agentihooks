@@ -75,9 +75,9 @@ def test_a_postgres_ledger_write_advances_its_revision_and_records_its_events():
     assert rejected == []
     assert claimed["_meta"]["rev"] > created
     assert shared.get_document(slug)["tasks"][0]["state"] == "claimed"
-    assert shared.events_since(slug, created)
+    assert [event for event in shared.export_document(slug)["_meta"]["events"] if event["rev"] > created]
     with pytest.raises(sqlite.Missing):
-        shared.events_since(fresh("missing"), 0)
+        shared.export_document(fresh("missing"))
 
 
 def test_the_postgres_relay_journal_holds_each_revision_once_and_drops_it():

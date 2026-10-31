@@ -65,6 +65,7 @@ class FencedLedger:
 class FencedRuntime:
     def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
+        self._local_slots_cache: local_slots.PassCache | None = None
         self.kubernetes_proof = (
             slug.startswith("proof-") and os.environ.get("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF") == slug
         )
@@ -108,11 +109,13 @@ class FencedRuntime:
         if launch := getattr(self.runtime, "hive_launch", None):
             launch.placement_cache = {}
             launch.herdr.pass_memo = {}
+        self._local_slots_cache = local_slots.PassCache()
 
     def end_placement_pass(self) -> None:
         if launch := getattr(self.runtime, "hive_launch", None):
             launch.placement_cache = None
             launch.herdr.pass_memo = None
+        self._local_slots_cache = None
 
     def placement_refusal(self, lane: str, task: dict) -> str:
         refused = self._refusal(lane, task)
@@ -184,8 +187,9 @@ class FencedRuntime:
         from scripts.hive import admission, headroom, registry
 
         hive = registry.show(self.store.redis, machine)
-        running = local_slots.running(self.store, self.slug, task["id"])
-        held = local_slots.held(self.store, machine, self.slug, task["id"])
+        cache = self._local_slots_cache
+        running = local_slots.running(self.store, self.slug, task["id"], cache)
+        held = local_slots.held(self.store, machine, self.slug, task["id"], cache)
         pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
         now = lease.now_ms(self.store)
         found = admission.room(

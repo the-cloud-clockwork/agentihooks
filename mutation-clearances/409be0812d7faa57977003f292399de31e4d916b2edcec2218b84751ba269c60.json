@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/server_code.py:scripts.swarm_ledger.server_code.x_loaded:a52af679274e8d2cc0c78956e576dd2a746985862b4412515f0475659632b6e8": {
+    "reader": "Standards",
+    "reason": "typing.cast returns its second argument unchanged. Changing only the type argument to None preserves every runtime result after the existing dictionary check."
+  }
+}
