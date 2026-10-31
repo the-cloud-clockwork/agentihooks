@@ -179,7 +179,7 @@ def test_a_hanging_open_runs_on_a_daemon_thread_and_frees_the_sender() -> None:
 
     publisher = bus.SeatPublisher(hanging)
     item = Item(id="i1", sender="alice", address=SEAT, text="work", state="pending", created_at=0, updated_at=0)
-    sender = threading.Thread(target=publisher.publish, args=(item,), daemon=True)
+    sender = threading.Thread(target=publisher.publish, args=(item,), daemon=False)
     sender.start()
     sender.join(2)
     held = sender.is_alive()
