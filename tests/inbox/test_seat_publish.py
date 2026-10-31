@@ -17,6 +17,7 @@ def mail(monkeypatch):
 
     shared = memory.open_bus(BusConfig())
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setattr(bus, "OPEN_WAIT_S", 30.0)
     publisher = bus.SeatPublisher(lambda: shared)
     monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
     yield InboxStore(fakeredis.FakeRedis(decode_responses=True)), shared
@@ -135,7 +136,7 @@ def test_a_hanging_connect_holds_no_publish_and_is_attempted_once():
     def hanging():
         attempts.append(1)
         release.wait(5)
-        raise OSError("nats connect timed out")
+        return memory.open_bus(BusConfig())
 
     publisher = bus.SeatPublisher(hanging)
     took = []

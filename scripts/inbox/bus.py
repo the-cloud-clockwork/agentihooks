@@ -204,7 +204,8 @@ def seat_of(store, me: str) -> str:
 
 
 class SeatPublisher:
-    """Open the bus once on a background thread behind one lock, so no sender waits on a connect."""
+    """Open the bus once on a background thread behind one lock; only the sender that starts an open waits for it,
+    at most OPEN_WAIT_S, and every send without an open bus is left to the Redis wake outbox."""
 
     def __init__(self, opener: Callable[[], Bus]) -> None:
         self._opener = opener
@@ -215,14 +216,13 @@ class SeatPublisher:
 
     def _ready(self) -> Bus | None:
         with self._lock:
-            if self._bus is not None or time.monotonic() < self._retry_at:
+            if self._bus is not None or self._opening is not None or time.monotonic() < self._retry_at:
                 return self._bus
-            opening = self._opening
-            if opening is None:
-                opening = self._opening = threading.Event()
-                threading.Thread(target=self._open, args=(opening,), daemon=True).start()
+            opening = self._opening = threading.Event()
+        threading.Thread(target=self._open, args=(opening,), daemon=True).start()
         opening.wait(OPEN_WAIT_S)
-        return self._bus
+        with self._lock:
+            return self._bus
 
     def _open(self, opening: threading.Event) -> None:
         try:

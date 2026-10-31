@@ -68,20 +68,22 @@ def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(i
     import threading
     import time
 
+    from scripts.events import memory
+    from scripts.events.config import BusConfig
     from scripts.inbox import bus
 
     release = threading.Event()
 
     def hanging():
         release.wait(5)
-        raise OSError("nats connect timed out")
+        return memory.open_bus(BusConfig())
 
     publisher = bus.SeatPublisher(hanging)
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
     monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
     phase = make_ledger()
-    state, _ = core.sync(SLUG, ops=[comment(phase, "c-3")])
     start = time.monotonic()
+    state, _ = core.sync(SLUG, ops=[comment(phase, "c-3")])
     [item] = ledger_server.relay_to_inbox(SLUG, state)
     took = time.monotonic() - start
     release.set()
