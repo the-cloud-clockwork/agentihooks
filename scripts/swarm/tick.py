@@ -1565,7 +1565,9 @@ def _finished_launch(slug, store, doc, agent):
     return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
 
 
-def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
+def _collect_acks(
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, doc: dict[str, Any], now_ms: int
+) -> list[str]:
     from scripts.swarm import launch_job
     from scripts.swarm_v2.runtime import codex
 
@@ -1606,7 +1608,15 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     return actions
 
 
-def _spawn_order(slug, config, store, agents, rows, doc, runtime):
+def _spawn_order(
+    slug: str,
+    config: SwarmConfig,
+    store: RedisStore,
+    agents: list[AgentRecord],
+    rows: dict[str, Any],
+    doc: dict[str, Any],
+    runtime: Any,
+) -> tuple[list[Any], list[Any]]:
     from scripts.swarm import capacity, focus_budget
 
     if begin := getattr(runtime, "begin_placement_pass", None):

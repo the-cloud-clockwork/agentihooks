@@ -2,16 +2,18 @@
 
 from collections.abc import Iterator
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 
-from scripts.events.bus import Bus
+from scripts.events.bus import Bus, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.memory import open_bus
 from scripts.hive import lanes, registry, spoke
 from scripts.hub import admission, slots
 from scripts.swarm import readiness
+from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_readiness import NOW, SLUG, Clock, bus, clock, doc, snapshot, task  # noqa: F401
@@ -59,7 +61,7 @@ def test_an_offer_carries_its_hive_pin_and_needs_and_nothing_for_an_unpinned_tas
 def test_placeable_keeps_workstation_pinned_and_needs_tasks_off_hives_that_may_not_take_them(
     row: dict, hive: str, capabilities: tuple[str, ...], expected: bool
 ) -> None:
-    assert readiness.placeable(row, hive, capabilities) is expected
+    assert readiness.placeable(row, hive, lambda: capabilities) is expected
 
 
 def test_fits_reads_capabilities_only_for_an_offer_with_needs() -> None:
@@ -76,6 +78,7 @@ def test_a_hive_leaves_an_offer_pinned_elsewhere_in_the_queue_for_its_own_hive(b
     queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
 
     taken = readiness.take(queue, lambda: None, 0, lambda event: readiness.fits(event, "hive-a", no_capabilities))
+    assert taken is not None
     assert taken.event.key == "plain"
     taken.ack()
     assert (
@@ -84,6 +87,7 @@ def test_a_hive_leaves_an_offer_pinned_elsewhere_in_the_queue_for_its_own_hive(b
 
     clock.now += readiness.UNFIT_NAK_MS
     held = readiness.take(queue, lambda: None, 0, lambda event: readiness.fits(event, "hive-b", no_capabilities))
+    assert held is not None
     assert held.event.key == "pinned"
 
 
@@ -91,7 +95,7 @@ def test_a_skipped_offer_is_released_for_another_hive_not_terminated() -> None:
     delivery = SimpleNamespace(event=SimpleNamespace(key="pinned"), nak=Mock(), term=Mock())
     queue = SimpleNamespace(take=Mock(side_effect=[delivery, None]))
 
-    assert readiness.take(queue, lambda: None, 0, lambda event: False) is None
+    assert readiness.take(cast(WorkQueue, queue), lambda: None, 0, lambda event: False) is None
 
     delivery.nak.assert_called_once_with(readiness.UNFIT_NAK_MS)
     delivery.term.assert_not_called()
@@ -118,7 +122,11 @@ def rig() -> Iterator[SimpleNamespace]:
     source = SimpleNamespace(
         snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if swarm.claimant(slug, t)])
     )
-    yield SimpleNamespace(store=swarm, redis=redis, admitter=admission.Admission(swarm, ledger, source, lambda: 7_000))
+    yield SimpleNamespace(
+        store=swarm,
+        redis=redis,
+        admitter=admission.Admission(swarm, cast(LedgerClient, ledger), cast(readiness.Source, source), lambda: 7_000),
+    )
     redis.close()
 
 
@@ -155,7 +163,7 @@ def test_a_lane_spoke_skips_an_offer_pinned_to_another_hive_without_asking_the_h
 ) -> None:
     scoped = open_bus(BusConfig(scoped=True))
     hub = Mock()
-    slots.serve(scoped, admitter=hub)
+    slots.serve(cast(Bus, scoped), admitter=hub)
     monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
     readiness.publish(scoped.for_swarm(SLUG), snapshot(doc([task("pinned", hive="hive-b")])), NOW)
     configs = SimpleNamespace(

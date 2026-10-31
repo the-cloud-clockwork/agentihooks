@@ -3,8 +3,9 @@
 An offer's id carries the task's claim generation, so the bus drops a repeat only inside its dedupe window.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from typing import Any, cast
 
 from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
@@ -107,8 +108,12 @@ def queue_name(slug: str, lane: str) -> str:
     return subjects.subject(slug, "ready", lane)
 
 
-def offer(task: dict, view: Snapshot, now_ms: int) -> Envelope:
-    pins = {"hive": task.get("hive"), "needs": list(task.get("needs") or ())}
+def offer(task: dict[str, Any], view: Snapshot, now_ms: int) -> Envelope:
+    data: dict[str, Any] = {"lane": task["lane"], "generation": generation(task)}
+    if hive := task.get("hive"):
+        data["hive"] = hive
+    if needs := task.get("needs"):
+        data["needs"] = list(needs)
     return Envelope(
         id=offer_id(view.slug, task),
         type="task.ready",
@@ -118,44 +123,57 @@ def offer(task: dict, view: Snapshot, now_ms: int) -> Envelope:
         version=generation(task),
         time=now_ms,
         author=AUTHOR,
-        data={"lane": task["lane"], "generation": generation(task), **{k: v for k, v in pins.items() if v}},
+        data=data,
     )
 
 
-def placeable(task: dict, hive: str, capabilities: Iterable[str]) -> bool:
-    """A hive never takes a workstation task, a task pinned to another hive or one needing what it lacks."""
+def placeable(task: Mapping[str, Any], hive: str, capabilities: Callable[[], Iterable[str]]) -> bool:
+    """A hive never takes a workstation task, a task pinned to another hive or one needing what it lacks; its
+    capabilities are read only for a task that names needs."""
+    needs: set[str] = set(task.get("needs") or ())
     return (
         not task.get("workstation")
         and task.get("hive") in (None, "", hive)
-        and set(task.get("needs") or ()) <= set(capabilities)
+        and (not needs or needs <= set(capabilities()))
     )
 
 
 def fits(event: Envelope, hive: str, capabilities: Callable[[], Iterable[str]]) -> bool:
-    """Capabilities are read only for an offer that names needs."""
-    needs = event.data.get("needs")
-    return placeable(event.data, hive, capabilities() if needs else ())
+    return placeable(cast("Mapping[str, Any]", event.data), hive, capabilities)
+
+
+def declared(client: Any, hive: str) -> Callable[[], list[str]]:
+    """The capabilities a hive registered, read when called."""
+
+    def capabilities() -> list[str]:
+        from scripts.hive import registry
+
+        record = cast("Mapping[str, list[str]] | None", registry.show(client, hive)) or {}
+        return list(record.get("capabilities", []))
+
+    return capabilities
 
 
 def anywhere(event: Envelope) -> bool:
     return True
 
 
-def tick_launches(engine: str, task: dict) -> bool:
+def tick_launches(engine: str, task: Mapping[str, Any]) -> bool:
     """Under the events engine hives take every task but a workstation task, which the workstation tick launches."""
     return engine != EVENTS_ENGINE or bool(task.get("workstation"))
 
 
-def tick_places(engine: str, rows: dict) -> bool:
+def tick_places(engine: str, rows: Mapping[str, Mapping[str, Any]]) -> bool:
     return engine != EVENTS_ENGINE or any(
         row.get("state") == "open" and tick_launches(engine, row) for row in rows.values()
     )
 
 
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
+    rows = cast("Mapping[str, dict[str, Any]]", view.rows)
     return [
         offer(task, view, now_ms)
-        for task in view.rows.values()
+        for task in rows.values()
         if task.get("lane") and not task.get("workstation") and claimable(task, task["lane"], view)
     ]
 

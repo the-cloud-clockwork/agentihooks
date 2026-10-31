@@ -63,11 +63,8 @@ def lanes(excluded: str | None) -> tuple[str, ...]:
 
 def fit(store: Any, hive: str) -> Callable[[Envelope], bool]:
     """Offers this hive may not take stay in the queue; its declared capabilities are read only for needs."""
-    from scripts.hive import registry
-
-    return lambda event: readiness.fits(
-        event, hive, lambda: (registry.show(store.redis, hive) or {}).get("capabilities", [])
-    )
+    capabilities = readiness.declared(store.redis, hive)
+    return lambda event: readiness.fits(event, hive, capabilities)
 
 
 def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> list[Spoke]:

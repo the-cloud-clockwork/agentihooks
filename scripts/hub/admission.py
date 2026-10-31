@@ -4,6 +4,7 @@ or occupy a seat, and a remote hive makes no service ledger reads."""
 import json
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window
@@ -34,7 +35,7 @@ class Admission:
     def _key(self, slug: str, request: dict) -> str:
         return self.store.key(slug, ADMITTED, request["task"], str(request["generation"]))
 
-    def admit(self, slug: str, request: dict) -> dict | None:
+    def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
@@ -55,15 +56,9 @@ class Admission:
             return None
         return self._claim(slug, request, view.rows)
 
-    def _placeable(self, row: dict, hive: str) -> bool:
+    def _placeable(self, row: dict[str, Any], hive: str) -> bool:
         """A workstation task, a task pinned to another hive or one needing what the hive lacks is never admitted."""
-        from scripts.hive import registry
-
-        return readiness.fits(
-            SimpleNamespace(data=row),
-            hive,
-            lambda: (registry.show(self.store.redis, hive) or {}).get("capabilities", []),
-        )
+        return readiness.placeable(row, hive, readiness.declared(self.store.redis, hive))
 
     def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
         from scripts.swarm import tick
