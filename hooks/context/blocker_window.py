@@ -186,7 +186,7 @@ def _frozen(tool_name: str, tool_input: dict[str, Any]) -> str | None:
     return None if current is None else FROZEN.format(reason=current.reason)
 
 
-def checked(payload: dict[str, Any]) -> str | None:
+def checked(payload: Any) -> str | None:
     tool_input: dict[str, Any] = payload.get("tool_input") or {}
     notice, block = pretool(
         str(payload.get("tool_name") or ""),
