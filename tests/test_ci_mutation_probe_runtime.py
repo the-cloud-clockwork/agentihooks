@@ -21,7 +21,7 @@ def test_early_probe_runs_only_its_owned_group_with_the_original_deadline_and_ke
     calls = []
     monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
 
-    def mutate(root, work, selected, deadline, shard, shared):
+    def mutate(root, work, selected, deadline, shard, shared, first=()):
         saved = json.loads((shared.folder.parent / "plan.json").read_text())
         calls.append((root, work.name, selected, deadline, shard, saved["probe_mode"]))
         return {"scripts/a.py": [{"name": "scripts.a.x_f__mutmut_1", "status": "killed"}]}, ""
@@ -73,7 +73,7 @@ def test_a_rerun_early_probe_reuses_its_folders_and_a_survivor_within_a_spent_bu
     monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
     seen = []
 
-    def mutate(root, work, selected, deadline, shard, shared):
+    def mutate(root, work, selected, deadline, shard, shared, first=()):
         seen.append((work, shared))
         return {"scripts/a.py": [{"name": "scripts.a.x_f__mutmut_1", "status": "survived"}]}, ""
 
@@ -98,7 +98,7 @@ def test_an_early_probe_runs_the_identity_group_alone_when_only_it_owns_split_mu
     monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
     calls = []
 
-    def mutate(root, work, selected, deadline, shard, shared):
+    def mutate(root, work, selected, deadline, shard, shared, first=()):
         calls.append((work.name, selected, shared.folder.name))
         return {
             "scripts/ci_mutation/identity.py": [
@@ -143,7 +143,7 @@ def test_shared_early_elapsed_time_is_charged_before_the_remaining_worker_starts
     monkeypatch.setattr(runner, "load_clearances", lambda root: {})
     monkeypatch.setattr(runner, "record_shard_measurement", lambda *args: None)
 
-    def mutate(root, work, selected, deadline, shard, shared):
+    def mutate(root, work, selected, deadline, shard, shared, first=()):
         calls.append(deadline - 100)
         return {"scripts/a.py": []}, ""
 

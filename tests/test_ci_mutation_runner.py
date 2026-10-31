@@ -96,7 +96,7 @@ def test_every_group_reached_after_the_deadline_is_reported_over_budget(tmp_path
 def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_run(tmp_path, monkeypatch):
     calls = []
 
-    def mutate(root, work, selected, deadline, shard, stats):
+    def mutate(root, work, selected, deadline, shard, stats, first=()):
         assert shard == (0, 1)
         assert stats is None
         calls.append(list(selected))
@@ -109,6 +109,21 @@ def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_r
     assert calls == [["hooks/sample.py"], ["scripts/ci_mutation/identity.py"]]
     assert report["not_mutated"] == [{"path": "hooks/sample.py", "reason": "mutmut failed with exit 1"}]
     assert [result["path"] for result in report["files"]] == ["scripts/ci_mutation/identity.py"]
+
+
+def test_every_group_receives_the_branch_tests_to_run_first(tmp_path, monkeypatch):
+    seen = []
+
+    def mutate(root, work, selected, deadline, shard, stats, first=()):
+        seen.append(first)
+        return {path: [] for path in selected}, ""
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
+    run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 60, first=("tests/test_new.py::test_n",))
+    assert seen == [("tests/test_new.py::test_n",), ("tests/test_new.py::test_n",)]
+    seen.clear()
+    run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 60)
+    assert seen == [(), ()]
 
 
 BASELINE_LOG = """...F
@@ -896,8 +911,9 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
             "lines": [2],
             "tests": ["tests/test_sample.py"],
             "direct": ["tests/test_sample.py::test_f"],
+            "first": [],
         },
-        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"], "direct": []},
+        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"], "direct": [], "first": []},
     }
     if len(commands) == 2:
         assert commands[1] == [
@@ -910,6 +926,32 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
             "hooks/sample.py",
             "scripts/other.py",
         ]
+
+
+def test_each_file_runs_first_only_the_branch_tests_its_selection_holds(tmp_path, monkeypatch):
+    import json
+
+    from scripts.ci_mutation.runner import mutate_files
+
+    selected = {
+        "hooks/sample.py": ({2}, ["tests/test_sample.py"]),
+        "scripts/other.py": ({3}, ["tests/test_o.py::TestO::test_x"]),
+    }
+    first = (
+        "tests/test_o.py::TestO::test_x",
+        "tests/test_o.py::TestO::test_y",
+        "tests/test_sample.py::test_new",
+        "tests/test_far.py::test_far",
+    )
+    monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", lambda root, work, paths, tests: work.mkdir())
+    monkeypatch.setattr("scripts.ci_mutation.runner.run_process", lambda command, cwd, timeout, log: None)
+    monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
+    assert mutate_files(tmp_path, tmp_path / "work", selected, 20, (0, 1), None, first) == ({}, "over budget")
+    written = json.loads((tmp_path / "work/changed-lines.json").read_text())
+    assert {path: entry["first"] for path, entry in written.items()} == {
+        "hooks/sample.py": ["tests/test_sample.py::test_new"],
+        "scripts/other.py": ["tests/test_o.py::TestO::test_x"],
+    }
 
 
 @pytest.mark.parametrize(
@@ -932,7 +974,7 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
         "diff": "-    return 1\n+    return 2",
     }
 
-    def mutate(root, work, selected, deadline, shard, stats):
+    def mutate(root, work, selected, deadline, shard, stats, first=()):
         assert shard == (2, 3)
         assert stats is None
         assert root == tmp_path
@@ -996,7 +1038,7 @@ def test_shard_measurement_counts_owned_terminal_metadata_and_excludes_unchecked
         json.dumps({"assignments": assignments, "costs": {name: 10 for name in assignments}})
     )
 
-    def mutate(root, work, selected, deadline, shard, shared):
+    def mutate(root, work, selected, deadline, shard, shared, first=()):
         if partial:
             for path in ("hooks/sample.py.meta", "hooks/duplicate.py.meta"):
                 target = work / "mutants" / path

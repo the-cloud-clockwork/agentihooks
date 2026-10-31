@@ -16,7 +16,7 @@ from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
 from scripts.ci_mutation.probe import mark_probe_results, probe_elapsed, probe_results
 from scripts.ci_mutation.report import evaluate, survivor_text
-from scripts.ci_mutation.scope import select_tests
+from scripts.ci_mutation.scope import select_tests, selects
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 IDENTITY = "scripts/ci_mutation/identity.py"
@@ -329,6 +329,7 @@ def mutate_files(
     deadline: float,
     shard: tuple[int, int],
     stats: SharedStats | None,
+    first: tuple[str, ...] = (),
 ) -> tuple[dict[str, list[dict]], str]:
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
     prepare_workspace(root, work, list(selected), tests)
@@ -338,7 +339,12 @@ def mutate_files(
     selection.write_text(
         json.dumps(
             {
-                path: {"lines": sorted(lines), "tests": chosen, "direct": direct.get(path, [])}
+                path: {
+                    "lines": sorted(lines),
+                    "tests": chosen,
+                    "direct": direct.get(path, []),
+                    "first": [test for test in first if any(selects(entry, test) for entry in chosen)],
+                }
                 for path, (lines, chosen) in selected.items()
             }
         )
@@ -441,6 +447,7 @@ def run_gate(
     budget: float,
     shard: tuple[int, int] = (0, 1),
     stats: SharedStats | None = None,
+    first: tuple[str, ...] = (),
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic() - probe_elapsed(stats)
@@ -471,7 +478,13 @@ def run_gate(
             continue
         work = Path(tempfile.mkdtemp(prefix=f"{index}-", dir=output))
         results, reason = mutate_files(
-            root, work, {path: selected[path] for path in group}, deadline, shard, stats and stats.group(index)
+            root,
+            work,
+            {path: selected[path] for path in group},
+            deadline,
+            shard,
+            stats and stats.group(index),
+            first,
         )
         if reason:
             reasons.update(dict.fromkeys(group, reason))

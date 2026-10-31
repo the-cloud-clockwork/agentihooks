@@ -48,6 +48,51 @@ def test_tests_covering_the_changed_lines_run_before_faster_fallback_tests(tmp_p
     ]
 
 
+def test_a_test_new_on_the_branch_runs_before_covering_tests_and_after_the_recorded_killer(tmp_path):
+    memory = killers.KillMemory(
+        tmp_path / "killers", {"scripts.a.": ["tests/test_a.py::fast"]}, ["tests/test_c.py::slow"]
+    )
+    assert memory.order("scripts.a.x_f__mutmut_1", TESTS) == [
+        "tests/test_c.py::slow",
+        "tests/test_a.py::fast",
+        "tests/test_b.py::middle",
+    ]
+    assert memory.order("scripts.b.x_f__mutmut_1", TESTS) == [
+        "tests/test_c.py::slow",
+        "tests/test_a.py::fast",
+        "tests/test_b.py::middle",
+    ]
+    parametrized = ["tests/test_a.py::fast", "tests/test_c.py::slow[2]", "tests/test_c.py::slow[1]"]
+    assert memory.order("scripts.a.x_f__mutmut_1", parametrized) == [
+        "tests/test_c.py::slow[2]",
+        "tests/test_c.py::slow[1]",
+        "tests/test_a.py::fast",
+    ]
+    memory.mutant = "scripts.a.x_f__mutmut_1"
+    memory.pytest_runtest_logreport(_report("tests/test_b.py::middle"))
+    assert memory.order("scripts.a.x_f__mutmut_2", TESTS) == [
+        "tests/test_b.py::middle",
+        "tests/test_c.py::slow",
+        "tests/test_a.py::fast",
+    ]
+
+
+def test_the_order_is_unchanged_when_no_test_is_new_on_the_branch(tmp_path):
+    direct = {"scripts.a.": ["tests/test_c.py::slow"]}
+    plain = killers.KillMemory(tmp_path / "plain", direct)
+    empty = killers.KillMemory(tmp_path / "empty", direct, [])
+    unrelated = killers.KillMemory(tmp_path / "unrelated", direct, ["tests/test_z.py::elsewhere"])
+    for mutant in ("scripts.a.x_f__mutmut_1", "scripts.b.x_f__mutmut_1"):
+        expected = plain.order(mutant, TESTS)
+        assert empty.order(mutant, TESTS) == expected
+        assert unrelated.order(mutant, TESTS) == expected
+    assert plain.order("scripts.a.x_f__mutmut_1", TESTS) == [
+        "tests/test_c.py::slow",
+        "tests/test_a.py::fast",
+        "tests/test_b.py::middle",
+    ]
+
+
 def test_the_test_that_killed_a_mutant_runs_first_for_every_later_mutant_of_its_function(tmp_path):
     memory = killers.KillMemory(tmp_path / "killers")
     memory.mutant = "scripts.a.x_f__mutmut_1"
@@ -177,6 +222,55 @@ def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(
     assert (tmp_path / "killers" / _digest("scripts.a.x_f")).read_text() == "tests/test_c.py::slow"
     assert not list((tmp_path / "killers").glob(f"*.{os.getpid()}"))
     assert Path.cwd() == tmp_path
+
+
+def test_a_mutant_killed_only_by_a_branch_new_test_dies_on_the_first_test_run(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    selection_file = tmp_path / "selection.json"
+    new = "tests/test_new.py::test_kills"
+    tests = [*TESTS, new]
+    selection_file.write_text(
+        json.dumps(
+            {
+                "scripts/a.py": {
+                    "lines": [2],
+                    "tests": ["tests/test_a.py", "tests/test_new.py"],
+                    "direct": ["tests/test_b.py::middle"],
+                    "first": [new],
+                }
+            }
+        )
+    )
+    runs = []
+
+    class PytestRunner:
+        def execute_pytest(self, params, **kwargs):
+            plugins = kwargs.get("plugins", [])
+            runs.append(list(params))
+            for plugin in plugins:
+                for test in params:
+                    plugin.pytest_runtest_logreport(_report(test, failed=test == new))
+            return 1
+
+        def run_tests(self, *, mutant_name, tests):
+            return self.execute_pytest(list(tests), plugins=[])
+
+    def cli(args):
+        PytestRunner().run_tests(mutant_name="scripts.a.x_f__mutmut_1", tests=tests)
+
+    runner = SimpleNamespace(
+        collect_source_file_mutation_data=None,
+        PytestRunner=PytestRunner,
+        mutmut=SimpleNamespace(),
+        cli=cli,
+    )
+    monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
+    monkeypatch.setenv("CI", "true")
+    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
+        monkeypatch.setitem(sys.modules, name, sys.modules[name])
+    selection.run_selected(selection_file, (0, 1))
+    assert runs == [[new, "tests/test_b.py::middle", "tests/test_a.py::fast", "tests/test_c.py::slow"]]
+    assert (tmp_path / "killers" / _digest("scripts.a.x_f")).read_text() == new
 
 
 def test_completed_mutant_cost_survives_a_kill_and_cache_reload(tmp_path, monkeypatch):

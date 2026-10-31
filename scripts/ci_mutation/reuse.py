@@ -13,6 +13,7 @@ from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
 EVIDENCE = Path(".mutation-gate")
 REPORT = "mutation-preflight-report"
 SCOPE = "scope.json"
+KILLERS = Path(".mutation-killers-restored/killers")
 PRODUCERS = (
     ".github/workflows/mutation-preflight.yml",
     ".github/workflows/test.yml",
@@ -125,6 +126,22 @@ def unpack(archive: bytes, row: dict) -> None:
     (EVIDENCE / "reuse.json").write_text(json.dumps({"run": row["id"], "head": row["head_sha"]}) + "\n")
 
 
+def restore_killers(head: str, branch: str, current: int, folder: Path = KILLERS) -> int:
+    """Unpack the killing tests the newest finished preflight of this head recorded; return how many it held."""
+    found = runs(f"head_sha={head}&branch={quote(branch)}", current)
+    if not found:
+        return 0
+    artifacts = api(f"actions/runs/{found[0]['id']}/artifacts?per_page=100")["artifacts"]
+    folder.mkdir(parents=True, exist_ok=True)
+    for artifact in artifacts:
+        if artifact["name"].startswith("mutation-killers-") and not artifact["expired"]:
+            with zipfile.ZipFile(io.BytesIO(api(f"actions/artifacts/{artifact['id']}/zip", binary=True))) as zipped:
+                for name in zipped.namelist():
+                    if not name.endswith("/"):
+                        (folder / Path(name).name).write_bytes(zipped.read(name))
+    return len(list(folder.iterdir()))
+
+
 def reuse(head: str, branch: str, current: int, base: str | None = None, grader: str | None = None) -> dict | None:
     try:
         found = exact(head, base, grader, branch, current) if base else source(head, branch, current)
@@ -151,6 +168,12 @@ def main() -> int:
         print(f"Reused the green mutation report of run {row['id']} for {row['head_sha']}")
     else:
         print("No green mutation report covers this head; mutating")
+        if args.head:
+            try:
+                restored = restore_killers(head, args.branch, args.run)
+                print(f"Restored {restored} kill memory records from this head's branch preflight")
+            except (subprocess.CalledProcessError, OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
+                print(f"Kill memory restore failed, mutating without it: {error}")
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
         stream.write(f"reused={'true' if row else 'false'}\n")
     return 0

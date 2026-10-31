@@ -20,14 +20,19 @@ def test_cli_uses_requested_revisions_budget_output_and_exit_code(tmp_path, monk
         calls.append((root, base, head))
         return {"hooks/sample.py": {2}}
 
-    def gate(root, changes, output, budget, shard, stats):
-        calls.append((root, changes, output, budget, shard, stats))
+    def gate(root, changes, output, budget, shard, stats, first):
+        calls.append((root, changes, output, budget, shard, stats, first))
         return {"failed": True}
+
+    def branch(root, base, head):
+        calls.append(("branch", root, base, head))
+        return ("tests/test_sample.py::test_new",)
 
     (tmp_path / "hooks").mkdir()
     (tmp_path / "scripts").mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", discover)
+    monkeypatch.setattr("scripts.ci_mutation.__main__.branch_tests", branch)
     monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
     monkeypatch.setattr(
         "sys.argv",
@@ -50,10 +55,20 @@ def test_cli_uses_requested_revisions_budget_output_and_exit_code(tmp_path, monk
     assert main() == 1
     assert calls == [
         (tmp_path, "base", "head"),
-        (tmp_path, {"hooks/sample.py": {2}}, tmp_path / "evidence", 13, (2, 5), None),
+        ("branch", tmp_path, "base", "head"),
+        (
+            tmp_path,
+            {"hooks/sample.py": {2}},
+            tmp_path / "evidence",
+            13,
+            (2, 5),
+            None,
+            ("tests/test_sample.py::test_new",),
+        ),
     ]
     out = capsys.readouterr().out
     assert "Changed Python files: 1" in out
+    assert "Tests new or changed on the branch, run first: 1" in out
     assert "Mutation shard: 3 of 5" in out
     assert __import__("os").environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
 
@@ -68,14 +83,15 @@ def test_cli_defaults_and_success(tmp_path, monkeypatch):
         assert (root, base, head) == (tmp_path, "origin/dev", "HEAD")
         return {}
 
-    def gate(root, changes, output, budget, shard, stats):
-        assert (root, changes, output, budget, shard, stats) == (
+    def gate(root, changes, output, budget, shard, stats, first):
+        assert (root, changes, output, budget, shard, stats, first) == (
             tmp_path,
             {},
             tmp_path / ".mutation-gate",
             1080,
             (0, 1),
             None,
+            (),
         )
         return {"failed": False}
 
@@ -158,7 +174,7 @@ def test_cli_passes_shared_stats_keyed_to_the_resolved_head(tmp_path, monkeypatc
         runs.append((command, kwargs))
         return __import__("subprocess").CompletedProcess(command, 0, "abc123\n", "")
 
-    def gate(root, changes, output, budget, shard, stats):
+    def gate(root, changes, output, budget, shard, stats, first):
         assert stats == SharedStats(tmp_path / "shared", "abc123", part)
         return {"failed": False}
 
@@ -206,7 +222,7 @@ def test_cli_accepts_the_first_stats_part_of_a_single_part_matrix(tmp_path, monk
     calls = []
     monkeypatch.setattr(
         "scripts.ci_mutation.__main__.run_gate",
-        lambda root, changes, output, budget, shard, stats: calls.append(stats) or {"failed": False},
+        lambda root, changes, output, budget, shard, stats, first: calls.append(stats) or {"failed": False},
     )
     assert main() == 0
     assert calls == [SharedStats(tmp_path / "s", "abc", (0, 1))]
@@ -391,3 +407,99 @@ def test_browser_cycles_do_not_hide_later_tests_or_revisit_modules(tmp_path, mon
 
     monkeypatch.setattr(browser, "imported_paths", imports)
     assert browser.needs_browser(tmp_path, ["tests/test_page.py", "tests/test_cycle.py"]) is True
+
+
+def _commit(root: Path, files: dict[str, str | None], message: str) -> str:
+    import subprocess
+
+    for name, text in files.items():
+        path = root / name
+        if text is None:
+            path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+    subprocess.run([*git, "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", message], cwd=root, check=True, capture_output=True)
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+
+
+def _repository(tmp_path: Path) -> tuple[Path, str]:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", "dev", str(tmp_path)], check=True)
+    base = _commit(
+        tmp_path,
+        {
+            "tests/test_a.py": "def test_kept():\n    pass\n\n\ndef test_changed():\n    assert 1\n",
+            "tests/test_gone.py": "def test_gone():\n    pass\n",
+            "tests/helper.py": "def test_like():\n    pass\n",
+        },
+        "base",
+    )
+    return tmp_path, base
+
+
+def test_branch_tests_name_every_test_the_branch_adds_or_changes(tmp_path):
+    from scripts.ci_mutation.__main__ import branch_tests
+
+    root, base = _repository(tmp_path)
+    head = _commit(
+        root,
+        {
+            "tests/test_a.py": (
+                "def test_kept():\n    pass\n\n\ndef test_changed():\n    assert 2\n\n\n"
+                "def helper():\n    pass\n\n\ndef test_new():\n    pass\n"
+            ),
+            "tests/test_b.py": "class TestB:\n    def test_x(self):\n        pass\n",
+            "tests/test_gone.py": None,
+            "tests/helper.py": "def test_like():\n    assert 1\n",
+        },
+        "branch",
+    )
+    assert branch_tests(root, base, head) == (
+        "tests/test_a.py::test_changed",
+        "tests/test_a.py::test_new",
+        "tests/test_b.py::TestB::test_x",
+    )
+
+
+def test_branch_tests_are_empty_when_the_branch_leaves_every_test_alone(tmp_path):
+    from scripts.ci_mutation.__main__ import branch_tests
+
+    root, base = _repository(tmp_path)
+    head = _commit(root, {"hooks/sample.py": "def f():\n    return 1\n"}, "branch")
+    assert branch_tests(root, base, head) == ()
+
+
+def test_branch_tests_measure_from_where_the_branch_left_its_base(tmp_path):
+    import subprocess
+
+    from scripts.ci_mutation.__main__ import branch_tests
+
+    root, base = _repository(tmp_path)
+    subprocess.run(["git", "checkout", "-q", "-b", "topic"], cwd=root, check=True)
+    head = _commit(root, {"tests/test_c.py": "def test_c():\n    pass\n"}, "topic")
+    subprocess.run(["git", "checkout", "-q", "dev"], cwd=root, check=True)
+    moved = _commit(root, {"tests/test_d.py": "def test_d():\n    pass\n"}, "dev moved")
+    assert branch_tests(root, moved, head) == ("tests/test_c.py::test_c",)
+    assert branch_tests(root, base, head) == ("tests/test_c.py::test_c",)
+
+
+@pytest.mark.parametrize(("args", "base"), [(["--bases", "first,second"], "first"), ([], "origin/dev")])
+def test_cli_reads_branch_tests_from_the_first_base_only_when_code_changed(tmp_path, monkeypatch, args, base):
+    from scripts.ci_mutation import __main__ as gate
+
+    (tmp_path / "hooks").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gate", *args])
+    calls, firsts = [], []
+    monkeypatch.setattr(gate, "branch_tests", lambda root, given, head: calls.append(given) or ("t::test_n",))
+    monkeypatch.setattr(gate, "run_gate", lambda *args: firsts.append(args[-1]) or {"failed": False})
+    monkeypatch.setattr(gate, "discover_changes", lambda root, given, head: {"hooks/a.py": {1}})
+    assert gate.main() == 0
+    monkeypatch.setattr(gate, "discover_changes", lambda root, given, head: {})
+    assert gate.main() == 0
+    assert calls == [base]
+    assert firsts == [("t::test_n",), ()]

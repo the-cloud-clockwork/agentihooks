@@ -674,6 +674,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     memory = KillMemory(
         Path.cwd() / "killers",
         {get_mutant_name(Path(path), ""): change.get("direct", ()) for path, change in changes.items()},
+        {test for change in changes.values() for test in change.get("first", ())},
     )
 
     runner.collect_or_load_stats = collect_selected_stats

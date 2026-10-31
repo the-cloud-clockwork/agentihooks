@@ -3808,6 +3808,16 @@ jobs:
           PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse "$BRANCH" "$GITHUB_RUN_ID" \
             --head "$HEAD_SHA" --base "$base" --grader "$GRADER"
 
+      - name: Share the branch preflight kill memory with the mutation shards
+        if: steps.reuse.outputs.reused != 'true' && hashFiles('.mutation-killers-restored/killers/*') != ''
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          name: mutation-stats-killers
+          path: .mutation-killers-restored/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 1
+
       - name: Take the helper scripts from the workflow revision
         if: steps.reuse.outputs.reused != 'true'
         run: |
