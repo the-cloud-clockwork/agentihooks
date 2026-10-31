@@ -36,9 +36,7 @@ def closing_pipelines(store, monkeypatch, closes):
     return sizes
 
 
-def test_rows_are_read_in_pipelines_of_fifty_in_order(
-    store: InboxStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_rows_are_read_in_pipelines_of_fifty_in_order(store: InboxStore, monkeypatch: pytest.MonkeyPatch) -> None:
     item = store.send("alice", "bob", "the last row")
     sizes = closing_pipelines(store, monkeypatch, closes=0)
     rows = store._rows([f"missing-{n}" for n in range(1000)] + [item.id])
