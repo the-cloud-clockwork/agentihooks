@@ -36,11 +36,13 @@ def closing_pipelines(store, monkeypatch, closes):
     return sizes
 
 
-def test_rows_are_read_in_pipelines_of_five_hundred_in_order(store, monkeypatch):
+def test_rows_are_read_in_pipelines_of_fifty_in_order(
+    store: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     item = store.send("alice", "bob", "the last row")
     sizes = closing_pipelines(store, monkeypatch, closes=0)
     rows = store._rows([f"missing-{n}" for n in range(1000)] + [item.id])
-    assert sizes == [500, 500, 1]
+    assert sizes == [50] * 20 + [1]
     assert len(rows) == 1001
     assert rows[:1000] == [{}] * 1000
     assert rows[1000]["text"] == "the last row"
