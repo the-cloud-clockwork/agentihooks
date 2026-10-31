@@ -30,7 +30,7 @@ def test_writes_keep_current_and_only_one_prior_revision() -> None:
 
     import fakeredis
 
-    from scripts.events.state import StateConflict
+    from scripts.events.bus import StateConflict
 
     client = fakeredis.FakeRedis(decode_responses=True)
     states = RedisStateStore(client, "probe", prefix="fixture")
