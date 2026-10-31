@@ -129,15 +129,16 @@ def test_redis_state_retries_a_write_raced_on_another_key(monkeypatch):
     store = RedisStateStore(client, "work")
     other = RedisStateStore(client, "work")
     raced = []
-    incr = client.incr
+    pipeline_class = type(client.pipeline())
+    execute = pipeline_class.execute
 
-    def racing(name, amount=1):
+    def racing(self):
         if not raced:
             raced.append(None)
             raced[0] = other.create("other", b"raced")
-        return incr(name, amount)
+        return execute(self)
 
-    monkeypatch.setattr(client, "incr", racing)
+    monkeypatch.setattr(pipeline_class, "execute", racing)
     revision = store.create("key", b"mine")
     assert raced and store.get("key").value == b"mine"
     assert store.get("key").revision == revision
@@ -162,15 +163,16 @@ def test_redis_state_gives_up_on_a_key_that_keeps_changing(monkeypatch):
 
     client = fakeredis.FakeRedis(decode_responses=True)
     store = RedisStateStore(client, "work")
-    incr = client.incr
+    pipeline_class = type(client.pipeline())
+    execute = pipeline_class.execute
     races = []
 
-    def racing(name, amount=1):
-        races.append(name)
+    def racing(self):
+        races.append(None)
         client.hset(store._current, "other", "{}")
-        return incr(name, amount)
+        return execute(self)
 
-    monkeypatch.setattr(client, "incr", racing)
+    monkeypatch.setattr(pipeline_class, "execute", racing)
     with pytest.raises(StateConflict) as changing:
         store.create("key", b"mine")
     assert str(changing.value) == "state key 'key' kept changing"
