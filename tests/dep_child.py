@@ -6,6 +6,10 @@ and ROOT the repository prefix.
 
 import os
 import sys
+from types import FrameType
+
+HELPERS = (f"{os.sep}pathlib.py", f"{os.sep}tokenize.py")
+LOADERS = ("<frozen importlib", f"{os.sep}importlib{os.sep}", "linecache.py", "<frozen runpy>", f"{os.sep}runpy.py")
 
 
 def registered_log(children: str) -> str | None:
@@ -23,6 +27,13 @@ def registered_log(children: str) -> str | None:
     return None
 
 
+def loading(frame: FrameType | None) -> bool:
+    """Whether the code that opened a file, past pathlib and tokenize helpers, is an import or traceback lookup."""
+    while frame is not None and frame.f_code.co_filename.endswith(HELPERS):
+        frame = frame.f_back
+    return frame is not None and any(loader in frame.f_code.co_filename for loader in LOADERS)
+
+
 def follow(children: str, root: str) -> None:
     if (log := registered_log(children)) is None:
         return
@@ -37,7 +48,8 @@ def follow(children: str, root: str) -> None:
         # An audit hook that raises fails the open it observes.
         try:
             path = os.path.abspath(os.fsdecode(args[0]))
-            if path.startswith(root) and not path.endswith((".py", ".pyc")) and path not in seen:
+            source = path.endswith(".py") and loading(sys._getframe(1))
+            if path.startswith(root) and not path.endswith(".pyc") and not source and path not in seen:
                 seen.add(path)
                 os.write(descriptor, os.fsencode(path + "\n"))
         except (OSError, ValueError):
