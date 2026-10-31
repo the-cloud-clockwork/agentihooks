@@ -49,6 +49,61 @@ class BlockedWrite:
         self.messages.append(message)
 
 
+class FailedFeed:
+    def __init__(self, operation: str) -> None:
+        self.operation = operation
+        self.calls = 0
+        self.stalled = threading.Event()
+        self.released = threading.Event()
+
+    def fail(self) -> None:
+        self.calls += 1
+        if self.calls > 1:
+            self.stalled.set()
+            assert self.released.wait(3)
+        raise channel.FeedError("feed unavailable")
+
+    def settle(self) -> None:
+        if self.operation == "settle":
+            self.fail()
+
+    def wait(self, timeout_ms: int) -> list[Any]:
+        self.fail()
+        return []
+
+    def close(self) -> None:
+        self.released.set()
+
+
+@pytest.mark.parametrize("operation", ["settle", "wait"])
+def test_failed_feed_operations_do_not_publish_a_healthy_poll(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    import anyio
+
+    _, inbox = channel_backend
+    feed = FailedFeed(operation)
+    first = inbox.send("alice", "bob", "delivery despite feed failure")
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+
+    async def scenario(
+        send: Callable[[Any], Awaitable[None]], receive: Callable[[], Awaitable[dict[str, Any]]]
+    ) -> None:
+        try:
+            with anyio.fail_after(3):
+                shown = await receive()
+                assert await anyio.to_thread.run_sync(feed.stalled.wait, 2)
+            assert shown["params"]["meta"]["item_id"] == first.id
+            status = json.loads(inbox.redis.get(inbox.key("channel-progress", "bob")))
+            assert status["delivery_at"] >= status["ready_at"] > 0
+            assert status["poll_at"] == 0
+            assert inbox.redis.get(inbox.key("channel-live", "bob")) is None
+        finally:
+            feed.released.set()
+
+    session(inbox, scenario, feed=feed)
+
+
 def test_a_successful_delivery_is_recorded_before_the_next_write_blocks(
     channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
