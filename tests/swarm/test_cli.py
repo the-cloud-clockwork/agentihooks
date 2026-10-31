@@ -959,6 +959,24 @@ def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
     assert sampled == [] and "fired ci_queue on sw" not in actions
 
 
+def test_a_scheduled_tick_stopped_inside_spawn_and_reap_has_started_the_refresh_job(env, monkeypatch):
+    from scripts.swarm import refresh_job
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    started = []
+    monkeypatch.setattr(refresh_job, "spawn", started.append)
+
+    def overrun(slug: str, *args: object) -> list[str]:
+        assert slug == "sw"
+        raise cli.tick_stop.Stopped
+
+    monkeypatch.setattr(cli, "tick", overrun)
+    with pytest.raises(cli.tick_stop.Stopped):
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
+    assert started == ["sw"]
+
+
 def test_the_tick_publishes_status_with_the_pull_request_view_it_built(env, monkeypatch):
     from scripts.swarm import command_runner, ledger_events
 
