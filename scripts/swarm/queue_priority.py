@@ -2,9 +2,10 @@ import json
 import os
 import subprocess
 import uuid
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
@@ -16,6 +17,7 @@ DISPLACED = "queue-priority-displaced"
 ACTIVE = "queue-priority-active"
 ACTIVE_S = 3600
 ORDER = "merge-priority-order"
+Tasks = list[dict] | Callable[[Collection[str]], list[dict]]
 
 
 class Displaced:
@@ -65,15 +67,25 @@ def exclusive(store: RedisStore, slug: str):
             store.redis.delete(key)
 
 
-def owners(tasks: list[dict], urls: Collection[str]) -> list[dict]:
+def owners(tasks: Tasks, urls: Collection[str]) -> list[dict]:
+    """The live claimed tasks whose pull request is one of urls; a reader is asked only for those urls."""
     return [
         task
-        for task in tasks
+        for task in (tasks(urls) if callable(tasks) else tasks)
         if task.get("pr_url") in urls
         and task.get("claimed_by")
         and task.get("state") != "done"
         and not ready.awaiting(task)
     ]
+
+
+def targeting(ledger: LedgerClient, slug: str) -> Callable[[Collection[str]], list[dict[str, Any]]]:
+    """A reader of the tasks whose pull request is one of the given urls, asking the ledger only for those urls."""
+
+    def read(urls: Collection[str]) -> list[dict[str, Any]]:
+        return [row for url in urls for row in ledger.tasks_targeting(slug, url) if row.get("pr_url") == url]
+
+    return read
 
 
 def settled(raw: dict | None) -> bool:
@@ -90,7 +102,7 @@ def blocker(raw: dict, head: str) -> str:
     return ""
 
 
-def leave_out(store: RedisStore, tasks: list[dict], url: str, head: str, reason: str) -> str:
+def leave_out(store: RedisStore, tasks: Tasks, url: str, head: str, reason: str) -> str:
     queue_record.Journal(url).write("priority-requeue-skipped", url, head, None, None, reason=reason)
     for task in owners(tasks, [url]):
         InboxStore(store.redis).send(
@@ -103,7 +115,7 @@ def leave_out(store: RedisStore, tasks: list[dict], url: str, head: str, reason:
     return f"left {url} out of the merge queue after an interrupted priority: {reason}"
 
 
-def retrying(store: RedisStore, tasks: list[dict], displaced: Displaced, pull: dict, reason: str) -> None:
+def retrying(store: RedisStore, tasks: Tasks, displaced: Displaced, pull: dict, reason: str) -> None:
     claimants = [task["claimed_by"] for task in owners(tasks, [pull["url"]])]
     if pull.get("notified") or not claimants:
         return
@@ -122,7 +134,7 @@ def retrying(store: RedisStore, tasks: list[dict], displaced: Displaced, pull: d
     displaced.mark(pull)
 
 
-def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
+def requeue(store: RedisStore, slug: str, tasks: Tasks, ledger: LedgerClient | None = None) -> list[str]:
     displaced, actions = Displaced(store, slug), []
     for pull in displaced.pulls():
         url, head = pull["url"], pull["headRefOid"]
@@ -168,14 +180,26 @@ def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -
 
 
 def apply(
-    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
+    store: RedisStore,
+    slug: str,
+    url: str,
+    sender: str,
+    tasks: Tasks,
+    journal: queue_record.Journal,
+    ahead: Collection[str] = (),
 ) -> dict:
     with exclusive(store, slug):
         return reorder(store, slug, url, sender, tasks, journal, ahead)
 
 
 def reorder(
-    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
+    store: RedisStore,
+    slug: str,
+    url: str,
+    sender: str,
+    tasks: Tasks,
+    journal: queue_record.Journal,
+    ahead: Collection[str] = (),
 ) -> dict:
     result = merge_queue.prioritize(
         url, journal=journal, displaced=Displaced(store, slug), **({"ahead": ahead} if ahead else {})
@@ -194,7 +218,7 @@ def reorder(
     return result
 
 
-def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], lift: bool) -> dict:
+def request(store: RedisStore, slug: str, url: str, sender: str, tasks: Tasks, lift: bool) -> dict:
     journal = queue_record.Journal(url)
     held = None if lift else blocking(url, journal)
     if held is not None:

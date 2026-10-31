@@ -165,7 +165,7 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
         {"id": "t4", "pr_url": URL[:-1] + "4", "claimed_by": "ci@unrelated"},
         {"id": "t5", "pr_url": URL[:-1] + "5", "claimed_by": "ci@released", "state": "pr", "awaiting": "merge"},
         {"id": "t6", "pr_url": URL[:-1] + "6", "claimed_by": "ci@done", "state": "done"},
-        {"id": "t7", "pr_url": URL[:-1] + "7", "split_pulls": [URL[:-1] + "2"], "claimed_by": "ci@other-half"},
+        {"id": "t7", "pr_url": URL[:-1] + "6", "split_pulls": [URL[:-1] + "2"], "claimed_by": "ci@other-half"},
     ]
     reads = []
     monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger(tasks, reads))
@@ -193,7 +193,13 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
             "ci@owner",
             f"Your pull request {URL[:-1]}2 was requeued in its original order after priority request {URL}.",
             {"fyi": True},
-        )
+        ),
+        (
+            "engineer@a1b2c3-0001",
+            "ci@other-half",
+            f"Your pull request {URL[:-1]}6 was requeued in its original order after priority request {URL}.",
+            {"fyi": True},
+        ),
     ]
     assert reads == [("targeting", "sw", URL[:-1] + str(n)) for n in (2, 3, 5, 6)]
     output = capsys.readouterr()
