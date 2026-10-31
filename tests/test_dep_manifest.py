@@ -184,6 +184,18 @@ def test_tests_files_and_global_inputs_invalidate_their_dependants(tmp_path):
     assert dep_manifest.invalidated(manifest, [("profiles/x.py", "", "y")])[1] == "profiles/x.py"
 
 
+def test_a_source_change_invalidates_the_tests_that_read_it_as_data():
+    manifest = {
+        "units": [],
+        "tests": {
+            "tests/test_reader.py::test_scan": {"units": [], "files": ["hooks/scanned.py"], "escapes": False},
+            "tests/test_other.py::test_other": {"units": [], "files": [], "escapes": False},
+        },
+    }
+    changed = [("hooks/scanned.py", "VALUE = 1\n", "VALUE = 2\n")]
+    assert dep_manifest.invalidated(manifest, changed)[0] == {"tests/test_reader.py::test_scan"}
+
+
 def test_changes_read_both_sides_of_a_git_diff(tmp_path):
     def git(*args):
         subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
@@ -260,6 +272,31 @@ def test_the_inputs_plugin_records_files_a_child_process_reads_for_its_test_only
     ]
     name = hashlib.sha256(str(out / "children").encode()).hexdigest()[:16]
     assert not (Path(sysconfig.get_path("purelib")) / f"agentihooks-dep-inputs-{name}.pth").exists()
+
+
+def test_the_inputs_plugin_records_python_files_a_child_process_reads_as_data_but_not_its_imports(tmp_path):
+    (tmp_path / "source.py").write_text("VALUE = 1\n")
+    (tmp_path / "helper.py").write_text("VALUE = 2\n")
+    (tmp_path / "test_sample.py").write_text(
+        "import subprocess, sys\n"
+        "def test_child_reads_source():\n"
+        "    subprocess.run([sys.executable, '-c', \"open('source.py').read()\"], env={}, check=True)\n"
+        "def test_child_imports_helper():\n"
+        "    subprocess.run([sys.executable, '-c', 'import helper'], cwd='.', env={}, check=True)\n"
+    )
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", "test_sample.py"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    lines = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    assert {line["test"]: line["files"] for line in lines} == {
+        "test_sample.py::test_child_reads_source": ["source.py"],
+        "test_sample.py::test_child_imports_helper": [],
+    }
 
 
 def test_the_coverage_shards_record_per_test_contexts_and_inputs():
