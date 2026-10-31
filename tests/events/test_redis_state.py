@@ -23,7 +23,6 @@ def test_a_guarded_transaction_aborts_when_the_bucket_changes():
     assert client.get("probe") is None
 
 
-@pytest.mark.fakeredis
 def test_writes_keep_current_and_only_one_prior_revision() -> None:
     import base64
     import json
