@@ -10,6 +10,7 @@ import uuid
 from dataclasses import asdict, is_dataclass, replace
 from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -128,7 +129,7 @@ def github_reply(repo: str, args: list[str]) -> dict[str, Any]:
 def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     import fakeredis
 
-    from scripts.swarm import commands, incidents, reboot, timing
+    from scripts.swarm import commands, incidents, panic, reboot, timing
     from scripts.swarm.health import merge_stall
 
     monkeypatch.setattr(merge_stall, "request", github_reply)
@@ -136,6 +137,8 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(commands, "hive_id", lambda: "fixture-hive")
     monkeypatch.setattr(incidents.socket, "gethostname", lambda: "fixture-host")
     monkeypatch.setattr(reboot, "boot_id", lambda: "00000000-0000-0000-0000-000000000001")
+    pass_identities = count(1)
+    monkeypatch.setattr(panic, "uuid", SimpleNamespace(uuid4=lambda: uuid.UUID(int=next(pass_identities))))
     identities = count(1)
     monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(identities)))
     for module in ("execution", "health.verdicts", "launch_evidence", "promotion_owner", "incidents"):
