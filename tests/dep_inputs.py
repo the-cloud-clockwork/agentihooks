@@ -224,10 +224,10 @@ class DepInputs:
             yield
         finally:
             self.register(self.children / f"{os.getpid()}-shared")
+            test, self.current = self.current, self.shared
             reads, escapes = self.closure(item.nodeid.split("::", 1)[0])
-            self.current[0].update(reads)
-            self.current[1] = self.current[1] or escapes
-            self.current = self.shared
+            test[0].update(reads)
+            test[1] = test[1] or escapes
             self.finish(item.nodeid)
 
     def kept(self, opened: set[str]) -> dict[str, str]:
