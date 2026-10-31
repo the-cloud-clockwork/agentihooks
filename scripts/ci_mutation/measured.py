@@ -5,6 +5,7 @@ import math
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from mutmut.utils.format_utils import get_mutant_name
 
@@ -189,12 +190,13 @@ def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
     return {**measured_plan(measured, KillMemory(stats.folder / "killers")), "keys": keys, "head": stats.head}
 
 
-def budget_overrun(plan: dict, budget: float) -> str:
+def budget_overrun(plan: dict[str, Any], budget: float) -> str:
     """Describe a plan whose slowest shard cannot finish within the shard budget, or return an empty string."""
-    slowest, workers = max(plan["shard_worker_seconds"]), plan["workers"]
+    slowest: float = max(plan["shard_worker_seconds"])
+    workers: int = plan["workers"]
     if slowest <= workers * budget:
         return ""
-    total = plan["estimated_worker_seconds"]
+    total: float = plan["estimated_worker_seconds"]
     capacity = SHARD_LIMIT * workers * budget
     parts = max(2, math.ceil(total / capacity))
     return (
