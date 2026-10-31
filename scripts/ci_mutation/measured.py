@@ -242,7 +242,7 @@ def main() -> int:
         if (tests := selection[path] if selection is not None else select_tests(root, Path(path)))
     }
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    plan = refine_plan(root, selected, SharedStats(args.stats, head))
+    plan: dict[str, Any] = refine_plan(root, selected, SharedStats(args.stats, head))
     (args.stats / "plan.json").write_text(json.dumps(plan))
     print(f"Measured mutation worker seconds: {plan['estimated_worker_seconds']:.1f}")
     print(f"Measured mutation shards: {plan['shards']}; assigned mutants: {len(plan['assignments'])}")
