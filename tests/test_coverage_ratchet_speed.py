@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -133,3 +134,121 @@ def test_usage_reads_cpu_seconds_and_throttled_time(tmp_path: Path) -> None:
     assert cpu > 0
     assert throttled == 2.5
     assert ratchet._usage(tmp_path / "absent")[1] == 0.0
+
+
+TRICKY = (
+    '"""Module docstring."""\n'
+    "import os\n"
+    "\n"
+    "\n"
+    "@staticmethod\n"
+    "def f(\n"
+    "    x,\n"
+    "    y,\n"
+    "):\n"
+    "    total = (\n"
+    "        x\n"
+    "        + y\n"
+    "    )\n"
+    "    if total:  # pragma: no cover\n"
+    "        return os.sep\n"
+    '    text = """a\n'
+    'b"""\n'
+    "    return [\n"
+    "        total,\n"
+    "        text,\n"
+    "    ]\n"
+    "\n"
+    "\n"
+    "class C:\n"
+    "    def g(self):\n"
+    "        ...\n"
+)
+
+
+def _statement_tree(tmp_path: Path) -> Path:
+    head = tmp_path / "head"
+    (head / "hooks/pkg").mkdir(parents=True)
+    (head / "scripts").mkdir()
+    (head / "hooks/tricky.py").write_text(TRICKY)
+    (head / "hooks/pkg/__init__.py").write_text("")
+    (head / "hooks/pkg/m.py").write_text("a = 1\nb = [\n    2,\n]\nc = 3\n")
+    (head / "scripts/untested.py").write_text("value = 1\n")
+    return head
+
+
+def _summarized_statements(head: Path, parts: int, tmp_path: Path) -> dict[str, dict]:
+    from tests import coverage_summary
+
+    written = []
+    for part in range(1, parts + 1):
+        out = tmp_path / f"statements-{part}" / coverage_summary.STATEMENTS
+        out.parent.mkdir()
+        coverage_summary.write_statements(head, part, parts, out)
+        written.append(out)
+    return coverage_summary.statements(written)
+
+
+def test_missed_lines_from_shard_statement_summaries_match_the_analysis_byte_for_byte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _statement_tree(tmp_path)
+    measured = {"hooks/tricky.py": {1, 2, 6, 8, 10, 12, 17, 19, 25}, "hooks/pkg/m.py": {1, 3}}
+    (tmp_path / "analysed").mkdir()
+    expected = ratchet._missed(head, measured, tmp_path / "analysed")
+    statements = _summarized_statements(head, 2, tmp_path)
+    assert set(statements) == set(expected)
+
+    def refuse_analysis(*args: object, **kwargs: object) -> dict[str, list[int]]:
+        pytest.fail("a module the shard summaries cover was analysed again")
+
+    monkeypatch.setattr(ratchet, "_analysed", refuse_analysis)
+    (tmp_path / "summarized").mkdir()
+    listed = ratchet._missed(head, measured, tmp_path / "summarized", summaries=statements)
+    assert listed == expected
+    assert list(listed) == list(expected)
+    assert expected["scripts/untested.py"] == [1]
+
+
+def test_a_module_whose_source_differs_from_its_statement_summary_is_analysed(tmp_path: Path) -> None:
+    head = _statement_tree(tmp_path)
+    statements = _summarized_statements(head, 1, tmp_path)
+    (head / "hooks/pkg/m.py").write_text("a = 1\nb = 2\n")
+    del statements["scripts/untested.py"]
+    measured = {"hooks/pkg/m.py": {1}}
+    (tmp_path / "analysed").mkdir()
+    (tmp_path / "summarized").mkdir()
+    expected = ratchet._missed(head, measured, tmp_path / "analysed")
+    assert ratchet._missed(head, measured, tmp_path / "summarized", summaries=statements) == expected
+    assert expected["hooks/pkg/m.py"] == [2]
+    assert expected["scripts/untested.py"] == [1]
+
+
+def test_shard_slices_cover_every_graded_module_once(tmp_path: Path) -> None:
+    from tests import coverage_summary
+
+    head = _statement_tree(tmp_path)
+    seen = []
+    for part in range(1, 4):
+        out = tmp_path / f"slice-{part}.json"
+        coverage_summary.main(
+            ["--statements", str(out), "--slice", f"{part}/3", "--head", str(head), "--out", str(tmp_path / "x")]
+        )
+        seen += list(json.loads(out.read_text()))
+    assert sorted(seen) == ratchet.graded_modules(head)
+
+
+def test_the_ratchet_reads_statement_summaries_beside_the_executed_lines_summaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests import coverage_summary
+
+    head = _statement_tree(tmp_path)
+    for part in (1, 2):
+        folder = tmp_path / "summaries" / f"executed-lines-3.12-{part}"
+        folder.mkdir(parents=True)
+        coverage_summary.write_statements(head, part, 2, folder / coverage_summary.STATEMENTS)
+    files = sorted((tmp_path / "summaries").glob(f"*/{coverage_summary.STATEMENTS}"))
+    assert ratchet._head_statements(tmp_path / "summaries") == coverage_summary.statements(files)
+    assert set(ratchet._head_statements(tmp_path / "summaries")) == set(ratchet.graded_modules(head))
+    assert ratchet._head_statements(None) == {}
