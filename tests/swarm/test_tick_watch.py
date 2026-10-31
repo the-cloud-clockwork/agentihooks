@@ -799,6 +799,22 @@ def test_the_scheduler_restart_stops_the_running_supervisor_then_registers_the_t
     assert kills == [(os.getpid(), scheduled_tick.signal.SIGTERM)]
 
 
+def test_the_scheduler_restart_leaves_a_supervisor_whose_tick_is_still_running():
+    from contextlib import ExitStack
+
+    from scripts.scheduler.service import machine_lock
+
+    held, kills, schedules = ExitStack(), [], []
+    held.enter_context(machine_lock("supervisor"))
+    held.enter_context(machine_lock(scheduled_tick.LOCK))
+
+    said = scheduled_tick.restart(lambda *args: kills.append(args), lambda: schedules.append(1) or True, lambda s: None)
+    held.close()
+
+    assert said == "left the scheduler alone: a swarm tick is still running"
+    assert (kills, schedules) == ([], [])
+
+
 def test_the_scheduler_restart_with_no_supervisor_only_registers_the_tick():
     kills, waits = [], []
 
