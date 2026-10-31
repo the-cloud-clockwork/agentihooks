@@ -95,9 +95,9 @@ def test_diff_of_lists_sharing_unchanged_items_stores_the_new_document(edit: Any
 
 
 def test_diff_of_a_changed_later_duplicate_writes_its_own_occurrence() -> None:
-    old, new = later_duplicate(ledger())
-    stored, _, after = applied(old, new)
-    assert stored == flatten(new)
+    duplicated, edit = later_duplicate(ledger())
+    stored, _, after = applied(duplicated, edit)
+    assert stored == flatten(edit)
     assert list(after) == ['["tasks",["id","t4",1],"title"]']
 
 
@@ -163,4 +163,13 @@ def test_written_stores_the_text_and_copy_of_the_written_state() -> None:
 
 
 def test_diff_walks_at_most_the_limit_of_changed_positions_before_the_full_walk() -> None:
-    assert rows.CHANGED_LIMIT == LIMIT
+    old = ledger(LIMIT + 10)
+    within: list[object] = [
+        {**item, "title": "bulk"} if position < LIMIT else item for position, item in enumerate(old["tasks"])
+    ]
+    beyond: list[object] = [
+        {**item, "title": "bulk"} if position <= LIMIT else item for position, item in enumerate(old["tasks"])
+    ]
+    walked = rows._changed_children(old["tasks"], within, ["tasks"])
+    assert walked is not None and [change[3] for change in walked] == list(range(LIMIT))
+    assert rows._changed_children(old["tasks"], beyond, ["tasks"]) is None

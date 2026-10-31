@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 from typing import cast
 
 from scripts.swarm_ledger import models
@@ -50,7 +51,7 @@ def _changed_children(
     return changed
 
 
-def children(item, parts, table):
+def children(item: object, parts: list[object], table: str) -> Iterator[tuple[object, list[object], object, int, str]]:
     """(child, parts, key, position, table) of a container, in the path scheme flatten stores."""
     if isinstance(item, dict):
         for index, (name, child) in enumerate(item.items()):
@@ -61,7 +62,7 @@ def children(item, parts, table):
     elif isinstance(item, list):
         seen = {}
         for index, child in enumerate(item):
-            identity = _identity(cast(object, child), index)
+            identity = _identity(child, index)
             token = _token(identity)
             occurrence = seen.get(token, 0)
             seen[token] = occurrence + 1
@@ -123,18 +124,20 @@ def diff(old: object, new: object) -> tuple[dict, dict]:
     """The stored rows of `old` and `new` under every path that differs, descending only into changed values."""
     before, after = {}, {}
 
-    def walk(left, right, parts, parent, key, position, table: str) -> None:
+    def walk(
+        left: object, right: object, parts: list[object], parent: str | None, key: object, position: int, table: str
+    ) -> None:
         if type(left) is type(right) and left == right:
             return
         same_shape = type(left) is type(right) and isinstance(left, (dict, list))
         if same_shape:
             changed = (
-                _changed_children(cast("list[object]", left), cast("list[object]", right), cast("list[object]", parts))
+                _changed_children(cast("list[object]", left), cast("list[object]", right), parts)
                 if type(left) is list
                 else None
             )
             if changed is not None:
-                encoded_parent = encode(cast(object, parts))
+                encoded_parent = encode(parts)
                 for old_child, new_child, child_parts, index in changed:
                     walk(old_child, new_child, child_parts, encoded_parent, index, index, table)
                 return
