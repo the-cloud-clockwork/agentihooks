@@ -365,6 +365,8 @@ def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_s
     assert plan_shards({"a": 3240, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 2
     uneven = plan_shards({"a": 2000, "b": 2000, "c": 2000, "d": 1500}, target=10**6, limit=1)
     assert uneven["shards"] == 4 and max(uneven["shard_worker_seconds"]) == 2000
+    roomy = plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2000)
+    assert roomy["shards"] == 2
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():
