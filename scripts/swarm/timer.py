@@ -283,12 +283,13 @@ def _ticking(env: dict[str, str]) -> bool:
     from scripts.swarm.scheduled_tick import LOCK
 
     try:
-        inode = (runtime_dir(env) / f"{LOCK}.lock").stat().st_ino
+        stat = (runtime_dir(env) / f"{LOCK}.lock").stat()
         table = LOCKS_FILE.read_text()
     except OSError:
         return False
-    held = re.findall(r"FLOCK\s+\S+\s+\S+\s+\d+\s+[0-9a-f]+:[0-9a-f]+:(\d+)\s", table)
-    return str(inode) in held
+    holders = re.findall(r"^\d+:\s+FLOCK\s+\S+\s+\S+\s+\d+\s+([0-9a-f]+):([0-9a-f]+):(\d+)\s", table, re.MULTILINE)
+    held = (os.major(stat.st_dev), os.minor(stat.st_dev), stat.st_ino)
+    return any((int(major, 16), int(minor, 16), int(inode)) == held for major, minor, inode in holders)
 
 
 def _proven():
