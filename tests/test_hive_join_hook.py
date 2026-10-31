@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from hooks.context import voice_output
 from tests.test_hook_manager import quiet_session_start as quiet_session_start
 
 
@@ -67,7 +68,7 @@ def test_hive_reports_are_dispatched_at_start_and_end(
     quiet_session_start: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from hooks import hook_manager
-    from hooks.context import hive_join, voice_output
+    from hooks.context import hive_join
 
     called = []
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
