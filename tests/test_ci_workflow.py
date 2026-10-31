@@ -2492,6 +2492,7 @@ def test_antoncore_app_rest_retains_all_checker_inputs_when_git_is_refused(tmp_p
         "k8s/values-overlays/agentihooks-swarm-nats/values.yaml": "values",
         "k8s/values-overlays/agentihooks-swarm-nats/users.yaml": "users",
         "k8s/values-overlays/agentihooks-swarm-nats/trust.yaml": "trust",
+        "k8s/charts/arc-runners-oss/values-oss-batch.yaml": "batch",
     }
     for path, value in {**inputs, "unselected.txt": "excluded"}.items():
         target = source / path

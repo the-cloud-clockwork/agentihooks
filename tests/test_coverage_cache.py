@@ -40,7 +40,7 @@ def test_cached_grading_does_not_read_github(measured, monkeypatch, covered, los
     data.write()
     monkeypatch.setattr(ratchet, "renamed", lambda *args: {})
     monkeypatch.setattr(ratchet, "dev_runs", lambda *args: pytest.fail("GitHub history read"))
-    args = argparse.Namespace(head=root, base="base", shards=1, base_baseline=target)
+    args = argparse.Namespace(head=root, base="base", shards=1, base_baseline=target, head_summaries=None)
     _, _, result = ratchet._grade(args, [shard], root)
     assert result.lost == lost
 
@@ -54,7 +54,7 @@ def test_a_head_split_another_way_grades_against_the_cached_base(measured, monke
         data.write()
         shards.append(root / f"shard-{index}.coverage")
     monkeypatch.setattr(ratchet, "renamed", lambda *args: {})
-    args = argparse.Namespace(head=root, base="base", shards=len(shards), base_baseline=target)
+    args = argparse.Namespace(head=root, base="base", shards=len(shards), base_baseline=target, head_summaries=None)
     _, _, result = ratchet._grade(args, shards, root)
     assert result.lost == {}
 
