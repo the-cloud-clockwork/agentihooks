@@ -542,7 +542,8 @@ def test_claude_waits_one_window_for_its_channel_while_codex_wakes_immediately(i
 
 
 @pytest.mark.feature("inbox-wake")
-def test_a_stalled_claude_channel_wakes_after_one_window_and_confirms(inbox: InboxStore) -> None:
+@pytest.mark.parametrize("prior", ["", "escalated_master", "escalated_operator"])
+def test_a_stalled_claude_channel_wakes_after_one_window_and_confirms(inbox: InboxStore, prior: str) -> None:
     from scripts.inbox.seen import claim
 
     agent = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="claude")
@@ -550,16 +551,58 @@ def test_a_stalled_claude_channel_wakes_after_one_window_and_confirms(inbox: Inb
     herdr = FakeHerdr({"p1": "idle"})
     ledger = FakeLedger()
     start = sent_at(item)
+    if prior:
+        inbox.note(item.id, prior, "swarm", "earlier escalation", start + W // 2)
     run(inbox, herdr, ledger, start + W - 1, [agent, AGENTS[1]])
     assert herdr.prompts == []
     run(inbox, herdr, ledger, start + W, [agent, AGENTS[1]])
     assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
-    assert events(inbox, item.id) == ["woken"]
+    assert events(inbox, item.id) == ([prior] if prior else []) + ["woken"]
     assert [shown.id for shown in claim(inbox, agent.name)] == [item.id]
     inbox.confirm(item.id, agent.name)
     assert inbox.get(item.id).state == "confirmed"
     run(inbox, herdr, ledger, start + W * 2, [agent, AGENTS[1]])
     assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+
+
+@pytest.mark.feature("inbox-wake")
+@pytest.mark.parametrize("guard", ["busy", "typed", "quiet", "owner", "master", "no pane"])
+def test_stalled_push_fallback_preserves_existing_pane_and_owner_guards(inbox: InboxStore, guard: str) -> None:
+    from scripts.inbox.dispatch import Dispatcher
+
+    agent = AgentRecord(
+        "sw-eng-1",
+        MASTER if guard == "master" else "eng",
+        "t1",
+        pane_id="" if guard == "no pane" else "p1",
+        harness="claude",
+    )
+    item = inbox.send("alice", agent.name, "pending reply")
+    now = sent_at(item) + W
+    herdr = FakeHerdr(
+        {"p1": "working" if guard == "busy" else "idle"}, {"p1": "operator text" if guard == "typed" else ""}
+    )
+    if guard == "quiet":
+        idle.prompted(inbox.redis, "sw", agent.name, now)
+    if guard == "owner":
+        Dispatcher(inbox).own(agent.name, "active pump")
+    run(inbox, herdr, FakeLedger(), now, [agent, AGENTS[1]])
+    assert herdr.prompts == []
+    assert "woken" not in events(inbox, item.id)
+
+
+@pytest.mark.feature("inbox-wake")
+def test_stalled_push_fallback_retries_at_most_three_times_one_window_apart(inbox: InboxStore) -> None:
+    agent = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="claude")
+    item = inbox.send("alice", agent.name, "pending reply")
+    herdr = FakeHerdr({"p1": "idle"})
+    ledger = FakeLedger()
+    start = sent_at(item)
+    for step in range(1, 5):
+        run(inbox, herdr, ledger, start + step * W - 1, [agent, AGENTS[1]])
+        run(inbox, herdr, ledger, start + step * W, [agent, AGENTS[1]])
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)] * 3
+    assert events(inbox, item.id) == ["woken", "woken", "woken", "escalated_master"]
 
 
 def test_a_codex_master_pane_is_never_woken_the_moment_an_item_lands(inbox):
