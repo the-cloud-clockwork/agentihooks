@@ -1,5 +1,7 @@
 import gc
+from typing import cast
 
+from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from tests.ledger_load import hierarchy_probe
 
 
@@ -23,7 +25,7 @@ def test_a_replacement_collects_the_garbage_it_left_before_the_next_read() -> No
     repo, state = Repository(events), {"phases": []}
     gc.callbacks.append(record)
     try:
-        hierarchy_probe.store(repo, state, replace=True)
+        hierarchy_probe.store(cast(SQLiteLedgerRepository, repo), state, replace=True)
     finally:
         gc.callbacks.remove(record)
     assert repo.calls == [(hierarchy_probe.SLUG, state, "hierarchy-proof", True)]
@@ -32,5 +34,5 @@ def test_a_replacement_collects_the_garbage_it_left_before_the_next_read() -> No
 
 def test_a_first_import_stores_without_replacing() -> None:
     repo, state = Repository([]), {"phases": []}
-    hierarchy_probe.store(repo, state)
+    hierarchy_probe.store(cast(SQLiteLedgerRepository, repo), state)
     assert repo.calls == [(hierarchy_probe.SLUG, state, "hierarchy-proof", False)]
