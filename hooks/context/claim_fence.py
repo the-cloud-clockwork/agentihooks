@@ -42,14 +42,13 @@ def check(payload: dict) -> str | None:
     raw = os.environ.get(VARIABLE)
     if not raw or payload.get("hook_event_name") == "SessionEnd":
         return None
-    held = None
     for attempt in range(ATTEMPTS):
         if attempt:
             sleep(DELAY)
         held = owned(raw)
         if held is not None:
             break
-    if held is None:
+    else:
         return CHECK_FAILED
     if held:
         return None
