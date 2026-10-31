@@ -2,6 +2,7 @@ import hashlib
 import json
 import socket
 from collections.abc import Callable, Sequence
+from typing import Any
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -124,16 +125,41 @@ def _base(slug: str, at: int, identity: object, task: dict) -> dict:
     }
 
 
-def _task(doc: dict, task_id: str) -> dict:
-    return next((task for task in doc.get("tasks", []) if task["id"] == task_id), {"id": task_id})
+class _Tasks:
+    """The first ledger task for each id, read once per row builder instead of scanning the task list per row."""
+
+    def __init__(self, doc: dict[str, Any]) -> None:
+        self.by_id: dict[str, dict[str, Any]] = {}
+        for task in doc.get("tasks", []):
+            self.by_id.setdefault(task["id"], task)
+
+    def get(self, task_id: str) -> dict[str, Any]:
+        """The first task with this id, or a stub naming the id."""
+        found = self.by_id.get(task_id)
+        return {"id": task_id} if found is None else found
 
 
-def _owner(agents: list, task_id: str, at: int, name: str = "") -> dict:
-    named = [agent for agent in agents if name and agent["name"] == name]
-    candidates = named or [
-        agent for agent in agents if agent["task"] == task_id and agent["started_at"] <= at <= agent.get("ended_at", at)
-    ]
-    return max(candidates, key=lambda agent: agent["started_at"], default={})
+class _Owners:
+    """Agents grouped by name and by task in history order, read once per row builder."""
+
+    def __init__(self, agents: list[dict[str, Any]]) -> None:
+        self.by_name: dict[str, list[dict[str, Any]]] = {}
+        self.by_task: dict[str, list[dict[str, Any]]] = {}
+        for agent in agents:
+            self.by_name.setdefault(agent["name"], []).append(agent)
+            self.by_task.setdefault(agent["task"], []).append(agent)
+
+    def first(self, name: str) -> dict[str, Any]:
+        """The earliest history record with this agent name, or an empty record."""
+        return next(iter(self.by_name.get(name, [])), {})
+
+    def owner(self, task_id: str, at: int, name: str = "") -> dict[str, Any]:
+        """The latest started agent with the name, else the latest started agent holding the task at the time."""
+        named = self.by_name.get(name, []) if name else []
+        candidates = named or [
+            agent for agent in self.by_task.get(task_id, []) if agent["started_at"] <= at <= agent.get("ended_at", at)
+        ]
+        return max(candidates, key=lambda agent: agent["started_at"], default={})
 
 
 def _event(slug: str, task: dict, agent: dict, at: int, kind: str, identity: object, reason: str = "") -> dict:
@@ -150,9 +176,10 @@ def _with_finding_kind(row: dict, finding_kind: str = "") -> dict:
 
 
 def agent_rows(slug: str, doc: dict, agents: list) -> list[dict]:
-    rows = []
+    """Spawn, retire and claim rows for every agent life and task claim the ledger and history hold."""
+    rows, tasks, owners = [], _Tasks(doc), _Owners(agents)
     for agent in agents:
-        task = _task(doc, agent["task"])
+        task = tasks.get(agent["task"])
         life = [agent["name"], agent["started_at"]]
         if agent["started_at"]:
             rows.append(_with_finding_kind(_event(slug, task, agent, agent["started_at"], "spawn", life)))
@@ -164,8 +191,8 @@ def agent_rows(slug: str, doc: dict, agents: list) -> list[dict]:
         if source["kind"] != "task claimed":
             continue
         task_id = source["target"].removeprefix("tasks/")
-        agent = _owner(agents, task_id, source["at"], source.get("by", ""))
-        rows.append(_with_finding_kind(_event(slug, _task(doc, task_id), agent, source["at"], "claim", source)))
+        agent = owners.owner(task_id, source["at"], source.get("by", ""))
+        rows.append(_with_finding_kind(_event(slug, tasks.get(task_id), agent, source["at"], "claim", source)))
     return rows
 
 
@@ -179,7 +206,7 @@ def _delivery(row: dict, task: dict, duration: float = -1.0) -> dict:
 
 
 def _split_merges(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]:
-    rows = []
+    rows, owners = [], _Owners(agents)
     for task in doc.get("tasks", []):
         for url in task.get("split_pulls") or []:
             pull = pulls.get(url)
@@ -194,13 +221,13 @@ def _split_merges(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
                 {},
             )
             identity = {**task, "pr_url": url, "branch": opened.get("branch", task.get("branch", ""))}
-            agent = _owner(agents, task["id"], pull.merged_at)
+            agent = owners.owner(task["id"], pull.merged_at)
             rows.append(_delivery(_event(slug, task, agent, pull.merged_at, "pull_request_merged", url), identity))
     return rows
 
 
 def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]:
-    rows, claims = [], {}
+    rows, claims, tasks, owners = [], {}, _Tasks(doc), _Owners(agents)
     kinds = {
         "task pr": "pull_request_opened",
         "task parked": "parked",
@@ -215,8 +242,8 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
             claims[task_id] = min(claims.get(task_id, source["at"]), source["at"])
         if source["kind"] not in kinds:
             continue
-        task = {**_task(doc, task_id), **{key: source[key] for key in ("pr_url", "branch") if key in source}}
-        agent = _owner(agents, task_id, source["at"], source.get("by", ""))
+        task = {**tasks.get(task_id), **{key: source[key] for key in ("pr_url", "branch") if key in source}}
+        agent = owners.owner(task_id, source["at"], source.get("by", ""))
         rows.append(
             _delivery(
                 _event(slug, task, agent, source["at"], kinds[source["kind"]], source.get("review_id", source)), task
@@ -229,18 +256,18 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
         at = pull.merged_at
         claimed = claims.get(task["id"])
         duration = (at - claimed) / 1000 if claimed is not None else -1.0
-        agent = _owner(agents, task["id"], at)
+        agent = owners.owner(task["id"], at)
         rows.append(_delivery(_event(slug, task, agent, at, "merge", task["id"]), task, duration))
     return rows + _split_merges(slug, doc, agents, pulls)
 
 
 def queue_rows(slug: str, doc: dict, agents: list, pulls: dict, now_ms: int) -> list[dict]:
-    rows = []
+    rows, owners = [], _Owners(agents)
     for task in doc["tasks"]:
         pull = pulls.get(task.get("pr_url"))
         if pull is None or pull.state != "OPEN" or not pull.queued:
             continue
-        agent = _owner(agents, task["id"], now_ms)
+        agent = owners.owner(task["id"], now_ms)
         rows.append(_delivery(_event(slug, task, agent, now_ms, "merge_queued", [task["pr_url"], pull.head]), task))
     return rows
 
@@ -254,25 +281,27 @@ def _supersede_merges(box: metrics_outbox.Outbox, rows: list) -> None:
 
 
 def launch_rows(slug: str, doc: dict, launches: list, agents: list) -> list[dict]:
+    """A row for every failed or waiting launch, joined to its agent's first history record."""
     kinds = {"failed": "launch_failed", "waiting": "launch_waiting"}
-    rows = []
+    rows, tasks, owners = [], _Tasks(doc), _Owners(agents)
     for source in launches:
         if source["state"] not in kinds:
             continue
-        agent = {**next((agent for agent in agents if agent["name"] == source["agent"]), {}), "name": source["agent"]}
+        agent = {**owners.first(source["agent"]), "name": source["agent"]}
         identity = [source["agent"], source["at"]]
         event = _event(
-            slug, _task(doc, source["task"]), agent, source["at"], kinds[source["state"]], identity, source["error"]
+            slug, tasks.get(source["task"]), agent, source["at"], kinds[source["state"]], identity, source["error"]
         )
         rows.append(_with_finding_kind(event))
     return rows
 
 
 def gate_rows(slug: str, doc: dict, agents: list, gates: list) -> tuple[list, list]:
-    rows, deliveries = [], []
+    """Gate deny and idle rows, and rerun delivery rows, from the swarm gate log."""
+    rows, deliveries, tasks, owners = [], [], _Tasks(doc), _Owners(agents)
     for source in gates:
-        task = _task(doc, source["task"])
-        agent = _owner(agents, source["task"], source["at"], source["agent"])
+        task = tasks.get(source["task"])
+        agent = owners.owner(source["task"], source["at"], source["agent"])
         if source["kind"] == "deny":
             rows.append(
                 _with_finding_kind(_event(slug, task, agent, source["at"], "gate_deny", source, source["reason"]))
@@ -287,17 +316,18 @@ def gate_rows(slug: str, doc: dict, agents: list, gates: list) -> tuple[list, li
 
 
 def signal_rows(slug: str, doc: dict, agents: list, handoffs: list, found: list) -> list[dict]:
-    rows = []
+    """Handoff rows and health finding rows, each joined to its owning agent and task."""
+    rows, tasks, owners = [], _Tasks(doc), _Owners(agents)
     for source in handoffs:
-        task = _task(doc, source["task"])
-        agent = _owner(agents, source["task"], source["at"], source["predecessor"])
+        task = tasks.get(source["task"])
+        agent = owners.owner(source["task"], source["at"], source["predecessor"])
         rows.append(
             _with_finding_kind(_event(slug, task, agent, source["at"], "handoff", source["id"], source["reason"]))
         )
     for source in found:
         at, subject = source["seen_at"], source["subject"]
-        agent = _owner(agents, subject, at, subject)
-        task = _task(doc, agent.get("task", subject if any(t["id"] == subject for t in doc.get("tasks", [])) else ""))
+        agent = owners.owner(subject, at, subject)
+        task = tasks.get(agent.get("task", subject if subject in tasks.by_id else ""))
         row = _event(slug, task, agent, at, "health_finding", [source["id"], at], source["summary"])
         rows.append(_with_finding_kind(row, source["kind"]))
     return rows
