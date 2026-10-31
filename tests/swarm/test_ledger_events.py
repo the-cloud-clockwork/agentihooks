@@ -512,6 +512,55 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     assert len(texts(store, ENG_SEAT)) == 2
 
 
+class ReopenLedger(FakeLedger):
+    def __init__(self, live=None):
+        super().__init__()
+        self.updates, self.live = [], live
+
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        self.updates.append((task_id, fields, if_state, if_match))
+        return self.live if self.live is not None else {**fields, "claim_generation": 1}
+
+
+def _owner_left(store, monkeypatch, owners=()):
+    from scripts.swarm import ready
+
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat=ENG_SEAT, state="finished"))
+    monkeypatch.setattr(ready, "_owners", lambda run, task_id: list(owners))
+
+
+def test_red_checks_after_the_owner_left_reopen_the_task_without_the_master(store, monkeypatch):
+    red, ledger = answer("open_red"), ReopenLedger()
+    _owner_left(store, monkeypatch)
+    run(store, recorded(), ledger=ledger)
+    told = run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    ((task_id, fields, if_state, if_match),) = ledger.updates
+    assert (task_id, fields, if_state) == ("t1", {"state": "open", "claimed_by": "", "awaiting": "fix"}, ("pr",))
+    assert if_match["claimed_by"] == "sw-eng-1" and if_match["pr_url"] == URL
+    ((_, comment_task, text, by),) = ledger.comments
+    assert (comment_task, by) == ("t1", "swarm") and "Reopened by the swarm" in text and "red checks" in text
+    assert told == [f"task t1 reopened, {URL} has red checks: {', '.join(red.failed)}"]
+    assert texts(store, MASTER_SEAT) == [] and texts(store, ENG_SEAT) == []
+
+
+def test_a_red_task_whose_reopen_is_refused_still_sends_its_notice(store, monkeypatch):
+    red, ledger = answer("open_red"), ReopenLedger()
+    _owner_left(store, monkeypatch, owners=[AgentRecord("sw-eng-9", "eng", "t1")])
+    run(store, recorded(), ledger=ledger)
+    told = run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    assert ledger.updates == [] and told == [f"told {MASTER_SEAT}: {URL}:red:{red.head}"]
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "has red checks and no push" in notice
+
+
+def test_red_checks_for_a_live_owner_only_send_the_notice(store, monkeypatch):
+    red, ledger = answer("open_red"), ReopenLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    assert ledger.updates == [] and texts(store, MASTER_SEAT) == []
+    assert len(texts(store, ENG_SEAT)) == 1
+
+
 def _notices():
     red, closed, merged = answer("open_red"), answer("closed_unmerged"), answer("merged")
     url = "https://github.com/o/r/pull/9"
