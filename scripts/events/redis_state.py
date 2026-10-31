@@ -74,15 +74,17 @@ class RedisStateStore:
         for _ in range(WRITE_TRIES):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(self._current)
+                    pipe.watch(self._current, self._revision)
                     found = pipe.hget(self._current, key)
                     if (None if found is None else json.loads(found)["revision"]) != revision:
                         raise StateConflict(conflict)
                     published = pipe.get(self._published)
-                    consistent = pipe.get(self._revision) == published
-                    written = self.redis.incr(self._revision)
+                    current = pipe.get(self._revision)
+                    consistent = current == published
+                    written = int(current or 0) + 1
                     row = json.dumps({"revision": written, "value": base64.b64encode(value).decode()})
                     pipe.multi()
+                    pipe.incr(self._revision)
                     if self.projection is not None or published is not None:
                         self._project(pipe, key, value, written, consistent)
                     pipe.hset(self._current, key, row)
