@@ -505,11 +505,75 @@ def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path
     monkeypatch.setattr(
         measured,
         "refine_plan",
-        lambda *args: {"estimated_worker_seconds": 1.0, "shards": 2, "assignments": {}, "splits": splits},
+        lambda *args: {
+            "estimated_worker_seconds": 1.0,
+            "shards": 2,
+            "assignments": {},
+            "splits": splits,
+            "shard_worker_seconds": [0.5, 0.5],
+            "workers": 3,
+        },
     )
     monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(folder)])
     assert measured.main() == 0
     assert output.read_text() == f"shards=[0, 1]\nprobe={flag}\n"
+
+
+def _measured_plan_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loads: list[float], budget: int | None
+) -> tuple[int, Path, Path]:
+    from scripts.ci_mutation import measured
+
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "stats"
+    folder.mkdir()
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(measured, "discover_changes", lambda *args: {})
+    monkeypatch.setattr(measured.subprocess, "check_output", lambda *args, **kwargs: "revision\n")
+    planned = {
+        "estimated_worker_seconds": sum(loads),
+        "shards": len(loads),
+        "assignments": {},
+        "splits": {},
+        "shard_worker_seconds": loads,
+        "workers": 3,
+    }
+    monkeypatch.setattr(measured, "refine_plan", lambda *args: planned)
+    budget_args = [] if budget is None else ["--budget", str(budget)]
+    monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(folder), *budget_args])
+    return measured.main(), folder, output
+
+
+def test_measured_cli_fails_at_plan_time_when_ten_shards_cannot_fit_the_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status, folder, output = _measured_plan_cli(tmp_path, monkeypatch, [31000.0] * 10, None)
+    text = capsys.readouterr().out
+    assert status == 1
+    assert json.loads((folder / "plan.json").read_text())["shard_worker_seconds"] == [31000.0] * 10
+    assert not output.exists()
+    assert (
+        "::error title=Mutation plan over budget::The slowest mutation shard needs 31000 worker seconds,"
+        " 10333 seconds on 3 workers, against the 1080 second shard budget. The change needs 310000 worker"
+        " seconds and 10 shards hold at most 32400, so split it into at least 10 pull requests." in text
+    )
+
+
+@pytest.mark.parametrize(("loads", "budget", "status"), [([3240.0, 10.0], None, 0), ([3240.0, 10.0], 1079, 1)])
+def test_measured_cli_accepts_a_shard_that_exactly_fills_its_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    loads: list[float],
+    budget: int | None,
+    status: int,
+) -> None:
+    result, _, output = _measured_plan_cli(tmp_path, monkeypatch, loads, budget)
+    text = capsys.readouterr().out
+    assert result == status
+    assert output.exists() is (status == 0)
+    assert ("split it into at least 2 pull requests" in text) is bool(status)
 
 
 @pytest.mark.parametrize("identity_only", [False, True])
