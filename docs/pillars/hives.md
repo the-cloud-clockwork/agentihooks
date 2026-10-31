@@ -439,7 +439,7 @@ hive that is not draining, appends nothing. The record keeps the newest 20 entri
 |---|---|
 | `at` | Wall clock time of the change, in milliseconds. |
 | `draining` | The new value, `yes` or `no`. |
-| `owner` | Who changed it: the session's `AGENTIHOOKS_AGENT_NAME`, else the machine's host name; `operator` from the ledger page. |
+| `owner` | The writing process's `AGENTIHOOKS_AGENT_NAME`, else the machine's host name. Ledger changes use the ledger server process's identity. |
 | `reason` | Why it changed. |
 | `deadline_at` | Time in milliseconds by which the hive's agents must have handed off, or `0` when the change sets none. |
 | `ready_before`, `ready_after` | Whether the hive was ready, live within 90 seconds and not draining, before and after the change. |
@@ -448,17 +448,17 @@ Every path that writes the flag names its owner and reason:
 
 | Path | Owner | Reason | Deadline |
 |---|---|---|---|
-| `agentihooks hive set <id> draining=... [--reason <text>]` | session agent name or host name | `--reason`, default `hive set` | none |
+| `agentihooks hive set --reason <text> <id> draining=...` | session agent name or host name | `--reason`, default `hive set` | none |
 | `agentihooks hive drain --wait <s>`, a worker pod's preStop | session agent name or host name | `the hive is stopping` | now plus `--wait` |
 | `agentihooks hive remove <name>`, drain step | session agent name or host name | `hive remove` | now plus `--wait` |
 | A worker pod's start, which sets `draining=no` | the pod's agent name or host name | `the worker started` | none |
-| The ledger [Hives panel](#ledger-hives-panel) and `PATCH /api/v1/hives/<id>` | `operator` | `ledger hive settings` | none |
+| The ledger [Hives panel](#ledger-hives-panel) and `PATCH /api/v1/hives/<id>` | ledger server agent name or host name | `hive set` | none |
 
 Drain a hive for maintenance, take it back, and read the history:
 
 ```bash
-agentihooks hive set pod-1 --reason "node kernel upgrade" draining=yes
-agentihooks hive set pod-1 --reason "upgrade finished" draining=no
+agentihooks hive set --reason "node kernel upgrade" pod-1 draining=yes
+agentihooks hive set --reason "upgrade finished" pod-1 draining=no
 agentihooks hive show pod-1 | jq '.drains'
 # [
 #   {"at": 1793166000000, "draining": "yes", "owner": "engineer@d44a5a-2351", "reason": "node kernel upgrade",
@@ -469,13 +469,15 @@ agentihooks hive show pod-1 | jq '.drains'
 ```
 
 The [Doctor hive pool detector](swarm.md#doctor-hive-pool-detector) reads each down hive's latest `draining=yes`
-entry into its finding.
+entry into its finding. This history belongs to the hive record: completing `hive remove` deletes that record and
+its drain history. The 20 entry limit is fixed; `hive set` has no deadline option. Use `hive drain --wait <seconds>`
+for the current hive or `hive remove <name> --wait <seconds>` when the operation must wait for handoffs.
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `hive show` has no `drains` key | The flag never changed since the release that records it, or every write left it as stored. | Nothing to fix; the first change adds the list. |
 | An entry's owner is a host name | The writing session had no `AGENTIHOOKS_AGENT_NAME`. | Run the command from an agent session, or read the host name as the machine that wrote it. |
-| An older drain is missing | More than 20 changes since it. | Read older changes from the tick and pod journals. |
+| An older drain is missing | More than 20 changes since it, or the hive record was removed. | Consult retained tick and pod journals if available; the hive record cannot recover discarded entries. |
 
 ### Capabilities and task needs
 
