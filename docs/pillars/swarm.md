@@ -848,7 +848,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
-| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), or until it expires after MINUTES, or 12 hours when MINUTES is omitted. When the thing resolves the tick ends the wait and sends you an inbox item; expiry sends none. For a red Actions run the item names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read; [When a checks wait ends](#when-a-checks-wait-ends) gives the green and red rule for pull request checks. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
+| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), or until it expires after MINUTES, or 12 hours when MINUTES is omitted. When the thing resolves the tick ends the wait and sends you an inbox item; expiry sends none. For a red Actions run the item names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read; [When a checks wait ends](#when-a-checks-wait-ends) gives the green and red rule for pull request checks. A bare wait lasts MINUTES, at most 60. An accepted checked wait prints a `next` field telling the agent to finish its turn; [Wait notice and end of turn](#wait-notice-and-end-of-turn) covers it and the notice a worker gets for an undeclared wait. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched through that repository's recorded checkout or its URL, or whose pull request already merged into `dev`, the task's own fork from `origin/dev`, see [Parking on a dependency already merged into dev](#parking-on-a-dependency-already-merged-into-dev)), comments the ledger task with the blocker, comments the issue with the branch, records those other repositories in `parked_repos` (see [Park fetch and note across repositories](#park-fetch-and-note-across-repositories)), stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
@@ -3454,6 +3454,115 @@ jq -c 'select(.gate == "claim-stop") | {at, kind, agent, task, reason}' ~/.agent
 
 `tests/gates/test_claim_stop.py` pins the grading: `test_a_live_checks_wait_on_another_pull_request_grades_that_pull_request_only`, `test_a_live_checks_wait_on_a_run_lets_a_red_pull_request_stop`, `test_a_checks_wait_on_the_task_pull_request_keeps_grading_it` and `test_a_merged_task_pull_request_still_owes_done_while_a_checks_wait_names_another`. `tests/gates/test_push_stop.py` pins the merge wait: `test_a_live_merge_wait_on_an_open_pull_request_lets_a_refused_push_stop`, `test_a_merge_wait_on_a_pull_request_no_longer_open_still_refuses_the_stop` and `test_a_merge_wait_never_holds_uncommitted_changes`. The behavior was delivered in [pull request 5312](https://github.com/the-cloud-clockwork/agentihooks/pull/5312); its new tests failed first in [run 39466142797](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39466142797) and passed in [run 39466488932](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39466488932).
 
+### Wait notice and end of turn
+
+An eng or ci agent that sleeps or polls inside its turn without a declared wait reads to the health check as a stale claim, and on Codex it also keeps the turn open, so the tick's next prompt has no turn to start. Two pieces keep a worker's waits visible and short: a hook notice that tells an agent starting an undeclared wait to declare it, and a `next` field in the output of a checked `swarm wait` that tells the agent to finish its turn.
+
+#### Who gets the notice
+
+The notice fires only when all of these hold:
+
+- the session carries `AGENTIHOOKS_SWARM`, `AGENTIHOOKS_SWARM_TASK` and `AGENTIHOOKS_AGENT_NAME`, so it is a swarm agent holding a task;
+- the agent name is in the `eng` or `ci` lane; masters, planners and operator sessions never get it;
+- the tool call counts as a wait (next table);
+- no wait the agent declared with `agentihooks swarm <id> wait` still holds.
+
+A failed lookup, such as Redis down, writes `swarm wait nudge failed` with the error to the hook log and adds nothing.
+
+#### Which calls count as a wait
+
+| Tool call | Counts when |
+|---|---|
+| `Bash` or `Monitor` command | A command in it starts with `sleep <arg>` (also after `do`, `then`, `else`, `nohup` or `timeout <n>`), runs an `until …; do` or `while …; do` loop, runs `gh run watch`, or runs `gh pr checks … --watch`. A command starts at the beginning of the text or after `;`, `&`, `\|`, `(`, `{` or a newline. |
+| Native `sleep` or `wait` tool (Codex) | Always, whatever its arguments. |
+| `write_stdin` (Codex) | It sends no characters: `chars` is empty or missing, which polls a running process. A call that types input, such as `"y\n"`, is not a wait. |
+| Codex code mode `exec` program, arriving as a `Bash` command | The program text itself matches the shell rules above, or the `cmd` of any `exec_command({...})` call in it does. |
+
+For an `exec` program, each `exec_command({...})` field is read on its own and only double quoted strings are decoded, with JavaScript escapes translated one pair at a time (`\$`, `\v`, a backslash before a line break). A field that cannot be decoded, such as `"\uZZ"`, reads as unknown and is not matched; its sibling fields are still read. A `cmd` in single quotes or backticks is not read. So:
+
+```javascript
+// counts: the nested cmd sleeps
+const r = await tools.exec_command({ cmd: "cd ~/x && sleep 300", workdir: "/w" });
+// counts: the second call watches a run
+await tools.exec_command({cmd:"ls"}); await tools.exec_command({cmd:"gh run watch 1"});
+// does not count: the sleep is only text, and the exec call runs git status
+text("sleep 55"); await tools.exec_command({cmd:"git status"});
+// does not count: single quoted cmd
+await tools.exec_command({cmd:'sleep 900'});
+```
+
+The one push gate's Codex working folder lookup reads the same `exec_command` fields. When any field of the latest `exec` program cannot be decoded, it finds no working folder and counts the session checkout, as it does for a program with no `workdir`.
+
+#### When the notice arrives
+
+| Harness | Hook event | What the agent sees |
+|---|---|---|
+| Claude Code, Copilot CLI | `PreToolUse` | The notice before the wait runs, once per waiting call. |
+| Codex | `PostToolUse` | The notice when the wait call returns, in the same turn. Codex's pre tool event cannot carry context, so a notice sent there would be lost. |
+
+The choice follows `can_inject_context("PreToolUse")` for the running harness: post tool delivery runs only where the pre tool event cannot carry context, so a Claude or Copilot agent never gets the notice twice. The notice is a `refocus` context block:
+
+```text
+=== SWARM WAIT ===
+You hold task t42 and are starting a wait with no declared wait, which the health check reads as a stale claim. Declare it first: agentihooks swarm my-swarm wait --on checks <pr url> | reply <inbox item> | task <id> when the tick can end it, else agentihooks swarm my-swarm wait <minutes> --reason "<what you wait on>" (at most 60) and agentihooks swarm my-swarm progress --doing "<what>" --ends-when "<what>" at least every 30 minutes, because a bare wait alone still counts as quiet.
+```
+
+The notice is context only. It never refuses or delays the call, and no stop gate was added with it.
+
+#### GitHub watch guard
+
+Separately, an eng or ci swarm agent's `gh run watch` or `gh pr checks --watch` in a `Bash` or `Monitor` call is refused before it runs, task or not, because independent watches spend the shared GitHub hourly quota:
+
+```text
+Independent GitHub watches spend the shared GitHub hourly quota. Use agentihooks swarm my-swarm wait --on checks <pr url>, or wait --on mutation <run url> for Mutation preflight. The swarm tick resolves these waits centrally.
+```
+
+The guard reads the command's own words, so `gh -R owner/repo run watch 1` is refused as well.
+
+#### A checked wait ends the turn
+
+A checked wait (`--on checks|merge|reply|task|mutation|intent`) that the command accepts prints one JSON line with a `next` field:
+
+```bash
+agentihooks swarm my-swarm wait --on checks https://github.com/<owner>/<repo>/pull/<number>
+```
+
+```json
+{"agent": "engineer@a1b2c3-0001", "until": "2026-10-23T03:41:07+00:00", "on": {"kind": "checks", "target": "https://github.com/<owner>/<repo>/pull/<number>", "head": "<head sha>"}, "next": "finish the current turn now unless you have independent work; do not sleep or poll, the swarm tick ends this wait and sends your next prompt"}
+```
+
+The agent then ends its turn. When the thing resolves, the tick ends the wait and sends an inbox item, which starts a new turn (on Codex through the push pump).
+
+`next` is absent in every other case:
+
+| Command | Output |
+|---|---|
+| `wait 30 --reason "the after window"` (bare wait) | `agent` and `until` only. When a bare wait ends the tick sends no prompt, so the agent keeps its turn and works through the wait itself, reporting `progress` at least every 30 minutes. |
+| `wait --inbox` | The received items and `timed_out`. |
+| A refused wait | Exit 1 with the reason and no `next`, and no wait is recorded. Reasons include `wait on one of: …` for an unknown kind, `wait on checks needs a pull request url or an Actions run url, not 7`, `no task t9 on the ledger`, `a wait lasts a whole number of minutes above zero` and `cannot read the pull request head; retry the checks wait`. |
+
+A refused wait therefore never tells an agent it has yielded; it fixes the command and declares the wait again.
+
+#### Proof
+
+Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentihooks/pull/5237) from the Doctor diagnosis in [issue 3194](https://github.com/the-cloud-clockwork/agentihooks/issues/3194). Over 24 hours from 22:40 UTC on 12 October, 96 of 100 Codex turns longer than 600 seconds carried CI status reads and wait calls.
+
+- Red: [run 39413710558](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39413710558) ran the seam tests before the fix; 10 failed: the native `sleep`, `wait` and `write_stdin` cases, the nested `exec` sleep and watch, the Codex post tool notice and the checked wait `next`.
+- Green: [run 39439331701](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39439331701) passed on the merged head.
+- Native Codex smoke, codex-cli 0.162.1 with stub swarm and gh CLIs, one run per output. With `next`, the turn completed 6 seconds after the wait with no tool call after it. With the old output, the agent made three more calls in the same turn (`gh pr checks --watch` twice, then `gh pr view`). Both runs started a fresh turn on the tick's wait ended notice.
+
+`tests/context/test_swarm_wait_nudge.py` pins the notice: `test_a_worker_with_no_declared_wait_is_told_to_declare_it` and `test_a_call_that_is_not_a_wait_is_not_told` hold the wait table, `test_only_double_quoted_nested_commands_are_read` the quoting rule, and `test_the_post_tool_hook_carries_the_nudge_where_the_pre_tool_event_cannot`, `test_the_post_tool_hook_leaves_the_nudge_to_a_pre_tool_event_that_carries_it` and `test_the_post_tool_hook_tells_nothing_once_a_wait_is_declared` the delivery. `tests/swarm/test_waits.py` pins `next`: `test_every_checked_wait_tells_the_agent_to_finish_the_current_turn`, `test_a_failed_wait_never_tells_the_agent_it_has_yielded`, `test_a_failed_checks_head_read_never_tells_the_agent_it_has_yielded` and `test_a_bare_wait_keeps_the_turn_open`. `tests/gates/test_one_push.py::test_ready_without_a_codex_exec_workdir_counts_the_session_checkout` covers the undecodable working folder case.
+
+#### Troubleshooting the wait notice
+
+| Symptom | Cause and action |
+|---|---|
+| A Codex agent sees `=== SWARM WAIT ===` only after its sleep finished | Expected: Codex gets the notice after the tool. Declare the wait before the next one. |
+| A worker sleeps with no notice | Check the session environment for all three swarm variables and an `eng` or `ci` agent name, then `agentihooks swarm <id> status` for a declared wait that still holds. Search the hook log for `swarm wait nudge failed`. A `cmd` in single quotes or backticks, or one with an undecodable escape, is not read. |
+| A Claude agent gets the notice twice for one call | Not expected: post tool delivery runs only when `can_inject_context("PreToolUse")` is false. Check `AGENTIHOOKS_TARGET` in the session; the codex wrapper sets it to `codex`. |
+| A Codex agent keeps polling after `wait --on checks` | Read the command output for `next`. When it is missing, the wait was refused or was a bare wait; fix the target and declare it again. |
+| `gh run watch` is refused | The GitHub watch guard. Use `wait --on checks <pr url>` or `wait --on mutation <run url>`. |
+
 ## The minute tick
 
 An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
@@ -4913,7 +5022,7 @@ when its pane shows a provider error while its heartbeat is not working. The tic
 minutes of silence, with an id built from the agent, its last activity and the window, so repeated ticks send it
 once; nothing is typed into its pane. The inbox channel delivers it to Claude and the Codex push pump to Codex. A
 nudge the pump delivers within two minutes of its sending interrupts a turn still running and starts a new app server
-turn; a later one is delivered like any message. An agent on a long command declares a wait first.
+turn; a later one is delivered like any message. An agent on a long command declares a wait first; the [wait notice](#wait-notice-and-end-of-turn) reminds a worker that starts one without.
 The master, an agent the operator is typing to, a swarm with an open outage and an agent in provider recovery get
 no nudge.
 
