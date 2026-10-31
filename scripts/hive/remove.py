@@ -34,7 +34,10 @@ ROLL = (
     "another hive."
 )
 WITHDRAWN = "hive {hive} stopped draining for its release, so its hand off order no longer applies"
-REMOVED = "hive {hive} stopped draining for its removal, so its hand off order no longer applies"
+REMOVED = (
+    "hive remove of {hive} stopped waiting for its agents, so this hand off order no longer applies; "
+    "a rerun of remove sends a new one"
+)
 RECOVERY = """## Intent
 Continue task {task}; hive {hive} stopped for a release while {name} still worked it.
 
