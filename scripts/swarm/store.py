@@ -16,11 +16,14 @@ from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
 if TYPE_CHECKING:
+    from redis.client import Pipeline
+
     from scripts.swarm_v2.runtime.operations import OperationJournal
 
 PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
+UNACKED_LAUNCH_STATES = ("pending", "acknowledging", "launching")
 MASTER = "master"
 PROJECTION_ATTEMPTS = 5
 PROJECTION_CONTENTION = "agent registry kept changing; the agent was not shown"
@@ -163,6 +166,17 @@ class AgentRecord:
     transport: str = ""
     remote_control: dict = field(default_factory=dict)
     desired_route_kind: str = ""
+
+
+def _close_dangling_launch(pipe: "Pipeline", key: str, name: str, raw: str | None) -> None:
+    row = json.loads(raw) if raw else None
+    if row is None or row["state"] not in UNACKED_LAUNCH_STATES:
+        return
+    pipe.hset(
+        key,
+        name,
+        json.dumps({**row, "state": "failed", "error": row["error"] or "the agent was dropped before it acknowledged"}),
+    )
 
 
 class RedisStore:
@@ -583,6 +597,7 @@ class RedisStore:
                 try:
                     pipe.watch(self.key(slug, "agents"))
                     previous = pipe.hget(self.key(slug, "agents"), name)
+                    launch = pipe.hget(self.key(slug, "launches"), name)
                     doc = fencing.read(self, slug)
                     executions = [a for a in occupants_of(doc).values() if a.name == name]
                     lives = records_of(doc) if previous else []
@@ -611,6 +626,7 @@ class RedisStore:
                             self.key(slug, "history"),
                             json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
                         )
+                    _close_dangling_launch(pipe, self.key(slug, "launches"), name, launch)
                     pipe.hdel(self.key(slug, "agents"), name)
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
