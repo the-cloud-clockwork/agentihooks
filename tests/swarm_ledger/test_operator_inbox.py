@@ -64,7 +64,9 @@ def test_an_agent_write_through_the_server_sends_nothing(inbox):
     assert ledger_server.relay_to_inbox(SLUG, state) == []
 
 
-def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(inbox, monkeypatch):
+def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import threading
     import time
 
@@ -74,7 +76,7 @@ def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(i
 
     release = threading.Event()
 
-    def hanging():
+    def hanging() -> memory.MemoryBus:
         release.wait(5)
         return memory.open_bus(BusConfig())
 

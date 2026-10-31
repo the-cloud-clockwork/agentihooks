@@ -123,7 +123,7 @@ def test_a_failed_publish_keeps_the_redis_send_and_says_so(monkeypatch, capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_a_hanging_connect_holds_no_publish_and_is_attempted_once():
+def test_a_hanging_connect_holds_no_publish_and_is_attempted_once() -> None:
     import threading
     import time
     from types import SimpleNamespace
@@ -133,7 +133,7 @@ def test_a_hanging_connect_holds_no_publish_and_is_attempted_once():
     release = threading.Event()
     attempts = []
 
-    def hanging():
+    def hanging() -> memory.MemoryBus:
         attempts.append(1)
         release.wait(5)
         return memory.open_bus(BusConfig())
@@ -141,7 +141,7 @@ def test_a_hanging_connect_holds_no_publish_and_is_attempted_once():
     publisher = bus.SeatPublisher(hanging)
     took = []
 
-    def write(n):
+    def write(n: int) -> None:
         item = SimpleNamespace(
             id=f"i{n}", address=SEAT, sender="alice", text="work", ref="", fyi=False, task="", created_at=0
         )
