@@ -441,10 +441,10 @@ def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch, typed):
     ]
 
 
-class _StarvedBudget:
+class _StarvedBudget(PromptBudget):
     def __init__(self, limit: int) -> None:
+        super().__init__()
         self.calls: list[str] = []
-        self.skipped: list[str] = []
         self._limit = limit
 
     def run(self, name: str, step, *args) -> bool | None:
