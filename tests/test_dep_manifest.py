@@ -437,7 +437,9 @@ def test_files_a_module_reads_while_imported_during_collection_belong_only_to_it
         )
         (tmp_path / "pkg" / "other.py").write_text("from pkg import DIGEST\n")
         (tmp_path / "pkg" / "sub.py").write_text("def f():\n    return 1\n")
-        imports = ("from pkg.other import DIGEST\n", "from pkg.sub import f\n")
+        (tmp_path / "side.txt").write_text("x")
+        (tmp_path / "side.py").write_text("from pathlib import Path\nSIDE = Path('side.txt').read_text()\n")
+        imports = ("from pkg.other import DIGEST\nimport side\n", "from pkg.sub import f\n")
     else:
         (tmp_path / "helper.py").write_text(reader + "DIGEST = digest()\n")
         (tmp_path / "wrapper.py").write_text("from helper import DIGEST\n")
@@ -449,7 +451,11 @@ def test_files_a_module_reads_while_imported_during_collection_belong_only_to_it
     rows = _recorded_inputs(tmp_path, ["test_reader.py", "test_consumer.py", "test_unrelated.py"])
     assert sorted(rows, key=lambda row: row["test"]) == [
         {"test": "test_consumer.py::test_cached", "files": ["page.js"], "escapes": False},
-        {"test": "test_reader.py::test_reads", "files": ["page.js"], "escapes": False},
+        {
+            "test": "test_reader.py::test_reads",
+            "files": ["page.js", "side.txt"] if layout == "package" else ["page.js"],
+            "escapes": False,
+        },
         {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
     ]
 

@@ -71,19 +71,17 @@ class DepInputs:
     def child_reads(self, log: Path) -> set[str]:
         return set(log.read_text().splitlines()) if log.is_file() else set()
 
-    def imported_by_another(self, frame: FrameType | None) -> bool:
-        """Whether a repository module other than the one being collected is running its top level code."""
+    def importing(self, frame: FrameType | None) -> str | None:
+        """The repository module, other than the one being collected, whose top level code runs innermost."""
         while frame is not None:
             name = frame.f_code.co_filename
-            if (
-                frame.f_code.co_name == "<module>"
-                and name != self.collecting
-                and name.startswith(self.root)
-                and not name[len(self.root) :].startswith(SKIPPED)
-            ):
-                return True
+            if frame.f_code.co_name == "<module>" and name.startswith(self.root):
+                if name == self.collecting:
+                    return None
+                if not name[len(self.root) :].startswith(SKIPPED):
+                    return name[len(self.root) :]
             frame = frame.f_back
-        return False
+        return None
 
     def audit(self, event: str, args: tuple) -> None:
         test = self.current
@@ -96,15 +94,17 @@ class DepInputs:
                     opened = os.path.abspath(os.fsdecode(path))
                 except OSError:
                     return
-                if not opened.startswith(self.own):
-                    test[0].add(opened)
-                    if (
-                        self.collecting
-                        and opened.startswith(self.root)
-                        and not opened.endswith((".py", ".pyc"))
-                        and not self.imported_by_another(sys._getframe(1))
-                    ):
-                        self.loose.add(opened)
+                if opened.startswith(self.own):
+                    return
+                owner = None
+                if self.collecting and opened.startswith(self.root) and not opened.endswith((".py", ".pyc")):
+                    owner = self.importing(sys._getframe(1))
+                if owner is not None:
+                    self.collections.setdefault(owner, [set(), False])[0].add(opened)
+                    return
+                test[0].add(opened)
+                if self.collecting:
+                    self.loose.add(opened)
         elif event in ESCAPES and test is not self.shared:
             test[1] = True
             self.escaping.update(self.setting_up)
@@ -129,7 +129,6 @@ class DepInputs:
                 filename = getattr(sys.modules[name], "__file__", "") or ""
                 if filename.startswith(self.root) and filename.endswith(".py"):
                     found = self.collections.setdefault(filename[len(self.root) :], [set(), False])
-                    found[0].update(collected[0])
                     found[1] = found[1] or collected[1]
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
@@ -162,12 +161,14 @@ class DepInputs:
             self.parsed[path] = {".".join(part[:end]) for part in parts for end in range(1, len(part) + 1)}, dynamic
         names, dynamic = self.parsed[path]
         filenames = {getattr(sys.modules.get(name), "__file__", "") or "" for name in names}
-        return {name[len(self.root) :] for name in filenames if name.startswith(self.root)}, dynamic
+        found = {name[len(self.root) :] for name in filenames if name.startswith(self.root)}
+        return {name for name in found if not name.startswith(SKIPPED)}, dynamic
 
     def closure(self, path: str) -> tuple[set[str], bool]:
         """The collection reads of a module and of every repository module it reaches through the modules loaded now."""
+        loaded = len(sys.modules), next(reversed(sys.modules), None)
         cached = self.closures.get(path)
-        if cached and cached[0] == len(sys.modules):
+        if cached and cached[0] == loaded:
             return cached[1]
         reads, escapes, pending, seen = set(), False, [path], {path}
         while pending:
@@ -178,7 +179,7 @@ class DepInputs:
             escapes = escapes or found[1] or dynamic
             pending.extend(names - seen)
             seen.update(names)
-        self.closures[path] = len(sys.modules), (reads, escapes)
+        self.closures[path] = loaded, (reads, escapes)
         return reads, escapes
 
     @pytest.hookimpl(hookwrapper=True)
