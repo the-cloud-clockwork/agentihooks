@@ -129,6 +129,39 @@ def test_over_the_limit_the_handoff_steps_are_allowed(monkeypatch, tool_name, to
     assert _gate(tool_name, tool_input) is None
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "agentihooks msg send master@my-swarm 'handoff refused: the ledger is unreachable'",
+        "agentihooks msg reply 3fb90b6722f9 'handing off'",
+        "agentihooks msg close 3fb90b6722f9 done",
+        "agentihooks msg read 3fb90b6722f9",
+        "agentihooks msg inbox",
+        "agentihooks swarm my-swarm master up --replace",
+    ],
+)
+def test_over_the_limit_a_master_keeps_its_inbox_and_can_launch_its_replacement(
+    monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    _over(monkeypatch)
+    assert _gate("Bash", {"command": command}, _swarm_env("my-swarm-master-1")) is None
+    assert _gate("Bash", {"command": command}) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "agentihooks swarm my-swarm master up --new",
+        "agentihooks swarm other-swarm master up --replace",
+        "agentihooks msg send master@my-swarm hi; git push",
+        "agentihooks msg watch",
+    ],
+)
+def test_over_the_limit_a_master_is_still_denied_other_work(monkeypatch: pytest.MonkeyPatch, command: str) -> None:
+    _over(monkeypatch)
+    assert _gate("Bash", {"command": command}, _swarm_env("my-swarm-master-1")) is not None
+
+
 def test_a_write_that_escapes_the_scratchpad_is_denied(monkeypatch):
     _over(monkeypatch)
     assert _gate("Write", {"file_path": "~/scratchpad/../dev/repo/a.py", "content": "x"})
