@@ -1619,6 +1619,27 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Summarize the executed lines
+        if: matrix.python-version == '3.12'
+        run: |
+          databases=(.coverage)
+          if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
+          python -m tests.coverage_summary --out executed-lines.json "${databases[@]}" \
+            --statements statement-lines.json --slice "$SHARD/20"
+        env:
+          SHARD: ${{ matrix.shard }}
+
+      - name: Upload the executed lines summary
+        if: matrix.python-version == '3.12'
+        uses: ./.github/actions/retry-upload
+        with:
+          name: executed-lines-${{ matrix.python-version }}-${{ matrix.shard }}
+          path: |
+            executed-lines.json
+            statement-lines.json
+          if-no-files-found: error
+          retention-days: 7
+
   unit-lost:
     if: ${{ !cancelled() && github.event_name == 'merge_group' && (needs.unit.result == 'failure' || needs.unit.result == 'cancelled') }}
     needs: [unit, split]
@@ -2811,6 +2832,7 @@ jobs:
             k8s/values-overlays/agentihooks-swarm-nats/values.yaml
             k8s/values-overlays/agentihooks-swarm-nats/users.yaml
             k8s/values-overlays/agentihooks-swarm-nats/trust.yaml
+            k8s/charts/arc-runners-oss/values-oss-batch.yaml
         run: |
           set -euo pipefail
           revision=$(gh api "repos/$REPOSITORY/commits/$REF" --jq .sha)
@@ -2869,6 +2891,14 @@ jobs:
           python -m pip install --quiet "cryptography>=42"
           cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
+
+      - name: Hold the mutation planner's batch runner ceiling equal to the antoncore batch runner chart
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_batch_runner_ceiling.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.ci_batch_runner_ceiling --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
 
       - name: Select artifact browser checks
         if: ${{ !cancelled() }}
@@ -3013,26 +3043,6 @@ jobs:
       - name: Install coverage
         run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4"
 
-      - name: Download shard coverage
-        id: download-shard-coverage
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &coverage-ratchet-download-shard-coverage
-          pattern: coverage-3.12-*
-          path: head-coverage
-
-      - name: Download shard coverage, wait before attempt 2
-        if: steps.download-shard-coverage.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download shard coverage, attempt 2
-        if: steps.download-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *coverage-ratchet-download-shard-coverage
-
       - name: Resolve the measured base tree
         id: base
         env:
@@ -3165,19 +3175,73 @@ jobs:
         uses: actions/download-artifact@v4
         with: *coverage-ratchet-download-the-queue-base-coverage-baseline
 
-      - name: Hold every line the base ran
+      - name: Check out the base grader
+        id: grader
         env:
           BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
         run: |
-          base="$BASE"
-          git worktree add --detach "$RUNNER_TEMP/base" "$base"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
           if [[ ! -f "$RUNNER_TEMP/base/tests/coverage_ratchet.py" ]]; then
             echo "::error::The base carries no tests/coverage_ratchet.py, so nothing trusted can grade."
             exit 1
           fi
+          if grep -q -- '--head-summaries' "$RUNNER_TEMP/base/tests/coverage_ratchet.py"; then
+            echo "input=--head-summaries" >> "$GITHUB_OUTPUT"
+          else
+            echo "input=--head-shards" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download the executed lines summaries
+        if: steps.grader.outputs.input == '--head-summaries'
+        id: download-the-executed-lines-summaries
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &coverage-ratchet-download-the-executed-lines-summaries
+          pattern: executed-lines-3.12-*
+          path: head-coverage
+
+      - name: Download the executed lines summaries, wait before attempt 2
+        if: steps.download-the-executed-lines-summaries.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the executed lines summaries failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the executed lines summaries, attempt 2
+        if: steps.download-the-executed-lines-summaries.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-ratchet-download-the-executed-lines-summaries
+
+      - name: Download shard coverage
+        if: steps.grader.outputs.input == '--head-shards'
+        id: download-shard-coverage
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &coverage-ratchet-download-shard-coverage
+          pattern: coverage-3.12-*
+          path: head-coverage
+
+      - name: Download shard coverage, wait before attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download shard coverage, attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-ratchet-download-shard-coverage
+
+      - name: Hold every line the base ran
+        env:
+          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
+          HEAD_INPUT: ${{ steps.grader.outputs.input }}
+        run: |
+          base="$BASE"
           cd "$RUNNER_TEMP/base"
           python -m tests.coverage_ratchet --base "$base" --head "$GITHUB_WORKSPACE" --shards 20 \
-            --head-shards "$GITHUB_WORKSPACE/head-coverage" --out "$GITHUB_WORKSPACE/coverage-ratchet" \
+            "$HEAD_INPUT" "$GITHUB_WORKSPACE/head-coverage" --out "$GITHUB_WORKSPACE/coverage-ratchet" \
             --base-baseline "$HOME/coverage-baseline/baseline.json"
 
       - name: Upload the coverage ratchet report
