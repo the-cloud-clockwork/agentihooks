@@ -875,7 +875,7 @@ def _pull_requests(mail, tasks, now_ms, github, ledger):
     return sent
 
 
-def _red(mail: "Mail", ledger: object, task: dict, found: "PullRequest", title: str, now_ms: int) -> list[str]:
+def _red(mail: Mail, ledger: object, task: dict, found: PullRequest, title: str, now_ms: int) -> list[str]:
     from scripts.swarm import ready
 
     url = task["pr_url"]

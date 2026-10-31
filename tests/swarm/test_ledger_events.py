@@ -572,6 +572,17 @@ def test_a_reopen_for_red_checks_with_no_named_failure_says_red_checks(store, mo
     assert text.startswith(f"Reopened by the swarm: its pull request {URL} has red checks. ")
 
 
+def test_a_red_task_with_no_claimant_reopens_and_says_so(store, monkeypatch):
+    from scripts.swarm import ready
+
+    ledger = ReopenLedger(live={"state": "open", "claimed_by": "", "claim_generation": 0})
+    _owner_left(store, monkeypatch)
+    task = {key: value for key, value in in_pr()["tasks"][0].items() if key != "claimed_by"}
+    assert ready.reopen_red(store, "sw", ledger, task, (), 100_000) == [f"task t1 reopened, {URL} has red checks"]
+    ((_, _, _, if_match),) = ledger.updates
+    assert if_match["claimed_by"] == "" and len(ledger.comments) == 1
+
+
 def _notices():
     red, closed, merged = answer("open_red"), answer("closed_unmerged"), answer("merged")
     url = "https://github.com/o/r/pull/9"

@@ -437,8 +437,9 @@ def reopen_red(
 ) -> list[str]:
     """Reopen a task in pull request whose red checks have no live owner to fix them, keeping its handoff."""
     run = Pass(store, slug, ledger, github=lambda url: None, reread=lambda url: None, now_ms=now_ms)
-    found = {"url": task["pr_url"], "agent": task.get("claimed_by")}
-    return _reopen(run, task, found, f"has red checks: {', '.join(failed)}" if failed else "has red checks")
+    row = {**task, "claimed_by": task.get("claimed_by") or ""}
+    found = {"url": row["pr_url"], "agent": row["claimed_by"]}
+    return _reopen(run, row, found, f"has red checks: {', '.join(failed)}" if failed else "has red checks")
 
 
 def _release(run, row, found, wait):
