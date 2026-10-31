@@ -627,9 +627,7 @@ def test_the_refresh_command_writes_the_lowered_baseline(
     assert capsys.readouterr().out == "Lowered 1 of 2 type baseline entries by 1 errors\n"
 
 
-def test_a_refreshed_baseline_grades_green_against_its_base(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_refreshed_baseline_grades_green_against_its_base(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 2})
     head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 2})
     (head / type_gate.BASELINE).write_text(json.dumps(type_gate.refresh(head)))
