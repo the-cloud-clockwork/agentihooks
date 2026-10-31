@@ -3,7 +3,10 @@
 import json
 import os
 import re
+import socket
+import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.events import state
@@ -26,7 +29,9 @@ JSON_FIELDS = {
     "master_login": dict,
     "repos": list,
     "capabilities": list,
+    "drains": list,
 }
+DRAINS_KEPT = 20
 INT_FIELDS = ("max_agents", "heartbeat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
@@ -186,12 +191,51 @@ def _settle(hive_id: str, record: dict) -> dict:
     return {**settled, "name": MASTER_NAME} if settled["ui"] == "yes" else settled
 
 
+@dataclass(frozen=True)
+class Drain:
+    """Who changed a hive's drain flag, why, and the time by which its agents must be gone."""
+
+    owner: str
+    reason: str
+    deadline_at: int = 0
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def drain_owner(environ: Mapping[str, str] = os.environ) -> str:
+    return environ.get("AGENTIHOOKS_AGENT_NAME") or socket.gethostname()
+
+
+def _ready(record: dict, at: int) -> bool:
+    return live({"heartbeat_at": 0, **record}, at) and record.get("draining") != "yes"
+
+
+def _drained(record: dict, stored: dict, drain: Drain | None) -> dict:
+    """Appends a drain flag change to the record's retained history, keeping the newest DRAINS_KEPT entries."""
+    if record.get("draining", "no") == stored.get("draining", "no"):
+        return record
+    drain = drain or Drain(drain_owner(), "hive set")
+    at = now_ms()
+    entry = {
+        "at": at,
+        "draining": record["draining"],
+        "owner": drain.owner,
+        "reason": drain.reason,
+        "deadline_at": drain.deadline_at,
+        "ready_before": _ready(stored, at),
+        "ready_after": _ready(record, at),
+    }
+    return {**record, "drains": [*stored.get("drains", []), entry][-DRAINS_KEPT:]}
+
+
 def show(client, hive_id: str) -> dict | None:
     stored = _stored(client, hive_id)
     return None if stored is None else _settle(hive_id, stored)
 
 
-def update(client, hive_id: str, pairs: list[str], keep: bool = False) -> dict:
+def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, drain: Drain | None = None) -> dict:
     if not HIVE_ID.fullmatch(hive_id):
         raise HiveError(f"hive id {hive_id!r} must be letters, digits, dots, dashes or underscores")
     if not pairs:
@@ -206,7 +250,7 @@ def update(client, hive_id: str, pairs: list[str], keep: bool = False) -> dict:
             if not (keep and f in stored and (f in KEPT or (f == "name" and stored[f] != hive_id)))
         }
         _check(_settle(hive_id, {**stored, **fields}))
-        return {**_seeded(hive_id), **stored, **fields}
+        return _drained({**_seeded(hive_id), **stored, **fields}, stored, drain)
 
     record = _settle(hive_id, _amend(client, hive_id, write))
     if hive_id != scope.member():

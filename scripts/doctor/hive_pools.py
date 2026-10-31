@@ -38,10 +38,13 @@ def observe(state: dict, hives: list[dict], readings: dict, refused: list[dict],
     for name in sorted(set(members.values()) - up):
         entry = state.get("down", {}).get(name, {"since": now_ms, "refused": []})
         fresh = [row["id"] for row in refused if row["seen_at"] >= entry["since"]]
+        pooled = sorted(hive_id for hive_id, member in members.items() if member == name)
+        drains = {hive["id"]: hive["drains"][-1] for hive in hives if hive["id"] in pooled and hive.get("drains")}
         down[name] = {
             "since": entry["since"],
-            "hives": sorted(hive_id for hive_id, member in members.items() if member == name),
+            "hives": pooled,
             "refused": sorted({*entry["refused"], *fresh}),
+            **({"drains": drains} if drains else {}),
         }
     return {"members": members, "down": down}
 
@@ -58,7 +61,16 @@ def findings(state: dict, now_ms: int) -> list[Finding]:
                 name,
                 f"no hive in pool {name} is ready for {minutes} minutes, "
                 f"{len(entry['refused'])} tasks refused a launch meanwhile",
-                (f"pool {name}", f"down since {entry['since']}", *(f"hive {hive_id}" for hive_id in entry["hives"])),
+                (
+                    f"pool {name}",
+                    f"down since {entry['since']}",
+                    *(f"hive {hive_id}" for hive_id in entry["hives"]),
+                    *(
+                        f"hive {hive_id} draining {d['draining']} by {d['owner']} at {d['at']} "
+                        f"for {d['reason']}, deadline {d['deadline_at']}"
+                        for hive_id, d in sorted(entry.get("drains", {}).items())
+                    ),
+                ),
                 "every hive in a pool not ready for ten minutes",
                 minutes,
             )

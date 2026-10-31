@@ -100,3 +100,24 @@ def test_a_down_pool_finding_names_who_drained_each_hive_why_and_by_when():
     assert found.evidence[-1] == (
         f"hive {HIVE} draining yes by worker-0 at {NOW} for release roll, deadline {NOW + 600_000}"
     )
+
+
+def test_a_stopping_hive_records_its_pod_as_owner_and_the_wait_as_deadline(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.hive import remove
+
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "agentihooks-hive-worker-0")
+    _live(client)
+    store = SimpleNamespace(redis=client, slugs=lambda: [])
+    host = remove.Host(wall=lambda: NOW / 1000, clock=lambda: 0.0, sleep=lambda seconds: None)
+
+    remove.settle(store, HIVE, 600, host)
+
+    [entry] = registry.show(client, HIVE)["drains"]
+    assert (entry["owner"], entry["reason"], entry["deadline_at"]) == (
+        "agentihooks-hive-worker-0",
+        "the hive is stopping",
+        NOW + 600_000,
+    )
+    assert (entry["ready_before"], entry["ready_after"]) == (True, False)
