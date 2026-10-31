@@ -1,5 +1,5 @@
 import { CHAT_SEEN, SWARM } from "./config.js";
-import { $, grow, h, newId, when } from "./dom.js";
+import { $, grow, h, newId, store, when } from "./dom.js";
 import { doc, queue } from "./sync.js";
 import { hiddenDone } from "./state.js";
 import { attachable, attachmentsView, refreshTray, withAttachments } from "./media.js";
@@ -43,7 +43,7 @@ function lastChatAt() {
 export function renderChatBadge() {
   if (!$("chat-panel").hidden && lastChatAt() > chatSeen) {
     chatSeen = lastChatAt();
-    try { localStorage.setItem(CHAT_SEEN, String(chatSeen)); } catch (e) { /* storage blocked: count resets on reload */ }
+    store(CHAT_SEEN, chatSeen);
   }
   const n = unreadCount(doc.chat, chatSeen);
   $("chat-badge").hidden = !n;

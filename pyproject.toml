@@ -18,8 +18,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "tree-sitter>=0.25",
-    "tree-sitter-bash>=0.25",
+    "tree-sitter==0.26.0",
+    "tree-sitter-bash==0.25.1",
+    "tree-sitter-javascript==0.25.0",
+    "tree-sitter-css==0.25.0",
     # Upper bound is load-bearing: mcp 2.0.0 removes `mcp.server.fastmcp`
     # outright (replaced by `mcp.server.mcpserver.MCPServer`, a different API),
     # so an unbounded spec resolves to a version where `hooks/mcp/__init__.py`
@@ -89,6 +91,7 @@ dev = [
     "pytest-split>=0.10",
     "pytest-asyncio>=0.23",
     "ruff==0.15.12",
+    "basedpyright==1.40.2",
     "vulture==2.14",
     "boto3>=1.34.0",
     "fakeredis[lua]>=2.0",
@@ -167,6 +170,13 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.basedpyright]
+include = ["hooks", "scripts", "tests"]
+pythonVersion = "3.12"
+pythonPlatform = "Linux"
+typeCheckingMode = "standard"
+strict = ["hooks", "scripts"]
 
 [dependency-groups]
 dev = [

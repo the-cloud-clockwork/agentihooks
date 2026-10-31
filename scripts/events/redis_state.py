@@ -1,6 +1,7 @@
 import base64
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 from .bus import StateConflict, StateEntry
 
@@ -22,19 +23,39 @@ def _entry(key: str, raw: str | None) -> StateEntry | None:
 
 
 class RedisStateStore:
-    def __init__(self, redis, bucket: str, prefix: str | None = None):
+    def __init__(
+        self,
+        redis: Any,
+        bucket: str,
+        prefix: str | None = None,
+        projection: Callable[[bytes], bytes] | None = None,
+    ) -> None:
         self.redis = redis
         base = f"{prefix or _prefix()}:state:{bucket}"
         self._current = f"{base}:current"
         self._revision = f"{base}:revision"
         self._history = f"{base}:history:"
+        self._projected = f"{base}:projected"
+        self._published = f"{base}:published"
+        self.projection = projection
 
     @property
     def watch_key(self) -> str:
         return self._current
 
+    def guard(self, pipe: Any) -> None:
+        pipe.watch(self._current)
+
     def get(self, key: str) -> StateEntry | None:
         return _entry(key, self.redis.hget(self._current, key))
+
+    def get_projection(self, key: str) -> StateEntry | None:
+        with self.redis.pipeline() as pipe:
+            pipe.get(self._revision)
+            pipe.get(self._published)
+            pipe.hget(self._projected, key)
+            revision, published, raw = pipe.execute()
+        return _entry(key, raw) if revision == published else None
 
     def get_many(self, keys: list[str]) -> list[StateEntry | None]:
         if not keys:
@@ -57,9 +78,13 @@ class RedisStateStore:
                     found = pipe.hget(self._current, key)
                     if (None if found is None else json.loads(found)["revision"]) != revision:
                         raise StateConflict(conflict)
+                    published = pipe.get(self._published)
+                    consistent = pipe.get(self._revision) == published
                     written = self.redis.incr(self._revision)
                     row = json.dumps({"revision": written, "value": base64.b64encode(value).decode()})
                     pipe.multi()
+                    if self.projection is not None or published is not None:
+                        self._project(pipe, key, value, written, consistent)
                     pipe.hset(self._current, key, row)
                     pipe.rpush(self._history + key, row)
                     pipe.ltrim(self._history + key, -HISTORY, -1)
@@ -68,6 +93,16 @@ class RedisStateStore:
                 except WatchError:
                     continue
         raise StateConflict(f"state key {key!r} kept changing")
+
+    def _project(self, pipe: Any, key: str, value: bytes, revision: int, consistent: bool) -> None:
+        if not consistent:
+            pipe.delete(self._projected)
+        if self.projection is None:
+            pipe.hdel(self._projected, key)
+        else:
+            row = json.dumps({"revision": revision, "value": base64.b64encode(self.projection(value)).decode()})
+            pipe.hset(self._projected, key, row)
+        pipe.set(self._published, revision)
 
     def watch(self, key: str, from_revision: int = 0) -> Iterator[StateEntry]:
         for raw in self.redis.lrange(self._history + key, 0, -1):

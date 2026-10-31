@@ -65,7 +65,10 @@ def registered_codes(store):
 
 
 def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(store):
+    from scripts.swarm import fencing
+
     seed(store, "sw")
+    fencing.read(store, "sw")
     alone, names = everything(store.redis), store.names.export("sw")
     seed(store, "other")
     state = store.export("sw")
@@ -77,7 +80,10 @@ def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(
 
 
 def test_a_snapshot_taken_before_names_were_exported_still_restores(store):
+    from scripts.swarm import fencing
+
     seed(store, "sw")
+    fencing.read(store, "sw")
     alone = everything(store.redis)
     state = store.export("sw")
     del state["names"]
@@ -158,13 +164,14 @@ def test_restore_refuses_while_an_agent_of_the_swarm_is_live(store):
     assert everything(store.redis) == before
 
 
-def test_pending_inbox_items_survive_a_lost_redis(store):
+def test_pending_inbox_items_survive_a_lost_redis(store: RedisStore) -> None:
     item = seed(store, "sw")
+    pending = [i.id for i in InboxStore(store.redis).pending_items("master@sw")]
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
     snapshot.restore(store, "sw", live=set())
     inbox = InboxStore(store.redis)
-    assert [i.id for i in inbox.pending_items("master@sw")] == [item.id]
+    assert [i.id for i in inbox.pending_items("master@sw")] == pending
     assert item.id in {i.id for i in inbox.pending()}
     assert [h["state"] for h in inbox.history(item.id)] == ["pending"]
 

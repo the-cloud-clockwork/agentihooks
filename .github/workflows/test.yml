@@ -1619,6 +1619,27 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Summarize the executed lines
+        if: matrix.python-version == '3.12'
+        run: |
+          databases=(.coverage)
+          if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
+          python -m tests.coverage_summary --out executed-lines.json "${databases[@]}" \
+            --statements statement-lines.json --slice "$SHARD/20"
+        env:
+          SHARD: ${{ matrix.shard }}
+
+      - name: Upload the executed lines summary
+        if: matrix.python-version == '3.12'
+        uses: ./.github/actions/retry-upload
+        with:
+          name: executed-lines-${{ matrix.python-version }}-${{ matrix.shard }}
+          path: |
+            executed-lines.json
+            statement-lines.json
+          if-no-files-found: error
+          retention-days: 7
+
   unit-lost:
     if: ${{ !cancelled() && github.event_name == 'merge_group' && (needs.unit.result == 'failure' || needs.unit.result == 'cancelled') }}
     needs: [unit, split]
@@ -1746,7 +1767,7 @@ jobs:
           [[ ${#files[@]} -gt 0 ]] || { echo "::error::Leg $LEG of the selection names no test file."; exit 1; }
           missing=false
           for file in "${files[@]}"; do
-            if [[ ! -f "$file" ]]; then
+            if [[ ! -f "${file%%::*}" ]]; then
               echo "::error::Selected test path $file does not exist."
               missing=true
             fi
@@ -1901,13 +1922,18 @@ jobs:
           jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
 
       # Sonar takes a leg's branch coverage in place of this artifact, so a leg uploads its database once.
+      - name: Stamp coverage with its attempt
+        if: &upload-selected-coverage matrix.python-version == '3.12' && (github.base_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository || hashFiles('branch-record/record.json') == '' || hashFiles('.coverage') == '')
+        run: if [[ -f .coverage ]]; then echo "$GITHUB_RUN_ATTEMPT" > coverage-attempt; fi
+
       - name: Upload coverage
-        if: matrix.python-version == '3.12' && (github.base_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository || hashFiles('branch-record/record.json') == '' || hashFiles('.coverage') == '')
+        if: *upload-selected-coverage
         uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
           path: |
             .coverage
+            coverage-attempt
             js-coverage/
           include-hidden-files: true
           if-no-files-found: error
@@ -2181,12 +2207,15 @@ jobs:
           shopt -s nullglob
           declare -A latest
           for folder in .coverage-shards/branch-coverage-3.12-*; do
-            [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ ]] || continue
+            [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ && -f "$folder/.coverage" ]] || continue
             if (( BASH_REMATCH[2] > ${latest[${BASH_REMATCH[1]}]:-0} )); then latest[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}; fi
           done
           for leg in "${!latest[@]}"; do
-            if [[ ! -e ".coverage-shards/coverage-3.12-$leg" ]]; then
-              mv ".coverage-shards/branch-coverage-3.12-$leg-${latest[$leg]}" ".coverage-shards/coverage-3.12-$leg"
+            shard=".coverage-shards/coverage-3.12-$leg"
+            uploaded=$(cat "$shard/coverage-attempt" 2>/dev/null || echo 0)
+            if (( latest[$leg] > uploaded )); then
+              rm -rf "$shard"
+              mv ".coverage-shards/branch-coverage-3.12-$leg-${latest[$leg]}" "$shard"
             fi
           done
           rm -rf .coverage-shards/branch-coverage-3.12-*
@@ -2619,6 +2648,9 @@ jobs:
       - name: Install vulture
         run: python -m pip install vulture==2.14
 
+      - name: Install the comment gate grammars
+        run: python -m pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -2746,6 +2778,14 @@ jobs:
           fi
           python -m scripts.locked_tests --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+      - name: Hold the mapped feature tests
+        if: ${{ !cancelled() }}
+        run: |
+          if grep -qs -- '"--base"' "$RUNNER_TEMP/grader/scripts/feature_map.py"; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"
+
       # dev's copy holds the pin list, so a pull request cannot unpin the threshold it loosens.
       # Only the pull request that introduces the check meets a grader without it; its own copy grades.
       - name: Pin thresholds, floors and allowlists against the base
@@ -2792,6 +2832,7 @@ jobs:
             k8s/values-overlays/agentihooks-swarm-nats/values.yaml
             k8s/values-overlays/agentihooks-swarm-nats/users.yaml
             k8s/values-overlays/agentihooks-swarm-nats/trust.yaml
+            k8s/charts/arc-runners-oss/values-oss-batch.yaml
         run: |
           set -euo pipefail
           revision=$(gh api "repos/$REPOSITORY/commits/$REF" --jq .sha)
@@ -2850,6 +2891,14 @@ jobs:
           python -m pip install --quiet "cryptography>=42"
           cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
+
+      - name: Hold the mutation planner's batch runner ceiling equal to the antoncore batch runner chart
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_batch_runner_ceiling.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.ci_batch_runner_ceiling --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
 
       - name: Select artifact browser checks
         if: ${{ !cancelled() }}
@@ -2915,6 +2964,61 @@ jobs:
           done
           exit "$failed"
 
+  type-gate:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}
+    needs: [reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *use-venv
+      - name: Check out the base revision
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"
+      - name: Check out the protected grader
+        env:
+          GRADER: ${{ github.event.pull_request.base.sha || needs.reuse.outputs.grader }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+      - name: Hold the strict type checker's errors per file to the base baseline
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/type_gate.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          elif [[ -f "$RUNNER_TEMP/base/tests/TYPE_BASELINE.json" ]]; then
+            echo "::error::dev carries a type baseline but no scripts/type_gate.py, so nothing trusted can grade."
+            exit 1
+          fi
+          python -m scripts.type_gate --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --measured "$RUNNER_TEMP/type-baseline/TYPE_BASELINE.json"
+      - name: Upload the head's type error measurement
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/retry-upload
+        with:
+          if-no-files-found: error
+          name: type-baseline
+          path: ${{ runner.temp }}/type-baseline/TYPE_BASELINE.json
+          retention-days: 7
+
   coverage-ratchet:
     needs: [select, unit, reuse]
     if: ${{ !cancelled() && needs.unit.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
@@ -2938,26 +3042,6 @@ jobs:
 
       - name: Install coverage
         run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4"
-
-      - name: Download shard coverage
-        id: download-shard-coverage
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &coverage-ratchet-download-shard-coverage
-          pattern: coverage-3.12-*
-          path: head-coverage
-
-      - name: Download shard coverage, wait before attempt 2
-        if: steps.download-shard-coverage.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download shard coverage, attempt 2
-        if: steps.download-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *coverage-ratchet-download-shard-coverage
 
       - name: Resolve the measured base tree
         id: base
@@ -3091,19 +3175,73 @@ jobs:
         uses: actions/download-artifact@v4
         with: *coverage-ratchet-download-the-queue-base-coverage-baseline
 
-      - name: Hold every line the base ran
+      - name: Check out the base grader
+        id: grader
         env:
           BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
         run: |
-          base="$BASE"
-          git worktree add --detach "$RUNNER_TEMP/base" "$base"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
           if [[ ! -f "$RUNNER_TEMP/base/tests/coverage_ratchet.py" ]]; then
             echo "::error::The base carries no tests/coverage_ratchet.py, so nothing trusted can grade."
             exit 1
           fi
+          if grep -q -- '--head-summaries' "$RUNNER_TEMP/base/tests/coverage_ratchet.py"; then
+            echo "input=--head-summaries" >> "$GITHUB_OUTPUT"
+          else
+            echo "input=--head-shards" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download the executed lines summaries
+        if: steps.grader.outputs.input == '--head-summaries'
+        id: download-the-executed-lines-summaries
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &coverage-ratchet-download-the-executed-lines-summaries
+          pattern: executed-lines-3.12-*
+          path: head-coverage
+
+      - name: Download the executed lines summaries, wait before attempt 2
+        if: steps.download-the-executed-lines-summaries.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the executed lines summaries failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the executed lines summaries, attempt 2
+        if: steps.download-the-executed-lines-summaries.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-ratchet-download-the-executed-lines-summaries
+
+      - name: Download shard coverage
+        if: steps.grader.outputs.input == '--head-shards'
+        id: download-shard-coverage
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &coverage-ratchet-download-shard-coverage
+          pattern: coverage-3.12-*
+          path: head-coverage
+
+      - name: Download shard coverage, wait before attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download shard coverage, attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-ratchet-download-shard-coverage
+
+      - name: Hold every line the base ran
+        env:
+          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
+          HEAD_INPUT: ${{ steps.grader.outputs.input }}
+        run: |
+          base="$BASE"
           cd "$RUNNER_TEMP/base"
           python -m tests.coverage_ratchet --base "$base" --head "$GITHUB_WORKSPACE" --shards 20 \
-            --head-shards "$GITHUB_WORKSPACE/head-coverage" --out "$GITHUB_WORKSPACE/coverage-ratchet" \
+            "$HEAD_INPUT" "$GITHUB_WORKSPACE/head-coverage" --out "$GITHUB_WORKSPACE/coverage-ratchet" \
             --base-baseline "$HOME/coverage-baseline/baseline.json"
 
       - name: Upload the coverage ratchet report
@@ -3117,7 +3255,7 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
@@ -3190,7 +3328,7 @@ jobs:
 
   gate-required:
     name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -3216,7 +3354,7 @@ jobs:
               | (if $event == "merge_group" then
                 ["select", "split", "shard-check", "test-count"]
               else
-                ["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]
+                ["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]
                 - (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats"] + (if $inline == "true" then [] else ["mutation"] end) else [] end)
@@ -3239,7 +3377,7 @@ jobs:
             echo "::error::A push or dispatch run never reuses a queue result."
             exit 1
           fi
-          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "mutation" and .value.result == "skipped" and $inline == "true") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
+          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "mutation" and .value.result == "skipped" and $inline == "true") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "type-gate" or .key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi

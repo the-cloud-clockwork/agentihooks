@@ -51,10 +51,12 @@ def refusal(argv, environ):
     return caught.value.code
 
 
+@pytest.mark.feature("plan-read")
 def test_task_chunk_carries_ten_lines_of_margin_each_side(slug, capsys):
     assert run(capsys, ["--task", "mid"], {"AGENTIHOOKS_SWARM": slug}) == numbered(5, 27)
 
 
+@pytest.mark.feature("plan-read")
 def test_task_without_plan_lines_prints_its_description_as_the_whole_spec(slug, capsys):
     assert run(capsys, ["--task", "bare"], {"AGENTIHOOKS_SWARM": slug}) == (
         "This task has no plan lines; its description is the whole spec.\n\n"
@@ -82,6 +84,7 @@ def test_slug_option_wins_over_the_session(slug, capsys):
     assert run(capsys, ["--slug", slug], environ) == numbered(5, 27)
 
 
+@pytest.mark.feature("plan-read")
 def test_phase_option_prints_the_phase_range_clamped_to_the_plan_end(slug, capsys):
     environ = {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_SWARM_TASK": "mid"}
     assert run(capsys, ["--phase", "p1"], environ) == numbered(2, 40)

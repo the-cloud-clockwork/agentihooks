@@ -1,5 +1,5 @@
-"""The master hotfix window: the operator's typed allow-master-coding lets the master seat code until the operator types
-deny-master-coding or disallow-master-coding, or the session restarts.
+"""The master hotfix window: the operator's typed allow-master-coding or troubleshooting mode, anywhere in his prompt and
+in any case, lets the master seat code until he types deny-master-coding or disallow-master-coding, or the session restarts.
 
 Only a prompt the operator typed in the master pane opens or closes it; agent text, tool output and relays never do.
 """
@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import cast
 
-OPEN = re.compile(r"(?<![\w-])allow-master-coding(?![\w-])", re.IGNORECASE)
+OPEN = re.compile(r"(?<![\w-])(?:allow-master-coding|troubleshoot(?:ing)?[ -]mode)(?![\w-])", re.IGNORECASE)
 CLOSE = re.compile(r"(?<![\w-])(?:deny|disallow)-master-coding(?![\w-])", re.IGNORECASE)
 PERMISSION_TOOLS = ("AskUserQuestion", "ExitPlanMode")
 MASTER_TASK = re.compile(r"master(?:-\d+)?")

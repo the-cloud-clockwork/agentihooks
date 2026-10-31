@@ -2,7 +2,8 @@
 
 Claude Code moves any additionalContext or plain stdout above ten thousand
 characters into a file and shows the model only its first two thousand, so
-doctrine goes first and the lowest priority blocks give way.
+doctrine goes first and the lowest priority blocks give way. Rendering an inbox block
+marks its items delivered, so it is never shortened or dropped.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from __future__ import annotations
 from itertools import accumulate
 
 KINDS = ("inbox", "alert", "enforcement", "condition", "refocus", "other", "brain", "tool_memory")
-# Rendering an inbox block marks its items delivered, so it is never shortened or dropped.
 _WHOLE = frozenset({"inbox"})
 _LABELS = {
     "inbox": "inbox messages",

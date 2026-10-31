@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def relay_journal():
 
 
 @pytest.fixture(autouse=True)
-def request_metrics_journal(monkeypatch: pytest.MonkeyPatch) -> None:
+def request_metrics_journal(monkeypatch: pytest.MonkeyPatch, _ledger_exit_guard: None) -> None:
     from collections import deque
 
     from scripts.swarm_ledger import request_metrics
@@ -52,3 +53,16 @@ def request_metrics_journal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(request_metrics, "JOURNAL", None)
     monkeypatch.setattr(request_metrics, "APPENDED", 0)
     monkeypatch.setattr(request_metrics, "STALE", False)
+
+
+@pytest.fixture
+def _ledger_exit_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = os.getpid()
+    original_exit = os._exit
+
+    def exit_process(code: int) -> None:
+        if os.getpid() != owner:
+            original_exit(code)
+        raise AssertionError(f"ledger server exited the test process with status {code}")
+
+    monkeypatch.setattr(os, "_exit", exit_process)

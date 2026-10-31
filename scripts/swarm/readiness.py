@@ -10,6 +10,7 @@ from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
 from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
+from scripts.events.scope import LANES
 from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, release_wait
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError, connect
@@ -128,9 +129,13 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 
 
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
+    """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned."""
+    events = offers(view, now_ms)
+    lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
+    queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
     placed = []
-    for event in offers(view, now_ms):
-        if bus.queue(queue_name(view.slug, event.data["lane"]), policy).offer(event):
+    for event in events:
+        if queues[event.data["lane"]].offer(event):
             placed.append(event.id)
     return placed
 

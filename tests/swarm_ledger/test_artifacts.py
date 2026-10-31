@@ -25,6 +25,7 @@ import os
 
 
 class TestStore:
+    @pytest.mark.feature("artifact-storage")
     def test_markdown_json_and_svg_are_stored_once_by_content_hash(self):
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         md = artifacts.store("arts", "proposal.md", MARKDOWN)
@@ -36,6 +37,7 @@ class TestStore:
         shot = artifacts.store("arts", "shot.png", png(4, 3))
         assert (shot["type"], shot["width"], shot["height"]) == ("image/png", 4, 3)
 
+    @pytest.mark.feature("artifact-storage")
     def test_svg_is_stored_without_scripts_handlers_or_script_links(self):
         stored = artifacts.path_of("arts", artifacts.store("arts", "diagram.svg", SVG)["id"]).read_text()
         for gone in ("script", "onload", "onclick", "onerror", "javascript", "missing.png", "foreignObject"):
@@ -52,11 +54,13 @@ class TestStore:
             ("bomb.svg", b'<!DOCTYPE svg [<!ENTITY a "aa">]><svg xmlns="http://www.w3.org/2000/svg">&a;</svg>'),
         ],
     )
+    @pytest.mark.feature("artifact-storage")
     def test_anything_else_is_refused(self, name, data):
         with pytest.raises(media.Refused) as caught:
             artifacts.store("arts", name, data)
         assert caught.value.status == 415
 
+    @pytest.mark.feature("artifact-storage")
     def test_an_oversize_file_is_refused(self):
         with pytest.raises(media.Refused) as caught:
             artifacts.store("arts", "big.md", b"#" * (artifacts.MAX_BYTES + 1))

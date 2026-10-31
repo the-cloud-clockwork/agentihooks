@@ -23,6 +23,7 @@ def inbox(monkeypatch):
     return store
 
 
+@pytest.mark.feature("inbox-addresses")
 def test_unknown_destination_is_refused_with_sender_swarm_addresses_and_nothing_stored(inbox, capsys):
     before = sorted(inbox.redis.keys())
     assert cli.main(["send", "swarm", "status"]) == 1
@@ -46,6 +47,7 @@ def test_reply_to_unknown_sender_is_refused_without_closing_or_storing(inbox, ca
 @pytest.mark.parametrize(
     "address", ["master@123456-0001", "master@crew", "eng-2@crew", "operator", "bob", "session-bob", "old-master"]
 )
+@pytest.mark.feature("inbox-addresses")
 def test_real_names_seats_operator_and_session_ids_still_accept_messages(inbox, monkeypatch, capsys, address):
     from scripts.inbox import addresses
 
@@ -54,7 +56,7 @@ def test_real_names_seats_operator_and_session_ids_still_accept_messages(inbox, 
     monkeypatch.setattr(addresses, "get_active_sessions", lambda **kwargs: {"session-bob": {"name": "bob"}})
     assert cli.main(["send", address, "hello"]) == 0
     result = json.loads(capsys.readouterr().out)
-    routed = {"old-master": "master@123456-0001", "operator": "master@crew"}
+    routed = {"old-master": "master@crew", "master@123456-0001": "master@crew", "operator": "master@crew"}
     assert result["to"] == routed.get(address, address)
     assert inbox.get(result["id"]).state == "pending"
 
@@ -82,5 +84,38 @@ def test_reply_to_a_registered_sender_still_closes_the_original(inbox, capsys):
     item = inbox.send("master@123456-0001", "engineer@123456-0001", "question")
     assert cli.main(["reply", item.id, "answer"]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert result["to"] == "master@123456-0001"
+    assert result["to"] == "master@crew"
     assert inbox.get(item.id).state == "done"
+
+
+@pytest.mark.parametrize("seat", ["master@crew", "master-2@crew"])
+@pytest.mark.parametrize("operation", ["send", "reply"])
+def test_master_name_without_registry_entry_routes_to_occupied_seat(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], seat: str, operation: str
+) -> None:
+    master = "master@123456-0099"
+    worker = "engineer@123456-0001"
+    inbox.seats.occupy(seat, master, 2)
+    monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
+    assert not inbox.names.entry(master)
+    original = inbox.send(master, worker, "question")
+    args = ["reply", original.id, "answer"] if operation == "reply" else ["send", master, "answer"]
+    assert cli.main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    answer = inbox.get(result["id"])
+    assert result["to"] == seat
+    assert (answer.sender, answer.address, answer.text) == (worker, seat, "answer")
+    assert [item.id for item in inbox.inbox(seat)] == [answer.id]
+    assert inbox.get(original.id).state == ("done" if operation == "reply" else "pending")
+
+
+def test_replaced_master_without_registration_is_still_refused(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    master = "master@123456-0099"
+    inbox.seats.occupy("master@crew", master, 2)
+    inbox.seats.occupy("master@crew", "master@123456-0100", 3)
+    monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
+    assert cli.main(["send", master, "answer"]) == 1
+    assert "unknown inbox address" in capsys.readouterr().err
+    assert not inbox.inbox("master@crew")

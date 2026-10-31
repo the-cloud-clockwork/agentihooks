@@ -261,6 +261,36 @@ def test_only_front_door_items_from_others_are_pooled(swarm, inbox):
     assert (inbox.pool.takes_back(None), inbox.pool.takes_back("")) == (False, False)
 
 
+@pytest.mark.parametrize("operation", ["send", "reply"])
+@pytest.mark.parametrize("alias", [False, True])
+def test_named_master_messages_bypass_pool_rotation(
+    swarm: RedisStore, inbox: InboxStore, operation: str, alias: bool
+) -> None:
+    _masters(swarm, 2)
+    first = inbox.send("worker", FRONT, "shared work")
+    assert inbox.get(first.id).address == FRONT
+    address = "previous-master" if alias else "sw-master-1"
+    if alias:
+        inbox.names.adopt(SLUG, "123456", SLUG, "repo")
+        name = inbox.names.next(SLUG, "master")
+        swarm.put_agent(SLUG, AgentRecord(name, "master", "master", seat=FRONT, state="working"))
+        inbox.seats.occupy(FRONT, name, at=2)
+        inbox.names.alias(address, name)
+    question = inbox.send(address, "worker", "question")
+    answer = (
+        inbox.reply(question.id, "worker", "answer")
+        if operation == "reply"
+        else inbox.send("worker", address, "answer")
+    )
+    assert inbox.get(answer.id).address == FRONT
+    assert answer.id in {item.id for item in inbox.inbox(FRONT)}
+    assert answer.id not in {item.id for item in inbox.inbox(SECOND)}
+    assert inbox.redis.hget(inbox.key("item", answer.id), "pool") is None
+    if operation == "reply":
+        assert inbox.reply(question.id, "worker", "answer").id == answer.id
+        assert inbox.get(question.id).state == "done"
+
+
 def test_an_unconfirmed_item_goes_to_the_next_master_with_the_same_id(swarm, inbox):
     _masters(swarm, 2)
     first, second = (inbox.send("swarm", FRONT, text) for text in ("first", "second"))

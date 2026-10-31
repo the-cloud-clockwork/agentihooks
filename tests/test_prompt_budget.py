@@ -416,13 +416,16 @@ def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch, typed):
 
     assert budget.calls == [
         ("secrets", hm._prompt_secrets, (payload,)),
+        ("operator_words", hm._operator_words, (payload,)),
+        ("operator_mode", hm._operator_mode, (payload, typed)),
+        ("master_coding", hm._master_coding, (payload, typed)),
+        ("prod_bypass", hm._prompt_prod_bypass, (payload, "s")),
+        ("signals", hm._prompt_signals, (payload, "s", typed)),
+        *([("gate_lifts", hm._arm_gate_lifts, (payload,))] if typed else []),
         ("amygdala", hm._prompt_amygdala, ("s",)),
         ("confirm_inbox", hm._confirm_inbox, ("s",)),
         ("swarm_heartbeat", hm._swarm_heartbeat, ("working", "p")),
         ("swarm_ledger", hm._swarm_ledger, (payload,)),
-        ("operator_words", hm._operator_words, (payload,)),
-        ("operator_mode", hm._operator_mode, (payload, typed)),
-        ("master_coding", hm._master_coding, (payload, typed)),
         ("trace_flush", hm._request_trace_flush, (payload, "prompt")),
         ("quota_usage", hm._prompt_quota_usage, ("s",)),
         ("quota_policy", hm._prompt_quota_policy, (payload, "s")),
@@ -430,15 +433,48 @@ def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch, typed):
         ("enforcements", hm._prompt_enforcements, (payload, "s")),
         ("ci_manifesto", hm._prompt_ci_manifesto, ("s",)),
         ("rules_refresh", hm._prompt_rules_refresh, ("s",)),
-        ("prod_bypass", hm._prompt_prod_bypass, (payload, "s")),
-        ("signals", hm._prompt_signals, (payload, "s", typed)),
-        *([("gate_lifts", hm._arm_gate_lifts, (payload,))] if typed else []),
         ("voice", hm._prompt_voice, (payload, "s", typed)),
         ("controls", hm._prompt_controls, (payload, "s", typed)),
         ("broadcasts", hm._prompt_broadcasts, ("s",)),
         ("refocus", hm._inject_refocus, ("s", "prompt")),
         ("ledger_decision", hm._inject_ledger_decision, (payload,)),
     ]
+
+
+class _StarvedBudget(PromptBudget):
+    def __init__(self, limit: int) -> None:
+        super().__init__()
+        self.calls: list[str] = []
+        self._limit = limit
+
+    def run(self, name: str, step, *args) -> bool | None:
+        if len(self.calls) >= self._limit:
+            self.skipped.append(name)
+            return None
+        self.calls.append(name)
+        return name == "operator_words"
+
+
+def test_operator_words_and_master_coding_run_before_a_budget_that_starves_swarm_heartbeat() -> None:
+    from hooks import hook_manager as hm
+
+    budget = _StarvedBudget(limit=7)
+    payload = {"session_id": "s", "prompt": "p", "cwd": "/w"}
+
+    hm._prompt_steps(budget, payload, "s")
+
+    assert budget.calls == [
+        "secrets",
+        "operator_words",
+        "operator_mode",
+        "master_coding",
+        "prod_bypass",
+        "signals",
+        "gate_lifts",
+    ]
+    assert "swarm_heartbeat" in budget.skipped
+    assert "operator_words" not in budget.skipped
+    assert "master_coding" not in budget.skipped
 
 
 @pytest.mark.parametrize("started", [None, 12.5])

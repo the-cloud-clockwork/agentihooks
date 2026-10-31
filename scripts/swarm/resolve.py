@@ -34,6 +34,10 @@ def headless_critic(prompt: str) -> tuple[str, str]:
             ),
         )
     except (HeadlessError, ValueError) as exc:
+        if isinstance(exc, runner.RouteRefused) and str(exc).startswith(
+            "claude refused to route: no Claude account has a free session under its quota band"
+        ):
+            return ledger_blockers.CRITIC_CAPACITY_RUN, str(exc)
         raise SwarmError(f"the blind critic did not answer: {exc}") from exc
     return f"headless {CRITIC_TIER} tier read only critic", reply["resolution"]
 

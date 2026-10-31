@@ -70,6 +70,7 @@ from urllib.parse import urlsplit
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
+from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -171,13 +172,14 @@ from scripts.swarm.store import (
     DISPATCH,
     FULL,
     MASTER,
+    AgentRecord,
     RedisStore,
     SwarmConfig,
     SwarmError,
     Unreachable,
     connect,
 )
-from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
+from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import (
     ledger_creator,
     ledger_kinds,
@@ -399,6 +401,10 @@ def run_tick(
             store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = _phase_steps(inbox, store, slug, doc, ledger)
+            if scheduled:
+                from scripts.swarm import refresh_job
+
+                timing.call(refresh_job.start, store, slug)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judged = worker.submit(copy_context().run, _intent_pass, inbox, store, slug, doc, ledger, config)
@@ -431,7 +437,7 @@ def run_tick(
                     view,
                     frozenset(live),
                     lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
-                    lambda lane: ready_in_order(slug, store, rows, doc, lane),
+                    stall_watch.ready_lanes(slug, store, ledger, doc, now_ms()),
                     now_ms(),
                     released=release_wait.checker(config.repo),
                     reread=ledger_events.view,
@@ -455,10 +461,6 @@ def run_tick(
                 doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms(), config.watchdog_address
             )
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
-            if scheduled:
-                from scripts.swarm import refresh_job
-
-                timing.call(refresh_job.start, store, slug)
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
@@ -1859,6 +1861,15 @@ def _hotfix_master(store, args) -> bool:
     return _me(store, args).lane == MASTER and master_coding.is_open(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
 
+def _require_target(store: object, args: argparse.Namespace, task_id: str) -> None:
+    """Refuse a final integration this task does not target, reading only its own task and the tasks naming the pull
+    request, never the whole tasks collection."""
+    ledger = LedgerClient()
+    own = ledger.task(args.slug, task_id)
+    rows: list[dict[str, object]] = [own] if own else []
+    done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
+
+
 def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
@@ -1871,7 +1882,7 @@ def cmd_merge(store, args):
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
-            done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
+            _require_target(store, args, agent.task)
         if args.action == "queue":
             result = merge_queue.operate(
                 args.action,
@@ -1887,7 +1898,7 @@ def cmd_merge(store, args):
     print(json.dumps(result))
 
 
-def cmd_done(store, args):
+def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
     if agent.lane == dispatch_seat.LANE:
         return _dispatcher_done(store, args.slug, agent)
@@ -1920,6 +1931,7 @@ def cmd_done(store, args):
     refused = done_gate.refusal(proven, url, _pull_reader(url, pull))
     if refused:
         raise SwarmError(refused)
+    _feature_gate(store, args.slug, agent, proven, pull)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
@@ -1961,6 +1973,23 @@ def _workflow_proof(store, slug, agent, ledger, row):
 
 def _pull_reader(url, pull):
     return lambda target: pull if target == url else ledger_events.view(target)
+
+
+def _feature_gate(
+    store: RedisStore, slug: str, agent: AgentRecord, task: dict, pull: ledger_events.PullRequest | None
+) -> None:
+    """Refuse swarm done when the feature gate enforces and the task names no mapped, tested feature."""
+    if modes.configured(feature_gate.GATE, store.config(slug).gates) == "off":
+        return
+    head = pull.head if pull is not None else ""
+    refused = feature_gate.refusal(
+        task,
+        task["proof"].get("feature", ""),
+        lambda: [feature_gate.read_map(ref) for ref in feature_gate.refs(head)],
+    )
+    who = Who(name=agent.name, swarm=slug, task=agent.task)
+    if refused and feature_gate.GATE.allows(store, who, "done", refused, now_ms()):
+        raise SwarmError(refused)
 
 
 def _dispatcher_done(store, slug, agent):

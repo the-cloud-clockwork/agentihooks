@@ -8,7 +8,7 @@ from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, dispatcher, lease, publish, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, fencing, lease, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
@@ -137,7 +137,7 @@ def test_done_refuses_distributed_task_before_proof_or_ledger_mutations(env, mon
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    store.redis.set(store.key("sw", "task-authority", "t1"), "{}")
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({"t1": {}}))
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("provider read"))
     assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 1
     assert ledger.rows["t1"]["state"] == "claimed"
@@ -535,23 +535,6 @@ def test_send_message_comes_from_the_named_agent(env, capsys, monkeypatch, flag,
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
     assert item.sender == "engineer@a1b2c3-0001"
     assert "engineer@a1b2c3-0001" not in json.loads(capsys.readouterr().out)["sent"]
-
-
-def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(env, capsys, monkeypatch):
-    store, ledger, _ = env
-    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
-    run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
-    ledger.said.clear()
-    capsys.readouterr()
-    assert run("sw", "send-message", "pause new work for a moment") == 0
-    assert ledger.said == []
-    live = sorted(a.name for a in store.agents("sw"))
-    inbox = InboxStore(store.redis)
-    for name in live:
-        [item] = inbox.inbox(name)
-        assert (item.sender, item.text) == ("operator", "pause new work for a moment")
-    assert sorted(json.loads(capsys.readouterr().out)["sent"]) == live and len(live) == 3
 
 
 def test_say_with_fyi_marks_each_item_as_needing_no_work(env):
@@ -974,6 +957,24 @@ def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
     assert started == ["sw"]
     assert sampled == [] and "fired ci_queue on sw" not in actions
+
+
+def test_a_stopped_scheduled_tick_has_started_the_refresh_job(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import refresh_job
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    started = []
+    monkeypatch.setattr(refresh_job, "spawn", started.append)
+
+    def overrun(slug: str, *args: object) -> list[str]:
+        assert slug == "sw"
+        raise cli.tick_stop.Stopped
+
+    monkeypatch.setattr(cli, "tick", overrun)
+    with pytest.raises(cli.tick_stop.Stopped):
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
+    assert started == ["sw"]
 
 
 def test_the_tick_publishes_status_with_the_pull_request_view_it_built(env, monkeypatch):

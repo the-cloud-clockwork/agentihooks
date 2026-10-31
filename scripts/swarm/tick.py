@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import Protocol
+from typing import Any, Protocol
 
 from hooks.context import context_recycle
 from scripts.doctor import priming
@@ -91,14 +91,14 @@ from scripts.swarm.naming import lane_of, parse, seat_label
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
-from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
+from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
-SPAWN_BUDGET_S = 20
+SPAWN_BUDGET_S = 60
 SPAWN_POOL = 8
 STARTUP_GRACE_MS = 6 * 60 * 1000
 ACK_LATER = "hive_ack_later"
@@ -109,6 +109,7 @@ SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
+SPAWN_DUE = "spawn-due"
 HOST_SPENDS = f"{PREFIX}:host-spends"
 HOST_SPENDS_KEPT = 1000
 HOST_START_LAG_MS = 30 * 1000
@@ -201,7 +202,7 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-def tick(slug, store, ledger, runtime, now_ms):
+def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     from scripts.swarm import automated_gc
 
     config = store.ensure_code(slug)
@@ -227,6 +228,12 @@ def tick(slug, store, ledger, runtime, now_ms):
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
+    due = store.key(slug, SPAWN_DUE)
+    if config.state == "running" and config.engine != EVENTS_ENGINE and not lifetime.sleeping(slug, store, rows):
+        if store.redis.exists(due):
+            with PLACING, _placement_pass(runtime):
+                actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+        store.redis.set(due, now_ms)
     actions += skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
@@ -293,6 +300,7 @@ def tick(slug, store, ledger, runtime, now_ms):
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
                 with _placement_pass(runtime):
                     actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+                store.redis.delete(due)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
@@ -503,7 +511,9 @@ def _ended(agent, rows):
     return agent.state == "finished" or bool(ended)
 
 
-def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
+def _launch_checks(
+    slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, doc: dict, now_ms: int
+) -> list[str]:
     waiting, actions = launch_check.pending(store, slug), []
     if not waiting:
         return actions
@@ -513,6 +523,8 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
     confirmed = [launch_check.canary(store, slug, agent) for agent in agents]
     agents, canaries = [agent for agent, _ in confirmed], {agent.name: miss for agent, miss in confirmed}
     facts = runtime.bindings(agents)
+    if any(launch_check.joined_at(agent, doc) is None for agent in agents):
+        doc = ledger.state(slug)
     for agent in agents:
         found = launch_check.misses(
             store,
@@ -682,6 +694,13 @@ def _observe(runtime, agent):
     return runtime.observe(agent)
 
 
+def _elsewhere(agent: AgentRecord) -> bool:
+    """A hub admitted agent names its hive before that hive records a host target."""
+    from scripts.swarm.commands import hive_id
+
+    return not agent.runtime_target and bool(agent.hive) and agent.hive != hive_id()
+
+
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     from scripts.hub.reconciler import legacy_agents
 
@@ -702,7 +721,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
                 continue
             if ended:
                 actions += timing.timed(_retire_ended, slug, store, ledger, runtime, rows, agent, now_ms)
-            elif agent.runtime_backend != "local" or reports.host(agent):
+            elif agent.runtime_backend != "local" or reports.host(agent) or _elsewhere(agent):
                 actions += timing.timed(_watch_remote, slug, store, ledger, runtime, rows, agent, now_ms)
             elif agent.name in live and agent.lane == MASTER:
                 runtime.name_pane(agent)

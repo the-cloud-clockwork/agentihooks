@@ -1,4 +1,4 @@
-"""Workflow layers: package, bundle, user bundle, each chained profile, then the project; a later layer wins by name."""
+"""Workflow layers: package, bundle, shared bundle, user bundle, each chained profile, then the project; a later layer wins by name."""
 
 from __future__ import annotations
 
@@ -25,13 +25,16 @@ class Found:
 def layer_dirs(state: dict, cwd: str | Path | None) -> list[tuple[str, Path]]:
     bundle = profile_chain.bundle_path(state)
     user = profile_chain.user_bundle_path(state)
+    shared = profile_chain.shared_bundle_path(state)
     layers = [("package", PACKAGE_WORKFLOWS)]
     if bundle is not None:
         layers.append(("bundle", bundle / WORKFLOWS))
+    if shared is not None:
+        layers.append(("shared-bundle", shared / WORKFLOWS))
     if user is not None:
         layers.append(("user-bundle", user / WORKFLOWS))
     chain = profile_chain.profile_dirs(
-        bundle, profile_chain.active_profile(state), profile_chain.linked_profiles(state), *([user] if user else [])
+        bundle, profile_chain.active_profile(state), profile_chain.linked_profiles(state), user, shared
     )
     layers.extend((f"profile:{name}", directory / WORKFLOWS) for name, directory in chain)
     root = repo_root(cwd)

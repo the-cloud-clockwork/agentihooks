@@ -92,7 +92,7 @@ def ensure_on_dev(cwd: str) -> str:
 
 
 def inject_on_session_start(cwd: str) -> None:
-    """Emit additionalContext notice if we switched branches."""
+    """Emit additionalContext notice if we switched branches; Codex and Copilot output is queued for the single flush."""
     try:
         msg = ensure_on_dev(cwd)
         if not msg:
@@ -102,8 +102,6 @@ def inject_on_session_start(cwd: str) -> None:
         from hooks.targets import buffers_single_envelope, emitter
 
         if buffers_single_envelope() or emitter.forced():
-            # Codex and Copilot parse hook stdout as ONE JSON object — queue
-            # for the single end-of-process flush instead of printing our own.
             emitter.buffer_context(content)
             return
 

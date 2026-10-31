@@ -161,15 +161,12 @@ async function searchRemote() {
   }
   if (filter.text && ["", "done"].includes(filter.state)) {
     for (const list of SEARCHED.filter((name) => closedLeft(name))) {
-      try {
-        const resp = await searchClosed(list, filter.text);
-        if (turn !== searchTurn) return;
-        if (resp.ok) {
-          const { data, total } = await resp.json();
-          remote[list] = data;
-          remoteTotal[list] = total;
-        }
-      } catch (e) { /* offline: the loaded rows still filter */ }
+      const page = await searchClosed(list, filter.text).then((resp) => (resp.ok ? resp.json() : null)).catch(() => null);
+      if (turn !== searchTurn) return;
+      if (page) {
+        remote[list] = page.data;
+        remoteTotal[list] = page.total;
+      }
     }
   }
   if (turn === searchTurn) renderOutline();
@@ -207,19 +204,22 @@ function remoteMore(s) {
 const fetching = new Set();
 
 async function searchMore(list) {
-  if (fetching.has(list)) return;
+  if (fetching.has(list)) return false;
   fetching.add(list);
   const turn = searchTurn;
   const text = filter.text;
   try {
     const resp = await searchClosed(list, text, remote[list].length);
-    if (turn !== searchTurn || text !== filter.text || !resp.ok) return;
+    if (turn !== searchTurn || text !== filter.text || !resp.ok) return false;
     const { data, total } = await resp.json();
     const have = new Set(remote[list].map((i) => i.id));
     remote[list] = [...remote[list], ...data.filter((i) => !have.has(i.id))];
     remoteTotal[list] = data.length ? total : remote[list].length;
     renderOutline();
-  } catch (e) { /* offline: the rows already listed stay */ } finally {
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
     fetching.delete(list);
   }
 }

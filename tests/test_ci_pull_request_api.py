@@ -150,7 +150,7 @@ def _reached_source(path: Path) -> str:
     return "\n".join(lines)
 
 
-def test_no_script_a_step_runs_calls_the_api():
+def test_no_script_a_step_runs_calls_the_api() -> None:
     calls = _api_calls((step.get("run", ""), here) for _, step, here in _all_steps())
     expected = [
         ".github/actions/browser-cache/select-artifacts.sh",
@@ -171,6 +171,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "hooks/hook_manager.py",
         "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
+        "scripts/ci_batch_runner_ceiling.py",
         "scripts/ci_branch_coverage.py",
         "scripts/ci_budget/__main__.py",
         "scripts/ci_budget/jobs.py",
@@ -232,6 +233,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/coverage_grade.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
+        "tests/coverage_summary.py",
         "tests/branch_record.py",
         "tests/dep_manifest.py",
         "tests/dev_durations.py",
@@ -279,7 +281,11 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/test_ci_runner_classes.py",
         "tests/test_ci_runner_trust.py",
     ]
-    expected += [name for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py") if ROOT / name in calls]
+    expected += [
+        name
+        for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py", "scripts/type_gate.py")
+        if ROOT / name in calls
+    ]
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),

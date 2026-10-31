@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json
 import os
 import subprocess
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -13,6 +16,10 @@ from scripts.swarm import tick as tick_module
 from scripts.swarm.store import MASTER, AgentRecord
 from tests.swarm.test_dead_resume import ResumingRuntime
 from tests.swarm.test_tick import tasks
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
+    from tests.swarm.test_tick import FakeLedger
 
 
 @pytest.fixture
@@ -74,7 +81,9 @@ def _taken(monkeypatch, written):
     monkeypatch.setattr(reboot.snapshot, "take", take)
 
 
-def test_shutdown_records_every_local_agent_and_asks_the_master_for_its_handoff(store, swarm, monkeypatch):
+def test_shutdown_records_every_local_agent_and_asks_the_master_for_its_handoff(
+    store: RedisStore, swarm: tuple[FakeLedger, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
+) -> None:
     written = []
     _taken(monkeypatch, written)
 
@@ -108,7 +117,7 @@ def test_shutdown_records_every_local_agent_and_asks_the_master_for_its_handoff(
         if a.name in local
     ]
     master = next(a for a in local.values() if a.lane == MASTER)
-    items = InboxStore(store.redis).inbox(master.name)
+    items = InboxStore(store.redis).inbox(master.seat)
     assert [i.text for i in items] == [reboot.ASK.format(path=reboot.handoff_path("sw"))]
     (hive_master,) = [name for name, a in _hive(store).items() if a.lane == MASTER]
     assert InboxStore(store.redis).inbox(hive_master) == []
@@ -176,6 +185,7 @@ def rebooted(store, swarm, monkeypatch):
     return ledger, runtime
 
 
+@pytest.mark.feature("swarm-reboot-recovery")
 def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_account(store, rebooted):
     ledger, runtime = rebooted
     before = _local(store)
@@ -198,6 +208,7 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
     assert store.redis.get(store.key("sw", "boot", "workstation")) == "boot-2"
 
 
+@pytest.mark.feature("swarm-reboot-recovery")
 def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, rebooted):
     ledger, runtime = rebooted
     eng = next(a for a in _local(store).values() if a.lane == "eng")

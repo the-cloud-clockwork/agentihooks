@@ -365,6 +365,18 @@ def test_a_workflow_only_plant_reuses_unrelated_tests_and_a_graded_plant_runs_it
     ]
 
 
+def _recorded_inputs(root: Path, modules: list[str]) -> list[dict]:
+    out = root / "inputs"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", *modules],
+        cwd=root,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    return [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+
+
 @pytest.mark.parametrize("shared_import", [None, "helper", "test_reader", "dynamic"])
 def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tmp_path, shared_import):
     workflow = tmp_path / ".github" / "workflows" / "smoke.yml"
@@ -394,27 +406,7 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
         )
         consumers = ["test_consumer.py"]
     (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
-    out = tmp_path / "inputs"
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "tests.dep_inputs",
-            "-p",
-            "no:cacheprovider",
-            "test_reader.py",
-            *consumers,
-            "test_unrelated.py",
-        ],
-        cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
-        check=True,
-        capture_output=True,
-    )
-    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    rows = _recorded_inputs(tmp_path, ["test_reader.py", *consumers, "test_unrelated.py"])
     expected = (
         []
         if not shared_import
@@ -428,6 +420,42 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
     )
     assert sorted(rows, key=lambda row: row["test"]) == expected + [
         {"test": "test_reader.py::test_reads", "files": [".github/workflows/smoke.yml"], "escapes": False},
+        {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
+    ]
+
+
+@pytest.mark.parametrize("layout", ["module", "package", "runtime"])
+def test_files_a_module_reads_while_imported_during_collection_belong_only_to_its_importers(
+    tmp_path: Path, layout: str
+) -> None:
+    (tmp_path / "page.js").write_text("x")
+    reader = "from pathlib import Path\ndef digest():\n    return Path(__file__).with_name('page.js').read_text()\n"
+    if layout == "package":
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "__init__.py").write_text(
+            reader.replace("with_name(", "parent.with_name(") + "DIGEST = digest()\n"
+        )
+        (tmp_path / "pkg" / "other.py").write_text("from pkg import DIGEST\n")
+        (tmp_path / "pkg" / "sub.py").write_text("def f():\n    return 1\n")
+        (tmp_path / "side.txt").write_text("x")
+        (tmp_path / "side.py").write_text("from pathlib import Path\nSIDE = Path('side.txt').read_text()\n")
+        imports = ("from pkg.other import DIGEST\nimport side\n", "from pkg.sub import f\n")
+    else:
+        (tmp_path / "helper.py").write_text(reader + "DIGEST = digest()\n")
+        (tmp_path / "wrapper.py").write_text("from helper import DIGEST\n")
+        imports = ("from helper import DIGEST\n", "import helper\n" if layout == "module" else "")
+    (tmp_path / "test_reader.py").write_text(imports[0] + "def test_reads():\n    assert DIGEST\n")
+    cached = "    from wrapper import DIGEST\n    assert DIGEST\n" if layout == "runtime" else "    assert 2 + 2 == 4\n"
+    (tmp_path / "test_consumer.py").write_text(imports[1] + "def test_cached():\n" + cached)
+    (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
+    rows = _recorded_inputs(tmp_path, ["test_reader.py", "test_consumer.py", "test_unrelated.py"])
+    assert sorted(rows, key=lambda row: row["test"]) == [
+        {"test": "test_consumer.py::test_cached", "files": ["page.js"], "escapes": False},
+        {
+            "test": "test_reader.py::test_reads",
+            "files": ["page.js", "side.txt"] if layout == "package" else ["page.js"],
+            "escapes": False,
+        },
         {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
     ]
 
