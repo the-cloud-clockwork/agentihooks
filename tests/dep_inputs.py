@@ -10,6 +10,7 @@ import sys
 import sysconfig
 import uuid
 from pathlib import Path
+from types import FrameType
 
 import pytest
 
@@ -34,6 +35,8 @@ class DepInputs:
         self.own = str(folder) + os.sep
         self.shared_key = None
         self.shared_files = {}
+        self.collecting = None
+        self.loose = set()
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -65,6 +68,15 @@ class DepInputs:
     def child_reads(self, log: Path) -> set[str]:
         return set(log.read_text().splitlines()) if log.is_file() else set()
 
+    def imported_by_another(self, frame: FrameType | None) -> bool:
+        """Whether a repository module other than the one being collected is running its top level code."""
+        while frame is not None:
+            name = frame.f_code.co_filename
+            if frame.f_code.co_name == "<module>" and name != self.collecting and name.startswith(self.root):
+                return True
+            frame = frame.f_back
+        return False
+
     def audit(self, event: str, args: tuple) -> None:
         test = self.current
         if event == "open":
@@ -78,6 +90,13 @@ class DepInputs:
                     return
                 if not opened.startswith(self.own):
                     test[0].add(opened)
+                    if (
+                        self.collecting
+                        and opened.startswith(self.root)
+                        and not opened.endswith((".py", ".pyc"))
+                        and not self.imported_by_another(sys._getframe(1))
+                    ):
+                        self.loose.add(opened)
         elif event in ESCAPES and test is not self.shared:
             test[1] = True
             self.escaping.update(self.setting_up)
@@ -91,10 +110,12 @@ class DepInputs:
         collected = self.collections.setdefault(collector.nodeid, [set(), False])
         imported = set(sys.modules)
         self.current = collected
+        self.collecting, self.loose = str(collector.path), set()
         try:
             yield
         finally:
-            previous[0].update(path for path in collected[0] if not path.startswith(self.root + ".github/workflows/"))
+            previous[0].update(path for path in self.loose if not path.startswith(self.root + ".github/workflows/"))
+            self.collecting = None
             self.current = previous
             for name in set(sys.modules) - imported:
                 filename = getattr(sys.modules[name], "__file__", "") or ""
