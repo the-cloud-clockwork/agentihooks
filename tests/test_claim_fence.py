@@ -83,11 +83,50 @@ def test_unreachable_authority_blocks_actions_without_killing_the_agent(monkeypa
 
     monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": 1}))
     with (
-        patch.object(claim_fence, "open_bus", side_effect=RuntimeError("offline")),
+        patch.object(claim_fence, "open_bus", side_effect=RuntimeError("offline")) as connect,
+        patch.object(claim_fence, "sleep") as pause,
         patch.object(claim_fence, "terminate") as kill,
     ):
         assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.CHECK_FAILED
+    assert claim_fence.ATTEMPTS == 3
+    assert connect.call_count == 3
+    assert pause.call_args_list == [((0.5,), {}), ((0.5,), {})]
     kill.assert_not_called()
+
+
+def test_a_launch_prompt_passes_when_one_bus_read_fails_before_an_owned_claim(monkeypatch):
+    from hooks.context import claim_fence
+
+    bus = open_bus(BusConfig())
+    revision = bus.state("spoke-work").create("claim-a", b'{"state":"launching"}')
+    monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": revision}))
+    with (
+        patch.object(claim_fence, "open_bus", side_effect=[RuntimeError("timeout"), bus]) as connect,
+        patch.object(claim_fence, "sleep") as pause,
+        patch.object(claim_fence, "terminate") as kill,
+    ):
+        assert claim_fence.check({"hook_event_name": "UserPromptSubmit"}) is None
+    assert connect.call_count == 2
+    pause.assert_called_once_with(0.5)
+    kill.assert_not_called()
+
+
+def test_a_superseded_claim_is_still_refused_after_a_transient_read_failure(monkeypatch):
+    from hooks.context import claim_fence
+
+    bus = open_bus(BusConfig())
+    bus.state("spoke-work").create("claim-a", b'{"state":"started","claim_revision":9}')
+    monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": 1}))
+    with (
+        patch.object(claim_fence, "open_bus", side_effect=[RuntimeError("timeout"), bus]) as connect,
+        patch.object(claim_fence, "sleep") as pause,
+        patch.object(claim_fence, "agent_pid", return_value=4321),
+        patch.object(claim_fence, "terminate") as kill,
+    ):
+        assert claim_fence.check({"hook_event_name": "UserPromptSubmit"}) == claim_fence.REVOKED
+    assert connect.call_count == 2
+    pause.assert_called_once_with(0.5)
+    kill.assert_called_once_with(4321)
 
 
 @pytest.mark.parametrize("message", [None, "claim revoked"])
