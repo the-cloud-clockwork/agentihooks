@@ -14,6 +14,7 @@
   "count-record.yml/count-record": "standard",
   "coverage-stability.yml/compare": "batch",
   "equivalence.yml/ledger-equivalence": "standard",
+  "equivalence.yml/tick-equivalence": "standard",
   "feature-suite.yml/features": "standard",
   "gate-protected.yml/grade": "hosted",
   "github-access-audit.yml/read-back": "hosted",
