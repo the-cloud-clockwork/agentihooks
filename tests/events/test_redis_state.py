@@ -39,9 +39,15 @@ def test_writes_keep_current_and_only_one_prior_revision() -> None:
     assert [(row.revision, row.value) for row in states.watch("doc")] == [(2, b"second"), (3, b"third")]
     assert [(row.revision, row.value) for row in states.watch("doc", 3)] == [(3, b"third")]
     expected = {"revision": 3, "value": base64.b64encode(b"third").decode()}
-    assert json.loads(client.hget("fixture:state:probe:current", "doc")) == expected
-    assert json.loads(client.lindex("fixture:state:probe:history:doc", -1)) == expected
+    current = client.hget("fixture:state:probe:current", "doc")
+    latest = client.lindex("fixture:state:probe:history:doc", -1)
+    assert isinstance(current, str)
+    assert isinstance(latest, str)
+    assert json.loads(current) == expected
+    assert json.loads(latest) == expected
     with pytest.raises(StateConflict):
         states.update("doc", b"conflict", 1)
     assert [(row.revision, row.value) for row in states.watch("doc")] == [(2, b"second"), (3, b"third")]
-    assert states.get("doc").value == b"third"
+    entry = states.get("doc")
+    assert entry is not None
+    assert entry.value == b"third"

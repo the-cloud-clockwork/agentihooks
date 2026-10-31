@@ -2,7 +2,7 @@ import argparse
 import json
 from typing import Any
 
-from .redis_state import HISTORY, _prefix
+from .redis_state import HISTORY
 
 TRIM_ONE = """
 if redis.call('LLEN', KEYS[1]) <= tonumber(ARGV[1]) then
@@ -29,7 +29,7 @@ def trim_page(redis: Any, prefix: str, cursor: int = 0, limit: int = 16) -> tupl
 
 
 def main(argv: list[str] | None = None) -> int:
-    from scripts.swarm.store import redis_client
+    from scripts.swarm import store
 
     parser = argparse.ArgumentParser(
         description="Trim one Redis state history scan page without reading documents",
@@ -38,8 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cursor", type=int, default=0)
     parser.add_argument("--limit", type=int, default=16)
     args = parser.parse_args(argv)
-    client = redis_client()
-    cursor, removed = trim_page(client, _prefix(), args.cursor, args.limit)
+    client = store.redis_client()  # pyright: ignore[reportUnknownMemberType]
+    cursor, removed = trim_page(client, store.PREFIX, args.cursor, args.limit)
     print(json.dumps({"cursor": cursor, "removed": removed}))
     return 0
 

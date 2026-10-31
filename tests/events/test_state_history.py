@@ -15,6 +15,7 @@ def test_history_trim_is_bounded_and_preserves_current_documents() -> None:
     revision = states.create("doc", b"current")
     history = "fixture:state:probe:history:doc"
     current = client.hget("fixture:state:probe:current", "doc")
+    assert isinstance(current, str)
     client.delete(history)
     client.rpush(history, "oldest", "older", "old", "prior", current)
     client.rpush("outside:state:probe:history:doc", "untouched", "untouched", "untouched")
@@ -22,7 +23,9 @@ def test_history_trim_is_bounded_and_preserves_current_documents() -> None:
     assert (cursor, removed) == (0, 2)
     assert client.lrange(history, 0, -1) == ["old", "prior", current]
     assert client.hget("fixture:state:probe:current", "doc") == current
-    assert states.get("doc").revision == revision
+    entry = states.get("doc")
+    assert entry is not None
+    assert entry.revision == revision
     cursor, removed = state_history.trim_page(client, "fixture", cursor=cursor, limit=2)
     assert (cursor, removed) == (0, 1)
     assert client.lrange(history, 0, -1) == ["prior", current]
@@ -94,7 +97,7 @@ def test_command_prints_its_resume_cursor(
 
     client = object()
     monkeypatch.setattr(store, "redis_client", lambda: client)
-    monkeypatch.setattr(state_history, "_prefix", lambda: "fixture")
+    monkeypatch.setattr(store, "PREFIX", "fixture")
 
     def trim(redis: object, prefix: str, cursor: int, limit: int) -> tuple[int, int]:
         assert redis is client
@@ -118,3 +121,44 @@ def test_command_refuses_an_unavailable_store(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(ConnectionError) as error:
         state_history.main([])
     assert str(error.value) == "Redis is unavailable"
+
+
+def test_default_trim_budget_removes_sixteen_entries() -> None:
+    import fakeredis
+
+    from scripts.events import state_history
+
+    client = fakeredis.FakeRedis()
+    key = "fixture:state:probe:history:doc"
+    client.rpush(key, *[str(index) for index in range(20)])
+    assert state_history.trim_page(client, "fixture") == (0, 16)
+    assert client.lrange(key, 0, -1) == [b"16", b"17", b"18", b"19"]
+
+
+def test_trim_shares_the_budget_across_histories(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fakeredis
+
+    from scripts.events import state_history
+
+    client = fakeredis.FakeRedis()
+    first = "fixture:state:probe:history:first"
+    second = "fixture:state:probe:history:second"
+    client.rpush(first, b"old", b"prior", b"current")
+    client.rpush(second, b"oldest", b"older", b"old", b"prior", b"current")
+    monkeypatch.setattr(client, "scan", lambda *args, **kwargs: (0, [first, second]))
+    assert state_history.trim_page(client, "fixture", limit=2) == (0, 2)
+    assert client.lrange(first, 0, -1) == [b"prior", b"current"]
+    assert client.lrange(second, 0, -1) == [b"older", b"old", b"prior", b"current"]
+
+
+def test_command_explains_resuming_bounded_cleanup(capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.events import state_history
+
+    with pytest.raises(SystemExit) as error:
+        state_history.main(["--help"])
+    assert error.value.code == 0
+    paragraphs = capsys.readouterr().out.split("\n\n")
+    assert paragraphs[1] == "Trim one Redis state history scan page without reading documents"
+    assert " ".join(paragraphs[-1].split()) == (
+        "Repeat with the returned cursor. Finish only when both cursor and removed are zero."
+    )
