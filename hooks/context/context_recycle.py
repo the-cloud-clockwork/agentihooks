@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shlex
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -35,6 +36,12 @@ _ALLOWED = (
     "each as one command."
 )
 
+_MASTER_ALLOWED = (
+    " A master may also run `agentihooks msg` send, reply, close, read and inbox, and "
+    "`agentihooks swarm {slug} master up --replace` to launch its replacement when its handoff cannot land."
+)
+
+_MASTER_MSG_STEPS = frozenset({"send", "reply", "close", "read", "inbox"})
 _READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "NotebookRead"})
 _WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
 _LEDGER_STEPS = frozenset({"comment", "say", "leave", "ack"})
@@ -132,6 +139,18 @@ def unmarked_overrun(session_id: str, compact_limit: int) -> int | None:
     return None if any(_marker(session_id, stage).exists() for stage in ("prepare", "recycle")) else used
 
 
+def gated_since(session_id: str, compact_limit: int) -> int | None:
+    """Epoch milliseconds at which the session met the hard gate, None while it is under the gate or never met it."""
+    used = _used(session_id) if session_id else None
+    limit = _pinned_swarm(session_id).get("compact_limit", compact_limit) if session_id else compact_limit
+    if used is None or used < _gate_limit(limit or None) * 1000:
+        return None
+    try:
+        return int(_marker(session_id, "recycle").stat().st_mtime * 1000)
+    except OSError:
+        return None
+
+
 def _in_scratchpad(path: str) -> bool:
     root = os.path.realpath(Path.home() / "scratchpad")
     return os.path.realpath(os.path.expanduser(path)).startswith(root + os.sep)
@@ -178,7 +197,7 @@ def _shell_read(tokens: list[str]) -> bool:
     )
 
 
-def _allowed_command(command: str, slug: str) -> bool:
+def _allowed_command(command: str, slug: str, master: bool = False) -> bool:
     tokens = _single_command(command)
     if tokens is None:
         return False
@@ -187,7 +206,9 @@ def _allowed_command(command: str, slug: str) -> bool:
     if len(tokens) < 3 or os.path.basename(tokens[0]) != "agentihooks":
         return False
     if tokens[1] == "swarm":
-        return _swarm_step(tokens[2:], slug)
+        return _swarm_step(tokens[2:], slug) or (master and tokens[2:] == [slug, "master", "up", "--replace"])
+    if tokens[1] == "msg":
+        return master and tokens[2] in _MASTER_MSG_STEPS
     return tokens[1] == "ledger" and _ledger_step(tokens[2:]) in _LEDGER_STEPS
 
 
@@ -197,7 +218,7 @@ def _swarm_step(args: list[str], slug: str) -> bool:
     return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 
-def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str | None:
+def gate(tool_name: str, tool_input: dict, session_id: str, environ: Mapping[str, str] | None = None) -> str | None:
     overrun = _overrun(session_id, environ)
     if overrun is None or tool_name in _READ_TOOLS:
         return None
@@ -205,9 +226,17 @@ def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str
     if tool_name in _WRITE_TOOLS and _handoff_write(tool_input):
         return None
     command = str(tool_input.get("command") or "")
-    if tool_name == "Bash" and _allowed_command(command, slug):
+    master = _is_master(os.environ if environ is None else environ)
+    if tool_name == "Bash" and _allowed_command(command, slug, master):
         return _handoff_refusal(command, slug)
-    return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=_gate_limit(), slug=slug)
+    allowed = _ALLOWED + (_MASTER_ALLOWED if master else "")
+    return "BLOCKED: " + (_DIRECTIVE + allowed).format(used=used // 1000, limit=_gate_limit(), slug=slug)
+
+
+def _is_master(environ: Mapping[str, str]) -> bool:
+    """True for a swarm master session, by its lane or its agent name."""
+    lane = environ.get("AGENTIHOOKS_SWARM_LANE") or naming.lane_of(environ.get("AGENTIHOOKS_AGENT_NAME"))
+    return lane == "master"
 
 
 def _resolver(slug: str):
