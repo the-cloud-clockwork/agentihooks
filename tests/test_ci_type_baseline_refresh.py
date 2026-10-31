@@ -40,6 +40,7 @@ def test_only_a_lowered_baseline_opens_one_pull_request_into_dev() -> None:
     assert 'path: "tests/TYPE_BASELINE.json"' in run
     assert 'git/commits" -f message="Lower the type baseline to the measured counts"' in run
     assert "git push" not in run and "x-access-token" not in run
+    assert run.index('"$(git hash-object tests/TYPE_BASELINE.json)"') < run.index("git/blobs")
     assert '--head "$BRANCH" --base dev --state open' in run
     assert 'gh pr create --repo "$GITHUB_REPOSITORY" --base dev --head "$BRANCH"' in run
     pull = next(step for step in _steps("refresh") if step.get("id") == "pull")

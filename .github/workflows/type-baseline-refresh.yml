@@ -93,6 +93,16 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BRANCH: type-baseline-refresh
         run: |
+          pull=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base dev --state open --json number -q '.[0].number // ""')
+          if [[ -n "$pull" ]]; then
+            held=$(gh api "repos/$GITHUB_REPOSITORY/contents/tests/TYPE_BASELINE.json?ref=refs/heads/$BRANCH" -q .sha || true)
+            if [[ "$held" == "$(git hash-object tests/TYPE_BASELINE.json)" ]]; then
+              echo "::notice::Pull request $pull already holds this baseline; its head stays."
+              echo "pull=$pull" >> "$GITHUB_OUTPUT"
+              echo "head=$(gh pr view "$pull" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
           parent=$(git rev-parse HEAD)
           jq -n --rawfile content tests/TYPE_BASELINE.json '{content: $content, encoding: "utf-8"}' > "$RUNNER_TEMP/blob.json"
           blob=$(gh api "repos/$GITHUB_REPOSITORY/git/blobs" --input "$RUNNER_TEMP/blob.json" -q .sha)
@@ -104,7 +114,6 @@ jobs:
           if ! gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$head" -F force=true >/dev/null 2>&1; then
             gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$head" >/dev/null
           fi
-          pull=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base dev --state open --json number -q '.[0].number // ""')
           if [[ -z "$pull" ]]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --base dev --head "$BRANCH" \
               --title "Lower the type baseline to the measured counts" \
@@ -142,7 +151,7 @@ jobs:
           state=""
           while (( SECONDS < deadline )); do
             state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD/check-runs?check_name=Gate%20%E2%80%94%20Required" \
-              -q '.check_runs | sort_by(.started_at) | last | if . == null then "pending" else "\(.status):\(.conclusion)" end')
+              -q '.check_runs | sort_by(.started_at) | last | if . == null then "pending" else "\(.status):\(.conclusion)" end' || echo unread)
             case "$state" in
               completed:success) break ;;
               completed:*) echo "::error::Gate — Required ended $state on pull request $PULL"; exit 1 ;;
@@ -154,6 +163,13 @@ jobs:
             exit 1
           fi
           node=$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json id -q .id)
-          gh api graphql \
-            -f query='mutation($pull: ID!, $head: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $pull, expectedHeadOid: $head}) { mergeQueueEntry { position } } }' \
-            -f pull="$node" -f head="$HEAD"
+          for attempt in 1 2 3; do
+            if gh api graphql \
+              -f query='mutation($pull: ID!, $head: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $pull, expectedHeadOid: $head}) { mergeQueueEntry { position } } }' \
+              -f pull="$node" -f head="$HEAD"; then
+              exit 0
+            fi
+            echo "::warning::Enqueue attempt $attempt for pull request $PULL failed"
+            sleep 30
+          done
+          exit 1
