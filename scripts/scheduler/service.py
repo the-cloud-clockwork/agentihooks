@@ -77,7 +77,9 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
 
 
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
+    """Dispatch due work every second until stopped; a pass that loses or cannot take the dispatch lock ends alone."""
     from scripts.events import state
+    from scripts.scheduler.lease import Busy, LostLock
 
     transient = state.unavailable()
     stopped = stop if stop is not None else _on_signals()
@@ -85,6 +87,8 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
         while not stopped.is_set():
             try:
                 await asyncio.to_thread(scheduler.run_due)
+            except (LostLock, Busy) as exc:
+                print(f"scheduler pass ended: {exc}", file=sys.stderr)
             except transient:
                 print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             try:
