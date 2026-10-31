@@ -884,23 +884,22 @@ def test_only_a_holder_of_the_tick_lock_file_counts_as_a_running_tick(tmp_path, 
     from scripts.scheduler.service import runtime_dir
     from scripts.swarm import scheduled_tick
 
-    env = timer._scheduler_env()
-    lock = runtime_dir(env) / f"{scheduled_tick.LOCK}.lock"
+    lock = runtime_dir() / f"{scheduled_tick.LOCK}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text("")
-    stat = lock.stat()
-    here = f"{os.major(stat.st_dev):02x}:{os.minor(stat.st_dev):02x}:{stat.st_ino}"
-    elsewhere = f"{os.major(stat.st_dev) + 1:02x}:{os.minor(stat.st_dev):02x}:{stat.st_ino}"
+    inode = lock.stat().st_ino
+    monkeypatch.setattr(timer.os, "major", lambda dev: 0x1A)
+    monkeypatch.setattr(timer.os, "minor", lambda dev: 0x2B)
     table = tmp_path / "locks"
     monkeypatch.setattr(timer, "LOCKS_FILE", table)
     table.write_text(
-        f"1: FLOCK  ADVISORY  WRITE 4242 {elsewhere} 0 EOF\n1: -> FLOCK  ADVISORY  WRITE 4243 {here} 0 EOF\n"
+        f"1: FLOCK  ADVISORY  WRITE 4242 1b:2b:{inode} 0 EOF\n1: -> FLOCK  ADVISORY  WRITE 4243 1a:2b:{inode} 0 EOF\n"
     )
-    assert timer._ticking(env) is False
-    table.write_text(f"2: FLOCK  ADVISORY  WRITE 4242 {here} 0 EOF\n")
-    assert timer._ticking(env) is True
+    assert timer._ticking() is False
+    table.write_text(f"2: FLOCK  ADVISORY  WRITE 4242 1a:2b:{inode} 0 EOF\n")
+    assert timer._ticking() is True
     table.unlink()
-    assert timer._ticking(env) is False
+    assert timer._ticking() is False
 
 
 def _delivering(monkeypatch):

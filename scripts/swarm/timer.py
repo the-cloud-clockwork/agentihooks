@@ -265,7 +265,7 @@ def recycle() -> None:
 
     env = _scheduler_env()
     held = service.holder(env)
-    if held is None or not (why := _off_installed(held)) or _ticking(env):
+    if held is None or not (why := _off_installed(held)) or _ticking():
         return
     print(f"recycling the scheduler supervisor: {why}", file=sys.stderr)
     if not service.drain(held["pid"], env):
@@ -275,7 +275,7 @@ def recycle() -> None:
         )
 
 
-def _ticking(env: dict[str, str]) -> bool:
+def _ticking() -> bool:
     """True while a swarm tick pass holds the tick lock, read from the kernel lock table so the probe never takes it."""
     import re
 
@@ -283,7 +283,7 @@ def _ticking(env: dict[str, str]) -> bool:
     from scripts.swarm.scheduled_tick import LOCK
 
     try:
-        stat = (runtime_dir(env) / f"{LOCK}.lock").stat()
+        stat = (runtime_dir() / f"{LOCK}.lock").stat()
         table = LOCKS_FILE.read_text()
     except OSError:
         return False

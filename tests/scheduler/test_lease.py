@@ -67,7 +67,7 @@ def test_renewal_extends_the_expiry_and_a_stale_lease_cannot_renew(state):
         lease.renew(state, held, now=120.0 + lease.LEASE_SECONDS)
 
 
-def test_a_conflicted_renewal_renews_again_on_the_next_beat(monkeypatch, state):
+def test_a_conflicted_renewal_renews_again_on_the_next_beat(monkeypatch, state, capsys):
     from scripts.events.bus import StateConflict
     from scripts.scheduler import lease
 
@@ -86,6 +86,10 @@ def test_a_conflicted_renewal_renews_again_on_the_next_beat(monkeypatch, state):
     lease._renew(state, held, stopped)
     assert calls == [held.token, held.token]
     lease.verify_lease(state, held)
+    assert capsys.readouterr() == (
+        "",
+        "scheduler lease renewal retries next beat: StateConflict: scheduler lease 'proof.lock' kept changing\n",
+    )
 
 
 def test_a_lost_lease_ends_the_renewal_without_another_beat(monkeypatch, state):
