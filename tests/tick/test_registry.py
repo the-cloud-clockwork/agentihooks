@@ -106,6 +106,24 @@ def test_multiple_unknown_dependencies_reported_in_order() -> None:
     assert str(error.value) == "Unknown dependency for a: b, z"
 
 
+@pytest.mark.parametrize("budget", [0.0, -1.0, float("nan"), float("inf"), float("-inf")])
+def test_step_budget_must_be_finite_and_positive(budget: float) -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", budget_s=budget))
+    with pytest.raises(ValueError) as error:
+        subject.validate()
+    assert str(error.value) == "Invalid budget for a: expected finite positive seconds"
+
+
+@pytest.mark.parametrize("interval", [-1.0, float("nan"), float("inf"), float("-inf")])
+def test_step_interval_must_be_finite_and_nonnegative(interval: float) -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", interval_s=interval))
+    with pytest.raises(ValueError) as error:
+        subject.waves()
+    assert str(error.value) == "Invalid interval for a: expected finite nonnegative seconds"
+
+
 @pytest.mark.parametrize("reverse", [False, True])
 def test_transitive_needs_orders_shared_writers(reverse: bool) -> None:
     subject = registry().Registry()
