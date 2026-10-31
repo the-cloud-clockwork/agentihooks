@@ -584,10 +584,15 @@ def test_the_recorder_keeps_each_module_an_import_statement_names_during_collect
     (tmp_path / "test_named.py").write_text(
         "from plugins import load\nVALUE = load('data')\ndef test_named():\n    pass\n"
     )
+    (tmp_path / "early.py").write_text(
+        "from importlib import import_module\ndef load(name):\n    return import_module(name)\n"
+    )
+    (tmp_path / "conftest.py").write_text("import early\n")
+    (tmp_path / "test_early.py").write_text("import early\nVALUE = early.load('data')\ndef test_early():\n    pass\n")
     out = tmp_path / "inputs"
     subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", "test_first.py"]
-        + ["test_lazy.py", "test_named.py"],
+        + ["test_lazy.py", "test_named.py", "test_early.py"],
         cwd=tmp_path,
         env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
         check=True,
