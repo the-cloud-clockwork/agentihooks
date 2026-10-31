@@ -50,21 +50,21 @@ def hive(monkeypatch):
 
 
 @pytest.fixture
-def hosted(monkeypatch):
+def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
     from scripts.swarm_ledger.api import client
 
     reads = []
 
     class Slow:
-        def __init__(self, base, credentials, timeout=10):
+        def __init__(self, base: str, credentials: dict, timeout: float = 10) -> None:
             self.timeout = timeout
 
-        def request(self, slug, path, payload=None):
+        def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
             reads.append((slug, path, self.timeout))
             raise TimeoutError("timed out")
 
-        def collection(self, slug, path):
-            return self.request(slug, path)
+        def collection(self, slug: str, path: str) -> list:
+            return [self.request(slug, path)]
 
     module = ledger_client._ledger()
     monkeypatch.setattr(client, "ResourceClient", Slow)
@@ -263,7 +263,9 @@ def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch,
     assert logged == [("claim watch failed", {"error": "no transcript"})]
 
 
-def test_a_slow_hosted_ledger_costs_one_short_read_and_the_call_passes(hive, hosted, monkeypatch):
+def test_a_slow_hosted_ledger_costs_one_short_read_and_the_call_passes(
+    hive: list, hosted: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from hooks.context import context_recycle, swarm_gates
 
     logged = []
@@ -279,7 +281,7 @@ def test_a_slow_hosted_ledger_costs_one_short_read_and_the_call_passes(hive, hos
     assert logged == [("claim watch failed", {"error": "timed out"})]
 
 
-def test_other_ledger_clients_keep_three_ten_second_attempts(hosted):
+def test_other_ledger_clients_keep_three_ten_second_attempts(hosted: list) -> None:
     with pytest.raises(TimeoutError):
         ledger_client.LedgerClient().task("sw", "t1")
 
@@ -292,7 +294,7 @@ def test_other_ledger_clients_keep_three_ten_second_attempts(hosted):
     ]
 
 
-def test_a_bounded_client_reads_collections_once_with_its_timeout(hosted):
+def test_a_bounded_client_reads_collections_once_with_its_timeout(hosted: list) -> None:
     with pytest.raises(TimeoutError):
         ledger_client.LedgerClient(read_timeout=3).tasks("sw")
 
