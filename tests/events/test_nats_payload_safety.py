@@ -123,12 +123,10 @@ def test_transport_configuration_is_checked_before_any_network_connection(
     async def connect(*args: object, **kwargs: object) -> None:
         assert args == ("nats://configured.example:4222",)
         expected = {
-            "allow_reconnect": reconnect,
+            "allow_reconnect": False,
             "disconnected_cb": nats._disconnected,
             "reconnected_cb": nats._reconnected,
         }
-        if reconnect:
-            expected["max_reconnect_attempts"] = -1
         assert kwargs == expected
         raise ValueError("configuration captured")
 

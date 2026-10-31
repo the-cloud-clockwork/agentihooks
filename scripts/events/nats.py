@@ -446,6 +446,19 @@ async def _reconnected() -> None:
     logging.getLogger(__name__).info("NATS bus reconnected")
 
 
+async def _connect(config: BusConfig, url: str) -> nats_client.NATS:
+    client = await nats_client.connect(
+        url,
+        allow_reconnect=False,
+        disconnected_cb=_disconnected,
+        reconnected_cb=_reconnected,
+        **auth_options(config.credentials),
+    )
+    if config.reconnect:
+        client.options.update(allow_reconnect=True, max_reconnect_attempts=-1)
+    return client
+
+
 class NatsBus:
     def __init__(self, config: BusConfig, url: str) -> None:
         self._config = config
@@ -455,16 +468,7 @@ class NatsBus:
         self._buckets: dict[str, NatsStateStore] = {}
         self._views: dict[str, Bus] = {}
         try:
-            self._nc = self._loop.run(
-                nats_client.connect(
-                    url,
-                    allow_reconnect=config.reconnect,
-                    disconnected_cb=_disconnected,
-                    reconnected_cb=_reconnected,
-                    **({"max_reconnect_attempts": -1} if config.reconnect else {}),
-                    **auth_options(config.credentials),
-                )
-            )
+            self._nc = self._loop.run(_connect(config, url))
             self._js = self._nc.jetstream()
             event_stream, dead_stream = EVENT_STREAM, DEAD_STREAM
             if config.provision or not config.scoped:

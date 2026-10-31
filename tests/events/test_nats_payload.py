@@ -111,11 +111,12 @@ def test_a_reconnecting_bus_serves_a_hub_after_the_server_closes_the_connection(
         opened = nats.open_bus(BusConfig(backend="nats", url=url, reconnect=True))
         connect.assert_called_once_with(
             url,
-            allow_reconnect=True,
-            max_reconnect_attempts=-1,
+            allow_reconnect=False,
             disconnected_cb=nats._disconnected,
             reconnected_cb=nats._reconnected,
         )
+        assert opened._nc.options["allow_reconnect"] is True
+        assert opened._nc.options["max_reconnect_attempts"] == -1
         handler = mock.Mock()
         hosted = runner.HubRunner(
             opened, registry.Registry([registry.Reactor("worker", "swarm.*.task.>", handler)]), "hub"

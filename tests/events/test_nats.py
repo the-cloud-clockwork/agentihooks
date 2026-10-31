@@ -464,6 +464,7 @@ def test_the_bus_can_explicitly_disable_reconnecting(url: str, monkeypatch: pyte
     connect = mock.Mock(wraps=nats.nats_client.connect)
     monkeypatch.setattr(nats.nats_client, "connect", connect)
     opened = nats.open_bus(BusConfig(backend="nats", url=url, reconnect=False))
+    assert opened._nc.options["allow_reconnect"] is False
     opened.close()
     connect.assert_called_once_with(
         url, allow_reconnect=False, disconnected_cb=nats._disconnected, reconnected_cb=nats._reconnected
