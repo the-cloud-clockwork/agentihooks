@@ -11,7 +11,7 @@ from scripts.handoff import transfers
 from scripts.handoff.transfers import first_next
 from scripts.hive import auth, cli, create, machine, registry, remove
 from scripts.hive.placement import choose, place_master
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxStore, Item
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger.ledger_workspace import folder
 
@@ -391,7 +391,7 @@ def test_an_ended_agent_on_the_hive_does_not_hold_the_drain(store):
     assert remove.hosted(store, member) == []
 
 
-def _orders(store, address):
+def _orders(store: Swarm, address: str) -> list[Item]:
     return [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(address)]
 
 
@@ -425,7 +425,7 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
     assert _orders(store, "engineer@1") == []
 
 
-def _found(store, item_id):
+def _found(store: Swarm, item_id: str) -> Item:
     return next(item for inbox in InboxStore(store.redis).worlds() if (item := inbox.get(item_id)))
 
 
@@ -439,8 +439,12 @@ def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_it
     inbox.seats.occupy(SEAT, "engineer@1", 1)
     remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
     [order] = _orders(store, "engineer@1")
+    assert remove.is_notice(order)
+    assert not remove.is_notice(replace(order, sender="operator"))
     other = inbox.send(remove.SENDER, "engineer@1", "Read the review on the ledger.")
-    RedisStore(store.redis).put_agent(SLUG, AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working"))
+    elsewhere = _member(store, "anton-8")
+    successor = AgentRecord("engineer@2", "eng", "t1", seat=SEAT, hive=elsewhere, state="working")
+    RedisStore(store.redis).put_agent(SLUG, successor)
     inbox.seats.occupy(SEAT, "engineer@2", other.created_at + 1)
 
     exits.settle(inbox, "engineer@1", SEAT, "handed off its seat")
