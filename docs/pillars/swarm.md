@@ -7194,6 +7194,70 @@ the count is 0 by construction, since the detector skips every such item. A late
 reporting any item that waits for a seat's successor, so the `seat wait` category no longer appears; the
 information only skip still covers the `unread delivery` and `delivered backlog` categories.
 
+### Listing a mailbox
+
+`agentihooks msg inbox` lists every item addressed to the calling session: its agent name, each alias of that
+name, and the seat it occupies unless it has left that seat. `--of <address>` lists another address the same way,
+and is refused when the swarm's template declares links and none joins the caller's seat to that address. Each line is
+tab separated: item id, state, sender and the first line of the text. Items are ordered by creation time, then
+send sequence, then id, and an item reachable through more than one of those addresses is listed once.
+
+Mailbox index and record reads use `ROW_BATCH` in `scripts.inbox.store` (500) to bound both steps:
+
+| Step | Redis commands | Bound |
+|---|---|---|
+| Read an address index | `ZRANGE` over the address's sorted set | at most 500 ids per call, repeated until a page returns fewer |
+| Read the item records | one pipeline of `HGETALL` per batch, no transaction | at most 500 commands per pipeline, one pipeline after another |
+
+A batch whose pipeline fails with a Redis connection error is sent once more; a second failure raises. An id whose
+record is gone is dropped from the address's indexes and reported on stderr. A single item `msg read`, `msg reply`
+or `msg close` reads one record and is unaffected.
+
+The bound limits the number of record reads sent together. It does not bound reply bytes or guarantee that a Redis
+connection cannot reset. The original report observed five listing failures in 42 minutes on 29 October 2026 while
+single item reads and replies succeeded; an oversized pipeline over TLS was a hypothesis, not a proven cause.
+
+#### Paging the output
+
+`--page N` prints only the Nth page of the ordered listing; `--size S` sets the page length and defaults to 500.
+Both take whole numbers of at least 1. Without `--page` the whole listing prints and `--size` is ignored.
+These options configure output for one invocation. They do not change the internal batch bound or retry count.
+
+```bash
+agentihooks msg inbox
+agentihooks msg inbox --page 1
+agentihooks msg inbox --page 2 --size 50
+agentihooks msg inbox --of 'eng-1@<slug>' --page 1 --size 20
+```
+
+A page past the end prints nothing and exits 0. `--page 0`, `--size 0`, a negative number or a non number is
+refused by the parser with exit 2 and a message such as `0 must be at least 1`.
+
+Paging shortens the output only. The command still reads the whole mailbox in the bounded batches above, then
+prints the requested window, so a later page costs the same Redis reads as the first. Page numbers count positions
+in the current listing; they are not a snapshot cursor. Changes to mailbox membership between calls can shift later
+pages. Closing an item changes its state but leaves it in the listing.
+
+#### Troubleshooting
+
+| Symptom | Check and response |
+|---|---|
+| `msg inbox` fails with `ConnectionResetError` or `Connection reset by peer` while `msg read <id>` works | Check the running package version and retain the failing command and traceback. Batching limits record commands per pipeline; this symptom alone does not identify the cause |
+| A record batch still fails after its retry | The second connection error propagates. Check Redis reachability and investigate reply payload size and connection handling. A smaller output `--size` does not reduce Redis reads |
+| `msg inbox --page 3` prints nothing | The listing has fewer than `2 * size + 1` items. Run `msg inbox` without `--page` to count them |
+| `error: argument --page: invalid positive_int value` | The value is not a whole number. Pass a number of at least 1 |
+
+#### Delivery evidence
+
+Batched record reads and paged address index reads landed with
+[pull request 8866](https://github.com/the-cloud-clockwork/agentihooks/pull/8866) and
+[pull request 8931](https://github.com/the-cloud-clockwork/agentihooks/pull/8931).
+[Pull request 9020](https://github.com/the-cloud-clockwork/agentihooks/pull/9020) added `--page` and `--size`.
+Its case `test_a_listing_across_name_alias_and_seat_reads_no_pipeline_above_the_batch`
+seeds 1,508 items across a name, an alias and a seat, counts the `HGETALL` commands
+in every pipeline the listing executes, and fails if any pipeline carries more than `ROW_BATCH`. The paging cases
+pin each window of a seven item mailbox and the refusals of values below one.
+
 ### Local outbox and limits
 
 When Redis is unavailable, inbox operations queue in `inbox-outbox.jsonl` under the AgentiHooks home. Records

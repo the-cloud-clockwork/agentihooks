@@ -30,6 +30,8 @@ See [Inbox escalation sender exclusion](swarm.md#inbox-escalation-sender-exclusi
 
 See [Inbox receiver read](swarm.md#inbox-receiver-read) for how the inbox detector resolves every receiver in a fixed number of Redis reads, the check command and the measured result.
 
+See [Listing a mailbox](swarm.md#listing-a-mailbox) for bounded Redis reads, `msg inbox --page` and `--size` examples, output limits and connection error troubleshooting.
+
 See [Information only items](swarm.md#information-only-items) for which inbox wakes, seat holds, escalations and Doctor findings skip items sent with `--fyi`, how to send and inspect them, troubleshooting and delivery evidence.
 
 See [Doctor measurement task readiness](swarm.md#doctor-measurement-task-readiness) for tune dependencies, application timestamps, configuration examples and releasing a read only seat with its recorded window.
