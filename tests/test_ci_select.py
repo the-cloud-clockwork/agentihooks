@@ -933,3 +933,49 @@ def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, cap
         given = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path), "LEG": str(leg)}
         subprocess.run(["bash", "-e", "-c", read["run"]], check=True, env=given | {"GITHUB_ENV": str(environment)})
         assert environment.read_text() == f"FILES={expected[f'files_{leg}']}\n"
+
+
+def test_a_recorded_read_selects_the_tests_that_read_the_changed_file_as_data(repo):
+    write(
+        repo,
+        {
+            ".github/workflows/deploy.yml": "name: deploy\n",
+            "hooks/scanned.py": "VALUE = 3\n",
+            "tests/test_workflows.py": "import os\n",
+            "tests/test_boundary.py": "import os\n",
+        },
+    )
+    manifest = {
+        "units": ["hooks/sample.py::<module>"],
+        "tests": {
+            "tests/test_workflows.py::test_scan": {
+                "units": [],
+                "files": [".test_durations", ".github/workflows/deploy.yml"],
+            },
+            "tests/test_boundary.py::test_boundary": {"units": [], "files": [".test_durations", "hooks/scanned.py"]},
+            "tests/test_other.py::test_other": {"units": [], "files": [".test_durations"]},
+        },
+    }
+    for changed, expected in (
+        ([".github/workflows/deploy.yml"], {"tests/test_workflows.py"}),
+        (["hooks/scanned.py"], {"tests/test_boundary.py"}),
+        ([".test_durations"], set()),
+    ):
+        assert ci_select.selected_tests(repo, changed, False, manifest) == expected
+
+
+def test_main_reads_the_recorded_reads_for_a_change_without_python_source(repo, monkeypatch, tmp_path):
+    write(repo, {"tests/test_workflows.py": "import os\n", "deploy/values.yaml": "a: 1\n"})
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "baseline")
+    write(repo, {"deploy/values.yaml": "a: 2\n"})
+    git(repo, "commit", "-am", "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+    manifest = {
+        "units": [],
+        "tests": {"tests/test_workflows.py::test_scan": {"units": [], "files": ["deploy/values.yaml"]}},
+    }
+    monkeypatch.setattr(ci_select, "find_record", lambda *_: ({"id": 7}, manifest))
+    output = run_main(repo, monkeypatch, tmp_path, "pull_request")
+    assert "scope=selected" in output
+    assert "files_1=tests/test_workflows.py" in output

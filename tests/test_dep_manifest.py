@@ -669,3 +669,43 @@ def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_u
     assert upload["with"]["name"] == "dep-manifest-packed"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/packed.json"
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+def test_the_inputs_plugin_records_python_files_a_test_reads_as_text_but_not_its_imports(tmp_path):
+    (tmp_path / "source.py").write_text("VALUE = 1\n")
+    (tmp_path / "helper.py").write_text("VALUE = 2\n")
+    (tmp_path / "module.py").write_text("VALUE = 3\n")
+    (tmp_path / "test_sample.py").write_text(
+        "from pathlib import Path\n"
+        "MODULE = Path('module.py').read_text()\n"
+        "def test_reads_source():\n    assert 'VALUE' in Path('source.py').read_text()\n"
+        "def test_imports_helper():\n    import helper\n    assert helper.VALUE == 2\n"
+        "def test_reads_bytes():\n    assert Path('source.py').read_bytes()\n"
+    )
+    (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "tests.dep_inputs",
+            "-p",
+            "no:cacheprovider",
+            "test_sample.py",
+            "test_unrelated.py",
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    assert {row["test"]: row["files"] for row in rows} == {
+        "test_sample.py::test_reads_source": ["module.py", "source.py"],
+        "test_sample.py::test_imports_helper": ["module.py"],
+        "test_sample.py::test_reads_bytes": ["module.py"],
+        "test_unrelated.py::test_other": [],
+    }
