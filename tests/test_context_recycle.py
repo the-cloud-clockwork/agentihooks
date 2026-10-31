@@ -148,6 +148,14 @@ def test_over_the_limit_a_master_keeps_its_inbox_and_can_launch_its_replacement(
     assert _gate("Bash", {"command": command}) is not None
 
 
+def test_over_the_limit_a_master_known_only_by_its_lane_keeps_its_inbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    _over(monkeypatch)
+    recycle.pin_swarm("s1", "my-swarm")
+    command = {"command": "agentihooks msg send master@my-swarm 'handoff refused'"}
+    assert _gate("Bash", command, {"AGENTIHOOKS_SWARM_LANE": "master"}) is None
+    assert _gate("Bash", command, {"AGENTIHOOKS_SWARM_LANE": "eng"}) is not None
+
+
 @pytest.mark.parametrize(
     "command",
     [

@@ -142,8 +142,7 @@ def unmarked_overrun(session_id: str, compact_limit: int) -> int | None:
 def gated_since(session_id: str, compact_limit: int) -> int | None:
     """Epoch milliseconds at which the session met the hard gate, None while it is under the gate or never met it."""
     used = _used(session_id) if session_id else None
-    limit = _pinned_swarm(session_id).get("compact_limit", compact_limit) if session_id else compact_limit
-    if used is None or used < _gate_limit(limit or None) * 1000:
+    if used is None or used < _gate_limit(compact_limit or None) * 1000:
         return None
     try:
         return int(_marker(session_id, "recycle").stat().st_mtime * 1000)
@@ -197,7 +196,7 @@ def _shell_read(tokens: list[str]) -> bool:
     )
 
 
-def _allowed_command(command: str, slug: str, master: bool = False) -> bool:
+def _allowed_command(command: str, slug: str, master: bool) -> bool:
     tokens = _single_command(command)
     if tokens is None:
         return False

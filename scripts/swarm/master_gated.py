@@ -31,7 +31,7 @@ Re-read the ledger and the master inbox, then continue as master.
 """
 
 
-def run(slug: str, config: SwarmConfig, store: RedisStore, ledger: object, runtime: object, now_ms: int) -> list[str]:
+def run(slug: str, config: SwarmConfig, store: RedisStore, ledger: object, now_ms: int) -> list[str]:
     """Recycle the live master once its session has sat at the hard gate for the bound."""
     master = affinity.live_master(store, slug)
     if master is None or master.lane != MASTER or config.state in {"stopping", "stopped"}:
