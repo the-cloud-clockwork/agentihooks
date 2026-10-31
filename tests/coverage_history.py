@@ -24,16 +24,17 @@ def git(*args: str, cwd: Path) -> str:
 def renamed(repo: Path, base: str) -> dict[str, str | tuple[str, ...]]:
     listed = git("diff", "--name-status", "-M", "--diff-filter=RAD", base, "HEAD", cwd=repo)
     moves, gone, added = {}, {}, {}
+    old, new = _show(repo, base), _show(repo, "HEAD")
     for status, *paths in (line.split("\t") for line in listed.splitlines()):
         if status.startswith("R"):
             moves[paths[0]] = paths[1]
             if paths[0].startswith(GRADED) and paths[0].endswith(".py"):
-                gone[paths[0]] = _show(repo, base)(paths[0])
+                gone[paths[0]] = old(paths[0])
             if paths[1].startswith(GRADED) and paths[1].endswith(".py"):
-                added[paths[1]] = _show(repo, "HEAD")(paths[1])
+                added[paths[1]] = new(paths[1])
         elif paths[0].startswith(GRADED) and paths[0].endswith(".py"):
-            side, commit = (gone, base) if status == "D" else (added, "HEAD")
-            side[paths[0]] = _show(repo, commit)(paths[0])
+            side, source = (gone, old) if status == "D" else (added, new)
+            side[paths[0]] = source(paths[0])
     if not gone:
         return moves
     graded = git("ls-tree", "-r", "--name-only", "HEAD", "--", *GRADED, cwd=repo).split()

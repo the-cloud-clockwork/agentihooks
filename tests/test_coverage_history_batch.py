@@ -38,22 +38,38 @@ def repo(tmp_path: Path) -> tuple[Path, str]:
     return tmp_path, _commit(tmp_path, FILES)
 
 
-def test_every_source_read_of_a_revision_shares_one_git_process(
-    repo: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, commit = repo
-    started = []
+@pytest.fixture
+def reads(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    started: list[list[str]] = []
     original = subprocess.Popen
 
     def counted(*args: Any, **kwargs: Any) -> object:
-        started.append(args)
+        command = [str(part) for part in args[0]]
+        if command[1] in ("show", "cat-file"):
+            started.append(command)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", counted)
+    return started
+
+
+def test_every_source_read_of_a_revision_shares_one_git_process(repo: tuple[Path, str], reads: list[list[str]]) -> None:
+    root, commit = repo
     source = coverage_history._show(root, commit)
     for path in PATHS:
         source(path)
-    assert len(started) == 1
+    assert len(reads) == 1
+
+
+def test_renamed_reads_each_revision_through_one_git_process(repo: tuple[Path, str], reads: list[list[str]]) -> None:
+    root, base = repo
+    for name in ("hooks/a.py", "hooks/crlf.py", "hooks/bare.py"):
+        (root / name).unlink()
+    _commit(root, {"scripts/a.py": FILES["hooks/a.py"], "scripts/new.py": "n = 1\n", "scripts/other.py": "o = 1\n"})
+    reads.clear()
+    moved = coverage_history.renamed(root, base)
+    assert moved["hooks/a.py"] == "scripts/a.py"
+    assert len(reads) == 2
 
 
 def test_batched_reads_return_what_git_show_returned(repo: tuple[Path, str]) -> None:
