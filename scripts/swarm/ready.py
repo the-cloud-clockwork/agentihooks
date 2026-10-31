@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from scripts.inbox.store import DuplicateItem, InboxStore
@@ -433,12 +434,21 @@ def _reopen(run, row, found, what):
     return [f"task {task_id} reopened, {url} {what}"]
 
 
-def reopen_red(run: Pass, task: dict[str, Any], rows: dict[str, Any], failed: tuple[str, ...]) -> list[str]:
+def reopen_red(
+    store: RedisStore,
+    slug: str,
+    ledger: Any,
+    github: Callable[..., Any],
+    task: dict[str, Any],
+    rows: dict[str, Any],
+    failed: tuple[str, ...],
+) -> list[str]:
     """Reopen a task in pull request whose red checks have no live owner to fix them, keeping its handoff."""
     row: dict[str, Any] = {**task, "claimed_by": task.get("claimed_by") or ""}
-    previous: dict[str, Any] = record(run.store, run.slug, row["id"]) or {}
-    if waits.dependency(previous.get("dependency", {}), row, rows, run.github):
+    previous: dict[str, Any] = record(store, slug, row["id"]) or {}
+    if waits.dependency(previous.get("dependency", {}), row, rows, github):
         return []
+    run = SimpleNamespace(store=store, slug=slug, ledger=ledger)
     found = {"url": row["pr_url"], "agent": row["claimed_by"]}
     reopened: list[str] = _reopen(
         run, row, found, f"has red checks: {', '.join(failed)}" if failed else "has red checks"

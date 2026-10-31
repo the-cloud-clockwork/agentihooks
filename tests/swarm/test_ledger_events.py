@@ -527,8 +527,8 @@ def _owner_left(store, monkeypatch, owners=()):
     monkeypatch.setattr(ready, "_owners", lambda run, task_id: list(owners))
 
 
-def _pass(store: RedisStore, ledger: ReopenLedger) -> ready.Pass:
-    return ready.Pass(store, "sw", ledger, lambda url: None, lambda url: None, 100_000)
+def _reopen_red(store: RedisStore, ledger: ReopenLedger, task: dict, rows: dict, failed: tuple) -> list[str]:
+    return ready.reopen_red(store, "sw", ledger, lambda url: None, task, rows, failed)
 
 
 def test_a_red_task_held_on_an_open_dependency_stays_in_pull_request(store, monkeypatch):
@@ -536,8 +536,18 @@ def test_a_red_task_held_on_an_open_dependency_stays_in_pull_request(store, monk
     _owner_left(store, monkeypatch)
     task, other = in_pr()["tasks"][0], {"id": "t2", "state": "pr"}
     ready.save(store, "sw", "t1", {"url": URL, "agent": "sw-eng-1", "dependency": {"kind": "task", "target": "t2"}})
-    assert ready.reopen_red(_pass(store, ledger), task, {"t1": task, "t2": other}, ()) == []
+    assert _reopen_red(store, ledger, task, {"t1": task, "t2": other}, ()) == []
     assert ledger.updates == [] and ledger.comments == []
+
+
+def test_a_red_task_held_on_an_open_pull_request_keeps_its_notice(store, monkeypatch):
+    red, ledger = answer("open_red"), ReopenLedger()
+    _owner_left(store, monkeypatch)
+    held = {"kind": "merge", "target": URL + "0"}
+    ready.save(store, "sw", "t1", {"url": URL, "agent": "sw-eng-1", "dependency": held})
+    run(store, recorded(), ledger=ledger)
+    told = run(store, in_pr(), now_ms=(red.red_at or 0) + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    assert ledger.updates == [] and told == [f"told {MASTER_SEAT}: {URL}:red:{red.head}"]
 
 
 def test_red_checks_after_the_owner_left_reopen_the_task_without_the_master(store, monkeypatch):
@@ -548,8 +558,10 @@ def test_red_checks_after_the_owner_left_reopen_the_task_without_the_master(stor
     ((task_id, fields, if_state, if_match),) = ledger.updates
     assert (task_id, fields, if_state) == ("t1", {"state": "open", "claimed_by": "", "awaiting": "fix"}, ("pr",))
     assert if_match["claimed_by"] == "sw-eng-1" and if_match["pr_url"] == URL
-    ((_, comment_task, text, by),) = ledger.comments
-    assert (comment_task, by) == ("t1", "swarm") and "Reopened by the swarm" in text and "red checks" in text
+    ((slug, comment_task, text, by),) = ledger.comments
+    assert (
+        (slug, comment_task, by) == ("sw", "t1", "swarm") and "Reopened by the swarm" in text and "red checks" in text
+    )
     assert told == [f"task t1 reopened, {URL} has red checks: {', '.join(red.failed)}"]
     assert texts(store, MASTER_SEAT) == [] and texts(store, ENG_SEAT) == []
 
@@ -576,16 +588,18 @@ def test_a_reopen_for_red_checks_with_no_named_failure_says_red_checks(store, mo
     ledger = ReopenLedger()
     _owner_left(store, monkeypatch)
     task = in_pr()["tasks"][0]
-    assert ready.reopen_red(_pass(store, ledger), task, {"t1": task}, ()) == [f"task t1 reopened, {URL} has red checks"]
+    assert _reopen_red(store, ledger, task, {"t1": task}, ()) == [f"task t1 reopened, {URL} has red checks"]
     ((_, _, text, _),) = ledger.comments
     assert text.startswith(f"Reopened by the swarm: its pull request {URL} has red checks. ")
+    told = _reopen_red(store, ReopenLedger(), task, {"t1": task}, ("unit", "lint"))
+    assert told == [f"task t1 reopened, {URL} has red checks: unit, lint"]
 
 
 def test_a_red_task_with_no_claimant_reopens_and_says_so(store, monkeypatch):
     ledger = ReopenLedger(live={"state": "open", "claimed_by": "", "claim_generation": 0})
     _owner_left(store, monkeypatch)
     task = {key: value for key, value in in_pr()["tasks"][0].items() if key != "claimed_by"}
-    assert ready.reopen_red(_pass(store, ledger), task, {"t1": task}, ()) == [f"task t1 reopened, {URL} has red checks"]
+    assert _reopen_red(store, ledger, task, {"t1": task}, ()) == [f"task t1 reopened, {URL} has red checks"]
     ((_, _, _, if_match),) = ledger.updates
     assert if_match["claimed_by"] == "" and len(ledger.comments) == 1
 

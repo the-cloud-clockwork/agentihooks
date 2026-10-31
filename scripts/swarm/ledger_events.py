@@ -872,20 +872,17 @@ def _pull_requests(mail, tasks, now_ms, github, ledger):
             and (not found.unpassed_gate or found.failed)
             and red_window(found.pushed_at, found.red_at, now_ms) is not None
         ):
-            sent += _red(mail, ledger, task, found, title, now_ms, github)
+            sent += _red(mail, ledger, task, found, title, github)
     return sent
 
 
-def _red(
-    mail: Any, ledger: Any, task: dict[str, Any], found: Any, title: str, now_ms: int, github: Callable[..., Any]
-) -> list[str]:
+def _red(mail: Any, ledger: Any, task: dict[str, Any], found: Any, title: str, github: Callable[..., Any]) -> list[str]:
     from scripts.swarm import ready
 
     url: str = task["pr_url"]
     if task.get("claimed_by") not in mail.seats:
-        run = ready.Pass(mail.store, mail.slug, ledger, github, github, now_ms)
-        rows: dict[str, Any] = {row["id"]: row for row in mail.doc.get("tasks", [])}
-        reopened = ready.reopen_red(run, task, rows, tuple(found.failed))
+        rows: dict[str, Any] = {row["id"]: row for row in mail.doc["tasks"]}
+        reopened = ready.reopen_red(mail.store, mail.slug, ledger, github, task, rows, tuple(found.failed))
         if reopened:
             return reopened
     text = f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
