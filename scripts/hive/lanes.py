@@ -77,9 +77,8 @@ def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> 
         for lane in taken:
             if (slug, lane) not in held:
                 tasks = LaneTasks(bus, hive, store.config)
-                held[slug, lane] = Spoke(
-                    SpokeConfig(config, lane, hive), bus, runtime, tasks, view=lambda: None, fit=fit(store, hive)
-                )
+                spoke_config = SpokeConfig(config, lane, hive, fit=fit(store, hive))
+                held[slug, lane] = Spoke(spoke_config, bus, runtime, tasks, view=lambda: None)
                 queue = readiness.queue_name(slug, lane)
                 print(f"hive spoke for swarm {slug} lane {lane} takes {queue}", file=sys.stderr)
             current.append(held[slug, lane])

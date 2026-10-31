@@ -31,6 +31,7 @@ class SpokeConfig:
     lane: str
     hive: str
     policy: QueuePolicy = QueuePolicy()
+    fit: Callable[[Envelope], bool] = readiness.anywhere
 
 
 def claim_key(event: Envelope) -> str:
@@ -47,10 +48,8 @@ class Spoke:
         measure: Callable[[], dict | None] | None = None,
         clock: Callable[[], int] | None = None,
         view: Callable[[], readiness.Snapshot] | None = None,
-        fit: Callable[[Envelope], bool] = lambda event: True,
     ):
         self.config, self.bus, self.runtime, self.tasks = config, bus.for_swarm(config.swarm.slug), runtime, tasks
-        self.fit = fit
         self._previous = None
         self.measure = measure or self._measure
         self.clock = clock or presence.now_ms
@@ -88,7 +87,7 @@ class Spoke:
             return recovered or "held"
         try:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-            delivery = readiness.take(queue, self.view, timeout_ms, self.fit)
+            delivery = readiness.take(queue, self.view, timeout_ms, self.config.fit)
         except Exception:
             return self._failed()
         if delivery is None:

@@ -137,6 +137,10 @@ def fits(event: Envelope, hive: str, capabilities: Callable[[], Iterable[str]]) 
     return placeable(event.data, hive, capabilities() if needs else ())
 
 
+def anywhere(event: Envelope) -> bool:
+    return True
+
+
 def tick_launches(engine: str, task: dict) -> bool:
     """Under the events engine hives take every task but a workstation task, which the workstation tick launches."""
     return engine != EVENTS_ENGINE or bool(task.get("workstation"))
@@ -189,7 +193,7 @@ def take(
     queue: WorkQueue,
     view: Snapshot | Callable[[], Snapshot | None],
     timeout_ms: int,
-    fit: Callable[[Envelope], bool] = lambda event: True,
+    fit: Callable[[Envelope], bool] = anywhere,
 ) -> Delivery | None:
     """A view that yields no snapshot leaves the recheck to the hub, which admits the offer; an offer this hive may
     not take goes back to the queue for another hive."""
