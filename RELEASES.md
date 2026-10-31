@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.525 · 2026-10-31
+
+### 2026-10-31 · 37ee75d4c899 · #9033 · @nestorcolt
+
+**Select pull request tests by the files they read as data**
+
+This change closes a gap in pull request test selection by tracking not just files a test imports, but files it reads as plain data, since those reads previously went unnoticed and caused real failures to slip through unselected (29 merge groups, 35 failing tests over the week studied). The coverage recorder now distinguishes genuine imports from data opens using call-frame heuristics, `ci_select` pulls in every test whose recorded run touched a changed file, and manifest-based reuse checks now consult these recorded reads before falling back to source-unit comparisons, tightening selection accuracy without over-selecting on shared files everyone reads.
+
 ## v2.17.524 · 2026-10-31
 
 ### 2026-10-31 · 4d0d1fc2e730 · #9049 · @nestorcolt
