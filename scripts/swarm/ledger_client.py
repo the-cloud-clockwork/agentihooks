@@ -75,11 +75,8 @@ class LedgerClient:
         return state
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
-        if self.read_timeout is None:
-            return _ledger().resource(slug, path, service=self.service, collection=collection)
-        return _ledger().resource(
-            slug, path, service=self.service, collection=collection, timeout=self.read_timeout, attempts=1
-        )
+        bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
+        return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
 
     def state(self, slug):
         return self._call(slug)
