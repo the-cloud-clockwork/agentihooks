@@ -599,6 +599,22 @@ def shard_count(seconds: float, mutants: int, target: float, limit: int, budget:
     return max(1, min(mutants, max(wanted, needed)))
 
 
+def budget_overrun(seconds: float, count: int, budget: float) -> str:
+    """Describe a plan whose shards cannot finish within the shard budget, or return an empty string."""
+    workers = shard_workers()
+    per_shard = seconds / count / workers
+    if per_shard <= budget:
+        return ""
+    capacity = BATCH_RUNNERS * workers * budget
+    parts = max(2, math.ceil(seconds / capacity))
+    return (
+        f"The change has an estimated {seconds:.0f} worker seconds of changed line mutation, {per_shard:.0f} seconds"
+        f" per shard on {workers} workers across {count} shards, against the {budget:.0f} second shard budget."
+        f" {BATCH_RUNNERS} shards hold at most {capacity:.0f} worker seconds, so split it into at least {parts} pull"
+        " requests."
+    )
+
+
 def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, float] | None = None) -> float:
     if seconds is None:
         seconds = file_seconds(root, tests)
@@ -643,6 +659,7 @@ def main() -> int:
     parser.add_argument("--target", type=float, default=120)
     parser.add_argument("--stats-target", type=float, default=60)
     parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--budget", type=float, default=1080)
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
@@ -678,7 +695,10 @@ def main() -> int:
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
     (root / ".mutation-direct.json").write_text(json.dumps(direct) + "\n")
-    count = shard_count(seconds, mutants, args.target, args.limit)
+    count = shard_count(seconds, mutants, args.target, args.limit, args.budget)
+    if overrun := budget_overrun(seconds, count, args.budget):
+        print(f"::error title=Mutation plan over budget::{overrun}")
+        return 1
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(
         f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, slowest stats bucket: {stats:.0f}"
