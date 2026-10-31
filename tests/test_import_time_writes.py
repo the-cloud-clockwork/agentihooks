@@ -60,7 +60,7 @@ def _imported(statements: list[ast.stmt]) -> set[str]:
             names.update(alias.asname or alias.name for alias in node.names)
         elif isinstance(node, ast.Assign) and _module_value(node.value, names):
             names.update(target.id for target in node.targets if isinstance(target, ast.Name))
-        elif isinstance(node, (ast.For, ast.AsyncFor)) and _module_value(node.iter, names):
+        elif isinstance(node, ast.For) and _module_value(node.iter, names):
             names.update(name.id for name in ast.walk(node.target) if isinstance(name, ast.Name))
     return names
 
@@ -96,9 +96,9 @@ def _targets(node: ast.stmt) -> Iterator[ast.expr]:
     pending: list[ast.expr]
     if isinstance(node, (ast.Assign, ast.Delete)):
         pending = list(node.targets)
-    elif isinstance(node, (ast.AugAssign, ast.AnnAssign, ast.For, ast.AsyncFor)):
+    elif isinstance(node, (ast.AugAssign, ast.AnnAssign, ast.For)):
         pending = [node.target]
-    elif isinstance(node, (ast.With, ast.AsyncWith)):
+    elif isinstance(node, ast.With):
         pending = [item.optional_vars for item in node.items if item.optional_vars]
     else:
         pending = []
@@ -150,7 +150,7 @@ def writes(source: str) -> list[int]:
 
 def _offenders() -> dict[str, list[int]]:
     """Every test tree file with an import time write, keyed by its path relative to the tests folder."""
-    found = {}
+    found: dict[str, list[int]] = {}
     for path in sorted(TESTS.rglob("*.py")):
         lines = writes(path.read_text(encoding="utf-8"))
         if lines:
@@ -190,6 +190,8 @@ def _offenders() -> dict[str, list[int]]:
         ("from hooks import a\nfrom scripts import b\nb.REGISTRY.update(a.TABLE)\n", [3]),
         ("from hooks import a\nfrom scripts import b\nvars(b).update(table=a.TABLE)\n", [3]),
         ("from scripts import b\nm2 = b.LIMIT\nm2.x = 3\n", [3]),
+        *[(f"from hooks import a\nfrom scripts import b\nb.REG.{name}(a.X)\n", [3]) for name in sorted(MUTATORS)],
+        ("import importlib\nx.y = importlib.import_module('scripts.b')\nx.y.LIMIT = 3\n", []),
         ("from scripts import b\nfor item in b.ITEMS:\n    item.count = 3\n", [3]),
         ("from hooks import a\nfrom scripts import b\nv = a.TABLE\nb.REG.update(v)\n", [4]),
         ("from hooks import a\nfrom scripts import b\nb.REG.update(a)\n", [3]),
