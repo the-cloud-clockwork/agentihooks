@@ -454,7 +454,7 @@
   "scripts/inbox/addresses.py": 78,
   "scripts/inbox/bus.py": 79,
   "scripts/inbox/channel.py": 166,
-  "scripts/inbox/cli.py": 243,
+  "scripts/inbox/cli.py": 233,
   "scripts/inbox/codex.py": 160,
   "scripts/inbox/dispatch.py": 228,
   "scripts/inbox/exits.py": 319,
