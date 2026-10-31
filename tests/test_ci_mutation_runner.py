@@ -119,10 +119,11 @@ def test_every_group_receives_the_branch_tests_to_run_first(tmp_path, monkeypatc
         return {path: [] for path in selected}, ""
 
     monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
-    run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 60, first=("tests/test_new.py::test_n",))
+    changes = _two_groups(tmp_path)
+    run_gate(tmp_path, changes, tmp_path / "output", 60, first=("tests/test_new.py::test_n",))
     assert seen == [("tests/test_new.py::test_n",), ("tests/test_new.py::test_n",)]
     seen.clear()
-    run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 60)
+    run_gate(tmp_path, changes, tmp_path / "output", 60)
     assert seen == [(), ()]
 
 

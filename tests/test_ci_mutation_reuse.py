@@ -664,7 +664,7 @@ def test_a_producer_the_protected_grader_changed_after_the_branch_point_blocks_r
     archive = _scoped(GREEN, {"base": base, "head": head})
     written, calls = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive}, grader=grader)
     assert written == "reused=false\n"
-    assert calls == []
+    assert calls == [f"{EXACT}{head}&branch=a%26b", "actions/runs/7/artifacts?per_page=100"]
 
 
 def test_a_grader_that_moved_only_outside_the_producers_still_reuses(pair, repo, monkeypatch):
