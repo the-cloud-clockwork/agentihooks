@@ -212,7 +212,7 @@ def test_a_baseline_merged_without_another_file_s_errors_does_not_freeze_the_nex
 ) -> None:
     base = _tree(tmp_path / "base", {"hooks/service.py": ILL_TYPED}, {})
     head = _tree(tmp_path / "head", {"hooks/service.py": ILL_TYPED, "hooks/other.py": WELL_TYPED}, {})
-    assert _grade(base, head, capsys) == (0, "1 type errors in 1 files, 0 allowed, 0 errors\n")
+    assert _grade(base, head, capsys) == (0, "0 type errors in 0 files, 0 allowed, 0 errors\n")
 
 
 def test_a_baseline_refresh_matching_the_measurement_is_green(
@@ -366,14 +366,14 @@ def test_graded_selects_changes_importers_and_edited_baseline_entries(tmp_path: 
     head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n", "hooks/new.py": ""})
     base_baseline = {"hooks/still.py": 2, "hooks/x.py": 1}
     recorded = {"hooks/still.py": 1, "hooks/x.py": 1, "hooks/zero.py": 0}
-    assert type_gate.graded(base, head, base_baseline, recorded) == {
+    assert type_gate.graded(base, head) == {
         "hooks/lib.py",
         "hooks/user.py",
         "hooks/legacy.py",
         "hooks/old.py",
         "hooks/new.py",
-        "hooks/still.py",
     }
+    assert type_gate.edited(base_baseline, recorded) == {"hooks/still.py"}
 
 
 def _fake_checker(
@@ -438,7 +438,7 @@ def test_a_base_without_a_baseline_measures_and_records_every_source(
 def test_drift_on_an_untouched_file_stays_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 2})
     head = _tree(tmp_path / "head", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 2})
-    assert _grade(base, head, capsys) == (0, "1 type errors in 1 files, 2 allowed, 0 errors\n")
+    assert _grade(base, head, capsys) == (0, "0 type errors in 0 files, 2 allowed, 0 errors\n")
 
 
 def test_grade_treats_a_zero_record_as_no_errors() -> None:

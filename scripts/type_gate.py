@@ -154,14 +154,16 @@ def importers(head: Path, files: list[str], modules: set[str]) -> set[str]:
     return found
 
 
-def graded(base: Path, head: Path, base_baseline: dict[str, int], recorded: dict[str, int]) -> set[str]:
-    """Return the sources the gate measures and grades: changed ones, their importers and edited baseline entries."""
+def graded(base: Path, head: Path) -> set[str]:
+    """Return the sources the gate grades for growth: changed ones and every source that imports them."""
     files = sources(head)
     touched = changed(base, head, set(files) | set(sources(base)))
-    edited = {
-        path for path in set(base_baseline) | set(recorded) if base_baseline.get(path, 0) != recorded.get(path, 0)
-    }
-    return touched | edited | importers(head, files, {module_name(path) for path in touched})
+    return touched | importers(head, files, {module_name(path) for path in touched})
+
+
+def edited(base_baseline: dict[str, int], recorded: dict[str, int]) -> set[str]:
+    """Return the baseline entries whose count the head's baseline changes against the base's."""
+    return {path for path in set(base_baseline) | set(recorded) if base_baseline.get(path, 0) != recorded.get(path, 0)}
 
 
 def write(head: Path) -> None:
@@ -174,8 +176,8 @@ def grade(
 ) -> list[str]:
     """Return every changed file whose errors grew against the base, and drift between the head and its baseline.
 
-    Growth and drift are graded on ``touched``, the files the head changes, their importers and the baseline entries
-    it edits, drift also on any entry it edits; with ``touched`` None, on every file. An untouched file keeps the
+    Growth and drift are graded on ``touched``, the files the head changes and their importers, drift also on any
+    baseline entry it edits; with ``touched`` None, on every file. An untouched file keeps the
     count the base recorded until a change to it, or a baseline refresh from the gate's own measurement, rewrites it, so one merge order cannot turn every later head red.
     """
     errors = [
@@ -222,13 +224,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         recorded = load(args.head)
         base = load(args.base)
-        touched = None if base is None else graded(args.base, args.head, base, recorded or {})
-        head = measure(args.head, None if touched is None else [path for path in sources(args.head) if path in touched])
+        touched = None if base is None else graded(args.base, args.head)
+        checked = None if touched is None else touched | edited(base, recorded or {})
+        head = measure(args.head, None if checked is None else [path for path in sources(args.head) if path in checked])
     except (GradeError, ValueError, KeyError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
     if args.measured:
-        kept = {path: count for path, count in (recorded or {}).items() if touched is not None and path not in touched}
+        kept = {path: count for path, count in (recorded or {}).items() if checked is not None and path not in checked}
         args.measured.parent.mkdir(parents=True, exist_ok=True)
         args.measured.write_text(json.dumps(dict(sorted({**kept, **head}.items())), indent=2) + "\n")
     if base is None:
