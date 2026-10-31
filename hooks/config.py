@@ -1,4 +1,22 @@
-"""Configuration for hooks module."""
+"""Configuration for hooks module.
+
+Settings rules that hold across the module:
+  - The scripts package config pin runs after the env files load, because they can set XDG_CONFIG_HOME.
+  - _MULTILINE_REPORTED is shared with the bashrc agentienv check, so the shell and every process it starts
+    name a multi line value once.
+  - An invalid SECRETS_MODE falls back to standard, never to off.
+  - The session id banner is the only identity the session scoped MCP tools have when the MCP server is
+    shared by every session.
+  - The kubectl mutation guard is disabled only by the operator setting its env var explicitly, never by a
+    signal or bypass mode.
+  - An explicit BRAIN_ENABLED wins over brain auto detection; AGENTIHOOKS_BASE_CHANNELS has no code default.
+    Channel layering, lowest first: profile env, repo settings, repo local settings, container env.
+  - With MASTER_CLAUDE_LOGIN set, the front door master of every swarm launches on the one claude ai master
+    login.
+  - The broadcast per injection byte caps stay below Claude Code's 10,000 character additionalContext limit
+    with envelope headroom.
+  - Manifestos load in deterministic filename order.
+"""
 
 import os
 import re
@@ -9,14 +27,8 @@ from hooks.context import brain_routes
 from scripts import gh_config
 from scripts.swarm import brain_binding
 
-# A name outside this shape cannot be a shell variable, and a mistyped line can
-# put a secret in the name, so such a line is reported by position only.
 _VALID_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-# Keys whose current os.environ value came from an .env file rather than the
-# surrounding process. Only these may be refreshed by reload_user_env() — a
-# value the shell or Helm set stays authoritative, which is the whole point of
-# the setdefault below.
 _FILE_OWNED_KEYS: set[str] = set()
 
 
@@ -45,15 +57,18 @@ def _parse_env_file(
     ``override_file_owned`` re-applies values for keys this loader set on a
     previous pass, so a long-lived process (the agentihooks MCP server) picks
     up an edited .env instead of reporting whatever was true at import.
+
+    Within one file the first definition wins, matching the scripts.mcp_daemon scanner, so a later wins
+    order applies between files only. Only keys recorded in _FILE_OWNED_KEYS, set from a file rather than
+    the process, are refreshed on a reload pass, so a value the shell or Helm set stays authoritative. A
+    name that is not a valid shell variable is reported by position only, because a mistyped line can put
+    a secret in the name.
     """
     multiline: set[str] = set()
     if not env_file.is_file():
         return multiline
     if pass_keys is None:
         pass_keys = set()
-    # Keys written by THIS file. Within one file the first definition wins —
-    # scripts/mcp_daemon.py's scanner resolves duplicates the same way and the
-    # two are asserted to agree, so "later wins" applies between files only.
     this_file: set[str] = set()
     _open_quote = ""
     for _n, _raw in enumerate(env_file.read_text(encoding="utf-8").splitlines(), 1):
@@ -64,7 +79,6 @@ def _parse_env_file(
         _line = _raw.strip()
         if not _line or _line.startswith("#"):
             continue
-        # Strip optional "export " prefix
         if _line.startswith("export "):
             _line = _line[7:].lstrip()
         if "=" not in _line:
@@ -72,7 +86,6 @@ def _parse_env_file(
         _key, _, _val = _line.partition("=")
         _key = _key.strip()
         _val = _val.strip()
-        # Handle quoted values: KEY="value" or KEY='value'
         if _val and _val[0] in ('"', "'"):
             _q = _val[0]
             _end = _val.find(_q, 1)
@@ -80,7 +93,6 @@ def _parse_env_file(
             if _end == -1:
                 _open_quote = _q
         elif "#" in _val:
-            # Strip inline comment: KEY=value # comment
             _val = _val[: _val.index("#")].rstrip()
         if blocked_keys and _key in blocked_keys:
             continue
@@ -97,7 +109,6 @@ def _parse_env_file(
         if _key in this_file:
             continue  # first definition within a file wins
         if _key in pass_keys:
-            # An earlier file in this pass set it; a later file overrides.
             os.environ[_key] = _val
             this_file.add(_key)
         elif _key not in os.environ:
@@ -112,15 +123,16 @@ def _parse_env_file(
     return multiline
 
 
-# Shared with the bashrc agentienv check, so the shell and every process it starts name a value once.
 _MULTILINE_REPORTED = "AGENTIHOOKS_MULTILINE_REPORTED"
 
 
 def _report_multiline_values(from_files: set[str]) -> None:
+    """Name the environment values that span several lines, once per process tree, and only when stderr is a
+    terminal, because hook processes write stderr into block messages.
+    """
     names = from_files | {k for k, v in os.environ.items() if "\n" in v and _VALID_NAME.fullmatch(k)}
     reported = os.environ.get(_MULTILINE_REPORTED, "").split()
     names -= set(reported)
-    # Hook processes write stderr into block messages, so only a person at a terminal is told.
     if names and sys.stderr.isatty():
         print(
             "[agentihooks] these values span several lines, and line based tools such as env "
@@ -130,10 +142,6 @@ def _report_multiline_values(from_files: set[str]) -> None:
         os.environ[_MULTILINE_REPORTED] = " ".join([*reported, *sorted(names)])
 
 
-# Connection and client settings adopted from the brain's own directory, where
-# `agentibrain install` writes them. Deliberately not the whole file: it also
-# holds POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD and provider keys, and sourcing
-# those would put database credentials into the environment of every agent session.
 _BRAIN_KEYS_FROM_KERNEL = (
     "BRAIN_URL",
     "BRAIN_HTTP_TOKEN",
@@ -153,8 +161,6 @@ _BRAIN_KEYS_FROM_KERNEL = (
     "BRAIN_WRITER_OUTBOX",
 )
 
-# Keys this loader owns, tracked apart from _FILE_OWNED_KEYS so a reload cannot
-# let the brain's file start beating an agentihooks .env that also defines them.
 _BRAIN_FILE_OWNED: set[str] = set()
 
 
@@ -189,6 +195,11 @@ def _load_brain_env(*, override_file_owned: bool = False) -> None:
 
     Lowest precedence by construction: a key the process or an agentihooks
     .env already set is left alone, so this is a default, not an override.
+
+    Only the connection and client settings in _BRAIN_KEYS_FROM_KERNEL are adopted, never the whole file,
+    which also holds database and provider credentials. Keys it set are tracked in _BRAIN_FILE_OWNED apart
+    from _FILE_OWNED_KEYS, so a reload never lets the brain file beat an agentihooks .env that defines the
+    same key.
     """
     env_file = _brain_env_file()
     if os.environ.get(brain_binding.VARIABLE) or not env_file.is_file():
@@ -228,14 +239,14 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
       2. ~/.agentihooks/*.env        (companion files, sorted alphabetically)
 
     Later files override earlier ones for duplicate keys.
+
+    Key tracking is shared across every file in the pass, so a later file overrides an earlier one and no
+    file overrides the process environment.
     """
     _home = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
 
-    # Shared across every file in this pass so a later file can override an
-    # earlier one without any file overriding the process env.
     _pass_keys: set[str] = set()
 
-    # 1. Main .env first
     blocked = set(_BRAIN_KEYS_FROM_KERNEL) | {"SWARM_SECRET"}
     multiline = _parse_env_file(
         _home / ".env",
@@ -244,7 +255,6 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
         blocked_keys=blocked,
     )
 
-    # 2. Additional *.env files (sorted, skip the main .env to avoid double-load)
     if _home.is_dir():
         for _extra in sorted(_home.glob("*.env")):
             if _extra.name == ".env":
@@ -314,7 +324,6 @@ _load_user_env()
 _load_brain_env()
 _route_brain()
 _ENV_FINGERPRINT = _env_files_fingerprint()
-# The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
 gh_config.pin(os.environ)
 gh_config.persist(os.environ)
 
@@ -386,23 +395,11 @@ def reload_brain_env(force: bool = False) -> dict:
     }
 
 
-# =============================================================================
-# RUNTIME DATA ROOT
-# =============================================================================
-
-# Root directory for all agentihooks runtime data (logs, memory, state).
-# Defaults to ~/.agentihooks. Override via env var for shared K8s mounts:
-#   export AGENTIHOOKS_HOME=/mnt/efs/shared
 AGENTIHOOKS_HOME = Path(os.getenv("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
 
-# =============================================================================
-# LOGGING CONFIGURATION
-# =============================================================================
 
 LOG_FILE = os.getenv("CLAUDE_HOOK_LOG_FILE", str(AGENTIHOOKS_HOME / "logs" / "hooks.log"))
 
-# Path to agent transcript log (centralized stream of conversation)
-# This is a copy of the Claude Code transcript, streamed in real-time
 AGENT_LOG_FILE = os.getenv("AGENT_LOG_FILE", str(AGENTIHOOKS_HOME / "logs" / "agent.log"))
 
 LOG_MAX_BYTES = int(os.getenv("AGENTIHOOKS_LOG_MAX_MB", "20")) * 1024 * 1024
@@ -415,43 +412,25 @@ def _env_bool(key: str, default: str = "false") -> bool:
     return val in ("true", "1", "yes")
 
 
-# Enable/disable hook logging
 LOG_ENABLED = _env_bool("CLAUDE_HOOK_LOG_ENABLED", "true")
 
-# Enable/disable logging of hook commands output
 LOG_HOOKS_COMMANDS = _env_bool("LOG_HOOKS_COMMANDS", "false")
 
-# Enable/disable automatic transcript logging (logs conversation to hooks.log)
 LOG_TRANSCRIPT = _env_bool("LOG_TRANSCRIPT", "true")
 
-# Enable/disable agent log streaming via hooks (copies transcript to AGENT_LOG_FILE)
-# Default: false - filesystem-based streaming (sync_transcripts_to_shared.sh) is preferred
-# as it provides real-time updates without depending on hook events
 STREAM_AGENT_LOG = _env_bool("STREAM_AGENT_LOG", "true")
 
-# Enable/disable ANSI colors in logs (disable for CloudWatch, enable for local dev)
 LOG_USE_COLORS = _env_bool("LOG_USE_COLORS", "true")
 
-# Enable/disable automatic memory save on session Stop
-# Captures session digest and stores it via MemoryStore
 MEMORY_AUTO_SAVE = _env_bool("MEMORY_AUTO_SAVE", "true")
 
-# The front door master of every swarm launches on the one claude ai master login
 MASTER_CLAUDE_LOGIN = _env_bool("AGENTIHOOKS_MASTER_CLAUDE_LOGIN", "false")
 
-# =============================================================================
-# SECRETS SCANNING MODE
-# =============================================================================
 
-# Controls how secrets scanning behaves: off | warn | standard | strict
-# Invalid values fail-safe to "standard" (never to "off").
 _VALID_SECRETS_MODES = frozenset({"off", "warn", "standard", "strict"})
 _raw = os.getenv("AGENTIHOOKS_SECRETS_MODE", "standard").lower().strip()
 SECRETS_MODE: str = _raw if _raw in _VALID_SECRETS_MODES else "standard"
 
-# =============================================================================
-# TOKEN CONTROL CONFIGURATION
-# =============================================================================
 TOKEN_CONTROL_ENABLED = _env_bool("TOKEN_CONTROL_ENABLED", "true")
 
 TOKEN_MONITOR_ENABLED = _env_bool("TOKEN_MONITOR_ENABLED", "true")
@@ -467,8 +446,6 @@ BASH_FILTER_GIT_MAX_COMMITS = int(os.getenv("BASH_FILTER_GIT_MAX_COMMITS", "20")
 
 FILE_READ_CACHE_ENABLED = _env_bool("FILE_READ_CACHE_ENABLED", "true")
 
-# Credential-read guard: blocks a read whose OUTPUT would be a secret value.
-# On by default and on every target; reading is the exposure.
 CREDENTIAL_GUARD_ENABLED = _env_bool("CREDENTIAL_GUARD_ENABLED", "true")
 FILE_READ_CACHE_BACKEND = os.getenv("FILE_READ_CACHE_BACKEND", "redis")
 FILE_READ_CACHE_TTL = int(os.getenv("FILE_READ_CACHE_TTL", "21600"))
@@ -476,51 +453,20 @@ FILE_READ_CACHE_TTL = int(os.getenv("FILE_READ_CACHE_TTL", "21600"))
 MCP_HYGIENE_ENABLED = _env_bool("MCP_HYGIENE_ENABLED", "true")
 CODEX_CONTEXT_PIN_ENABLED = _env_bool("CODEX_CONTEXT_PIN_ENABLED", "true")
 
-# Project bridge: a repo's own .claude/rules bodies and project memory, for a
-# target with no rules directory of its own. 0 = inject whole, matching what
-# Claude Code itself loads.
 PROJECT_BRIDGE_ENABLED = _env_bool("PROJECT_BRIDGE_ENABLED", "true")
 PROJECT_BRIDGE_MAX_BYTES = int(os.getenv("PROJECT_BRIDGE_MAX_BYTES", "0"))
 
-# Tell the agent its own session id at SessionStart. The session-scoped
-# agentihooks MCP tools (channel_acknowledge) take it as an argument, which is the
-# only identity mechanism that works when the MCP server runs as a network server
-# shared by every session.
 MCP_SESSION_ID_BANNER_ENABLED = _env_bool("MCP_SESSION_ID_BANNER_ENABLED", "true")
 
-# =============================================================================
-# RETRY CIRCUIT BREAKER
-# =============================================================================
 RETRY_BREAKER_ENABLED = _env_bool("RETRY_BREAKER_ENABLED", "true")
 RETRY_BREAKER_MAX = int(os.getenv("RETRY_BREAKER_MAX", "5"))
 RETRY_BREAKER_HARD_MAX = int(os.getenv("RETRY_BREAKER_HARD_MAX", "10"))
 RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 
-# =============================================================================
-# KUBECTL MUTATION GUARD — HARD FLOOR
-# =============================================================================
-# PreToolUse hook on Bash that blocks live-system state mutation (kubectl edit,
-# patch, set, scale, exec writes, cp INTO pod, helm install/upgrade outside
-# CI, ssh-edit, scp INTO host, docker exec writes, etc.). Doctrine: code is
-# the source of truth; behavior changes go through code → CI → deploy.
-# Default-on. Disabling requires the operator to set the env var explicitly
-# (never via signal, bypass mode, or any other clearance).
-# See: documents/anton/ANTON-CORE-CI-MANIFESTO.md §3.5
-#      agentihooks-bundle/profiles/*/.claude/rules/code-is-source.md
 KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "true")
 
-# Python in a linked worktree is edited through Serena (Development Manifesto §7).
-# AGENTIHOOKS_SERENA=false is the one off switch for every session or machine: the
-# guard lets every edit through and injects no Serena directive. Unset or any other
-# value keeps it on.
 SERENA_EDIT_GUARD_ENABLED = os.getenv("AGENTIHOOKS_SERENA", "true") != "false"
 
-# =============================================================================
-# BRAIN ADAPTER
-# =============================================================================
-# Pluggable brain content injection into broadcast channels.
-# Auto-detect brain: enabled when a kernel URL is configured, or when the
-# legacy brain-feed dir has .md files. Either way an explicit BRAIN_ENABLED wins.
 _brain_feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
 _brain_default = (
     "true"
@@ -544,32 +490,19 @@ def _parse_channel_list(raw: str) -> tuple[str, ...]:
     return tuple(seen)
 
 
-# Subscription floor — operator-configured per profile / per repo / per container.
-# No code-level default. Empty / unset → session gets only global broadcasts.
-# Layering (lowest → highest): profile env → repo settings.json → repo
-# settings.local.json → container ENV at launch.
 BASE_CHANNELS: tuple[str, ...] = _parse_channel_list(os.getenv("AGENTIHOOKS_BASE_CHANNELS", ""))
 
-# Amygdala — emergency signal propagation
 AMYGDALA_ENABLED = _env_bool("AMYGDALA_ENABLED", "false")
 AMYGDALA_SIGNAL_PATH = os.getenv("AMYGDALA_SIGNAL_PATH", "")
 
-# Brain Writer — write-back path from agent markers to brain-api. Markers POST
-# to {BRAIN_URL}/marker; the outbox is a local buffer that drains over HTTP
-# once brain-api is reachable again.
 BRAIN_WRITER_ENABLED = _env_bool("BRAIN_WRITER_ENABLED", "true" if _brain_http_configured() else "false")
 BRAIN_WRITER_OUTBOX = os.getenv("BRAIN_WRITER_OUTBOX", str(Path(AGENTIHOOKS_HOME) / "brain-outbox"))
 BRAIN_WRITER_MAX_MARKERS = int(os.getenv("BRAIN_WRITER_MAX_MARKERS", "5"))
 
-# Brain HTTP — brain-api client. When BRAIN_URL is set, the brain hooks call
-# the kernel over HTTP (e.g. http://127.0.0.1:8103 for a local agentibrain
-# compose stack). With BRAIN_URL unset, the writer buffers to the outbox and
-# the reader falls back to the local brain-feed files.
 BRAIN_URL = os.getenv("BRAIN_URL", "").rstrip("/")
 BRAIN_HTTP_TOKEN = os.getenv("BRAIN_HTTP_TOKEN", "") or os.getenv("KB_ROUTER_TOKEN", "")
 BRAIN_HTTP_TIMEOUT = float(os.getenv("BRAIN_HTTP_TIMEOUT", "3"))
 
-# Console quota display
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
 CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
@@ -577,9 +510,6 @@ QUOTA_USAGE_INJECTION_ENABLED = _env_bool("QUOTA_USAGE_INJECTION_ENABLED", "true
 QUOTA_USAGE_TOOL_CALLS: int = int(os.getenv("QUOTA_USAGE_TOOL_CALLS", "5"))
 QUOTA_USAGE_STALE_SEC: int = int(os.getenv("QUOTA_USAGE_STALE_SEC", "300"))
 
-# Quota policy — what a session does when its own quota runs out (hooks/context/quota_policy.py).
-# Handoff when 7d used >= WEEK_PCT or 5h used >= 5H_PCT; a target account needs MIN_LEFT% routing
-# left; a spent 5h window with >= WAIT_MIN_WEEK_LEFT% of the week left waits for the reset.
 QUOTA_POLICY_ENABLED = _env_bool("QUOTA_POLICY_ENABLED", "true")
 QUOTA_HANDOFF_WEEK_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WEEK_PCT", "98"))
 QUOTA_HANDOFF_5H_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_5H_PCT", "99"))
@@ -591,105 +521,48 @@ QUOTA_RESERVE_ACCOUNTS: frozenset[str] = frozenset(
     slug.strip() for slug in os.getenv("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()
 )
 
-# =============================================================================
-# CONTEXT AUDIT — per-tool token consumption tracking
-# =============================================================================
 CONTEXT_AUDIT_ENABLED = _env_bool("CONTEXT_AUDIT_ENABLED", "true")
 CONTEXT_AUDIT_THRESHOLD_PCT: int = int(os.getenv("CONTEXT_AUDIT_THRESHOLD_PCT", "70"))
 
-# =============================================================================
-# POST-TOOL-USE PHASE TRACE (debug aid for random-stop diagnosis)
-# Logs entry/exit/duration of each sub-handler in on_post_tool_use to hooks.log.
-# Off by default — enable with POST_TOOL_TRACE=1 when bisecting handler bugs.
-# =============================================================================
 POST_TOOL_TRACE = _env_bool("POST_TOOL_TRACE", "false")
 
-# =============================================================================
-# THINKING / EFFORT POLICY
-# =============================================================================
 EFFORT_POLICY_ENABLED = _env_bool("EFFORT_POLICY_ENABLED", "true")
 DEFAULT_EFFORT: str = os.getenv("DEFAULT_EFFORT", "medium")
 THINKING_BUDGET_TOKENS: int = int(os.getenv("THINKING_BUDGET_TOKENS", "0"))
 
-# =============================================================================
-# MCP SURFACE AREA WARNING
-# =============================================================================
 MCP_TOOL_WARN_THRESHOLD: int = int(os.getenv("MCP_TOOL_WARN_THRESHOLD", "40"))
 MCP_SCHEMA_AVG_TOKENS: int = int(os.getenv("MCP_SCHEMA_AVG_TOKENS", "150"))
 
-# =============================================================================
-# SMART COMPACT SUGGESTIONS
-# =============================================================================
 COMPACT_SUGGEST_ENABLED = _env_bool("COMPACT_SUGGEST_ENABLED", "true")
 COMPACT_LIMIT: int = int(os.getenv("AGENTIHOOKS_COMPACT_LIMIT", "600"))
 HANDOFF_MARGIN: int = int(os.getenv("AGENTIHOOKS_HANDOFF_MARGIN", "50"))
 
-# =============================================================================
-# CLAUDE.MD SANITY CHECK
-# =============================================================================
 CLAUDE_MD_SANITY_CHECK = _env_bool("AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK", "true")
 CLAUDE_MD_MAXLINES = int(os.getenv("AGENTIHOOKS_CLAUDE_MD_MAXLINES", "200"))
 
-# =============================================================================
-# CONTEXT PREPROCESSOR — token compression for injected content
-# =============================================================================
-# Periodic rules / CLAUDE.md re-injection was removed 2026-07-20: Claude Code
-# already loads CLAUDE.md and rules/*.md at position 0 for the whole session, so
-# re-emitting them verbatim every N turns was pure duplicate token spend. The
-# compression settings below survive because the preprocessor still serves other
-# injectors (broadcast banners, bash-output filtering). The CONTEXT_REFRESH_*
-# names are kept for config back-compat; they no longer gate any re-injection.
 
-# Context Preprocessor — compression level for injected content
 _VALID_COMPRESSION_MODES = frozenset({"off", "light", "standard", "aggressive"})
 _raw_compression = os.getenv("CONTEXT_REFRESH_COMPRESSION", "standard").lower().strip()
 CONTEXT_REFRESH_COMPRESSION: str = _raw_compression if _raw_compression in _VALID_COMPRESSION_MODES else "off"
 CONTEXT_REFRESH_ABBREV_FILE: str = os.getenv("CONTEXT_REFRESH_ABBREV_FILE", "")
 
-# Scope of token compression. "all" = compress every injection + tool output.
-# "refresh" (default) once scoped compression to the context-refresh payload;
-# that path was removed 2026-07-20, so "refresh" is now effectively "off" — set
-# "all" to get any compression. Default kept for config back-compat.
 _VALID_COMPRESSION_SCOPES = frozenset({"refresh", "all"})
 _raw_scope = os.getenv("CONTEXT_COMPRESSION_SCOPE", "refresh").lower().strip()
 CONTEXT_COMPRESSION_SCOPE: str = _raw_scope if _raw_scope in _VALID_COMPRESSION_SCOPES else "refresh"
 
-# =============================================================================
-# PROFILE BROADCAST — notify fleet on profile activation/deactivation
 PROFILE_BROADCAST_ENABLED = _env_bool("PROFILE_BROADCAST_ENABLED", "true")
 
-# BROADCAST SYSTEM — real-time fleet messaging
-# =============================================================================
 BROADCAST_ENABLED = _env_bool("BROADCAST_ENABLED", "true")
 BROADCAST_FILE: str = os.getenv("BROADCAST_FILE", str(Path.home() / ".agentihooks" / "broadcast.json"))
 BROADCAST_MAX_MESSAGES: int = int(os.getenv("BROADCAST_MAX_MESSAGES", "50"))
-# Default OFF — alert-tier broadcasts on every PreToolUse is a #34713
-# contamination vector ("Hook Error"-shaped injections erode model
-# confidence at scale). Operators on incident response can opt back in via
-# ~/.agentihooks/.env.
 BROADCAST_CRITICAL_ON_PRETOOL = _env_bool("BROADCAST_CRITICAL_ON_PRETOOL", "false")
-# PreToolUse threshold raised to "critical" so only true-emergency
-# broadcasts fire on every tool call. Routine alerts still land via
-# UserPromptSubmit.
 BROADCAST_PRETOOL_MIN_SEVERITY: str = os.getenv("BROADCAST_PRETOOL_MIN_SEVERITY", "critical")
 
-# Cadence controls — skip re-injecting identical or too-frequent broadcasts per session.
 BROADCAST_DEDUP_BY_HASH = _env_bool("BROADCAST_DEDUP_BY_HASH", "true")
-# Throttle window between same-message redeliveries. 300s was empirically too
-# strict — combined with hash-dedup it suppressed ~96% of brain markers per
-# brain-keeper Apr 13 audit. 120s lets a 2h tick land + ad-hoc markers
-# without re-injecting the same persistent banner every prompt.
 BROADCAST_MIN_INTERVAL_SEC: int = int(os.getenv("BROADCAST_MIN_INTERVAL_SEC", "120"))
-# Per-prompt cap. Raised 2→6→8 so brain feed entries + amygdala (1-2)
-# + profile transitions all land in the same prompt without contention.
 BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "8"))
-# Per-injection byte caps. Claude Code's additionalContext has a 10,000-char
-# hard limit; exceeding it makes the harness write to a temp file and the
-# model receives a filepath instead of the body. Cap below the limit with
-# envelope headroom.
 BROADCAST_MAX_BYTES_PRETOOL: int = int(os.getenv("BROADCAST_MAX_BYTES_PRETOOL", "0"))
 BROADCAST_MAX_BYTES_PROMPT: int = int(os.getenv("BROADCAST_MAX_BYTES_PROMPT", "0"))
-# Characters one Claude hook event may inject in total; 0 turns the budget off.
 HOOK_INJECTION_MAX_CHARS: int = int(os.getenv("HOOK_INJECTION_MAX_CHARS", "9000"))
 BROADCAST_PERSISTENT_THROTTLE = _env_bool("BROADCAST_PERSISTENT_THROTTLE", "true")
 BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
@@ -697,9 +570,6 @@ BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
     str(AGENTIHOOKS_HOME / "broadcast_delivery_state.json"),
 )
 
-# =============================================================================
-# ENFORCEMENT — operator-curated drumbeat reminders, cadence-driven re-injection
-# =============================================================================
 ENFORCEMENT_INJECTION_ENABLED = _env_bool("ENFORCEMENT_INJECTION_ENABLED", "true")
 ENFORCEMENT_FILE: str = os.getenv("ENFORCEMENT_FILE", str(AGENTIHOOKS_HOME / "enforcements.json"))
 ENFORCEMENT_COUNTER_FILE: str = os.getenv(
@@ -715,34 +585,20 @@ ENFORCEMENT_MATCH_COUNTER_FILE: str = os.getenv(
     str(AGENTIHOOKS_HOME / "enforcement_match_counters.json"),
 )
 
-# =============================================================================
-# CONDITIONS — bundle/profile scripts run on matching PreToolUse/PostToolUse calls
-# =============================================================================
 CONDITIONS_ENABLED = _env_bool("CONDITIONS_ENABLED", "true")
 CONDITIONS_TIMEOUT_SEC: float = float(os.getenv("CONDITIONS_TIMEOUT_SEC", "10"))
 CONDITIONS_MAX_PARALLEL: int = max(1, int(os.getenv("CONDITIONS_MAX_PARALLEL", "8")))
 CONDITIONS_TRUSTED_OWNERS: str = os.getenv("CONDITIONS_TRUSTED_OWNERS", "")
 
-# Brain payload shrinking — cap hot-arcs rows and per-entry body bytes.
 BRAIN_HOT_ARCS_TOP_N: int = int(os.getenv("BRAIN_HOT_ARCS_TOP_N", "10"))
 BRAIN_PAYLOAD_MAX_BYTES: int = int(os.getenv("BRAIN_PAYLOAD_MAX_BYTES", "1536"))
 
-# =============================================================================
-# VOICE OUTPUT — spoken summaries via Anton Voice Service
-# =============================================================================
 VOICE_ENABLED: bool = _env_bool("VOICE_ENABLED", "false")
 VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "")
 VOICE_API_KEY: str = os.getenv("VOICE_API_KEY", "")
 
-# =============================================================================
-# CONTROLS BYPASS — operator-toggled session-level CI-gate bypass
-# Phrase: "disable controls" / "enable controls". Default-on (feature wired).
-# =============================================================================
 CONTROLS_BYPASS_ENABLED: bool = _env_bool("CONTROLS_BYPASS_ENABLED", "true")
 
-# =============================================================================
-# CI MANIFESTO — doctrine-as-context injection
-# =============================================================================
 CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
 
 
@@ -750,8 +606,6 @@ def manifesto_name(name: str) -> str:
     return Path(name.strip()).stem.casefold()
 
 
-# Manifesto resolution loads every Markdown manifesto in deterministic filename
-# order. CI_MANIFESTO_PATH remains a single-file compatibility override.
 def _manifesto_skip_names() -> set[str]:
     raw = os.getenv("AGENTIHOOKS_SKIP_MANIFESTO", "")
     return {manifesto_name(name) for name in raw.split(",") if name.strip()}
@@ -844,33 +698,16 @@ def _resolve_manifesto_path() -> str:
 
 CI_MANIFESTO_PATHS: list[str] = _resolve_manifesto_paths()
 CI_MANIFESTO_PATH: str = CI_MANIFESTO_PATHS[0] if CI_MANIFESTO_PATHS else ""
-# Optional cap on the bytes the manifesto inject contributes to SessionStart /
-# UserPromptSubmit. 0 (default) = no cap; full doctrine ships through. Set
-# >0 to opt in to truncation when stacking multiple injections under
-# Claude Code's documented 10,000-char hook output limit.
 CI_MANIFESTO_MAX_BYTES: int = int(os.getenv("CI_MANIFESTO_MAX_BYTES", "0"))
-# When True, ci_manifesto.inject_on_session_start fires on every session
-# start (legacy behavior — emits 36 KB+ on stdout, hits Claude Code's 2 KB
-# persisted-output preview cap, manifesto silently truncated to filepath).
-# Default False — manifesto is now appended to ~/.claude/CLAUDE.md by
-# `agentihooks init` and loaded through the memory channel (no hook cap,
-# no per-session cost). Flip to True to restore the old runtime injection.
 CI_MANIFESTO_RUNTIME_INJECT: bool = _env_bool("CI_MANIFESTO_RUNTIME_INJECT", "false")
 CI_MANIFESTO_REFRESH_EVERY: int = int(os.getenv("CI_MANIFESTO_REFRESH_EVERY", "8"))
 
-# Auto dev-switch — at SessionStart, if cwd is on main/master, switch to dev.
 AGENTIHOOKS_FORCE_DEV_BRANCH = _env_bool("AGENTIHOOKS_FORCE_DEV_BRANCH", "false")
 
-# =============================================================================
-# OTEL — Custom hook telemetry (Layer 2)
-# Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.
-# These control agentihooks-specific OTEL emission.
-# =============================================================================
 OTEL_HOOKS_ENABLED = _env_bool("OTEL_HOOKS_ENABLED", "true")
 OTEL_HOOKS_SERVICE_NAME = os.getenv("OTEL_HOOKS_SERVICE_NAME", "agentihooks")
 
 
-# Langfuse OTEL destination (traces only, OTLP HTTP)
 def langfuse_enabled(environ) -> bool:
     """Claude Code strips every OTEL_* variable from hook processes, so the unprefixed name is the one hooks see."""
     names = ("AGENTIHOOKS_LANGFUSE_ENABLED", "OTEL_LANGFUSE_ENABLED")

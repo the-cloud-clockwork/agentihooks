@@ -34,7 +34,6 @@ def load_quota() -> Optional[dict]:
         return {"stale": True}
     if (datetime.now(timezone.utc) - updated).total_seconds() > stale_sec:
         return {"stale": True}
-    # Include active account name
     from hooks.config import AGENTIHOOKS_HOME
 
     state_file = AGENTIHOOKS_HOME / "state.json"
@@ -69,7 +68,6 @@ def fmt_quota(data: dict) -> str:
     if acct and acct != "default":
         parts.append(f"[{acct}]")
 
-    # Session
     session = data.get("session") or {}
     if (s := session.get("used_pct")) is not None:
         tok = f"session:{s:.0f}%"
@@ -78,7 +76,6 @@ def fmt_quota(data: dict) -> str:
             tok += f" [{_dur(ri)}]"
         parts.append(tok)
 
-    # Weekly — all models + sonnet
     weekly = data.get("weekly") or {}
     wk_parts = []
     am = weekly.get("all_models")
@@ -96,7 +93,6 @@ def fmt_quota(data: dict) -> str:
     if wk_parts:
         parts.append(" | ".join(wk_parts))
 
-    # Extra usage / monthly spend
     spend = data.get("monthly_spend")
     if spend and spend.get("amount") is not None:
         sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(spend.get("currency", ""), "")
@@ -109,7 +105,6 @@ def fmt_quota(data: dict) -> str:
             tok += f" resets {spend['resets']}"
         parts.append(tok)
 
-    # Balance
     balance = data.get("balance")
     if balance is not None:
         sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(data.get("monthly_spend", {}).get("currency", ""), "")

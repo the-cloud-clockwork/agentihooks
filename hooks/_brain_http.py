@@ -90,6 +90,8 @@ def _request(
     ``{"__http_status__": <code>}`` instead of None, so a caller that must
     distinguish "server down" from "server rejected THIS payload" (the outbox
     drain's quarantine decision) can tell them apart.
+
+    Every failure returns None and is logged, because a hook must never raise.
     """
     base = _base_url()
     if not base:

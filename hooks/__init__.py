@@ -22,16 +22,13 @@ from hooks.config import LOG_ENABLED, LOG_FILE, LOG_HOOKS_COMMANDS, LOG_TRANSCRI
 from hooks.observability.transcript import log_new_entries
 
 __all__ = [
-    # Core
     "main",
-    # Logging
     "log",
     "log_command",
     "log_transcript",
     "log_new_entries",
     "output_json",
     "run_script",
-    # Config
     "LOG_FILE",
     "LOG_ENABLED",
     "LOG_HOOKS_COMMANDS",
