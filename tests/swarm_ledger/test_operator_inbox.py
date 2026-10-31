@@ -64,6 +64,7 @@ def test_an_agent_write_through_the_server_sends_nothing(inbox):
     assert ledger_server.relay_to_inbox(SLUG, state) == []
 
 
+@pytest.mark.wall_clock
 def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(
     inbox: InboxStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

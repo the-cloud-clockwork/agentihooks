@@ -123,6 +123,7 @@ def test_a_failed_publish_keeps_the_redis_send_and_says_so(monkeypatch, capsys):
     assert capsys.readouterr().err == ""
 
 
+@pytest.mark.wall_clock
 def test_a_hanging_connect_holds_no_publish_and_is_attempted_once() -> None:
     import threading
     import time
