@@ -503,7 +503,7 @@ def test_any_other_client_error_is_logged_in_one_line(caplog):
     caplog.set_level("DEBUG")
     asyncio.run(nats._unreported(nats.nats_client.errors.AuthorizationError()))
     assert [(record.name, record.levelname, record.getMessage(), record.exc_info) for record in caplog.records] == [
-        ("scripts.events.nats", "ERROR", "nats: nats: authorization failed", None)
+        ("scripts.events.nats", "ERROR", "nats: authorization failed", None)
     ]
 
 

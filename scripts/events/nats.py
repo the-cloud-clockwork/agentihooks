@@ -64,7 +64,7 @@ def auth_options(credentials: str | None) -> dict:
 async def _unreported(error: Exception) -> None:
     """Drop a connection error, which the open or the next call raises; log any other error in one line."""
     if not isinstance(error, (OSError, asyncio.TimeoutError, nats_client.errors.NoServersError)):
-        _log.error("nats: %s", error)
+        _log.error("%s", error)
 
 
 def connect_options(config: BusConfig) -> dict:

@@ -415,7 +415,7 @@ def test_a_reload_with_nats_unreachable_finishes_inside_the_stop_deadline(tmp_pa
     assert stopped_in < process_interval.STOP_SECONDS
 
 
-def test_each_failed_open_with_nats_unreachable_logs_one_line_and_keeps_the_row(tmp_path, monkeypatch, capsys):
+def test_failed_opens_with_nats_unreachable_log_only_the_relay_line_and_keep_the_row(tmp_path, monkeypatch, capsys):
     repository, _ = _reload_with_nats_unreachable(tmp_path, monkeypatch)
     lines = capsys.readouterr().err.splitlines()
     assert len(lines) >= 1
