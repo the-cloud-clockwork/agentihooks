@@ -54,7 +54,9 @@ def test_a_tick_pass_uses_real_backends_with_scripted_agents(
     before = int(time.time() * 1000)
     actions = cli.run_tick(store, slug, ledger=ledger, runtime=runtime)
     assert isinstance(actions, list)
-    assert int(store.redis.get(store.key(slug, "last-tick"))) >= before
+    completed = store.redis.get(store.key(slug, "last-tick"))
+    assert completed is not None, actions
+    assert int(completed) >= before
     assert ledger.state(slug)["tasks"]
     assert all(agent.process.poll() is None for agent in launched)
     assert all(idle.heartbeat(store.redis, slug, agent.record.name) for agent in launched)
