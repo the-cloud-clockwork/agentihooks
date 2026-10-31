@@ -463,9 +463,44 @@ def test_the_plan_names_direct_tests_when_the_record_drifted_past_its_narrowing(
     _commit(tmp_path, "edited branch")
     del manifest["lines"]["tests/test_core.py::test_other"]["scripts/core.py"]
     monkeypatch.setattr(plan, "record_drift", lambda *args: None)
+    changes = {"scripts/core.py": {4}}
     direct = {}
-    plan.estimate(tmp_path, {"scripts/core.py": {4}}, {}, manifest, direct=direct)
-    assert direct == {"scripts/core.py": ["tests/test_core.py::test_g", "tests/test_helper.py::test_helper"]}
+    plan.estimate(tmp_path, changes, {}, manifest, direct=direct)
+    assert direct == {}
+    assert plan.recorded_direct(tmp_path, manifest, changes) == {
+        "scripts/core.py": ["tests/test_core.py::test_g", "tests/test_helper.py::test_helper"]
+    }
+    assert plan.recorded_direct(tmp_path, None, changes) == {}
+    assert plan.recorded_direct(tmp_path, {**manifest, "commit": None}, changes) == {}
+    assert (
+        plan.recorded_direct(tmp_path, {key: value for key, value in manifest.items() if key != "lines"}, changes) == {}
+    )
+
+
+def test_the_plan_publishes_direct_tests_the_estimate_left_unnamed(tmp_path, monkeypatch):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/sample.py").write_text("def sample(value):\n    return value + 1\n")
+    (tmp_path / "tests/test_sample.py").write_text("def test_sample():\n    pass\n")
+    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setattr("sys.argv", ["plan"])
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    monkeypatch.setattr(plan, "select_tests", lambda *args: ["tests/test_sample.py"])
+    calls = []
+
+    def recorded(root, manifest, changes):
+        calls.append((root, manifest, changes))
+        return {"scripts/sample.py": ["tests/test_sample.py::test_sample"]}
+
+    monkeypatch.setattr(plan, "recorded_direct", recorded)
+    assert plan.main() == 0
+    assert json.loads((tmp_path / ".mutation-direct.json").read_text()) == {
+        "scripts/sample.py": ["tests/test_sample.py::test_sample"]
+    }
+    assert calls == [(tmp_path, None, {"scripts/sample.py": {2}})]
 
 
 def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path, monkeypatch):
