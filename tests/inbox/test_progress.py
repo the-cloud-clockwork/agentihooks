@@ -35,6 +35,52 @@ class StalledFeed:
         self.released.set()
 
 
+class BlockedWrite:
+    def __init__(self, blocked: Any) -> None:
+        self.blocked = blocked
+        self.messages: list[Any] = []
+
+    async def send(self, message: Any) -> None:
+        import anyio
+
+        if self.messages:
+            self.blocked.set()
+            await anyio.sleep_forever()
+        self.messages.append(message)
+
+
+def test_a_successful_delivery_is_recorded_before_the_next_write_blocks(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import anyio
+
+    _, inbox = channel_backend
+    first = inbox.send("alice", "bob", "first delivery")
+    second = inbox.send("alice", "bob", "blocked delivery")
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+
+    async def scenario() -> None:
+        ready, blocked = anyio.Event(), anyio.Event()
+        ready.set()
+        write = BlockedWrite(blocked)
+        async with anyio.create_task_group() as group:
+            group.start_soon(channel._push, inbox, "bob", write, ready)
+            try:
+                with anyio.fail_after(3):
+                    await blocked.wait()
+                assert write.messages[0].message.root.params["meta"]["item_id"] == first.id
+                status = json.loads(inbox.redis.get(inbox.key("channel-progress", "bob")))
+                assert status["delivery_at"] >= status["ready_at"] > 0
+                assert status["poll_at"] == 0
+                assert inbox.redis.get(inbox.key("channel-live", "bob")) is None
+            finally:
+                group.cancel_scope.cancel()
+        assert inbox.get(first.id).state == "delivered"
+        assert inbox.get(second.id).state == "pending"
+
+    anyio.run(scenario)
+
+
 def test_delivery_progress_suppresses_wake_until_the_stalled_loops_lease_expires(
     channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
