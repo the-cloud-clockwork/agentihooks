@@ -147,10 +147,11 @@ def test_a_wrong_basedpyright_version_is_red(
 def test_a_failed_checker_run_is_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    head = _tree(tmp_path, {}, {})
+    base = _tree(tmp_path / "base", {}, {})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {})
     monkeypatch.setattr(type_gate, "_basedpyright_version", lambda: type_gate.BASEDPYRIGHT_VERSION)
     monkeypatch.setattr(type_gate, "_BASEDPYRIGHT", (*type_gate._BASEDPYRIGHT, "--no-such-flag"))
-    code, out = _grade(head, head, capsys)
+    code, out = _grade(base, head, capsys)
     assert code == 1
     assert out.startswith("::error::basedpyright exited ")
 
@@ -277,6 +278,155 @@ def test_changed_names_files_whose_contents_differ(tmp_path: Path) -> None:
     assert type_gate.changed(base, head, paths) == {"hooks/edited.py", "hooks/new.py"}
 
 
+def test_a_changed_signature_reds_an_untouched_importer(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    lib = "def size(value: int) -> int:\n    return value\n"
+    user = "from hooks.lib import size\n\n\ndef total() -> int:\n    return size(1)\n"
+    files = {"hooks/user.py": user, "hooks/other.py": ILL_TYPED}
+    base = _tree(tmp_path / "base", {**files, "hooks/lib.py": lib}, {})
+    head = _tree(
+        tmp_path / "head",
+        {**files, "hooks/lib.py": lib.replace("value: int", "value: str").replace("value\n", "len(value)\n")},
+        {},
+    )
+    assert _grade(base, head, capsys) == (
+        1,
+        "1 type errors in 1 files, 0 allowed, 2 errors\n"
+        "::error::hooks/user.py has 1 type errors, more than the 0 the base allows\n"
+        f"::error::{type_gate.BASELINE} records 0 type errors in hooks/user.py, the head has 1; "
+        "run python -m scripts.type_gate --write\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "path,module",
+    [("hooks/a/b.py", "hooks.a.b"), ("hooks/a/__init__.py", "hooks.a"), ("scripts/c.pyi", "scripts.c")],
+)
+def test_module_name_maps_a_source_to_its_module(path: str, module: str) -> None:
+    assert type_gate.module_name(path) == module
+
+
+def test_imported_resolves_absolute_relative_and_nested_imports() -> None:
+    source = (
+        b"import os.path\nfrom . import sibling\nfrom .. import top\nfrom .inner import name\n"
+        b"from hooks.lib import size\n\n\ndef late() -> None:\n    import json\n"
+    )
+    assert type_gate.imported("hooks/pkg/mod.py", source) == {
+        "os",
+        "os.path",
+        "hooks",
+        "hooks.pkg",
+        "hooks.pkg.sibling",
+        "hooks.top",
+        "hooks.pkg.inner",
+        "hooks.pkg.inner.name",
+        "hooks.lib",
+        "hooks.lib.size",
+        "json",
+    }
+    assert type_gate.imported("hooks/pkg/__init__.py", b"from . import sibling\nfrom .sub import x\n") == {
+        "hooks",
+        "hooks.pkg",
+        "hooks.pkg.sibling",
+        "hooks.pkg.sub",
+        "hooks.pkg.sub.x",
+    }
+
+
+def test_importers_follow_imports_through_cycles_and_skip_unparsable_sources(tmp_path: Path) -> None:
+    head = _tree(
+        tmp_path,
+        {
+            "hooks/lib.py": "",
+            "hooks/user.py": "from .lib import size\n",
+            "hooks/far.py": "from hooks import user\n",
+            "hooks/loop_a.py": "from hooks import loop_b, lib\n",
+            "hooks/loop_b.py": "from hooks import loop_a\n",
+            "hooks/other.py": "import os\n",
+            "hooks/broken.py": "def (\n",
+        },
+    )
+    assert type_gate.importers(head, type_gate.sources(head), {"hooks.lib"}) == {
+        "hooks/user.py",
+        "hooks/far.py",
+        "hooks/loop_a.py",
+        "hooks/loop_b.py",
+    }
+
+
+def test_graded_selects_changes_importers_and_edited_baseline_entries(tmp_path: Path) -> None:
+    same = {"hooks/user.py": "from hooks import lib\n", "hooks/still.py": "", "hooks/zero.py": ""}
+    base = _tree(tmp_path / "base", {**same, "hooks/lib.py": "x = 1\n", "hooks/old.py": ""})
+    head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n", "hooks/new.py": ""})
+    base_baseline = {"hooks/still.py": 2, "hooks/x.py": 1}
+    recorded = {"hooks/still.py": 1, "hooks/x.py": 1, "hooks/zero.py": 0}
+    assert type_gate.graded(base, head, base_baseline, recorded) == {
+        "hooks/lib.py",
+        "hooks/user.py",
+        "hooks/old.py",
+        "hooks/new.py",
+        "hooks/still.py",
+    }
+
+
+def _fake_checker(
+    monkeypatch: pytest.MonkeyPatch, diagnostics: list[dict[str, str]], files: int = 1
+) -> list[list[str]]:
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--version" in command:
+            return subprocess.CompletedProcess(command, 0, f"basedpyright {type_gate.BASEDPYRIGHT_VERSION}\n", "")
+        commands.append(command)
+        report = {"generalDiagnostics": diagnostics, "summary": {"filesAnalyzed": files}}
+        return subprocess.CompletedProcess(command, 0, json.dumps(report), "")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    return commands
+
+
+def test_a_head_without_source_changes_runs_no_checker(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 1})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": ILL_TYPED, "docs/notes.md": "new\n"}, {"hooks/planted.py": 1})
+    commands = _fake_checker(monkeypatch, [], 0)
+    measured = tmp_path / "out" / "TYPE_BASELINE.json"
+    assert type_gate.main(["--base", str(base), "--head", str(head), "--measured", str(measured)]) == 0
+    assert capsys.readouterr().out == "0 type errors in 0 files, 1 allowed, 0 errors\n"
+    assert commands == []
+    assert measured.read_text() == '{\n  "hooks/planted.py": 1\n}\n'
+
+
+def test_the_measurement_checks_only_graded_sources_and_keeps_other_recorded_counts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline = {"hooks/a.py": 1, "hooks/z.py": 2}
+    base = _tree(tmp_path / "base", {"hooks/z.py": ILL_TYPED}, baseline)
+    head = _tree(tmp_path / "head", {"hooks/z.py": ILL_TYPED, "hooks/a.py": ILL_TYPED}, baseline)
+    commands = _fake_checker(monkeypatch, [{"file": str(head / "hooks/a.py"), "severity": "error"}])
+    measured = tmp_path / "out" / "TYPE_BASELINE.json"
+    assert type_gate.main(["--base", str(base), "--head", str(head), "--measured", str(measured)]) == 0
+    assert capsys.readouterr().out == "1 type errors in 1 files, 3 allowed, 0 errors\n"
+    assert [command[-1] for command in commands] == ["hooks/a.py"]
+    assert measured.read_text() == '{\n  "hooks/a.py": 1,\n  "hooks/z.py": 2\n}\n'
+
+
+def test_a_base_without_a_baseline_measures_and_records_every_source(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _tree(tmp_path / "base", {"hooks/a.py": ""})
+    head = _tree(tmp_path / "head", {"hooks/a.py": ""}, {"hooks/a.py": 1, "hooks/gone.py": 3})
+    commands = _fake_checker(monkeypatch, [{"file": str(head / "hooks/a.py"), "severity": "error"}])
+    measured = tmp_path / "out" / "TYPE_BASELINE.json"
+    assert type_gate.main(["--base", str(base), "--head", str(head), "--measured", str(measured)]) == 1
+    assert [command[-2:] for command in commands] == [["hooks/__init__.py", "hooks/a.py"]]
+    assert measured.read_text() == '{\n  "hooks/a.py": 1\n}\n'
+    assert capsys.readouterr().out.endswith(
+        f"::error::{type_gate.BASELINE} records 3 type errors in hooks/gone.py, the head has 0; "
+        "run python -m scripts.type_gate --write\n"
+    )
+
+
 def test_drift_on_an_untouched_file_stays_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 2})
     head = _tree(tmp_path / "head", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 2})
@@ -309,7 +459,8 @@ def test_write_records_an_indented_baseline(tmp_path: Path) -> None:
 def test_a_checker_failure_names_its_output(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    head = _tree(tmp_path, {}, {})
+    base = _tree(tmp_path / "base", {}, {})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {})
     calls: list[dict[str, object]] = []
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -319,7 +470,7 @@ def test_a_checker_failure_names_its_output(
         return subprocess.CompletedProcess(command, 2, "", "boom\n")
 
     monkeypatch.setattr(type_gate.subprocess, "run", run)
-    assert _grade(head, head, capsys) == (1, "::error::basedpyright exited 2: boom\n")
+    assert _grade(base, head, capsys) == (1, "::error::basedpyright exited 2: boom\n")
     assert calls[-1] == {
         "cwd": head,
         "env": {**os.environ, "NODE_OPTIONS": "--max-old-space-size=6656"},
@@ -384,7 +535,8 @@ def test_a_checker_run_without_a_usable_report_is_red(
     stdout: str,
     message: str,
 ) -> None:
-    head = _tree(tmp_path, {}, {})
+    base = _tree(tmp_path / "base", {}, {})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {})
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if "--version" in command:
@@ -392,7 +544,7 @@ def test_a_checker_run_without_a_usable_report_is_red(
         return subprocess.CompletedProcess(command, returncode, stdout, "crash\n")
 
     monkeypatch.setattr(type_gate.subprocess, "run", run)
-    assert _grade(head, head, capsys) == (1, f"::error::{message}\n")
+    assert _grade(base, head, capsys) == (1, f"::error::{message}\n")
 
 
 def test_the_parser_reads_paths_and_defaults_the_head_to_the_working_directory(
