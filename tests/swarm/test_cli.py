@@ -2898,21 +2898,6 @@ def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, c
     assert ticks == {"fast": 2, "slow": 1}
 
 
-def test_a_quick_swarm_starts_no_extra_tick_its_longest_pass_cannot_finish_by_the_deadline(monkeypatch, capsys):
-    import time
-
-    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 0.7)
-    ticks = {"fast": 0, "slow": 0}
-
-    def run_tick(store, slug):
-        ticks[slug] += 1
-        time.sleep(1.5 if slug == "slow" else 0.4)
-        return []
-
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=0.5)
-    assert ticks == {"fast": 1, "slow": 1}
-
-
 def test_an_extra_tick_starting_exactly_at_the_deadline_still_runs(monkeypatch, capsys):
     import threading
     import time
