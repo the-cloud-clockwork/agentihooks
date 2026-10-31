@@ -38,6 +38,8 @@
         "swarm:index",
         "swarm:state:fencing:current",
         "swarm:state:fencing:history:sv2-ux-05",
+        "swarm:state:fencing:projected",
+        "swarm:state:fencing:published",
         "swarm:state:fencing:revision",
         "swarm:state:names:current",
         "swarm:state:names:history:code-of.3b9ae8a2b9d7951faafffa48b30149484fe048d2574397e81f4141140ebb6d6f",
