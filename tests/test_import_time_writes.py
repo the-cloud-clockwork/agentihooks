@@ -27,6 +27,7 @@ def _run_on_import(body: list[ast.stmt]) -> Iterator[ast.stmt]:
     """Yield every statement that runs when the module imports, class bodies and nested blocks included."""
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node
             continue
         if isinstance(node, ast.If) and _main_guard(node):
             yield from _run_on_import(node.orelse)
@@ -46,7 +47,7 @@ def _module_value(value: ast.expr, names: set[str]) -> bool:
         return value.id in names
     if isinstance(value, ast.Call) and ast.unparse(value.func).split(".")[-1] in {"import_module", "__import__"}:
         return True
-    return _root(value) in names or isinstance(value, ast.Subscript) and ast.unparse(value.value) == "sys.modules"
+    return _root(value) in names or (isinstance(value, ast.Subscript) and ast.unparse(value.value) == "sys.modules")
 
 
 def _imported(statements: list[ast.stmt]) -> set[str]:
@@ -113,15 +114,16 @@ def _targets(node: ast.stmt) -> Iterator[ast.expr]:
 
 
 def _calls(node: ast.stmt) -> Iterator[ast.Call]:
-    """Every call in the statement's own expressions, leaving nested statements and lambda bodies out."""
-    pending = [child for child in ast.iter_child_nodes(node) if isinstance(child, ast.expr)]
+    """Every call the statement makes itself, decorators and defaults included, leaving nested statements and
+    lambdas out."""
+    pending = [child for child in ast.iter_child_nodes(node) if not isinstance(child, ast.stmt)]
     while pending:
         child = pending.pop()
         if isinstance(child, ast.Lambda):
             continue
         if isinstance(child, ast.Call):
             yield child
-        pending.extend(grand for grand in ast.iter_child_nodes(child) if isinstance(grand, ast.expr))
+        pending.extend(grand for grand in ast.iter_child_nodes(child) if not isinstance(grand, ast.stmt))
 
 
 def _changed(call: ast.Call, imported: set[str]) -> ast.expr | None:
@@ -190,6 +192,13 @@ def _offenders() -> dict[str, list[int]]:
         ("from hooks import a\nfrom scripts import b\nb.REGISTRY.update(a.TABLE)\n", [3]),
         ("from hooks import a\nfrom scripts import b\nvars(b).update(table=a.TABLE)\n", [3]),
         ("from scripts import b\nm2 = b.LIMIT\nm2.x = 3\n", [3]),
+        ("from scripts import b\n@setattr(b, 'X', 1)\ndef f():\n    pass\n", [2]),
+        ("from hooks import a\nfrom scripts import b\ndef f(_=b.REG.update(a.TABLE)):\n    pass\n", [3]),
+        ("from scripts import b\ndef f(*, _=setattr(b, 'X', 1)):\n    pass\n", [2]),
+        ("from scripts import b\nclass T(metaclass=type(setattr(b, 'X', 1))):\n    pass\n", [2]),
+        ("from scripts import b\nprint(end=setattr(b, 'X', 1))\n", [2]),
+        ("from scripts import b\nwith setattr(b, 'X', 1):\n    pass\n", [2]),
+        ("from scripts import b\nITEMS = [n for n in setattr(b, 'X', 1)]\n", [2]),
         *[(f"from hooks import a\nfrom scripts import b\nb.REG.{name}(a.X)\n", [3]) for name in sorted(MUTATORS)],
         ("import importlib\nx.y = importlib.import_module('scripts.b')\nx.y.LIMIT = 3\n", []),
         ("from scripts import b\nfor item in b.ITEMS:\n    item.count = 3\n", [3]),
@@ -217,7 +226,8 @@ def test_writes_finds_import_time_stores_into_imported_names(source: str, lines:
         "import os\nos.environ.pop('X', None)\n",
         "from scripts import b\nb.helper(1)\nb.TABLE.update({'k': 1})\nb.TABLE.get(b.KEY)\n",
         "from scripts import b\nm = make()\nm.LIMIT = 3\nm2 = b.make()\nm2.x = 3\n",
-        "import sys\nfrom pathlib import Path\nok = sys.path.insert(0, str(Path(__file__).parent))\nf = lambda: setattr(sys, 'x', 1)\n",
+        "import sys\nfrom pathlib import Path\nok = sys.path.insert(0, str(Path(__file__).parent))\n",
+        "import sys\nf = lambda: setattr(sys, 'x', 1)\n",
         "from scripts import b\nwith open('x') as handle:\n    pass\nfor item in b.ITEMS:\n    pass\n",
         "from scripts import b\nvars()['LIMIT'] = 3\nfunc(b).x = 3\n",
         "from scripts import b\nbox = b.Box()\nbox.LIMIT = 3\nCASES = {}\nCASES['k'] = b.LIMIT\n",
