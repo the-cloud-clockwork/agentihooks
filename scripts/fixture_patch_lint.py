@@ -2,8 +2,10 @@
 
 import argparse
 import ast
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -12,8 +14,8 @@ FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 class Function:
     path: Path
     name: str
-    fixture: bool
-    autouse: bool
+    scope: tuple[str, ...]
+    kind: Literal["function", "fixture", "autouse"]
     requires: tuple[str, ...]
     patches: tuple[tuple[str, int], ...]
     overrides: tuple[tuple[str, int], ...]
@@ -74,12 +76,41 @@ def attributes(
     return tuple(patches), tuple(overrides)
 
 
+def scope_markers(body: list[ast.stmt]) -> tuple[ast.AST, ...]:
+    return tuple(
+        node.value
+        for node in body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in node.targets)
+    )
+
+
+def definitions(
+    body: list[ast.stmt], scope: tuple[str, ...], markers: tuple[ast.AST, ...]
+) -> Iterator[tuple[ast.FunctionDef | ast.AsyncFunctionDef, tuple[str, ...], tuple[ast.AST, ...]]]:
+    inherited = (*markers, *scope_markers(body))
+    for node in body:
+        if isinstance(node, ast.ClassDef):
+            yield from definitions(node.body, (*scope, node.name), (*inherited, *node.decorator_list))
+        elif isinstance(node, FUNCTIONS):
+            yield node, scope, (*inherited, *node.decorator_list)
+
+
+def marked_fixtures(markers: tuple[ast.AST, ...], aliases: dict[str, str]) -> list[str]:
+    return [
+        value
+        for marker in markers
+        for call in ast.walk(marker)
+        if isinstance(call, ast.Call) and qualified(call.func, aliases) == "pytest.mark.usefixtures"
+        for argument in call.args
+        if (value := literal(argument))
+    ]
+
+
 def functions(path: Path, tree: ast.Module) -> list[Function]:
     aliases = imports(tree)
     found: list[Function] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, FUNCTIONS):
-            continue
+    for node, scope, markers in definitions(tree.body, (), ()):
         decorators = [
             d
             for d in node.decorator_list
@@ -92,17 +123,25 @@ def functions(path: Path, tree: ast.Module) -> list[Function]:
             )
             for d in decorators
         )
+        requirements = [a.arg for a in [*node.args.args, *node.args.kwonlyargs]]
+        requirements.extend(marked_fixtures(markers, aliases))
         patches, overrides = attributes(node, aliases)
         found.append(
             Function(
-                path, node.name, bool(decorators), autouse, tuple(a.arg for a in node.args.args), patches, overrides
+                path,
+                node.name,
+                scope,
+                "autouse" if autouse else "fixture" if decorators else "function",
+                tuple(requirements),
+                patches,
+                overrides,
             )
         )
     return found
 
 
-def selected(test: Function, fixtures: dict[str, Function]) -> list[Function]:
-    pending = [*test.requires, *(name for name, item in fixtures.items() if item.autouse)]
+def dependencies(names: list[str], fixtures: dict[str, Function]) -> list[Function]:
+    pending = names.copy()
     seen: set[str] = set()
     found: list[Function] = []
     while pending:
@@ -117,12 +156,18 @@ def selected(test: Function, fixtures: dict[str, Function]) -> list[Function]:
 
 
 def overlaps(module: list[Function], parents: list[Function]) -> list[str]:
-    fixtures = {item.name: item for item in [*parents, *module] if item.fixture}
     problems: set[str] = set()
     for test in module:
-        if test.fixture or not test.name.startswith("test_"):
+        if test.kind != "function" or not test.name.startswith("test_"):
             continue
-        active = selected(test, fixtures)
+        fixtures = {
+            item.name: item
+            for item in sorted([*parents, *module], key=lambda item: len(item.scope))
+            if item.kind != "function" and test.scope[: len(item.scope)] == item.scope
+        }
+        active = dependencies(
+            [*test.requires, *(name for name, item in fixtures.items() if item.kind == "autouse")], fixtures
+        )
         for fixture in active:
             for patched, patch_line in fixture.patches:
                 for owner in [test, *active]:
@@ -130,6 +175,7 @@ def overlaps(module: list[Function], parents: list[Function]) -> list[str]:
                         owner.path != fixture.path
                         and owner.path.name == "conftest.py"
                         and fixture.path.is_relative_to(owner.path.parent)
+                        and fixture not in dependencies(list(owner.requires), fixtures)
                     ):
                         continue
                     for overridden, override_line in owner.overrides:

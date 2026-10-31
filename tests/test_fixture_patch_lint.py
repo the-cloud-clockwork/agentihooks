@@ -96,6 +96,104 @@ def dependent(isolated):
     assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 1
 
 
+def test_ancestor_override_depending_on_a_descendant_mock_fixture_is_checked(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "conftest.py",
+        """
+import pytest
+
+@pytest.fixture(autouse=True)
+def parent(monkeypatch, bridge):
+    monkeypatch.setattr("hooks.context.enforcement._get_bundle_path", lambda: None)
+
+@pytest.fixture
+def bridge(isolated):
+    return None
+""",
+    )
+    write(tmp_path, "test_mix.py", MOCK_FIXTURE + "\ndef test_plain():\n    pass\n")
+    assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 1
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        '@pytest.mark.usefixtures("isolated")\n',
+        'pytestmark = pytest.mark.usefixtures("isolated")\n',
+    ],
+)
+def test_usefixtures_marker_selects_the_mock_fixture(tmp_path: Path, marker: str) -> None:
+    write(
+        tmp_path,
+        "test_marker.py",
+        MOCK_FIXTURE.replace("autouse=True", "")
+        + marker
+        + OVERRIDE.lstrip()
+        .replace("from hooks.context import enforcement as rules\n\n", "")
+        .replace(
+            'monkeypatch.setattr(rules, "_get_bundle_path",',
+            'monkeypatch.setattr("hooks.context.enforcement._get_bundle_path",',
+        ),
+    )
+    assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 1
+
+
+def test_class_fixtures_do_not_apply_to_sibling_classes(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "test_classes.py",
+        """
+import pytest
+from unittest.mock import patch
+
+class TestPatched:
+    @pytest.fixture(autouse=True)
+    def isolated(self):
+        with patch("hooks.context.enforcement._get_bundle_path", return_value=None):
+            yield
+
+    def test_plain(self):
+        pass
+
+class TestOther:
+    def test_override(self, monkeypatch):
+        monkeypatch.setattr("hooks.context.enforcement._get_bundle_path", lambda: None)
+""",
+    )
+    assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 0
+
+
+def test_same_named_class_fixtures_preserve_the_leaking_class(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "test_classes.py",
+        """
+import pytest
+from unittest.mock import patch
+
+class TestLeaking:
+    @pytest.fixture(autouse=True)
+    def isolated(self):
+        with patch("hooks.context.enforcement._get_bundle_path", return_value=None):
+            yield
+
+    def test_override(self, monkeypatch):
+        monkeypatch.setattr("hooks.context.enforcement._get_bundle_path", lambda: None)
+
+class TestOther:
+    @pytest.fixture(autouse=True)
+    def isolated(self):
+        with patch("hooks.context.enforcement._store_path", return_value=None):
+            yield
+
+    def test_plain(self):
+        pass
+""",
+    )
+    assert fixture_patch_lint.main(["--root", str(tmp_path)]) == 1
+
+
 def test_sibling_conftest_and_unrelated_attributes_do_not_overlap(tmp_path: Path) -> None:
     write(tmp_path, "other/conftest.py", MOCK_FIXTURE)
     write(tmp_path, "test_clean.py", OVERRIDE)
