@@ -5,7 +5,7 @@ from typing import Any
 
 from .bus import StateConflict, StateEntry
 
-HISTORY = 64
+HISTORY = 2
 WRITE_TRIES = 16
 
 
