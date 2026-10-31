@@ -89,11 +89,11 @@ def test_trim_advances_the_scan_and_honors_the_removal_budget(monkeypatch: pytes
 def test_command_prints_its_resume_cursor(
     argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from hooks import _redis
     from scripts.events import state_history
+    from scripts.swarm import store
 
     client = object()
-    monkeypatch.setattr(_redis, "get_redis", lambda: client)
+    monkeypatch.setattr(store, "redis_client", lambda: client)
     monkeypatch.setattr(state_history, "_prefix", lambda: "fixture")
 
     def trim(redis: object, prefix: str, cursor: int, limit: int) -> tuple[int, int]:
@@ -107,14 +107,14 @@ def test_command_prints_its_resume_cursor(
     assert capsys.readouterr().out == '{"cursor": 31, "removed": 2}\n'
 
 
-def test_command_refuses_an_unavailable_store(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from hooks import _redis
+def test_command_refuses_an_unavailable_store(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.events import state_history
+    from scripts.swarm import store
 
-    monkeypatch.setattr(_redis, "get_redis", lambda: None)
-    with pytest.raises(SystemExit) as error:
+    def unavailable() -> None:
+        raise ConnectionError("Redis is unavailable")
+
+    monkeypatch.setattr(store, "redis_client", unavailable)
+    with pytest.raises(ConnectionError) as error:
         state_history.main([])
-    assert error.value.code == 2
-    assert capsys.readouterr().err.endswith("error: Redis is unavailable\n")
+    assert str(error.value) == "Redis is unavailable"

@@ -29,15 +29,16 @@ def trim_page(redis: Any, prefix: str, cursor: int = 0, limit: int = 16) -> tupl
 
 
 def main(argv: list[str] | None = None) -> int:
-    from hooks._redis import get_redis
+    from scripts.swarm.store import redis_client
 
-    parser = argparse.ArgumentParser(description="Trim one Redis state history scan page without reading documents")
+    parser = argparse.ArgumentParser(
+        description="Trim one Redis state history scan page without reading documents",
+        epilog="Repeat with the returned cursor. Finish only when both cursor and removed are zero.",
+    )
     parser.add_argument("--cursor", type=int, default=0)
     parser.add_argument("--limit", type=int, default=16)
     args = parser.parse_args(argv)
-    client = get_redis()
-    if client is None:
-        parser.error("Redis is unavailable")
+    client = redis_client()
     cursor, removed = trim_page(client, _prefix(), args.cursor, args.limit)
     print(json.dumps({"cursor": cursor, "removed": removed}))
     return 0
