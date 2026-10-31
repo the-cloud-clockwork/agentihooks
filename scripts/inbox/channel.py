@@ -139,7 +139,7 @@ async def _recheck(store, me, pubsub):
         raise error
 
 
-async def _deliver(store, me, write, pushed):
+async def _deliver(store: InboxStore, me: str, write: Any, pushed: Pushed, progress: ChannelProgress) -> None:
     import mcp.types as types
     from mcp.shared.message import SessionMessage
 
@@ -150,12 +150,14 @@ async def _deliver(store, me, write, pushed):
         note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
         try:
             await write.send(SessionMessage(types.JSONRPCMessage(note)))
+            pushed.shown.add(item.id)
+            pushed.held.add(item.id)
+            progress.delivered()
         except BaseException:
             for unsent in items[index:]:
-                store.requeue(unsent.id, me, UNSHOWN)
+                if unsent.id not in pushed.shown:
+                    store.requeue(unsent.id, me, UNSHOWN)
             raise
-        pushed.shown.add(item.id)
-        pushed.held.add(item.id)
 
 
 def _held(store, item_id):
@@ -180,10 +182,7 @@ async def _push(store: InboxStore, me: str, write: Any, ready: Any, feed: Any = 
                 if pubsub is None and feed is None:
                     pubsub = store.redis.pubsub()
                     pubsub.subscribe(NOTIFY)
-                shown = len(pushed.shown)
-                await _deliver(store, me, write, pushed)
-                if len(pushed.shown) > shown:
-                    progress.delivered()
+                await _deliver(store, me, write, pushed, progress)
                 if feed is None:
                     await _recheck(store, me, pubsub)
                     progress.polled()
