@@ -142,13 +142,13 @@ def fits(event: Envelope, hive: str, capabilities: Callable[[], Iterable[str]]) 
     return placeable(cast("Mapping[str, Any]", event.data), hive, capabilities)
 
 
-def declared(client: Any, hive: str) -> Callable[[], list[str]]:
-    """The capabilities a hive registered, read when called."""
+def declared(store: Any, hive: str) -> Callable[[], list[str]]:
+    """The capabilities a hive registered in the store's Redis, read when called."""
 
     def capabilities() -> list[str]:
         from scripts.hive import registry
 
-        record = cast("Mapping[str, list[str]] | None", registry.show(client, hive)) or {}
+        record = cast("Mapping[str, list[str]] | None", registry.show(store.redis, hive)) or {}
         return list(record.get("capabilities", []))
 
     return capabilities

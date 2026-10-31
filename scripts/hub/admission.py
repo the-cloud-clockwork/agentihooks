@@ -58,7 +58,7 @@ class Admission:
 
     def _placeable(self, row: dict[str, Any], hive: str) -> bool:
         """A workstation task, a task pinned to another hive or one needing what the hive lacks is never admitted."""
-        return readiness.placeable(row, hive, readiness.declared(self.store.redis, hive))
+        return readiness.placeable(row, hive, readiness.declared(self.store, hive))
 
     def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
         from scripts.swarm import tick

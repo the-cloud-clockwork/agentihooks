@@ -63,7 +63,7 @@ def lanes(excluded: str | None) -> tuple[str, ...]:
 
 def fit(store: Any, hive: str) -> Callable[[Envelope], bool]:
     """Offers this hive may not take stay in the queue; its declared capabilities are read only for needs."""
-    capabilities = readiness.declared(store.redis, hive)
+    capabilities = readiness.declared(store, hive)
     return lambda event: readiness.fits(event, hive, capabilities)
 
 
