@@ -1156,8 +1156,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    admission leaves it room.
 6. Runs `agentihooks hive run`.
 
-When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
-<workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, sends
+When the pod stops, for an image update, a rollout or a node drain, its preStop runs
+`agentihooks hive drain --wait <workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, sends
 each agent it hosts one inbox order to hand off, so the agent's successor starts on another hive, and waits until no
 agent it hosts is running. The drain records its owner, the reason `the hive is stopping` and its deadline in the
 hive's [drain history](#drain-history) and writes its result to the pod log. The grace period is `workers.drainSeconds` plus

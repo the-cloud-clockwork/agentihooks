@@ -3065,8 +3065,8 @@ the bottleneck remedy read that record.
 | A lane with held spawns has an open hive placement wait | `host` | empty | `hive placement: <wait reason>`, for example `hive placement: no hive for eng has room` |
 | Neither | `quota` | The harness every held lane is pinned to, else empty | The capacity reason, then one note per held lane pinned to a harness |
 
-A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to
-<harness>`, plural `spawns` above one, in lane name order and joined with
+A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to <harness>`,
+plural `spawns` above one, in lane name order and joined with
 `; `. A lane set to `auto` gets no note. Example:
 
 ```text
