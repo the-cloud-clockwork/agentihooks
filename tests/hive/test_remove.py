@@ -522,6 +522,62 @@ def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(s
     assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("cancelled", _withdrawn(member))]
 
 
+class Failing(Successor):
+    def sleep(self, seconds):
+        raise RuntimeError("the roll lost its Redis connection")
+
+
+def _two_agents(store):
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
+    return member
+
+
+def _none_open_for_later_occupants(store, reason):
+    for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
+        assert {(item.state, item.reason) for item in _orders(store, seat)} == {("cancelled", reason)}
+        SeatRegistry(store.redis).occupy(seat, successor, 1)
+        assert InboxStore(store.redis).open_mail(successor) == []
+
+
+def test_a_hive_remove_drain_withdraws_every_unanswered_order_when_it_ends_so_a_later_occupant_reads_none(
+    store, tmp_path
+):
+    member = _two_agents(store)
+    plan = remove.Plan(member, "anton-9", "p", wait_s=600)
+
+    remove.drain(store, plan, _host(Successor(store), Run(), tmp_path))
+
+    _none_open_for_later_occupants(store, f"cancelled: {remove.REMOVED.format(hive=member)}")
+
+
+def test_a_hive_remove_drain_that_times_out_withdraws_its_orders_and_a_rerun_leaves_none_open(store, tmp_path):
+    member = _two_agents(store)
+    plan = remove.Plan(member, "anton-9", "p", wait_s=30)
+    reason = f"cancelled: {remove.REMOVED.format(hive=member)}"
+
+    with pytest.raises(auth.HiveError):
+        remove.drain(store, plan, _host(Clock(store, member, 99), Run(), tmp_path))
+
+    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("cancelled", reason)]
+    remove.drain(store, plan, _host(Successor(store), Run(), tmp_path))
+    assert len(_orders(store, SEAT)) == 2
+    _none_open_for_later_occupants(store, reason)
+
+
+def test_a_release_roll_that_fails_midway_withdraws_the_orders_it_sent_and_a_rerun_leaves_none_open(store, tmp_path):
+    member = _two_agents(store)
+
+    with pytest.raises(RuntimeError):
+        remove.settle(store, member, 3600, _host(Failing(store), Run(), tmp_path))
+
+    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("cancelled", _withdrawn(member))]
+    remove.settle(store, member, 3600, _host(Successor(store), Run(), tmp_path))
+    assert len(_orders(store, SEAT)) == 2
+    _none_open_for_later_occupants(store, _withdrawn(member))
+
+
 def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(
     store, tmp_path, monkeypatch
 ):
