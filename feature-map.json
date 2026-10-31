@@ -1,6 +1,26 @@
 {
   "features": [
     {
+      "id": "swarm-tick-real-backends",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
+      "behaviour": "A tick pass completes against real Redis and Postgres with three and fifteen scripted agents reporting their canaries and heartbeats.",
+      "seam": "scripts.swarm.cli.run_tick with real feature services and scripted agent processes",
+      "tests": [
+        "tests/features/test_tick_pass.py::test_a_tick_pass_uses_real_backends_with_scripted_agents"
+      ]
+    },
+    {
+      "id": "scheduler-tick-delivery",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
+      "behaviour": "The scheduler delivers a tick subprocess under the machine lock, refuses a concurrent delivery and records completion in real Redis after the child reads the Postgres ledger.",
+      "seam": "scripts.swarm.scheduled_tick.main and its inherited machine lock and delivery record",
+      "tests": [
+        "tests/features/test_scheduler_delivery.py::test_scheduler_delivers_once_under_the_machine_lock_and_records_completion"
+      ]
+    },
+    {
       "id": "swarm-tick-characterisation",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a2",
