@@ -7,16 +7,17 @@ count survives restarts.
 
 import uuid
 from dataclasses import dataclass, replace
+from typing import Any
 
 from scripts.hive import reports
 from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import CLOSED, Item, redelivery_ms
+from scripts.inbox.store import CLOSED, InboxStore, Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
-from scripts.swarm.store import MASTER, RedisStore, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 MAX_WAKES = 3
@@ -43,13 +44,8 @@ def quiet_ms(environ):
     return int(environ.get(QUIET_ENV) or DEFAULT_QUIET_S) * 1000
 
 
-def typed_wake(inbox, agent):
-    return (
-        bool(agent.pane_id)
-        and agent.lane != MASTER
-        and not capabilities.of_agent(agent).push_inbox
-        and not Dispatcher(inbox).owner(agent.name)
-    )
+def typed_wake(inbox: InboxStore, agent: AgentRecord) -> bool:
+    return bool(agent.pane_id) and agent.lane != MASTER and not Dispatcher(inbox).owner(agent.name)
 
 
 def decide(item, pane, history, now_ms, window, slug, since=0):
@@ -143,7 +139,33 @@ class _Clock:
     quiet: int
 
 
-def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
+def _push_step(
+    item: Item,
+    pane: str | None,
+    history: list[dict[str, Any]],
+    clock: _Clock,
+    since: int | None,
+    slug: str,
+) -> str | None:
+    if item.state != "pending" or item.fyi or since is None:
+        return None
+    wakes = [entry for entry in history if entry.get("event") == WOKEN]
+    last = max(since, *(entry["at"] for entry in history if entry.get("state") == "pending" or entry in wakes))
+    due = clock.now_ms - last - outage.paused_ms(slug, last, clock.now_ms) >= clock.window
+    if pane in READY and len(wakes) < MAX_WAKES and due:
+        return WOKEN
+    return decide(item, None, history, clock.now_ms, clock.window, slug, since)
+
+
+def _wake_world(
+    inbox: InboxStore,
+    slug: str,
+    agents: list[AgentRecord],
+    herdr: Any,
+    ledger: Any,
+    clock: _Clock,
+    items: list[Item],
+) -> list[str]:
     now_ms, window, quiet = clock.now_ms, clock.window, clock.quiet
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
@@ -168,8 +190,17 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         since = reads.clocks[item.address]
-        step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
-        if step == WOKEN and _still_held(inbox, held) and _wake(inbox.redis, slug, herdr, agent, prompted):
+        if agent and capabilities.of_agent(agent).push_inbox:
+            step = _push_step(item, statuses.get(receiver), reads.histories[item.id], clock, since, slug)
+        else:
+            step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
+        if (
+            step == WOKEN
+            and agent is not None
+            and _still_held(inbox, held)
+            and typed_wake(inbox, agent)
+            and _wake(inbox.redis, slug, herdr, agent, prompted)
+        ):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif (

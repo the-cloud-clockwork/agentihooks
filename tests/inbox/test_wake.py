@@ -528,7 +528,7 @@ def test_a_tick_with_pending_items_never_types_into_the_master_pane(inbox, harne
 
 
 @pytest.mark.feature("inbox-wake")
-def test_a_claude_pane_takes_its_items_through_the_inbox_channel_never_a_typed_wake(inbox):
+def test_claude_waits_one_window_for_its_channel_while_codex_wakes_immediately(inbox: InboxStore) -> None:
     claude = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="claude")
     codex = AgentRecord("sw-eng-2", "eng", "t2", pane_id="p2", harness="codex")
     item = inbox.send("sw-eng-4", "sw-eng-1", "review my diff")
@@ -538,7 +538,7 @@ def test_a_claude_pane_takes_its_items_through_the_inbox_channel_never_a_typed_w
     assert herdr.prompts == [("p2", wake.WAKE_TEXT)]
     assert events(inbox, item.id) == [] and events(inbox, other.id) == ["woken"]
     run(inbox, herdr, FakeLedger(), sent_at(item) + W, [claude, codex, AGENTS[1]])
-    assert events(inbox, item.id) == ["escalated_master"]
+    assert events(inbox, item.id) == ["woken"]
 
 
 @pytest.mark.feature("inbox-wake")
