@@ -1,12 +1,14 @@
 """Strict type gate: basedpyright error totals per file may only shrink against the base's baseline."""
 
 import argparse
+import ast
 import json
 import os
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
+from itertools import accumulate
+from pathlib import Path, PurePosixPath
 
 BASEDPYRIGHT_VERSION = "1.40.2"
 BASELINE = Path("tests/TYPE_BASELINE.json")
@@ -54,12 +56,15 @@ def sources(head: Path) -> list[str]:
     )
 
 
-def measure(head: Path) -> dict[str, int]:
-    """Run basedpyright over the head's sources in sorted order and count its errors per file.
+def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
+    """Run basedpyright over the given sources, every source when None, in sorted order and count its errors per file.
 
-    The checker empties its type cache once the Node heap passes ninety percent of its limit, and when that happens
-    varies between runs, so the heap limit is raised well above what the check uses.
+    An empty list measures nothing. The checker empties its type cache once the Node heap passes ninety percent of
+    its limit, and when that happens varies between runs, so the heap limit is raised well above what the check uses.
     """
+    files = sources(head) if files is None else sorted(files)
+    if not files:
+        return {}
     result = subprocess.run(
         [
             *_BASEDPYRIGHT,
@@ -68,7 +73,7 @@ def measure(head: Path) -> dict[str, int]:
             str(head / "pyproject.toml"),
             "--pythonpath",
             sys.executable,
-            *sources(head),
+            *files,
         ],
         cwd=head,
         env={**os.environ, "NODE_OPTIONS": _NODE_OPTIONS},
@@ -108,6 +113,60 @@ def _contents(path: Path) -> bytes | None:
     return path.read_bytes() if path.is_file() else None
 
 
+def module_name(path: str) -> str:
+    """Return the dotted module a source path defines, its package for an __init__ file."""
+    parts = list(PurePosixPath(path).with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def imported(path: str, source: bytes) -> set[str]:
+    """Return every module a source imports, each enclosing package included, with relative imports resolved."""
+    package = module_name(path).split(".")
+    if PurePosixPath(path).stem != "__init__":
+        package.pop()
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            prefix = package[: len(package) - node.level + 1] if node.level else []
+            target = ".".join([*prefix, *([node.module] if node.module else [])])
+            names.add(target)
+            names.update(f"{target}.{alias.name}" for alias in node.names)
+    return {prefix for name in names for prefix in accumulate(name.split("."), lambda left, right: f"{left}.{right}")}
+
+
+def importers(head: Path, files: list[str], modules: set[str]) -> set[str]:
+    """Return every source that imports one of the modules, directly or through another source that does."""
+    imports: dict[str, set[str]] = {}
+    for path in files:
+        try:
+            imports[path] = imported(path, (head / path).read_bytes())
+        except SyntaxError:
+            imports[path] = set()
+    found: set[str] = set()
+    frontier = modules
+    for _ in files:
+        reached = {path for path, names in imports.items() if path not in found and names & frontier}
+        found |= reached
+        frontier = {module_name(path) for path in reached}
+    return found
+
+
+def graded(base: Path, head: Path) -> set[str]:
+    """Return the sources the gate grades for growth: changed ones and every source that imports them."""
+    files = sources(head)
+    touched = changed(base, head, set(files) | set(sources(base)))
+    return touched | importers(head, files, {module_name(path) for path in touched})
+
+
+def edited(base_baseline: dict[str, int], recorded: dict[str, int]) -> set[str]:
+    """Return the baseline entries whose count the head's baseline changes against the base's."""
+    return {path for path in set(base_baseline) | set(recorded) if base_baseline.get(path, 0) != recorded.get(path, 0)}
+
+
 def write(head: Path) -> None:
     """Record the head's measurement as its baseline."""
     (head / BASELINE).write_text(json.dumps(measure(head), indent=2) + "\n")
@@ -118,9 +177,9 @@ def grade(
 ) -> list[str]:
     """Return every changed file whose errors grew against the base, and drift between the head and its baseline.
 
-    Growth and drift are graded on files the head changes, drift also on baseline entries it edits; with ``touched``
-    None, on every file. An untouched file keeps the count the base recorded until a change to it, or a baseline
-    refresh from the gate's own measurement, rewrites it, so one merge order cannot turn every later head red.
+    Growth and drift are graded on ``touched``, the files the head changes and their importers, drift also on any
+    baseline entry it edits; with ``touched`` None, on every file. An untouched file keeps the
+    count the base recorded until a change to it, or a baseline refresh from the gate's own measurement, rewrites it, so one merge order cannot turn every later head red.
     """
     errors = [
         f"{path} has {count} type errors, more than the {base.get(path, 0)} the base allows"
@@ -164,21 +223,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.write:
             write(args.head)
             return 0
-        head = measure(args.head)
         recorded = load(args.head)
         base = load(args.base)
+        touched = checked = None
+        if base is not None:
+            touched = graded(args.base, args.head)
+            checked = touched | edited(base, recorded or {})
+        head = measure(args.head, None if checked is None else [path for path in sources(args.head) if path in checked])
     except (GradeError, ValueError, KeyError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
     if args.measured:
+        kept = {path: count for path, count in (recorded or {}).items() if checked is not None and path not in checked}
         args.measured.parent.mkdir(parents=True, exist_ok=True)
-        args.measured.write_text(json.dumps(head, indent=2) + "\n")
-    touched = None
+        args.measured.write_text(json.dumps(dict(sorted({**kept, **head}.items())), indent=2) + "\n")
     if base is None:
         print(f"::notice::The base carries no {BASELINE}; this head introduces it.")
         base = recorded or {}
-    else:
-        touched = changed(args.base, args.head, set(head) | set(recorded or {}))
     errors = grade(base, head, recorded, touched)
     print(f"{sum(head.values())} type errors in {len(head)} files, {sum(base.values())} allowed, {len(errors)} errors")
     for error in errors:
