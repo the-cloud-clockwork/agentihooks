@@ -68,7 +68,39 @@ def many(old: Doc) -> Doc:
     return new
 
 
-EDITS = [retitle, comment, rename, numeric_id, numeric_rename, scalar_item, many]
+def swap(old: Doc) -> Doc:
+    new = edited(old, "tasks", 2, old["tasks"][9])
+    new["tasks"][9] = old["tasks"][2]
+    return new
+
+
+def to_scalar(old: Doc) -> Doc:
+    return edited(old, "tasks", 6, "plain")
+
+
+def anonymous(old: Doc) -> Doc:
+    rows_without_id = {**old, "notes": [{"text": "a"}, {"text": "b"}, {"text": "c"}]}
+    return edited(rows_without_id, "notes", 1, {"text": "changed"})
+
+
+EDITS = [retitle, comment, rename, numeric_id, numeric_rename, scalar_item, many, swap, to_scalar]
+
+
+def test_diff_of_a_changed_earlier_duplicate_writes_its_own_occurrence() -> None:
+    old = ledger()
+    duplicated = {**old, "tasks": [*old["tasks"], {**old["tasks"][4]}]}
+    edit = edited(duplicated, "tasks", 4, {**old["tasks"][4], "title": "first changed"})
+    stored, _, after = applied(duplicated, edit)
+    assert stored == flatten(edit)
+    assert list(after) == ['["tasks",["id","t4",0],"title"]']
+
+
+def test_diff_of_dicts_without_ids_stores_the_new_document() -> None:
+    old = {**ledger(), "notes": [{"text": "a"}, {"text": "b"}, {"text": "c"}]}
+    new = anonymous(old)
+    stored, _, after = applied(old, new)
+    assert stored == flatten(new)
+    assert list(after) == ['["notes",["index",1,0],"text"]']
 
 
 def applied(old: Doc, new: Doc) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -106,7 +138,8 @@ def test_diff_of_one_changed_item_visits_no_unchanged_sibling(monkeypatch: pytes
     new = retitle(old)
     children = Mock(wraps=rows.children)
     monkeypatch.setattr(rows, "children", children)
-    _, before, after = applied(old, new)
+    before, after = diff(old, new)
+    monkeypatch.undo()
     assert list(after) == ['["tasks",["id","t7",0],"title"]'] == list(before)
     visited = [call.args[0] for call in children.call_args_list]
     assert not any(item is old["tasks"] or item is new["tasks"] for item in visited)
