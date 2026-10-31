@@ -106,8 +106,9 @@ The fencing state lives in one Redis state bucket shared by every swarm, under `
   publishes a fresh copy. A stale copy is never returned; a gap costs only the whole document read.
 - **Writers with no copy.** A `RedisStateStore` opened without a projection, such as the hive credentials and hive
   registry stores, touches `projected` and `published` only when its bucket already has a `published` key. There it
-  deletes its own key's copy, or every copy when the bucket already had a gap, and sets `published`. `python -m scripts.swarm.redis_commands`
-  lists both keys and the `GET`, `SET`, `DEL` and `HDEL` commands for each state store it maps; see the
+  deletes its own key's copy, or every copy when the bucket already had a gap, and sets `published`. For the hive
+  credentials and hive registry stores, `python -m scripts.swarm.redis_commands` lists both keys and the `GET`, `SET`,
+  `DEL` and `HDEL` commands; it does not map the fencing bucket. See the
   [Redis command map](../reference/redis-command-map.md).
 
 Nothing is configured. The copy is used only with the Redis state backend (`AGENTIHOOKS_STATE_BACKEND` unset or
@@ -154,11 +155,13 @@ rows = [json.loads(l) for l in sys.stdin]
 print(len(rows), "passes;", sum(r["outcome"] == "stopped" for r in rows), "stopped")'
 ```
 
-Add `grep "\"slug\": \"$SLUG\""` before `sed` to read one swarm. The Doctor source task measured these on the
-workstation journal on 30 October 2026, after pull request 8616 and before pull request 9002: the routing reads of one
-twenty minute window took 403 seconds over 272 calls, against 11 seconds over 1746 calls in the 24 minutes before 8616 reached the checkout, and both Doctor
-passes of the following hour stopped at the deadline. A live read only profile of three of these lookups, kept in
-the source task's proof on the Doctor ledger, took 8.9 seconds, 6.5 of them loading the whole document.
+Add `grep "\"slug\": \"$SLUG\""` before `sed` to read one swarm. The Doctor measured these on the workstation
+journal on 30 October 2026, after
+[pull request 8616](https://github.com/the-cloud-clockwork/agentihooks/pull/8616) and before pull request 9002. The
+routing reads of one twenty minute window took 403 seconds over 272 calls, against 11 seconds over 1746 calls in the
+24 minutes before 8616 reached the checkout, and both Doctor passes of the following hour stopped at the deadline. A
+live read only profile of three of these lookups, kept in the source task's proof on the Doctor ledger, took 8.9
+seconds, 6.5 of them loading the whole document.
 
 ### Tests
 
