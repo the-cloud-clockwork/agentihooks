@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/server_code.py:scripts.swarm_ledger.server_code.x_source_identity:764fa6915be7e04470414bede4ed4be48184d59512f550232fc01803f0e5118b": {
+    "reader": "Standards",
+    "reason": "The source identity module has no future imports. compile converts None to false for dont_inherit; no future flags are inherited, preserving compiled code and digest."
+  }
+}

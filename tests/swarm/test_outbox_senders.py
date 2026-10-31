@@ -203,11 +203,11 @@ def test_a_redis_error_outside_a_say_to_agents_is_raised(swarm, monkeypatch):
     assert not outbox.waiting()
 
 
-def test_a_queued_say_to_everyone_reaches_each_recipient_once(swarm):
+def test_a_queued_say_to_everyone_reaches_each_recipient_once(swarm: tuple[RedisStore, InboxStore]) -> None:
     _, inbox = swarm
     delivery.queue(SLUG, "the docs build is green", "sw-ci-9", "all")
     outbox.flush(inbox)
-    assert [len(items(inbox, agent.name)) for agent in (ENG, BOSS)] == [1, 1]
+    assert [len(items(inbox, agent.seat if agent.lane == MASTER else agent.name)) for agent in (ENG, BOSS)] == [1, 1]
 
 
 def test_a_queued_swarm_say_naming_nobody_is_set_aside_and_the_next_records_still_land(swarm):

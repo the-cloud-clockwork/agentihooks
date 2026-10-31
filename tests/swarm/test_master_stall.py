@@ -4,7 +4,7 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import idle, master_retire, master_stall
 from scripts.swarm.health import activity
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_tick import store as store
@@ -52,11 +52,11 @@ class SlugLedger(FakeLedger):
         return super().tasks(slug)
 
 
-def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store):
+def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store: RedisStore) -> None:
     agent, runtime = master(store)
     asked = run(store, runtime, START + 10 * MINUTE)
     assert asked == [f"asked {agent.name} for a handoff before retiring it: busy with no tool call for 10 minutes"]
-    items = InboxStore(store.redis).pending_items(agent.name)
+    items = InboxStore(store.redis).pending_items(agent.seat)
     assert [i.ref for i in items] == [master_retire.REF]
     assert run(store, runtime, START + 14 * MINUTE) == [
         f"waiting on {agent.name}'s handoff before retiring it: busy with no tool call for 10 minutes"
@@ -70,6 +70,7 @@ def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store):
     assert handoff.endswith("<!-- handoff complete -->\n")
     assert store.handoff_seat("sw", MASTER) == agent.seat
     found = store.handoff_envelope("sw", MASTER)
+    assert found is not None
     assert (found["agent"], found["seat"], found["reason"], found["ledger"]) == (
         agent.name,
         agent.seat,
@@ -78,6 +79,7 @@ def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store):
     )
     assert found["claims"] == []
     [row] = transfers.list_transfers(store, "sw")
+    assert row is not None
     assert (row["reason"], row["predecessor"], row["seat"]) == (master_stall.STALLED, agent.name, agent.seat)
     assert row["at"] == START + 15 * MINUTE
     assert runtime.killed == []
@@ -166,10 +168,10 @@ def test_master_without_any_tool_call_record_stays(store):
 
 
 @pytest.mark.parametrize("done", [False, True])
-def test_tool_call_after_the_ask_withdraws_it(store, done):
+def test_tool_call_after_the_ask_withdraws_it(store: RedisStore, done: bool) -> None:
     agent, runtime = master(store)
     run(store, runtime, START + 10 * MINUTE)
-    [ask] = InboxStore(store.redis).pending_items(agent.name)
+    [ask] = InboxStore(store.redis).pending_items(agent.seat)
     call("sw", agent.name, START + 12 * MINUTE, done=done)
     assert run(store, runtime, START + 16 * MINUTE) == []
     assert master_retire.reason(store, "sw", agent.name) == ""
