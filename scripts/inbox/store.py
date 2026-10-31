@@ -10,6 +10,7 @@ import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, fields, replace
+from typing import Any
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
@@ -310,11 +311,8 @@ class InboxStore:
 
     def _index_open(self, address):
         with self.redis.pipeline() as pipe:
-            pipe.watch(self.key("address", address))
-            ids = pipe.zrange(self.key("address", address), 0, -1)
-            if ids:
-                pipe.watch(*(self.key("item", item_id) for item_id in ids))
-            items, gone = _present(ids, [pipe.hgetall(self.key("item", item_id)) for item_id in ids])
+            ids, rows = self._watched_rows(pipe, address)
+            items, gone = _present(ids, rows)
             opened = {item.id: item.created_at for item in items if item.state not in CLOSED}
             pipe.multi()
             self._stage_drop(pipe, address, gone)
@@ -326,6 +324,22 @@ class InboxStore:
             pipe.execute()
         self._report_gone(address, gone)
         return list(opened)
+
+    def _watched_rows(self, pipe: Any, address: str) -> tuple[list[str], list[dict[str, str]]]:
+        """Every id the address index lists and its row, read in pages of ROW_BATCH with each page's item keys
+        watched on pipe before its rows are read."""
+        index = self.key("address", address)
+        pipe.watch(index)
+        ids: list[str] = []
+        rows: list[dict[str, str]] = []
+        while True:
+            page = pipe.zrange(index, len(ids), len(ids) + ROW_BATCH - 1)
+            if page:
+                pipe.watch(*(self.key("item", item_id) for item_id in page))
+                rows.extend(self._batch(page))
+            ids.extend(page)
+            if len(page) < ROW_BATCH:
+                return ids, rows
 
     def _listed(self, item_ids, address):
         return self._listed_at(dict.fromkeys(item_ids, address))
@@ -1013,11 +1027,8 @@ class InboxStore:
 
     def _try_back_fill(self, address):
         with self.redis.pipeline() as pipe:
-            pipe.watch(self.key("address", address))
-            ids = pipe.zrange(self.key("address", address), 0, -1)
-            if ids:
-                pipe.watch(*(self.key("item", item_id) for item_id in ids))
-            items, gone = _present(ids, [pipe.hgetall(self.key("item", item_id)) for item_id in ids])
+            ids, rows = self._watched_rows(pipe, address)
+            items, gone = _present(ids, rows)
             pooled = self.pool.waiting(pipe, address)
             pending = {item.id: item.created_at for item in items if item.state == "pending" and item.id not in pooled}
             pipe.multi()
