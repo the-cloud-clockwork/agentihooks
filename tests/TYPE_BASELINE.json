@@ -535,7 +535,7 @@
   "scripts/scheduler/core.py": 138,
   "scripts/scheduler/lease.py": 29,
   "scripts/scheduler/process_timer.py": 5,
-  "scripts/scheduler/service.py": 13,
+  "scripts/scheduler/service.py": 11,
   "scripts/scheduler/slots.py": 46,
   "scripts/scout/cli.py": 4,
   "scripts/scout/loop.py": 37,
