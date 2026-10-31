@@ -1239,7 +1239,7 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
         (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
-        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(40))), json.dumps(list(range(10)))),
+        (170_000, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(40))), json.dumps(list(range(10)))),
     ],
 )
 def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_the_shard_budget(
