@@ -21,7 +21,18 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 BUCKET = "scheduler"
 WRITE_TRIES = 64
+PROCESS_OWNER = "process"
+ABANDONED_S = 3600
+ABANDONED = ("ready", "fired", "cancelled", "stopped", "stale")
 T = TypeVar("T")
+
+
+def _abandoned(entry: dict[str, Any], now: float) -> bool:
+    """A process timer no waiter holds: finished or never started, and due ABANDONED_S or more before now."""
+    due = entry.get("due")
+    return (
+        entry["owner"] == PROCESS_OWNER and entry["state"] in ABANDONED and due is not None and now - due >= ABANDONED_S
+    )
 
 
 @dataclass(frozen=True)
@@ -335,11 +346,16 @@ class Scheduler:
         self.get(entry_id).cancel()
         self.change(lambda document: document["retired"].__setitem__(entry_id, True))
 
-    def _reap(self, lease: Lease) -> None:
-        def reap(document):
+    def _reap(self, lease: Lease, now: float | None = None) -> None:
+        """Drop retired entries, and process timers left finished or never started for longer than ABANDONED_S."""
+        now = time.time() if now is None else now
+
+        def reap(document: dict[str, Any]) -> None:
             for entry_id in document["retired"]:
                 document["entries"].pop(entry_id, None)
             document["retired"] = {}
+            for entry_id in [key for key, entry in document["entries"].items() if _abandoned(entry, now)]:
+                document["entries"].pop(entry_id)
 
         self.change(reap, lease=lease)
 
@@ -363,5 +379,5 @@ class Scheduler:
             for entry_id, entry in self.document()["entries"].items():
                 if entry["state"] == "pending":
                     self._deliver(entry_id, now, lease)
-            self._reap(lease)
+            self._reap(lease, now)
             return fired

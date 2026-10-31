@@ -532,7 +532,7 @@
   "scripts/runtime_env.py": 10,
   "scripts/scheduler/cli.py": 135,
   "scripts/scheduler/commands.py": 51,
-  "scripts/scheduler/core.py": 132,
+  "scripts/scheduler/core.py": 128,
   "scripts/scheduler/lease.py": 28,
   "scripts/scheduler/process_timer.py": 5,
   "scripts/scheduler/service.py": 11,
