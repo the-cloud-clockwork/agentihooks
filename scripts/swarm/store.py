@@ -16,12 +16,14 @@ from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
 if TYPE_CHECKING:
+    from redis.client import Pipeline
+
     from scripts.swarm_v2.runtime.operations import OperationJournal
 
 PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
-UNACKED_LAUNCH_STATES = ("pending", "acknowledging", "launching", "waiting")
+UNACKED_LAUNCH_STATES = ("pending", "acknowledging", "launching")
 MASTER = "master"
 PROJECTION_ATTEMPTS = 5
 PROJECTION_CONTENTION = "agent registry kept changing; the agent was not shown"
@@ -166,7 +168,7 @@ class AgentRecord:
     desired_route_kind: str = ""
 
 
-def _close_dangling_launch(pipe, key: str, name: str, raw: str | None) -> None:
+def _close_dangling_launch(pipe: "Pipeline", key: str, name: str, raw: str | None) -> None:
     row = json.loads(raw) if raw else None
     if row is None or row["state"] not in UNACKED_LAUNCH_STATES:
         return
