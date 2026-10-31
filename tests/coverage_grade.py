@@ -50,13 +50,18 @@ def executed(shards: list[Path], workers: int = 1) -> dict[str, set[int]]:
 
 
 def _shard_lines(shard: Path) -> dict[str, set[int]]:
-    data = CoverageData(basename=str(shard))
-    data.read()
-    measured = {path: data.lines(path) for path in data.measured_files() if path.startswith(GRADED)}
-    measured = {path: set(ran) for path, ran in measured.items() if ran}
+    measured = measured_lines(shard)
     if not measured:
         raise Unmeasured(f"shard {shard} measured no line under {', '.join(GRADED)}")
     return measured
+
+
+def measured_lines(shard: Path) -> dict[str, set[int]]:
+    """Lines one coverage database ran under the graded trees, leaving out modules it ran no line of."""
+    data = CoverageData(basename=str(shard))
+    data.read()
+    measured = {path: data.lines(path) for path in data.measured_files() if path.startswith(GRADED)}
+    return {path: set(ran) for path, ran in measured.items() if ran}
 
 
 @functools.lru_cache(maxsize=512)
