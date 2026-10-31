@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sqlite3
 
 from .rows import changes, encode
 
@@ -11,7 +12,7 @@ TRIM = (
 )
 
 
-def read_events(connection, slug: str) -> list:
+def read_events(connection: sqlite3.Connection, slug: str) -> list[dict[str, object]]:
     query = "SELECT value FROM events WHERE slug=? ORDER BY position"
     return [json.loads(value) for (value,) in connection.execute(query, (slug,))]
 
