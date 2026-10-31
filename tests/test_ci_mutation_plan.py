@@ -407,27 +407,28 @@ def test_the_head_takes_the_direct_tests_of_a_changed_line_first_within_its_budg
         [5.6 + 1.25 * (20.0 + sum(seconds[node] for node in chosen)) for chosen in split["slices"]]
     )
     assert split_tests(set(), seconds, 10, {"d1"}) is None
+    late = {"z1": 30.0, "a2": 60.0, "a3": 70.0}
     for direct in ({"a3"}, {"d1"}):
-        fallback = split_tests({"a3", "a2", "a1", "d2"}, seconds, 10, direct)
-        assert fallback is not None and fallback["head"] == ["a1"]
+        fallback = split_tests(set(late), late, 10, direct)
+        assert fallback is not None and fallback["head"] == ["z1"]
 
 
 def test_a_kept_split_whose_head_lacks_a_fitting_direct_test_is_cut_again(tmp_path):
     from scripts.ci_mutation import killers, measured
 
     function = "scripts.sample.x_f"
-    nodes = ["fast", "a", "b", "c"]
-    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c": 19.5}
+    nodes = ["fast", "a", "b", "c[p]"]
+    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c[p]": 19.5}
     memory = killers.KillMemory(tmp_path)
-    memory.keep_splits({function: {"head": ["fast"], "slices": [["a", "c"], ["b"]], "costs": [1.0] * 2}})
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a", "c[p]"], ["b"]], "costs": [1.0] * 2}})
     results = [{"tests": {function: nodes}, "durations": durations}]
     names = [f"{function}__mutmut_1"]
-    kept = {"head": ["fast"], "slices": [["a", "c"], ["b"]]}
+    kept = {"head": ["fast"], "slices": [["a", "c[p]"], ["b"]]}
     assert measured.measured_splits(names, results, 10, memory)[function].items() >= kept.items()
     split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["fast"]})[function]
     assert split.items() >= kept.items()
     split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["c"]})[function]
-    assert split["head"] == ["c"]
+    assert split["head"] == ["c[p]"]
     assert sorted(node for chosen in split["slices"] for node in chosen) == ["a", "b", "fast"]
 
 

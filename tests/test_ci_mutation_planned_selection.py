@@ -479,16 +479,18 @@ def test_the_plan_names_direct_tests_when_the_record_drifted_past_its_narrowing(
 
 def test_the_plan_publishes_direct_tests_the_estimate_left_unnamed(tmp_path, monkeypatch):
     (tmp_path / "scripts").mkdir()
-    (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/sample.py").write_text("def sample(value):\n    return value + 1\n")
-    (tmp_path / "tests/test_sample.py").write_text("def test_sample():\n    pass\n")
     (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
+    manifest = {"commit": "recorded", "lines": {}}
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
-    monkeypatch.setattr("sys.argv", ["plan"])
+    monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "touches_code", lambda *args: True)
     monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
     monkeypatch.setattr(plan, "select_tests", lambda *args: ["tests/test_sample.py"])
+    monkeypatch.setattr(plan, "read_record", lambda repository: (({"id": 7}, manifest), ""))
+    monkeypatch.setattr(plan, "estimate", lambda *args: (0.0, 0, []))
     calls = []
 
     def recorded(root, manifest, changes):
@@ -500,7 +502,7 @@ def test_the_plan_publishes_direct_tests_the_estimate_left_unnamed(tmp_path, mon
     assert json.loads((tmp_path / ".mutation-direct.json").read_text()) == {
         "scripts/sample.py": ["tests/test_sample.py::test_sample"]
     }
-    assert calls == [(tmp_path, None, {"scripts/sample.py": {2}})]
+    assert calls == [(tmp_path, manifest, {"scripts/sample.py": {2}})]
 
 
 def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path, monkeypatch):
