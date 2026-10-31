@@ -1,0 +1,16 @@
+{
+  "fixture_inputs": {
+    "capture": "a new turn appended to the lock session while the consumer route is switched and rolled back",
+    "grants": "the fixture grant over both projects, and a narrow grant over the kernel project only",
+    "questions": "catalog lock incident and empty kernel feed, each with a hand checked expected source range",
+    "unexpandable": "the same catalog served with an empty object store, so search answers and expansion is refused"
+  },
+  "input_sha256": {
+    "fixtures/swarm_v2/cutover-questions.json": "35e8c84b7d1f89c0250da304dac1fe9f1ec0fe06c5d657c46f1478b4125fceed",
+    "fixtures/swarm_v2/session-tools.json": "88df786b2ad1eb5fbf9875b1735643b1ddbb09ac66b8a04cc1c01b358764a69d",
+    "sv2_mig04_cases.py": "16b8ca42fca43c8dcc2246c9f750162e493923b1e03086c27a1239f1992241f4"
+  },
+  "mocked": true,
+  "package": "SV2-MIG-04",
+  "tested_commit": "6ad7648d3aadd22286e0ac96b9ae864d207cf216"
+}
