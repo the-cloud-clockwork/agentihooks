@@ -344,7 +344,29 @@ def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preser
         "splits": {},
     }
     assert plan_shards({"a": 480, "b": 481})["shards"] == 2
-    assert plan_shards({str(i): 10000 for i in range(11)})["shards"] == 10
+    assert plan_shards({str(i): 1000 for i in range(11)})["shards"] == 10
+
+
+def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_shards(monkeypatch):
+    from scripts.ci_mutation.measured import BATCH_RUNNERS, plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    costs = {f"scripts.sample.x__mutmut_{index}": 160.0 for index in range(240)}
+    planned = plan_shards(costs, limit=10, budget=1080)
+    assert planned["shards"] == 12
+    assert max(planned["shard_worker_seconds"]) <= 3 * 1080
+    assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == BATCH_RUNNERS == 40
+    assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
+    assert plan.shard_count(3 * 1080 * 15, 500, 120, 10) == 15
+    assert plan.shard_count(3 * 1080 * 15, 12, 120, 10) == 12
+    assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == BATCH_RUNNERS
+    assert plan.shard_count(3 * 120 * 4, 500, 120, 10) == 4
+    assert plan_shards({"a": 3241, "b": 1}, target=10**6, limit=1)["shards"] == 2
+    assert plan_shards({"a": 3240, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 2
+    uneven = plan_shards({"a": 2000, "b": 2000, "c": 2000, "d": 1500}, target=10**6, limit=1)
+    assert uneven["shards"] == 4 and max(uneven["shard_worker_seconds"]) == 2000
+    roomy = plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2000)
+    assert roomy["shards"] == 2
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():
@@ -398,6 +420,7 @@ def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan
     from scripts.ci_mutation import measured
     from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
 
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "4")
     nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
     results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 130.0)}]
     names = ["scripts.sample.x_f__mutmut_1"]
@@ -413,7 +436,8 @@ def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan
     write_part(stats.group(0).folder / "part-0.json", stats_key("head", selected), (0, 1), results)
     refined = measured.refine_plan(tmp_path, selected, stats)
     assert list(refined["splits"]) == ["scripts.sample.x_f"]
-    assert len(refined["assignments"]) >= 10 and refined["shards"] == 10
+    assert len(refined["assignments"]) >= 10 and refined["shards"] > 10
+    assert max(refined["shard_worker_seconds"]) <= 4 * 1080
     assert all(len(shards) == 10 for shards in refined["assignments"].values())
 
 
@@ -707,10 +731,14 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
         (961, 500, 2),
         (4800, 500, 5),
         (4800, 3, 3),
-        (10**6, 10**4, 10),
+        (43200, 10**4, 10),
+        (43201, 10**4, 11),
+        (10**6, 10**4, 40),
     ],
 )
-def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(seconds, mutants, expected):
+def test_shard_count_fills_each_shard_to_its_target_within_the_limit_unless_the_budget_needs_more(
+    seconds, mutants, expected
+):
     assert plan.shard_count(seconds, mutants, 240, 10) == expected
 
 
@@ -1153,10 +1181,10 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
         (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
-        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(10))), json.dumps(list(range(10)))),
+        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(40))), json.dumps(list(range(10)))),
     ],
 )
-def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_ten_shards(
+def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_the_shard_budget(
     tmp_path, monkeypatch, seconds, timed, shards, parts
 ):
     monkeypatch.chdir(tmp_path)
