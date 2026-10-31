@@ -1,11 +1,14 @@
 import functools
+import io
 import os
 import subprocess
 import time
+import weakref
 from collections import deque
 from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
+from typing import IO, cast
 
 from tests.coverage_grade import GRADED, HISTORY, Measurement, Source, executed, pair_moves
 
@@ -39,12 +42,35 @@ def renamed(repo: Path, base: str) -> dict[str, str | tuple[str, ...]]:
 
 
 def _show(repo: Path, commit: str) -> Source:
+    readers: list[subprocess.Popen[bytes]] = []
+
     @functools.cache
     def source(path: str) -> str | None:
-        shown = subprocess.run(["git", "show", f"{commit}:{path}"], cwd=repo, capture_output=True, text=True)
-        return shown.stdout if shown.returncode == 0 else None
+        if not readers:
+            readers.append(
+                subprocess.Popen(
+                    ["git", "cat-file", "--batch=%(objecttype) %(objectsize)"],
+                    cwd=repo,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                )
+            )
+        stdin, stdout = cast(IO[bytes], readers[0].stdin), cast(IO[bytes], readers[0].stdout)
+        stdin.write(f"{commit}:{path}\n".encode())
+        stdin.flush()
+        kind, _, size = stdout.readline().rstrip(b"\n").rpartition(b" ")
+        if not size.isdigit():
+            return None
+        data = stdout.read(int(size) + 1)[:-1]
+        return io.TextIOWrapper(io.BytesIO(data)).read() if kind == b"blob" else None
 
+    weakref.finalize(source, _close, readers)
     return source
+
+
+def _close(readers: list[subprocess.Popen[bytes]]) -> None:
+    for reader in readers:
+        reader.communicate()
 
 
 def _gh(*args: str) -> str:

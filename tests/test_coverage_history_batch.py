@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -44,7 +45,7 @@ def test_every_source_read_of_a_revision_shares_one_git_process(
     started = []
     original = subprocess.Popen
 
-    def counted(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+    def counted(*args: Any, **kwargs: Any) -> object:
         started.append(args)
         return original(*args, **kwargs)
 
