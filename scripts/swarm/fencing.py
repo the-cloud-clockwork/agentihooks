@@ -4,7 +4,7 @@ import copy
 import json
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 
 from scripts.events import state
 from scripts.events.bus import StateConflict
@@ -132,7 +132,7 @@ def _decode(value: bytes) -> dict:
     return {**copy.deepcopy(EMPTY), **json.loads(value)}
 
 
-def read(store: Any, slug: str) -> dict:
+def read(store: Any, slug: str) -> dict[str, Any]:
     return _decode(_entry(_states(store), store, slug).value)
 
 
@@ -142,7 +142,7 @@ def read_executions(store: Any, slug: str) -> dict[str, Any]:
         entry = states.get_projection(slug)
         if entry is not None:
             return json.loads(entry.value)
-    return cast(dict[str, Any], read(store, slug)["executions"])
+    return read(store, slug)["executions"]
 
 
 def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
