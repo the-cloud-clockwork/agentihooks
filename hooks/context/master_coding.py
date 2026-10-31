@@ -35,14 +35,14 @@ def seat_path(session_id: str) -> Path:
     return home / "master_seats" / (re.sub(r"[^A-Za-z0-9_.@-]", "_", session_id) + ".json")
 
 
-def seat(session_id: str | None) -> dict:
+def seat(session_id: str | None) -> dict[str, object]:
     if not session_id:
         return {}
     try:
         data = json.loads(seat_path(session_id).read_text())
     except (OSError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
+    return data if isinstance(data, dict) else {}  # pyright: ignore[reportUnknownVariableType]
 
 
 def record_seat(session_id: str, slug: str, name: str) -> None:
@@ -79,6 +79,19 @@ def observe(session_id: str | None, prompt: str | None, typed: bool, now: float 
 def close(session_id: str | None) -> None:
     if session_id:
         path(session_id).unlink(missing_ok=True)
+
+
+def open_for_blockers(session_id: str, now: float | None = None) -> None:
+    path(session_id).parent.mkdir(parents=True, exist_ok=True)
+    path(session_id).write_text(json.dumps({"at": time.time() if now is None else now, "reason": "blockers"}))
+
+
+def opened_for_blockers(session_id: str) -> bool:
+    try:
+        data = json.loads(path(session_id).read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and bool(data.get("reason") == "blockers")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def is_open(session_id: str) -> bool:

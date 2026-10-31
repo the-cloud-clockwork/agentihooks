@@ -865,6 +865,43 @@ def test_guard_says_when_a_drained_supervisor_holds_on_and_recycles_it_on_a_late
     )
 
 
+def test_guard_recycles_a_supervisor_off_the_installed_code_only_between_tick_passes(tmp_path, monkeypatch, capsys):
+    from scripts.scheduler.service import machine_lock
+    from scripts.swarm import scheduled_tick
+
+    order = []
+    _supervisor(monkeypatch, {**CURRENT, "revision": "older"}, order)
+    with machine_lock(scheduled_tick.LOCK, environ=timer._scheduler_env()):
+        assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["supervise"]
+    assert capsys.readouterr().err == ""
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["supervise", "drain 4242", "supervise"]
+    assert capsys.readouterr().err.startswith("recycling the scheduler supervisor: ")
+
+
+def test_only_a_holder_of_the_tick_lock_file_counts_as_a_running_tick(tmp_path, monkeypatch):
+    from scripts.scheduler.service import runtime_dir
+    from scripts.swarm import scheduled_tick
+
+    lock = runtime_dir() / f"{scheduled_tick.LOCK}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("")
+    inode = lock.stat().st_ino
+    monkeypatch.setattr(timer.os, "major", lambda dev: 0x1A)
+    monkeypatch.setattr(timer.os, "minor", lambda dev: 0x2B)
+    table = tmp_path / "locks"
+    monkeypatch.setattr(timer, "LOCKS_FILE", table)
+    table.write_text(
+        f"1: FLOCK  ADVISORY  WRITE 4242 1b:2b:{inode} 0 EOF\n1: -> FLOCK  ADVISORY  WRITE 4243 1a:2b:{inode} 0 EOF\n"
+    )
+    assert timer._ticking() is False
+    table.write_text(f"2: FLOCK  ADVISORY  WRITE 4242 1a:2b:{inode} 0 EOF\n")
+    assert timer._ticking() is True
+    table.unlink()
+    assert timer._ticking() is False
+
+
 def _delivering(monkeypatch):
     import fakeredis
 

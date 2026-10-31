@@ -1,5 +1,6 @@
 import json
 import math
+import sys
 import time
 import uuid
 from collections.abc import Iterator
@@ -9,10 +10,18 @@ from threading import Event, Thread
 
 from scripts.events.bus import StateConflict, StateStore
 
-LEASE_SECONDS = 30
+LEASE_SECONDS = 90
 RENEW_SECONDS = 10
 WAIT_POLL_S = 0.1
 WRITE_TRIES = 64
+
+
+class LostLock(RuntimeError):
+    """The dispatch lease this scheduler held expired or passed to another holder."""
+
+
+class Busy(RuntimeError):
+    """Another scheduler holds a live dispatch lease on this machine."""
 
 
 @dataclass
@@ -43,7 +52,7 @@ def holds(document: dict, lease: Lease, now: float) -> bool:
 
 def check(document: dict, lease: Lease, now: float | None = None) -> None:
     if not holds(document, lease, time.time() if now is None else now):
-        raise RuntimeError("scheduler lost its dispatch lock")
+        raise LostLock("scheduler lost its dispatch lock")
 
 
 def _change(state: StateStore, name: str, change) -> None:
@@ -66,7 +75,7 @@ def acquire(state: StateStore, name: str, *, now: float | None = None) -> Lease:
     def take(document):
         held = document.get("lease")
         if held is not None and held["expires"] > now:
-            raise RuntimeError("another scheduler is dispatching on this machine")
+            raise Busy("another scheduler is dispatching on this machine")
         document["lease"] = {"token": lease.token, "expires": now + LEASE_SECONDS}
 
     _change(state, name, take)
@@ -78,11 +87,12 @@ def verify_lease(state: StateStore, lease: Lease, *, now: float | None = None) -
 
 
 def renew(state: StateStore, lease: Lease, *, now: float | None = None) -> None:
-    now = time.time() if now is None else now
+    """Extend the lease from the time of each write attempt, so a slow retry never writes an expiry already spent."""
 
-    def extend(document):
-        check(document, lease, now)
-        document["lease"] = {"token": lease.token, "expires": now + LEASE_SECONDS}
+    def extend(document: dict) -> None:
+        stamp = time.time() if now is None else now
+        check(document, lease, stamp)
+        document["lease"] = {"token": lease.token, "expires": stamp + LEASE_SECONDS}
 
     _change(state, lease.name, extend)
 
@@ -97,11 +107,16 @@ def release(state: StateStore, lease: Lease) -> None:
 
 
 def _renew(state: StateStore, lease: Lease, stopped: Event) -> None:
+    """Renew until stopped or the lease is lost; a conflicted or unanswered renewal is tried again on the next beat."""
+    from scripts.events import state as backends
+
     while not stopped.wait(RENEW_SECONDS):
         try:
             renew(state, lease)
-        except (RuntimeError, StateConflict, OSError):
+        except LostLock:
             return
+        except backends.unavailable() as exc:
+            print(f"scheduler lease renewal retries next beat: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 @contextmanager
