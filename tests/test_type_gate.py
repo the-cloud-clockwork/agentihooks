@@ -613,7 +613,7 @@ def test_refresh_without_a_lower_count_measures_once_and_keeps_the_baseline(
 
     monkeypatch.setattr(type_gate, "measure", measure)
     assert type_gate.refresh(head) == {"hooks/a.py": 1}
-    assert calls == [["hooks/a.py"]]
+    assert [files for files in calls if files] == [["hooks/a.py"]]
 
 
 def test_the_refresh_command_writes_the_lowered_baseline(

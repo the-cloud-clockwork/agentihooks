@@ -116,6 +116,8 @@ MOVED = {
     ("writer-lock.yml", "scenario"): QUEUED,
     ("feature-suite.yml", "features"): QUEUED,
     ("worker-resources.yml", "measure"): BATCH,
+    ("type-baseline-refresh.yml", "refresh"): BATCH,
+    ("type-baseline-refresh.yml", "enqueue"): LIGHT,
 }
 if (WORKFLOWS / "actions-storage.yml").exists():
     MOVED[("actions-storage.yml", "prune")] = LIGHT
