@@ -3,6 +3,7 @@ import json
 import subprocess
 import urllib.error
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -448,7 +449,9 @@ def _found(store: Swarm, item_id: str) -> Item:
     return next(item for inbox in InboxStore(store.redis).worlds() if (item := inbox.get(item_id)))
 
 
-def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_its_predecessor(store, tmp_path):
+def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_its_predecessor(
+    store: Swarm, tmp_path: Path
+) -> None:
     from scripts.inbox import exits
     from scripts.swarm.store import RedisStore
 
@@ -456,11 +459,12 @@ def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_it
     _agent(store, member)
     inbox = InboxStore(store.redis)
     inbox.seats.occupy(SEAT, "engineer@1", 1)
-    remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
+    plan = remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9")
+    remove.drain(store, plan, _host(Clock(store, member, 1), Run(), tmp_path))
     [order] = _orders(store, "engineer@1")
     assert remove.is_notice(order)
     assert not remove.is_notice(replace(order, sender="operator"))
-    assert remove.is_notice(replace(order, text=remove.ORDER.format(hive=member, slug=SLUG)))
+    assert remove.is_notice(replace(order, text=remove.ROLL.format(hive=member, slug=SLUG)))
     other = inbox.send(remove.SENDER, "engineer@1", "Read the review on the ledger.")
     elsewhere = _member(store, "anton-8")
     successor = AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working")
@@ -510,9 +514,9 @@ def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_
 
 
 class Answering(Successor):
-    def sleep(self, seconds):
-        for item in _orders(self.store, SEAT):
-            InboxStore(self.store.redis).close(item.id, SEAT, "done", "handed off")
+    def sleep(self, seconds: int) -> None:
+        for item in _orders(self.store, "engineer@1"):
+            InboxStore(self.store.redis).close(item.id, "engineer@1", "done", "handed off")
         super().sleep(seconds)
 
 
@@ -521,32 +525,36 @@ def _withdrawn(member):
 
 
 def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_a_later_occupant_reads_none(
-    store, tmp_path
-):
+    store: Swarm, tmp_path: Path
+) -> None:
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
 
     remove.settle(store, member, 3600, _host(Successor(store), Run(), tmp_path))
 
-    for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
-        assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _withdrawn(member))]
+    for seat, predecessor, successor in ((SEAT, "engineer@1", "engineer@2"), (f"ci-1@{SLUG}", "ci@1", "ci@2")):
+        assert [(item.state, item.reason) for item in _orders(store, predecessor)] == [
+            ("cancelled", _withdrawn(member))
+        ]
         SeatRegistry(store.redis).occupy(seat, successor, 1)
         assert InboxStore(store.redis).open_mail(successor) == []
 
 
-def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, tmp_path):
+def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store: Swarm, tmp_path: Path) -> None:
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
 
     remove.settle(store, member, 3600, _host(Answering(store), Run(), tmp_path))
 
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("done", "done: handed off")]
-    assert [(item.state, item.reason) for item in _orders(store, f"ci-1@{SLUG}")] == [("cancelled", _withdrawn(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("done", "done: handed off")]
+    assert [(item.state, item.reason) for item in _orders(store, "ci@1")] == [("cancelled", _withdrawn(member))]
 
 
-def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(store, tmp_path, monkeypatch):
+def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(
+    store: Swarm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.handoff import envelope
 
     member = _member(store)
@@ -556,7 +564,7 @@ def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(s
     settled = remove.settle(store, member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
 
     assert settled.startswith(f"hive {member} stops after 30 seconds; engineer@1 did not hand off")
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("cancelled", _withdrawn(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("cancelled", _withdrawn(member))]
 
 
 def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(
