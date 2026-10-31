@@ -88,6 +88,24 @@ def test_same_lane_shared_writers_require_needs_path() -> None:
     assert str(error.value) == "Unordered writers in lane local for tasks: a, b"
 
 
+def test_validation_continues_after_unrelated_lane_pair() -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("remote", lane="remote"))
+    subject.register(SampleStep("a", writes=frozenset({"agents", "tasks"})))
+    subject.register(SampleStep("b", writes=frozenset({"agents", "tasks"})))
+    with pytest.raises(ValueError) as error:
+        subject.validate()
+    assert str(error.value) == "Unordered writers in lane local for agents, tasks: a, b"
+
+
+def test_multiple_unknown_dependencies_reported_in_order() -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", frozenset({"z", "b"})))
+    with pytest.raises(ValueError) as error:
+        subject.validate()
+    assert str(error.value) == "Unknown dependency for a: b, z"
+
+
 @pytest.mark.parametrize("reverse", [False, True])
 def test_transitive_needs_orders_shared_writers(reverse: bool) -> None:
     subject = registry().Registry()

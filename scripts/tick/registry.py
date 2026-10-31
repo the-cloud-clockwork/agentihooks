@@ -18,7 +18,9 @@ def _dependency_waves(steps: list[Step]) -> tuple[tuple[Step, ...], ...]:
     pending = sorted(steps, key=lambda step: step.order)
     completed: set[str] = set()
     result: list[tuple[Step, ...]] = []
-    while pending:
+    for _ in steps:
+        if not pending:
+            break
         ready = tuple(step for step in pending if step.needs <= completed)
         if not ready:
             raise ValueError(f"Dependency cycle: {', '.join(sorted(step.name for step in pending))}")
