@@ -13,6 +13,8 @@ from coverage.exceptions import NotPython
 
 from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map, pair_moves
 from tests.coverage_history import dev_runs, git, renamed
+from tests.coverage_summary import NAME as SUMMARY
+from tests.coverage_summary import executed as summarized
 
 __all__ = ["Measurement", "Result", "Unmeasured", "executed", "grade", "line_map", "main", "pair_moves", "report"]
 
@@ -82,7 +84,7 @@ def _grade(
     missing = [str(f) for f in head_files if not f.is_file()]
     if missing:
         raise Unmeasured(f"head shard coverage missing: {', '.join(missing)}")
-    head = executed(head_files, workers)
+    head = summarized(head_files) if getattr(args, "head_summaries", None) else executed(head_files, workers)
     wanted = git("rev-parse", args.base, cwd=args.head).strip()
     if getattr(args, "base_baseline", None):
         runs = _cached_runs(args.head, wanted, args.base_baseline)
@@ -126,12 +128,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", required=True, help="base revision")
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--shards", type=int, required=True)
-    parser.add_argument("--head-shards", type=Path, required=True, help="downloaded coverage-3.12-N artifacts")
+    head_input = parser.add_mutually_exclusive_group(required=True)
+    head_input.add_argument("--head-shards", type=Path, help="downloaded coverage-3.12-N artifacts")
+    head_input.add_argument("--head-summaries", type=Path, help="downloaded executed-lines-3.12-N artifacts")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--base-baseline", type=Path, help="exact base measurement restored from the Actions cache")
     args = parser.parse_args(argv)
-    head_files = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
-    head_files += sorted(args.head_shards.glob("coverage-3.12-*/reused-coverage/.coverage"))
+    if args.head_summaries:
+        head_files = [args.head_summaries / f"executed-lines-3.12-{n}" / SUMMARY for n in range(1, args.shards + 1)]
+    else:
+        head_files = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
+        head_files += sorted(args.head_shards.glob("coverage-3.12-*/reused-coverage/.coverage"))
     args.out.mkdir(parents=True, exist_ok=True)
     workers = _cpus()
     started, (cpu, throttled) = time.monotonic(), _usage()

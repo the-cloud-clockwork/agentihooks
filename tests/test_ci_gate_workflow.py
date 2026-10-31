@@ -542,6 +542,30 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     assert report["with"]["path"] == "coverage-ratchet/report.txt"
 
 
+def test_coverage_ratchet_downloads_only_the_executed_lines_summaries_a_base_grader_reads():
+    jobs = _workflow()["jobs"]
+    unit = [step.get("name") for step in jobs["unit"]["steps"]]
+    summarize = _step("unit", "Summarize the executed lines")
+    upload = _step("unit", "Upload the executed lines summary")
+    assert unit.index("Check the coverage database") < unit.index(summarize["name"]) < unit.index(upload["name"])
+    assert "python -m tests.coverage_summary --out executed-lines.json" in summarize["run"]
+    assert upload["with"]["name"] == "executed-lines-${{ matrix.python-version }}-${{ matrix.shard }}"
+    assert upload["with"]["path"] == "executed-lines.json"
+    steps = [step.get("name") for step in jobs["coverage-ratchet"]["steps"]]
+    grader = _step("coverage-ratchet", "Check out the base grader")
+    summaries = _step("coverage-ratchet", "Download the executed lines summaries")
+    databases = _step("coverage-ratchet", "Download shard coverage")
+    hold = _step("coverage-ratchet", "Hold every line the base ran")
+    assert steps.index(grader["name"]) < steps.index(summaries["name"]) < steps.index(hold["name"])
+    assert steps.index(grader["name"]) < steps.index(databases["name"]) < steps.index(hold["name"])
+    assert "grep -q -- '--head-summaries'" in grader["run"]
+    assert summaries["with"]["pattern"] == "executed-lines-3.12-*"
+    assert summaries["if"] == "steps.grader.outputs.input == '--head-summaries'"
+    assert databases["if"] == "steps.grader.outputs.input == '--head-shards'"
+    assert hold["env"]["HEAD_INPUT"] == "${{ steps.grader.outputs.input }}"
+    assert '"$HEAD_INPUT" "$GITHUB_WORKSPACE/head-coverage"' in hold["run"]
+
+
 def test_every_coverage_baseline_records_all_the_shards_the_unit_job_splits():
     jobs = _workflow()["jobs"]
     record = next(
