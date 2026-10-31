@@ -82,6 +82,7 @@ def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
             merged.append((start, end))
     return merged
 
+
 def was_file_read(session_id: str, file_path: str, offset: int = 1, limit: int | None = None) -> bool:
     """Return whether every requested line was delivered for this file revision."""
     end = offset + limit - 1 if limit is not None else sys.maxsize
@@ -140,6 +141,7 @@ def mark_read_result(payload: dict[str, Any]) -> None:
         return
     for start, end in _delivered_ranges(response):
         mark_file_read(session_id, file_path, start, end)
+
 
 def check_and_block_redundant_read(payload: dict[str, Any]) -> None:
     """Refuse a Read only when all requested lines are already in context."""
