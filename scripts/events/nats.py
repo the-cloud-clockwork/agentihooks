@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import logging
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, replace
@@ -437,8 +438,16 @@ class NatsStateStore:
             return None
 
 
+async def _disconnected() -> None:
+    logging.getLogger(__name__).warning("NATS bus disconnected")
+
+
+async def _reconnected() -> None:
+    logging.getLogger(__name__).info("NATS bus reconnected")
+
+
 class NatsBus:
-    def __init__(self, config: BusConfig, url: str):
+    def __init__(self, config: BusConfig, url: str) -> None:
         self._config = config
         self._loop = _Loop()
         self._lock = threading.Lock()
@@ -450,6 +459,8 @@ class NatsBus:
                 nats_client.connect(
                     url,
                     allow_reconnect=config.reconnect,
+                    disconnected_cb=_disconnected,
+                    reconnected_cb=_reconnected,
                     **({"max_reconnect_attempts": -1} if config.reconnect else {}),
                     **auth_options(config.credentials),
                 )

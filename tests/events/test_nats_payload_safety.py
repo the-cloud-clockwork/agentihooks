@@ -115,12 +115,18 @@ def test_scoped_page_write_refusal_and_missing_page_are_reported():
 
 
 @pytest.mark.parametrize("reconnect", [False, True])
-def test_transport_configuration_is_checked_before_any_network_connection(monkeypatch, reconnect):
+def test_transport_configuration_is_checked_before_any_network_connection(
+    monkeypatch: pytest.MonkeyPatch, reconnect: bool
+) -> None:
     from scripts.events.config import BusConfig
 
-    async def connect(*args, **kwargs):
+    async def connect(*args: object, **kwargs: object) -> None:
         assert args == ("nats://configured.example:4222",)
-        expected = {"allow_reconnect": reconnect}
+        expected = {
+            "allow_reconnect": reconnect,
+            "disconnected_cb": nats._disconnected,
+            "reconnected_cb": nats._reconnected,
+        }
         if reconnect:
             expected["max_reconnect_attempts"] = -1
         assert kwargs == expected

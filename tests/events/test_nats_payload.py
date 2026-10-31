@@ -1,5 +1,6 @@
 import random
 from dataclasses import replace
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -97,7 +98,9 @@ def test_exact_encoded_header_budget_is_allowed_and_one_extra_byte_is_refused():
         nats_payload.validate(client, "subject", b"x" * 82, {"x": "é"})
 
 
-def test_a_reconnecting_bus_serves_a_hub_after_the_server_closes_the_connection(tmp_path, monkeypatch):
+def test_a_reconnecting_bus_serves_a_hub_after_the_server_closes_the_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import asyncio
 
     from scripts.hub import registry, runner
@@ -106,13 +109,19 @@ def test_a_reconnecting_bus_serves_a_hub_after_the_server_closes_the_connection(
     monkeypatch.setattr(nats.nats_client, "connect", connect)
     with nats_server.running(tmp_path / "jetstream") as url:
         opened = nats.open_bus(BusConfig(backend="nats", url=url, reconnect=True))
-        connect.assert_called_once_with(url, allow_reconnect=True, max_reconnect_attempts=-1)
+        connect.assert_called_once_with(
+            url,
+            allow_reconnect=True,
+            max_reconnect_attempts=-1,
+            disconnected_cb=nats._disconnected,
+            reconnected_cb=nats._reconnected,
+        )
         handler = mock.Mock()
         hosted = runner.HubRunner(
             opened, registry.Registry([registry.Reactor("worker", "swarm.*.task.>", handler)]), "hub"
         )
 
-        async def disconnect_and_recover():
+        async def disconnect_and_recover() -> None:
             await opened._nc._process_op_err(OSError("server refused publish"))
             async with asyncio.timeout(10):
                 while not opened._nc.is_connected:

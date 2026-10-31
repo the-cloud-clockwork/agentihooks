@@ -460,12 +460,14 @@ def test_dead_letter_migration_reads_the_selected_legacy_stream(bus, url):
         hub.close()
 
 
-def test_the_bus_connects_without_reconnecting(url, monkeypatch):
+def test_the_bus_can_explicitly_disable_reconnecting(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     connect = mock.Mock(wraps=nats.nats_client.connect)
     monkeypatch.setattr(nats.nats_client, "connect", connect)
-    opened = nats.open_bus(BusConfig(backend="nats", url=url))
+    opened = nats.open_bus(BusConfig(backend="nats", url=url, reconnect=False))
     opened.close()
-    connect.assert_called_once_with(url, allow_reconnect=False)
+    connect.assert_called_once_with(
+        url, allow_reconnect=False, disconnected_cb=nats._disconnected, reconnected_cb=nats._reconnected
+    )
 
 
 def test_close_closes_the_server_connection(url):

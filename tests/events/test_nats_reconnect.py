@@ -46,15 +46,17 @@ def test_shared_bus_reconnects_and_restores_subscriptions_after_server_restart(
     caplog.set_level(logging.INFO, logger="scripts.events.nats")
     port = nats_server.free_port()
     store = tmp_path / "jetstream"
-    with server(store, port):
+    with server(store, port) as first:
         opened = nats.open_bus(BusConfig(backend="nats", url=f"nats://127.0.0.1:{port}"))
-        opened.serve("reconnect.echo", "worker", lambda subject, data: data)
-        assert opened.request("reconnect.echo", b"before", 2_000) == b"before"
-    try:
-        wait_log(caplog, "NATS bus disconnected")
-        with server(store, port):
-            wait_log(caplog, "NATS bus reconnected")
-            assert opened.request("reconnect.echo", b"after", 2_000) == b"after"
-        assert caplog.messages.index("NATS bus disconnected") < caplog.messages.index("NATS bus reconnected")
-    finally:
-        opened.close()
+        try:
+            opened.serve("reconnect.echo", "worker", lambda subject, data: data)
+            assert opened.request("reconnect.echo", b"before", 2_000) == b"before"
+            first.terminate()
+            first.wait(10)
+            wait_log(caplog, "NATS bus disconnected")
+            with server(store, port):
+                wait_log(caplog, "NATS bus reconnected")
+                assert opened.request("reconnect.echo", b"after", 2_000) == b"after"
+            assert caplog.messages.index("NATS bus disconnected") < caplog.messages.index("NATS bus reconnected")
+        finally:
+            opened.close()
