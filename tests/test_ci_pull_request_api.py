@@ -171,6 +171,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "hooks/hook_manager.py",
         "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
+        "scripts/ci_batch_runner_ceiling.py",
         "scripts/ci_branch_coverage.py",
         "scripts/ci_budget/__main__.py",
         "scripts/ci_budget/jobs.py",

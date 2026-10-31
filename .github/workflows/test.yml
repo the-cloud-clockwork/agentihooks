@@ -2832,6 +2832,7 @@ jobs:
             k8s/values-overlays/agentihooks-swarm-nats/values.yaml
             k8s/values-overlays/agentihooks-swarm-nats/users.yaml
             k8s/values-overlays/agentihooks-swarm-nats/trust.yaml
+            k8s/charts/arc-runners-oss/values-oss-batch.yaml
         run: |
           set -euo pipefail
           revision=$(gh api "repos/$REPOSITORY/commits/$REF" --jq .sha)
@@ -2890,6 +2891,14 @@ jobs:
           python -m pip install --quiet "cryptography>=42"
           cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
+
+      - name: Hold the mutation planner's batch runner ceiling equal to the antoncore batch runner chart
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_batch_runner_ceiling.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.ci_batch_runner_ceiling --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
 
       - name: Select artifact browser checks
         if: ${{ !cancelled() }}
