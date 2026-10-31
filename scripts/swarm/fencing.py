@@ -139,7 +139,7 @@ def _archive_rows(store: Any, reference: str) -> dict[str, Any]:
     rows: dict[str, Any] = {}
     seen: set[str] = set()
     states = state.for_store(store, BUCKET)
-    while reference:
+    while reference != "":
         entry = states.get(reference)
         if entry is None:
             raise SwarmError("referenced execution archive is unavailable")
@@ -178,11 +178,11 @@ def _externalize_archive(store: Any, slug: str, doc: dict[str, Any]) -> None:
     rows = doc["archive"]
     changed = [key for key, row in rows.items() if key not in previous or previous[key] != row]
     removed = sorted(previous.keys() - rows.keys())
-    for start in range(0, max(len(changed), 1), 64):
+    if removed:
+        reference = _save_archive_chunk(store, slug, reference, {}, removed)
+    for start in range(0, len(changed), 64):
         batch = {key: rows[key] for key in changed[start : start + 64]}
-        if batch or removed:
-            reference = _save_archive_chunk(store, slug, reference, batch, removed)
-        removed = []
+        reference = _save_archive_chunk(store, slug, reference, batch, [])
     doc["archive_ref"] = reference
     doc["archive"] = {}
 

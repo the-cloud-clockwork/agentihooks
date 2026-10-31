@@ -40,8 +40,9 @@ def test_migration_requires_the_reader_rollout(store: Any) -> None:
 
     fencing.write(store, "fixture", lambda doc: doc["archive"].update({"old": {"name": "old"}}))
     before = fencing._states(store).get("fixture")
-    with pytest.raises(SwarmError, match="upgrade every live fencing writer"):
+    with pytest.raises(SwarmError) as caught:
         fencing.migrate_archive(store, "fixture")
+    assert str(caught.value) == "upgrade every live fencing writer before migrating the archive"
     assert fencing._states(store).get("fixture") == before
     assert "archive_ref" not in json.loads(before.value)
 
@@ -99,6 +100,7 @@ def test_historical_execution_readers_and_pane_restore_survive_migration(store: 
         row for row in records if row.execution_id == second.execution_id
     )
     registry.set_pane("fixture", first.execution_id, "old-pane")
+    assert json.loads(fencing._states(store).get("fixture").value)["archive_ref"].startswith("fixture:archive:")
     assert store.execution("fixture", first.execution_id).pane_id == "old-pane"
     assert first.execution_id not in fencing.read(store, "fixture")["archive"]
     assert registry.occupants("fixture") == occupants
@@ -111,6 +113,20 @@ def test_historical_execution_readers_and_pane_restore_survive_migration(store: 
         third.execution_id,
         other.execution_id,
     }
+
+
+def test_archived_name_cannot_start_in_another_seat(store: Any) -> None:
+    from scripts.swarm import fencing
+    from scripts.swarm.store import AgentRecord, SwarmError
+    from tests.swarm.test_execution_archive import history
+
+    first, _, _, _ = history(store)
+    store.execution_registry.archive("fixture")
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    candidate = AgentRecord(first.name, "eng", "task", seat="eng-3@fixture")
+    with pytest.raises(SwarmError) as caught:
+        store.start_execution("fixture", candidate)
+    assert str(caught.value) == "canonical agent already belongs to another execution seat"
 
 
 def test_empty_archive_and_snapshots_round_trip(store: Any) -> None:
@@ -148,7 +164,9 @@ def test_self_contained_snapshot_restores_without_source_chunks(store: Any) -> N
     store.redis.flushdb()
     fencing.replace(store, "fixture", saved)
     assert fencing.read(store, "fixture")["archive"] == saved["archive"]
-    assert json.loads(fencing._states(store).get("fixture").value)["archive"] == {}
+    raw = json.loads(fencing._states(store).get("fixture").value)
+    assert raw["archive"] == {}
+    assert raw["archive_ref"].startswith("fixture:archive:")
 
 
 def test_archive_chunks_retain_only_changes(store: Any) -> None:
@@ -163,6 +181,7 @@ def test_archive_chunks_retain_only_changes(store: Any) -> None:
     saved = fencing.read(store, "fixture")
     reference = saved["archive_ref"]
     assert reference != original
+    assert reference.startswith("fixture:archive:")
     latest = json.loads(fencing._states(store).get(reference).value)
     assert latest == {"parent": original, "rows": {"new": {"name": "new"}}, "removed": []}
     total = 0
@@ -225,7 +244,9 @@ def test_cas_retry_never_publishes_uncommitted_archive_chunks(store: Any, monkey
     assert json.loads(fencing._states(store).get("fixture").value)["archive"] == {}
 
 
-def test_migration_command_requires_confirmation_before_connecting(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_migration_command_requires_confirmation_before_connecting(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.swarm import archive_migration
 
     def refused() -> None:
@@ -235,6 +256,7 @@ def test_migration_command_requires_confirmation_before_connecting(monkeypatch: 
     with pytest.raises(SystemExit) as caught:
         archive_migration.main(["fixture"])
     assert caught.value.code == 2
+    assert capsys.readouterr().err.endswith("error: upgrade every live fencing writer before migrating the archive\n")
 
 
 def test_migration_command_runs_the_explicit_migration(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -284,17 +306,25 @@ def test_failed_chunk_persistence_never_removes_inline_history(
     assert fencing.read(store, "fixture") == before
 
 
-def test_migration_module_help_is_safe_before_connecting() -> None:
-    import subprocess
-    import sys
+def test_migration_module_help_is_safe_before_connecting(capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.swarm import archive_migration
 
-    result = subprocess.run(
-        [sys.executable, "-m", "scripts.swarm.archive_migration", "--help"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert result.returncode == 0
-    assert "Migrate execution history after the fencing reader rollout" in result.stdout
-    assert "--writers-upgraded" in result.stdout
-    assert "slug" in result.stdout
+    with pytest.raises(SystemExit) as caught:
+        archive_migration.main(["--help"])
+    assert caught.value.code == 0
+    output = capsys.readouterr().out
+    assert "\nMigrate execution history after the fencing reader rollout\n" in output
+    assert "--writers-upgraded" in output
+    assert "slug" in output
+
+
+def test_registry_history_callback_preserves_chunk_namespace(store: Any) -> None:
+    from scripts.swarm import execution, fencing
+
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    registry = execution.ExecutionRegistry(store)
+    registry._fenced("fixture", lambda doc: doc["archive"].update({"old": {"name": "old"}}), history=True)
+    raw = json.loads(fencing._states(store).get("fixture").value)
+    assert raw["archive"] == {}
+    assert raw["archive_ref"].startswith("fixture:archive:")
+    assert fencing.read(store, "fixture")["archive"] == {"old": {"name": "old"}}
