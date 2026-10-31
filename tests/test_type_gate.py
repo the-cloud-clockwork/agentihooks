@@ -627,6 +627,17 @@ def test_the_refresh_command_writes_the_lowered_baseline(
     assert capsys.readouterr().out == "Lowered 1 of 2 type baseline entries by 1 errors\n"
 
 
+def test_the_refresh_command_drops_an_entry_measured_clean_and_counts_it_lowered(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {"hooks/a.py": "", "hooks/b.py": ""}, {"hooks/a.py": 3, "hooks/b.py": 1})
+    monkeypatch.setattr(type_gate, "_basedpyright_version", lambda: type_gate.BASEDPYRIGHT_VERSION)
+    monkeypatch.setattr(type_gate, "measure", lambda tree, files=None: {"hooks/a.py": 2})
+    assert type_gate.main(["--refresh", "--head", str(head)]) == 0
+    assert (head / type_gate.BASELINE).read_text() == '{\n  "hooks/a.py": 2\n}\n'
+    assert capsys.readouterr().out == "Lowered 2 of 2 type baseline entries by 2 errors\n"
+
+
 def test_a_refreshed_baseline_grades_green_against_its_base(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 2})
     head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 2})

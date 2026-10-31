@@ -187,7 +187,8 @@ def refresh(head: Path) -> dict[str, int]:
         if lowered == lowering:
             break
         lowering = lowered
-    refreshed = {path: counts.get(path, 0) if path in lowering else count for path, count in recorded.items()}
+    refreshed = {path: count for path, count in recorded.items() if path not in lowering}
+    refreshed.update((path, counts[path]) for path in lowering if path in counts)
     return dict(sorted((path, count) for path, count in refreshed.items() if count))
 
 
