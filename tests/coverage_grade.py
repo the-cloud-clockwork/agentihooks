@@ -4,6 +4,7 @@ import functools
 import itertools
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,18 +36,27 @@ class Result:
     unconfirmed: dict[str, dict[int, int]] = field(default_factory=dict)
 
 
-def executed(shards: list[Path]) -> dict[str, set[int]]:
+def executed(shards: list[Path], workers: int = 1) -> dict[str, set[int]]:
     lines: dict[str, set[int]] = {}
-    for shard in shards:
-        data = CoverageData(basename=str(shard))
-        data.read()
-        measured = {path: data.lines(path) for path in data.measured_files() if path.startswith(GRADED)}
-        measured = {path: ran for path, ran in measured.items() if ran}
-        if not measured:
-            raise Unmeasured(f"shard {shard} measured no line under {', '.join(GRADED)}")
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            parts = list(pool.map(_shard_lines, shards))
+    else:
+        parts = [_shard_lines(shard) for shard in shards]
+    for measured in parts:
         for path, ran in measured.items():
             lines.setdefault(path, set()).update(ran)
     return lines
+
+
+def _shard_lines(shard: Path) -> dict[str, set[int]]:
+    data = CoverageData(basename=str(shard))
+    data.read()
+    measured = {path: data.lines(path) for path in data.measured_files() if path.startswith(GRADED)}
+    measured = {path: set(ran) for path, ran in measured.items() if ran}
+    if not measured:
+        raise Unmeasured(f"shard {shard} measured no line under {', '.join(GRADED)}")
+    return measured
 
 
 @functools.lru_cache(maxsize=512)

@@ -37,6 +37,7 @@ from tests.dep_manifest import changes as recorded_changes
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
 WORKERS = 4
+BATCH_RUNNERS = 40
 RECORD_RETRY_SECONDS = 10
 STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
@@ -585,8 +586,10 @@ def narrow(
     return sorted(kept) or chosen
 
 
-def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
-    return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
+def shard_count(seconds: float, mutants: int, target: float, limit: int, budget: float = 1080) -> int:
+    wanted = min(limit, math.ceil(seconds / (shard_workers() * target)))
+    needed = min(BATCH_RUNNERS, math.ceil(seconds / (shard_workers() * budget)))
+    return max(1, min(mutants, max(wanted, needed)))
 
 
 def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, float] | None = None) -> float:
