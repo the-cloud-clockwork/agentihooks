@@ -1,8 +1,12 @@
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 from coverage import Coverage, CoverageData
+from coverage.exceptions import NotPython
 
+from tests import coverage_grade
 from tests import coverage_ratchet as ratchet
 
 pytestmark = pytest.mark.unit
@@ -133,3 +137,75 @@ def test_usage_reads_cpu_seconds_and_throttled_time(tmp_path: Path) -> None:
     assert cpu > 0
     assert throttled == 2.5
     assert ratchet._usage(tmp_path / "absent")[1] == 0.0
+
+
+GRADE_SOURCES = {
+    "hooks/kept.py": "def kept(x):\n    if x:\n        return 1\n    return 2\n",
+    "hooks/edited.py": "import os\n\n\ndef edited(x):\n    if x:\n        return 1\n    return 2\n",
+    "scripts/first.py": "def first():\n    return 1\n",
+    "scripts/second.py": "def second():\n    return 2\n",
+    "scripts/renamed.py": "def moved(x):\n    if x:\n        return 1\n    return 2\n",
+}
+GRADE_BASE = {
+    "hooks/kept.py": GRADE_SOURCES["hooks/kept.py"],
+    "hooks/edited.py": "def edited(x):\n    if x:\n        return 1\n    return 2\n",
+    "hooks/split.py": "def first():\n    return 1\n\ndef second():\n    return 2\n",
+    "hooks/old.py": GRADE_SOURCES["scripts/renamed.py"],
+    "hooks/deleted.py": "value = 1\n",
+}
+GRADE_RAN = {
+    "hooks/kept.py": {1, 2, 3, 4},
+    "hooks/edited.py": {1, 2, 3, 4},
+    "hooks/split.py": {1, 2, 4, 5},
+    "hooks/old.py": {1, 2, 4},
+    "hooks/deleted.py": {1},
+    "hooks/vanished.py": {1},
+}
+GRADE_HEAD = {
+    "hooks/kept.py": {1, 2, 3},
+    "hooks/edited.py": {4, 5, 7},
+    "scripts/first.py": {1, 2},
+    "scripts/second.py": {1},
+    "scripts/renamed.py": {1, 2},
+}
+GRADE_MOVES: dict[str, str | tuple[str, ...]] = {
+    "hooks/split.py": ("scripts/first.py", "scripts/second.py"),
+    "hooks/old.py": "scripts/renamed.py",
+}
+
+
+def _graded(workers: int) -> coverage_grade.Result:
+    base = coverage_grade.Measurement("b1", GRADE_RAN, GRADE_BASE.get)
+    return coverage_grade.grade(GRADE_HEAD, GRADE_SOURCES.get, iter([base]), GRADE_MOVES, workers=workers)
+
+
+def test_parallel_grade_equals_the_serial_grade() -> None:
+    serial = _graded(1)
+    assert serial.lost == {"hooks/edited.py": [3], "hooks/kept.py": [4], "hooks/old.py": [4], "hooks/split.py": [5]}
+    assert repr(_graded(2)) == repr(serial)
+
+
+def test_parallel_grade_maps_each_file_in_a_pool_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    pools = []
+
+    class Pool(ThreadPoolExecutor):
+        def __init__(self, max_workers: int) -> None:
+            pools.append(max_workers)
+            super().__init__(max_workers=max_workers)
+
+        def map(
+            self, fn: Callable[..., object], *iterables: Iterable[object], timeout: float | None = None, chunksize: int = 1
+        ) -> Iterator[object]:
+            listed = [list(items) for items in iterables]
+            pools.append(len(listed[0]))
+            return super().map(fn, *listed)
+
+    monkeypatch.setattr(coverage_grade, "ProcessPoolExecutor", Pool)
+    assert _graded(3).lost == _graded(1).lost
+    assert pools == [3, len(GRADE_RAN)]
+
+
+def test_parallel_grade_still_refuses_an_unparsable_source() -> None:
+    base = coverage_grade.Measurement("b1", {"hooks/a.py": {1}}, {"hooks/a.py": "def broken(:"}.get)
+    with pytest.raises(NotPython):
+        coverage_grade.grade({}, {"hooks/a.py": "value = 1\n"}.get, iter([base]), workers=2)
