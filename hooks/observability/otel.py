@@ -20,7 +20,7 @@ import hashlib
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 _tracer = None
 _meter = None
@@ -130,13 +130,7 @@ def _dispatch_op(op: tuple) -> None:
             _gauges[name] = _meter.create_gauge(name)
         _gauges[name].set(value, {**_correlation(attrs), **attrs})
     elif kind == "counter":
-        _, name, value, attrs = op
-        if _meter is None:
-            _count(attrs, "counters", "unsupported")
-            return
-        if name not in _counters:
-            _counters[name] = _meter.create_counter(name)
-        _counters[name].add(value, attrs)
+        _add_counter(cast(tuple[str, str, float, dict[str, str]], op))
     elif kind == "flush":
         try:
             succeeded = True
@@ -146,6 +140,18 @@ def _dispatch_op(op: tuple) -> None:
             op[2][0] = succeeded
         finally:
             op[1].set()
+
+
+def _add_counter(op: tuple[str, str, float, dict[str, str]]) -> None:
+    """Adds a queued counter increment, creating the counter on first use."""
+    _, name, value, attrs = op
+    meter: Any = _meter
+    if meter is None:
+        _count(attrs, "counters", "unsupported")
+        return
+    if name not in _counters:
+        _counters[name] = meter.create_counter(name)
+    _counters[name].add(value, attrs)
 
 
 def _correlation(attrs: dict) -> dict:
