@@ -8,13 +8,13 @@ import pytest
 
 from scripts.events.bus import Bus
 from scripts.events.config import BusConfig, QueuePolicy
-from scripts.events.memory import Clock, open_bus
+from scripts.events.memory import open_bus
 from scripts.hive import lanes, registry, spoke
 from scripts.hub import admission, slots
 from scripts.swarm import readiness
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
-from tests.swarm.test_readiness import NOW, SLUG, bus, clock, doc, snapshot, task  # noqa: F401
+from tests.swarm.test_readiness import NOW, SLUG, Clock, bus, clock, doc, snapshot, task  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
 
 pytestmark = pytest.mark.unit
