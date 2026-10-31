@@ -131,15 +131,18 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
         )
     inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + plan.wait_s
-    while remaining := hosted(store, plan.hive):
-        _order(inbox, ordered, remaining, ORDER, plan.hive)
-        if host.clock() >= deadline:
-            names = ", ".join(agent.name for _, agent in remaining)
-            raise auth.HiveError(
-                f"hive {plan.hive} takes no new agents, but {names} did not hand off within {plan.wait_s} seconds; "
-                "run remove again to keep waiting"
-            )
-        host.sleep(POLL_S)
+    try:
+        while remaining := hosted(store, plan.hive):
+            _order(inbox, ordered, remaining, ORDER, plan.hive)
+            if host.clock() >= deadline:
+                names = ", ".join(agent.name for _, agent in remaining)
+                raise auth.HiveError(
+                    f"hive {plan.hive} takes no new agents, but {names} did not hand off within {plan.wait_s} "
+                    "seconds; run remove again to keep waiting"
+                )
+            host.sleep(POLL_S)
+    finally:
+        _withdraw(inbox, ordered, REMOVED.format(hive=plan.hive))
     handed = ", ".join(sorted(name for _, name in ordered)) or "none"
     return [f"drained {plan.hive}: {len(ordered)} agents handed off: {handed}"]
 
@@ -171,23 +174,22 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     )
     inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + wait_s
-    while remaining := _unhanded(store, hive):
-        _order(inbox, ordered, remaining, ROLL, hive)
-        if host.clock() >= deadline:
-            ended = _recover(store, hive, wait_s, remaining, host)
-            break
-        host.sleep(POLL_S)
-    else:
-        ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
-    _withdraw(inbox, ordered, hive)
-    return ended
+    try:
+        while remaining := _unhanded(store, hive):
+            _order(inbox, ordered, remaining, ROLL, hive)
+            if host.clock() >= deadline:
+                return _recover(store, hive, wait_s, remaining, host)
+            host.sleep(POLL_S)
+        return f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
+    finally:
+        _withdraw(inbox, ordered, WITHDRAWN.format(hive=hive))
 
 
-def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
+def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], reason: str) -> None:
     worlds = inbox.worlds()
     for item_id in ordered.values():
         for world in worlds:
-            world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
+            world.settle(item_id, SENDER, "cancel", reason)
 
 
 def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
