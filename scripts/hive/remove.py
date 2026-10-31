@@ -182,8 +182,9 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
 
 
 def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
+    worlds = inbox.worlds()
     for item_id in ordered.values():
-        for world in inbox.worlds():
+        for world in worlds:
             world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
 
 
