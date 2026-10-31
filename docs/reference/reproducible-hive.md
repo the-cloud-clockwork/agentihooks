@@ -74,7 +74,7 @@ agentihooks hive remove <name>
 
 | Step | What it does |
 |---|---|
-| drain | marks the hive's registry record draining, so placement sends it no new agent, and orders each agent on it, through its inbox, to finish its step and hand off; its successor starts on another hive. Waits up to `--wait` (3600) seconds; past that it refuses naming the agents still running, and a rerun keeps waiting |
+| drain | marks the hive's registry record draining, recording owner, reason `hive remove` and the `--wait` deadline in its [drain history](../pillars/hives.md#drain-history), so placement sends it no new agent, and orders each agent on it, through its inbox, to finish its step and hand off; its successor starts on another hive. Waits up to `--wait` (3600) seconds; past that it refuses naming the agents still running, and a rerun keeps waiting |
 | member | revokes the hive's member credential and its Redis user, and its NATS credential when a NATS signer is configured |
 | herdr | deletes the herdr machine and its `known_hosts` entry |
 | registry | deletes the hive's registry records, keeping its wait history in the swarm, releases the hive name of every node holding that name and deletes the saved create when it names that hive |
