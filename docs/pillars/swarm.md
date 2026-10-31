@@ -3372,7 +3372,11 @@ the first pass that found each pool with no ready hive and every task whose laun
 swarm since then (a placement wait whose reason says `has room`), counted once per task however many ticks refuse it
 again. A pool down for ten minutes raises `hive-pool-down/<pool>`; its summary
 names the minutes down and the tasks refused a launch meanwhile, its evidence names the pool, the down start and its hives,
-and its number is the minutes down. A ready hive in the pool clears it, and a pool whose hives lost their records is
+and its number is the minutes down. For each hive in the down pool whose record carries a
+[drain history](hives.md#drain-history), the pass keeps that hive's latest `draining=yes` entry, even after a later
+undrain, and the evidence adds one line per such hive:
+`hive <id> draining yes by <owner> at <ms> for <reason>, deadline <ms>`, such as
+`hive 06db8fa06259f56a draining yes by agentihooks-hive-worker-0 at 1793166000000 for the hive is stopping, deadline 1793169600000`. A ready hive in the pool clears it, and a pool whose hives lost their records is
 forgotten.
 
 ### Doctor slot census detector
