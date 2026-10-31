@@ -63,7 +63,7 @@ def test_every_source_read_of_a_revision_shares_one_git_process(repo: tuple[Path
 
 def test_renamed_reads_each_revision_through_one_git_process(repo: tuple[Path, str], reads: list[list[str]]) -> None:
     root, base = repo
-    for name in ("hooks/a.py", "hooks/crlf.py", "hooks/bare.py"):
+    for name in ("hooks/a.py", "hooks/crlf.py", "hooks/bare.py", "scripts/name with space.py"):
         (root / name).unlink()
     _commit(root, {"scripts/a.py": FILES["hooks/a.py"], "scripts/new.py": "n = 1\n", "scripts/other.py": "o = 1\n"})
     reads.clear()
