@@ -121,3 +121,38 @@ def test_a_stopping_hive_records_its_pod_as_owner_and_the_wait_as_deadline(clien
         NOW + 600_000,
     )
     assert (entry["ready_before"], entry["ready_after"]) == (True, False)
+
+
+def test_the_worker_start_undrain_through_hive_set_keeps_the_drain_and_names_its_own_reason(client, monkeypatch):
+    from scripts.hive import cli
+
+    monkeypatch.setattr(cli, "redis_client", lambda: client)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "agentihooks-hive-worker-0")
+    _live(client)
+    registry.update(client, HIVE, ["draining=yes"], drain=registry.Drain("worker-0", "the hive is stopping", NOW + 1))
+
+    assert cli.main(["set", "--keep", "--reason", "the worker started", HIVE, "draining=no"]) == 0
+
+    drained, undrained = registry.show(client, HIVE)["drains"]
+    assert (drained["owner"], drained["reason"], drained["at"], drained["deadline_at"]) == (
+        "worker-0",
+        "the hive is stopping",
+        NOW,
+        NOW + 1,
+    )
+    assert (undrained["draining"], undrained["owner"], undrained["reason"]) == (
+        "no",
+        "agentihooks-hive-worker-0",
+        "the worker started",
+    )
+
+
+def test_a_pool_down_after_an_undrain_still_names_the_last_drain():
+    reading = {"cpus": 16, "total_mb": 64000, "pod_total_mb": 19600}
+    drained = {"at": NOW, "draining": "yes", "owner": "worker-0", "reason": "release roll", "deadline_at": NOW + 1}
+    undrained = {**drained, "at": NOW + 2, "draining": "no", "owner": "worker-1", "reason": "the worker started"}
+    hive = {"id": HIVE, "ui": "no", "draining": "no", "heartbeat_at": 0, "drains": [drained, undrained]}
+
+    state = hive_pools.observe({}, [hive], {HIVE: reading}, [], NOW)
+
+    assert state["down"]["16cpu-19600mb"]["drains"] == {HIVE: drained}

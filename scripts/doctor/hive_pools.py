@@ -39,7 +39,11 @@ def observe(state: dict, hives: list[dict], readings: dict, refused: list[dict],
         entry = state.get("down", {}).get(name, {"since": now_ms, "refused": []})
         fresh = [row["id"] for row in refused if row["seen_at"] >= entry["since"]]
         pooled = sorted(hive_id for hive_id, member in members.items() if member == name)
-        drains = {hive["id"]: hive["drains"][-1] for hive in hives if hive["id"] in pooled and hive.get("drains")}
+        drains = {
+            hive["id"]: drained[-1]
+            for hive in hives
+            if hive["id"] in pooled and (drained := [d for d in hive.get("drains", []) if d["draining"] == "yes"])
+        }
         down[name] = {
             "since": entry["since"],
             "hives": pooled,
