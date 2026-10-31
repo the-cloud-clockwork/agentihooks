@@ -145,16 +145,12 @@ def _order(
             ordered.add((slug, agent.name))
 
 
-def _shape(template: str) -> "re.Pattern[str]":
-    return re.compile(re.escape(template).replace(r"\{hive\}", ".+").replace(r"\{slug\}", ".+"))
-
-
-NOTICES = (_shape(ORDER), _shape(ROLL))
-
-
 def is_notice(item: "Item") -> bool:
     """Whether item is a hive drain order, meant only for the life the draining hive runs."""
-    return item.sender == SENDER and any(shape.fullmatch(item.text) for shape in NOTICES)
+    return item.sender == SENDER and any(
+        re.fullmatch(re.escape(text).replace(r"\{hive\}", ".+").replace(r"\{slug\}", ".+"), item.text)
+        for text in (ORDER, ROLL)
+    )
 
 
 def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:

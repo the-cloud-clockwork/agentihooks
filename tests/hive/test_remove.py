@@ -441,6 +441,7 @@ def test_a_successor_on_another_hive_never_receives_the_drain_order_meant_for_it
     [order] = _orders(store, "engineer@1")
     assert remove.is_notice(order)
     assert not remove.is_notice(replace(order, sender="operator"))
+    assert remove.is_notice(replace(order, text=remove.ORDER.format(hive=member, slug=SLUG)))
     other = inbox.send(remove.SENDER, "engineer@1", "Read the review on the ledger.")
     elsewhere = _member(store, "anton-8")
     successor = AgentRecord("engineer@2", "eng", "t1", seat=SEAT, state="working")
