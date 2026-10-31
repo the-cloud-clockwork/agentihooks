@@ -3,6 +3,8 @@ import os
 import signal
 import subprocess
 import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -241,34 +243,34 @@ def test_a_watched_restart_records_why_it_stopped_the_server(store, tmp_path):
     ]
 
 
-def test_a_server_on_stale_code_is_reloaded_without_a_signal(store, tmp_path):
+def test_a_server_on_stale_code_is_reloaded_without_a_signal(store: RedisStore, tmp_path: Path) -> None:
     host = Host(tmp_path)
     plant(host.proc, host.argv)
     (host.folder / ".server.pid").write_text(str(PID))
     ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host)
     assert [call[0] for call in host.calls] == ["run"]
     assert host.calls[0][1][-1] == "--reload"
-    assert not (host.folder / ledger_watchdog.LOG).exists()
+    record = json.loads((host.folder / ledger_watchdog.LOG).read_text())
+    assert record["reload"] == "completed"
+    assert set(record) == {"at", "reload", "before", "after"}
 
 
-def test_a_stale_server_that_does_not_hand_off_is_stopped_and_started(store, tmp_path):
+def test_a_stale_server_that_does_not_hand_off_keeps_its_active_requests(store: RedisStore, tmp_path: Path) -> None:
     host = Host(tmp_path)
     plant(host.proc, host.argv)
     (host.folder / ".server.pid").write_text(str(PID))
-    replies = iter([subprocess.CompletedProcess([], 1, stderr="did not hand off\n"), None])
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess:
         host.calls.append(("run", argv[-1]))
-        return next(replies) or subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(argv, 1, stderr="did not hand off\n")
 
     host.run = run
-    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) != []
-    assert [call[:3] if call[0] == "kill" else call for call in host.calls] == [
-        ("run", "--reload"),
-        ("kill", PID, signal.SIGTERM),
-        ("run", "--ensure"),
-    ]
-    first = json.loads((host.folder / ledger_watchdog.LOG).read_text().splitlines()[0])
+    actions = ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host)
+    assert actions == [f"the ledger server needed a restart because {REASON}, and the restart failed: did not hand off"]
+    assert host.calls == [("run", "--reload")]
+    records = (host.folder / ledger_watchdog.LOG).read_text().splitlines()
+    assert len(records) == 1
+    first = json.loads(records[0])
     assert sorted(first) == ["at", "error", "pid", "reason", "reload"]
     assert isinstance(first["at"], float)
     assert (first["reload"], first["error"], first["pid"], first["reason"]) == (
@@ -277,8 +279,6 @@ def test_a_stale_server_that_does_not_hand_off_is_stopped_and_started(store, tmp
         PID,
         REASON,
     )
-    stop = json.loads((host.folder / ledger_watchdog.LOG).read_text().splitlines()[1])
-    assert (stop["signal"], stop["reason"]) == ("SIGTERM", REASON)
 
 
 def test_a_pid_taken_by_another_program_during_the_stop_is_never_killed(tmp_path):

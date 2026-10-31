@@ -139,7 +139,9 @@ def doctor_world(world):
 @pytest.mark.parametrize("front_door", [True, False])
 @pytest.mark.parametrize("seat", [SECOND, f"master-3@{SLUG}"])
 @pytest.mark.parametrize("by_name", [True, False])
-def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, front_door, seat, by_name):
+def test_a_linked_doctor_master_messages_live_watched_masters(
+    doctor_world: tuple[cases.World, str, str], front_door: bool, seat: str, by_name: bool
+) -> None:
     world, _, sender = doctor_world
     address = world.store.seats.occupant(seat).occupant if by_name else seat
     if not front_door:
@@ -154,7 +156,7 @@ def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, fron
 
     result = inbox_cli.apply(inbox(world), record)
 
-    assert result["to"] == address
+    assert result["to"] == seat
     assert inbox(world).get(result["id"]).text == "Apply the merged fix"
     assert world.refusals() == 0
 
