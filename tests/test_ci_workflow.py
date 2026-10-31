@@ -2111,7 +2111,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         step
         for step in setup
         if not str(step.get("name", "")).startswith(
-            (*downloads, "Cap the merged test stats", "Check for merged test stats")
+            (*downloads, "Cap the merged test stats", "Report orphan shared input bytes", "Check for merged test stats")
         )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
         and step.get("name") != "Restore latest dev durations"

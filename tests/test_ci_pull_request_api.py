@@ -268,6 +268,8 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
     ]
+    if (ROOT / "scripts/ci_mutation/stats_orphans.py").exists():
+        expected.append("scripts/ci_mutation/stats_orphans.py")
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
     if (ROOT / "scripts/ci_wall_clock.py").exists():
