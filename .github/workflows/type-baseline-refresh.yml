@@ -91,13 +91,19 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          APP: ${{ steps.app-token.outputs.app-slug }}
           BRANCH: type-baseline-refresh
         run: |
-          git config user.name "$APP[bot]"
-          git config user.email "$APP[bot]@users.noreply.github.com"
-          git commit -m "Lower the type baseline to the measured counts" -- tests/TYPE_BASELINE.json
-          git push --force "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$BRANCH"
+          parent=$(git rev-parse HEAD)
+          jq -n --rawfile content tests/TYPE_BASELINE.json '{content: $content, encoding: "utf-8"}' > "$RUNNER_TEMP/blob.json"
+          blob=$(gh api "repos/$GITHUB_REPOSITORY/git/blobs" --input "$RUNNER_TEMP/blob.json" -q .sha)
+          jq -n --arg base "$(git rev-parse 'HEAD^{tree}')" --arg blob "$blob" \
+            '{base_tree: $base, tree: [{path: "tests/TYPE_BASELINE.json", mode: "100644", type: "blob", sha: $blob}]}' > "$RUNNER_TEMP/tree.json"
+          tree=$(gh api "repos/$GITHUB_REPOSITORY/git/trees" --input "$RUNNER_TEMP/tree.json" -q .sha)
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/commits" -f message="Lower the type baseline to the measured counts" \
+            -f tree="$tree" -f "parents[]=$parent" -q .sha)
+          if ! gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$head" -F force=true >/dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$head" >/dev/null
+          fi
           pull=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base dev --state open --json number -q '.[0].number // ""')
           if [[ -z "$pull" ]]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --base dev --head "$BRANCH" \
@@ -106,7 +112,7 @@ jobs:
             pull=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base dev --state open --json number -q '.[0].number')
           fi
           echo "pull=$pull" >> "$GITHUB_OUTPUT"
-          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
 
   enqueue:
     needs: refresh

@@ -37,7 +37,9 @@ def test_the_refresh_measures_dev_with_the_type_gate() -> None:
 def test_only_a_lowered_baseline_opens_one_pull_request_into_dev() -> None:
     run = _run("refresh")
     assert "git diff --quiet -- tests/TYPE_BASELINE.json" in run
-    assert 'git commit -m "Lower the type baseline to the measured counts" -- tests/TYPE_BASELINE.json' in run
+    assert 'path: "tests/TYPE_BASELINE.json"' in run
+    assert 'git/commits" -f message="Lower the type baseline to the measured counts"' in run
+    assert "git push" not in run and "x-access-token" not in run
     assert '--head "$BRANCH" --base dev --state open' in run
     assert 'gh pr create --repo "$GITHUB_REPOSITORY" --base dev --head "$BRANCH"' in run
     pull = next(step for step in _steps("refresh") if step.get("id") == "pull")
