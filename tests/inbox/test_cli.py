@@ -3,7 +3,7 @@ import json
 import pytest
 
 from scripts.inbox import cli
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import ROW_BATCH, InboxStore, Item, _fields
 
 
 @pytest.fixture
@@ -278,8 +278,6 @@ def test_multi_agent_chat_rooms_are_retired_without_dangling_references():
 
 
 def _seed(store: InboxStore, counts: dict[str, int]) -> list[str]:
-    from scripts.inbox.store import Item, _fields
-
     ids: list[str] = []
     with store.redis.pipeline() as pipe:
         for address, count in counts.items():
@@ -315,8 +313,6 @@ def _record_reads(store: InboxStore, monkeypatch: pytest.MonkeyPatch) -> list[in
 def test_a_listing_across_name_alias_and_seat_reads_no_pipeline_above_the_batch(
     store: InboxStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from scripts.inbox.store import ROW_BATCH
-
     store.names.mint_code("sw", "sw", "/repo")
     name = store.names.next("sw", "eng")
     store.names.alias("old-bob", name)
@@ -355,11 +351,19 @@ def test_inbox_lists_one_page_of_the_ordered_listing(
     assert [line.split("\t")[0] for line in capsys.readouterr().out.splitlines()] == ids[window]
 
 
-@pytest.mark.parametrize("argv", [("--page", "0"), ("--page", "1", "--size", "0"), ("--size", "-1")])
+@pytest.mark.parametrize(
+    "argv, error",
+    [
+        (("--page", "0"), "0 must be at least 1"),
+        (("--page", "1", "--size", "0"), "0 must be at least 1"),
+        (("--size", "-1"), "-1 must be at least 1"),
+        (("--page", "abc"), "invalid positive_int value: 'abc'"),
+    ],
+)
 def test_inbox_refuses_a_page_or_size_below_one(
-    store: InboxStore, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...]
+    store: InboxStore, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...], error: str
 ) -> None:
     with pytest.raises(SystemExit) as refused:
         run("inbox", *argv)
     assert refused.value.code == 2
-    assert "must be at least 1" in capsys.readouterr().err
+    assert error in capsys.readouterr().err

@@ -100,7 +100,7 @@ def cmd_inbox(store: InboxStore, me: str, args: argparse.Namespace) -> None:
         print(f"{item.id}\t{item.state}\t{item.sender}\t{item.text.splitlines()[0]}")
 
 
-def _at_least_one(value: str) -> int:
+def positive_int(value: str) -> int:
     number = int(value)
     if number < 1:
         raise argparse.ArgumentTypeError(f"{value} must be at least 1")
@@ -214,8 +214,8 @@ def build_parser():
     send.set_defaults(func=cmd_send)
     inbox = sub.add_parser("inbox")
     inbox.add_argument("--of", default="", metavar="ADDRESS")
-    inbox.add_argument("--page", type=_at_least_one, default=0, metavar="N")
-    inbox.add_argument("--size", type=_at_least_one, default=ROW_BATCH, metavar="N")
+    inbox.add_argument("--page", type=positive_int, default=0, metavar="N")
+    inbox.add_argument("--size", type=positive_int, default=ROW_BATCH, metavar="N")
     inbox.set_defaults(func=cmd_inbox)
     read = sub.add_parser("read")
     read.add_argument("id")
