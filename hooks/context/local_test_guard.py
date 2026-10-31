@@ -135,21 +135,23 @@ def _launches(source: str, comment: str) -> bool:
 
 
 @functools.cache
-def _launched_literal(runners: re.Pattern) -> Callable[[str, re.Match], bool]:
+def _launched_literal(runners: re.Pattern) -> tuple[Callable[[str, re.Match], bool], re.Pattern]:
     runner, attached = runners.pattern, runners.pattern.removeprefix(r"\b")
     launched = re.compile(
         rf"(?m)(?:^|[;&|`'\"]|\$\()\s*(?:{_WRAPPER}\s+)*(?:[\w.$~{{}}-]*/)*(?:{runner})|-m\s*(?:{attached})"
     )
 
     def keep(source: str, match: re.Match) -> bool:
-        return bool(launched.search(source[match.end("q") : match.end() - len(match["q"])]))
+        return match["q"] is not None and bool(
+            launched.search(source[match.end("q") : match.end() - len(match["q"])])
+        )
 
-    return keep
+    return keep, re.compile(rf"{runner}|-m(?:{attached})")
 
 
 def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
-    keep = _launched_literal(runners) if _launches(source, comment) else _module_literal
-    return bool(runners.search(_strip(source, comment, keep)))
+    keep, found = _launched_literal(runners) if _launches(source, comment) else (_module_literal, runners)
+    return bool(found.search(_strip(source, comment, keep)))
 
 
 def _imports(tree: ast.Module) -> list[tuple[str, str]]:
