@@ -13,6 +13,7 @@ from typing import Any
 
 from scripts.swarm import tick_stop
 
+STORE: ContextVar[Any] = ContextVar("tick_store", default=None)
 SWARM = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
 ON_FAILURE = ContextVar("tick_failure", default=None)
@@ -37,11 +38,13 @@ def emit(stream, line: str) -> None:
 
 
 @contextmanager
-def tick(slug: str) -> Iterator[None]:
+def tick(slug: str, store: Any = None) -> Iterator[None]:
     token = SWARM.set(slug)
+    recording = STORE.set(store)
     try:
         yield
     finally:
+        STORE.reset(recording)
         SWARM.reset(token)
 
 
@@ -98,6 +101,10 @@ def step(name: str, report: bool = True) -> Iterator[None]:
             reaped_child_cpu_s=(child_end.ru_utime - child.ru_utime) + (child_end.ru_stime - child.ru_stime),
         )
         emit(sys.stderr, json.dumps(record))
+        if (store := STORE.get()) is not None:
+            store.redis.xadd(
+                store.key(slug, "tick:steps"), {"record": json.dumps(record)}, maxlen=50000, approximate=False
+            )
 
 
 def keep() -> None:
