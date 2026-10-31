@@ -39,9 +39,12 @@ def prune(repository: Any, config: BusConfig) -> None:
     """Drop sent rows past the dedupe window and unsent rows past the cap, whether or not a relay ran."""
     try:
         outbox.prune(repository, config.dedupe_window_ms)
-        outbox.cap(repository, outbox.MAX_UNSENT)
+        dropped = outbox.cap(repository, outbox.MAX_UNSENT)
     except Exception as exc:
         sys.stderr.write(f"ledger outbox prune: {exc}\n")
+        return
+    if dropped:
+        sys.stderr.write(f"ledger outbox prune: dropped {dropped} unsent rows past {outbox.MAX_UNSENT}\n")
 
 
 @contextmanager

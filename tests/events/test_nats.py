@@ -475,14 +475,6 @@ def test_the_bus_connects_without_reconnecting(url, monkeypatch):
     )
 
 
-def _closed_port() -> str:
-    import socket
-
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return f"nats://127.0.0.1:{probe.getsockname()[1]}"
-
-
 def test_a_reconnecting_client_retries_without_end_and_a_first_connect_tries_twice_quickly():
     assert nats.connect_options(BusConfig(backend="nats", reconnect=True)) == {
         "allow_reconnect": True,
@@ -496,13 +488,29 @@ def test_a_reconnecting_client_retries_without_end_and_a_first_connect_tries_twi
         "error_cb": nats._unreported,
     }
     assert nats.FIRST_CONNECT_S == 2
-    assert asyncio.run(nats._unreported(OSError("refused"))) is None
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("refused"), asyncio.TimeoutError(), nats.nats_client.errors.NoServersError()], ids=str
+)
+def test_a_connection_error_is_left_to_the_caller(caplog, error):
+    caplog.set_level("DEBUG")
+    assert asyncio.run(nats._unreported(error)) is None
+    assert caplog.records == []
+
+
+def test_any_other_client_error_is_logged_in_one_line(caplog):
+    caplog.set_level("DEBUG")
+    asyncio.run(nats._unreported(nats.nats_client.errors.AuthorizationError()))
+    assert [(record.name, record.levelname, record.getMessage(), record.exc_info) for record in caplog.records] == [
+        ("scripts.events.nats", "ERROR", "nats: nats: authorization failed", None)
+    ]
 
 
 def test_an_unreachable_bus_raises_once_and_logs_no_connect_attempt(caplog):
     caplog.set_level("DEBUG")
     with pytest.raises(nats.nats_client.errors.NoServersError):
-        nats.open_bus(BusConfig(backend="nats", url=_closed_port()))
+        nats.open_bus(BusConfig(backend="nats", url=nats_server.closed_url()))
     assert [record.getMessage() for record in caplog.records if record.name.startswith("nats")] == []
 
 
@@ -510,7 +518,7 @@ def test_an_unreachable_bus_raises_once_and_logs_no_connect_attempt(caplog):
 def test_an_unreachable_bus_gives_up_within_seconds():
     started = time.monotonic()
     with pytest.raises(nats.nats_client.errors.NoServersError):
-        nats.open_bus(BusConfig(backend="nats", url=_closed_port()))
+        nats.open_bus(BusConfig(backend="nats", url=nats_server.closed_url()))
     assert time.monotonic() - started < nats.FIRST_CONNECT_S * 2
 
 

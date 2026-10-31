@@ -92,11 +92,19 @@ def test_postgres_prune_deletes_sent_rows_and_marks_older_than_the_window_and_ke
         assert cursor.fetchone() == (0,)
 
 
-def test_the_postgres_cap_keeps_unsent_rows_within_its_limit(ledger):
+def test_the_postgres_cap_deletes_the_oldest_unsent_row_past_its_limit(ledger):
     repository, slug = ledger
     before = subjects(slug)
+    with closing(psycopg2.connect(URL)) as writer, writer, writer.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO outbox VALUES (%s, %s, -2, 'oldest', 'v'), (%s, %s, -1, 'older', 'v')",
+            (f"{slug}-oldest", slug, f"{slug}-older", slug),
+        )
+        cursor.execute("SELECT count(*) FROM outbox WHERE id NOT IN (SELECT id FROM outbox_sent)")
+        unsent = cursor.fetchone()[0]
     assert outbox.cap(repository, 10**9) == 0
-    assert subjects(slug) == before
+    assert outbox.cap(repository, unsent - 1) == 1
+    assert subjects(slug) == [("older", -1), *before]
 
 
 def test_a_postgres_mark_table_without_the_sent_time_gains_it_with_old_marks_at_zero():

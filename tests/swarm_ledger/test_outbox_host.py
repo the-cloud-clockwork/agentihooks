@@ -1,6 +1,6 @@
 import threading
 from contextlib import nullcontext
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -8,6 +8,7 @@ from scripts.events import factory, memory
 from scripts.events.config import BusConfig
 from scripts.hub import projector
 from scripts.swarm_ledger.repository import outbox, sqlite
+from tests.events import nats_server
 
 
 @pytest.mark.wall_clock
@@ -55,6 +56,7 @@ def test_memory_default_preserves_outbox_rows(tmp_path, monkeypatch):
         assert connection.execute("SELECT COUNT(*) FROM outbox_sent").fetchone() == (0,)
 
 
+@pytest.mark.parametrize("failure", ["connect", "publish"])
 def test_relay_retries_failures_on_the_next_interval_and_closes_its_bus(monkeypatch, capsys, failure):
     from scripts.swarm_ledger import outbox_host
 
@@ -95,14 +97,15 @@ def test_closing_a_relay_without_a_connection_is_safe(monkeypatch):
     opening.assert_not_called()
 
 
+@pytest.mark.parametrize("close_error", [False, True])
 def test_host_stops_the_scheduled_interval_before_closing_the_bus(monkeypatch, close_error):
     from scripts.swarm_ledger import outbox_host
 
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    pruning, relaying = Mock(), Mock()
+    order = Mock()
+    pruning, relaying, bus = order.pruning, order.relaying, order.bus
     interval = Mock(side_effect=[pruning, relaying])
     monkeypatch.setattr(outbox_host, "Interval", interval)
-    bus = Mock()
     opening = Mock(return_value=bus)
     monkeypatch.setattr(factory, "open_bus", opening)
     monkeypatch.setattr(outbox_host.outbox, "relay", Mock())
@@ -111,17 +114,18 @@ def test_host_stops_the_scheduled_interval_before_closing_the_bus(monkeypatch, c
     repository = object()
     with pytest.raises(ValueError, match="stop" if close_error else "serving"):
         with outbox_host.running(repository):
-            pruning.start.assert_called_once_with()
-            relaying.start.assert_called_once_with()
-            relaying.close.assert_not_called()
+            assert order.mock_calls == [call.pruning.start(), call.relaying.start()]
             callback = interval.call_args.args[0]
             callback()
-            bus.close.assert_not_called()
             raise ValueError("serving")
-    assert [call.kwargs for call in interval.call_args_list] == [{"every": 30.0}, {"every": 1.0}]
-    relaying.close.assert_called_once_with()
-    pruning.close.assert_called_once_with()
-    bus.close.assert_called_once_with()
+    assert [entry.kwargs for entry in interval.call_args_list] == [{"every": 30.0}, {"every": 1.0}]
+    assert order.mock_calls == [
+        call.pruning.start(),
+        call.relaying.start(),
+        call.relaying.close(),
+        call.bus.close(),
+        call.pruning.close(),
+    ]
     assert callback.__self__.bus is None
     assert callback.__self__.repository is repository
     opening.assert_called_once_with(BusConfig(backend="nats"))
@@ -328,10 +332,11 @@ def test_the_host_prune_drops_sent_rows_outside_the_dedupe_window_and_keeps_the_
     opening.assert_not_called()
 
 
-def test_the_host_prune_caps_unsent_rows_at_the_outbox_limit(monkeypatch):
+@pytest.mark.parametrize("dropped", [0, 3])
+def test_the_host_prune_caps_unsent_rows_at_the_outbox_limit_and_reports_a_drop(monkeypatch, capsys, dropped):
     from scripts.swarm_ledger import outbox_host
 
-    prune, cap = Mock(return_value=0), Mock(return_value=0)
+    prune, cap = Mock(return_value=0), Mock(return_value=dropped)
     monkeypatch.setattr(outbox_host.outbox, "prune", prune)
     monkeypatch.setattr(outbox_host.outbox, "cap", cap)
     monkeypatch.setattr(outbox_host.outbox, "MAX_UNSENT", 7)
@@ -339,6 +344,7 @@ def test_the_host_prune_caps_unsent_rows_at_the_outbox_limit(monkeypatch):
     outbox_host.prune(repository, BusConfig(dedupe_window_ms=9_000))
     prune.assert_called_once_with(repository, 9_000)
     cap.assert_called_once_with(repository, 7)
+    assert capsys.readouterr().err == ("ledger outbox prune: dropped 3 unsent rows past 7\n" if dropped else "")
 
 
 def test_a_failed_prune_logs_one_line_and_leaves_the_interval_running(monkeypatch, capsys):
@@ -360,14 +366,6 @@ def test_the_outbox_limit_and_prune_interval_defaults():
     assert outbox_host.INTERVAL == 1.0
 
 
-def _closed_port() -> str:
-    import socket
-
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return f"nats://127.0.0.1:{probe.getsockname()[1]}"
-
-
 def _unsent(repository) -> int:
     with repository.connect() as connection:
         return connection.execute("SELECT COUNT(*) FROM outbox").fetchone()[0]
@@ -386,7 +384,7 @@ def test_the_outbox_stays_bounded_with_no_bus(tmp_path, monkeypatch, backend):
     assert _unsent(repository) == 3
     monkeypatch.setattr(outbox, "MAX_UNSENT", 1)
     monkeypatch.setenv("AGENTIHOOKS_BUS", backend)
-    monkeypatch.setenv("AGENTIHOOKS_BUS_URL", _closed_port())
+    monkeypatch.setenv("AGENTIHOOKS_BUS_URL", nats_server.closed_url())
     with outbox_host.running(repository, interval=0.01, prune_every=0.01):
         deadline = time.monotonic() + 5
         while _unsent(repository) > 1 and time.monotonic() < deadline:
@@ -394,22 +392,32 @@ def test_the_outbox_stays_bounded_with_no_bus(tmp_path, monkeypatch, backend):
         assert _unsent(repository) == 1
 
 
-@pytest.mark.wall_clock
-def test_a_reload_with_nats_unreachable_finishes_inside_the_stop_deadline(tmp_path, monkeypatch, capsys):
+def _reload_with_nats_unreachable(tmp_path, monkeypatch) -> tuple:
     import time
 
-    from scripts.scheduler import process_interval
     from scripts.swarm_ledger import outbox_host
 
     repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
     repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    monkeypatch.setenv("AGENTIHOOKS_BUS_URL", _closed_port())
+    monkeypatch.setenv("AGENTIHOOKS_BUS_URL", nats_server.closed_url())
     with outbox_host.running(repository, interval=0.01):
         time.sleep(0.3)
         stopping = time.monotonic()
-    assert time.monotonic() - stopping < process_interval.STOP_SECONDS
+    return repository, time.monotonic() - stopping
+
+
+@pytest.mark.wall_clock
+def test_a_reload_with_nats_unreachable_finishes_inside_the_stop_deadline(tmp_path, monkeypatch):
+    from scripts.scheduler import process_interval
+
+    _, stopped_in = _reload_with_nats_unreachable(tmp_path, monkeypatch)
+    assert stopped_in < process_interval.STOP_SECONDS
+
+
+def test_each_failed_open_with_nats_unreachable_logs_one_line_and_keeps_the_row(tmp_path, monkeypatch, capsys):
+    repository, _ = _reload_with_nats_unreachable(tmp_path, monkeypatch)
     lines = capsys.readouterr().err.splitlines()
-    assert lines
-    assert set(lines) == {"ledger bus relay: nats: no servers available for connection"}
+    assert len(lines) >= 1
+    assert lines == ["ledger bus relay: nats: no servers available for connection"] * len(lines)
     assert _unsent(repository) == 1

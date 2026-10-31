@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import logging
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, replace
@@ -37,6 +38,7 @@ MIN_FETCH_MS = 10
 LOOP_START_S = 5
 LOOP_STOP_S = 5
 FIRST_CONNECT_S = 2
+_log = logging.getLogger(__name__)
 ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
 
 
@@ -60,7 +62,9 @@ def auth_options(credentials: str | None) -> dict:
 
 
 async def _unreported(error: Exception) -> None:
-    """Drop a connect attempt error; the open that gives up raises once to its caller."""
+    """Drop a connection error, which the open or the next call raises; log any other error in one line."""
+    if not isinstance(error, (OSError, asyncio.TimeoutError, nats_client.errors.NoServersError)):
+        _log.error("nats: %s", error)
 
 
 def connect_options(config: BusConfig) -> dict:
