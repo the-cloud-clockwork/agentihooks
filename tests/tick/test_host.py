@@ -1,4 +1,4 @@
-"""The host steps run the tick wrapper's relay, probes, health, commands, refresh, intent and reboot calls in today's order."""
+"""The host steps run the tick wrapper's relay, probes, health, commands, phases, refresh, intent and reboot calls in today's order."""
 
 from types import SimpleNamespace
 from typing import Any
@@ -70,7 +70,7 @@ def _cli(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespace
 
     def phase_steps(*args: Any) -> list[str]:
         calls.append(("phases", *args))
-        return ["phased"]
+        return ["phase ticked"]
 
     return SimpleNamespace(
         now_ms=lambda: 7,
@@ -120,7 +120,7 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("prompt backlog", "wrapper health", 40),
         ("command runner", "wrapper commands", 10),
         ("urgent hold", "wrapper phases", 10),
-        ("phase steps", "wrapper phases", 20),
+        ("planning and phase pass", "wrapper phases", 20),
         ("refresh job", "wrapper refresh", 10),
         ("intent check", "wrapper intent", 10),
         ("reboot pass", "wrapper reboot", 10),
@@ -211,9 +211,12 @@ def test_a_ledger_that_is_no_client_skips_the_health_probe(monkeypatch: pytest.M
     assert box == {}
 
 
-def test_the_phase_steps_observe_the_urgent_hold_then_run_the_phases(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper phases", calls, _pass(inbox="inbox", doc="doc"), monkeypatch) == ["phased"]
+    state = _pass(inbox="inbox", doc="doc")
+    assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked"]
     assert calls == [
         ("call", urgent_hold.observe, STORE, "sw", "doc", 7),
         ("phases", "inbox", STORE, "sw", "doc", "ledger"),

@@ -1,4 +1,4 @@
-"""The host steps of the tick wrapper: relay, launch slots, probes, host health, commands, refresh, intent and reboot."""
+"""The host steps of the tick wrapper: relay, launch slots, probes, host health, commands, phases, refresh, intent and reboot."""
 
 from collections.abc import Callable
 from importlib import import_module
@@ -16,7 +16,7 @@ from scripts.swarm import (
     reboot,
     timing,
 )
-from scripts.swarm.health import prompt_backlog, urgent_hold
+from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
 from scripts.tick.steps import CallStep
 
@@ -89,14 +89,6 @@ def _prompt_backlog(cli: Any, get: Get) -> None:
     timing.call(prompt_backlog.observe, get("store"), get("slug"), cli.now_ms() // 1000)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _urgent_hold(cli: Any, get: Get) -> None:
-    timing.call(urgent_hold.observe, get("store"), get("slug"), get("doc"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
-
-
-def _phase_steps(cli: Any, get: Get) -> Any:
-    return cli._phase_steps(get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"))
-
-
 def _command_runner(cli: Any, get: Get) -> Any:
     from scripts.swarm import command_runner
 
@@ -106,6 +98,16 @@ def _command_runner(cli: Any, get: Get) -> Any:
 def _refresh_job(cli: Any, get: Get) -> None:
     if get("scheduled"):
         timing.call(cli.refresh_job.start, get("store"), get("slug"))  # pyright: ignore[reportUnknownMemberType]
+
+
+def _urgent_hold(cli: Any, get: Get) -> None:
+    from scripts.swarm.health import urgent_hold
+
+    timing.call(urgent_hold.observe, get("store"), get("slug"), get("doc"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
+
+
+def _phase_passes(cli: Any, get: Get) -> Any:
+    return cli._phase_steps(get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"))
 
 
 def _intent_check(cli: Any, get: Get) -> None:
@@ -150,7 +152,7 @@ STEPS = (
     CallStep("prompt backlog", "wrapper health", 40, held(_prompt_backlog)),
     CallStep("command runner", "wrapper commands", 10, held(_command_runner)),
     CallStep("urgent hold", "wrapper phases", 10, held(_urgent_hold)),
-    CallStep("phase steps", "wrapper phases", 20, held(_phase_steps)),
+    CallStep("planning and phase pass", "wrapper phases", 20, held(_phase_passes)),
     CallStep("refresh job", "wrapper refresh", 10, held(_refresh_job)),
     CallStep("intent check", "wrapper intent", 10, held(_intent_check)),
     CallStep("reboot pass", "wrapper reboot", 10, held(_reboot_pass)),
