@@ -378,6 +378,21 @@ def test_tick_pass_reports_a_failed_cancel(store, counted):
     assert found[0].startswith("panic cancel failed: ")
 
 
+def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.swarm.store import SwarmError
+
+    panic.engage(store, "pressed", False, [FIX], 0)
+
+    def unreadable(url: str, refused: str) -> None:
+        raise SwarmError(f"{refused}: boom")
+
+    monkeypatch.setattr(stack, "change", unreadable)
+    assert panic.tick_pass(store, True, 1_000, Runs({})) == [
+        f"panic cancel failed: cannot read pull request {FIX}: boom"
+    ]
+
+
 def test_the_tick_spawns_nothing_while_panic_holds():
     source = Path(panic.__file__).with_name("tick.py").read_text()
     assert "config.engine != EVENTS_ENGINE and panic.state(store) is None:\n" in source

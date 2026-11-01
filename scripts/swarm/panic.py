@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from scripts.swarm.store import PREFIX, RedisStore
+from scripts.swarm.store import PREFIX, RedisStore, SwarmError
 from scripts.tick.adapters.github import command
 
 FLEET = "fleet"
@@ -181,6 +181,6 @@ def tick_pass(store: RedisStore, ok: bool, now_ms: int, run: Runner = gh) -> lis
         return actions
     try:
         cancelled = cancel_runs(current.fixes, REPOS, run)
-    except (subprocess.SubprocessError, OSError, ValueError) as error:
+    except (subprocess.SubprocessError, OSError, ValueError, SwarmError) as error:
         return [*actions, f"panic cancel failed: {error}"]
     return [*actions, *(f"panic cancelled {line}" for line in cancelled)]
