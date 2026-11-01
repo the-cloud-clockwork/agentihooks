@@ -59,7 +59,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from contextvars import copy_context
@@ -189,7 +189,9 @@ from scripts.swarm_ledger import (
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 from scripts.tick import view as ledger_view
-from scripts.tick.adapters.github import command
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.steps import host as host_steps
 
 SETTABLE = {
@@ -1666,23 +1668,20 @@ def _tracks(run, recorded):
     return done.returncode == 0 and done.stdout.strip() == f"origin/{recorded}"
 
 
-PULL_HEAD = "headRefName,headRepository,headRepositoryOwner"
+PULL_SECONDS = 20
 
 
-def pull_branch(url, run=subprocess.run):
+def pull_branch(
+    url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control
+) -> tuple[str, str]:
+    """Read a pull request's head branch and the url of the repository holding it, both empty when unreadable."""
     try:
-        done = run(command(["pr", "view", url, "--json", PULL_HEAD]), capture_output=True, text=True, timeout=20)
-        found = json.loads(done.stdout) if done.returncode == 0 else {}
-        return found["headRefName"], _head_repo(url, found)
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        provider, reference = ports(url)
+        change = provider.change(reference, deadline=Deadline.after(PULL_SECONDS))
+    except stack.PORT_ERRORS:
         return "", ""
-
-
-def _head_repo(url, found):
-    owner, repo = found.get("headRepositoryOwner") or {}, found.get("headRepository") or {}
-    if not (owner.get("login") and repo.get("name")):
-        return ""
-    return f"{url.split('/pull/')[0].rsplit('/', 2)[0]}/{owner['login']}/{repo['name']}"
+    host = url.split("/pull/")[0].rsplit("/", 2)[0]
+    return change.head_branch, f"{host}/{change.head_repository}" if change.head_repository else ""
 
 
 def origin_repo(run=subprocess.run):

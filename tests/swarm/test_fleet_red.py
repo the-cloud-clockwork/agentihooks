@@ -379,3 +379,98 @@ def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, m
     [(slug, got_store, got_ledger, rows, now_ms)] = seen
     assert (slug, got_store, got_ledger, list(rows), now_ms) == ("sw", store, ledger, ["a"], 4_321)
     assert "noticed" in actions
+
+
+SAVED = [pull(1, run("Tests", "FAILURE")), pull(2, run("Lint", None, None), status("Gate", "SUCCESS"))]
+
+
+def test_the_cache_lists_once_and_keeps_the_listing_ten_minutes(store: RedisStore) -> None:
+    reads: list[str] = []
+
+    def reader(repo: str) -> list[OpenChange]:
+        reads.append(repo)
+        return SAVED
+
+    assert fleet_red.cached(store, "sw", "o/r", reader) == tuple(SAVED)
+    assert fleet_red.cached(store, "sw", "o/r", reader) == tuple(SAVED)
+    assert reads == ["o/r"]
+    assert store.redis.ttl(store.key("sw", "fleet-red-pulls:o/r")) == 600
+    assert fleet_red.TTL == 600
+
+
+def test_the_cache_keeps_each_swarm_and_repository_apart(store: RedisStore) -> None:
+    reads: list[str] = []
+
+    def reader(repo: str) -> list[OpenChange]:
+        reads.append(repo)
+        return SAVED
+
+    fleet_red.cached(store, "sw", "o/r", reader)
+    fleet_red.cached(store, "sw", "o/s", reader)
+    fleet_red.cached(store, "other", "o/r", reader)
+    assert reads == ["o/r", "o/s", "o/r"]
+
+
+@pytest.mark.parametrize(
+    "error", [TimeoutError("x"), KeyError("x"), OSError("x"), ValueError("x"), subprocess.SubprocessError()]
+)
+def test_the_cache_keeps_a_failed_listing_as_none_for_ten_minutes(store: RedisStore, error: Exception) -> None:
+    reads: list[str] = []
+
+    def reader(repo: str) -> list[OpenChange]:
+        reads.append(repo)
+        raise error
+
+    assert fleet_red.cached(store, "sw", "o/r", reader) is None
+    assert fleet_red.cached(store, "sw", "o/r", reader) is None
+    assert reads == ["o/r"]
+    assert store.redis.ttl(store.key("sw", "fleet-red-pulls:o/r")) == 600
+
+
+def test_the_cache_keeps_an_empty_listing(store: RedisStore) -> None:
+    reads: list[str] = []
+
+    def reader(repo: str) -> list[OpenChange]:
+        reads.append(repo)
+        return []
+
+    assert fleet_red.cached(store, "sw", "o/r", reader) == ()
+    assert fleet_red.cached(store, "sw", "o/r", reader) == ()
+    assert reads == ["o/r"]
+
+
+def test_the_cache_lists_through_read_without_a_reader(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fleet_red, "read", lambda repo: SAVED if repo == "o/r" else [])
+    assert fleet_red.cached(store, "sw", "o/r") == tuple(SAVED)
+
+
+def test_the_notice_pass_reads_through_the_cache_without_a_reader(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = {"red": task("red", pr_url=MINE)}
+    both = [run("Tests", "FAILURE"), run("Semgrep", "FAILURE")]
+    reads: list[str] = []
+
+    def reader(repo: str) -> list[OpenChange]:
+        reads.append(repo)
+        return fleet(both, *[both] * 3)
+
+    monkeypatch.setattr(fleet_red, "read", reader)
+    ledger = Ledger()
+    held = fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS)
+    assert held == [f"task red held unclaimed, {MINE} is red only from Semgrep, Tests"]
+    store.redis.delete(store.key("sw", "fleet-red:red"))
+    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS) == held
+    assert reads == ["o/r"]
+
+
+def test_the_notice_pass_declares_nothing_while_the_cache_holds_a_failed_listing(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def reader(repo: str) -> list[OpenChange]:
+        raise TimeoutError("x")
+
+    monkeypatch.setattr(fleet_red, "read", reader)
+    ledger = Ledger()
+    assert fleet_red.notice_pass("sw", store, ledger, {"red": task("red", pr_url=MINE)}, NOW_MS) == []
+    assert ledger.notices == []

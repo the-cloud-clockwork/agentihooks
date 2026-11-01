@@ -564,7 +564,7 @@
   "scripts/swarm/claim_lost.py": 6,
   "scripts/swarm/claim_order.py": 98,
   "scripts/swarm/clearance.py": 116,
-  "scripts/swarm/cli.py": 3109,
+  "scripts/swarm/cli.py": 3083,
   "scripts/swarm/code_reach.py": 240,
   "scripts/swarm/command_runner.py": 22,
   "scripts/swarm/commands.py": 94,
