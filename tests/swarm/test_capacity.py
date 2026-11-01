@@ -1035,7 +1035,7 @@ def test_a_config_without_a_master_lane_or_declared_account_stays_unchanged(monk
 
     found = {"claude": MasterAccount("claude", declared)} if declared else {}
     monkeypatch.setattr(capacity.master_account, "load", lambda env: found)
-    config = SwarmConfig("sw", "/repo", lanes=lanes)
+    config = SwarmConfig("sw", "/repo", 1, 0, lanes=lanes)
     assert capacity.with_declared_master(config, {}) is config
 
 
@@ -1043,7 +1043,7 @@ def test_the_declared_master_account_joins_the_master_lane(monkeypatch):
     from scripts.routing.master_account import MasterAccount
 
     monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": MasterAccount("claude", "main")})
-    config = SwarmConfig("sw", "/repo", lanes={"master": {"agent": "claude"}, "eng": {"agent": "codex"}})
+    config = SwarmConfig("sw", "/repo", 1, 0, lanes={"master": {"agent": "claude"}, "eng": {"agent": "codex"}})
     assert capacity.with_declared_master(config, {}).lanes == {
         "master": {"agent": "claude", "account": "main"},
         "eng": {"agent": "codex"},
