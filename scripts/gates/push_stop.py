@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from hooks.config import CONDITIONS_TIMEOUT_SEC
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
 
@@ -50,7 +50,7 @@ GATE_LATE = (
     "Run python -m scripts.ci_prepush there and commit."
 )
 PUSH_LATE = "The stop hook had too little time left to push {path}, so it did not push it. Push it yourself."
-PANIC_HELD = "Fleet panic holds every push but the fix, so the stop hook did not push {path}."
+PANIC_HELD = "Fleet panic holds, so the stop hook pushes nothing and did not push {path}."
 
 
 @dataclass(frozen=True)
@@ -214,7 +214,7 @@ class PushStop:
     def matches(self, call):
         return not call.tool
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: object) -> Decision:
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         ledger = self.ledger()

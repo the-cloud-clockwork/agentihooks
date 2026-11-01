@@ -1148,7 +1148,15 @@ def test_fleet_panic_keeps_the_stop_hook_from_pushing_and_names_panic(rig):
     assert rig.ledger.comments == []
 
 
-@pytest.mark.parametrize("on", [None, {"kind": "checks", "target": "https://github.com/o/r/pull/7"}])
+@pytest.mark.parametrize(
+    "on",
+    [
+        None,
+        {"kind": "checks", "target": "https://github.com/o/r/pull/7"},
+        {"kind": "merge", "target": "https://github.com/o/r/pull/7"},
+        {"kind": "task", "target": "t9"},
+    ],
+)
 def test_any_live_declared_wait_lets_the_stop_pass_while_fleet_panic_holds(rig, on):
     panic_on(rig)
     rig.commit()
