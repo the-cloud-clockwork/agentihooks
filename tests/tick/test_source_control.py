@@ -497,6 +497,51 @@ def test_github_latest_runs_read_the_newest_runs_of_the_repository(
     ]
 
 
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_workflow_runs_read_every_page_of_one_workflow_since_a_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    row = {
+        "id": 8,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "head_branch": None,
+        "head_sha": "abc",
+        "created_at": "2026-10-08T10:00:00Z",
+        "run_started_at": "2026-10-08T10:01:00Z",
+        "updated_at": "2026-10-08T10:06:00Z",
+        "run_attempt": 2,
+        "name": "Tests",
+    }
+    first = [{**row, "id": index} for index in range(100)]
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"workflow_runs": first}, {"workflow_runs": [row]}])
+
+    found = provider.workflow_runs("test.yml", "pull_request", "success", "2026-10-07T10:06:40Z", deadline=_deadline())
+
+    assert len(found) == 101
+    assert found[-1] == port.WorkflowRun(
+        8,
+        "pull_request",
+        "completed",
+        "success",
+        None,
+        "abc",
+        "2026-10-08T10:00:00Z",
+        "2026-10-08T10:01:00Z",
+        "2026-10-08T10:06:00Z",
+        2,
+    )
+    path = (
+        "repos/owner/project/actions/workflows/test.yml/runs?event=pull_request&status=success"
+        "&exclude_pull_requests=true&created=>=2026-10-07T10:06:40Z&per_page=100"
+    )
+    assert recorder.calls == [
+        (github.CALLER, ["api", f"{path}&page=1"], {"cwd": tmp_path, "timeout": 9, **REST}),
+        (github.CALLER, ["api", f"{path}&page=2"], {"cwd": tmp_path, "timeout": 9, **REST}),
+    ]
+
+
 @pytest.mark.parametrize("body", ["", "{}"])
 def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, body: str
@@ -531,6 +576,7 @@ def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
         ("cancel_run", (5,), None),
         ("merged_at", ("abc123",), "2026-10-19T21:20:03Z"),
         ("open_changes", (), (port.OpenChange("u", (port.RollupCheck("Tests", "FAILURE", "t"),)),)),
+        ("workflow_runs", ("test.yml", "push", "success", "2026-10-07T10:06:40Z"), ()),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(
