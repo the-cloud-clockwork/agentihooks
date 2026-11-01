@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -497,6 +498,22 @@ def test_source_control_names_the_github_port_and_the_change_a_url_names(
     provider, reference = stack.source_control(url)
     assert reference == ChangeRef(repository, number)
     assert provider == GitHubSourceControl(repository, Path.cwd(), "dev")
+
+
+def test_login_source_control_is_the_github_port_bound_to_no_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    monkeypatch.chdir(tmp_path)
+    assert stack.login_source_control() == GitHubSourceControl("", tmp_path, "dev")
+
+
+def test_a_port_refusal_reports_the_provider_output_else_the_exception_text() -> None:
+    assert stack.refusal(subprocess.CalledProcessError(1, [], stderr=" no such issue\n")) == "no such issue"
+    assert stack.refusal(subprocess.CalledProcessError(1, [])) == ""
+    assert stack.refusal(TimeoutError("tool deadline expired")) == "tool deadline expired"
+    assert stack.PORT_ERRORS == (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError)
 
 
 @pytest.mark.parametrize(

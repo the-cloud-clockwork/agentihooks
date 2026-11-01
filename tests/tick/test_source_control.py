@@ -291,6 +291,48 @@ def test_github_comment_posts_on_the_change(monkeypatch: pytest.MonkeyPatch, tmp
     assert recorder.calls[0][1] == ["api", "repos/owner/project/issues/7/comments", "-f", "body=hello"]
 
 
+def test_github_issue_state_reads_the_issue(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"state": "open"}])
+
+    assert provider.issue_state(REFERENCE, deadline=_deadline()) == "open"
+    assert recorder.calls == [
+        (github.CALLER, ["api", "repos/owner/project/issues/7"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
+    ]
+
+
+def test_github_close_issue_patches_its_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"state": "closed"}])
+
+    assert provider.close_issue(REFERENCE, deadline=_deadline()) == "closed"
+    assert recorder.calls[0][1] == ["api", "repos/owner/project/issues/7", "-X", "PATCH", "-f", "state=closed"]
+
+
+def test_github_rate_limit_reads_the_core_quota(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    core = {"used": 40, "remaining": 4960, "reset": 1700}
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"resources": {"core": core, "search": {}}}])
+
+    assert provider.rate_limit(deadline=_deadline()) == port.RateLimit(40, 4960, 1700)
+    assert recorder.calls[0][1] == ["api", "rate_limit"]
+
+
+@pytest.mark.parametrize(
+    "operation,args,answer",
+    [
+        ("issue_state", (REFERENCE,), "open"),
+        ("close_issue", (REFERENCE,), "closed"),
+        ("rate_limit", (), port.RateLimit(1, 2, 3)),
+    ],
+)
+def test_fake_issue_and_rate_limit_tools_record_and_answer(
+    operation: str, args: tuple[object, ...], answer: object
+) -> None:
+    provider = fakes.FakeSourceControl({operation: answer})
+    deadline = Deadline.after(10, clock=lambda: 0.0)
+
+    assert getattr(provider, operation)(*args, deadline=deadline) is answer
+    assert provider.calls == [fakes.Call(operation, args, deadline)]
+
+
 def test_github_tags_read_the_git_remote(tmp_path: Path) -> None:
     seen: list[tuple[list[str], dict[str, object]]] = []
 
@@ -325,6 +367,9 @@ def test_github_defaults() -> None:
         ("tags", ()),
         ("comment", (REFERENCE, "body")),
         ("capabilities", ()),
+        ("issue_state", (REFERENCE,)),
+        ("close_issue", (REFERENCE,)),
+        ("rate_limit", ()),
     ],
 )
 def test_github_expired_deadline_prevents_external_reads(
