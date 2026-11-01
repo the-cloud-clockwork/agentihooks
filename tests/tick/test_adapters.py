@@ -6,9 +6,11 @@ import ast
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
+from hooks.classifier.result import DecisionRequest
 from scripts.tick import ports
 from scripts.tick.adapters import host, inbox, llm, metrics
 from scripts.tick.deadline import Deadline
@@ -52,7 +54,7 @@ class _Store:
 
 def test_inbox_delegates_each_operation_as_the_tick() -> None:
     store = _Store()
-    port = inbox.StoreInbox(store, "tick@swarm")
+    port = inbox.StoreInbox(cast(Any, store), "tick@swarm")
     assert isinstance(port, ports.Inbox)
     assert port.read("eng-1@swarm", deadline=_open()) == ["item for eng-1@swarm"]
     assert port.send("eng-1@swarm", "wake", deadline=_open()) == "sent"
@@ -67,7 +69,7 @@ def test_inbox_delegates_each_operation_as_the_tick() -> None:
 @pytest.mark.parametrize("operation,args", [("read", ("a",)), ("send", ("a", "b")), ("close", ("a",))])
 def test_inbox_refuses_an_expired_deadline_before_the_store(operation: str, args: tuple[str, ...]) -> None:
     store = _Store()
-    port = inbox.StoreInbox(store, "tick@swarm")
+    port = inbox.StoreInbox(cast(Any, store), "tick@swarm")
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         getattr(port, operation)(*args, deadline=_expired())
     assert store.calls == []
@@ -98,13 +100,13 @@ def test_llm_classifies_through_a_backend_bounded_by_the_deadline() -> None:
     assert answer == "verdict"
     assert [(item.model, item.url, item.timeout_s) for item in built] == [("liquid", "https://decide", 6.0)]
     request = built[0].seen[0]
-    assert type(request).__name__ == "DecisionRequest"
+    assert isinstance(request, DecisionRequest)
     assert (request.state, request.questions) == ({"task": "t"}, {"q": "?"})
 
 
 def test_llm_refuses_an_expired_deadline_before_building_a_backend() -> None:
     built: list[object] = []
-    port = llm.ApiLlm("liquid", "https://decide", lambda *args: built.append(args))
+    port = llm.ApiLlm("liquid", "https://decide", cast(Any, lambda *args: built.append(args)))
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         port.classify({"state": {}, "questions": {}}, deadline=_expired())
     assert built == []
@@ -129,7 +131,7 @@ class _Box:
 def test_metrics_spools_every_named_table_in_one_batch() -> None:
     box = _Box()
     tables = {"passes": "passes table", "stages": "stages table"}
-    port = metrics.SpoolMetrics(box, tables)
+    port = metrics.SpoolMetrics(cast(Any, box), cast(Any, tables))
     assert isinstance(port, ports.Metrics)
     rows = {"passes": ({"a": 1}, {"a": 2}), "stages": [{"b": 3}]}
     assert port.emit(rows, deadline=_open()) == 3
@@ -139,7 +141,7 @@ def test_metrics_spools_every_named_table_in_one_batch() -> None:
 
 def test_metrics_refuses_an_unknown_table_and_an_expired_deadline() -> None:
     box = _Box()
-    port = metrics.SpoolMetrics(box, {"passes": "passes table"})
+    port = metrics.SpoolMetrics(cast(Any, box), cast(Any, {"passes": "passes table"}))
     with pytest.raises(KeyError, match="unknown metrics table: other"):
         port.emit({"other": [{}]}, deadline=_open())
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
@@ -181,7 +183,7 @@ def test_local_host_wires_the_controller_sample_and_both_jobs(monkeypatch: pytes
         lambda store, slug, now_ms, environ: calls.append(("snapshot", store, slug, now_ms, environ)) or "n",
     )
     environ = {"A": "1"}
-    port = host.local_host("store", "slug", environ)
+    port = host.local_host(cast(Any, "store"), "slug", environ)
     assert port.read("sample", deadline=_open()) == "s"
     assert port.run({"job": "refresh"}, deadline=_open()) == "r"
     assert port.run({"job": "snapshot", "now_ms": 5}, deadline=_open()) == "n"
