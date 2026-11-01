@@ -12,7 +12,7 @@ import pytest
 
 from hooks.classifier.result import DecisionRequest
 from scripts.tick import ports
-from scripts.tick.adapters import host, inbox, llm, metrics
+from scripts.tick.adapters import fakes, host, inbox, llm, metrics
 from scripts.tick.deadline import Deadline
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,8 +47,8 @@ class _Store:
         self.calls.append(("send", sender, address, text))
         return "sent"
 
-    def close(self, item_id: str, closer: str, kind: str) -> str:
-        self.calls.append(("close", item_id, closer, kind))
+    def close(self, item_id: str, closer: str, kind: str, detail: str) -> str:
+        self.calls.append(("close", item_id, closer, kind, detail))
         return "closed"
 
 
@@ -58,15 +58,73 @@ def test_inbox_delegates_each_operation_as_the_tick() -> None:
     assert isinstance(port, ports.Inbox)
     assert port.read("eng-1@swarm", deadline=_open()) == ["item for eng-1@swarm"]
     assert port.send("eng-1@swarm", "wake", deadline=_open()) == "sent"
-    assert port.close("abc", deadline=_open()) == "closed"
+    assert port.close("abc", "handoff", "eng-2@swarm", deadline=_open()) == "closed"
+    assert port.close("def", "cancel", deadline=_open()) == "closed"
     assert store.calls == [
         ("inbox", "eng-1@swarm"),
         ("send", "tick@swarm", "eng-1@swarm", "wake"),
-        ("close", "abc", "tick@swarm", "done"),
+        ("close", "abc", "tick@swarm", "handoff", "eng-2@swarm"),
+        ("close", "def", "tick@swarm", "cancel", ""),
     ]
 
 
-@pytest.mark.parametrize("operation,args", [("read", ("a",)), ("send", ("a", "b")), ("close", ("a",))])
+def _strict_store() -> Any:
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+
+    return InboxStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+
+
+def test_inbox_closes_a_work_item_on_a_strict_store_only_with_an_outcome() -> None:
+    from scripts.inbox.store import InboxError
+
+    store = _strict_store()
+    port = inbox.StoreInbox(store, "bob")
+    bare = store.send("alice", "bob", "review my branch")
+    with pytest.raises(InboxError, match="^done needs an outcome naming where the work went$"):
+        port.close(bare.id, "done", deadline=_open())
+    assert store.get(bare.id).state == "pending"
+    work = store.send("alice", "bob", "fix the gate")
+    closed = cast(Any, port.close(work.id, "done", "merged the fix", deadline=_open()))
+    assert (closed.state, closed.reason) == ("done", "done: merged the fix")
+    note = store.send("alice", "bob", "status", fyi=True)
+    assert cast(Any, port.close(note.id, "done", deadline=_open())).state == "done"
+
+
+@pytest.mark.parametrize(
+    "outcome,detail,message",
+    [
+        ("done", "", "^done needs an outcome naming where the work went$"),
+        ("done", "  ", "^done needs an outcome naming where the work went$"),
+        ("handoff", "", "^handoff needs the address the work went to$"),
+        ("blocked", "", "^blocked needs what it is blocked on$"),
+        ("finished", "x", "^closing needs a reason: one of done, handoff, blocked, cancel$"),
+    ],
+)
+def test_fake_inbox_refuses_a_close_the_store_refuses(outcome: str, detail: str, message: str) -> None:
+    from scripts.inbox.store import InboxError
+
+    fake = fakes.FakeInbox()
+    with pytest.raises(InboxError, match=message):
+        fake.close("abc", outcome, detail, deadline=_open())
+    assert fake.calls == []
+
+
+def test_fake_inbox_records_a_close_with_an_outcome_and_an_information_item_bare() -> None:
+    fake = fakes.FakeInbox(information={"note"})
+    deadline = _open()
+    assert fake.close("abc", "done", "merged", deadline=deadline) is None
+    assert fake.close("def", "cancel", deadline=deadline) is None
+    assert fake.close("note", "done", deadline=deadline) is None
+    assert fake.calls == [
+        fakes.Call("close", ("abc", "done", "merged"), deadline),
+        fakes.Call("close", ("def", "cancel", ""), deadline),
+        fakes.Call("close", ("note", "done", ""), deadline),
+    ]
+
+
+@pytest.mark.parametrize("operation,args", [("read", ("a",)), ("send", ("a", "b")), ("close", ("a", "cancel"))])
 def test_inbox_refuses_an_expired_deadline_before_the_store(operation: str, args: tuple[str, ...]) -> None:
     store = _Store()
     port = inbox.StoreInbox(cast(Any, store), "tick@swarm")

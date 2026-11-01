@@ -3,7 +3,6 @@
   "/scripts/swarm/cli.py",
   "/scripts/swarm/fleet_red.py",
   "/scripts/swarm/github_reads.py",
-  "/scripts/swarm/github_sampler.py",
   "/scripts/swarm/health/checks.py",
   "/scripts/swarm/ledger_events.py",
   "/scripts/swarm/ledger_host.py",
@@ -11,7 +10,6 @@
   "/scripts/swarm/merge_queue.py",
   "/scripts/swarm/mutation_wait.py",
   "/scripts/swarm/panic.py",
-  "/scripts/swarm/publish.py",
   "/scripts/swarm/ready.py",
   "/scripts/swarm/stack.py",
   "/scripts/tick/adapters/github.py"

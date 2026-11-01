@@ -12,6 +12,7 @@ from scripts.tick.ports.source_control import (
     Merged,
     QueueEntry,
     QueueHealth,
+    RateLimit,
     Run,
     Tag,
 )
@@ -71,6 +72,12 @@ class SourceControl(Protocol):
 
     def capabilities(self, *, deadline: Deadline) -> Capabilities: ...
 
+    def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str: ...
+
+    def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str: ...
+
+    def rate_limit(self, *, deadline: Deadline) -> RateLimit: ...
+
 
 @runtime_checkable
 class Runtime(Protocol):
@@ -94,7 +101,7 @@ class Inbox(Protocol):
 
     def send(self, address: str, body: str, *, deadline: Deadline) -> object: ...
 
-    def close(self, item_id: str, *, deadline: Deadline) -> object: ...
+    def close(self, item_id: str, outcome: str, detail: str, *, deadline: Deadline) -> object: ...
 
 
 @runtime_checkable

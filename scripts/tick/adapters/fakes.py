@@ -2,6 +2,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from scripts.inbox.store import InboxError, close_reason
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools, Unsupported
 from scripts.tick.ports.source_control import (
@@ -13,6 +14,7 @@ from scripts.tick.ports.source_control import (
     Merged,
     QueueEntry,
     QueueHealth,
+    RateLimit,
     Run,
     Tag,
 )
@@ -143,6 +145,15 @@ class FakeSourceControl:
         answer = _record(self, "capabilities", (), deadline)
         return answer if answer is not None else Capabilities(merge_queue=self.merge_queue)
 
+    def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str:
+        return _record(self, "issue_state", (reference,), deadline)
+
+    def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str:
+        return _record(self, "close_issue", (reference,), deadline)
+
+    def rate_limit(self, *, deadline: Deadline) -> RateLimit:
+        return _record(self, "rate_limit", (), deadline)
+
 
 @dataclass
 class FakeRuntime:
@@ -175,6 +186,7 @@ class FakeProcesses:
 class FakeInbox:
     answers: dict[str, object] = field(default_factory=dict)
     calls: list[Call] = field(default_factory=list)
+    information: set[str] = field(default_factory=set)
 
     def read(self, address: str, *, deadline: Deadline) -> object:
         return _record(self, "read", (address,), deadline)
@@ -190,8 +202,12 @@ class FakeInbox:
             deadline,
         )
 
-    def close(self, item_id: str, *, deadline: Deadline) -> object:
-        return _record(self, "close", (item_id,), deadline)
+    def close(self, item_id: str, outcome: str, detail: str = "", *, deadline: Deadline) -> object:
+        """Refuse an unknown outcome, a missing detail or a bare done on a work item, as the inbox store does."""
+        state, reason = close_reason(outcome, detail)
+        if state == "done" and reason == "done" and item_id not in self.information:
+            raise InboxError("done needs an outcome naming where the work went")
+        return _record(self, "close", (item_id, outcome, detail), deadline)
 
 
 @dataclass

@@ -13,6 +13,7 @@ from scripts.ci_mutation.merge import merge_reports
 from scripts.swarm import github_reads
 from scripts.swarm.lost_runner import home as _backoff_home
 from scripts.swarm.store import SwarmError
+from scripts.tick.adapters.github import command
 
 RUN_URL = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)")
 SHARD_REPORT = re.compile(r"mutation-preflight-shard-([0-9]+)")
@@ -67,7 +68,7 @@ def _api(endpoint, binary=False, caller="mutation_wait"):
         raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(_held_until())}")
     try:
         with gh_audit.uncharged():
-            done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
+            done = subprocess.run(command(["api", endpoint]), capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as error:
         raise Unreachable(f"gh api {endpoint}: {error}") from error
     github_reads.charge(caller, endpoint, _now())
@@ -108,7 +109,7 @@ def _held_until():
 
 def _core_reset(now):
     try:
-        done = subprocess.run(["gh", "api", "rate_limit"], capture_output=True, timeout=20)
+        done = subprocess.run(command(["api", "rate_limit"]), capture_output=True, timeout=20)
         core = json.loads(done.stdout)["resources"]["core"]
         if not done.returncode and core["remaining"] == 0 and core["reset"] > now:
             return core["reset"]

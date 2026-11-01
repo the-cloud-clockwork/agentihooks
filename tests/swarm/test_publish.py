@@ -528,7 +528,6 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         "repository_branches": {str(repository): "predecessor"},
         hint: {"continue_from": f"origin/{continued}", "source": "origin/predecessor"},
     }
-    native = publish.execute
     native_git = publish.git
 
     def git_call(root, *args):
@@ -538,13 +537,14 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
 
     monkeypatch.setattr(publish, "git", git_call)
 
-    def execute(command, root):
-        if command[:3] == ["gh", "pr", "view"]:
-            assert command == ["gh", "pr", "view", pr_url, "--json", "state,headRefName"]
-            return json.dumps({"state": state, "headRefName": head})
-        return native(command, root)
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
-    monkeypatch.setattr(publish, "execute", execute)
+    def change(url: str, refused: str) -> ChangeState:
+        assert (url, refused) == (pr_url, f"cannot read pull request {pr_url}")
+        lowered = "open" if state == "OPEN" else "closed"
+        return ChangeState(ChangeRef("example/repo", 7), lowered, "a" * 40, "dev", state == "MERGED", url, head)
+
+    monkeypatch.setattr(publish.stack, "change", change)
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: head if state == "OPEN" else "")
 
     def update_task(slug, task_id, fields, by):

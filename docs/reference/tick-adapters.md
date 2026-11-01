@@ -1,23 +1,24 @@
 ---
-title: Tick inbox, llm, metrics, host, runtime and processes adapters
+title: Tick source control, inbox, llm, metrics, host, runtime and processes adapters
 parent: Reference
 nav_order: 64
 ---
 
-# Tick inbox, llm, metrics, host, runtime and processes adapters
+# Tick source control, inbox, llm, metrics, host, runtime and processes adapters
 
-The swarm tick reaches six outside systems through ports in `scripts.tick.ports`: the durable inbox store, the
-decision classifier, the local metrics spool, the host readings and background jobs, the agent runtime with its herdr
-panes, and the process table. Each port has one adapter in
+The swarm tick reaches seven outside systems through ports in `scripts.tick.ports`: the source control provider, the
+durable inbox store, the decision classifier, the local metrics spool, the host readings and background jobs, the
+agent runtime with its herdr panes, and the process table. Each port has one adapter in
 `scripts.tick.adapters` and one fake in `scripts.tick.adapters.fakes`. Every operation takes a `Deadline` keyword
 argument and is refused with `TimeoutError("tool deadline expired")` once that deadline has passed, before the
-adapter touches Redis, the network, SQLite or a job.
+adapter touches Redis, the network, SQLite, git or a job.
 
 Tick step modules never import the adapted implementations. A unit test in CI walks every module under
 `scripts/tick` outside `scripts/tick/adapters` and fails on any direct import of them.
 
 | Port | Adapter | Delegates to | Operations (read / write) |
 |---|---|---|---|
+| `SourceControl` | `github.GitHubSourceControl` | `scripts.swarm.github_reads.rest` (`gh api`) and `git ls-remote` | `change`, `checks`, `runs`, `queue_health`, `tags`, `capabilities` / `enqueue`, `merge`, `comment` |
 | `Inbox` | `inbox.StoreInbox` | `scripts.inbox.store.InboxStore` | `read` / `send`, `close` |
 | `Llm` | `llm.ApiLlm` | `hooks.classifier.api.DecisionsApiBackend` | none / `classify` |
 | `Metrics` | `metrics.SpoolMetrics` | `scripts.swarm.metrics_outbox` spool and tables | none / `emit` |
@@ -26,8 +27,10 @@ Tick step modules never import the adapted implementations. A unit test in CI wa
 | `Processes` | `processes.PassProcesses` | `hooks.proc.processes` | `scan` / none |
 
 The adapters exist and are tested; no tick pass builds a `Tools` bundle from them yet. Steps receive them once the
-tick engine passes a `Tools` bundle to each step. The one exception is `PassProcesses`: every swarm tick pass already
-uses it for the reaper's process scan, described under [One process scan per tick pass](#one-process-scan-per-tick-pass).
+tick engine passes a `Tools` bundle to each step. Two adapters are already in use outside a bundle: every swarm tick
+pass uses `PassProcesses` for the reaper's process scan, described under
+[One process scan per tick pass](#one-process-scan-per-tick-pass), and `scripts.swarm.stack.change` reads one pull
+request through `GitHubSourceControl`, described under [Source control adapter](#source-control-adapter).
 
 ## Deadlines
 
@@ -50,8 +53,100 @@ step_deadline = deadline.child(2.0)
 | `child(seconds)` | A deadline `seconds` from now, capped at the parent's expiry. |
 
 Each adapter calls `scripts.tick.adapters.inbox.check(deadline)` first. The host, llm and metrics adapters reuse the
-same function, and the runtime and processes adapters make the same check themselves, so all six refuse with the same
-message.
+same function, and the source control, runtime and processes adapters make the same check themselves, so all seven
+refuse with the same message.
+
+## Source control adapter
+
+The `SourceControl` port names no provider. Steps pass and receive the provider neutral records in
+`scripts.tick.ports.source_control`, all frozen dataclasses, and only an adapter knows how a provider spells them.
+`GitHubSourceControl` in `scripts.tick.adapters.github` is the one adapter today; another provider is one more class
+with the same nine operations, and no step changes.
+
+| Record | Fields | Meaning |
+|---|---|---|
+| `ChangeRef` | `repository`, `number` | One change, such as a pull request: `"owner/name"` and its number. |
+| `ChangeState` | `reference`, `state`, `head`, `base`, `merged`, `url` | The change's provider state (`open` or `closed` on GitHub), head commit, target branch, whether it merged, and its web address. |
+| `CheckState` | `name`, `status`, `conclusion`, `url` | One check on the change's head. `conclusion` is `None` until it completes. |
+| `Run` | `id`, `name`, `head`, `status`, `conclusion`, `url` | One workflow run on the change's head. |
+| `QueueEntry` | `reference`, `position` | The change's position in the merge queue after `enqueue`. |
+| `QueueHealth` | `depth`, `states` | The number of queue entries and the state of each entry read. |
+| `Merged` | `reference`, `sha` | The commit a merge produced. |
+| `Tag` | `name`, `sha` | One remote tag and the object `git ls-remote` lists for it. |
+| `Comment` | `reference`, `url` | The web address of a posted comment. |
+| `Capabilities` | `merge_queue` | Whether the provider has a merge queue on the base branch. |
+
+`GitHubSourceControl(repository, root, base, git=subprocess.run)` is a frozen dataclass:
+
+| Argument | Meaning |
+|---|---|
+| `repository` | `"owner/name"`, the repository whose merge queue `queue_health` and `capabilities` read. |
+| `root` | The working folder for every `gh` and `git` call; `tags` reads the `origin` remote of this checkout. |
+| `base` | The branch whose merge queue `enqueue`, `queue_health` and `capabilities` use, normally `dev`. |
+| `git` | The callable that runs `git`, with the `subprocess.run` signature. Tests pass a recorder here. |
+
+```python
+from pathlib import Path
+
+from scripts.tick.adapters.github import GitHubSourceControl
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports import Unsupported
+from scripts.tick.ports.source_control import ChangeRef
+
+port = GitHubSourceControl("the-cloud-clockwork/agentihooks", Path.cwd(), "dev")
+pull = ChangeRef("the-cloud-clockwork/agentihooks", 9166)
+deadline = Deadline.after(60.0)
+
+state = port.change(pull, deadline=deadline)
+failed = [check.name for check in port.checks(pull, deadline=deadline) if check.conclusion == "failure"]
+if port.capabilities(deadline=deadline).merge_queue:
+    entry = port.enqueue(pull, deadline=deadline)
+health = port.queue_health(deadline=deadline)
+if isinstance(health, Unsupported):
+    merged = port.merge(pull, deadline=deadline)
+port.comment(pull, "Queued by the tick.", deadline=deadline)
+releases = [tag.name for tag in port.tags(deadline=deadline) if tag.name.startswith("v")]
+```
+
+| Operation | GitHub call | Returns |
+|---|---|---|
+| `change(reference)` | REST `repos/<repository>/pulls/<number>` | `ChangeState` |
+| `checks(reference)` | `change`, then REST `repos/<repository>/commits/<head>/check-runs` | `tuple[CheckState, ...]` |
+| `runs(reference)` | `change`, then REST `repos/<repository>/actions/runs?head_sha=<head>` | `tuple[Run, ...]` |
+| `enqueue(reference)` | GraphQL read of the base branch merge queue and the pull request id and head, then the `enqueuePullRequest` mutation | `QueueEntry`, or `Unsupported("enqueue")` |
+| `merge(reference)` | `change`, then REST `PUT repos/<repository>/pulls/<number>/merge` with `sha=<head>` and `merge_method=squash` | `Merged` |
+| `queue_health()` | GraphQL `mergeQueue(branch: <base>)` with its first 100 entries | `QueueHealth`, or `Unsupported("queue_health")` |
+| `tags()` | `git ls-remote --tags origin` in `root` | `tuple[Tag, ...]` |
+| `comment(reference, body)` | REST `POST repos/<repository>/issues/<number>/comments` | `Comment` |
+| `capabilities()` | The same GraphQL queue read as `queue_health` | `Capabilities` |
+
+- Every `gh` call goes through `scripts.swarm.github_reads.rest` with the caller name `tick.source_control`
+  (`github.CALLER`), so each request is charged to that caller in `github-reads/charged.jsonl` under the AgentiHooks
+  home, beside every other audited GitHub read.
+- Each `gh` and `git` call gets `deadline.remaining` as its subprocess timeout. `checks`, `runs` and `merge` make a
+  `change` read first, and each later call receives what is left of the same deadline.
+- `checks` and `runs` read 100 rows a page and stop at the first page shorter than 100, or after ten pages, so at most
+  1,000 rows come back.
+- `enqueue` passes the head it just read as `expectedHeadOid`, and `merge` passes the head from its `change` read as
+  `sha`. GitHub refuses both when the pull request head moved after the read, so a push between the read and the
+  write is never queued or merged unread.
+- A repository without a merge queue on `base` answers `Unsupported("enqueue")` and `Unsupported("queue_health")`
+  instead of raising, and `capabilities()` reports `merge_queue=False`. `enqueue` then makes no second GraphQL call.
+- `queue_health().depth` is the queue's total count; `states` holds the states of the first 100 entries only.
+- `tags` drops the peeled `^{}` lines of annotated tags and strips `refs/tags/`, so each tag appears once with the
+  commit `ls-remote` lists first: the tag object for an annotated tag, the commit for a lightweight one.
+- `enqueue`, `queue_health` and `capabilities` use `base` for the queue branch, whatever branch the pull request
+  targets.
+- Provider errors are not caught. A non zero `gh` or `git` exit raises `subprocess.CalledProcessError` with the
+  command's stderr, a call that outlives its timeout raises `subprocess.TimeoutExpired`, and an answer missing an
+  expected field raises `KeyError`.
+
+`scripts.swarm.stack.change(url, refused)` is the first caller outside the tests. It builds the port from a GitHub
+pull request or issue address with `base` `dev` and the current folder as `root`, reads the change with a sixty second
+deadline, and turns any of the errors above into a `SwarmError` that starts with `refused`. `swarm park` reads
+through it whether each dependency pull request merged into dev when it picks the stacked base, and `swarm publish`
+reads whether the task's recorded pull request is closed before it lets a worktree on a new branch publish for the
+task.
 
 ## Inbox adapter
 
@@ -71,12 +166,14 @@ item = port.send("eng-1@rig-grade-swarm", "wake", deadline=Deadline.after(2.0))
 |---|---|---|
 | `read(address)` | `store.inbox(address)` | The address's items |
 | `send(address, body)` | `store.send(sender, address, body)` | The new item |
-| `close(item_id)` | `store.close(item_id, sender, "done")` | The closed item |
+| `close(item_id, outcome, detail="")` | `store.close(item_id, sender, outcome, detail)` | The closed item |
 
-`send` passes no `ref`, `fyi`, `task` or `item_id`. `close` closes as `done` with the adapter's sender as closer and
-no outcome detail. The store accepts that only for an item sent with `fyi`; any other item raises
-`InboxError("done needs an outcome naming where the work went")`, and closing an already closed item raises
-`InboxError("message <id> is closed: <reason>")`. The sender must also act for the item's address.
+`send` passes no `ref`, `fyi`, `task` or `item_id`. `close` takes an outcome, one of `done`, `handoff`, `blocked` or
+`cancel`, and its detail, and closes with the adapter's sender as closer. `handoff` needs the address the work went to
+and `blocked` needs what it is blocked on. A bare `done` is accepted only for an item sent with `fyi`; any other item
+raises `InboxError("done needs an outcome naming where the work went")`, and closing an already closed item raises
+`InboxError("message <id> is closed: <reason>")`. The sender must also act for the item's address. `FakeInbox`
+refuses an unknown outcome, a missing detail and a bare `done` on an item not listed in its `information` set.
 
 ## Llm adapter
 
@@ -311,9 +408,9 @@ def retire_all(names_and_pids):
 ## Declared effects
 
 `Tools` in `scripts.tick.ports` holds one adapter per port. `Tools.for_effects(effects)` returns a copy whose ports
-allow read operations always and write operations only on the ports named in `effects`. In this example `ledger`,
-`coordination`, `source_control`, `runtime` and `processes` stand for the adapters of the other five ports, and the
-remaining names are built as in the sections above.
+allow read operations always and write operations only on the ports named in `effects`. In this example `ledger`
+and `coordination` stand for the adapters of the two ports this page does not cover, `source_control`, `runtime` and
+`processes` are the adapters built in their sections above, and the remaining names are built as in those sections.
 
 ```python
 from scripts.inbox.store import connect as inbox_connect
@@ -343,6 +440,7 @@ The last line raises `UndeclaredEffect("host is not a declared effect")`.
 
 | Port | Read operations | Write operations |
 |---|---|---|
+| `source_control` | `change`, `checks`, `runs`, `queue_health`, `tags`, `capabilities` | `enqueue`, `merge`, `comment` |
 | `inbox` | `read` | `send`, `close` |
 | `llm` | none | `classify` |
 | `metrics` | none | `emit` |
@@ -356,11 +454,12 @@ its port.
 
 ## Fakes for tests
 
-`scripts.tick.adapters.fakes` has `FakeInbox`, `FakeLlm`, `FakeMetrics`, `FakeHost`, `FakeRuntime` and
-`FakeProcesses`. Each records a `Call` with the
+`scripts.tick.adapters.fakes` has `FakeSourceControl`, `FakeInbox`, `FakeLlm`, `FakeMetrics`, `FakeHost`,
+`FakeRuntime` and `FakeProcesses`. Each records a `Call` with the
 operation, its arguments and the deadline, and answers from its `answers` dictionary keyed by operation. Each refuses
 an expired deadline like the adapters. `fake_tools(effects)` builds a full `Tools` of fakes, restricted to `effects`
-when given. In `fake_tools`, the processes fake answers `scan` with an empty tuple.
+when given. In `fake_tools`, the processes fake answers `scan` with an empty tuple and the source control fake has no merge
+queue.
 
 ```python
 from scripts.tick.adapters.fakes import FakeHost, FakeRuntime, fake_tools
@@ -368,6 +467,36 @@ from scripts.tick.adapters.fakes import FakeHost, FakeRuntime, fake_tools
 tools = fake_tools(frozenset({"host"}))
 host = FakeHost({"run": True})
 runtime = FakeRuntime({"panes": [{"pane_id": "w1:p1"}]})
+```
+
+`FakeSourceControl(answers, merge_queue=False)` answers with records from `scripts.tick.ports.source_control`. Without
+an answer for an operation it falls back as follows:
+
+| Operation | No merge queue (default) | `merge_queue=True` |
+|---|---|---|
+| `enqueue` | `Unsupported("enqueue")` | `QueueEntry(reference, 1)` |
+| `queue_health` | `Unsupported("queue_health")` | `QueueHealth(0, ())` |
+| `capabilities` | `Capabilities(merge_queue=False)` | `Capabilities(merge_queue=True)` |
+| `checks`, `runs`, `tags` | `()` | `()` |
+| `change`, `merge`, `comment` | `None` | `None` |
+
+An entry in `answers` always wins, with or without a queue. A step that must work on a provider without a merge
+queue is tested against the default fake; give `change`, `merge` and `comment` an answer whenever the step reads one.
+
+```python
+from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports import Unsupported
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+pull = ChangeRef("owner/project", 7)
+open_pull = ChangeState(pull, "open", "abc123", "dev", False, "https://github.com/owner/project/pull/7")
+port = FakeSourceControl({"change": open_pull})
+deadline = Deadline.after(5.0)
+
+assert port.change(pull, deadline=deadline) is open_pull
+assert port.enqueue(pull, deadline=deadline) == Unsupported("enqueue")
+assert [call.operation for call in port.calls] == ["change", "enqueue"]
 ```
 
 `PassProcesses` takes its scan function as an argument, so a test can count scans without a fake:
@@ -400,12 +529,16 @@ and call the port from the step.
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| `Unsupported("enqueue")` or `Unsupported("queue_health")` from source control | The repository has no merge queue on the adapter's `base` branch, or the fake was built without one. | Check `capabilities().merge_queue` first and merge with `merge` instead, or build the adapter with the branch that has the queue. |
+| `CalledProcessError` from source control `merge` or `enqueue` | GitHub refused the write; a head that moved after the adapter's read is the usual cause. | Read the change again and retry against the new head once its checks pass. |
+| `CalledProcessError` from source control `tags` | `git ls-remote` failed in `root`, for example no `origin` remote or no access. | Run `git ls-remote --tags origin` in that folder. |
+| `TimeoutExpired` from a source control operation | `gh` or `git` outlived what was left of the deadline. | Give the step a larger deadline; `checks`, `runs` and `merge` spend it on two or more calls. |
 | `TimeoutError: tool deadline expired` | The deadline passed before the call; no outside system was touched. | Give the step a larger budget or check `deadline.remaining` before a slow call. |
 | `UndeclaredEffect: <port> is not a declared effect` | A step called a write operation on a port missing from its effects. | Declare the port in the step's effects. |
 | `TypeError: tools require a Deadline keyword argument` | A restricted port was called without `deadline=`. | Pass the step's `Deadline` by keyword. |
 | `KeyError: 'unknown metrics table: <name>'` | `emit` named a table the adapter was not built with. | Add the `Table` to the `tables` mapping. |
 | `BackendFailure: <model>: timeout` from `classify` | The decisions API did not answer within `deadline.remaining`. | Raise the deadline, or build `ApiLlm` with a model that answers faster. |
-| `InboxError: done needs an outcome naming where the work went` from `inbox.close` | The item was not sent with `fyi`, and the adapter closes without an outcome. | Close the item with `agentihooks msg close <id> done <where the work went>` or answer it with `agentihooks msg reply <id> <text>`. |
+| `InboxError: done needs an outcome naming where the work went` from `inbox.close` | The item was not sent with `fyi`, and the step closed it as `done` with no detail. | Pass the detail naming where the work went, or close with `handoff`, `blocked` or `cancel`. |
 | `Outcome(..., Status.UNAVAILABLE, "", detail="no agent named <handle>")` from `runtime.inspect` or `runtime.stop` | The `agents` lookup found no record for that name. | Check the name against the swarm's agent records; the router was not called. |
 | `TypeError` from `runtime.launch` | The request mapping lacks one of `config`, `lane`, `name`, `task`, or carries another key. | Pass exactly those four keys. |
 | `runtime.panes` returns `[]` | herdr answered without a `panes` list. | Run `herdr pane list` on the host and check the herdr server is up. |

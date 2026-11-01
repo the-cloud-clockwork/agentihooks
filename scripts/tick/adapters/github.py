@@ -19,11 +19,12 @@ from scripts.tick.ports.source_control import (
     Merged,
     QueueEntry,
     QueueHealth,
+    RateLimit,
     Run,
     Tag,
 )
 
-__all__ = ["CALLER", "GitHubSourceControl"]
+__all__ = ["CALLER", "GitHubSourceControl", "command"]
 
 CALLER = "tick.source_control"
 
@@ -48,6 +49,11 @@ Git = Callable[..., subprocess.CompletedProcess[str]]
 
 _PAGE = 100
 _MAX_PAGES = 10
+
+
+def command(args: list[str]) -> list[str]:
+    """Return the gh command line for the arguments; the GitHub adapter is the only module that names gh."""
+    return ["gh", *args]
 
 
 def _live(deadline: Deadline) -> float:
@@ -103,7 +109,13 @@ class GitHubSourceControl:
         """Read the state of one change."""
         body = self._api([f"repos/{reference.repository}/pulls/{reference.number}"], deadline)
         return ChangeState(
-            reference, body["state"], body["head"]["sha"], body["base"]["ref"], body["merged"], body["html_url"]
+            reference,
+            body["state"],
+            body["head"]["sha"],
+            body["base"]["ref"],
+            body["merged"],
+            body["html_url"],
+            body["head"]["ref"],
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
@@ -170,3 +182,17 @@ class GitHubSourceControl:
     def capabilities(self, *, deadline: Deadline) -> Capabilities:
         """Report which optional operations this repository supports."""
         return Capabilities(merge_queue=self._queue(deadline) is not None)
+
+    def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str:
+        """Read whether the issue is open or closed."""
+        return self._api([f"repos/{reference.repository}/issues/{reference.number}"], deadline)["state"]
+
+    def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str:
+        """Close the issue and return the state it reports after the write."""
+        path = f"repos/{reference.repository}/issues/{reference.number}"
+        return self._api([path, "-X", "PATCH", "-f", "state=closed"], deadline)["state"]
+
+    def rate_limit(self, *, deadline: Deadline) -> RateLimit:
+        """Read the core REST quota of the login, a read GitHub does not charge."""
+        core = self._api(["rate_limit"], deadline)["resources"]["core"]
+        return RateLimit(core["used"], core["remaining"], core["reset"])

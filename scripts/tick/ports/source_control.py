@@ -11,6 +11,7 @@ __all__ = [
     "Merged",
     "QueueEntry",
     "QueueHealth",
+    "RateLimit",
     "Run",
     "Tag",
 ]
@@ -30,6 +31,7 @@ class ChangeState:
     base: str
     merged: bool
     url: str
+    head_branch: str = ""
 
 
 @dataclass(frozen=True)
@@ -83,3 +85,10 @@ class Comment:
 @dataclass(frozen=True)
 class Capabilities:
     merge_queue: bool
+
+
+@dataclass(frozen=True)
+class RateLimit:
+    used: int
+    remaining: int
+    reset: int
