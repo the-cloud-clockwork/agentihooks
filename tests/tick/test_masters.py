@@ -1,7 +1,8 @@
 """The master and dispatcher seat steps run the tick's hand written seat calls at their sites in today's order."""
 
+from time import monotonic
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -17,8 +18,8 @@ from scripts.swarm import (
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, actions, masters
+from scripts.tick.step import Context, Domain, Result, Write
+from scripts.tick.steps import ACTIONS, PASS, actions, masters
 
 pytestmark = pytest.mark.unit
 
@@ -164,3 +165,55 @@ def test_a_system_exit_is_held_too() -> None:
     held = masters._held(leave)
     assert held(None, {"box": box}.get) == []
     assert isinstance(box[masters.RAISED], SystemExit)
+
+
+def test_the_site_view_reads_the_locals_and_the_box_for_the_pass_domain() -> None:
+    box: dict[str, Any] = {}
+    view = masters._SiteView({"slug": "sw", "box": "shadowed"}, box)
+    assert view.read(PASS, "slug") == "sw"
+    assert view.read(PASS, "box") is box
+    assert view.read(PASS, "doc") is None
+    assert view.read(Domain("tasks"), "slug") is None
+
+
+def test_a_site_runs_its_group_against_the_locals_under_the_step_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, Context]] = []
+
+    def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
+        seen.append((name, ctx))
+        result = Result((Write(ACTIONS, "one", ["ran"]),))
+        return (engine.StepRecord("one", 0.0, 1.0, result=result),)
+
+    monkeypatch.setattr(engine, "run_group", run_group)
+    assert masters.run_site("master watch", {"slug": "sw"}) == ["ran"]
+    ((name, ctx),) = seen
+    assert name == "master watch"
+    assert ctx.view.read(PASS, "slug") == "sw"
+    assert ctx.view.read(PASS, "box") == {}
+    assert ctx.deadline.expires_at - monotonic() == pytest.approx(600.0, abs=5.0)
+
+
+def test_a_site_raises_what_its_steps_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
+        cast(dict[str, Any], ctx.view.read(PASS, "box"))[masters.RAISED] = KeyError("held")
+        return ()
+
+    monkeypatch.setattr(engine, "run_group", run_group)
+    with pytest.raises(KeyError, match="held"):
+        masters.run_site("masters", {})
+
+
+@pytest.mark.parametrize(
+    ("site", "group"),
+    [
+        (masters.run_masters, "masters"),
+        (masters.run_seats, "master seats"),
+        (masters.run_dispatch, "dispatch seat"),
+        (masters.run_watch, "master watch"),
+    ],
+)
+def test_each_site_names_its_group(site: Any, group: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+    monkeypatch.setattr(engine, "run_group", lambda name, ctx: seen.append(name) or ())
+    assert site({}) == []
+    assert seen == [group]
