@@ -153,10 +153,11 @@ class SeatRegistry:
         entry = {"generation": seat.generation, "occupant": seat.occupant, "at": at, "event": event, "detail": detail}
         self.redis.rpush(f"{self.key(address)}:history", json.dumps(entry))
 
-    def swarm_keys(self, slug):
+    def swarm_keys(self, slug: str) -> list[str]:
         """The swarm's seats with their history and memory, and the seat pointers of its agents."""
         seat = re.compile(rf"{re.escape(PREFIX)}:[^:@]+@{re.escape(slug)}(:({'|'.join(MEMORY_KINDS)}))?")
-        keys = [key for key in self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*") if seat.fullmatch(key)]
+        found = self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*", count=SCAN_PAGE)
+        keys = [key for key in found if seat.fullmatch(key)]
         agents = sorted(f"{PREFIX}-of:{name}" for name in self.agent_names(slug))
         return sorted(keys) + agents + [f"{key}:exit" for key in agents if self.redis.exists(f"{key}:exit")]
 

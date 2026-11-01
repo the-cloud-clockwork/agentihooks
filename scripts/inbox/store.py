@@ -9,10 +9,11 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
-from scripts.inbox.seats import SeatRegistry, is_seat, master_of
+from scripts.inbox.seats import SCAN_PAGE, SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
@@ -475,14 +476,19 @@ class InboxStore:
             rows = pipe.execute()
         return {item_id: [json.loads(entry) for entry in row] for item_id, row in zip(item_ids, rows)}
 
-    def keys_for(self, belongs):
+    def keys_for(
+        self, belongs: Callable[[str], bool], pattern: str = "*", known: Iterable[str] = ()
+    ) -> tuple[list[str], dict[str, list[str]]]:
         """The keys of every address belongs() accepts, its items and their histories, and those
-        addresses' memberships in the shared waiting and indexed sets."""
+        addresses' memberships in the shared waiting and indexed sets. Addresses are found by the key pattern
+        and in the shared open index, with known added; belongs() must not read Redis."""
         prefix = self.key("address", "")
-        seen = {key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")}
+        seen = {key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + pattern, count=SCAN_PAGE)}
         seen.update(self.redis.smembers(self.key("open-indexed")))
         size_prefix = self.key("open-size", "")
-        seen.update(key[len(size_prefix) :] for key in self.redis.scan_iter(match=size_prefix + "*"))
+        sized = self.redis.scan_iter(match=size_prefix + pattern, count=SCAN_PAGE)
+        seen.update(key[len(size_prefix) :] for key in sized)
+        seen.update(known)
         addresses = sorted(a for a in seen if belongs(a))
         keys, wake_ids = [], []
         waiting_wakes = self.redis.smembers(self.key("wake-outbox"))
