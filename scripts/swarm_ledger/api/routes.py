@@ -217,7 +217,7 @@ PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 def export(handler: object, services: Services, slug: str, path: str, payload: dict) -> dict | None:
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
-        parts = tuple(payload.get("parts", ()))
+        parts = tuple(sorted(payload.get("parts", ())))
         generation, body = services.repository.export_since(slug, payload["since"], export_text, export_changes, parts)
         body = body if isinstance(body, bytes) else body.encode()
         return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
