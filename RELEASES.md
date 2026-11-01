@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.560 · 2026-11-01
+
+### 2026-11-01 · e6d19c945d9c · #9272 · @agenticore-app
+
+**Restore coverage of competing fencing document creation**
+
+This change adds a test case to fencing.read that re-establishes coverage lost during a previous push: it verifies that when the initial document creation loses a race to a competing writer, the code correctly recovers from the resulting StateConflict and returns the competing document unchanged rather than overwriting it. No production logic changed, only test coverage was restored to satisfy the coverage-ratchet check that previously flagged two untested lines, confirmed via mutation testing showing the touched lines are properly exercised.
+
 ## v2.17.556 · 2026-11-01
 
 ### 2026-11-01 · f6d70a31a48b · #9211 · @nestorcolt
