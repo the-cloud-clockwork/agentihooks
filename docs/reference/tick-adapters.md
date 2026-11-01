@@ -198,6 +198,7 @@ remaining names are built as in the sections above.
 ```python
 from scripts.inbox.store import connect as inbox_connect
 from scripts.swarm.store import connect as swarm_connect
+from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools
 
 tools = Tools(
@@ -258,9 +259,9 @@ under `scripts/tick` except those in `scripts/tick/adapters` and fails on any im
 - `scripts.swarm.refresh_job`
 - `scripts.swarm.snapshot_job`
 
-Any relative import in a scanned module also fails, whatever it names, since the check cannot resolve it. The failure lists each
-module path with the names it imported. Move the call behind a port operation in the adapter and call the port from
-the step.
+Any relative import in a scanned module also fails, whatever it names, since the check cannot resolve it.
+The failure lists each module path with the names it imported. Move the call behind a port operation in the adapter
+and call the port from the step.
 
 ## Troubleshooting
 
