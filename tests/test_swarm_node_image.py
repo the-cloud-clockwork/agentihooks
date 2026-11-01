@@ -674,16 +674,13 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
     monkeypatch.setattr("time.sleep", sleeps)
     if isinstance(failure, int):
         error = urllib.error.HTTPError(herdr["url"], failure, "Server error", {}, None)
-    elif failure == "wrapped-timeout":
-        error = urllib.error.URLError(TimeoutError("timed out"))
-    elif failure == "incomplete-read":
-        error = http.client.IncompleteRead(b"partial", 29057246)
-    elif failure == "read-reset":
-        error = ConnectionResetError("connection reset by peer")
-    elif failure == "wrapped-reset":
-        error = urllib.error.URLError(ConnectionResetError("connection reset by peer"))
     else:
-        error = TimeoutError("timed out")
+        error = {
+            "wrapped-timeout": urllib.error.URLError(TimeoutError("timed out")),
+            "incomplete-read": http.client.IncompleteRead(b"partial", 29057246),
+            "read-reset": ConnectionResetError("connection reset by peer"),
+            "wrapped-reset": urllib.error.URLError(ConnectionResetError("connection reset by peer")),
+        }.get(failure, TimeoutError("timed out"))
 
     def opened(url, timeout):
         assert timeout == 120
