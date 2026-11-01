@@ -54,6 +54,20 @@ def test_rest_callers_charge_the_shared_log(tmp_path, monkeypatch, caller, faile
         assert run.call_args.kwargs["timeout"] == 20
 
 
+@pytest.mark.parametrize("remote", [True, False])
+def test_merge_stall_runs_without_working_folder_for_a_remote_repo(tmp_path, monkeypatch, remote):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    repo = "github.com/the-cloud-clockwork/agentihooks" if remote else str(tmp_path)
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
+    monkeypatch.setattr(merge_stall.subprocess, "run", run)
+    token = merge_stall.DEADLINE.set(merge_stall.time.monotonic() + 600)
+    try:
+        assert merge_stall.request(repo, ["api", "repos/example/project/actions/runs"]) == {}
+    finally:
+        merge_stall.DEADLINE.reset(token)
+    assert run.call_args.kwargs["cwd"] == (None if remote else str(tmp_path))
+
+
 def test_failing_test_log_read_is_charged_to_promotion_watch(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     log = "FAILED tests/test_example.py::test_case - AssertionError\n"
