@@ -4,6 +4,7 @@ import time
 from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
+from pathlib import Path
 
 from scripts.swarm import github_reads, timing
 from scripts.swarm.health.findings import Finding
@@ -38,7 +39,7 @@ def request(repo: str, args: list[str]) -> dict:
             "swarm.merge_stall",
             args,
             subprocess.run,
-            cwd=repo,
+            cwd=repo if Path(repo).is_dir() else None,
             capture_output=True,
             text=True,
             timeout=min(20, remaining),
