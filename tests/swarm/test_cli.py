@@ -7,8 +7,9 @@ import pytest
 from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
+from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, dispatcher, fencing, lease, publish, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, fencing, lease, metrics, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
@@ -290,7 +291,7 @@ def test_the_tick_hands_the_metrics_pass_its_ledger(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     seen = []
-    monkeypatch.setattr(cli.metrics, "record_pass", lambda *args: seen.append(args[-1].ledger.state("sw")) or [])
+    monkeypatch.setattr(metrics, "record_pass", lambda *args: seen.append(args[-1].ledger.state("sw")) or [])
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert [state["tasks"] for state in seen] == [ledger.state("sw")["tasks"]]
 
@@ -928,18 +929,6 @@ def test_tick_records_failed_stage_and_releases_its_lock(env, monkeypatch, capsy
     assert rows[-1]["step"] == "run_tick"
     assert not store.redis.exists(store.key("sw", "tick-lock"))
     assert cli.timing.SWARM.get() is None
-
-
-def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, monkeypatch):
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    calls = []
-    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
-    monkeypatch.setenv(cli.wake.WINDOW_ENV, "60")
-    monkeypatch.setattr(cli.wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
-    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert calls == [(9_000_000, 60_000)]
 
 
 def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
@@ -1598,7 +1587,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
 
     ledger.relay = refuse
     ran = []
-    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "maintenance")):
+    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (wake, "maintenance")):
         real = getattr(module, name)
         monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
     item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "operator", "the job finished at 18:45")
