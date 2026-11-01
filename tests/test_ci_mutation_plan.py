@@ -301,6 +301,8 @@ def test_a_mutant_without_a_killer_costs_the_direct_tests_it_runs_first_and_one_
     assert measured_costs(names[:1], results) == pytest.approx({names[0]: 5.6 + 1.25 * 52.0})
     importing = {"scripts.other.": ["tests/test_sample.py"]}
     assert measured_costs(names[2:], results, direct=importing) == pytest.approx({names[2]: 5.6 + 1.25 * 2.0})
+    untimed = [{**results[0], "tests": {"scripts.other.x_h": ["tests/test_sample.py::test_new"]}}]
+    assert measured_costs(names[2:], untimed, direct=importing) == pytest.approx({names[2]: 5.6 + 1.25 * 50.0})
 
 
 def test_refinement_prices_mutants_from_killers_kept_beside_the_shared_stats(tmp_path, monkeypatch):

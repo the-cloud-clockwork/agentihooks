@@ -325,6 +325,26 @@ def test_a_block_moved_reindented_into_a_class_grades_only_the_edited_signature_
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {1, 2}}
 
 
+def test_blocks_moved_from_two_files_over_a_removed_line_grade_only_the_line_after_them(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    other = (
+        "def other(rows):\n"
+        "    counted = {row.key: row.value for row in rows if row.value}\n"
+        "    return sorted(counted.items(), key=lambda pair: pair[1])\n"
+    )
+    git, commit = _repo(tmp_path)
+    commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    commit("other.py", f"def keep():\n    return 1\n\n\n{other}")
+    pinned = commit("new.py", "VALUE = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    (tmp_path / "hooks" / "other.py").write_text("def keep():\n    return 1\n")
+    git("add", "hooks/old.py", "hooks/other.py")
+    commit("new.py", f"{STEP}{other}VALUE = 2\n")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {8}}
+
+
 @pytest.mark.parametrize(
     ("head", "expected"),
     [

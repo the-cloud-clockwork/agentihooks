@@ -149,10 +149,10 @@ def bindings(node: ast.stmt) -> list[str]:
 
 def moved_lines(root: Path, comparison: str) -> dict[str, set[int]]:
     """Name the head lines one whole diff colours as moved unchanged, so moves between files count too."""
-    colours = ["color.diff.new=green", "color.diff.newMoved=blue", "color.diff.newMovedAlternative=blue"]
     command = [
         "git",
-        *(part for colour in colours for part in ("-c", colour)),
+        "-c",
+        "color.diff.newMoved=blue",
         "diff",
         "--no-renames",
         "--no-ext-diff",
@@ -169,19 +169,20 @@ def moved_lines(root: Path, comparison: str) -> dict[str, set[int]]:
         "scripts/",
     ]
     moved: dict[str, set[int]] = {}
-    name, line, header = "", 0, False
+    current: set[int] = set()
+    line, header = 0, False
     for raw in subprocess.check_output(command, cwd=root).decode().splitlines():
         text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
         hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", text)
         if text.startswith("diff --git "):
             header = True
         elif header and text.startswith("+++ b/"):
-            name = text.removeprefix("+++ b/").rstrip("\t")
+            current = moved.setdefault(text.removeprefix("+++ b/").removesuffix("\t"), set())
         elif hunk:
             header, line = False, int(hunk[1])
         elif not header and text.startswith("+"):
             if raw.startswith("\x1b[34m"):
-                moved.setdefault(name, set()).add(line)
+                current.add(line)
             line += 1
     return moved
 
@@ -300,7 +301,7 @@ def select_tests(root: Path, source: Path, helpers: bool = True) -> list[str]:
         or source.suffix == ".js"
         and source.name in text
     } | importing({module})
-    added = reaching if helpers else set()
+    added = set() if helpers is False else reaching
     while added:
         added = importing({module_name(path.relative_to(root)) for path in added}) - reaching
         reaching |= added

@@ -55,6 +55,7 @@ def test_a_test_file_named_as_direct_runs_every_one_of_its_tests_first(tmp_path)
     assert killers.is_direct("tests/test_a.py::test_b[1]", ["tests/test_a.py::test_b"])
     assert not killers.is_direct("tests/test_a.py::test_bc", ["tests/test_a.py::test_b"])
     assert not killers.is_direct("tests/test_ab.py::test_c", ["tests/test_a.py"])
+    assert killers.is_direct("tests/test_a.py::TestA::test_b", ["tests/test_a.py"])
 
 
 def test_the_test_that_killed_a_mutant_runs_first_for_every_later_mutant_of_its_function(tmp_path):
