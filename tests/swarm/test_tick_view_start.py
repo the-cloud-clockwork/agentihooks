@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm import cli
+from scripts.swarm import cli, controller
 from scripts.tick import view
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import env, run
@@ -39,4 +39,24 @@ def test_a_pass_with_a_stand_in_ledger_reads_no_view(env: tuple, monkeypatch: py
     started = []
     monkeypatch.setattr(view, "start", lambda slug, service=False: started.append(slug))
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert started == []
+
+
+def test_a_pass_with_a_ledger_client_stand_in_reads_no_view(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, _, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(cli.outage, "ledger_health", lambda slug, at, probe: True)
+
+    class StandIn(cli.ledger_client.LedgerClient):
+        """A ledger client subclass, as the test suites stand in for the ledger."""
+
+    def fenced(*args: object) -> None:
+        raise RuntimeError("fenced")
+
+    started = []
+    monkeypatch.setattr(view, "start", lambda slug, service=False: started.append(slug))
+    monkeypatch.setattr(controller, "FencedLedger", fenced)
+    with pytest.raises(RuntimeError, match="^fenced$"):
+        cli.run_tick(store, "sw", StandIn(), rt, FakeHerdr({}))
     assert started == []

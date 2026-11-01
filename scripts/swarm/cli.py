@@ -376,7 +376,7 @@ def run_tick(
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
         ):
             return ["Ledger health probe failed"]
-        if isinstance(ledger, ledger_client.LedgerClient):
+        if type(ledger) is ledger_client.LedgerClient:
             timing.call(ledger_view.start, slug, ledger.service)
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
