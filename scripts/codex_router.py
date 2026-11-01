@@ -170,9 +170,15 @@ def _min_life(environ: Mapping[str, str]) -> float:
 
 def expiring(account: CodexAccount, environ: Mapping[str, str], now: float) -> bool:
     """A routed session holds only the bearer token and cannot refresh it, so it dies at the token's exp."""
+    exp = expires_at(account, environ)
+    return exp is not None and exp - now < _min_life(environ)
+
+
+def expires_at(account: CodexAccount, environ: Mapping[str, str]) -> float | None:
+    """The exp claim of this account's token, or None when the token carries none."""
     token = environ.get(account.env_name)
     exp = _claims(token).get("exp") if token else None
-    return isinstance(exp, int | float) and exp - now < _min_life(environ)
+    return exp if isinstance(exp, int | float) else None
 
 
 def bearer_overrides() -> list[str]:

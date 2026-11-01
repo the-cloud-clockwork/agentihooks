@@ -68,7 +68,11 @@ def test_the_page_quota_table_shows_a_duplicate_as_its_own_row_with_a_duplicate_
     assert {name: row["sessions"] for name, row in duplicates.items()} == {"alpha": 2, "delta": 0}
     for row in duplicates.values():
         assert row["state"] == agents_quota.DUPLICATE
-        assert row["source"] == f"same ChatGPT account as {KEPT}"
+        name = row["account"]
+        assert (
+            row["source"]
+            == f"same ChatGPT account as {KEPT}; sign in its own account with agentihooks codex login {name}"
+        )
         assert row["kind"] == "subscription"
         assert row["identity"] == codex_router.fingerprint("acct-1")
         empty = ("five_hour_left", "seven_day_left", "seven_day_resets_at", "cap", "routing_left")
@@ -76,3 +80,59 @@ def test_the_page_quota_table_shows_a_duplicate_as_its_own_row_with_a_duplicate_
     assert codex_router.routed_live([], {"alpha": 2, "other": 1}, dict(_environ(tmp_path))) == [
         codex_router.CodexAccount("other", "AH_CX_TOKEN_other")
     ]
+
+
+def test_balance_lists_every_refused_token_account_with_its_state_and_login_command(tmp_path, monkeypatch):
+    import time
+
+    from hooks.context import account_sessions
+    from tests.codex_fakes import DAY, jwt
+
+    now = time.time()
+
+    def token(account_id, exp):
+        return jwt({"exp": int(exp), codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": account_id}})
+
+    environ = {
+        **_environ(tmp_path),
+        "AH_CX_TOKEN_old": token("acct-3", now - 4 * DAY),
+        "AH_CX_TOKEN_soon": token("acct-4", now + 60),
+        "AH_CX_TOKEN_keyed": "sk-placeholder",
+    }
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda **kw: {"old": 1})
+    monkeypatch.setattr(codex_router, "fresh_quotas", lambda *a, **kw: {})
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
+    rows = {row.account: row for row in agents_quota._codex(now) if row.kind != "api"}
+    assert sorted(rows) == ["alpha", "gamma", "keyed", KEPT, "old", "soon"]
+    assert rows["alpha"].state == agents_quota.DUPLICATE
+    assert rows["alpha"].source.endswith("agentihooks codex login alpha")
+    assert rows["old"].state == agents_quota.EXPIRED
+    assert rows["old"].source == "token expired: run agentihooks codex login old"
+    assert rows["old"].sessions == 1
+    assert rows["soon"].state == agents_quota.EXPIRING
+    assert rows["soon"].source == codex_router.expiry_refusal(
+        codex_router.CodexAccount("soon", "AH_CX_TOKEN_soon"), environ, now
+    )
+    assert "agentihooks codex login soon" in rows["soon"].source
+    assert rows["keyed"].state == agents_quota.REFUSED
+    assert "CODEX_API_KEY" in rows["keyed"].source
+    for name in ("alpha", "old", "soon", "keyed"):
+        assert (rows[name].cap, rows[name].routing_left, rows[name].seven_day_left) == (None, None, None)
+
+
+def test_a_refused_token_account_replaces_the_row_the_table_lists_for_it(tmp_path):
+    from tests.codex_fakes import DAY, jwt
+
+    expired = jwt({"exp": 100 - 4 * DAY, codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": "acct-3"}})
+    environ = {**_environ(tmp_path), "AH_CX_TOKEN_old": expired}
+    claude = agents_quota.QuotaRow("claude", "old", "OPEN", 1, None, None, None, "")
+    listed = agents_quota.QuotaRow("codex", "old", "UNKNOWN", 2, None, None, None, "")
+    found = agents_quota.with_unrouted([claude, listed], environ, {"old": 2}, 100.0)
+    assert [(row.agent, row.account, row.state) for row in found] == [
+        ("claude", "old", "OPEN"),
+        ("codex", "old", agents_quota.EXPIRED),
+        ("codex", "alpha", agents_quota.DUPLICATE),
+    ]
+    assert found[1].sessions == 2

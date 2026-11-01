@@ -57,6 +57,9 @@ LEGACY = (
 )
 FORCED = "{name}: refreshed under its old name; agentihooks codex login {name} stores it as {slug}"
 UNUSABLE = "{name}: not refreshed, the name cannot become a slug; sign in again with agentihooks codex login <slug>"
+UNRENEWABLE = "{slug}: {env} cannot be renewed here, {why}; sign in with agentihooks codex login {slug}"
+NO_LOGIN = "no Codex login under {root}"
+NO_BAO_REFRESH = "OpenBao holds no refresh token for it"
 
 
 class GrantError(RuntimeError):
@@ -106,6 +109,7 @@ class Run:
     bao: openbao_kv.OpenBao | None
     deps: Deps
     creds: str = openbao_kv.CODEX_CREDS
+    tokens: tuple[str, ...] = ()
 
 
 class Outcome(NamedTuple):
@@ -209,10 +213,23 @@ def _select(names: list[str], force: str) -> list[str]:
     return kept
 
 
+def _logins(root: Path) -> list[str]:
+    return sorted(path.name for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
+
+
 def _local_accounts(force: str) -> list[Path]:
     root = codex_login.homes()
-    found = sorted(path.name for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
-    return [root / name for name in _select(found, force)]
+    return [root / name for name in _select(_logins(root), force)]
+
+
+def _unrenewable(run: Run, renewable: list[str], why: str) -> None:
+    """Names each token account in this environment that the run holds nothing to renew with."""
+    if run.force:
+        return
+    for slug in run.tokens:
+        if slug not in renewable:
+            env = f"{CODEX_TOKEN_PREFIX}{slug}"
+            print(term_colors.yellow(UNRENEWABLE.format(slug=slug, env=env, why=why)))
 
 
 def _attempt(slug: str, action: Callable[[], object]) -> bool:
@@ -246,6 +263,8 @@ def run_local(run: Run) -> int:
     if run.force and not homes:
         print(term_colors.red(NO_LOCAL_ACCOUNT.format(slug=run.force, root=codex_login.homes())))
         return 1
+    root = codex_login.homes()
+    _unrenewable(run, _logins(root), NO_LOGIN.format(root=root))
     outcomes = [outcome for home in homes if (outcome := _refresh_local(run, home)) is not None]
     if run.bao is None and any(outcome.saved for outcome in outcomes):
         print(term_colors.yellow(BAO_UNSET))
@@ -320,6 +339,8 @@ def run_openbao(run: Run) -> int:
     if run.force and not slugs:
         print(term_colors.red(NO_BAO_ACCOUNT.format(slug=run.force)))
         return 1
+    prefix = codex_login.REFRESH_PREFIX
+    _unrenewable(run, [key.removeprefix(prefix) for key in secret if key.startswith(prefix)], NO_BAO_REFRESH)
     return [_refresh_bao(run, secret, slug) for slug in slugs].count(False)
 
 
@@ -359,7 +380,12 @@ def _settings(args: list[str], environ: Mapping[str, str], deps: Deps) -> tuple[
     if store not in (LOCAL, OPENBAO):
         raise ValueError(BAD_STORE.format(store=store))
     bao = openbao_kv.from_env(environ, deps.opener)
-    return store, Run(force, _days(options.days, environ), bao, deps, openbao_kv.codex_creds(environ))
+    tokens = tuple(
+        account.name
+        for account in codex_router.token_accounts(environ)
+        if codex_router.expires_at(account, environ) is not None
+    )
+    return store, Run(force, _days(options.days, environ), bao, deps, openbao_kv.codex_creds(environ), tokens)
 
 
 def main(args: list[str], environ: Mapping[str, str] | None = None, deps: Deps | None = None) -> int:
