@@ -2,6 +2,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from scripts.inbox.store import InboxError, close_reason
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools, Unsupported
 from scripts.tick.ports.source_control import (
@@ -175,6 +176,7 @@ class FakeProcesses:
 class FakeInbox:
     answers: dict[str, object] = field(default_factory=dict)
     calls: list[Call] = field(default_factory=list)
+    information: set[str] = field(default_factory=set)
 
     def read(self, address: str, *, deadline: Deadline) -> object:
         return _record(self, "read", (address,), deadline)
@@ -190,8 +192,12 @@ class FakeInbox:
             deadline,
         )
 
-    def close(self, item_id: str, *, deadline: Deadline) -> object:
-        return _record(self, "close", (item_id,), deadline)
+    def close(self, item_id: str, outcome: str, detail: str = "", *, deadline: Deadline) -> object:
+        """Refuse what the inbox store refuses: an unknown outcome, a missing detail, or a bare done on a work item."""
+        state, reason = close_reason(outcome, detail)
+        if state == "done" and reason == "done" and item_id not in self.information:
+            raise InboxError("done needs an outcome naming where the work went")
+        return _record(self, "close", (item_id, outcome, detail), deadline)
 
 
 @dataclass
