@@ -312,16 +312,17 @@ def test_lines_moved_unchanged_into_another_file_are_not_graded_and_its_new_glue
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new name.py": {1, 2}}
 
 
-def test_a_moved_line_edited_on_the_way_and_its_reindented_neighbours_keep_only_the_edit_graded(tmp_path):
+def test_a_block_moved_reindented_into_a_class_grades_only_the_edited_signature_and_new_glue(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 
     git, commit = _repo(tmp_path)
     pinned = commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
     git("checkout", "-q", "-b", "branch")
     (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
-    moved = STEP.replace("len(items) + 10", "len(items) + 11").replace("\n    ", "\n        ")
-    commit("new.py", f"class Runner:\n    {moved.replace('(items)', '(self, items)', 1)}")
-    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {1, 2, 4}}
+    git("add", "hooks/old.py")
+    moved = STEP.replace("\n    ", "\n        ").replace("(items)", "(self, items)", 1)
+    commit("new.py", f"class Runner:\n    {moved}")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {1, 2}}
 
 
 @pytest.mark.parametrize(
