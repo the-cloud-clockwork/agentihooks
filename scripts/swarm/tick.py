@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -200,17 +201,20 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-class _Unread:
-    """A view that holds nothing until the ledger view reaches the engine."""
+@dataclass(frozen=True)
+class _FixedView:
+    """A view that answers only the domain and key pairs it was built with."""
+
+    values: Mapping[tuple[Domain, str], object] = field(default_factory=dict)
 
     def read(self, domain: Domain, key: str) -> object | None:
-        """Return nothing for every domain and key."""
-        return None
+        """Return the value held for ``domain`` and ``key``, or nothing."""
+        return self.values.get((domain, key))
 
 
 def run_group(name: str) -> None:
     """Run the registered steps of tick group ``name`` in legacy order under the group budget."""
-    engine.run_group(name, Context(_Unread(), Deadline.after(GROUP_BUDGET_S)))
+    engine.run_group(name, Context(_FixedView(), Deadline.after(GROUP_BUDGET_S)))
 
 
 @reaper.scanning_pass
