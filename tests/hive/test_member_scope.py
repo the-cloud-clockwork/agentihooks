@@ -429,6 +429,7 @@ def test_host_hash_hit_uses_one_field_read(redis: Any, swarm: Any, monkeypatch: 
     def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("host lookup scanned the execution registry")
 
+    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", "true")
     monkeypatch.setattr(ExecutionRegistry, "hive", forbidden)
     with scope.one_pass():
         scope.joined(redis)
@@ -455,3 +456,30 @@ def test_removing_an_agent_removes_its_host(redis: Any, swarm: Any) -> None:
     swarm.drop_agent("fixture", name)
     assert redis.hget(swarm.key("fixture", "hosts"), name) is None
     assert scope.host(redis, "fixture", name) == ""
+
+
+@pytest.mark.parametrize("legacy_change", ["remove", "move"])
+def test_host_projection_stays_untrusted_until_every_writer_upgrades(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch, legacy_change: str
+) -> None:
+    from scripts.hive import scope
+    from scripts.swarm import fencing
+
+    monkeypatch.delenv("SWARM_HOST_PROJECTION_ENABLED", raising=False)
+    join(redis, "m1")
+    join(redis, "m2")
+    name = place(swarm, "m1")
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+
+    def move(doc: dict) -> None:
+        row = next(row for row in doc["executions"].values() if row["name"] == name)
+        row["hive"] = "m2"
+
+    if legacy_change == "remove":
+        redis.hdel(swarm.key("fixture", "agents"), name)
+        expected = ""
+    else:
+        fencing.write(swarm, "fixture", move)
+        expected = "m2"
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+    assert scope.host(redis, "fixture", name) == expected

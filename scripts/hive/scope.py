@@ -37,7 +37,9 @@ def host(redis: "Redis", slug: str, name: str) -> str:
     if not hosts:
         return ""
     store = RedisStore(redis)
-    placed = redis.hget(store.key(slug, "hosts"), name)
+    placed = (
+        redis.hget(store.key(slug, "hosts"), name) if os.getenv("SWARM_HOST_PROJECTION_ENABLED") == "true" else None
+    )
     if placed is None:
         placed = store.execution_registry.hive(slug, name)
     return placed if placed in hosts else ""
