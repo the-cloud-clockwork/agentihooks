@@ -264,7 +264,7 @@ class PushStop:
         except RedisError:
             return False
 
-    def waiting(self, store: Any, who: Any, doc: Any, task: Any, dirty: bool, frozen: bool = False) -> bool:
+    def waiting(self, store: Any, who: Any, doc: Any, task: Any, dirty: bool, frozen: bool) -> bool:
         """Whether a live checked wait holds the stop, so a refused push never deadlocks: any declared wait while
         fleet panic holds, one on another unfinished task, or one on the merge of a pull request still open, which a
         push would drop from the queue, while every change is committed."""

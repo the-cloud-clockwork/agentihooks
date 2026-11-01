@@ -1163,3 +1163,18 @@ def test_an_ended_wait_still_refuses_the_stop_while_fleet_panic_holds(rig):
     rig.commit()
     wait_on(rig, None, at=NOW - 120_000, until=NOW)
     assert not rig.stop().allowed
+
+
+def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(monkeypatch, rig):
+    from redis.exceptions import RedisError
+
+    from scripts.swarm import panic
+
+    def broken(store):
+        raise RedisError("down")
+
+    monkeypatch.setattr(panic, "state", broken)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
