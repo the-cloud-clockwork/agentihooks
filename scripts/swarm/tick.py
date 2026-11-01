@@ -202,6 +202,7 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
+@reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     from scripts.swarm import automated_gc
 
