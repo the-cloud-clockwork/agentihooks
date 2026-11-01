@@ -489,7 +489,12 @@ def test_source_control_names_the_github_port_and_the_change_a_url_names(url, re
 
 @pytest.mark.parametrize(
     "url",
-    ["http://github.com/o/r/pull/42", "git@github.com:o/r.git", "https://ghe.example/o/r/pull/42", "https://github.com/o/r"],
+    [
+        "http://github.com/o/r/pull/42",
+        "git@github.com:o/r.git",
+        "https://ghe.example/o/r/pull/42",
+        "https://github.com/o/r",
+    ],
 )
 def test_change_refuses_a_url_that_names_no_github_change(url):
     with pytest.raises(SwarmError, match="^refused: "):
