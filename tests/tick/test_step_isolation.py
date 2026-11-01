@@ -7,7 +7,9 @@ import pytest
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import CallStep, budgets
+from scripts.tick.steps import CallStep, agents, budgets, host, masters, observe, place, report, tasks
+
+pytestmark = pytest.mark.unit
 
 
 class View:
@@ -72,6 +74,8 @@ def test_budgets_come_from_the_p95_with_headroom_in_whole_seconds() -> None:
     assert budgets.budget_s(14.511) == 22.0
     assert budgets.timing_of("preempt") == (18.0, 60.0)
     assert budgets.timing_of("night watch") == (22.0, 120.0)
+    assert budgets.timing_of("config load") == (15.0, 60.0)
+    assert budgets.timing_of("hive ledger") == (15.0, 120.0)
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
@@ -83,8 +87,6 @@ def test_an_undeclared_step_is_refused() -> None:
 
 @pytest.mark.feature("swarm-tick-step-isolation")
 def test_every_registered_call_step_declares_its_measured_timing() -> None:
-    from scripts.tick.steps import agents, host, masters, observe, place, report, tasks
-
     for step in (*observe.STEPS, *agents.STEPS, *masters.STEPS, *tasks.STEPS, *place.STEPS, *host.STEPS, *report.STEPS):
         assert (step.budget_s, step.interval_s) == budgets.timing_of(step.name)
         assert step.interval_s in {budgets.CRITICAL_S, budgets.WIDE_S, budgets.SLOW_S}
@@ -92,8 +94,6 @@ def test_every_registered_call_step_declares_its_measured_timing() -> None:
 
 @pytest.mark.feature("swarm-tick-step-isolation")
 def test_spawn_needs_only_judge_orphans_and_preempt() -> None:
-    from scripts.tick.steps import place
-
     assert budgets.JUDGE == {"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"}
     assert budgets.SPAWN_NEEDS == budgets.JUDGE | {"orphans", "preempt"}
     assert {step.name: step.needs for step in place.STEPS}["spawn"] == budgets.SPAWN_NEEDS

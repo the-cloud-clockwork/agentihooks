@@ -43,7 +43,10 @@ def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, .
 
 
 def run_step(step: Step, ctx: Context) -> StepRecord:
-    """Run one step under a copied context and its own deadline, waiting at most its budget for it to end."""
+    """Run one step under a copied context and its own deadline, waiting at most its budget for it to end.
+
+    A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
+    """
     deadline = ctx.deadline.child(step.budget_s)
     clock = deadline.clock
     started = clock()
@@ -65,7 +68,7 @@ def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: St
     """Run ``step`` in the caller's copied context and append its result or the error it raised."""
     try:
         outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx))
-    except (Exception, SystemExit) as exc:
+    except BaseException as exc:
         outcome.append(exc)
 
 

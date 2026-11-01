@@ -11,6 +11,7 @@ __all__ = [
     "SLOW_S",
     "SPAWN_NEEDS",
     "SPAWN_START_S",
+    "UNMEASURED_S",
     "WIDE_S",
     "Timing",
     "budget_s",
@@ -22,6 +23,7 @@ WIDE_S = 120.0
 SLOW_S = 600.0
 HEADROOM = 1.5
 SPAWN_START_S = 40.0
+UNMEASURED_S = 10.0
 JUDGE = frozenset({"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"})
 SPAWN_NEEDS = JUDGE | {"orphans", "preempt"}
 
@@ -34,8 +36,8 @@ class Timing(NamedTuple):
 
 
 MEASURED: dict[str, Timing] = {
-    "config load": Timing(0.0, CRITICAL_S),
-    "stopped branch": Timing(0.0, CRITICAL_S),
+    "config load": Timing(UNMEASURED_S, CRITICAL_S),
+    "stopped branch": Timing(UNMEASURED_S, CRITICAL_S),
     "pane evidence": Timing(1.047, WIDE_S),
     "execution reconcile": Timing(0.442, CRITICAL_S),
     "master move fail over": Timing(0.261, CRITICAL_S),
@@ -82,9 +84,9 @@ MEASURED: dict[str, Timing] = {
     "bottleneck remedy": Timing(0.04, CRITICAL_S),
     "inbox relay": Timing(0.332, CRITICAL_S),
     "launch slots": Timing(0.116, CRITICAL_S),
-    "outage probes": Timing(0.0, CRITICAL_S),
-    "hive ledger": Timing(0.0, WIDE_S),
-    "ledger health": Timing(0.0, WIDE_S),
+    "outage probes": Timing(UNMEASURED_S, CRITICAL_S),
+    "hive ledger": Timing(UNMEASURED_S, WIDE_S),
+    "ledger health": Timing(UNMEASURED_S, WIDE_S),
     "host pressure": Timing(0.145, WIDE_S),
     "ledger watchdog": Timing(0.041, WIDE_S),
     "ledger probe": Timing(4.476, WIDE_S),
@@ -116,8 +118,8 @@ MEASURED: dict[str, Timing] = {
     "inbox wake": Timing(0.34, CRITICAL_S),
     "snapshot job": Timing(0.009, SLOW_S),
     "last tick": Timing(0.005, CRITICAL_S),
-    "heartbeat": Timing(0.0, CRITICAL_S),
-    "status publish": Timing(0.0, CRITICAL_S),
+    "heartbeat": Timing(UNMEASURED_S, CRITICAL_S),
+    "status publish": Timing(UNMEASURED_S, CRITICAL_S),
 }
 
 
