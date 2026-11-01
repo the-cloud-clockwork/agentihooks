@@ -63,6 +63,7 @@ from scripts.swarm import (
     master_start,
     master_wake,
     outage,
+    pane_evidence,  # noqa: F401
     panic,
     preempt,
     prerequisite_wait,

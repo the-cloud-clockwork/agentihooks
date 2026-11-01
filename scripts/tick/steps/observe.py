@@ -68,9 +68,7 @@ def _stopped_branch(tick: Any, get: Get, box: Box) -> Any:
 
 
 def _pane_evidence(tick: Any, get: Get, box: Box) -> Any:
-    return tick.skip_refused(
-        import_module("scripts.swarm.pane_evidence").sweep, get("slug"), get("store"), get("runtime"), get("now_ms")
-    )
+    return tick.skip_refused(tick.pane_evidence.sweep, get("slug"), get("store"), get("runtime"), get("now_ms"))
 
 
 def _execution_reconcile(tick: Any, get: Get, box: Box) -> Any:
