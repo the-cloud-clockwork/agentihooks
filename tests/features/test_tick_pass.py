@@ -11,6 +11,7 @@ from tests.features.conftest import Agent, Swarm
 from tests.features.test_harness import _until
 from tests.swarm.test_tick import FakeRuntime
 
+
 @pytest.mark.feature
 def test_the_real_backend_feature_suite_holds_both_promotion_jobs() -> None:
     root = Path(__file__).resolve().parents[2]
