@@ -361,6 +361,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     if "finished" in box:
         return actions
     store.redis.delete(store.key(slug, SPAWN_HOLD))
+    engine.update_pass_budget(store, slug)
     actions += run_group("observe", **passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
@@ -1258,12 +1259,14 @@ def _hold(slug, store, text):
     return text
 
 
-def spawn_holds(store, slug):
+def spawn_holds(store: Any, slug: str) -> list[str]:
     held = store.redis.get(store.key(slug, SPAWN_HOLD))
-    return [held] if held else []
+    return [hold for hold in (held, engine.pass_budget_hold(store, slug)) if hold]
 
 
-def _spawn_stop(slug, config, store, runtime, now_ms, in_flight=0):
+def _spawn_stop(slug: str, config: SwarmConfig, store: Any, runtime: Any, now_ms: int, in_flight: int = 0) -> str:
+    if held := engine.pass_budget_hold(store, slug):
+        return held
     if stopped := run_window.claims_stopped(store, slug, config, now_ms):
         return stopped
     if not runtime.has_capacity(config):
