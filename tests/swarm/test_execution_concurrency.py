@@ -134,7 +134,7 @@ def test_fencing_retries_sleep_only_before_remaining_attempts(
         fencing.migrate_records(store, "fixture", writers_upgraded=True)
         target, method, error = RedisRecords, "fenced_batch", RevisionConflict
     else:
-        target, method, error = fencing._states(store), "update", StateConflict
+        target, method, error = type(fencing._states(store)), "update", StateConflict
     original = getattr(target, method)
     calls, pauses, bounds = [], [], []
 
