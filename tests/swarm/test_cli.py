@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -2351,7 +2352,7 @@ def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env
     store, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "pending", lambda url, run=None, approval=False: url.endswith("/7"))
+    monkeypatch.setattr(checks, "pending", lambda url, read=None, approval=False: url.endswith("/7"))
     assert _findings(capsys) == []
 
 
@@ -2363,7 +2364,7 @@ def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env
     _, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "cached", partial(checks.cached, run=runner(PASSED)))
+    monkeypatch.setattr(checks, "cached", partial(checks.cached, read=runner(PASSED)))
     for autonomy, expected in [
         ("assist", []),
         ("delegate", ["idle with claim"]),
@@ -2377,19 +2378,21 @@ def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env
     assert _findings(capsys) == []
 
 
-@pytest.mark.parametrize(
-    "out, code", [("lint\tfail\t8s\thttps://x/1\n", 1), ("", 0), ("lint\tpass\t8s\thttps://x/1\n", 1)]
-)
-def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(env, capsys, monkeypatch, tmp_path, out, code):
+@pytest.mark.parametrize("case", ["failed", "empty", "unreadable"])
+def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(
+    env: tuple, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, case: str
+) -> None:
     from functools import partial
 
-    from tests.swarm.test_health_checks import runner
+    from tests.swarm.test_health_checks import FAILED, raising, runner
+
+    read = {"failed": runner((FAILED,)), "empty": runner(()), "unreadable": raising}[case]
 
     _, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     run("sw", "set", "autonomy=assist")
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "cached", partial(checks.cached, run=runner(out, code)))
+    monkeypatch.setattr(checks, "cached", partial(checks.cached, read=read))
     assert [f["kind"] for f in _findings(capsys)] == ["idle with claim"]
 
 

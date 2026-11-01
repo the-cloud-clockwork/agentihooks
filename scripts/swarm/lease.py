@@ -12,7 +12,7 @@ from scripts.swarm.store import RedisStore, SwarmError
 
 TICK_MS = 60_000
 TICK_REFUSAL = "AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second"
-STALE = "the controller lease is stale"
+STALE = document.STALE
 EPOCH = ContextVar("controller_epoch", default=None)
 T = TypeVar("T")
 
@@ -170,7 +170,7 @@ def fenced(store: RedisStore, slug: str, held: Lease | int | None, change: Calla
         _check(doc, now_ms(store), held)
         return change(doc)
 
-    return document.write(store, slug, guarded)
+    return document.write(store, slug, guarded, held)
 
 
 def require(store: RedisStore, slug: str, held: Lease) -> None:
