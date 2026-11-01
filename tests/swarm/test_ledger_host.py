@@ -107,7 +107,9 @@ def test_the_newest_commit_on_dev_counts_from_when_it_reached_dev_not_its_commit
     }
 
 
-def test_a_merge_queue_commit_is_aged_from_its_pull_request_merge_not_its_older_commit_time(monkeypatch, tmp_path):
+def test_a_merge_queue_commit_is_aged_from_its_pull_request_merge_not_its_older_commit_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     real = subprocess.run
     stamp = {
         "GIT_AUTHOR_DATE": "@1792441723 +0000",
@@ -193,7 +195,9 @@ def test_newest_on_dev_asks_github_for_the_merge_of_the_dev_tip(monkeypatch):
         ("not a time", None),
     ],
 )
-def test_merged_at_reads_the_merge_time_of_a_commit_through_the_origin_port(monkeypatch, answer, expected):
+def test_merged_at_reads_the_merge_time_of_a_commit_through_the_origin_port(
+    monkeypatch: pytest.MonkeyPatch, answer: object, expected: float | None
+) -> None:
     port = MergedPort(answer)
     roots = []
     monkeypatch.setattr(ledger_host.stack, "origin_source_control", lambda root: roots.append(root) or port)
