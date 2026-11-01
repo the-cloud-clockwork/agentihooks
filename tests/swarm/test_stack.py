@@ -509,8 +509,10 @@ def test_source_control_names_the_github_port_and_the_change_a_url_names(
     ],
 )
 def test_change_refuses_a_url_that_names_no_github_change(url: str) -> None:
-    with pytest.raises(SwarmError, match="^refused: "):
+    with pytest.raises(SwarmError, match="^refused: ") as refused:
         stack.change(url, "refused")
+    if not url.startswith(stack.GITHUB):
+        assert str(refused.value) == f"refused: {url} is not a GitHub pull request or issue url"
 
 
 def test_change_reads_through_the_port_inside_its_deadline(monkeypatch: pytest.MonkeyPatch) -> None:

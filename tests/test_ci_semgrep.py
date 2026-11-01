@@ -44,6 +44,7 @@ def test_scan_keeps_the_reusable_workflow_steps():
     assert [step.get("name") for step in steps[2:]] == [
         "Install Semgrep",
         "Own rules hold on their fixtures and the code",
+        "Source control exceptions only shrink",
         "Resolve the merge base of the head and the base",
         "Fail on findings new against the base",
     ]
