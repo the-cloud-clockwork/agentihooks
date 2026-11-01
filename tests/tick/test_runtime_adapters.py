@@ -141,10 +141,10 @@ def test_unknown_handle_is_unavailable_without_a_router_call() -> None:
 
 def test_launch_spawns_the_request_through_the_router() -> None:
     adapter, router = _runtime({})
-    request = {"config": None, "lane": "eng", "name": "eng-c", "task": {"id": "t2"}}
+    request = {"config": "swarm-config", "lane": "eng", "name": "eng-c", "task": {"id": "t2"}}
     outcome = adapter.launch(request, deadline=Deadline.after(10))
     assert outcome == Outcome("spawn", Status.OK, "local", value="eng-c")
-    assert router.calls == [("spawn", SpawnRequest(None, "eng", "eng-c", {"id": "t2"}), None)]
+    assert router.calls == [("spawn", SpawnRequest("swarm-config", "eng", "eng-c", {"id": "t2"}), None)]
 
 
 def test_stop_terminates_with_the_agent_scratch_homes() -> None:
