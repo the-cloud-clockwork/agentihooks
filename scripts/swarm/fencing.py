@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from hashlib import sha256
-from secrets import randbelow
+from random import uniform
 from typing import Any, TypeVar
 
 from scripts.events import state
@@ -345,7 +345,7 @@ def _lease_fence(fence: Any) -> LeaseFence | None:
 
 def _retry(attempt: int) -> None:
     if attempt + 1 < ATTEMPTS:
-        time.sleep((1 + randbelow(min(1 << attempt, 32))) / 1000)
+        time.sleep(uniform(0.001, 0.032))
 
 
 def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, Any]], T], fence: Any) -> T:

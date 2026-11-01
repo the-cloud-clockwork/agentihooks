@@ -798,21 +798,29 @@ def test_the_hive_ack_binds_the_full_target_over_the_host_only_target(store, age
     assert store.execution("fixture", stale.execution_id).runtime_target == HIVE_TARGET
 
 
-@pytest.mark.parametrize("query", ["get", "records", "occupants", "managed", "agents"])
+@pytest.mark.parametrize("layout", ["document", "records"])
+@pytest.mark.parametrize("query", ["get", "records", "occupants", "managed", "agents", "hive"])
 def test_registry_queries_use_record_port(
-    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, query: str
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, query: str, layout: str
 ) -> None:
     from scripts.swarm import fencing
 
     current = store.start_execution("fixture", agent)
+    if layout == "records":
+        fencing.migrate_records(store, "fixture", writers_upgraded=True)
 
     def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("registry read the whole fencing document")
 
+    if layout == "records":
+        monkeypatch.setattr(fencing.WholeDocumentRecords, "sections", forbidden)
+
     monkeypatch.setattr(fencing, "read", forbidden)
     monkeypatch.setattr(fencing, "read_executions", forbidden)
     registry = store.execution_registry
-    if query == "get":
+    if query == "hive":
+        assert registry.hive("fixture", agent.name) == current.hive
+    elif query == "get":
         assert registry.get("fixture", current.execution_id) == current
     elif query == "managed":
         assert registry.managed("fixture", agent.name)

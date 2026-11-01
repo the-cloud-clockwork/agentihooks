@@ -483,3 +483,16 @@ def test_host_projection_stays_untrusted_until_every_writer_upgrades(
         expected = "m2"
     assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
     assert scope.host(redis, "fixture", name) == expected
+
+
+def test_renaming_an_agent_removes_only_its_old_host_projection(redis: Any, swarm: Any) -> None:
+    from dataclasses import replace
+
+    join(redis, "m1")
+    old = place(swarm, "m1")
+    current = swarm.agents("fixture")[0]
+    other = place(swarm, "m1", seat="eng-2@fixture")
+    renamed = replace(current, name="renamed-agent", hive="m2")
+    swarm.project_agent("fixture", renamed, previous=current, removed=old)
+    assert redis.hgetall(swarm.key("fixture", "hosts")) == {other: "m1", renamed.name: "m2"}
+    assert not redis.hexists(swarm.key("fixture", "agents"), old)

@@ -144,12 +144,12 @@ def test_fencing_retries_sleep_only_before_remaining_attempts(
             raise error("conflict")
         return original(*args, **kwargs)
 
-    def choose(bound: int) -> int:
-        bounds.append(bound)
-        return bound - 1
+    def choose(low: float, high: float) -> float:
+        bounds.append((low, high))
+        return high
 
     monkeypatch.setattr(target, method, conflict)
-    monkeypatch.setattr(fencing, "randbelow", choose)
+    monkeypatch.setattr(fencing, "uniform", choose)
     monkeypatch.setattr(fencing.time, "sleep", pauses.append)
     if failures == fencing.ATTEMPTS:
         with pytest.raises(SwarmError) as refused:
@@ -160,5 +160,5 @@ def test_fencing_retries_sleep_only_before_remaining_attempts(
         assert fencing.read(store, "fixture")["legacy_owner"] == "owner"
     expected = min(failures, fencing.ATTEMPTS - 1)
     assert len(calls) == min(failures + 1, fencing.ATTEMPTS)
-    assert bounds == [min(1 << attempt, 32) for attempt in range(expected)]
-    assert pauses == [bound / 1000 for bound in bounds]
+    assert bounds == [(0.001, 0.032)] * expected
+    assert pauses == [0.032] * expected
