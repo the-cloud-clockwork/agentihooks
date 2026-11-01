@@ -104,8 +104,6 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
 
 
 def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert (report.EVENTS, report.METRICS, report.STATUS) == ("wrapper events", "wrapper metrics", "wrapper status")
-    assert (report.FOUND, report.LIVE, report.STARTED) == ("found", "live", "started")
     assert [(step.name, step.group, step.order) for step in report.STEPS] == [
         ("ledger event pass", "wrapper events", 10),
         ("done recheck", "wrapper events", 20),
@@ -135,7 +133,7 @@ def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
 def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
-    found = _run(report.EVENTS, calls, _pass(box), monkeypatch)
+    found = _run("wrapper events", calls, _pass(box), monkeypatch)
     assert found == [f"ran {n}" for n in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12)]
     assert calls[:5] == [
         ("skip", ledger_events.event_pass, "inbox", STORE, "sw", DOC, "ledger", 7, "view"),
@@ -151,13 +149,13 @@ def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytes
         ("call", findings, STORE, "sw", CONFIG, ["t"], ["e"], "view"),
         ("skip", ledger_events.findings_pass, "inbox", STORE, "sw", ["ran 11"], DOC),
     ]
-    assert box == {report.LIVE: {"a", "b"}, report.FOUND: ["ran 11"]}
+    assert box == {"live": {"a", "b"}, "found": ["ran 11"]}
 
 
 def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     state = _pass()
-    _run(report.EVENTS, calls, state, monkeypatch)
+    _run("wrapper events", calls, state, monkeypatch)
     stall, overrun_call = calls[5], calls[6]
     assert (stall[0], stall[1], stall[3]) == ("skip", stall_watch.stall_pass, DOC)
     name, args, kwargs = stall[2]
@@ -177,8 +175,8 @@ def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest
 
 def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    box: dict[str, Any] = {report.FOUND: ["f"]}
-    found = _run(report.METRICS, calls, _pass(box, count=5), monkeypatch)
+    box: dict[str, Any] = {"found": ["f"]}
+    found = _run("wrapper metrics", calls, _pass(box, count=5), monkeypatch)
     assert found == ["ran 1", "ran 2", "ran 3"]
     assert calls == [
         ("call", metrics.record_pass, "sw", 7, 5, os.environ, ("input", STORE, DOC, ["f"], "view", "ledger")),
@@ -186,7 +184,7 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
         ("skip", wake.maintenance, "inbox", "sw", AGENTS, 7, ("window", True)),
         ("call", snapshot_job.start, STORE, "sw", 7, os.environ),
     ]
-    assert box[report.STARTED] == ["ran 4"]
+    assert box["started"] == ["ran 4"]
 
 
 def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,5 +195,5 @@ def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_the_status_publish_hands_over_the_doc_and_view(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run(report.STATUS, calls, _pass(), monkeypatch) == []
+    assert _run("wrapper status", calls, _pass(), monkeypatch) == []
     assert calls == [("publish", STORE, "sw", DOC, "view")]

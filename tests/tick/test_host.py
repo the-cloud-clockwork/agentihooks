@@ -78,9 +78,6 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
 
 
 def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert (host.PROBES, host.HEALTH, host.COMMANDS) == ("wrapper probes", "wrapper health", "wrapper commands")
-    assert (host.REFRESH, host.INTENT, host.REBOOT) == ("wrapper refresh", "wrapper intent", "wrapper reboot")
-    assert (host.RAISED, host.JUDGED) == ("raised", "judged")
     assert [(step.name, step.group, step.order) for step in host.STEPS] == [
         ("inbox relay", "wrapper probes", 10),
         ("launch slots", "wrapper probes", 20),
@@ -101,7 +98,7 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
 
 def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run(host.PROBES, calls, _pass(), monkeypatch) == []
+    assert _run("wrapper probes", calls, _pass(), monkeypatch) == []
     assert calls == [
         ("call", relay.relay, "redis"),
         ("call", ("refresh reported", "redis"), 7),
@@ -111,7 +108,7 @@ def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatc
 
 def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run(host.HEALTH, calls, _pass(), monkeypatch) == ["ran 1", "ran 2", "ran 3"]
+    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 2", "ran 3"]
     assert calls == [
         ("skip", incidents.host_pressure, STORE, "sw"),
         ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
@@ -121,15 +118,15 @@ def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch
 
 def test_the_command_runner_consumes_the_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run(host.COMMANDS, calls, _pass(), monkeypatch) == ["ran 1"]
+    assert _run("wrapper commands", calls, _pass(), monkeypatch) == ["ran 1"]
     assert calls == [("call", command_runner.consume, STORE, "sw")]
 
 
 def test_the_refresh_job_starts_only_on_a_scheduled_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run(host.REFRESH, calls, _pass(scheduled=False), monkeypatch) == []
+    assert _run("wrapper refresh", calls, _pass(scheduled=False), monkeypatch) == []
     assert calls == []
-    assert _run(host.REFRESH, calls, _pass(scheduled=True), monkeypatch) == []
+    assert _run("wrapper refresh", calls, _pass(scheduled=True), monkeypatch) == []
     assert calls == [("call", refresh_job.start, STORE, "sw")]
 
 
@@ -137,14 +134,14 @@ def test_the_intent_check_keeps_its_judgement_in_the_box(monkeypatch: pytest.Mon
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
     state = _pass(box, inbox="inbox", doc="doc", config="config")
-    assert _run(host.INTENT, calls, state, monkeypatch) == []
+    assert _run("wrapper intent", calls, state, monkeypatch) == []
     assert calls == [("intent", "inbox", STORE, "sw", "doc", "ledger", "config")]
-    assert box == {host.JUDGED: ("view", "checked")}
+    assert box == {"judged": ("view", "checked")}
 
 
 def test_the_reboot_pass_boots_with_the_fenced_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run(host.REBOOT, calls, _pass(), monkeypatch) == ["ran 1"]
+    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1"]
     assert calls == [("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)]
 
 
@@ -152,9 +149,9 @@ def test_a_raising_step_skips_the_rest_and_raises_at_the_site(monkeypatch: pytes
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
     state = _pass(box, raises=incidents.host_pressure)
-    assert _run(host.HEALTH, calls, state, monkeypatch) == []
+    assert _run("wrapper health", calls, state, monkeypatch) == []
     assert calls == [("skip", incidents.host_pressure, STORE, "sw")]
-    assert list(box) == [host.RAISED]
+    assert list(box) == ["raised"]
     with pytest.raises(RuntimeError, match="^boom$"):
         host.raise_held(box)
 

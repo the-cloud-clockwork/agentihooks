@@ -28,15 +28,7 @@ from scripts.tick import registry
 from scripts.tick.steps import CallStep
 from scripts.tick.steps.host import held
 
-__all__ = ["EVENTS", "FOUND", "LIVE", "METRICS", "STARTED", "STATUS", "STEPS"]
-
 Get = Callable[[str], Any]
-EVENTS = "wrapper events"
-METRICS = "wrapper metrics"
-STATUS = "wrapper status"
-FOUND = "found"
-LIVE = "live"
-STARTED = "started"
 
 
 def _event_pass(cli: Any, get: Get) -> Any:
@@ -88,7 +80,7 @@ def _merge_pass(cli: Any, get: Get) -> Any:
 def _stall_watch(cli: Any, get: Get) -> Any:
     store, slug, ledger, runtime = get("store"), get("slug"), get("ledger"), get("runtime")
     live = runtime.live_names() | {a.name for a in get("agents") if a.runtime_backend != "local"}
-    get("box")[LIVE] = live
+    get("box")["live"] = live
     return cli.skip_refused(
         stall_watch.stall_pass,
         stall_watch.Watch(
@@ -115,7 +107,7 @@ def _overrun(cli: Any, get: Get) -> Any:
             get("store"),
             slug,
             get("ledger"),
-            frozenset(get("box")[LIVE]),
+            frozenset(get("box")["live"]),
             lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
             cli.now_ms(),
         ),
@@ -147,7 +139,7 @@ def _priorities(cli: Any, get: Get) -> Any:
 
 def _health_findings(cli: Any, get: Get) -> None:
     doc = get("doc")
-    get("box")[FOUND] = timing.call(
+    get("box")["found"] = timing.call(
         findings,
         get("store"),
         get("slug"),
@@ -160,7 +152,7 @@ def _health_findings(cli: Any, get: Get) -> None:
 
 def _findings_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        ledger_events.findings_pass, get("inbox"), get("store"), get("slug"), get("box")[FOUND], get("doc")
+        ledger_events.findings_pass, get("inbox"), get("store"), get("slug"), get("box")["found"], get("doc")
     )
 
 
@@ -171,7 +163,7 @@ def _metrics(cli: Any, get: Get) -> Any:
         cli.now_ms(),
         get("count"),
         os.environ,
-        metrics.metrics_swarm.TickInput(get("store"), get("doc"), get("box")[FOUND], get("view"), get("ledger")),
+        metrics.metrics_swarm.TickInput(get("store"), get("doc"), get("box")["found"], get("view"), get("ledger")),
     )
 
 
@@ -185,7 +177,7 @@ def _master_wake(cli: Any, get: Get) -> Any:
 
 
 def _snapshot_job(cli: Any, get: Get) -> None:
-    get("box")[STARTED] = timing.call(snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)
+    get("box")["started"] = timing.call(snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)
 
 
 def _heartbeat(cli: Any, get: Get) -> None:
@@ -197,24 +189,24 @@ def _status_publish(cli: Any, get: Get) -> None:
 
 
 STEPS = (
-    CallStep("ledger event pass", EVENTS, 10, held(_event_pass)),
-    CallStep("done recheck", EVENTS, 20, held(_done_recheck)),
-    CallStep("progress checks", EVENTS, 30, held(_progress_checks)),
-    CallStep("waits end", EVENTS, 40, held(_waits_end)),
-    CallStep("merge pass", EVENTS, 50, held(_merge_pass)),
-    CallStep("stall watch", EVENTS, 60, held(_stall_watch)),
-    CallStep("overrun pass", EVENTS, 70, held(_overrun)),
-    CallStep("quiet pass", EVENTS, 80, held(_quiet)),
-    CallStep("doc report", EVENTS, 90, held(_doc_report)),
-    CallStep("priorities sweep", EVENTS, 100, held(_priorities)),
-    CallStep("health findings", EVENTS, 110, held(_health_findings)),
-    CallStep("findings pass", EVENTS, 120, held(_findings_pass)),
-    CallStep("metrics record", METRICS, 10, held(_metrics)),
-    CallStep("bottleneck status", METRICS, 20, held(_bottleneck_status)),
-    CallStep("master wake", METRICS, 30, held(_master_wake)),
-    CallStep("snapshot job", METRICS, 40, held(_snapshot_job)),
+    CallStep("ledger event pass", "wrapper events", 10, held(_event_pass)),
+    CallStep("done recheck", "wrapper events", 20, held(_done_recheck)),
+    CallStep("progress checks", "wrapper events", 30, held(_progress_checks)),
+    CallStep("waits end", "wrapper events", 40, held(_waits_end)),
+    CallStep("merge pass", "wrapper events", 50, held(_merge_pass)),
+    CallStep("stall watch", "wrapper events", 60, held(_stall_watch)),
+    CallStep("overrun pass", "wrapper events", 70, held(_overrun)),
+    CallStep("quiet pass", "wrapper events", 80, held(_quiet)),
+    CallStep("doc report", "wrapper events", 90, held(_doc_report)),
+    CallStep("priorities sweep", "wrapper events", 100, held(_priorities)),
+    CallStep("health findings", "wrapper events", 110, held(_health_findings)),
+    CallStep("findings pass", "wrapper events", 120, held(_findings_pass)),
+    CallStep("metrics record", "wrapper metrics", 10, held(_metrics)),
+    CallStep("bottleneck status", "wrapper metrics", 20, held(_bottleneck_status)),
+    CallStep("master wake", "wrapper metrics", 30, held(_master_wake)),
+    CallStep("snapshot job", "wrapper metrics", 40, held(_snapshot_job)),
     CallStep("heartbeat", "after", 10, held(_heartbeat)),
-    CallStep("status publish", STATUS, 10, held(_status_publish)),
+    CallStep("status publish", "wrapper status", 10, held(_status_publish)),
 )
 
 for _step in STEPS:

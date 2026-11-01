@@ -68,6 +68,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import scripts.tick.steps.report  # noqa: F401
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
@@ -185,7 +186,6 @@ from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 from scripts.tick.adapters.github import command
 from scripts.tick.steps import host as host_steps
-from scripts.tick.steps import report as report_steps
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -363,7 +363,7 @@ def run_tick(
             return actions
         box: dict[str, Any] = {}
         passing = {"store": store, "slug": slug, "runtime": runtime, "box": box}
-        run_group(host_steps.PROBES, **passing)
+        run_group("wrapper probes", **passing)
         host_steps.raise_held(box)
         hive_ledger.observe(store, slug, now_ms())
         if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
@@ -381,11 +381,11 @@ def run_tick(
         from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
 
         passing |= {"ledger": ledger, "runtime": runtime}
-        probed = run_group(host_steps.HEALTH, **passing)
+        probed = run_group("wrapper health", **passing)
         host_steps.raise_held(box)
         timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
-            controls = run_group(host_steps.COMMANDS, **passing)
+            controls = run_group("wrapper commands", **passing)
             host_steps.raise_held(box)
             if timing.call(ledger.binned, slug):
                 return _bin_stop(store, slug, ledger, runtime)
@@ -400,21 +400,21 @@ def run_tick(
             store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = _phase_steps(inbox, store, slug, doc, ledger)
-            run_group(host_steps.REFRESH, **passing, scheduled=scheduled)
+            run_group("wrapper refresh", **passing, scheduled=scheduled)
             host_steps.raise_held(box)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             judging: dict[str, Any] = {}
             with ThreadPoolExecutor(max_workers=1) as worker:
                 intent = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
-                judged = worker.submit(copy_context().run, run_group, host_steps.INTENT, **intent)
+                judged = worker.submit(copy_context().run, run_group, "wrapper intent", **intent)
                 try:
-                    actions += run_group(host_steps.REBOOT, **passing)
+                    actions += run_group("wrapper reboot", **passing)
                     host_steps.raise_held(box)
                     actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
                 finally:
                     judged.result()
                     host_steps.raise_held(judging)
-                    view, checked = judging[host_steps.JUDGED]
+                    view, checked = judging["judged"]
             actions += checked
             timing.call(delivery.migrate_outbox, store, slug, inbox)
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
@@ -423,20 +423,20 @@ def run_tick(
             view = timing.call(ledger_events.tick_view, inbox, store, slug, doc, view)
             rows = {t["id"]: t for t in doc["tasks"]}
             passing |= {"inbox": inbox, "doc": doc, "config": config, "view": view, "rows": rows, "agents": agents}
-            actions += run_group(report_steps.EVENTS, **passing)
+            actions += run_group("wrapper events", **passing)
             host_steps.raise_held(box)
-            actions += run_group(report_steps.METRICS, **passing, count=len(actions))
+            actions += run_group("wrapper metrics", **passing, count=len(actions))
             host_steps.raise_held(box)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             doc = timing.call(ledger.state, slug)
             run_group("after", **(passing | {"doc": doc}))
             host_steps.raise_held(box)
-            started = box[report_steps.STARTED]
+            started = box["started"]
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     finally:
         try:
             published: dict[str, Any] = {}
-            run_group(report_steps.STATUS, store=store, slug=slug, doc=doc, view=view, box=published)
+            run_group("wrapper status", store=store, slug=slug, doc=doc, view=view, box=published)
             host_steps.raise_held(published)
         finally:
             timing.BEFORE_STEP.reset(keeping)
