@@ -70,7 +70,7 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
             if isinstance(error, urllib.error.HTTPError):
                 transient = 500 <= error.code < 600
             elif isinstance(error, urllib.error.URLError):
-                transient = isinstance(error.reason, TimeoutError)
+                transient = isinstance(error.reason, (TimeoutError, ConnectionResetError))
             else:
                 transient = True
             if not transient or attempt == 4:

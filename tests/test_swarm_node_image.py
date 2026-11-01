@@ -662,7 +662,8 @@ def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
 
 @pytest.mark.parametrize("action", ["install", "download"])
 @pytest.mark.parametrize(
-    "failure", [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout", "incomplete-read", "read-reset"]
+    "failure",
+    [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout", "incomplete-read", "read-reset", "wrapped-reset"],
 )
 @pytest.mark.parametrize("failures", [1, 4, 5])
 def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action, failure, failures):
@@ -679,6 +680,8 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
         error = http.client.IncompleteRead(b"partial", 29057246)
     elif failure == "read-reset":
         error = ConnectionResetError("connection reset by peer")
+    elif failure == "wrapped-reset":
+        error = urllib.error.URLError(ConnectionResetError("connection reset by peer"))
     else:
         error = TimeoutError("timed out")
 
