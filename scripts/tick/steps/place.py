@@ -33,9 +33,9 @@ def _collect_acks(tick: Any, get: Get) -> Any:
 
 
 def _codex_hook_order(tick: Any, get: Get) -> Any:
-    if get("sleeping"):
-        return []
-    return tick.skip_refused(tick._codex_hook_order)
+    if not get("sleeping"):
+        return tick.skip_refused(tick._codex_hook_order)
+    return []
 
 
 def _rank_pass(tick: Any, get: Get) -> Any:
@@ -52,25 +52,25 @@ def _bottleneck_remedy(tick: Any, get: Get) -> Any:
 
 def _preempt(tick: Any, get: Get) -> Any:
     config, store = get("config"), get("store")
-    if config.state != "running" or config.engine == tick.EVENTS_ENGINE or panic.state(store) is not None:
-        return []
-    placement = partial(tick.preempt.probe, get("runtime"))
-    seats = tick.preempt.Seats(get("rows"), tick._ended, tick._current_owner, tick.ready_in_order, placement)
-    return tick.skip_refused(tick.preempt.run, get("slug"), config, store, get("doc"), get("now_ms"), seats)
+    if config.state == "running" and config.engine != tick.EVENTS_ENGINE and panic.state(store) is None:
+        placement = partial(tick.preempt.probe, get("runtime"))
+        seats = tick.preempt.Seats(get("rows"), tick._ended, tick._current_owner, tick.ready_in_order, placement)
+        return tick.skip_refused(tick.preempt.run, get("slug"), config, store, get("doc"), get("now_ms"), seats)
+    return []
 
 
 def _spawn(tick: Any, get: Get) -> Any:
     config, store = get("config"), get("store")
-    if not (
+    if (
         config.state == "running"
         and tick.readiness.tick_places(config.engine, get("rows"))
         and panic.state(store) is None
     ):
-        return []
-    with tick._placement_pass(get("runtime")):
-        found = tick.skip_refused(tick._spawn, *_spawn_args(get))
-    store.redis.delete(get("due"))
-    return found
+        with tick._placement_pass(get("runtime")):
+            found = tick.skip_refused(tick._spawn, *_spawn_args(get))
+        store.redis.delete(get("due"))
+        return found
+    return []
 
 
 STEPS = (
