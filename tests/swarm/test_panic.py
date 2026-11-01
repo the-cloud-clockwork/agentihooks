@@ -59,7 +59,7 @@ class Runs:
         return [f"{repository}:{call.args[0]}" for repository, call in self.calls() if call.operation == "cancel_run"]
 
 
-class Broken:
+class Broken(FakeSourceControl):
     def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]:
         raise subprocess.CalledProcessError(1, ["listing"])
 
