@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
@@ -78,7 +78,7 @@ class ExecutionRegistry:
     def __init__(self, store: RedisStore) -> None:
         self.store = store
 
-    def conflict(self, slug: str, message: str) -> None:
+    def conflict(self, slug: str, message: str) -> NoReturn:
         from scripts.swarm.store import SwarmError
 
         fencing.bump(self.store, slug, fencing.IDENTITY_CONFLICTS)
@@ -105,7 +105,7 @@ class ExecutionRegistry:
         if port.record(slug, "by-name", name) is not None:
             return True
         rows = port.sections(slug, ("archive",))["archive"]
-        return any(row.value["name"] == name for row in rows.values())
+        return any(cast(dict[str, Any], row.value)["name"] == name for row in rows.values())
 
     def archive(self, slug: str) -> int:
         listed = self.store.listed(slug)
@@ -134,14 +134,14 @@ class ExecutionRegistry:
             return ""
         port = fencing.records(self.store, slug)
         head = port.record(slug, "by-name", name)
-        row = port.record(slug, "executions", head.value) if head is not None else None
-        hive = row.value.get("hive") if row is not None else None
+        row = port.record(slug, "executions", cast(str, head.value)) if head is not None else None
+        hive = cast(dict[str, Any], row.value).get("hive") if row is not None else None
         return hive if isinstance(hive, str) else ""
 
     def agents(self, slug: str) -> list[AgentRecord]:
         projections, desired = self.store.projections(slug)
-        rows = fencing.records(self.store, slug).sections(slug, ("executions",))["executions"]
-        attempts = [row.value for row in rows.values() if row.value["name"] in projections]
+        rows = fencing.read_executions(self.store, slug)
+        attempts = [row for row in rows.values() if row["name"] in projections]
         heads = latest(attempts, "name")
         result = []
         for name, row in sorted(projections.items()):
@@ -171,7 +171,7 @@ class ExecutionRegistry:
         row = port.record(slug, "executions", execution_id) or port.record(slug, "archive", execution_id)
         if row is None:
             self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
-        return _record(row.value)
+        return _record(cast(dict[str, Any], row.value))
 
     def validate(self, slug: str, agent: AgentRecord) -> None:
         if agent.runtime_backend not in ("local", "kubernetes"):

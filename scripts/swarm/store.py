@@ -181,7 +181,7 @@ class RedisStore:
         self.names = NameRegistry(redis)
         self.execution_registry = ExecutionRegistry(self)
 
-    def key(self, slug, *parts):
+    def key(self, slug: str, *parts: str) -> str:
         return ":".join((PREFIX, slug, *parts))
 
     def put_gate_lift(self, slug: str, scope: str, subject: str, gate: str, record: dict) -> None:

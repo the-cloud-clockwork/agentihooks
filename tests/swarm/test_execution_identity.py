@@ -816,7 +816,6 @@ def test_registry_queries_use_record_port(
         monkeypatch.setattr(fencing.WholeDocumentRecords, "sections", forbidden)
 
     monkeypatch.setattr(fencing, "read", forbidden)
-    monkeypatch.setattr(fencing, "read_executions", forbidden)
     registry = store.execution_registry
     if query == "hive":
         assert registry.hive("fixture", agent.name) == current.hive

@@ -487,12 +487,8 @@ def read(store: Any, slug: str) -> dict[str, Any]:
 
 
 def read_executions(store: Any, slug: str) -> dict[str, Any]:
-    states = _states(store)
-    if isinstance(states, RedisStateStore):
-        entry = states.get_projection(slug)
-        if entry is not None:
-            return json.loads(entry.value)
-    return read(store, slug)["executions"]
+    rows = records(store, slug).sections(slug, ("executions",))["executions"]
+    return {key: row.value for key, row in rows.items()}
 
 
 LEASE_CACHE = "lease-cache"
