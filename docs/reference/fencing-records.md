@@ -8,7 +8,8 @@ nav_order: 68
 
 Every write the controller lease fences, such as an execution admission, a launch grant, a task claim or a controller
 intent, used to rewrite one JSON document per swarm: the swarm's fencing document in the shared `fencing` state bucket.
-Each write sent the whole document to Redis and kept 64 copies of it in the swarm's history list. Since
+Each write sent the whole document to Redis and appended another whole copy to the swarm's history list, which keeps
+the last two (`HISTORY` in `scripts.events.redis_state`; the `bus` backend keeps 64). Since
 [pull request 9249](https://github.com/the-cloud-clockwork/agentihooks/pull/9249), a swarm moved onto per record keys
 writes only the records a change touched, in one Lua script that checks the controller lease and the revision of every
 record involved, then writes all of them or none.
@@ -68,7 +69,8 @@ Every key of a migrated swarm carries the swarm slug as its hash tag, so one scr
 Each hash field holds `{"r": <revision>, "v": <value>}`: the revision of the batch that last wrote it and the
 record's value. Every record a batch puts gets that batch's revision.
 
-The fence log stream replaces the 64 document copies that the history list kept per write. The document bucket keys
+The fence log stream replaces the whole document copies that the history list kept per write: each entry holds only
+the revision, the owner and the batch size. The document bucket keys
 stay in place; see [Fencing state after the move](#fencing-state-after-the-move).
 
 ## The fenced batch

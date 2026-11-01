@@ -89,7 +89,7 @@ The fencing state lives in one Redis state bucket shared by every swarm, under `
 |---|---|---|
 | `…:fencing:current` | hash, one field per swarm slug | the whole document and its revision |
 | `…:fencing:revision` | counter | the bucket revision, raised by every write of any swarm |
-| `…:fencing:history:<slug>` | list | the swarm's last 64 document revisions |
+| `…:fencing:history:<slug>` | list | the swarm's last 2 document revisions |
 | `…:fencing:projected` | hash, one field per swarm slug | the swarm's `executions` alone, with the revision of the write that made it |
 | `…:fencing:published` | string | the bucket revision at the last write that published a copy |
 
