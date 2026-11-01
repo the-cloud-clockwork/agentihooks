@@ -178,6 +178,24 @@ def test_a_pass_whose_lease_was_stolen_refuses_to_start(store, clock):
     assert lease.current(store, "sw") == stolen
 
 
+def test_a_spawn_after_the_lease_was_stolen_mid_pass_refuses_to_launch(store, clock, monkeypatch):
+    store.create(SwarmConfig("sw", ".", 1, 0))
+    held = lease.acquire(store, "sw", "home")
+    monkeypatch.setattr(lease, "beat", lambda store, slug, held, stop: None)
+    launched = []
+    runtime = controller.FencedRuntime(
+        store, "sw", held, SimpleNamespace(spawn=lambda *args: launched.append(args[2]) or "placed"), "local"
+    )
+    with lease.held_pass(store, "sw", held):
+        assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
+        clock[0] += lease.ttl_ms()
+        lease.acquire(store, "sw", "other")
+        with pytest.raises(SwarmError) as error:
+            runtime.spawn(store.config("sw"), "eng", "two", {"id": "t"})
+    assert str(error.value) == "the controller lease is stale"
+    assert launched == ["one"]
+
+
 def test_a_pass_fences_each_ledger_write_with_the_lease_of_the_swarm_that_owns_it(store, clock):
     for slug in ("sw", "peer", "idle"):
         store.create(SwarmConfig(slug, ".", 1, 0))

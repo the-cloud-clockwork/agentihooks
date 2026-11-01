@@ -219,7 +219,7 @@ class FencedRuntime:
         return room(config) if room else 1
 
     def spawn(self, config, lane, name, task):
-        lease.renew(self.store, self.slug, self.held)
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
         task = _master_task(lane, task)
         try:
             return self._spawn(config, lane, name, task)

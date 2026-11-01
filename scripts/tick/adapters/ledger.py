@@ -13,12 +13,6 @@ __all__ = ["ClientLedger", "resource_client"]
 Clients = Callable[[float], ResourceClient]
 
 
-def _live(deadline: Deadline) -> float:
-    if deadline.expired:
-        raise TimeoutError("tool deadline expired")
-    return deadline.remaining
-
-
 def resource_client(slug: str, service: bool = False) -> Clients:
     """Build clients for ledger slug whose request timeout never outlasts the deadline left."""
     from scripts.swarm.ledger_client import _ledger
@@ -41,10 +35,10 @@ class ClientLedger:
     clients: Clients
 
     def export(self, *, deadline: Deadline) -> dict[str, object]:
-        return self.clients(_live(deadline)).export(self.slug)
+        return self.clients(deadline.live()).export(self.slug)
 
     def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> dict[str, object]:
-        client = self.clients(_live(deadline))
+        client = self.clients(deadline.live())
         epoch = lease.epoch_for(self.slug)
         stamped = [
             dict(operation) if epoch is None else {**operation, "controller_epoch": epoch} for operation in operations
