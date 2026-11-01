@@ -1725,8 +1725,8 @@ def test_an_auto_swarm_with_an_unknown_host_scales_on_quota_alone():
     _, decision = capacity.autoscaled(config, inputs)
     free = capacity._placeable(capacity._open(inputs.observations, {}))
     previous = {"ceilings": {"eng": 1, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, None, inputs.demand, previous)
-    assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1}
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, None, inputs.demand, previous, now_ms=0)
+    assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1, "since": 0}
     assert (
         decision["reason"]
         == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 5 of 13; raise held at tick 1 of 3."
@@ -1853,7 +1853,7 @@ def test_quota_capacity_autoscales_on_the_room_left_since_it_was_first_granted(t
     assert asked == [1_000]
     assert decision["host"] == {**_granted(), "held": True, "reason": BAND_HOLDS}
     assert decision["autoscale"]["host"] == decision["host"]
-    assert decision["autoscale"]["pending_raise"] == {"target": 5, "ticks": 1}
+    assert decision["autoscale"]["pending_raise"] == {"target": 5, "ticks": 1, "since": 100_000}
 
 
 def test_a_runtime_without_a_spawn_counter_autoscales_on_the_whole_room(tmp_path, monkeypatch):
@@ -1866,7 +1866,7 @@ def test_a_runtime_without_a_spawn_counter_autoscales_on_the_whole_room(tmp_path
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto")
     agents = [AgentRecord(f"eng-{n}", "eng", "") for n in range(4)]
     decision = rt.quota_capacity(config, agents, 100, {"eng": 9, "ci": 0, "plan": 0})
-    assert decision["autoscale"]["pending_raise"] == {"target": 7, "ticks": 1}
+    assert decision["autoscale"]["pending_raise"] == {"target": 7, "ticks": 1, "since": 100_000}
 
 
 def test_apply_hands_the_runtime_the_spawn_count_the_host_gate_reads(tmp_path, monkeypatch):
@@ -1901,9 +1901,9 @@ def test_an_auto_swarm_with_quota_and_host_room_rises_above_its_configured_caps_
     rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6), account("cx", harness="codex", cap=6)])
     first = _scaling_tick(store, ledger, rt, 1000)
     assert sum(first["configured"].values()) == 2
-    assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1}
+    assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1, "since": 1000}
     second = _scaling_tick(store, ledger, rt, 61_000)
-    assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2}
+    assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2, "since": 1000}
     assert "raise held at tick 2 of 3" in second["autoscale"]["reason"]
     third = _scaling_tick(store, ledger, rt, 121_000)
     assert third["configured"] == {"eng": 3, "ci": 1, "plan": 0}
@@ -2059,7 +2059,7 @@ def test_autoscaled_uses_the_swarm_watermarks_and_the_stored_state():
     room = host_budget.room(inputs.host(), host_budget.Thresholds(2.0, 1.5, 1000), None)
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": 9, "ticks": 1}}
     free = capacity._placeable(capacity._open(inputs.observations, {}))
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous)
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous, now_ms=0)
     assert decision == {
         **expected,
         "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held, "granted_at": 0},
@@ -2088,7 +2088,7 @@ def test_autoscaled_seeds_from_the_configured_caps_and_an_idle_raise():
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
     free = capacity._placeable(capacity._open(inputs.observations, {}))
     zero = {"eng": 0, "ci": 0, "plan": 0}
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous)
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous, now_ms=0)
     assert decision == {
         **expected,
         "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held, "granted_at": 0},
