@@ -4,6 +4,7 @@ from time import monotonic
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
