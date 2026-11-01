@@ -42,6 +42,15 @@ def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, 
     return tests, durations, max([MUTANT_SECONDS, *durations.values()])
 
 
+def head_seconds(seconds: list[float]) -> float:
+    """Price the fastest tests that fit the head budget, or the fastest one, where most mutants die."""
+    spent = 0.0
+    for taken in sorted(seconds):
+        if spent + taken <= HEAD_SECONDS:
+            spent += taken
+    return spent or min(seconds)
+
+
 def measured_costs(
     names: list[str],
     results: list[dict],
@@ -61,7 +70,7 @@ def measured_costs(
         seconds = (
             durations.get(killer, missing)
             if killer in tests.get(function, ())
-            else sum(durations.get(node, missing) for node in early)
+            else head_seconds([durations.get(node, missing) for node in early])
             if early
             else functions.get(function, fallback)
         )
