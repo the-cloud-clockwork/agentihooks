@@ -205,13 +205,25 @@ def test_github_checks_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tm
             {"name": "tests", "status": "in_progress", "conclusion": None, "html_url": "https://c/2"},
         ]
     }
-    provider, recorder = _provider(monkeypatch, tmp_path, [PULL, runs])
+    statuses = {
+        "statuses": [
+            {"context": "Gate — Required", "state": "pending", "target_url": "https://s/1"},
+            {"context": "sonar", "state": "success", "target_url": None},
+            {"context": "deploy", "state": "error", "target_url": "https://s/3"},
+        ]
+    }
+    provider, recorder = _provider(monkeypatch, tmp_path, [PULL, runs, statuses])
 
     assert provider.checks(REFERENCE, deadline=_deadline()) == (
         port.CheckState("lint", "completed", "success", "https://c/1"),
         port.CheckState("tests", "in_progress", None, "https://c/2"),
+        port.CheckState("Gate — Required", "pending", None, "https://s/1"),
+        port.CheckState("sonar", "completed", "success", ""),
+        port.CheckState("deploy", "completed", "error", "https://s/3"),
     )
     assert recorder.calls[1][1] == ["api", "repos/owner/project/commits/head/check-runs?per_page=100&page=1"]
+    assert recorder.calls[2][1] == ["api", "repos/owner/project/commits/head/status"]
+    assert len(recorder.calls) == 3
 
 
 def test_github_runs_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -233,12 +245,15 @@ def test_github_runs_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tmp_
 
 def test_github_checks_follow_full_pages(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     row = {"name": "lint", "status": "completed", "conclusion": "success", "html_url": "https://c/1"}
-    provider, recorder = _provider(monkeypatch, tmp_path, [PULL, {"check_runs": [row] * 100}, {"check_runs": [row]}])
+    provider, recorder = _provider(
+        monkeypatch, tmp_path, [PULL, {"check_runs": [row] * 100}, {"check_runs": [row]}, {"statuses": []}]
+    )
 
     assert len(provider.checks(REFERENCE, deadline=_deadline())) == 101
     assert [call[1][1] for call in recorder.calls[1:]] == [
         "repos/owner/project/commits/head/check-runs?per_page=100&page=1",
         "repos/owner/project/commits/head/check-runs?per_page=100&page=2",
+        "repos/owner/project/commits/head/status",
     ]
 
 
