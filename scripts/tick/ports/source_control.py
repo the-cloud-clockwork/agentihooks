@@ -9,10 +9,12 @@ __all__ = [
     "CheckState",
     "Comment",
     "Merged",
+    "OpenChange",
     "QueueEntry",
     "QueueHealth",
     "RateLimit",
     "RepositoryRun",
+    "RollupCheck",
     "Run",
     "Tag",
 ]
@@ -43,6 +45,19 @@ class CheckState:
     status: str
     conclusion: str | None
     url: str
+
+
+@dataclass(frozen=True)
+class RollupCheck:
+    name: str
+    result: str | None
+    at: str | None
+
+
+@dataclass(frozen=True)
+class OpenChange:
+    url: str
+    checks: tuple[RollupCheck, ...]
 
 
 @dataclass(frozen=True)
