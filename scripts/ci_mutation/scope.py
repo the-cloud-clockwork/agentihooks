@@ -147,6 +147,45 @@ def bindings(node: ast.stmt) -> list[str]:
     return []
 
 
+def moved_lines(root: Path, comparison: str) -> dict[str, set[int]]:
+    """Name the head lines one whole diff colours as moved unchanged, so moves between files count too."""
+    colours = ["color.diff.new=green", "color.diff.newMoved=blue", "color.diff.newMovedAlternative=blue"]
+    command = [
+        "git",
+        *(part for colour in colours for part in ("-c", colour)),
+        "diff",
+        "--no-renames",
+        "--no-ext-diff",
+        "--color=always",
+        "--color-moved=blocks",
+        "--color-moved-ws=allow-indentation-change",
+        "--ws-error-highlight=none",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "-U0",
+        comparison,
+        "--",
+        "hooks/",
+        "scripts/",
+    ]
+    moved: dict[str, set[int]] = {}
+    name, line, header = "", 0, False
+    for raw in subprocess.check_output(command, cwd=root).decode().splitlines():
+        text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
+        hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", text)
+        if text.startswith("diff --git "):
+            header = True
+        elif header and text.startswith("+++ b/"):
+            name = text.removeprefix("+++ b/").rstrip("\t")
+        elif hunk:
+            header, line = False, int(hunk[1])
+        elif not header and text.startswith("+"):
+            if raw.startswith("\x1b[34m"):
+                moved.setdefault(name, set()).add(line)
+            line += 1
+    return moved
+
+
 def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
     comparison = f"{base}...{head}"
     names = (
@@ -158,6 +197,7 @@ def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
         .split("\0")
     )
     fork = subprocess.check_output(["git", "merge-base", base, head], cwd=root).decode().strip()
+    moved = moved_lines(root, comparison)
     changes = {}
     for name in names:
         path = Path(name)
@@ -166,7 +206,8 @@ def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
         if bare_tree(blob(root, fork, name)) == bare_tree(blob(root, head, name)):
             continue
         diff = subprocess.check_output(["git", "diff", "-U0", comparison, "--", name], cwd=root).decode()
-        changes[name] = changed_lines(diff)
+        if lines := changed_lines(diff) - moved.get(name, set()):
+            changes[name] = lines
     return changes
 
 
@@ -237,7 +278,7 @@ def mentioned(text: str, words: list[frozenset[str]]) -> bool:
     return relative or any(parts <= tokens for parts in words)
 
 
-def select_tests(root: Path, source: Path) -> list[str]:
+def select_tests(root: Path, source: Path, helpers: bool = True) -> list[str]:
     module = module_name(source)
     named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
     texts = {path: path.read_text() for path in sorted((root / "tests").rglob("*.py")) if path.is_file()}
@@ -259,7 +300,7 @@ def select_tests(root: Path, source: Path) -> list[str]:
         or source.suffix == ".js"
         and source.name in text
     } | importing({module})
-    added = reaching
+    added = reaching if helpers else set()
     while added:
         added = importing({module_name(path.relative_to(root)) for path in added}) - reaching
         reaching |= added

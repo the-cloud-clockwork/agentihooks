@@ -10,7 +10,7 @@ from typing import Any
 
 from mutmut.utils.format_utils import get_mutant_name
 
-from scripts.ci_mutation.killers import KillMemory
+from scripts.ci_mutation.killers import KillMemory, is_direct
 from scripts.ci_mutation.mutant_shards import function_name
 from scripts.ci_mutation.plan import BATCH_RUNNERS, MUTANT_SECONDS, shard_count, shard_workers
 from scripts.ci_mutation.scope import discover_changes, select_tests
@@ -42,7 +42,12 @@ def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, 
     return tests, durations, max([MUTANT_SECONDS, *durations.values()])
 
 
-def measured_costs(names: list[str], results: list[dict], memory: KillMemory | None = None) -> dict[str, float]:
+def measured_costs(
+    names: list[str],
+    results: list[dict],
+    memory: KillMemory | None = None,
+    direct: dict[str, Collection[str]] | None = None,
+) -> dict[str, float]:
     tests, durations, missing = function_tests(results)
     functions = {function: sum(durations.get(node, missing) for node in nodes) for function, nodes in tests.items()}
     fallback = max(60.0, max(functions.values(), default=0.0))
@@ -51,8 +56,14 @@ def measured_costs(names: list[str], results: list[dict], memory: KillMemory | N
         function = name.rpartition("__mutmut_")[0]
         # The recorded killer runs first and mutmut stops at the first failing test.
         killer = memory.killer(name) if memory is not None else None
+        first = (direct or {}).get(function.rpartition(".")[0] + ".", ())
+        early = [node for node in tests.get(function, ()) if is_direct(node, first)]
         seconds = (
-            durations.get(killer, missing) if killer in tests.get(function, ()) else functions.get(function, fallback)
+            durations.get(killer, missing)
+            if killer in tests.get(function, ())
+            else sum(durations.get(node, missing) for node in early)
+            if early
+            else functions.get(function, fallback)
         )
         observed = memory.cost(name, tests.get(function, ())) if memory is not None else None
         costs[name] = observed if observed is not None else MUTANT_SECONDS + 1.25 * seconds
@@ -64,7 +75,7 @@ def split_tests(
 ) -> dict[str, Any] | None:
     head: list[str] = []
     spent = 0.0
-    for node in sorted(nodes, key=lambda node: (node.partition("[")[0] not in direct, seconds[node], node)):
+    for node in sorted(nodes, key=lambda node: (not is_direct(node, direct), seconds[node], node)):
         if spent + seconds[node] <= HEAD_SECONDS:
             head.append(node)
             spent += seconds[node]
@@ -100,7 +111,7 @@ def measured_splits(
         seconds = {node: durations.get(node, missing) for node in tests[function]}
         first = (direct or {}).get(function.rpartition(".")[0] + ".", ())
         split = split_tests(tests[function], seconds, limit, first)
-        wanted = {node for node in split["head"] if node.partition("[")[0] in first} if split else set()
+        wanted = {node for node in split["head"] if is_direct(node, first)} if split else set()
         # Reusing the last run's slices keeps each unit's selection, so its recorded cost still matches.
         kept = memory.split(function, tests[function]) if memory is not None else None
         if kept and 2 <= len(kept["slices"]) <= limit and wanted <= set(kept["head"]):
@@ -184,7 +195,7 @@ def measured_plan(
     limit = min(limit, sum(len(names) for names, _ in groups))
     costs, splits, unit_costs = {}, {}, {}
     for names, results in groups:
-        costs.update(measured_costs(names, results, memory))
+        costs.update(measured_costs(names, results, memory, direct))
         group_splits = measured_splits(names, results, limit, memory, direct)
         splits.update(group_splits)
         for name in names:
