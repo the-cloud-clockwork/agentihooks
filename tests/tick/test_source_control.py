@@ -339,6 +339,29 @@ def test_github_rate_limit_reads_the_core_quota(monkeypatch: pytest.MonkeyPatch,
     assert recorder.calls[0][1] == ["api", "rate_limit"]
 
 
+@pytest.mark.feature("swarm-tick-source-control-port")
+@pytest.mark.parametrize(
+    "rows,expected",
+    [
+        (
+            [{"merged_at": None}, {"merged_at": "2026-10-19T21:20:03Z"}, {"merged_at": "2026-10-20T00:00:00Z"}],
+            "2026-10-19T21:20:03Z",
+        ),
+        ([{"merged_at": None}], None),
+        ([], None),
+    ],
+)
+def test_github_merged_at_reads_the_first_merged_change_carrying_a_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rows: list[dict[str, str | None]], expected: str | None
+) -> None:
+    provider, recorder = _provider(monkeypatch, tmp_path, [rows])
+
+    assert provider.merged_at("abc123", deadline=_deadline()) == expected
+    assert recorder.calls == [
+        (github.CALLER, ["api", "repos/owner/project/commits/abc123/pulls"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
+    ]
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_github_issues_enabled_reads_the_repository(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool
@@ -407,6 +430,7 @@ def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
         ("issues_enabled", (), True),
         ("latest_runs", (), (port.RepositoryRun(1, "feature", "push", "queued"),)),
         ("cancel_run", (5,), None),
+        ("merged_at", ("abc123",), "2026-10-19T21:20:03Z"),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(
@@ -459,6 +483,7 @@ def test_github_defaults() -> None:
         ("issues_enabled", ()),
         ("latest_runs", ()),
         ("cancel_run", (5,)),
+        ("merged_at", ("abc123",)),
     ],
 )
 def test_github_expired_deadline_prevents_external_reads(
