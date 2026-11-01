@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.548 · 2026-11-01
+
+### 2026-11-01 · 2ee703361052 · #9221 · @nestorcolt
+
+**Read renewed Codex tokens in balance like the Claude rows**
+
+This change fixes `agentihooks balance` so Codex account rows pick up freshly renewed login tokens instead of a stale shell environment, matching how Claude rows already work; previously, logging into a Codex account in a new shell wouldn't show up until the old shell was closed, now it correctly reports status like OPEN, Pro, 83 percent of the week immediately. It also resolves a type-checking regression in the tick module caused by a prior refactor, suppressing now-irrelevant unused-function and unused-import warnings and lowering the strict type count baseline so pull requests from dev stop failing the type gate.
+
 ## v2.17.547 · 2026-11-01
 
 ### 2026-11-01 · fcfc09affd1d · #9217 · @agenticore-app
