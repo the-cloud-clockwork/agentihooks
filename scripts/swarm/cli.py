@@ -103,10 +103,8 @@ from scripts.swarm import (
     doc_report,
     done_gate,
     failed_panes,
-    hive_ledger,
     idle,
     launch_check,
-    ledger_client,
     ledger_events,
     master_launch,
     master_move,
@@ -144,6 +142,7 @@ from scripts.swarm import (
     trace_plan,
     waits,
 )
+from scripts.swarm import ledger_client as ledger_client
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
@@ -368,14 +367,11 @@ def run_tick(
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
         box: dict[str, Any] = {}
-        passing = {"store": store, "slug": slug, "runtime": runtime, "box": box}
+        passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         run_group("wrapper probes", **passing)
         host_steps.raise_held(box)
-        hive_ledger.observe(store, slug, now_ms())
-        if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
-            slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
-        ):
-            return ["Ledger health probe failed"]
+        if "stop" in box:
+            return box["stop"]
         if ledger_view.reads(ledger):
             ledger_view.start(slug, ledger.service)
         runtime = controller.FencedRuntime(
@@ -385,12 +381,11 @@ def run_tick(
             runtime or routed(herdr=HerdrRuntime()),
             controller.deployment_for(store.config(slug), os.environ),
         )
-        from scripts.swarm.health import prompt_backlog, spawn_stall
+        from scripts.swarm.health import spawn_stall
 
         passing |= {"ledger": ledger, "runtime": runtime}
         probed = run_group("wrapper health", **passing)
         host_steps.raise_held(box)
-        timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = run_group("wrapper commands", **passing)
             host_steps.raise_held(box)
@@ -417,24 +412,24 @@ def run_tick(
                 try:
                     actions += run_group("wrapper reboot", **passing)
                     host_steps.raise_held(box)
-                    actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
                 finally:
                     judged.result()
                     host_steps.raise_held(judging)
                     view, checked = judging["judged"]
             actions += checked
-            timing.call(delivery.migrate_outbox, store, slug, inbox)
-            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
+            run_group("wrapper relay", **passing, inbox=inbox)
+            host_steps.raise_held(box)
+            agents = box["agents"]
             doc, config = timing.call(ledger.state, slug), store.config(slug)
-            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc, view)
+            run_group("wrapper view", **passing, inbox=inbox, doc=doc, view=view)
+            host_steps.raise_held(box)
+            view = box["view"]
             rows = {t["id"]: t for t in doc["tasks"]}
             passing |= {"inbox": inbox, "doc": doc, "config": config, "view": view, "rows": rows, "agents": agents}
             actions += run_group("wrapper events", **passing)
             host_steps.raise_held(box)
             actions += run_group("wrapper metrics", **passing, count=len(actions))
             host_steps.raise_held(box)
-            store.redis.set(store.key(slug, "last-tick"), now_ms())
             doc = timing.call(ledger.state, slug)
             run_group("after", **(passing | {"doc": doc}))
             host_steps.raise_held(box)
