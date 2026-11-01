@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.doctor import detect, master_prompts
-from scripts.swarm import input_wait
+from scripts.swarm import elapsed, input_wait
 from scripts.swarm.health.verdicts import VerdictStore
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -112,7 +112,7 @@ def test_the_tick_keeps_the_entry_time_while_the_same_prompt_holds_and_clears_it
     watch(store, runtime, PaneObservation("waiting", PROMPT), ENTERED)
     watch(store, runtime, PaneObservation("waiting", PROMPT), ENTERED + 5 * MINUTE)
     assert input_wait.since(store, "sw", name) == ENTERED
-    assert store.redis.ttl(store.key("sw", "input-since", name)) == input_wait.DAY_S
+    assert store.redis.ttl(store.key("sw", "input-since", name)) == elapsed.DAY_S
     watch(store, runtime, PaneObservation("waiting", "Another question?"), ENTERED + 6 * MINUTE)
     assert input_wait.since(store, "sw", name) == ENTERED + 6 * MINUTE
     watch(store, runtime, PaneObservation("idle"), ENTERED + 7 * MINUTE)

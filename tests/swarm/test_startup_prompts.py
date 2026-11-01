@@ -63,7 +63,7 @@ def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
     for n in range(1, 5):
         beat(store.redis, "prompt-proof", agent.name, "working", n)
         agent = store.agents("prompt-proof")[0]
-        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, n)
+        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, n * 60_000)
         report = status_report(store, "prompt-proof", ledger.state("prompt-proof"), runtime)
         assert report["agents"][0]["status"] == "waiting"
         assert report["agents"][0]["input_ticks"] == n
@@ -280,7 +280,7 @@ def test_status_text_shows_a_pane_held_at_a_prompt_as_waiting_and_the_finding_na
     runtime.observe = HerdrRuntime(home=tmp_path, herdr=_herdr_showing("claude-trust-prompt.txt")).observe
     for tick in range(1, 5):
         agent = store.agents("prompt-proof")[0]
-        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, tick)
+        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, tick * 60_000)
         cli.cmd_status(store, SimpleNamespace(slug="prompt-proof", json=False))
         out = capsys.readouterr().out
         row = next(line.split("\t") for line in out.splitlines() if line.startswith("engineer-one\t"))
