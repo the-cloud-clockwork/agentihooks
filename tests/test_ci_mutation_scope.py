@@ -292,6 +292,38 @@ def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
 
 
+STEP = (
+    "def step(items):\n"
+    "    total = sum(item.weight for item in items)\n"
+    "    limit = max(total, len(items) + 10)\n"
+    "    return [item.name for item in items if item.weight <= limit]\n"
+)
+
+
+def test_lines_moved_unchanged_into_another_file_are_not_graded_and_its_new_glue_is(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    pinned = commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    git("add", "hooks/old.py")
+    commit("new name.py", f"def run(items):\n    return len(step(items)) + 1\n\n\n{STEP}")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new name.py": {1, 2}}
+
+
+def test_a_moved_line_edited_on_the_way_and_its_reindented_neighbours_keep_only_the_edit_graded(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    pinned = commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    moved = STEP.replace("len(items) + 10", "len(items) + 11").replace("\n    ", "\n        ")
+    commit("new.py", f"class Runner:\n    {moved.replace('(items)', '(self, items)', 1)}")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {1, 2, 4}}
+
+
 @pytest.mark.parametrize(
     ("head", "expected"),
     [

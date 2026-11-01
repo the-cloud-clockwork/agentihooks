@@ -276,6 +276,31 @@ def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_i
     )
 
 
+def test_a_mutant_without_a_killer_costs_the_direct_tests_it_runs_first_and_one_without_them_its_traced_sum():
+    from scripts.ci_mutation.measured import measured_costs, measured_plan
+
+    names = ["scripts.sample.x_f__mutmut_1", "scripts.sample.x_g__mutmut_1", "scripts.other.x_h__mutmut_1"]
+    results = [
+        {
+            "tests": {
+                "scripts.sample.x_f": ["tests/test_sample.py::test_f[1]", "tests/test_tick.py::test_slow"],
+                "scripts.sample.x_g": ["tests/test_tick.py::test_slow", "tests/test_tick.py::test_other"],
+                "scripts.other.x_h": ["tests/test_sample.py::test_f[1]", "tests/test_tick.py::test_slow"],
+            },
+            "durations": {
+                "tests/test_sample.py::test_f[1]": 2.0,
+                "tests/test_tick.py::test_slow": 50.0,
+                "tests/test_tick.py::test_other": 6.0,
+            },
+        }
+    ]
+    direct = {"scripts.sample.": ["tests/test_sample.py::test_f"], "scripts.other.": []}
+    expected = {names[0]: 5.6 + 1.25 * 2.0, names[1]: 5.6 + 1.25 * 56.0, names[2]: 5.6 + 1.25 * 52.0}
+    assert measured_costs(names, results, direct=direct) == pytest.approx(expected)
+    assert measured_plan([(names, results)], direct=direct)["costs"] == pytest.approx(expected)
+    assert measured_costs(names[:1], results) == pytest.approx({names[0]: 5.6 + 1.25 * 52.0})
+
+
 def test_refinement_prices_mutants_from_killers_kept_beside_the_shared_stats(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
