@@ -50,6 +50,7 @@ CASES = [
     ("source_control", "latest_runs", (), False),
     ("source_control", "cancel_run", ("value",), True),
     ("source_control", "merged_at", ("value",), False),
+    ("source_control", "open_changes", (), False),
     ("runtime", "inspect", ("value",), False),
     ("runtime", "launch", ({},), True),
     ("runtime", "stop", ("value",), True),
