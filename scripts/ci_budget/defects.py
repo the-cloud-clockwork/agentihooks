@@ -173,7 +173,7 @@ def refresh(
     redis.set(key(slug), now_ms)
     since_s = now_ms / 1000 - WINDOW_S
     try:
-        listed = ci_speed.read_runs(config.repo, since_s, run)
+        listed = ci_speed.read_runs(config.repo, since_s)
     except READ_ERRORS as exc:
         _skipped("reading Tests runs", exc)
         return []
@@ -207,11 +207,11 @@ def refresh(
         redis.set(seen, now_ms, ex=SEEN_TTL_S)
     if metrics_outbox.settings(environ) is not None:
         try:
-            listed = listed + ci_speed.read_runs(config.repo, since_s, run, event="push")
+            listed = listed + ci_speed.read_runs(config.repo, since_s, event="push")
         except READ_ERRORS as exc:
             _skipped("reading dev push Tests runs", exc)
         try:
-            listed = listed + ci_speed.read_runs(config.repo, since_s, run, event="merge_group")
+            listed = listed + ci_speed.read_runs(config.repo, since_s, event="merge_group")
         except READ_ERRORS as exc:
             _skipped("reading merge queue Tests runs", exc)
         runs = metrics_ci.metered(listed)

@@ -4,30 +4,31 @@ from __future__ import annotations
 
 import json
 import statistics
-import subprocess
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.swarm import stack
 from scripts.swarm.store import PREFIX
-from scripts.tick.adapters.github import command
+from scripts.tick.deadline import Deadline
 
 if TYPE_CHECKING:
     from redis import Redis
 
     from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.tick.ports.contracts import SourceControl
+    from scripts.tick.ports.source_control import WorkflowRun
 
 WORKFLOW = "test.yml"
 WINDOW_S = 24 * 3600
 REFRESH_MS = 3600 * 1000
 OVERLAP_S = 2 * 3600
+READ_SECONDS = 60
 FINISHED = {"success", "failure"}
-JQ = (
-    ".workflow_runs[] | {id, event, status, conclusion, head_branch, head_sha, created_at, run_started_at,"
-    " updated_at, run_attempt} | @json"
-)
 EMPTY = {"minutes": None, "runs": 0, "at": 0, "tried_at": 0}
 
 
@@ -68,31 +69,33 @@ def median_minutes(window: dict[str, list[float]]) -> float | None:
     return round(statistics.median(seconds) / 60, 2) if seconds else None
 
 
-def read_runs(repo_dir: str, since_s: float, run: Callable = subprocess.run, event: str = "pull_request") -> list[dict]:
+def read_runs(
+    repo_dir: str,
+    since_s: float,
+    ports: Callable[[Path], SourceControl] = stack.origin_source_control,
+    event: str = "pull_request",
+) -> list[dict]:
+    """Read the finished Tests runs for an event created since a time, through the checkout's source control port."""
     since = datetime.fromtimestamp(since_s, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    provider = ports(Path(repo_dir))
 
-    def read(conclusion):
-        endpoint = (
-            f"repos/{{owner}}/{{repo}}/actions/workflows/{WORKFLOW}/runs"
-            f"?event={event}&status={conclusion}&exclude_pull_requests=true&created=>={since}&per_page=100"
-        )
-        return run(
-            command(["api", endpoint, "--paginate", "--jq", JQ]),
-            cwd=repo_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=60,
-        ).stdout
+    def read(conclusion: str) -> tuple[WorkflowRun, ...]:
+        """Read every run that finished with one conclusion."""
+        return provider.workflow_runs(WORKFLOW, event, conclusion, since, deadline=Deadline.after(READ_SECONDS))
 
     with ThreadPoolExecutor() as pool:
         outputs = list(pool.map(read, sorted(FINISHED)))
-    return [json.loads(line) for output in outputs for line in output.splitlines()]
+    return [asdict(found) for output in outputs for found in output]
 
 
 def refresh(
-    slug: str, config: SwarmConfig, store: RedisStore, now_ms: int, run: Callable = subprocess.run
+    slug: str,
+    config: SwarmConfig,
+    store: RedisStore,
+    now_ms: int,
+    ports: Callable[[Path], SourceControl] = stack.origin_source_control,
 ) -> list[str]:
+    """Refresh the cached median of the last day's pull request Tests runs at most hourly, keeping it on a failed read."""
     cached = {**EMPTY, **(get(store.redis, slug) or {})}
     if now_ms - cached["tried_at"] < REFRESH_MS:
         return []
@@ -100,8 +103,8 @@ def refresh(
     known = cached.get("durations")
     since_s = start_s if known is None else max(start_s, cached["at"] / 1000 - OVERLAP_S)
     try:
-        merged = {**(known or {}), **durations(read_runs(config.repo, since_s, run))}
-    except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError) as exc:
+        merged = {**(known or {}), **durations(read_runs(config.repo, since_s, ports))}
+    except (*stack.PORT_ERRORS, TypeError) as exc:
         error = getattr(exc, "stderr", None) or str(exc)
         print(f"ci speed kept its last value, reading Tests runs failed: {error}", file=sys.stderr)
         store.redis.set(key(slug), json.dumps({**cached, "tried_at": now_ms, "error": error}))

@@ -559,7 +559,7 @@
   "scripts/swarm/brain_binding.py": 55,
   "scripts/swarm/brain_place.py": 23,
   "scripts/swarm/capacity.py": 480,
-  "scripts/swarm/ci_speed.py": 57,
+  "scripts/swarm/ci_speed.py": 42,
   "scripts/swarm/claim_hold.py": 120,
   "scripts/swarm/claim_lost.py": 6,
   "scripts/swarm/claim_order.py": 98,
