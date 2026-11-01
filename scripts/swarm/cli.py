@@ -385,7 +385,7 @@ def run_tick(
             runtime or routed(herdr=HerdrRuntime()),
             controller.deployment_for(store.config(slug), os.environ),
         )
-        from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
+        from scripts.swarm.health import prompt_backlog, spawn_stall
 
         passing |= {"ledger": ledger}
         probed = run_group("wrapper health", **passing)
@@ -405,8 +405,8 @@ def run_tick(
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
             store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
-            timing.call(urgent_hold.observe, store, slug, doc, now_ms())
-            actions = _phase_steps(inbox, store, slug, doc, ledger)
+            actions = run_group("wrapper phases", **passing, inbox=inbox, doc=doc)
+            host_steps.raise_held(box)
             run_group("wrapper refresh", **passing, scheduled=scheduled)
             host_steps.raise_held(box)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
