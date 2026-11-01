@@ -280,3 +280,53 @@ def test_liveness_reads_each_member_without_a_table_scan(monkeypatch: pytest.Mon
     monkeypatch.setattr(reaper, "_process", one)
     assert reaper._alive({60: 600, 61: 610, 62: 620, 63: 1}) == [60]
     assert sorted(read) == [60, 61, 62, 63]
+
+
+def test_rescan_replaces_the_pass_snapshot() -> None:
+    tables = [{1: _process(1, 1)}, {2: _process(2, 2)}]
+    shared = process_adapter.PassProcesses(lambda: tables[shared.scans])
+    deadline = Deadline.after(10)
+    assert shared.scan(deadline=deadline) == tables[0]
+    assert shared.rescan(deadline=deadline) == tables[1]
+    assert shared.scan(deadline=deadline) == tables[1]
+    assert shared.scans == 2
+
+
+def test_real_termination_in_a_pass_reuses_the_selection_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    table = {80: _process(80, 80), 81: _process(81, 80), 90: _process(90, 90)}
+    scans: list[int] = []
+    sent: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(reaper, "processes", lambda: scans.append(1) or table)
+    monkeypatch.setattr(reaper, "carries", lambda process, name: True)
+    monkeypatch.setattr(reaper, "_process", lambda pid, proc: None)
+    monkeypatch.setattr(reaper.os, "killpg", lambda pgid, sig: sent.append(("group", pgid, sig)))
+    monkeypatch.setattr(reaper.os, "kill", lambda pid, sig: sent.append(("single", pid, sig)))
+
+    @reaper.scanning_pass
+    def tick_pass() -> list[reaper.Outcome]:
+        return [reaper.retire("eng-a", 80, [], 800), reaper.reap([90])]
+
+    assert tick_pass() == [reaper.Outcome((80, 81)), reaper.Outcome((90,))]
+    assert scans == [1]
+    assert sent == [("group", 80, reaper.signal.SIGTERM), ("group", 90, reaper.signal.SIGTERM)]
+
+
+def test_a_rescanned_process_is_waited_on_from_the_new_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    tables = [{}, {95: _process(95, 95)}]
+    scans: list[int] = []
+
+    def scan() -> dict[int, Process]:
+        scans.append(1)
+        return tables[len(scans) - 1]
+
+    monkeypatch.setattr(reaper, "processes", scan)
+    monkeypatch.setattr(reaper, "carries", lambda process, name: True)
+    monkeypatch.setattr(reaper, "_process", lambda pid, proc: tables[1][pid] if len(scans) == 1 else None)
+    monkeypatch.setattr(reaper.os, "killpg", lambda pgid, sig: None)
+
+    @reaper.scanning_pass
+    def tick_pass() -> reaper.Outcome:
+        return reaper.retire("eng-new", 95, [], 950)
+
+    assert tick_pass() == reaper.Outcome((95,))
+    assert scans == [1, 1]

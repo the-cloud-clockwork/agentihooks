@@ -23,3 +23,8 @@ class PassProcesses:
             self._table = self._scan()
             self.scans += 1
         return self._table
+
+    def rescan(self, *, deadline: Deadline) -> dict[int, Process]:
+        """Replace the pass snapshot with a fresh scan, for a process started after the first read."""
+        self._table = None
+        return self.scan(deadline=deadline)
