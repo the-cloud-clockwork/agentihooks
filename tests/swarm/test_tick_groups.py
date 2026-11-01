@@ -12,6 +12,7 @@ from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
 from scripts.tick.step import Context, Domain, Lane, Result
+from scripts.tick.steps import PASS
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -67,23 +68,23 @@ def test_a_tick_pass_runs_the_seven_groups_in_order(store: RedisStore, monkeypat
     assert [name for name, _ in seen] == TICK_GROUPS
 
 
-def test_each_group_reads_an_empty_view_under_the_group_budget(
+def test_each_group_reads_its_pass_state_under_the_group_budget(
     store: RedisStore,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen = _spy(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
+    views = dict(seen)
+    assert views["start"].view.read(PASS, "slug") is None
+    for name in ("agents", "tasks", "close"):
+        assert views[name].view.read(PASS, "slug") == "sw"
+        assert views[name].view.read(PASS, "now_ms") == 1_000
+        assert views[name].view.read(PASS, "store") is store
+        assert views[name].view.read(Domain("tasks"), "slug") is None
     for _, ctx in seen:
         assert ctx.view.read(Domain("tasks"), "t1") is None
         assert ctx.deadline.expires_at - monotonic() == pytest.approx(tick_module.GROUP_BUDGET_S, abs=5.0)
     assert tick_module.GROUP_BUDGET_S == 600.0
-
-
-def test_a_fixed_view_answers_only_the_pairs_it_holds() -> None:
-    view = tick_module._FixedView({(Domain("tasks"), "t1"): "row"})
-    assert view.read(Domain("tasks"), "t1") == "row"
-    assert view.read(Domain("tasks"), "t2") is None
-    assert view.read(Domain("agents"), "t1") is None
 
 
 def test_a_stopped_swarm_runs_only_the_start_group(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
