@@ -1136,6 +1136,29 @@
         "tests/swarm_ledger/test_freeze_page.py::test_freezing_a_plan_from_its_row_sends_the_freeze_and_disables_its_rows",
         "tests/swarm_ledger/test_freeze_page.py::test_unfreeze_sends_the_clear_and_restores_the_rows"
       ]
+    },
+    {
+      "id": "swarm-tick-delta-reads",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c1",
+      "behaviour": "Each tick pass patches a stored view of the ledger's tasks, metadata and phases with one export read of the changes since the view's generation, and reads those parts in full only when the server's change window no longer covers the gap.",
+      "seam": "The export parts of the ledger API and the tick ledger view",
+      "tests": [
+        "tests/swarm_ledger/test_export_parts.py::test_parts_limit_the_full_export_to_the_named_parts",
+        "tests/swarm_ledger/test_export_parts.py::test_parts_limit_the_changes_to_the_named_parts",
+        "tests/swarm_ledger/test_export_parts.py::test_parts_without_meta_carry_no_events",
+        "tests/swarm_ledger/test_export_parts.py::test_a_changed_root_answers_the_named_parts_in_full",
+        "tests/swarm_ledger/test_export_parts.py::test_each_part_set_keeps_its_own_full_export",
+        "tests/swarm_ledger/test_export_parts.py::test_parts_must_be_a_list_of_distinct_names",
+        "tests/swarm_ledger/test_export_parts.py::test_the_client_reads_changes_of_the_named_parts",
+        "tests/tick/test_view.py::test_a_first_pass_reads_the_parts_in_full_and_stores_them",
+        "tests/tick/test_view.py::test_a_later_pass_makes_one_delta_call_and_patches_the_stored_view",
+        "tests/tick/test_view.py::test_an_exceeded_change_window_replaces_the_stored_view",
+        "tests/tick/test_view.py::test_a_patch_that_does_not_fit_falls_back_to_one_full_read",
+        "tests/tick/test_view.py::test_an_unchanged_generation_leaves_the_stored_file",
+        "tests/tick/test_view.py::test_start_reads_through_the_ledger_client_and_holds_the_view",
+        "tests/swarm/test_tick_view_start.py::test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read"
+      ]
     }
   ],
   "unmapped_rules": [
