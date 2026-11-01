@@ -211,7 +211,10 @@ def test_the_import_check_catches_a_planted_direct_import() -> None:
         "scripts.swarm.refresh_job",
         "hooks.classifier.api",
     ]
-    assert _banned_imports("from scripts.inbox.store import InboxStore\n") == ["scripts.inbox.store"]
+    assert _banned_imports("from scripts.inbox.store import InboxStore\n") == [
+        "scripts.inbox.store",
+        "scripts.inbox.store.InboxStore",
+    ]
     assert _banned_imports("from ..swarm import refresh_job\nfrom .. import inbox\n") == [
         "relative import ..swarm",
         "relative import ..",

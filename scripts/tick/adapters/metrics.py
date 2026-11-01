@@ -1,4 +1,4 @@
-"""Metrics port adapter: measurements appended to the local metrics spool in one transaction per deadline bound call."""
+"""Metrics port adapter: measurements appended to the local metrics spool in one transaction, admitted only while its deadline holds."""
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
