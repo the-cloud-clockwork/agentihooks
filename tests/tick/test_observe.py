@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import automated_gc, pane_evidence
+from scripts.swarm import automated_gc
 from scripts.swarm import tick as tick_module
 from scripts.tick import engine
 from scripts.tick.deadline import Deadline
@@ -92,7 +92,7 @@ def _fake(seen: list[tuple[str, tuple[Any, ...]]], name: str, result: list[str] 
 
 def _observe_fakes(monkeypatch: pytest.MonkeyPatch, store: _Store) -> list[tuple[str, tuple[Any, ...]]]:
     seen: list[tuple[str, tuple[Any, ...]]] = []
-    monkeypatch.setattr(pane_evidence, "sweep", _fake(seen, "panes", ["pane"]))
+    monkeypatch.setattr(tick_module.pane_evidence, "sweep", _fake(seen, "panes", ["pane"]))
     store.execution_registry.reconcile = _fake(seen, "reconcile", ["reconciled"])
     monkeypatch.setattr(tick_module.master_move, "fail_over", _fake(seen, "fail over", ["moved"]))
     monkeypatch.setattr(tick_module, "_recover_master", _fake(seen, "recover", ["recovered"]))
