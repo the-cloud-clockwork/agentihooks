@@ -541,7 +541,7 @@
   "scripts/scout/loop.py": 37,
   "scripts/select_profile.py": 13,
   "scripts/serena_router_daemon.py": 18,
-  "scripts/session_bands.py": 6,
+  "scripts/session_bands.py": 3,
   "scripts/session_exit.py": 5,
   "scripts/size_limits.py": 59,
   "scripts/skill_eval.py": 6,
