@@ -189,9 +189,10 @@ class OperationJournal:
         return self._write(slug, update)
 
     def _current(self, execution_id: str, generation: int, doc: dict) -> Any:
+        from scripts.swarm import fencing
         from scripts.swarm.execution import occupants_of
 
-        agent = doc["executions"].get(execution_id) or doc["archive"].get(execution_id)
+        agent = fencing.execution_row(self.store, doc, execution_id)
         if not agent:
             raise OperationConflict(_ERRORS["admission"])
         occupant = occupants_of(doc).get(agent["seat"])

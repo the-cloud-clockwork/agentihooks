@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -345,3 +346,56 @@ def test_external_archive_removal_keeps_other_rows(store: Any) -> None:
     assert raw == {"parent": reference, "rows": {}, "removed": ["old"]}
     assert doc["archive"] == {}
     assert fencing._archive_rows(store, doc["archive_ref"]) == {"keep": rows["keep"]}
+
+
+def test_fenced_execution_readers_find_externalized_history(store: Any) -> None:
+    from scripts.swarm import fencing
+    from scripts.swarm.store import SwarmError
+    from scripts.swarm_v2.authority import TaskAuthority
+    from scripts.swarm_v2.runtime.operations import OperationConflict, OperationJournal
+    from tests.swarm.test_execution_archive import history
+
+    first, _, _, _ = history(store)
+    store.execution_registry.archive("fixture")
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    expected = store.execution("fixture", first.execution_id)
+    authority = TaskAuthority(store, SimpleNamespace(slug="fixture"), None)  # pyright: ignore[reportArgumentType]
+    journal = OperationJournal(store)
+    seen: dict[str, Any] = {}
+
+    def check(doc: dict[str, Any]) -> None:
+        assert doc["archive"] == {}
+        seen["record"] = authority._execution(doc, first.execution_id)
+        with pytest.raises(OperationConflict) as caught:
+            journal._current(first.execution_id, first.generation, doc)
+        seen["error"] = str(caught.value)
+        with pytest.raises(SwarmError) as unknown:
+            authority._execution(doc, "exe-missing")
+        seen["unknown"] = str(unknown.value)
+
+    fencing.write(store, "fixture", check)
+    assert seen == {
+        "record": expected,
+        "error": "execution generation is stale",
+        "unknown": "unknown execution identity; display labels cannot identify attempts",
+    }
+
+
+def test_execution_row_prefers_current_then_inline_then_external(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    fencing.write(store, "fixture", lambda doc: doc["archive"].update({"old": {"name": "external"}}))
+    fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    doc = fencing._decode(fencing._states(store).get("fixture").value)
+    assert fencing.execution_row(store, doc, "old") == {"name": "external"}
+    doc["archive"]["old"] = {"name": "inline"}
+    assert fencing.execution_row(store, doc, "old") == {"name": "inline"}
+    doc["executions"]["old"] = {"name": "current"}
+    assert fencing.execution_row(store, doc, "old") == {"name": "current"}
+    assert fencing.execution_row(store, doc, "absent") is None
+
+
+def test_execution_row_without_external_history_reads_only_the_document(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    assert fencing.execution_row(store, {"executions": {}, "archive": {}}, "absent") is None
