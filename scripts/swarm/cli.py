@@ -256,7 +256,9 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-def _publish_tick_status(store, slug, doc, view=None, failure=None):
+def _publish_tick_status(
+    store: Any, slug: str, doc: Any, view: Any = None, failure: BaseException | None = None
+) -> None:
     from scripts.swarm import command_runner
 
     try:

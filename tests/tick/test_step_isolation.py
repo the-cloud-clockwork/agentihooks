@@ -7,7 +7,7 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Domain, Lane, Result
+from scripts.tick.step import Context, Domain, Lane, Result, Step
 from scripts.tick.steps import CallStep, agents, budgets, host, masters, observe, place, report, tasks
 
 pytestmark = pytest.mark.unit
@@ -143,5 +143,5 @@ def test_latest_start_follows_the_longest_needs_path() -> None:
     second = TimedStep("b", 2, 4.0, needs=frozenset({"a"}))
     side = TimedStep("c", 3, 5.0)
     last = TimedStep("d", 4, 1.0, needs=frozenset({"b", "c"}))
-    steps = [first, second, side, last]
+    steps: list[Step] = [first, second, side, last]
     assert [registry.latest_start(name, steps) for name in "abcd"] == [0.0, 3.0, 0.0, 7.0]
