@@ -147,10 +147,11 @@ def test_a_pass_on_records_writes_no_whole_document(store: Any, clock: list[int]
     assert _document(store) == document
     assert set(fencing.read(store, "sw")["archive"]) == {"old"}
     assert fencing.execution_row(store, fencing.read(store, "sw"), "old") == _row("old", "gone", 0)
-    assert fencing.read(store, "sw")["executions"] == {"a": _row("a", "eng", 1)}
+    current = {"a": _row("a", "eng", 1), "new": _row("new", "gone", 1)}
+    assert fencing.read(store, "sw")["executions"] == current
     assert fencing.read(store, "sw")["intents"] == {"i": {"epoch": held.epoch}}
     assert fencing.read_lease(store, "sw") == {"lease": renewed.__dict__}
-    assert fencing.read_executions(store, "sw") == {"a": _row("a", "eng", 1)}
+    assert fencing.read_executions(store, "sw") == current
 
 
 def test_a_stale_controller_racing_a_takeover_is_refused_at_the_write(store: Any, clock: list[int]) -> None:
@@ -658,6 +659,31 @@ def test_a_document_write_in_flight_across_the_move_lands_on_the_records(store: 
     assert len(calls) == 2
     assert fencing.read(store, "sw")["grants"] == {"g": {"n": 1}}
     assert json.loads(_document(store).value)[fencing.MOVED] == fencing.RECORDS
+    assert "g" not in json.loads(_document(store).value)["grants"]
+
+
+def test_a_move_between_the_layout_check_and_the_read_retries_onto_the_records(
+    store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fencing
+
+    fencing.read(store, "sw")
+    real = fencing._migrated
+    checks: list[int] = []
+
+    def moving(saved: Any, slug: str) -> Any:
+        found = real(saved, slug)
+        checks.append(1)
+        if len(checks) == 1:
+            fencing.migrate_records(store, "sw", writers_upgraded=True)
+        return found
+
+    monkeypatch.setattr(fencing, "_migrated", moving)
+    calls: list[int] = []
+    fencing.write(store, "sw", lambda doc: calls.append(1) or doc["grants"].update(g={"n": 1}))
+    assert calls == [1]
+    assert len(checks) == 2
+    assert fencing.read(store, "sw")["grants"] == {"g": {"n": 1}}
     assert "g" not in json.loads(_document(store).value)["grants"]
 
 

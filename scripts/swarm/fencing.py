@@ -532,6 +532,8 @@ def write(store: Any, slug: str, change: Callable[[dict[str, Any]], T], fence: A
             return _write_records(store, port, slug, change, fence)
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
+        if MOVED in doc:
+            continue
         before = copy.deepcopy(doc)
         result = change(doc)
         if doc["archive"] and "archive_ref" in doc:
