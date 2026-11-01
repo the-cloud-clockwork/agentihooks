@@ -47,6 +47,7 @@ def test_only_the_selected_tick_uses_the_hosted_ledger(store, monkeypatch):
     monkeypatch.setattr(cli.outage, "providers", lambda *_: None)
     monkeypatch.setattr(cli, "_publish_tick_status", lambda *_: None)
     monkeypatch.setattr(lease, "acquire", lambda *_: lease.Lease("host", 4, 10**15))
+    monkeypatch.setattr(lease, "renew", lambda _store, _slug, held: held)
     from scripts.swarm import controller
 
     monkeypatch.setattr(controller, "take_tick_lock", lambda *_: "lock")
