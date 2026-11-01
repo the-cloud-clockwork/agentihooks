@@ -56,7 +56,7 @@ class Run:
 @dataclass(frozen=True)
 class RepositoryRun:
     id: int
-    branch: str
+    branch: str | None
     event: str
     status: str
 

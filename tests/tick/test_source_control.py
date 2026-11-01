@@ -333,12 +333,14 @@ def test_github_latest_runs_read_the_newest_runs_of_the_repository(
     rows = [
         {"id": 5, "head_branch": "feature", "event": "pull_request", "status": "queued", "name": "Tests"},
         {"id": 6, "head_branch": "dev", "event": "push", "status": "completed", "name": "Lint"},
+        {"id": 7, "head_branch": None, "event": "schedule", "status": "in_progress", "name": "Nightly"},
     ]
-    provider, recorder = _provider(monkeypatch, tmp_path, [{"total_count": 2, "workflow_runs": rows}])
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"total_count": 3, "workflow_runs": rows}])
 
     assert provider.latest_runs(deadline=_deadline()) == (
         port.RepositoryRun(5, "feature", "pull_request", "queued"),
         port.RepositoryRun(6, "dev", "push", "completed"),
+        port.RepositoryRun(7, None, "schedule", "in_progress"),
     )
     assert recorder.calls == [
         (
