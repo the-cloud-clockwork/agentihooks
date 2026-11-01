@@ -78,6 +78,8 @@ def test_the_agent_steps_sit_in_their_groups_in_legacy_order() -> None:
         "conversations",
         "session models",
         "handoff transfers",
+        "settle",
+        "close space",
     ]
     assert len(agents.STEPS) == 8
 
