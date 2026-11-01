@@ -239,7 +239,7 @@ SINCE_SCHEMA = {
             "type": "array",
             "minItems": 1,
             "uniqueItems": True,
-            "items": {"enum": ["tasks", "_meta", "phases"]},
+            "items": {"enum": ["tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview"]},
         },
     },
     "required": ["since"],

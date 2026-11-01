@@ -18,7 +18,7 @@ from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export
 
 __all__ = ["CURRENT", "PARTS", "LedgerView", "Reader", "refreshed", "start", "view_file"]
 
-PARTS = ("tasks", "_meta", "phases")
+PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
 
 Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
@@ -31,6 +31,7 @@ class LedgerView:
         self.tasks: list[dict[str, Any]] = state.get("tasks", [])
         self.meta: dict[str, Any] = state.get("_meta", {})
         self.phases: list[dict[str, Any]] = state.get("phases", [])
+        self.document = state
 
     def read(self, domain: str, key: str) -> object | None:
         """Return the task or phase row with id ``key``, or the metadata entry ``key``, or nothing."""
