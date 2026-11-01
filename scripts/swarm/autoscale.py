@@ -1,9 +1,14 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict
+
+from scripts.swarm import elapsed
+
+RAISE_MS = 2 * elapsed.PASS_MS
 
 
 class PendingRaise(TypedDict):
     target: int | None
     ticks: int
+    since: NotRequired[int]
 
 
 class Decision(TypedDict):
@@ -38,17 +43,20 @@ def calculate(
     host_room: int | None,
     demand: dict[str, int],
     previous: Decision | None = None,
+    *,
+    now_ms: int,
 ) -> Decision:
     seats = sum(free_seats.values())
     target = min(50, sum(live.values()) + (seats if host_room is None else min(seats, host_room)))
     current = sum(previous["ceilings"].values()) if previous is not None else sum(live.values())
     pending: PendingRaise = {"target": None, "ticks": 0}
     total = target
+    prior = previous["pending_raise"] if previous is not None else pending
+    since = prior.get("since", elapsed.anchored(now_ms, prior["ticks"])) if prior["ticks"] else now_ms
+    held = not elapsed.reached(now_ms - since, RAISE_MS)
     if target > current:
-        prior = previous["pending_raise"] if previous is not None else pending
-        ticks = min(prior["ticks"] + 1, 3)
-        pending = {"target": target, "ticks": ticks}
-        total = current if ticks < 3 else min(target, current + 2)
+        pending = {"target": target, "ticks": min(prior["ticks"] + 1, 3), "since": since}
+        total = current if held else min(target, current + 2)
         if total == target:
             pending = {"target": None, "ticks": 0}
     total = max(total, min(target, sum(live.values()) + sum(bool(count) for count in demand.values())))
@@ -62,9 +70,7 @@ def calculate(
         reason += f"; capped by ready work {ready}"
     elif target > total:
         reason += (
-            f"; raise held at tick {pending['ticks']} of 3"
-            if pending["ticks"] < 3
-            else "; raise held by the two seat per tick limit"
+            f"; raise held at tick {pending['ticks']} of 3" if held else "; raise held by the two seat per tick limit"
         )
     decision: Decision = {
         "ceilings": ceilings,

@@ -25,19 +25,34 @@ def test_each_failed_tick_counts_and_keeps_the_first_time(store):
 
 
 def test_the_finding_appears_on_the_third_failed_tick(store):
-    for at in (1, 2):
+    for at in (0, 60_000):
         retire_watch.failed(store, "sw", NAME, REFUSED, at)
     assert retire_watch.findings(store, "sw") == []
-    retire_watch.failed(store, "sw", NAME, REFUSED, 3)
+    retire_watch.failed(store, "sw", NAME, REFUSED, 120_000)
     (found,) = retire_watch.findings(store, "sw")
     assert found.as_dict() == {
         "kind": "retire failed",
         "subject": NAME,
         "summary": f"{NAME} is still running after 3 retire attempts",
         "evidence": ["process 77", "refusal: survived SIGKILL: 77"],
-        "threshold": "a retire failing 3 ticks",
+        "threshold": "a retire failing for 2 minutes",
     }
     assert found.measure == 3
+
+
+def test_failures_three_minutes_apart_raise_the_finding_on_the_second(store):
+    retire_watch.failed(store, "sw", NAME, REFUSED, 0)
+    assert retire_watch.findings(store, "sw") == []
+    retire_watch.failed(store, "sw", NAME, REFUSED, 180_000)
+    assert [found.measure for found in retire_watch.findings(store, "sw")] == [2]
+
+
+def test_rapid_retries_inside_a_minute_raise_no_finding(store):
+    for at in (600_000, 610_000, 620_000, 630_000, 689_999):
+        retire_watch.failed(store, "sw", NAME, REFUSED, at)
+    assert retire_watch.findings(store, "sw") == []
+    retire_watch.failed(store, "sw", NAME, REFUSED, 690_000)
+    assert len(retire_watch.findings(store, "sw")) == 1
 
 
 def test_a_dropped_agent_clears_its_failures(store):
@@ -93,7 +108,7 @@ def test_swarm_status_lists_the_retire_finding(store, monkeypatch):
     from scripts.swarm import status
 
     monkeypatch.setattr(status.activity, "counts", lambda slug: {})
-    for at in (1, 2, 3):
+    for at in (0, 60_000, 120_000):
         retire_watch.failed(store, "sw", NAME, REFUSED, at)
     found = status.findings(store, "sw", store.config("sw"), [], [])
     assert [f["id"] for f in found] == [f"retire-failed/{NAME}"]
@@ -113,7 +128,7 @@ def test_retire_findings_identify_the_original_hive_and_removed_host_count(store
                 name, "eng", "task", seat=f"eng-{index}@sw", state="finished", runtime_target={"host_id": "removed"}
             ),
         )
-        for at in (1, 2, 3):
+        for at in (0, 60_000, 120_000):
             retire_watch.failed(store, "sw", name, {"process": 0, "refusal": "waiting for acknowledgement"}, at)
     if indexed:
         store.redis.sadd(registry.INDEX, "removed")
