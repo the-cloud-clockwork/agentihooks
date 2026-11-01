@@ -3,12 +3,28 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      Swarm code reaches source control through the source control port, never a direct gh command. The GitHub
-      adapter alone runs gh; a file still calling it stays listed in source-control-allowlist.json until it moves.
-    pattern: '["gh", ...]'
+      Swarm code reaches source control through the source control port, never a gh command. The GitHub adapter
+      alone builds one, with a gh list or its command builder; a file still doing so stays listed in
+      source-control-allowlist.json until its calls move onto port tools.
+    pattern-either:
+      - pattern: '["gh", ...]'
+      - pattern: scripts.tick.adapters.github.command(...)
     paths:
       include:
         - "/scripts/swarm/**"
         - "*.test.py"
       exclude:
+        - "/scripts/swarm/ci_speed.py"
+        - "/scripts/swarm/cli.py"
+        - "/scripts/swarm/fleet_red.py"
+        - "/scripts/swarm/github_reads.py"
+        - "/scripts/swarm/github_sampler.py"
+        - "/scripts/swarm/ledger_events.py"
+        - "/scripts/swarm/ledger_host.py"
+        - "/scripts/swarm/linked_issues.py"
+        - "/scripts/swarm/merge_queue.py"
+        - "/scripts/swarm/mutation_wait.py"
+        - "/scripts/swarm/panic.py"
+        - "/scripts/swarm/ready.py"
+        - "/scripts/swarm/stack.py"
         - "/scripts/tick/adapters/github.py"

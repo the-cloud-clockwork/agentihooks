@@ -114,7 +114,7 @@
     {
       "id": "swarm-tick-source-control-port",
       "origin": "inventory",
-      "behaviour": "Swarm code reaches source control only through the source control port; the GitHub adapter alone builds a gh command, and a change read names its state, head and head branch inside a deadline.",
+      "behaviour": "Swarm code reaches source control through the source control port: a gh list or the GitHub adapter's command builder outside the adapter is refused unless its file is on an exception list that only shrinks, and a change read names its state, head and head branch inside a deadline.",
       "seam": "The source control port in scripts.tick.ports.source_control and its GitHub adapter",
       "tests": [
         "tests/tick/test_source_control.py::test_github_change_uses_audited_reads_and_deadline",

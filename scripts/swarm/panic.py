@@ -141,8 +141,11 @@ def gh(argv: list[str]) -> str:
     return subprocess.run(argv, capture_output=True, text=True, check=True, timeout=60).stdout
 
 
-def _branch(url: str, run: Runner) -> str:
-    return run(command(["pr", "view", url, "--json", "headRefName", "--jq", ".headRefName"])).strip()
+def _branch(url: str) -> str:
+    """Return the head branch of a fix pull request, read through the source control port."""
+    from scripts.swarm import stack
+
+    return stack.change(url, f"cannot read pull request {url}").head_branch
 
 
 def _spared(row: dict[str, str], branches: set[str]) -> bool:
@@ -151,7 +154,7 @@ def _spared(row: dict[str, str], branches: set[str]) -> bool:
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], run: Runner) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue and the named fix pull requests."""
-    branches = {_branch(url, run) for url in fixes}
+    branches = {_branch(url) for url in fixes}
     cancelled: list[str] = []
     for repo in repos:
         listing = command(

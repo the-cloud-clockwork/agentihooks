@@ -1,40 +1,74 @@
 import subprocess
+from collections.abc import Callable
 
 import pytest
 
 from scripts.swarm.health import checks
 from scripts.swarm.health.findings import Limits
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
+from scripts.tick.ports.source_control import CheckState
 
 URL = "https://github.com/o/r/pull/7"
-PENDING = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpending\t0\thttps://x/2\n"
-PASSED = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpass\t12s\thttps://x/2\n"
-SKIPPED = PASSED + "refresh-durations\tskipping\t0\thttps://x/3\n"
+PASS = CheckState("lint", "completed", "success", "https://x/1")
+WAIT = CheckState("unit (3.11, 1)", "in_progress", None, "https://x/2")
+FAIL = CheckState("lint", "completed", "failure", "https://x/1")
+SKIP = CheckState("refresh-durations", "completed", "skipped", "https://x/3")
+NEUTRAL = CheckState("advisory", "completed", "neutral", "https://x/4")
+PENDING = (PASS, WAIT)
+PASSED = (PASS, CheckState("unit (3.11, 1)", "completed", "success", "https://x/2"))
+SKIPPED = (*PASSED, SKIP)
 
 
-def runner(out, code=0, seen=None):
-    def run(argv, **_):
+def runner(found: tuple[CheckState, ...], seen: list[str] | None = None) -> Callable[[str], tuple[CheckState, ...]]:
+    def read(pr_url: str) -> tuple[CheckState, ...]:
         if seen is not None:
-            seen.append(argv)
-        return subprocess.CompletedProcess(argv, code, stdout=out, stderr="")
+            seen.append(pr_url)
+        return found
 
-    return run
+    return read
 
 
-def raising(argv, **_):
-    raise subprocess.TimeoutExpired(argv, 20)
+def raising(pr_url: str) -> tuple[CheckState, ...]:
+    raise subprocess.TimeoutExpired(["gh"], 20)
 
 
 def test_a_pull_request_with_a_pending_check_waits_on_checks():
     seen = []
-    assert checks.pending(URL, runner(PENDING, 8, seen)) is True
-    assert seen == [["gh", "pr", "checks", URL]]
+    assert checks.pending(URL, runner(PENDING, seen)) is True
+    assert seen == [URL]
 
 
 def test_finished_failed_or_unreadable_checks_do_not_wait():
     assert checks.pending(URL, runner(PASSED)) is False
-    assert checks.pending(URL, runner("lint\tfail\t8s\thttps://x/1\n", 1)) is False
+    assert checks.pending(URL, runner((FAIL,))) is False
     assert checks.pending(URL, raising) is False
+
+
+def test_approval_waits_only_when_every_check_passed():
+    assert checks.pending(URL, runner(PASSED), approval=True) is True
+    assert checks.pending(URL, runner(SKIPPED), approval=True) is False
+    assert checks.pending(URL, runner(()), approval=True) is False
+
+
+def test_check_runs_are_named_by_status_and_conclusion():
+    assert checks.passing(URL, runner((PASS, NEUTRAL))) is True
+    assert checks.passing(URL, runner((PASS, CheckState("x", "queued", None, "u")))) is False
+    assert checks.passing(URL, runner((PASS, CheckState("x", "completed", None, "u")))) is False
+    assert checks.SKIPPED == ("skipped", "neutral")
+
+
+def test_read_checks_asks_the_port_for_the_pull_request_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.tick.adapters.fakes import FakeSourceControl
+    from scripts.tick.ports.source_control import ChangeRef
+
+    reference = ChangeRef("o/r", 7)
+    provider = FakeSourceControl(answers={"checks": PENDING})
+    monkeypatch.setattr(stack, "source_control", lambda url: (provider, reference) if url == URL else None)
+    assert checks.read_checks(URL) == PENDING
+    [call] = provider.calls
+    assert (call.operation, call.args) == ("checks", (reference,))
+    assert stack.PORT_SECONDS - 1 < call.deadline.remaining <= stack.PORT_SECONDS
 
 
 def test_only_idle_holders_of_a_pull_request_task_are_probed():
@@ -57,7 +91,7 @@ def test_a_cached_probe_asks_github_once_per_ttl():
     import fakeredis
 
     redis, seen = fakeredis.FakeRedis(decode_responses=True), []
-    probe = checks.cached(redis, f"{KEY_ROOT}:swarm:sw:checks", run=runner(PENDING, 8, seen))
+    probe = checks.cached(redis, f"{KEY_ROOT}:swarm:sw:checks", read=runner(PENDING, seen))
     assert [probe(URL), probe(URL)] == [True, True]
     assert len(seen) == 1
     assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:checks:{URL}") <= checks.CACHE_SECONDS
@@ -65,16 +99,16 @@ def test_a_cached_probe_asks_github_once_per_ttl():
 
 def test_a_pull_request_whose_checks_all_passed_or_skipped_is_green():
     seen = []
-    assert checks.passing(URL, runner(SKIPPED, 0, seen)) is True
-    assert seen == [["gh", "pr", "checks", URL]]
+    assert checks.passing(URL, runner(SKIPPED, seen)) is True
+    assert seen == [URL]
 
 
 def test_pending_failed_empty_or_unreadable_checks_are_not_green():
-    assert checks.passing(URL, runner(PENDING, 8)) is False
-    assert checks.passing(URL, runner(PASSED, 1)) is False
-    assert checks.passing(URL, runner("lint\tfail\t8s\thttps://x/1\n", 1)) is False
-    assert checks.passing(URL, runner("refresh-durations\tskipping\t0\thttps://x/3\n")) is False
-    assert checks.passing(URL, runner("", 1)) is False
+    assert checks.passing(URL, runner(PENDING)) is False
+    assert checks.passing(URL, runner((*PASSED, FAIL))) is False
+    assert checks.passing(URL, runner((FAIL,))) is False
+    assert checks.passing(URL, runner((SKIP,))) is False
+    assert checks.passing(URL, runner(())) is False
     assert checks.passing(URL, raising) is False
 
 
@@ -94,12 +128,12 @@ def test_a_cached_green_probe_asks_github_once_per_ttl_under_its_own_key():
     import fakeredis
 
     redis, seen = fakeredis.FakeRedis(decode_responses=True), []
-    probe = checks.cached_green(redis, f"{KEY_ROOT}:swarm:sw:checks", run=runner(PASSED, 0, seen))
+    probe = checks.cached_green(redis, f"{KEY_ROOT}:swarm:sw:checks", read=runner(PASSED, seen))
     assert [probe(URL), probe(URL)] == [True, True]
     assert len(seen) == 1
     assert redis.get(f"{KEY_ROOT}:swarm:sw:checks:green:{URL}") == "1"
     assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:checks:green:{URL}") <= checks.CACHE_SECONDS
-    red = checks.cached_green(redis, f"{KEY_ROOT}:swarm:sw:checks", run=runner(PENDING, 8))
+    red = checks.cached_green(redis, f"{KEY_ROOT}:swarm:sw:checks", read=runner(PENDING))
     assert [red("https://github.com/o/r/pull/8"), red("https://github.com/o/r/pull/8")] == [False, False]
     assert redis.get(f"{KEY_ROOT}:swarm:sw:checks:green:https://github.com/o/r/pull/8") == "0"
 
