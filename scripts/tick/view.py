@@ -12,6 +12,7 @@ from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
 
+from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
 
 __all__ = ["CURRENT", "PARTS", "LedgerView", "Reader", "refreshed", "start", "view_file"]
@@ -60,6 +61,11 @@ def refreshed(path: Path, reader: Reader) -> LedgerView:
     if reply["generation"] != generation:
         write_export_file(path, reply["generation"], state)
     return LedgerView(reply["generation"], state)
+
+
+def reads(ledger: object) -> bool:
+    """True for the ledger client a pass reads the view through; never for a subclass standing in for it."""
+    return type(ledger) is LedgerClient
 
 
 def start(slug: str, service: bool = False) -> LedgerView | None:

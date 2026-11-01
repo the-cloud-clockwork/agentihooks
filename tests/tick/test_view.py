@@ -115,6 +115,18 @@ def test_an_empty_view_holds_empty_parts() -> None:
     assert (held.tasks, held.meta, held.phases) == ([], {}, [])
 
 
+def test_only_the_ledger_client_itself_reads_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import ledger_client
+
+    class StandIn(ledger_client.LedgerClient):
+        """A ledger client subclass, as the test suites stand in for the ledger."""
+
+    monkeypatch.setattr(ledger_client, "LedgerClient", StandIn)
+    assert view.reads(view.LedgerClient()) is True
+    assert view.reads(StandIn()) is False
+    assert view.reads(object()) is False
+
+
 def test_each_server_and_swarm_keeps_its_own_view_file(tmp_path: Path) -> None:
     names = {view.view_file(base, slug, tmp_path) for base in ("http://a", "http://b") for slug in ("s", "t")}
     assert len(names) == 4
