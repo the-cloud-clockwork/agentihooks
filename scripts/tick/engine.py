@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import tick_report, timing
 from scripts.tick import registry
+from scripts.tick.adapters.inbox import notify_pass_budget
 from scripts.tick.step import Context, Result, Step
 
 __all__ = ["FAILED", "LATE", "OK", "StepRecord", "group_steps", "run_group", "run_step"]
@@ -85,10 +85,7 @@ def update_pass_budget(store: Any, slug: str) -> str:
         store.redis.set(key, json.dumps({"text": text, "notice": uuid4().hex, "notified": False}), nx=True)
         held = json.loads(store.redis.get(key))
         if not held["notified"]:
-            try:
-                InboxStore(store.redis).send("swarm", f"master@{slug}", held["text"], fyi=True, item_id=held["notice"])
-            except DuplicateItem:
-                pass
+            notify_pass_budget(store.redis, slug, held["text"], held["notice"])
             held["notified"] = True
             store.redis.set(key, json.dumps(held))
         return held["text"]
