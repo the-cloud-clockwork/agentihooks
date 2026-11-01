@@ -157,6 +157,14 @@ def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch
     ]
 
 
+def test_the_prompt_backlog_observes_at_whole_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(timing, "call", lambda *args: calls.append(args))
+    cli = SimpleNamespace(now_ms=lambda: 2_000_999)
+    host._prompt_backlog(cli, _pass().get)
+    assert calls == [(prompt_backlog.observe, STORE, "sw", 2000)]
+
+
 def test_the_command_runner_consumes_the_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     assert _run("wrapper commands", calls, _pass(), monkeypatch) == ["ran 1"]

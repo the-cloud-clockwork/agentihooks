@@ -64,7 +64,9 @@ def _hive_ledger(cli: Any, get: Get) -> None:
 def _ledger_health(cli: Any, get: Get) -> None:
     ledger, slug = get("ledger"), get("slug")
     if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
-        slug, cli.now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
+        slug,
+        cli.now_ms(),
+        lambda: isinstance(ledger.metadata(slug), dict),  # pyright: ignore[reportUnknownMemberType]
     ):
         get("box")["stop"] = ["Ledger health probe failed"]
 
@@ -128,7 +130,7 @@ def _outbox_migration(cli: Any, get: Get) -> None:
 def _page_relay(cli: Any, get: Get) -> None:
     agents = [a for a in timing.call(get("store").agents, get("slug")) if a.state != "finished"]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     get("box")["agents"] = agents
-    cli.skip_refused(delivery.relay_to_page, get("inbox"), get("slug"), agents, get("ledger"))
+    cli.skip_refused(delivery.relay_to_page, get("inbox"), get("slug"), agents, get("ledger"))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _tick_view(cli: Any, get: Get) -> None:
