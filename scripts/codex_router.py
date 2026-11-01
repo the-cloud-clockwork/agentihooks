@@ -356,7 +356,7 @@ def fingerprint(account_id: str) -> str:
     return hashlib.sha256(account_id.encode()).hexdigest()[:FINGERPRINT_LENGTH] if account_id else ""
 
 
-def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
+def duplicates(pool: list[CodexAccount], environ: Mapping[str, str], now: float | None = None) -> dict[str, str]:
     """Each token account whose ChatGPT account another token account shares, mapped to the one routed for both."""
     groups: dict[str, list[CodexAccount]] = {}
     for account in pool:
@@ -365,7 +365,7 @@ def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str
             groups.setdefault(found, []).append(account)
     repeated = {}
     for group in groups.values():
-        kept = min(group, key=lambda account: (bool(refusal(account, environ)), _routed_rank(account, environ)))
+        kept = min(group, key=lambda account: (bool(refusal(account, environ, now)), _routed_rank(account, environ)))
         repeated.update({account.name: kept.name for account in group if account is not kept})
     return repeated
 
@@ -402,12 +402,17 @@ def routed_live(
 
 
 def _shadowed(tokens: list[CodexAccount], environ: Mapping[str, str]) -> set[str]:
+    return set(shadows(tokens, environ))
+
+
+def shadows(tokens: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
+    """Each token name dropped because a listed token account holds the identical token, mapped to that account."""
+    holder = {environ[account.env_name]: account.name for account in tokens}
     kept = {account.env_name for account in tokens}
-    held = {environ[name] for name in kept}
     return {
-        name.removeprefix(CODEX_TOKEN_PREFIX)
+        name.removeprefix(CODEX_TOKEN_PREFIX): holder[environ[name]]
         for name in environ
-        if name.startswith(CODEX_TOKEN_PREFIX) and name not in kept and environ[name] in held
+        if name.startswith(CODEX_TOKEN_PREFIX) and name not in kept and environ[name] in holder
     }
 
 

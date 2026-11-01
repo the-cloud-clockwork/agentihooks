@@ -52,7 +52,8 @@ def test_the_hives_table_and_the_quota_table_list_the_same_deduplicated_codex_ac
 def test_the_page_quota_table_shows_a_duplicate_as_its_own_row_with_a_duplicate_state(tmp_path, monkeypatch):
     from hooks.context import account_sessions
 
-    environ = {**_environ(tmp_path), "AH_CX_TOKEN_delta": _jwt("acct-1") + "y"}
+    expired = jwt({"exp": 100 - 4 * DAY, codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": "acct-3"}})
+    environ = {**_environ(tmp_path), "AH_CX_TOKEN_delta": _jwt("acct-1") + "y", "AH_CX_TOKEN_old": expired}
     for name, value in environ.items():
         monkeypatch.setenv(name, value)
     agents_quota._page_cache.clear()
@@ -65,7 +66,12 @@ def test_the_page_quota_table_shows_a_duplicate_as_its_own_row_with_a_duplicate_
     codex = [row for row in rows if row["agent"] == "codex" and row["kind"] != "api"]
     assert [row["account"] for row in codex[:2]] == ["gamma", KEPT]
     assert agents_quota.DUPLICATE not in {row["state"] for row in codex[:2]}
-    duplicates = {row["account"]: row for row in codex[2:]}
+    expired_row = next(row for row in codex if row["account"] == "old")
+    assert (expired_row["state"], expired_row["source"]) == (
+        "EXPIRED",
+        "token expired: run agentihooks codex login old",
+    )
+    duplicates = {row["account"]: row for row in codex[2:] if row["account"] != "old"}
     assert sorted(duplicates) == ["alpha", "delta"]
     assert {name: row["sessions"] for name, row in duplicates.items()} == {"alpha": 2, "delta": 0}
     for row in duplicates.values():
@@ -97,14 +103,24 @@ def test_balance_lists_every_refused_token_account_with_its_state_and_login_comm
         "AH_CX_TOKEN_old": token("acct-3", now - 4 * DAY),
         "AH_CX_TOKEN_soon": token("acct-4", now + 60),
         "AH_CX_TOKEN_keyed": "sk-placeholder",
+        "AH_CX_TOKEN_noid": jwt({"exp": int(now + 9 * DAY), codex_router.OPENAI_AUTH_CLAIM: {}}),
+        "AH_CX_TOKEN_twin": _environ(tmp_path)["AH_CX_TOKEN_gamma"],
     }
     for name, value in environ.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda **kw: {"old": 1})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda **kw: {"old": 1, "twin": 3})
     monkeypatch.setattr(codex_router, "fresh_quotas", lambda *a, **kw: {})
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     rows = {row.account: row for row in agents_quota._codex(now) if row.kind != "api"}
-    assert sorted(rows) == ["alpha", "gamma", "keyed", KEPT, "old", "soon"]
+    assert sorted(rows) == ["alpha", "gamma", "keyed", KEPT, "noid", "old", "soon", "twin"]
+    assert (rows["twin"].state, rows["twin"].sessions) == (agents_quota.DUPLICATE, 3)
+    assert rows["twin"].source == (
+        "same ChatGPT account as gamma; sign in its own account with agentihooks codex login twin"
+    )
+    assert rows["noid"].state == agents_quota.REFUSED
+    assert rows["noid"].source == (
+        "AH_CX_TOKEN_noid holds a ChatGPT token with no chatgpt_account_id claim; run agentihooks codex login noid"
+    )
     assert rows["alpha"].state == agents_quota.DUPLICATE
     assert rows["alpha"].source.endswith("agentihooks codex login alpha")
     assert rows["old"].state == agents_quota.EXPIRED
@@ -116,8 +132,10 @@ def test_balance_lists_every_refused_token_account_with_its_state_and_login_comm
     )
     assert "agentihooks codex login soon" in rows["soon"].source
     assert rows["keyed"].state == agents_quota.REFUSED
-    assert "CODEX_API_KEY" in rows["keyed"].source
-    for name in ("alpha", "old", "soon", "keyed"):
+    assert rows["keyed"].source == (
+        f"AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route {codex_router.API_ACCOUNT} instead"
+    )
+    for name in ("alpha", "old", "soon", "keyed", "noid", "twin"):
         assert (rows[name].cap, rows[name].routing_left, rows[name].seven_day_left) == (None, None, None)
 
 

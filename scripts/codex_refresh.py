@@ -379,10 +379,9 @@ def _settings(args: list[str], environ: Mapping[str, str], deps: Deps) -> tuple[
     if store not in (LOCAL, OPENBAO):
         raise ValueError(BAD_STORE.format(store=store))
     bao = openbao_kv.from_env(environ, deps.opener)
+    named = {name.removeprefix(CODEX_TOKEN_PREFIX) for name in environ if name.startswith(CODEX_TOKEN_PREFIX)}
     tokens = tuple(
-        account.name
-        for account in codex_router.token_accounts(environ)
-        if codex_router.expires_at(account, environ) is not None
+        sorted(slug for slug in named - {"", codex_router.API_ACCOUNT} if environ[CODEX_TOKEN_PREFIX + slug])
     )
     return store, Run(force, _days(options.days, environ), bao, deps, openbao_kv.codex_creds(environ), tokens)
 

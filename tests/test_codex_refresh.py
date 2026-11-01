@@ -685,6 +685,7 @@ def test_the_local_store_names_each_token_account_it_holds_no_login_for(capsys):
         "AH_CX_TOKEN_alpha": access_token(8),
         "AH_CX_TOKEN_ghost": access_token(-4),
         "AH_CX_TOKEN_personal": "at-placeholder",
+        "AH_CX_TOKEN_twin": access_token(8),
     }
     assert _run([], environ) == 0
     out = capsys.readouterr().out
@@ -694,7 +695,11 @@ def test_the_local_store_names_each_token_account_it_holds_no_login_for(capsys):
         "sign in with agentihooks codex login ghost"
     ) in out
     assert "alpha: AH_CX_TOKEN_alpha cannot" not in out
-    assert "personal" not in out
+    for slug in ("personal", "twin"):
+        assert (
+            f"{slug}: AH_CX_TOKEN_{slug} cannot be renewed here, no Codex login under {root}; "
+            f"sign in with agentihooks codex login {slug}"
+        ) in out
     assert _run(["--force", "alpha"], environ) == 0
     assert "cannot be renewed" not in capsys.readouterr().out
 
