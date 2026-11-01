@@ -68,6 +68,7 @@ RECORDS_REF = "records:"
 ARCHIVE = "archive"
 ARCHIVE_REF = "archive_ref"
 BY_NAME = "by-name"
+MOVED = "moved_to"
 SECTIONS = tuple(name for name, value in EMPTY.items() if isinstance(value, dict))
 LOADED = (META, *(name for name in SECTIONS if name != ARCHIVE), BY_NAME)
 STALE = "the controller lease is stale"
@@ -204,9 +205,7 @@ def _section_changes(
     return writes + [RecordWrite("delete", section, key, _expected(loaded, section, key)) for key in removed]
 
 
-def _changes(
-    before: dict[str, Any], after: dict[str, Any], loaded: dict[str, dict[str, Record]], guard_lease: bool
-) -> list[RecordWrite]:
+def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, dict[str, Record]]) -> list[RecordWrite]:
     """Every record a change wrote, each expecting the revision it was read at, plus the derived name index."""
     writes: list[RecordWrite] = []
     for name in sorted((before.keys() | after.keys()) - {ARCHIVE_REF}):
@@ -217,10 +216,112 @@ def _changes(
         elif name not in before or before[name] != after[name]:
             writes.append(RecordWrite("put", META, name, _expected(loaded, META, name), after[name]))
     heads = (_heads(before.get("executions", {})), _heads(after.get("executions", {})))
-    writes += _section_changes(BY_NAME, heads[0], heads[1], loaded)
-    if writes and guard_lease and not any(write.section == META and write.key == "lease" for write in writes):
-        writes.append(RecordWrite("check", META, "lease", _expected(loaded, META, "lease")))
-    return writes
+    return writes + _section_changes(BY_NAME, heads[0], heads[1], loaded)
+
+
+class Reads(dict[str, Any]):
+    """A section handed to a fenced change that remembers the keys the change read, or that it read every key."""
+
+    def __init__(self, values: dict[str, Any]) -> None:
+        super().__init__(values)
+        self.seen: set[str] = set()
+        self.whole = False
+
+    def __getitem__(self, key: str) -> Any:
+        self.seen.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        self.seen.add(key)
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        self.seen.add(str(key))
+        return super().__contains__(key)
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        self.seen.add(key)
+        return super().setdefault(key, default)
+
+    def pop(self, key: str, *default: Any) -> Any:
+        self.seen.add(key)
+        return super().pop(key, *default)
+
+    def untracked(self, key: str) -> Any:
+        """The value under key without counting it as read."""
+        return super().get(key)
+
+    def _every(self) -> None:
+        self.whole = True
+
+    def __iter__(self) -> Any:
+        self._every()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._every()
+        return super().__len__()
+
+    def keys(self) -> Any:
+        self._every()
+        return super().keys()
+
+    def values(self) -> Any:
+        self._every()
+        return super().values()
+
+    def items(self) -> Any:
+        self._every()
+        return super().items()
+
+    def __eq__(self, other: object) -> bool:
+        self._every()
+        return super().__eq__(other)
+
+    def __ne__(self, other: object) -> bool:
+        self._every()
+        return super().__ne__(other)
+
+    def copy(self) -> dict[str, Any]:
+        self._every()
+        return dict(super().items())
+
+    def __copy__(self) -> dict[str, Any]:
+        return self.copy()
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> dict[str, Any]:
+        return copy.deepcopy(self.copy(), memo)
+
+
+def _track(doc: dict[str, Any]) -> Reads:
+    return Reads({name: Reads(value) if name in SECTIONS and name != ARCHIVE else value for name, value in doc.items()})
+
+
+def _read_set(doc: Reads) -> dict[str, set[str] | None]:
+    """The keys each section's change read, None for a section it read whole; scalars sit under meta."""
+    reads: dict[str, set[str] | None] = {
+        META: None if doc.whole else {key for key in doc.seen if key not in (*SECTIONS, ARCHIVE_REF)}
+    }
+    for name in SECTIONS:
+        section = doc.untracked(name)
+        if isinstance(section, Reads):
+            reads[name] = None if section.whole else set(section.seen)
+    return reads
+
+
+def _checks(
+    reads: dict[str, set[str] | None], loaded: dict[str, dict[str, Record]], writes: list[RecordWrite], fenced: bool
+) -> list[RecordWrite]:
+    """A revision check for each record the change read but did not write; a fence covers the lease itself."""
+    skip = {(write.section, write.key) for write in writes}
+    if fenced:
+        skip.add((META, "lease"))
+    checks: list[RecordWrite] = []
+    for section, keys in sorted(reads.items()):
+        for key in sorted(loaded.get(section, {}) if keys is None else keys):
+            if (section, key) not in skip:
+                checks.append(RecordWrite("check", section, key, _expected(loaded, section, key)))
+    return checks
 
 
 def _lease_fence(fence: Any) -> LeaseFence | None:
@@ -236,20 +337,23 @@ def _write_records(store: Any, port: RedisRecords, slug: str, change: Callable[[
 
     for _ in range(ATTEMPTS):
         loaded = port.sections(slug, LOADED)
-        doc = _assemble(slug, loaded)
-        before = copy.deepcopy(doc)
+        assembled = _assemble(slug, loaded)
+        before = copy.deepcopy(assembled)
+        doc = _track(assembled)
         hydrated: dict[str, dict[str, Record]] = {}
         token = HYDRATED.set(hydrated)
         try:
             result = change(doc)
         finally:
             HYDRATED.reset(token)
+        reads = _read_set(doc)
         if ARCHIVE in hydrated:
             loaded[ARCHIVE] = hydrated[ARCHIVE]
             before[ARCHIVE] = {key: found.value for key, found in hydrated[ARCHIVE].items()}
-        writes = _changes(before, doc, loaded, fence is None)
+        writes = _changes(before, doc, loaded)
         if not writes:
             return result
+        writes += _checks(reads, loaded, writes, fence is not None)
         try:
             port.fenced_batch(slug, FencedBatch(tuple(writes), _lease_fence(fence)))
         except RevisionConflict:
@@ -421,11 +525,11 @@ def write(store: Any, slug: str, change: Callable[[dict[str, Any]], T], fence: A
     """Commits change whole or not at all; on per record keys the batch also checks fence, a held lease or epoch."""
     from scripts.swarm.store import SwarmError
 
-    port = _migrated(store, slug)
-    if port is not None:
-        return _write_records(store, port, slug, change, fence)
     states = _states(store)
     for _ in range(ATTEMPTS):
+        port = _migrated(store, slug)
+        if port is not None:
+            return _write_records(store, port, slug, change, fence)
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
         before = copy.deepcopy(doc)
@@ -584,7 +688,10 @@ def records(store: Any, slug: str) -> Records:
 
 
 def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) -> int:
-    """Copies the whole fencing document into per record keys once every live fencing reader and writer has both layouts."""
+    """Moves the fencing document onto per record keys once every live reader and writer has both layouts.
+
+    The same transaction rewrites the document, so a write that read it before the move retries onto the records.
+    """
     from redis.exceptions import WatchError
 
     from scripts.swarm.store import SwarmError
@@ -603,11 +710,15 @@ def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) ->
                 if port.layout(slug) == RECORDS:
                     pipe.unwatch()
                     return 0
-                doc = _decode(_entry(states, store, slug).value)
+                entry = _entry(states, store, slug)
+                current = int(pipe.get(states.revision_key) or 0)
+                doc = _decode(entry.value)
                 hydrate_archive(store, doc)
-                writes = _changes(copy.deepcopy(EMPTY), doc, empty, False)
+                writes = _changes(copy.deepcopy(EMPTY), doc, empty)
                 writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
+                moved = _encode({**json.loads(entry.value), MOVED: RECORDS})
                 pipe.multi()
+                states.queue_write(pipe, slug, moved, current)
                 port.queue_batch(pipe, slug, FencedBatch(tuple(writes)))
                 pipe.execute()
                 return len(writes)
