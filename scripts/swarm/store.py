@@ -40,6 +40,8 @@ DEFAULT_LOCAL_MAX_AGENTS = 8
 EVENTS_ENGINE = "events"
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
+SEQUENTIAL_TICK = "sequential"
+TICK_MODES = (SEQUENTIAL_TICK, "parallel")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
 PLACEMENT_MODES = ("anton-first", "round-robin")
 ANTON_FIRST, ROUND_ROBIN = PLACEMENT_MODES
@@ -98,8 +100,11 @@ class SwarmConfig:
     placement_mode: str = ANTON_FIRST
     placement_nodes: int = 0
     repo_origin: str = ""
+    tick_mode: str = SEQUENTIAL_TICK
 
     def __post_init__(self) -> None:
+        if self.tick_mode not in TICK_MODES:
+            raise SwarmError(f"tick mode must be one of {', '.join(TICK_MODES)}")
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
         if self.placement_mode not in PLACEMENT_MODES:
@@ -270,6 +275,7 @@ class RedisStore:
             raw.get("placement_mode") or ANTON_FIRST,
             int(raw.get("placement_nodes") or 0),
             raw.get("repo_origin", ""),
+            raw.get("tick_mode") or SEQUENTIAL_TICK,
         )
 
     def update(self, slug, **changes):

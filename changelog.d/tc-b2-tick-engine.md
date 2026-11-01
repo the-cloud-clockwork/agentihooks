@@ -1,0 +1,3 @@
+### Added
+
+- The tick engine runs a group's registered steps in legacy order, each in a copied context under its own budget deadline; a step that raises, exits or overruns is recorded as failed or late and never stops the next. `agentihooks swarm <slug> set tick-mode=sequential|parallel` stores the tick mode on the swarm config, sequential by default.
