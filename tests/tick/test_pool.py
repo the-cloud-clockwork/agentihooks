@@ -1,7 +1,8 @@
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from threading import Event, Lock
+from pathlib import Path
+from threading import Event, Lock, Thread
 from time import monotonic
 
 import pytest
@@ -192,3 +193,32 @@ def test_fifteen_agent_load_finishes_under_sixty_seconds() -> None:
     with pool.running(workers=15):
         assert pool.fan_out(agent, range(15)) == list(range(15))
     assert monotonic() - at < 60
+
+
+def test_host_placement_lock_serializes_distinct_lock_instances(tmp_path: Path) -> None:
+    from scripts.tick import pool
+
+    entered, release, second = Event(), Event(), Event()
+    path = tmp_path / "placing.lock"
+
+    def first() -> None:
+        with pool.HostLock(path):
+            entered.set()
+            release.wait(1)
+
+    def next_host() -> None:
+        with pool.HostLock(path):
+            second.set()
+
+    first_worker = Thread(target=first)
+    first_worker.start()
+    assert entered.wait(1)
+    next_worker = Thread(target=next_host)
+    next_worker.start()
+    try:
+        assert not second.wait(0.02)
+    finally:
+        release.set()
+        first_worker.join(1)
+        next_worker.join(1)
+    assert second.is_set()
