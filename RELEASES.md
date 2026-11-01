@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.550 · 2026-11-01
+
+### 2026-11-01 · 6b86ac25c522 · #9236 · @agenticore-app
+
+**Document the tick ledger view and export parts**
+
+This change adds the documentation for the Tick ledger view feature delivered in #9224, giving operators a clear reference for how the system avoids rereading the whole ledger on every pass. It covers the stored view file location under the scheduler runtime folder, the refresh table and its full-read fallback conditions, the HTTP 400 skip behavior, and the export parts request/reply shapes including the 256 generation change window. It also adds a check script, troubleshooting guidance, tests, a reference index entry, and a changelog fragment, so the delivered behavior is now fully documented and verifiable against merged dev.
+
+### 2026-11-01 · c5f6822cae33 · #9231 · @nestorcolt
+
+**Add run listing and run cancel port tools and move the panic cancel onto the port**
+
+This change extends the source control port with `latest_runs` and `cancel_run` tools, letting the GitHub adapter fetch and cancel workflow runs through audited, deadline-bound calls rather than raw `gh run list`/`gh run cancel` commands. Panic's fleet-wide cancel logic (`cancel_runs`, `tick_pass`, and the panic button) now routes through this single port per repository under a sixty-second deadline, with matching fake support and effect-registry entries. This shrinks the shell-call allowlist further, keeps GitHub access auditable and testable, and moves the project closer to fully eliminating hardcoded GitHub CLI usage outside the adapter.
+
 ## v2.17.549 · 2026-11-01
 
 ### 2026-11-01 · 866f11b0e334 · #9213 · @nestorcolt
