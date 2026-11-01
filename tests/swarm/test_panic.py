@@ -40,21 +40,33 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float, dict[str,
 
 
 class Runs:
-    def __init__(self, rows: dict[str, list[dict[str, Any]]], branches: dict[str, str] | None = None) -> None:
+    def __init__(self, rows: dict[str, list[dict[str, Any]]]) -> None:
         self.rows = rows
-        self.branches = branches or {}
         self.calls: list[list[str]] = []
 
     def __call__(self, argv: list[str]) -> str:
         self.calls.append(argv)
-        if argv[:3] == ["gh", "pr", "view"]:
-            return self.branches[argv[3]] + "\n"
         if argv[:3] == ["gh", "run", "list"]:
             return json.dumps(self.rows.get(argv[4], []))
         return ""
 
     def cancelled(self) -> list[str]:
         return [f"{argv[5]}:{argv[3]}" for argv in self.calls if argv[:3] == ["gh", "run", "cancel"]]
+
+
+def _branches(monkeypatch: pytest.MonkeyPatch, branches: dict[str, str]) -> list[str]:
+    from scripts.swarm import stack
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+    asked: list[str] = []
+
+    def change(url: str, refused: str) -> ChangeState:
+        assert refused == f"cannot read pull request {url}"
+        asked.append(url)
+        return ChangeState(ChangeRef("o/r", 1), "open", "a" * 40, "dev", False, url, branches[url])
+
+    monkeypatch.setattr(stack, "change", change)
+    return asked
 
 
 def _row(run_id: int, branch: str, status: str = "in_progress", event: str = "pull_request") -> dict[str, Any]:
@@ -279,7 +291,8 @@ def test_release_refuses_below_the_level(store, counted):
     assert panic.state(store) is not None
 
 
-def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs():
+def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _branches(monkeypatch, {FIX: "fix-branch"})
     runs = Runs(
         {
             "o/a": [
@@ -291,7 +304,6 @@ def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs():
             ],
             "o/b": [_row(6, "other", status="pending")],
         },
-        {FIX: "fix-branch"},
     )
     cancelled = panic.cancel_runs([FIX], ["o/a", "o/b"], runs)
     assert cancelled == ["o/a run 1 on feature", "o/a run 5 on waiting", "o/b run 6 on other"]
@@ -300,7 +312,8 @@ def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs():
         ["gh", "run", "cancel", "5", "--repo", "o/a"],
         ["gh", "run", "cancel", "6", "--repo", "o/b"],
     ]
-    assert ["gh", "pr", "view", FIX, "--json", "headRefName", "--jq", ".headRefName"] in runs.calls
+    assert asked == [FIX]
+    assert not [argv for argv in runs.calls if argv[:3] == ["gh", "pr", "view"]]
     listing = ["gh", "run", "list", "--repo", "o/a", "--limit", "100", "--json", "databaseId,event,headBranch,status"]
     assert listing in runs.calls
 
@@ -365,13 +378,29 @@ def test_tick_pass_reports_a_failed_cancel(store, counted):
     assert found[0].startswith("panic cancel failed: ")
 
 
+def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.swarm.store import SwarmError
+
+    panic.engage(store, "pressed", False, [FIX], 0)
+
+    def unreadable(url: str, refused: str) -> None:
+        raise SwarmError(f"{refused}: boom")
+
+    monkeypatch.setattr(stack, "change", unreadable)
+    assert panic.tick_pass(store, True, 1_000, Runs({})) == [
+        f"panic cancel failed: cannot read pull request {FIX}: boom"
+    ]
+
+
 def test_the_tick_spawns_nothing_while_panic_holds():
     source = Path(panic.__file__).with_name("tick.py").read_text()
     assert "config.engine != EVENTS_ENGINE and panic.state(store) is None:\n" in source
 
 
 def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys):
-    runs = Runs({repo: [_row(7, "busy"), _row(8, "fix-branch")] for repo in panic.REPOS}, {FIX: "fix-branch"})
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    runs = Runs({repo: [_row(7, "busy"), _row(8, "fix-branch")] for repo in panic.REPOS})
     monkeypatch.setattr(panic, "gh", runs)
     args = cli.build_parser().parse_args([SLUG, "panic", "on", "--fix", FIX])
     before = cli.now_ms()

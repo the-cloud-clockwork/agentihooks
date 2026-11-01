@@ -6,6 +6,7 @@ from collections.abc import Callable
 from scripts import gh_audit
 from scripts.swarm import github_reads, ledger_events, mutation_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
+from scripts.tick.adapters.github import command
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
@@ -33,11 +34,11 @@ MERGEABLE = ("CLEAN", "HAS_HOOKS", "UNSTABLE")
 
 
 def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
-    command = ["gh", "api", "graphql", "-f", f"query={query}"]
+    argv = command(["api", "graphql", "-f", f"query={query}"])
     for name, value in variables.items():
-        command += ["-f", f"{name}={value}"]
+        argv += ["-f", f"{name}={value}"]
     try:
-        done = run(command, capture_output=True, text=True, timeout=20)
+        done = run(argv, capture_output=True, text=True, timeout=20)
         if done.returncode:
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
         response = json.loads(done.stdout)
@@ -54,10 +55,10 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
 def rest(path: str, run) -> dict | list | str:
     if mutation_wait.backing_off():
         raise SwarmError(f"GitHub API rate limit backoff holds {path}")
-    command = ["gh", "api", path, "--allow-escape-sequences"] if path.endswith("/logs") else ["gh", "api", path]
+    argv = command(["api", path, "--allow-escape-sequences"]) if path.endswith("/logs") else command(["api", path])
     try:
         with gh_audit.uncharged():
-            done = run(command, capture_output=True, text=True, timeout=20)
+            done = run(argv, capture_output=True, text=True, timeout=20)
         github_reads.charge(github_reads.CALLER.get(), path, time.time())
         if done.returncode:
             if mutation_wait.rate_limited(done.stderr):

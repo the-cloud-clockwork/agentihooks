@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm.lost_runner import home as _agentihooks_home
+from scripts.tick.adapters import github as _github
 
 CALLER = ContextVar("github_caller", default="swarm.rest")
 RUN_TTL_S = 60
@@ -64,8 +65,9 @@ def _log_key(endpoint):
     if source() in TOKENS:
         return _key(endpoint)
     host = os.environ.get("GH_HOST") or "github.com"
+    argv = _github.command(["config", "get", "user", "--host", host])
     account = subprocess.run(
-        ["gh", "config", "get", "user", "--host", host],
+        argv,  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
         capture_output=True,
         text=True,
         check=True,
@@ -138,7 +140,7 @@ def _conditional_page(caller: str, endpoint: str, fetch: Callable) -> dict:
     if status == 304:
         return cached
     if status != 200:
-        raise subprocess.CalledProcessError(1, ["gh", "api", *args], output=output)
+        raise subprocess.CalledProcessError(1, _github.command(["api", *args]), output=output)
     headers = {key.lower(): value.strip() for key, _, value in (line.partition(":") for line in lines[1:])}
     links = re.findall(r'<([^>]+)>;\s*rel="next"', header)
     found = {"body": json.loads(body), "etag": headers.get("etag", ""), "next": links[0] if links else ""}
@@ -214,13 +216,13 @@ def rest(
 ) -> subprocess.CompletedProcess[Any]:
     from scripts import gh_audit
 
-    path = gh_audit.endpoint(["gh", *args]) if args[0] == "api" else None
+    path = gh_audit.endpoint(_github.command(args)) if args[0] == "api" else None
     if path is None:
-        return run(["gh", *args], **options)
+        return run(_github.command(args), **options)
     endpoint = next(word for word in args[1:] if word.split("?")[0].removeprefix("/") == path)
     paginate = "--paginate" in args
     include = "--include" in args or "-i" in args
-    command = ["gh", *args] if include or not paginate else ["gh", *args, "--include"]
+    command = _github.command(args if include or not paginate else [*args, "--include"])
     try:
         with gh_audit.uncharged():
             result = run(command, **options)

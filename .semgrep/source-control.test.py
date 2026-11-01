@@ -14,3 +14,17 @@ def spread(args):
 def other(root):
     # ok: swarm-source-control-port
     return subprocess.run(["git", "-C", str(root), "status"], capture_output=True)
+
+
+def built(url):
+    from scripts.tick.adapters.github import command
+
+    # ruleid: swarm-source-control-port
+    return subprocess.run(command(["pr", "view", url]), capture_output=True)
+
+
+def aliased(url):
+    from scripts.tick.adapters import github as adapter
+
+    # ruleid: swarm-source-control-port
+    return subprocess.run(adapter.command(["pr", "view", url]), capture_output=True)

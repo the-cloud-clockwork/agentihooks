@@ -191,6 +191,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
+from scripts.tick.adapters.github import command
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -1715,7 +1716,7 @@ PULL_HEAD = "headRefName,headRepository,headRepositoryOwner"
 
 def pull_branch(url, run=subprocess.run):
     try:
-        done = run(["gh", "pr", "view", url, "--json", PULL_HEAD], capture_output=True, text=True, timeout=20)
+        done = run(command(["pr", "view", url, "--json", PULL_HEAD]), capture_output=True, text=True, timeout=20)
         found = json.loads(done.stdout) if done.returncode == 0 else {}
         return found["headRefName"], _head_repo(url, found)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError):
