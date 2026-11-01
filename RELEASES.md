@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.556 · 2026-11-01
+
+### 2026-11-01 · f6d70a31a48b · #9211 · @nestorcolt
+
+**Run the tick's start and observation steps as registered engine steps**
+
+This change refactors the tick's start and observation logic out of hand-written inline calls into formally registered engine steps, moving each step body verbatim into dedicated `step_*` functions organized under `scripts.tick.steps.observe`, with an adapter that passes parameters by name and preserves legacy execution order and exception propagation. It matters because it makes these steps consistent with the engine's step framework, improving testability and traceability while keeping behavior identical to the previous implementation, as verified by tick equivalence tests and a planted-fault regression test that confirms failures are still caught correctly.
+
 ## v2.17.554 · 2026-11-01
 
 ### 2026-11-01 · 0a840aea3e0d · #9246 · @nestorcolt
