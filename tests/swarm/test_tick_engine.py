@@ -52,7 +52,7 @@ def test_an_events_engine_swarm_collects_no_worker_hive_acknowledgement(store): 
     assert runtime.collected == runtime.ordered
 
 
-def test_tick_holds_spawning_until_pass_budget_recovers(store: object, monkeypatch: object) -> None:
+def test_tick_holds_spawning_until_pass_budget_recovers(store: object, monkeypatch: object) -> None:  # noqa: F811
     import json
     from typing import Any, cast
     from unittest.mock import patch
