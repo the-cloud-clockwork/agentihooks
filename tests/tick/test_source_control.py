@@ -148,6 +148,7 @@ def test_domain_types_preserve_provider_neutral_state() -> None:
     )
 
 
+@pytest.mark.feature("swarm-tick-source-control-port")
 def test_github_change_uses_audited_reads_and_deadline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     provider, recorder = _provider(monkeypatch, tmp_path, [PULL])
 
@@ -157,6 +158,20 @@ def test_github_change_uses_audited_reads_and_deadline(monkeypatch: pytest.Monke
     assert recorder.calls == [
         ("tick.source_control", ["api", "repos/owner/project/pulls/7"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
     ]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_change_names_its_head_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pull = {**PULL, "head": {"sha": "head", "ref": "engineer-1"}}
+    provider, _ = _provider(monkeypatch, tmp_path, [pull])
+
+    assert provider.change(REFERENCE, deadline=_deadline()).head_branch == "engineer-1"
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_command_is_the_one_gh_command_line() -> None:
+    assert github.command(["pr", "view", "7"]) == ["gh", "pr", "view", "7"]
+    assert github.command([]) == ["gh"]
 
 
 def test_github_checks_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

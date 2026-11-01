@@ -112,16 +112,13 @@ def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_delete
         repository_branches={str(root): "predecessor"},
         pr_url="https://github.com/example/repo/pull/7",
     )
-    original = publish.execute
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
-    def execute(command, cwd):
-        if command[0] == "gh":
-            assert command == ["gh", "pr", "view", p.task["pr_url"], "--json", "state,headRefName"]
-            assert cwd == root
-            return '{"state":"MERGED","baseRefName":"dev","headRefName":"predecessor"}'
-        return original(command, cwd)
+    def change(url: str, refused: str) -> ChangeState:
+        assert (url, refused) == (p.task["pr_url"], f"cannot read pull request {p.task['pr_url']}")
+        return ChangeState(ChangeRef("example/repo", 7), "closed", "a" * 40, "dev", True, url, "predecessor")
 
-    monkeypatch.setattr(publish, "execute", execute)
+    monkeypatch.setattr(publish.stack, "change", change)
     result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
     assert git(result["worktree"], "rev-parse", "HEAD") == git(root, "rev-parse", "origin/dev")
     assert p.task["branch"] == "engineer-test"

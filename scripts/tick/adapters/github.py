@@ -23,7 +23,7 @@ from scripts.tick.ports.source_control import (
     Tag,
 )
 
-__all__ = ["CALLER", "GitHubSourceControl"]
+__all__ = ["CALLER", "GitHubSourceControl", "command"]
 
 CALLER = "tick.source_control"
 
@@ -48,6 +48,11 @@ Git = Callable[..., subprocess.CompletedProcess[str]]
 
 _PAGE = 100
 _MAX_PAGES = 10
+
+
+def command(args: list[str]) -> list[str]:
+    """Return the gh command line for the arguments; the GitHub adapter is the only module that names gh."""
+    return ["gh", *args]
 
 
 def _live(deadline: Deadline) -> float:
@@ -103,7 +108,13 @@ class GitHubSourceControl:
         """Read the state of one change."""
         body = self._api([f"repos/{reference.repository}/pulls/{reference.number}"], deadline)
         return ChangeState(
-            reference, body["state"], body["head"]["sha"], body["base"]["ref"], body["merged"], body["html_url"]
+            reference,
+            body["state"],
+            body["head"]["sha"],
+            body["base"]["ref"],
+            body["merged"],
+            body["html_url"],
+            body["head"].get("ref", ""),
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:

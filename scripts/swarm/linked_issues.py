@@ -3,13 +3,14 @@
 import re
 
 from scripts.swarm import stack
+from scripts.tick.adapters.github import command
 
 KEYWORD = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+#(\d+)\b", re.IGNORECASE)
 COMMENT = "Closed by the swarm: pull request {url} merged into dev."
 
 
 def named(url):
-    done = stack.shell(["gh", "pr", "view", url, "--json", "body", "--jq", ".body"])
+    done = stack.shell(command(["pr", "view", url, "--json", "body", "--jq", ".body"]))
     if done.returncode != 0:
         return [], [f"could not read the issues named by {url}: {done.stderr.strip()}"]
     repo = url.split("/pull/")[0]
@@ -27,15 +28,15 @@ def settle(url, finished, rows):
 
 
 def _close(issue, url):
-    state = stack.shell(["gh", "issue", "view", issue, "--json", "state", "--jq", ".state"])
+    state = stack.shell(command(["issue", "view", issue, "--json", "state", "--jq", ".state"]))
     if state.returncode != 0:
         return [f"could not close issue {issue}: {state.stderr.strip()}"]
     if state.stdout.strip() != "OPEN":
         return []
-    closed = stack.shell(["gh", "issue", "close", issue])
+    closed = stack.shell(command(["issue", "close", issue]))
     if closed.returncode != 0:
         return [f"could not close issue {issue}: {closed.stderr.strip()}"]
-    said = stack.shell(["gh", "issue", "comment", issue, "--body", COMMENT.format(url=url)])
+    said = stack.shell(command(["issue", "comment", issue, "--body", COMMENT.format(url=url)]))
     if said.returncode != 0:
         return [f"closed issue {issue}; could not comment on it: {said.stderr.strip()}"]
     return [f"closed issue {issue}"]

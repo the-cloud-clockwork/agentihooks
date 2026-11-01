@@ -112,6 +112,17 @@
       ]
     },
     {
+      "id": "swarm-tick-source-control-port",
+      "origin": "inventory",
+      "behaviour": "Swarm code reaches source control only through the source control port; the GitHub adapter alone builds a gh command, and a change read names its state, head and head branch inside a deadline.",
+      "seam": "The source control port in scripts.tick.ports.source_control and its GitHub adapter",
+      "tests": [
+        "tests/tick/test_source_control.py::test_github_change_uses_audited_reads_and_deadline",
+        "tests/tick/test_source_control.py::test_github_change_names_its_head_branch",
+        "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
+      ]
+    },
+    {
       "id": "swarm-tick-launch-budget",
       "origin": "inventory",
       "behaviour": "A tick pass stops launching once its launch budget is spent.",

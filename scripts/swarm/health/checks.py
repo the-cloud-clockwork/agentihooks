@@ -3,12 +3,14 @@
 import subprocess
 from collections.abc import Callable
 
+from scripts.tick.adapters.github import command
+
 CACHE_SECONDS = 60
 
 
 def _states(pr_url, run):
     try:
-        done = run(["gh", "pr", "checks", pr_url], capture_output=True, text=True, timeout=20)
+        done = run(command(["pr", "checks", pr_url]), capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.SubprocessError):
         return None, []
     return done.returncode, [line.split("\t")[1:2] for line in done.stdout.splitlines()]

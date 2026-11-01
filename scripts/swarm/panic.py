@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from scripts.swarm.store import PREFIX, RedisStore
+from scripts.tick.adapters.github import command
 
 FLEET = "fleet"
 HOUR_MS = 60 * 60 * 1000
@@ -141,7 +142,7 @@ def gh(argv: list[str]) -> str:
 
 
 def _branch(url: str, run: Runner) -> str:
-    return run(["gh", "pr", "view", url, "--json", "headRefName", "--jq", ".headRefName"]).strip()
+    return run(command(["pr", "view", url, "--json", "headRefName", "--jq", ".headRefName"])).strip()
 
 
 def _spared(row: dict[str, str], branches: set[str]) -> bool:
@@ -153,21 +154,13 @@ def cancel_runs(fixes: Iterable[str], repos: Iterable[str], run: Runner) -> list
     branches = {_branch(url, run) for url in fixes}
     cancelled: list[str] = []
     for repo in repos:
-        listing = [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            repo,
-            "--limit",
-            "100",
-            "--json",
-            "databaseId,event,headBranch,status",
-        ]
+        listing = command(
+            ["run", "list", "--repo", repo, "--limit", "100", "--json", "databaseId,event,headBranch,status"]
+        )
         for row in json.loads(run(listing)):
             if _spared(row, branches):
                 continue
-            run(["gh", "run", "cancel", str(row["databaseId"]), "--repo", repo])
+            run(command(["run", "cancel", str(row["databaseId"]), "--repo", repo]))
             cancelled.append(f"{repo} run {row['databaseId']} on {row['headBranch']}")
     return cancelled
 

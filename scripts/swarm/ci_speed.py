@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from scripts.swarm.store import PREFIX
+from scripts.tick.adapters.github import command
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -76,7 +77,7 @@ def read_runs(repo_dir: str, since_s: float, run: Callable = subprocess.run, eve
             f"?event={event}&status={conclusion}&exclude_pull_requests=true&created=>={since}&per_page=100"
         )
         return run(
-            ["gh", "api", endpoint, "--paginate", "--jq", JQ],
+            command(["api", endpoint, "--paginate", "--jq", JQ]),
             cwd=repo_dir,
             capture_output=True,
             text=True,
