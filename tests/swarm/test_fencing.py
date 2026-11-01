@@ -186,7 +186,7 @@ def test_a_watched_transaction_aborts_when_the_fencing_document_changes(store):
 
     fencing.write(store, "sw", lambda doc: doc.update(epoch=1))
     with store.redis.pipeline() as pipe:
-        fencing.watch(store, pipe, "sw")
+        fencing.watch(store, pipe)
         fencing.write(store, "sw", lambda doc: doc.update(epoch=2))
         pipe.multi()
         pipe.set("probe", "1")

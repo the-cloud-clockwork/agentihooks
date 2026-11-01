@@ -32,24 +32,25 @@ if ARGV[1] ~= '' then
     return redis.error_reply('FENCE_STALE the controller lease moved')
   end
 end
-local count = #KEYS - 3
+local count = #KEYS - 4
 for i = 1, count do
-  local at = 3 + (i - 1) * 4
+  local at = 4 + (i - 1) * 4
   local expected = tonumber(ARGV[at + 2])
-  if expected >= 0 and revision_of(KEYS[3 + i], ARGV[at + 1]) ~= expected then
+  if expected >= 0 and revision_of(KEYS[4 + i], ARGV[at + 1]) ~= expected then
     return redis.error_reply('FENCE_CONFLICT ' .. ARGV[at + 1])
   end
 end
 local revision = redis.call('INCR', KEYS[1])
 for i = 1, count do
-  local at = 3 + (i - 1) * 4
+  local at = 4 + (i - 1) * 4
   local kind = ARGV[at + 3]
   if kind == 'put' then
-    redis.call('HSET', KEYS[3 + i], ARGV[at + 1], '{"r":' .. revision .. ',"v":' .. ARGV[at + 4] .. '}')
+    redis.call('HSET', KEYS[4 + i], ARGV[at + 1], '{"r":' .. revision .. ',"v":' .. ARGV[at + 4] .. '}')
   elseif kind == 'delete' then
-    redis.call('HDEL', KEYS[3 + i], ARGV[at + 1])
+    redis.call('HDEL', KEYS[4 + i], ARGV[at + 1])
   end
 end
+redis.call('HSET', KEYS[4], ARGV[4], revision)
 redis.call('XADD', KEYS[2], 'MAXLEN', ARGV[2], '*', 'revision', revision, 'owner', ARGV[3], 'records', count)
 return revision
 """
@@ -83,9 +84,11 @@ def _encode(value: object) -> str:
 class RedisRecords:
     """Every fenced record of a swarm lives under keys sharing the swarm's hash tag, so one script sees them all."""
 
-    def __init__(self, redis: Any, prefix: str | None = None) -> None:
+    def __init__(self, redis: Any, prefix: str | None = None, touched: str = "") -> None:
+        """touched names a hash each batch stamps with its revision, so transactions watching that hash abort."""
         self.redis = redis
         self.prefix = prefix or _prefix()
+        self.touched = touched
         self._script = redis.register_script(FENCED_BATCH)
 
     def key(self, slug: str, part: str) -> str:
@@ -115,9 +118,10 @@ class RedisRecords:
 
     def batch_call(self, slug: str, batch: FencedBatch) -> tuple[list[str], list[object]]:
         """The keys and arguments the fenced batch script receives, in its order."""
-        keys = [self.revision_key(slug), self.log_key(slug), self.key(slug, META)]
+        touched = self.touched or self.key(slug, "touched")
+        keys = [self.revision_key(slug), self.log_key(slug), self.key(slug, META), touched]
         owner = batch.lease.owner if batch.lease is not None else ""
-        args: list[object] = [_fence(batch.lease), LOG_CAP, owner]
+        args: list[object] = [_fence(batch.lease), LOG_CAP, owner, f"{slug}:records"]
         for write in batch.writes:
             keys.append(self.key(slug, write.section))
             value = _encode(write.value) if write.kind == "put" else ""

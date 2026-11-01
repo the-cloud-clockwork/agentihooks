@@ -64,7 +64,7 @@ LEGACY_ORPHANS = "controller-orphans"
 T = TypeVar("T")
 RECORDS = "records"
 DOCUMENT = "document"
-RECORDS_REF = "records:"
+RECORDS_SLUG = "records_slug"
 ARCHIVE = "archive"
 ARCHIVE_REF = "archive_ref"
 BY_NAME = "by-name"
@@ -156,10 +156,14 @@ def _decode(value: bytes) -> dict[str, Any]:
     return {**copy.deepcopy(EMPTY), **json.loads(value)}
 
 
+def _port(store: Any) -> RedisRecords:
+    return RedisRecords(store.redis, touched=RedisStateStore(store.redis, BUCKET).watch_key)
+
+
 def _migrated(store: Any, slug: str) -> RedisRecords | None:
     if state.backend() != "redis":
         return None
-    port = RedisRecords(store.redis)
+    port = _port(store)
     return port if port.layout(slug) == RECORDS else None
 
 
@@ -172,8 +176,12 @@ def _assemble(slug: str, loaded: dict[str, dict[str, Record]]) -> dict[str, Any]
             doc.update(values)
         elif name in SECTIONS:
             doc[name] = values
-    doc[ARCHIVE_REF] = RECORDS_REF + slug
+    doc[RECORDS_SLUG] = slug
     return doc
+
+
+def _read_records(store: Any, slug: str) -> dict[str, Any]:
+    return _assemble(slug, RedisRecords(store.redis).sections(slug, (*LOADED, ARCHIVE)))
 
 
 def _heads(rows: dict[str, Any]) -> dict[str, str]:
@@ -208,7 +216,7 @@ def _section_changes(
 def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, dict[str, Record]]) -> list[RecordWrite]:
     """Every record a change wrote, each expecting the revision it was read at, plus the derived name index."""
     writes: list[RecordWrite] = []
-    for name in sorted((before.keys() | after.keys()) - {ARCHIVE_REF}):
+    for name in sorted((before.keys() | after.keys()) - {ARCHIVE_REF, RECORDS_SLUG}):
         if name in SECTIONS:
             writes += _section_changes(name, before.get(name, {}), after.get(name, {}), loaded)
         elif name not in after:
@@ -304,7 +312,7 @@ def _track(doc: dict[str, Any]) -> Reads:
 def _read_set(doc: Reads) -> dict[str, set[str] | None]:
     """The keys each section's change read, None for a section it read whole; scalars sit under meta."""
     reads: dict[str, set[str] | None] = {
-        META: None if doc.whole else {key for key in doc.seen if key not in (*SECTIONS, ARCHIVE_REF)}
+        META: None if doc.whole else {key for key in doc.seen if key not in (*SECTIONS, ARCHIVE_REF, RECORDS_SLUG)}
     }
     for name in SECTIONS:
         section = doc.untracked(name)
@@ -376,18 +384,16 @@ def _record_archive(store: Any, slug: str) -> dict[str, Any]:
     return {key: copy.deepcopy(found.value) for key, found in rows.items()}
 
 
-def _archived(store: Any, reference: str, execution_id: str) -> Any:
-    if reference.startswith(RECORDS_REF):
-        found = RedisRecords(store.redis).record(reference.removeprefix(RECORDS_REF), ARCHIVE, execution_id)
+def _archived(store: Any, doc: dict[str, Any], execution_id: str) -> Any:
+    if RECORDS_SLUG in doc:
+        found = RedisRecords(store.redis).record(doc[RECORDS_SLUG], ARCHIVE, execution_id)
         return None if found is None else found.value
-    return _archive_rows(store, reference).get(execution_id)
+    return _archive_rows(store, doc.get(ARCHIVE_REF, "")).get(execution_id)
 
 
 def _archive_rows(store: Any, reference: str) -> dict[str, Any]:
     from scripts.swarm.store import SwarmError
 
-    if reference.startswith(RECORDS_REF):
-        return _record_archive(store, reference.removeprefix(RECORDS_REF))
     rows: dict[str, Any] = {}
     seen: set[str] = set()
     states = state.for_store(store, BUCKET)
@@ -425,14 +431,12 @@ def hydrate_archive(store: Any, doc: dict[str, Any]) -> None:
 def execution_row(store: Any, doc: dict[str, Any], execution_id: str) -> dict[str, Any] | None:
     """Finds an execution in the current rows, then the inline archive, then the external archive history."""
     return (
-        doc["executions"].get(execution_id)
-        or doc["archive"].get(execution_id)
-        or _archived(store, doc.get(ARCHIVE_REF, ""), execution_id)
+        doc["executions"].get(execution_id) or doc["archive"].get(execution_id) or _archived(store, doc, execution_id)
     )
 
 
 def _externalize_archive(store: Any, slug: str, doc: dict[str, Any]) -> None:
-    if ARCHIVE_REF not in doc or doc[ARCHIVE_REF].startswith(RECORDS_REF):
+    if "archive_ref" not in doc:
         return
     reference = doc["archive_ref"]
     previous = _archive_rows(store, reference)
@@ -471,18 +475,14 @@ def migrate_archive(store: Any, slug: str, *, writers_upgraded: bool = False) ->
 
 
 def read(store: Any, slug: str) -> dict[str, Any]:
-    port = _migrated(store, slug)
-    if port is not None:
-        return _assemble(slug, port.sections(slug, (*LOADED, ARCHIVE)))
     doc = _decode(_entry(_states(store), store, slug).value)
+    if MOVED in doc:
+        return _read_records(store, slug)
     hydrate_archive(store, doc)
     return doc
 
 
 def read_executions(store: Any, slug: str) -> dict[str, Any]:
-    port = _migrated(store, slug)
-    if port is not None:
-        return _assemble(slug, port.sections(slug, ("executions",)))["executions"]
     states = _states(store)
     if isinstance(states, RedisStateStore):
         entry = states.get_projection(slug)
@@ -508,10 +508,6 @@ def _cache_lease(store: Any, states: Any, slug: str, doc: dict[str, Any], revisi
 
 
 def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
-    port = _migrated(store, slug)
-    if port is not None:
-        found = port.record(slug, META, "lease")
-        return {"lease": None if found is None else found.value}
     states = _states(store)
     if not isinstance(states, RedisStateStore):
         return None
@@ -525,19 +521,15 @@ def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
     return {"lease": cached["lease"]}
 
 
-def write(store: Any, slug: str, change: Callable[[dict[str, Any]], T], fence: Any = None) -> T:
-    """Commits change whole or not at all; on per record keys the batch also checks fence, a held lease or epoch."""
+def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None) -> T:
     from scripts.swarm.store import SwarmError
 
     states = _states(store)
     for _ in range(ATTEMPTS):
-        port = _migrated(store, slug)
-        if port is not None:
-            return _write_records(store, port, slug, change, fence)
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
         if MOVED in doc:
-            continue
+            return _write_records(store, _port(store), slug, change, fence)
         before = copy.deepcopy(doc)
         result = change(doc)
         if doc["archive"] and "archive_ref" in doc:
@@ -555,9 +547,6 @@ def write(store: Any, slug: str, change: Callable[[dict[str, Any]], T], fence: A
 
 
 def authority_held(store: Any, slug: str, task: str) -> bool:
-    port = _migrated(store, slug)
-    if port is not None:
-        return port.record(slug, "claims", task) is not None or port.record(slug, "journals", task) is not None
     doc = read(store, slug)
     return task in doc["claims"] or task in doc["journals"]
 
@@ -586,23 +575,23 @@ def bump(store: Any, slug: str, part: str) -> None:
     raise SwarmError(CONTENTION)
 
 
-def watch(store: Any, pipe: Any, slug: str) -> None:
-    """Makes a Redis transaction abort when any fencing document or the swarm's fenced records change."""
+def watch(store: Any, pipe: Any) -> None:
+    """Makes a Redis transaction abort when any fencing document changes; other backends have nothing to watch."""
     states = _states(store)
     if isinstance(states, RedisStateStore):
         states.guard(pipe)
-        pipe.watch(RedisRecords(store.redis).revision_key(slug))
 
 
 def replace(store: Any, slug: str, saved: dict[str, Any] | None) -> None:
     """Puts back a saved document; a snapshot taken before the document existed is imported from its keys."""
     restored: dict[str, Any] = _legacy(store, slug) if saved is None else {**EMPTY, **saved}
     restored.pop(MOVED, None)
+    restored.pop(RECORDS_SLUG, None)
 
     def change(doc: dict[str, Any]) -> Any:
-        records = doc.get(ARCHIVE_REF, "").startswith(RECORDS_REF)
+        records = RECORDS_SLUG in doc
         if records:
-            hydrate_archive(store, doc)
+            _record_archive(store, slug)
         doc.clear()
         doc.update(restored)
         if records:
@@ -616,7 +605,7 @@ def replace(store: Any, slug: str, saved: dict[str, Any] | None) -> None:
 
 def _view(doc: dict[str, Any], section: str) -> dict[str, Any]:
     if section == META:
-        return {key: value for key, value in doc.items() if key not in SECTIONS and key != ARCHIVE_REF}
+        return {key: value for key, value in doc.items() if key not in (*SECTIONS, ARCHIVE_REF, RECORDS_SLUG)}
     if section == BY_NAME:
         return _heads(doc["executions"])
     return doc[section]
@@ -705,7 +694,7 @@ def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) ->
         raise SwarmError("upgrade every live fencing reader and writer before migrating to per record keys")
     if state.backend() != "redis":
         raise SwarmError("per record fencing keys need the Redis state backend")
-    port = RedisRecords(store.redis)
+    port = _port(store)
     states = RedisStateStore(store.redis, BUCKET)
     empty: dict[str, dict[str, Record]] = {name: {} for name in (*LOADED, ARCHIVE)}
 

@@ -361,7 +361,7 @@ class RedisStore:
         key = self.key(slug, "claim", agent.task)
         with self.redis.pipeline() as pipe:
             try:
-                fencing.watch(self, pipe, slug)
+                fencing.watch(self, pipe)
                 pipe.watch(key, self.key(slug, "agents"))
                 current = next((a for a in self.agents(slug) if a.name == agent.name), None)
                 if current != agent or agent.state not in ("starting", "working", "awaiting-decision"):
@@ -568,14 +568,7 @@ class RedisStore:
     def agents(self, slug):
         return self.execution_registry.agents(slug)
 
-    def drop_agent(
-        self,
-        slug: str,
-        name: str,
-        at: int | None = None,
-        expected: AgentRecord | None = None,
-        before: Callable[[Any], None] | None = None,
-    ) -> bool:
+    def drop_agent(self, slug, name, at=None, expected=None, before=None):
         from redis.exceptions import WatchError
 
         from scripts.swarm import fencing, lease
@@ -602,7 +595,7 @@ class RedisStore:
                     live = {agent.execution_id for agent in executions}
                     if not lease.fenced(self, slug, lease.EPOCH.get(), end):
                         return False
-                    fencing.watch(self, pipe, slug)
+                    fencing.watch(self, pipe)
                     observed = occupants_of(fencing.read(self, slug)).values()
                     if {a.execution_id for a in observed if a.name == name} != live:
                         return False
