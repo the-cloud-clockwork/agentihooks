@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.swarm import cli, idle, launch_check
+from scripts.swarm import cli, idle, launch_check, promotion_watch
 from scripts.swarm.ledger_client import LedgerClient, _ledger
 from tests.features.conftest import Agent, Swarm
 from tests.features.test_harness import _until
@@ -61,3 +61,33 @@ def test_a_tick_pass_uses_real_backends_with_scripted_agents(
     assert ledger.state(slug)["tasks"]
     assert all(agent.process.poll() is None for agent in launched)
     assert all(idle.heartbeat(store.redis, slug, agent.record.name) for agent in launched)
+
+
+@pytest.mark.feature
+def test_a_failed_feature_job_files_one_promotion_fixer_on_real_backends(
+    swarm: Swarm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name, value in swarm.ledger.env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(_ledger(), "BASE", f"http://127.0.0.1:{swarm.ledger.env['LEDGER_PORT']}")
+    store, slug = swarm.store, swarm.ledger.slug
+    store.update(slug, max_ci_agents=1, repo=str(tmp_path))
+    ledger = LedgerClient()
+    failed = {
+        "id": 41251658525,
+        "head_sha": "c688145a04f6349a642c67617656da5b3e17d5d1",
+        "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41251658525",
+    }
+    causes = [("feature-suite / features", "planted missing promotion feature dependency")]
+    actions = promotion_watch._red(slug, store, ledger, ledger.state(slug), failed, causes, str(tmp_path))
+    doc = ledger.state(slug)
+    fixers = [task for task in doc["tasks"] if str(failed["id"]) in task["id"]]
+    assert len(fixers) == 1, actions
+    fixer = fixers[0]
+    assert (fixer["kind"], fixer["lane"], fixer["rank"]) == ("ci", "ci", "urgent")
+    assert failed["head_sha"] in fixer["description"]
+    assert failed["html_url"] in fixer["description"]
+    assert any(alert["source"] == promotion_watch.SOURCE for alert in doc["alerts"])
+    promotion_watch._red(slug, store, ledger, doc, failed, causes, str(tmp_path))
+    assert len([task for task in ledger.state(slug)["tasks"] if task["id"] == fixer["id"]]) == 1
