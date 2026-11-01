@@ -86,10 +86,10 @@ def test_inbox_closes_a_work_item_on_a_strict_store_only_with_an_outcome() -> No
         port.close(bare.id, "done", deadline=_open())
     assert store.get(bare.id).state == "pending"
     work = store.send("alice", "bob", "fix the gate")
-    closed = port.close(work.id, "done", "merged the fix", deadline=_open())
+    closed = cast(Any, port.close(work.id, "done", "merged the fix", deadline=_open()))
     assert (closed.state, closed.reason) == ("done", "done: merged the fix")
     note = store.send("alice", "bob", "status", fyi=True)
-    assert port.close(note.id, "done", deadline=_open()).state == "done"
+    assert cast(Any, port.close(note.id, "done", deadline=_open())).state == "done"
 
 
 @pytest.mark.parametrize(

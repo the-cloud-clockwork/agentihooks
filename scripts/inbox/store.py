@@ -110,7 +110,7 @@ def replied(answer_id):
     return f"replied with message {answer_id}"
 
 
-def close_reason(kind, detail=""):
+def close_reason(kind: str, detail: str = "") -> tuple[str, str]:
     detail = detail.strip()
     if kind not in CLOSE_KINDS:
         raise InboxError(f"closing needs a reason: one of {', '.join(CLOSE_KINDS)}")
