@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from scripts.swarm_ledger import ledger_closed, ports
@@ -214,7 +215,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
-def export(handler: object, services: Services, slug: str, path: str, payload: dict) -> dict | None:
+def export(handler: object, services: Services, slug: str, path: str, payload: dict[str, Any]) -> dict | None:
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
         parts = tuple(sorted(payload.get("parts", ())))
@@ -259,7 +260,7 @@ def export_text(fragments: Fragment, parts: tuple[str, ...] = ()) -> bytes:
     return b'{"data":{' + body + b"}}"
 
 
-def change_unit(path: str) -> tuple | None:
+def change_unit(path: str) -> tuple[str, ...] | None:
     parts = json.loads(path)
     if parts[:1] != ["_meta"]:
         return tuple(encode(part) for part in parts[:2])
@@ -272,7 +273,7 @@ def identities(items: list) -> list:
     return [encode(parts[-1]) for _, parts, *_ in children(items, [], None)]
 
 
-def export_changes(state: dict, paths: set, parts: tuple[str, ...] = ()) -> str | None:
+def export_changes(state: dict[str, Any], paths: set[str], parts: tuple[str, ...] = ()) -> str | None:
     """The export items whose rows changed: dictionary entries set or dropped, and for each list holding a
     changed item its item identities in order with every changed item; only the top level parts named in
     parts when there are any."""

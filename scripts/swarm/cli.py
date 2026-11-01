@@ -377,7 +377,7 @@ def run_tick(
         ):
             return ["Ledger health probe failed"]
         if ledger_view.reads(ledger):
-            timing.call(ledger_view.start, slug, ledger.service)
+            ledger_view.start(slug, ledger.service)
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
             store,

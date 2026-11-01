@@ -11,6 +11,7 @@ import urllib.error
 from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
@@ -19,17 +20,17 @@ __all__ = ["CURRENT", "PARTS", "LedgerView", "Reader", "refreshed", "start", "vi
 
 PARTS = ("tasks", "_meta", "phases")
 
-Reader = Callable[[int, tuple[str, ...]], dict]
+Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
 
 class LedgerView:
     """Tasks, metadata and phases of one ledger at one generation."""
 
-    def __init__(self, generation: int, state: dict) -> None:
+    def __init__(self, generation: int, state: dict[str, Any]) -> None:
         self.generation = generation
-        self.tasks = state.get("tasks", [])
-        self.meta = state.get("_meta", {})
-        self.phases = state.get("phases", [])
+        self.tasks: list[dict[str, Any]] = state.get("tasks", [])
+        self.meta: dict[str, Any] = state.get("_meta", {})
+        self.phases: list[dict[str, Any]] = state.get("phases", [])
 
     def read(self, domain: str, key: str) -> object | None:
         """Return the task or phase row with id ``key``, or the metadata entry ``key``, or nothing."""
@@ -51,7 +52,7 @@ def refreshed(path: Path, reader: Reader) -> LedgerView:
     """The view stored at path patched with one delta read, stored back when its generation moved or a stored
     view that no longer fits was replaced by a full read."""
     stored = read_export_file(path)
-    generation, held = stored if stored is not None else (0, None)
+    generation, held = stored if stored is not None else (0, {})
     reply = reader(generation, PARTS)
     try:
         state = patched(held, reply["changes"]) if "changes" in reply else reply["data"]
@@ -72,10 +73,10 @@ def start(slug: str, service: bool) -> LedgerView | None:
     """Patch the stored view of this swarm's ledger with one delta read and hold it for the rest of the pass;
     hold nothing when the ledger server refuses named parts because it predates them."""
     from scripts.scheduler import service as scheduler
-    from scripts.swarm.ledger_client import _ledger
+    from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
 
-    ledger = _ledger()
-    base = ledger.base(slug)
+    ledger: Any = _ledger()
+    base: str = ledger.base(slug)
     client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
     try:
         view = refreshed(

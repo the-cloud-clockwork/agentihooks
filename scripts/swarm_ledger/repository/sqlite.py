@@ -7,6 +7,7 @@ import weakref
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
@@ -591,7 +592,7 @@ class SQLiteLedgerRepository:
         return entry.views[view]
 
     def export_since(
-        self, slug: str, since: int, view: Callable, changes: Callable, parts: tuple[str, ...] = ()
+        self, slug: str, since: int, view: Callable[..., Any], changes: Callable[..., Any], parts: tuple[str, ...] = ()
     ) -> tuple[int, str | bytes]:
         """(generation, text) of the stored ledger: changes(state, paths, parts) when the database recorded every
         row change after generation since, else view(fragments, parts) of the stored ledger, built once per part

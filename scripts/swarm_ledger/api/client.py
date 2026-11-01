@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote, urlencode
 
 import orjson
@@ -41,7 +42,7 @@ def export_file(base: str, slug: str, environ=os.environ) -> Path:
     return home / "ledger-exports" / f"{hashlib.sha256(f'{base} {slug}'.encode()).hexdigest()[:32]}.json"
 
 
-def read_export_file(path: Path) -> tuple | None:
+def read_export_file(path: Path) -> tuple[int, dict[str, Any]] | None:
     try:
         stored = orjson.loads(path.read_bytes())
         generation, state = stored["generation"], stored["state"]
@@ -50,7 +51,7 @@ def read_export_file(path: Path) -> tuple | None:
     return (generation, state) if isinstance(generation, int) and isinstance(state, dict) else None
 
 
-def write_export_file(path: Path, generation: int, state: dict) -> None:
+def write_export_file(path: Path, generation: int, state: dict[str, Any]) -> None:
     partial = path.with_name(f"{path.name}.{uuid.uuid4().hex}")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,7 +62,7 @@ def write_export_file(path: Path, generation: int, state: dict) -> None:
         partial.unlink(missing_ok=True)
 
 
-def patched(state: dict, changes: dict) -> dict:
+def patched(state: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
     for key, touched in changes["lists"].items():
         old = {encode(parts[-1]): child for child, parts, *_ in children(state[key], [], None)}
         state[key] = [touched["items"][item] if item in touched["items"] else old[item] for item in touched["order"]]
@@ -84,7 +85,7 @@ class ResourceClient:
         self.credentials = credentials
         self.timeout = timeout
 
-    def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
+    def request(self, slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.base}/api/v1/ledgers/{quote(slug, safe='')}/{path}",
             data=None if payload is None else json.dumps(payload).encode(),
@@ -153,7 +154,7 @@ class ResourceClient:
         kept[key] = (reply["generation"], state)
         return thawed(state)
 
-    def changes(self, slug: str, since: int, parts: tuple[str, ...]) -> dict:
+    def changes(self, slug: str, since: int, parts: tuple[str, ...]) -> dict[str, Any]:
         """The export of the named parts as the changes since generation since, or in full when the server no
         longer holds every change after it."""
         return self.request(slug, "export", {"since": since, "parts": list(parts)})
