@@ -37,9 +37,18 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 SourceControl.queue_health.__name__,
                 SourceControl.tags.__name__,
                 SourceControl.capabilities.__name__,
+                SourceControl.issue_state.__name__,
+                SourceControl.rate_limit.__name__,
             ]
         ),
-        frozenset([SourceControl.enqueue.__name__, SourceControl.merge.__name__, SourceControl.comment.__name__]),
+        frozenset(
+            [
+                SourceControl.enqueue.__name__,
+                SourceControl.merge.__name__,
+                SourceControl.comment.__name__,
+                SourceControl.close_issue.__name__,
+            ]
+        ),
     ),
     "runtime": (
         frozenset([Runtime.inspect.__name__, Runtime.panes.__name__]),

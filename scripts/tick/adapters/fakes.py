@@ -14,6 +14,7 @@ from scripts.tick.ports.source_control import (
     Merged,
     QueueEntry,
     QueueHealth,
+    RateLimit,
     Run,
     Tag,
 )
@@ -143,6 +144,15 @@ class FakeSourceControl:
     def capabilities(self, *, deadline: Deadline) -> Capabilities:
         answer = _record(self, "capabilities", (), deadline)
         return answer if answer is not None else Capabilities(merge_queue=self.merge_queue)
+
+    def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str:
+        return _record(self, "issue_state", (reference,), deadline)
+
+    def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str:
+        return _record(self, "close_issue", (reference,), deadline)
+
+    def rate_limit(self, *, deadline: Deadline) -> RateLimit:
+        return _record(self, "rate_limit", (), deadline)
 
 
 @dataclass
