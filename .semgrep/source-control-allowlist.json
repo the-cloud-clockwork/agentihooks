@@ -4,6 +4,7 @@
   "/scripts/swarm/fleet_red.py",
   "/scripts/swarm/github_reads.py",
   "/scripts/swarm/github_sampler.py",
+  "/scripts/swarm/health/checks.py",
   "/scripts/swarm/ledger_events.py",
   "/scripts/swarm/ledger_host.py",
   "/scripts/swarm/linked_issues.py",

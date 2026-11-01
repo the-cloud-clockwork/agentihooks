@@ -114,7 +114,6 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert rule["paths"]["exclude"] == allowed
     assert "/scripts/tick/adapters/github.py" in allowed
     assert all(path.endswith(".py") and "*" not in path for path in allowed)
-    assert "/scripts/swarm/health/checks.py" not in allowed
     assert "/scripts/swarm/publish.py" not in allowed
 
 

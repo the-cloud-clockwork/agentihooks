@@ -2,52 +2,30 @@
 
 import subprocess
 from collections.abc import Callable
-from typing import Any
 
-from scripts.tick.ports.source_control import CheckState
+from scripts.tick.adapters.github import command
 
 CACHE_SECONDS = 60
-SKIPPED = ("skipped", "neutral")
-
-Read = Callable[[str], tuple[CheckState, ...]]
 
 
-def read_checks(pr_url: str) -> tuple[CheckState, ...]:
-    """Read the check runs on a pull request's head through the source control port."""
-    from scripts.swarm import stack
-    from scripts.tick.deadline import Deadline
-
-    provider, reference = stack.source_control(pr_url)
-    return provider.checks(reference, deadline=Deadline.after(stack.PORT_SECONDS))
-
-
-def _state(check: CheckState) -> str:
-    """Name one check run as pending, pass, skipping or fail."""
-    if check.status != "completed":
-        return "pending"
-    if check.conclusion == "success":
-        return "pass"
-    return "skipping" if check.conclusion in SKIPPED else "fail"
-
-
-def _states(pr_url: str, read: Read) -> list[str]:
-    """Return the state of every check on the pull request, none when they cannot be read."""
+def _states(pr_url, run):
     try:
-        return [_state(check) for check in read(pr_url)]
-    except (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError):
-        return []
+        done = run(command(["pr", "checks", pr_url]), capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None, []
+    return done.returncode, [line.split("\t")[1:2] for line in done.stdout.splitlines()]
 
 
-def pending(pr_url: str, read: Read = read_checks, approval: bool = False) -> bool:
-    """Whether a check is still running, or with approval, every check passed."""
-    states = _states(pr_url, read)
-    return "pending" in states or (approval and bool(states) and all(state == "pass" for state in states))
+def pending(pr_url, run=subprocess.run, approval=False):
+    code, states = _states(pr_url, run)
+    return any(state == ["pending"] for state in states) or (
+        approval and code == 0 and bool(states) and all(state == ["pass"] for state in states)
+    )
 
 
-def passing(pr_url: str, read: Read = read_checks) -> bool:
-    """Whether at least one check passed and every other passed or skipped."""
-    states = _states(pr_url, read)
-    return "pass" in states and all(state in ("pass", "skipping") for state in states)
+def passing(pr_url, run=subprocess.run):
+    code, states = _states(pr_url, run)
+    return code == 0 and ["pass"] in states and all(state in (["pass"], ["skipping"]) for state in states)
 
 
 def _memo(redis, key, compute):
@@ -58,16 +36,16 @@ def _memo(redis, key, compute):
     return hit == "1"
 
 
-def cached(redis: Any, prefix: str, read: Read = read_checks, approval: bool = False) -> Callable[[str], bool]:
-    def probe(pr_url: str) -> bool:
+def cached(redis, prefix, run=subprocess.run, approval=False):
+    def probe(pr_url):
         key = f"{prefix}:approval:{pr_url}" if approval else f"{prefix}:{pr_url}"
-        return _memo(redis, key, lambda: pending(pr_url, read, approval=approval))
+        return _memo(redis, key, lambda: pending(pr_url, run, approval=approval))
 
     return probe
 
 
-def cached_green(redis: Any, prefix: str, read: Read = read_checks) -> Callable[[str], bool]:
-    return lambda pr_url: _memo(redis, f"{prefix}:green:{pr_url}", lambda: passing(pr_url, read))
+def cached_green(redis, prefix, run=subprocess.run):
+    return lambda pr_url: _memo(redis, f"{prefix}:green:{pr_url}", lambda: passing(pr_url, run))
 
 
 def from_view(view: Callable, approval: bool = False) -> tuple[Callable, Callable]:

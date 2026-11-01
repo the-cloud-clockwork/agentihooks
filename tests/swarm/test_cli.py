@@ -2374,7 +2374,7 @@ def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env
     _, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "cached", partial(checks.cached, read=runner(PASSED)))
+    monkeypatch.setattr(checks, "cached", partial(checks.cached, run=runner(PASSED)))
     for autonomy, expected in [
         ("assist", []),
         ("delegate", ["idle with claim"]),
@@ -2388,19 +2388,19 @@ def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env
     assert _findings(capsys) == []
 
 
-@pytest.mark.parametrize("found", ["failed", "none", "mixed"])
-def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(env, capsys, monkeypatch, tmp_path, found):
+@pytest.mark.parametrize(
+    "out, code", [("lint\tfail\t8s\thttps://x/1\n", 1), ("", 0), ("lint\tpass\t8s\thttps://x/1\n", 1)]
+)
+def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(env, capsys, monkeypatch, tmp_path, out, code):
     from functools import partial
 
-    from tests.swarm.test_health_checks import FAIL, PASS, runner
-
-    states = {"failed": (FAIL,), "none": (), "mixed": (PASS, FAIL)}[found]
+    from tests.swarm.test_health_checks import runner
 
     _, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     run("sw", "set", "autonomy=assist")
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "cached", partial(checks.cached, read=runner(states)))
+    monkeypatch.setattr(checks, "cached", partial(checks.cached, run=runner(out, code)))
     assert [f["kind"] for f in _findings(capsys)] == ["idle with claim"]
 
 
