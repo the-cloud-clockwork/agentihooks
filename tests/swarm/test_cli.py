@@ -1955,6 +1955,7 @@ def test_a_continuation_whose_recorded_branch_left_origin_is_told_to_push_head_t
 
 
 PullPorts = Callable[[str], tuple[FakeSourceControl, ChangeRef]]
+PULL_READ_ERRORS = [ValueError("x"), KeyError("x"), TimeoutError("tool deadline expired"), OSError("x")]
 
 
 def _pull_port(head_repository: str, seen: list[str] | None = None) -> tuple[PullPorts, FakeSourceControl, ChangeRef]:
@@ -1989,15 +1990,7 @@ def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> No
 
 
 @pytest.mark.parametrize(
-    "error",
-    [
-        subprocess.CalledProcessError(1, []),
-        subprocess.TimeoutExpired([], 20),
-        ValueError("x"),
-        KeyError("x"),
-        TimeoutError("tool deadline expired"),
-        OSError("x"),
-    ],
+    "error", [subprocess.CalledProcessError(1, []), subprocess.TimeoutExpired([], 20), *PULL_READ_ERRORS]
 )
 def test_an_unreadable_pull_request_gives_no_branch(error: Exception) -> None:
     def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
