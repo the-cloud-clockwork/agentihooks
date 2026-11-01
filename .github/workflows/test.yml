@@ -2750,6 +2750,14 @@ jobs:
             exit 1
           fi
 
+      - name: Hold whole ledger state reads in the swarm and tick packages
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/no_whole_ledger.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.no_whole_ledger --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       - name: Reject new Python comments and preserve comment free files
         if: ${{ !cancelled() }}
         run: |
