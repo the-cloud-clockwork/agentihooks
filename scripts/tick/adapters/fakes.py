@@ -1,9 +1,21 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools, Unsupported
+from scripts.tick.ports.source_control import (
+    Capabilities,
+    ChangeRef,
+    ChangeState,
+    CheckState,
+    Comment,
+    Merged,
+    QueueEntry,
+    QueueHealth,
+    Run,
+    Tag,
+)
 
 if TYPE_CHECKING:
     from scripts.swarm.store import SwarmConfig
@@ -37,7 +49,7 @@ class FakePort(Protocol):
     calls: list[Call]
 
 
-def _record(port: FakePort, operation: str, args: tuple[object, ...], deadline: Deadline) -> object:
+def _record(port: FakePort, operation: str, args: tuple[object, ...], deadline: Deadline) -> Any:
     if deadline.expired:
         raise TimeoutError("tool deadline expired")
     port.calls.append(Call(operation, args, deadline))
@@ -90,43 +102,46 @@ class FakeCoordination:
 
 @dataclass
 class FakeSourceControl:
+    """Source control fake that records calls and answers Unsupported for queue operations without a queue."""
+
     answers: dict[str, object] = field(default_factory=dict)
     calls: list[Call] = field(default_factory=list)
+    merge_queue: bool = False
 
-    def change(self, reference: str, *, deadline: Deadline) -> object:
+    def _queued(self, operation: str, answer: Any, default: Any) -> Any:
+        """Return the supplied answer, else the queue default, or Unsupported when the fake has no queue."""
+        if operation in self.answers:
+            return answer
+        return default if self.merge_queue else Unsupported(operation)
+
+    def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
         return _record(self, "change", (reference,), deadline)
 
-    def checks(self, reference: str, *, deadline: Deadline) -> object:
-        return _record(self, "checks", (reference,), deadline)
+    def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
+        return _record(self, "checks", (reference,), deadline) or ()
 
-    def runs(self, reference: str, *, deadline: Deadline) -> object:
-        return _record(self, "runs", (reference,), deadline)
+    def runs(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[Run, ...]:
+        return _record(self, "runs", (reference,), deadline) or ()
 
-    def enqueue(self, reference: str, *, deadline: Deadline) -> object:
-        return _record(self, "enqueue", (reference,), deadline)
+    def enqueue(self, reference: ChangeRef, *, deadline: Deadline) -> QueueEntry | Unsupported:
+        answer = _record(self, "enqueue", (reference,), deadline)
+        return self._queued("enqueue", answer, QueueEntry(reference, 1))
 
-    def merge(self, reference: str, *, deadline: Deadline) -> object:
+    def merge(self, reference: ChangeRef, *, deadline: Deadline) -> Merged:
         return _record(self, "merge", (reference,), deadline)
 
-    def queue_health(self, *, deadline: Deadline) -> object:
-        return _record(self, "queue_health", (), deadline)
+    def queue_health(self, *, deadline: Deadline) -> QueueHealth | Unsupported:
+        return self._queued("queue_health", _record(self, "queue_health", (), deadline), QueueHealth(0, ()))
 
-    def tags(self, *, deadline: Deadline) -> object:
-        return _record(self, "tags", (), deadline)
+    def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
+        return _record(self, "tags", (), deadline) or ()
 
-    def comment(self, reference: str, body: str, *, deadline: Deadline) -> object:
-        return _record(
-            self,
-            "comment",
-            (
-                reference,
-                body,
-            ),
-            deadline,
-        )
+    def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment:
+        return _record(self, "comment", (reference, body), deadline)
 
-    def capabilities(self, *, deadline: Deadline) -> object:
-        return _record(self, "capabilities", (), deadline)
+    def capabilities(self, *, deadline: Deadline) -> Capabilities:
+        answer = _record(self, "capabilities", (), deadline)
+        return answer if answer is not None else Capabilities(merge_queue=self.merge_queue)
 
 
 @dataclass
@@ -213,7 +228,7 @@ def fake_tools(effects: frozenset[str] | None = None) -> Tools:
     tools = Tools(
         ledger=FakeLedger({"export": {}}),
         coordination=FakeCoordination(),
-        source_control=FakeSourceControl({"queue_health": Unsupported("queue_health")}),
+        source_control=FakeSourceControl(),
         runtime=FakeRuntime(),
         processes=FakeProcesses({"scan": ()}),
         inbox=FakeInbox(),

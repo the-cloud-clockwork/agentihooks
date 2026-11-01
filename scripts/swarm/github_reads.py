@@ -19,6 +19,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm.lost_runner import home as _agentihooks_home
 
@@ -208,7 +209,9 @@ def _not_modified(output: str | bytes | None) -> bool:
     return bool(re.match(pattern, output))
 
 
-def rest(caller: str, args: list[str], run: Callable = subprocess.run, **options) -> subprocess.CompletedProcess:
+def rest(
+    caller: str, args: list[str], run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run, **options: Any
+) -> subprocess.CompletedProcess[Any]:
     from scripts import gh_audit
 
     path = gh_audit.endpoint(["gh", *args]) if args[0] == "api" else None
