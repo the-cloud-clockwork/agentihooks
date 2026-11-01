@@ -114,7 +114,7 @@ class GitHubSourceControl:
             body["base"]["ref"],
             body["merged"],
             body["html_url"],
-            body["head"].get("ref", ""),
+            body["head"]["ref"],
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
