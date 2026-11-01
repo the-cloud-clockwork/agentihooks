@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.566 · 2026-11-01
+
+### 2026-11-01 · 67fb3d888da3 · #9299 · @agenticore-app
+
+**Remind seated sessions to read seat notes on every user prompt**
+
+This change adds an automatic reminder on every user prompt in a session bound to a swarm seat, so lane agents (eng, ci, master, planner, dispatcher) see a one-line nudge naming their swarm's learned notes command before making any tool calls. It runs as a UserPromptSubmit step right after operator steps, routed through the shared context-injection path so it works consistently across Claude, Codex and Copilot. This prevents wasted tool calls re-deriving context already captured in seat notes, and new tests confirm seated sessions get the line while unseated ones don't, across all three targets.
+
 ## v2.17.563 · 2026-11-01
 
 ### 2026-11-01 · 6cd258b2c2ec · #9273 · @nestorcolt
