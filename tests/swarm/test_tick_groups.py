@@ -2,10 +2,12 @@
 
 from dataclasses import dataclass, field
 from time import monotonic
+from typing import Any
 
 import pytest
 
 from scripts.swarm import cli
+from scripts.swarm.store import RedisStore
 from scripts.swarm import tick as tick_module
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
@@ -48,29 +50,29 @@ class _Marker:
         return Result()
 
 
-def test_a_tick_pass_runs_the_seven_groups_in_order(store, monkeypatch):  # noqa: F811
+def test_a_tick_pass_runs_the_seven_groups_in_order(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     seen = _spy(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert [name for name, _ in seen] == TICK_GROUPS
 
 
-def test_each_group_reads_an_empty_view_under_the_pass_budget(store, monkeypatch):  # noqa: F811
+def test_each_group_reads_an_empty_view_under_the_group_budget(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     seen = _spy(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     for _, ctx in seen:
         assert ctx.view.read(Domain("tasks"), "t1") is None
-        assert ctx.deadline.expires_at - monotonic() == pytest.approx(tick_module.PASS_BUDGET_S, abs=5.0)
-    assert tick_module.PASS_BUDGET_S == 600.0
+        assert ctx.deadline.expires_at - monotonic() == pytest.approx(tick_module.GROUP_BUDGET_S, abs=5.0)
+    assert tick_module.GROUP_BUDGET_S == 600.0
 
 
-def test_a_stopped_swarm_runs_only_the_start_group(store, monkeypatch):  # noqa: F811
+def test_a_stopped_swarm_runs_only_the_start_group(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     store.update("sw", state="stopped")
     seen = _spy(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert [name for name, _ in seen] == ["start"]
 
 
-def test_a_registered_step_runs_in_its_tick_group(store, monkeypatch):  # noqa: F811
+def test_a_registered_step_runs_in_its_tick_group(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     monkeypatch.setattr(registry, "registry", registry.Registry())
     ran: list[str] = []
     registry.register(_Marker("agents", ran))
@@ -78,7 +80,7 @@ def test_a_registered_step_runs_in_its_tick_group(store, monkeypatch):  # noqa: 
     assert ran == ["agents"]
 
 
-def test_the_tick_wrapper_runs_its_groups_before_and_after_the_tick(env, monkeypatch):  # noqa: F811
+def test_the_tick_wrapper_runs_its_groups_before_and_after_the_tick(env: tuple[RedisStore, Any, Any], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     swarm, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     seen = _spy(monkeypatch)

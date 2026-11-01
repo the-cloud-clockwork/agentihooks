@@ -112,7 +112,7 @@ SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
-PASS_BUDGET_S = 600.0
+GROUP_BUDGET_S = 600.0
 SPAWN_DUE = "spawn-due"
 HOST_SPENDS = f"{PREFIX}:host-spends"
 HOST_SPENDS_KEPT = 1000
@@ -215,8 +215,8 @@ class _Unread:
 
 
 def run_group(name: str) -> None:
-    """Run the registered steps of tick group ``name`` in legacy order under the pass budget."""
-    engine.run_group(name, Context(_Unread(), Deadline.after(PASS_BUDGET_S)))
+    """Run the registered steps of tick group ``name`` in legacy order under the group budget."""
+    engine.run_group(name, Context(_Unread(), Deadline.after(GROUP_BUDGET_S)))
 
 
 @reaper.scanning_pass
