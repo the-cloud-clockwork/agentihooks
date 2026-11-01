@@ -10,8 +10,8 @@ Each tick pass keeps a stored view of its swarm ledger's tasks, metadata and
 phases, and refreshes it with one export read of what changed since the
 view's generation. The ledger server answers with only those three parts, and
 sends them in full only when the view has no generation yet or the server no
-longer holds every change since that generation. A pass on a large ledger therefore moves the rows that changed
-instead of the whole document.
+longer holds every change since that generation. A pass on a large ledger
+therefore moves the rows that changed instead of the whole document.
 
 The view lives in `scripts.tick.view`; the export parts live in the ledger
 API's `export` route. The feature map entry is `swarm-tick-delta-reads`.
@@ -50,8 +50,9 @@ so two servers holding the same slug keep separate views. The scheduler
 runtime folder is `scripts.scheduler.service.runtime_dir()`:
 `~/.cache/agentihooks/scheduler` when the Redis endpoint is
 `redis://127.0.0.1:6379/0` and the host is not a hive member (local mode, or
-no `AGENTIHOOKS_HIVE_ID`); otherwise a subfolder of it named by a hash of the Redis
-endpoint and hive, or of the bus identity when the event backend is the bus.
+no `AGENTIHOOKS_HIVE_ID`); otherwise a subfolder of it named by a hash of the
+Redis endpoint and hive, or of the bus identity when the event backend is the
+bus.
 
 The file holds the generation and the state, the same format the ledger
 client's stored export uses:
