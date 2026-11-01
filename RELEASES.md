@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.561 · 2026-11-01
+
+### 2026-11-01 · bc83baf076c5 · #9271 · @nestorcolt
+
+**List open pull requests through the source control port in fleet red**
+
+Fleet red's open-pull-request check now goes through the source control port instead of shelling out to `gh pr list`. The port adds a new read tool, `open_changes`, which the GitHub adapter answers with a single GraphQL query (capped at 200 PRs, matching the old limit) covering each PR's newest-commit rollup checks, and which the fake answers for tests. Fleet red uses this with the same 60 second deadline and unchanged red-check rule, surfacing stack port errors instead of the old `ReadError`, and drops off the Semgrep source control allowlist, leaving six callers still pending the same migration.
+
 ## v2.17.560 · 2026-11-01
 
 ### 2026-11-01 · e6d19c945d9c · #9272 · @agenticore-app
