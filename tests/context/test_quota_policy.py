@@ -54,7 +54,7 @@ def test_other_accounts_read_a_week_only_account_and_refuse_a_rejected_or_weekle
         monkeypatch.setenv(f"AH_CC_TOKEN_{account}", f"available-{account}")
     week = balancer.QuotaWindow(30.0, None)
     missing = balancer.QuotaWindow()
-    spent = balancer.QuotaWindow(90.0, time.time() - 60)
+    spent = balancer.QuotaWindow(90.0, int(time.time()) - 60)
     results = [
         balancer.ProbeResult("open", "allowed", "NORMAL", 70.0, missing, week),
         balancer.ProbeResult("spent", "allowed", "NORMAL", 70.0, spent, week),
