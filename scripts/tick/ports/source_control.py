@@ -37,6 +37,7 @@ class ChangeState:
     head_branch: str = ""
     body: str = ""
     draft: bool = False
+    head_repository: str = ""
 
 
 @dataclass(frozen=True)

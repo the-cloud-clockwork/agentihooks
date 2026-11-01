@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,8 @@ from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_delivery import FakeHerdr
@@ -1951,10 +1954,10 @@ def test_a_continuation_whose_recorded_branch_left_origin_is_told_to_push_head_t
     )
 
 
-def _pull_port(head_repository: str, seen: list[str] | None = None) -> tuple[object, ...]:
-    from scripts.tick.adapters.fakes import FakeSourceControl
-    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+PullPorts = Callable[[str], tuple[FakeSourceControl, ChangeRef]]
 
+
+def _pull_port(head_repository: str, seen: list[str] | None = None) -> tuple[PullPorts, FakeSourceControl, ChangeRef]:
     reference = ChangeRef("o/r", 3)
     change = ChangeState(reference, "open", "h", "dev", False, "u", "engineer-a1b2c3-0001", "", False, head_repository)
     provider = FakeSourceControl({"change": change})
@@ -1989,7 +1992,7 @@ def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> No
     "error", [subprocess.CalledProcessError(1, []), subprocess.TimeoutExpired([], 20), ValueError("x"), KeyError("x")]
 )
 def test_an_unreadable_pull_request_gives_no_branch(error: Exception) -> None:
-    def ports(url: str) -> tuple[object, object]:
+    def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
         raise error
 
     assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("", "")
