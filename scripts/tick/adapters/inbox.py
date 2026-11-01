@@ -1,4 +1,4 @@
-"""Inbox port adapter: the tick's inbox tools over the durable inbox store, each call bounded by a deadline."""
+"""Inbox port adapter: the tick's inbox tools over the durable inbox store, each call admitted only while its deadline holds."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING

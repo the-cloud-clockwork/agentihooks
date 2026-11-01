@@ -1,4 +1,4 @@
-"""Host port adapter: named host readings and background host jobs, each call bounded by a deadline."""
+"""Host port adapter: named host readings and background host jobs, each call admitted only while its deadline holds."""
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
