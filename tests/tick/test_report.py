@@ -152,6 +152,12 @@ def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytes
     assert box == {"live": {"a", "b"}, "found": ["ran 11"]}
 
 
+def test_the_health_findings_read_no_tasks_or_events_from_an_empty_doc(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    _run("wrapper events", calls, _pass(doc={}), monkeypatch)
+    assert ("call", findings, STORE, "sw", CONFIG, [], [], "view") in calls
+
+
 def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     state = _pass()

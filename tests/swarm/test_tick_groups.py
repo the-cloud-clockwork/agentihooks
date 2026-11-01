@@ -117,6 +117,28 @@ def test_the_tick_wrapper_runs_its_groups_before_and_after_the_tick(
     ]
 
 
+def test_the_wrapper_hands_metrics_the_action_count_and_after_the_reread_doc(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+    states: list[dict[str, Any]] = []
+    real = ledger.state
+
+    def state(slug: str) -> dict[str, Any]:
+        states.append(dict(real(slug)))
+        return states[-1]
+
+    monkeypatch.setattr(ledger, "state", state)
+    cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    sites = dict(seen)
+    assert isinstance(sites["wrapper metrics"].view.read(PASS, "count"), int)
+    assert sites["after"].view.read(PASS, "doc") is states[-1]
+    assert len(states) > 1
+
+
 def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,

@@ -380,7 +380,7 @@ def run_tick(
         )
         from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
 
-        passing |= {"ledger": ledger, "runtime": runtime}
+        passing |= {"ledger": ledger}
         probed = run_group("wrapper health", **passing)
         host_steps.raise_held(box)
         timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)

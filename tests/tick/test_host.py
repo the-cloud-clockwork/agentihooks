@@ -171,8 +171,17 @@ def test_a_held_system_exit_is_raised_again(monkeypatch: pytest.MonkeyPatch) -> 
 def test_a_held_call_gets_the_swarm_command_module_not_the_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[object] = []
     monkeypatch.setattr(host, "import_module", lambda name: f"module {name}")
-    assert host.held(lambda cli, get: seen.append(cli) or ["done"])("tick", {"box": {}}.get) == ["done"]
-    assert seen == ["module scripts.swarm.cli"]
+    state = {"box": {}, "slug": "sw"}
+    assert host.held(lambda cli, get: seen.append((cli, get("slug"))) or ["done"])("tick", state.get) == ["done"]
+    assert seen == [("module scripts.swarm.cli", "sw")]
+
+
+def test_a_held_call_after_a_held_exception_does_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+    monkeypatch.setattr(host, "import_module", lambda name: "cli")
+    box: dict[str, Any] = {"raised": RuntimeError("earlier")}
+    assert host.held(lambda cli, get: seen.append(cli) or ["done"])("tick", {"box": box}.get) == []
+    assert seen == []
 
 
 def test_an_empty_box_raises_nothing() -> None:
