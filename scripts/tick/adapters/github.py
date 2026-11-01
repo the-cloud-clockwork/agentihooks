@@ -64,6 +64,14 @@ def _live(deadline: Deadline) -> float:
     return deadline.remaining
 
 
+def _status_check(row: dict[str, Any]) -> CheckState:
+    """Read one commit status as a check, still running while the status is pending."""
+    url = row["target_url"] or ""
+    if row["state"] == "pending":
+        return CheckState(row["context"], "pending", None, url)
+    return CheckState(row["context"], "completed", row["state"], url)
+
+
 @dataclass(frozen=True)
 class GitHubSourceControl:
     """Source control port answered by the GitHub REST and GraphQL APIs and the git remote."""
@@ -126,10 +134,12 @@ class GitHubSourceControl:
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
-        """Read the check runs on the change's current head."""
+        """Read the check runs and commit statuses on the change's current head."""
         head = self.change(reference, deadline=deadline).head
         rows = self._pages(f"repos/{reference.repository}/commits/{head}/check-runs?", "check_runs", deadline)
-        return tuple(CheckState(row["name"], row["status"], row["conclusion"], row["html_url"]) for row in rows)
+        statuses = self._api([f"repos/{reference.repository}/commits/{head}/status"], deadline)["statuses"]
+        runs = tuple(CheckState(row["name"], row["status"], row["conclusion"], row["html_url"]) for row in rows)
+        return runs + tuple(_status_check(row) for row in statuses)
 
     def runs(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[Run, ...]:
         """Read the workflow runs on the change's current head."""

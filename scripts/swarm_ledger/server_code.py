@@ -30,6 +30,7 @@ CODE_DIRS = (
             "hub",
             "workflows",
             "auth",
+            "tick",
         )
     ),
     ROOT / "hooks",
