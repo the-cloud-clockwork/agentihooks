@@ -207,7 +207,7 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-class _Pass:
+class _PassView:
     """A view holding the pass state a tick group site hands its steps."""
 
     def __init__(self, state: dict[str, object]) -> None:
@@ -221,7 +221,7 @@ class _Pass:
 
 def run_group(name: str, **state: object) -> list[str]:
     """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
-    return steps.actions(engine.run_group(name, Context(_Pass(state), Deadline.after(GROUP_BUDGET_S))))
+    return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
 
 
 @reaper.scanning_pass
