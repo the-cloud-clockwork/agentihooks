@@ -26,5 +26,4 @@ rules:
         - "/scripts/swarm/mutation_wait.py"
         - "/scripts/swarm/panic.py"
         - "/scripts/swarm/ready.py"
-        - "/scripts/swarm/stack.py"
         - "/scripts/tick/adapters/github.py"
