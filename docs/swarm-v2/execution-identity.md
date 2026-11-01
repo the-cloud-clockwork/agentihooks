@@ -111,6 +111,9 @@ The fencing state lives in one Redis state bucket shared by every swarm, under `
   `DEL` and `HDEL` commands; it does not map the fencing bucket. See the
   [Redis command map](../reference/redis-command-map.md).
 
+A swarm moved onto per record keys no longer writes this document or its copy; its fencing state and the reads that
+follow it are described in [Fencing records](../reference/fencing-records.md).
+
 Nothing is configured. The copy is used only with the Redis state backend (`AGENTIHOOKS_STATE_BACKEND` unset or
 `redis`); with the `bus` backend these reads load the whole document as before.
 
