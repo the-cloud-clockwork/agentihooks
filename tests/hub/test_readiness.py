@@ -147,6 +147,7 @@ def test_snapshot_holds_a_task_red_only_from_checks_failing_across_its_repositor
     from datetime import UTC, datetime
 
     from scripts.swarm import fleet_red
+    from scripts.tick.ports.source_control import OpenChange, RollupCheck
 
     monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
     monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
@@ -154,12 +155,11 @@ def test_snapshot_holds_a_task_red_only_from_checks_failing_across_its_repositor
     row["pr_url"] = "https://github.com/x/y/pull/1"
     at = datetime.now(UTC).isoformat()
 
-    def listing(conclusion):
-        others = [[{"name": "Tests", "conclusion": conclusion, "completedAt": at}]] * 3
-        mine = [{"name": "Tests", "conclusion": "FAILURE", "completedAt": at}]
+    def listing(conclusion: str) -> list[OpenChange]:
+        others = [(RollupCheck("Tests", conclusion, at),)] * 3
+        mine = (RollupCheck("Tests", "FAILURE", at),)
         return [
-            {"url": f"https://github.com/x/y/pull/{n}", "statusCheckRollup": checks}
-            for n, checks in enumerate([mine, *others], start=1)
+            OpenChange(f"https://github.com/x/y/pull/{n}", checks) for n, checks in enumerate([mine, *others], start=1)
         ]
 
     reads = []
