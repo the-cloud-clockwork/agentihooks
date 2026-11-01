@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/github.py:scripts.tick.adapters.github.xǁGitHubSourceControlǁtags:9df4a5c491b5b23f0087c1d45b63fb3ee8ee2373f48dd7cdca1764876ed64b0f": {
+    "reader": "standards_reader",
+    "reason": "Equivalent for git-producible input: ls-remote --tags emits exactly one tab per line (hex SHA, ref names exclude control characters), so partition and rpartition yield identical triples."
+  }
+}
