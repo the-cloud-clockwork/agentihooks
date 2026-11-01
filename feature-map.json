@@ -32,6 +32,28 @@
       ]
     },
     {
+      "id": "swarm-tick-pass-budget",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a4",
+      "behaviour": "One fenced tick pass over fifteen working agents and nine hundred tasks, with latency injected into the fake runtime, ledger and Redis under a virtual clock, stays within a pass budget that starts at 384 seconds and may only shrink; a step made 300 seconds slower breaks it.",
+      "seam": "scripts.swarm.cli.run_tick timed by its pass record and read back through tick_report.read",
+      "tests": [
+        "tests/swarm/test_tick_load.py::test_simulated_load_pass_fits_the_budget",
+        "tests/swarm/test_tick_load.py::test_a_step_made_300_seconds_slower_breaks_the_budget",
+        "tests/swarm/test_tick_load.py::test_the_budget_only_shrinks_against_its_base",
+        "tests/swarm/test_tick_load.py::test_a_raised_budget_is_refused",
+        "tests/swarm/test_tick_load.py::test_an_equal_or_lower_budget_is_accepted"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.install",
+        "swarm",
+        "rig-grade-swarm",
+        "tick-report"
+      ]
+    },
+    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
