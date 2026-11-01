@@ -152,9 +152,10 @@ def test_context_changes_inside_a_step_do_not_leak() -> None:
 def test_step_runs_through_timing_call() -> None:
     clock = Clock()
     step = FakeStep("timed", 1, done)
-    with mock.patch.object(engine.timing, "call", return_value=Result()) as call:
+    with mock.patch.object(engine.timing, "within", return_value=Result()) as call:
         record = engine.run_step(step, context(clock))
-    function, ctx = call.call_args.args
+    budget, function, ctx = call.call_args.args
+    assert budget == 5.0
     assert function == step.run
     assert ctx.deadline.expires_at == 105.0
     assert record.result == Result()

@@ -111,7 +111,7 @@ def finish_pass(store: Any, slug: str, record: dict[str, Any]) -> None:
 
 
 @contextmanager
-def step(name: str, report: bool = True) -> Iterator[None]:
+def step(name: str, report: bool = True, budget_s: float | None = None) -> Iterator[None]:
     slug = SWARM.get()
     if slug is None:
         yield
@@ -146,6 +146,10 @@ def step(name: str, report: bool = True) -> Iterator[None]:
         raise
     finally:
         ended = time.monotonic()
+        if budget_s is not None:
+            record["budget_s"] = budget_s
+            if outcome == "success" and ended - started > budget_s:
+                outcome = "late"
         own_end = resource.getrusage(resource.RUSAGE_THREAD)
         child_end = resource.getrusage(resource.RUSAGE_CHILDREN)
         record.update(
@@ -156,7 +160,7 @@ def step(name: str, report: bool = True) -> Iterator[None]:
             reaped_child_cpu_s=(child_end.ru_utime - child.ru_utime) + (child_end.ru_stime - child.ru_stime),
         )
         emit(sys.stderr, json.dumps(record))
-        if outcome != "success" and (current := PASS.get()) is not None:
+        if outcome not in ("success", "late") and (current := PASS.get()) is not None:
             current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:
             append_record(store, slug, "tick:steps", record)
@@ -175,6 +179,13 @@ def named(function: Callable) -> str:
 def call(function: Callable, *args, **kwargs) -> Any:
     keep()
     with step(named(function)):
+        return function(*args, **kwargs)
+
+
+def within(budget_s: float, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run ``function`` as a timed step whose record reads late when it overruns ``budget_s``."""
+    keep()
+    with step(named(function), budget_s=budget_s):
         return function(*args, **kwargs)
 
 
