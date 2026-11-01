@@ -11,13 +11,13 @@ from scripts.swarm import apply_wait
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
-from scripts.tick.adapters.github import command
 
 if TYPE_CHECKING:
     from scripts.tick.ports.contracts import SourceControl
     from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
 PORT_SECONDS = 60.0
+PORT_ERRORS = (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError)
 GITHUB = "https://github.com/"
 WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
 READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
@@ -84,14 +84,17 @@ def worktree() -> str:
     return top
 
 
-def _issue_ready(row):
+def _issue_ready(row: dict[str, object]) -> None:
+    """Refuse a park without a recorded issue when the repository takes issues."""
+    from scripts.tick.deadline import Deadline
+
     if row.get("issue_url"):
         return
-    answer = _out(command(["repo", "view", "--json", "hasIssuesEnabled"]), "cannot tell whether the repo has issues")
+    provider = repository_source_control()
     try:
-        has_issues = json.loads(answer)["hasIssuesEnabled"]
-    except (ValueError, KeyError) as exc:
-        raise SwarmError(f"cannot tell whether the repo has issues: {exc}") from exc
+        has_issues = provider.issues_enabled(deadline=Deadline.after(PORT_SECONDS))
+    except PORT_ERRORS as exc:
+        raise SwarmError(f"cannot tell whether the repo has issues: {refusal(exc)}") from exc
     if has_issues:
         raise SwarmError("the repo has issues; open one and run swarm issue before parking")
 
@@ -160,8 +163,41 @@ def change(url: str, refused: str) -> "ChangeState":
         return provider.change(reference, deadline=Deadline.after(PORT_SECONDS))
     except subprocess.CalledProcessError as exc:
         raise SwarmError(f"{refused}: {(exc.stderr or '').strip()}") from exc
-    except (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError) as exc:
+    except PORT_ERRORS as exc:
         raise SwarmError(f"{refused}: {exc}") from exc
+
+
+def login_source_control() -> "SourceControl":
+    """Return the source control port for reads that belong to the login rather than one repository."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    return GitHubSourceControl("", Path.cwd(), "dev")
+
+
+def repository_source_control() -> "SourceControl":
+    """Return the source control port for the repository the current checkout's origin names."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    origin = repo_key(_out(["git", "remote", "get-url", "origin"], "cannot read the repo origin"))
+    return GitHubSourceControl(origin.removeprefix("github.com/"), Path.cwd(), "dev")
+
+
+def refusal(exc: Exception) -> str:
+    """Return the words a failed port call gives: the provider's error output, else the exception text."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        return (exc.stderr or "").strip()
+    return str(exc)
+
+
+def _comment(url: str, body: str) -> None:
+    """Post a comment on the issue through the source control port, refusing with a swarm error on failure."""
+    from scripts.tick.deadline import Deadline
+
+    try:
+        provider, reference = source_control(url)
+        provider.comment(reference, body, deadline=Deadline.after(PORT_SECONDS))
+    except PORT_ERRORS as exc:
+        raise SwarmError(f"could not comment on the issue: {refusal(exc)}") from exc
 
 
 def _merged_into_dev(dep: dict[str, object]) -> bool:
@@ -294,7 +330,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
     if row.get("issue_url"):
         body = _issue_body(row, open_, base, foreign)
-        _out(command(["issue", "comment", row["issue_url"], "--body", body]), "could not comment on the issue")
+        _comment(row["issue_url"], body)
     repos = {}
     for dep in foreign:
         repos.setdefault(repo_key(dep["branch_repo"]), dep["branch_repo"])

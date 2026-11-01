@@ -4349,6 +4349,11 @@ child CPU across retained steps, excluding the whole pass measurement. Nested
 step measurements can overlap. The report identifies passes with no retained
 steps; a partially trimmed pass can contain only its last steps.
 
+The same report holds a simulated pass to a budget in CI: one tick over fifteen
+working agents and nine hundred tasks on a virtual clock must finish within
+384 seconds, a budget a pull request may only lower. See
+[Tick load budget](../reference/tick-load-budget.md).
+
 The tick retains at most 50,000 finished step records in its per swarm
 `tick:steps` stream and 50,000 pass records in `tick:passes`. Pass records carry
 start and end times, elapsed duration, active agent count, failed steps and

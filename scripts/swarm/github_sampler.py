@@ -5,21 +5,26 @@ The rate_limit endpoint is not charged, so sampling it once a minute measures th
 
 import argparse
 import json
-import subprocess
 import time
 from collections import Counter
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
-from scripts.swarm import github_reads
-from scripts.tick.adapters.github import command
+from scripts.swarm import github_reads, stack
+from scripts.tick.deadline import Deadline
 
+if TYPE_CHECKING:
+    from scripts.tick.ports.contracts import SourceControl
+
+RATE_LIMIT_SECONDS = 30.0
 DOCTOR = "doctor."
 GRAPHQL = "graphql"
 
 
-def core(run=subprocess.run) -> tuple[int, int]:
-    done = run(command(["api", "rate_limit"]), capture_output=True, text=True, check=True, timeout=30)
-    found = json.loads(done.stdout)["resources"]["core"]
-    return found["used"], found["reset"]
+def core(provider: "SourceControl | None" = None) -> tuple[int, int]:
+    """Read the used count and reset time of the login's core REST quota through the source control port."""
+    found = (provider or stack.login_source_control()).rate_limit(deadline=Deadline.after(RATE_LIMIT_SECONDS))
+    return found.used, found.reset
 
 
 def spent(samples: list[tuple[int, int]]) -> int:
@@ -29,12 +34,19 @@ def spent(samples: list[tuple[int, int]]) -> int:
     return total
 
 
-def sample(minutes: int, interval: int = 60, run=subprocess.run, sleep=time.sleep, clock=time.time) -> dict:
+def sample(
+    minutes: int,
+    interval: int = 60,
+    provider: "SourceControl | None" = None,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.time,
+) -> dict[str, Any]:
+    """Sample the core quota every interval for the window and report the spend with its per caller tally."""
     since = clock()
-    samples = [core(run)]
+    samples = [core(provider)]
     for _ in range(minutes * 60 // interval):
         sleep(interval)
-        samples.append(core(run))
+        samples.append(core(provider))
     until = clock()
     calls = spent(samples)
     callers = rest_counts(since, until)
