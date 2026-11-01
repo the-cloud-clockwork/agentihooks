@@ -41,7 +41,7 @@ def test_a_first_pass_reads_the_parts_in_full_and_stores_them(tmp_path: Path) ->
     path = tmp_path / "views" / "sw.json"
     reader = Reader({"generation": 7, "data": STATE})
     held = view.refreshed(path, reader)
-    assert reader.calls == [(0, ("tasks", "_meta", "phases"))]
+    assert reader.calls == [(0, view.PARTS)]
     assert (held.generation, held.tasks, held.meta, held.phases) == (7, STATE["tasks"], STATE["_meta"], STATE["phases"])
     assert api.read_export_file(path) == (7, STATE)
 
@@ -52,7 +52,7 @@ def test_a_later_pass_makes_one_delta_call_and_patches_the_stored_view(tmp_path:
     api.write_export_file(path, 7, STATE)
     reader = Reader(changed(9))
     held = view.refreshed(path, reader)
-    assert reader.calls == [(7, ("tasks", "_meta", "phases"))]
+    assert reader.calls == [(7, view.PARTS)]
     assert held.generation == 9
     assert held.meta == {"rev": 5, "events": []}
     assert api.read_export_file(path) == (9, {**STATE, "_meta": {"rev": 5, "events": []}})
@@ -64,7 +64,7 @@ def test_an_exceeded_change_window_replaces_the_stored_view(tmp_path: Path) -> N
     api.write_export_file(path, 7, {"tasks": [], "_meta": {}, "phases": []})
     reader = Reader({"generation": 900, "data": STATE})
     held = view.refreshed(path, reader)
-    assert reader.calls == [(7, ("tasks", "_meta", "phases"))]
+    assert reader.calls == [(7, view.PARTS)]
     assert (held.generation, held.tasks) == (900, STATE["tasks"])
     assert api.read_export_file(path) == (900, STATE)
 
@@ -200,3 +200,19 @@ def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.Mo
     with pytest.raises(urllib.error.HTTPError) as raised:
         view.start("sw", False)
     assert raised.value.code == 503
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> None:
+    assert view.PARTS == ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+    state = {
+        **STATE,
+        "freezes": [{"verb": "focus", "target": "p1"}],
+        "priorities": [{"item": "tasks/t1"}],
+        "followups": [{"id": "f1", "text": "Later"}],
+        "alerts": [{"id": "a1", "state": "open"}],
+        "overview": "Intent",
+    }
+    held = view.refreshed(tmp_path / "sw.json", Reader({"generation": 3, "data": state}))
+    assert held.document == state
+    assert (held.tasks, held.meta, held.phases) == (state["tasks"], state["_meta"], state["phases"])

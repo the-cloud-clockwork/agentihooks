@@ -78,7 +78,7 @@ def test_parts_must_be_a_list_of_distinct_names(live: dict) -> None:
         {"since": 0, "parts": ["tasks", "tasks"]},
         {"since": 0, "parts": [1]},
         {"since": 0, "parts": ["chat"]},
-        {"since": 0, "parts": ["tasks", "overview"]},
+        {"since": 0, "parts": ["tasks", "comments"]},
         {"parts": ["tasks"]},
     ):
         status, _, _ = send(
@@ -106,3 +106,15 @@ def test_the_client_reads_changes_of_the_named_parts(live: dict, monkeypatch: py
     reply = reader.changes(SLUG, 0, ("tasks", "phases"))
     assert sent == [("export", {"since": 0, "parts": ["tasks", "phases"]})]
     assert set(reply["data"]) == {"tasks", "phases"}
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_the_tick_view_parts_are_accepted(live: dict) -> None:
+    from scripts.tick import view
+
+    whole = request(live, "POST", "export", {"since": 0})[1]
+    reply = parted(live, 0, list(view.PARTS))
+    assert reply == {
+        "generation": whole["generation"],
+        "data": {key: whole["data"][key] for key in view.PARTS if key in whole["data"]},
+    }

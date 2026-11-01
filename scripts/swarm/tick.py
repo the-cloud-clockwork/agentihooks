@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
+from types import MappingProxyType
 from typing import Any, Protocol
 
 import scripts.tick.steps.agents  # noqa: F401
@@ -276,8 +277,7 @@ def step_recover_master(slug: str, config: SwarmConfig, store: RedisStore, runti
 
 def step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any]) -> list[str]:
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
-    rows = {t["id"]: t for t in doc["tasks"]}
-    box.update(doc=doc, rows=rows)
+    box.update(doc=doc, rows=MappingProxyType({t["id"]: t for t in doc["tasks"]}))
     return []
 
 
@@ -786,7 +786,7 @@ def _elsewhere(agent: AgentRecord) -> bool:
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     from scripts.hub.reconciler import legacy_agents
 
-    live, actions = timing.timed(_live_names, runtime), []
+    live, actions, rows = timing.timed(_live_names, runtime), [], dict(rows)
     for agent in timing.timed(legacy_agents, store, slug):
         with timing.acting(agent.name):
             if (
@@ -1346,7 +1346,7 @@ def _spawn(
     order, actions = timing.timed(_spawn_order, slug, config, store, agents, rows, doc, runtime)
     actions += timing.timed(_block_unresolved, slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
-    run = _Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
+    run = _Pass(slug, config, store, ledger, runtime, dict(rows), doc, now_ms)
     clock, batch = _LaunchClock(), []
     for lane, task in order:
         stop = held or [
@@ -1394,6 +1394,7 @@ class Launch:
 def _prepare(run, lane, task, taken, failing, peers):
     slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
     rows, doc, now_ms = run.rows, run.doc, run.now_ms
+    task = rows[task["id"]] = dict(task)
     expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
     blocked = (
         timing.timed(_lives_spent, slug, store, ledger, rows, task)
