@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import cast
 
 import pytest
 
@@ -120,7 +121,7 @@ def test_a_cached_probe_asks_github_once_per_ttl() -> None:
     probe = checks.cached(redis, f"{KEY_ROOT}:swarm:sw:checks", read=runner(PENDING, seen))
     assert [probe(URL), probe(URL)] == [True, True]
     assert len(seen) == 1
-    assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:checks:{URL}") <= checks.CACHE_SECONDS
+    assert 0 < cast(int, redis.ttl(f"{KEY_ROOT}:swarm:sw:checks:{URL}")) <= checks.CACHE_SECONDS
     approval = checks.cached(redis, f"{KEY_ROOT}:swarm:sw:checks", read=runner(PASSED), approval=True)
     assert approval(URL) is True
     assert redis.get(f"{KEY_ROOT}:swarm:sw:checks:approval:{URL}") == "1"
@@ -162,7 +163,7 @@ def test_a_cached_green_probe_asks_github_once_per_ttl_under_its_own_key() -> No
     assert [probe(URL), probe(URL)] == [True, True]
     assert len(seen) == 1
     assert redis.get(f"{KEY_ROOT}:swarm:sw:checks:green:{URL}") == "1"
-    assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:checks:green:{URL}") <= checks.CACHE_SECONDS
+    assert 0 < cast(int, redis.ttl(f"{KEY_ROOT}:swarm:sw:checks:green:{URL}")) <= checks.CACHE_SECONDS
     red = checks.cached_green(redis, f"{KEY_ROOT}:swarm:sw:checks", read=runner(PENDING))
     assert [red("https://github.com/o/r/pull/8"), red("https://github.com/o/r/pull/8")] == [False, False]
     assert redis.get(f"{KEY_ROOT}:swarm:sw:checks:green:https://github.com/o/r/pull/8") == "0"
