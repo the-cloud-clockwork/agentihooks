@@ -72,7 +72,7 @@ with the same nine operations, and no step changes.
 | `QueueEntry` | `reference`, `position` | The change's position in the merge queue after `enqueue`. |
 | `QueueHealth` | `depth`, `states` | The number of queue entries and the state of each entry read. |
 | `Merged` | `reference`, `sha` | The commit a merge produced. |
-| `Tag` | `name`, `sha` | One remote tag and the commit it names. |
+| `Tag` | `name`, `sha` | One remote tag and the object `git ls-remote` lists for it. |
 | `Comment` | `reference`, `url` | The web address of a posted comment. |
 | `Capabilities` | `merge_queue` | Whether the provider has a merge queue on the base branch. |
 
