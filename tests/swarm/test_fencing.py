@@ -51,7 +51,7 @@ def test_a_first_read_returns_the_document_created_by_a_competitor(
 
     monkeypatch.setenv(state.BACKEND_ENV, "redis")
     original_create = RedisStateStore.create
-    winner = {"epoch": 7, "legacy_owner": "competitor"}
+    winner = {**fencing.EMPTY, "epoch": 7, "legacy_owner": "competitor"}
 
     def competing_create(self: RedisStateStore, key: str, value: bytes) -> int:
         original_create(self, key, json.dumps(winner).encode())
