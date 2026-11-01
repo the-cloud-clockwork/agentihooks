@@ -76,8 +76,10 @@ def _split(found: list[Process], launch: Process | None, table: dict[int, Proces
     return Targets(frozenset(whole), frozenset(singles))
 
 
-def targets(name: str, pid: int | str | None, homes: list[Path], start: int = 0) -> Targets:
-    table = processes()
+def targets(
+    name: str, pid: int | str | None, homes: list[Path], start: int = 0, table: dict[int, Process] | None = None
+) -> Targets:
+    table = processes() if table is None else table
     launch = table.get(int(pid)) if pid else None
     if launch is not None and (not carries(launch, name) or start and launch.start_time != start):
         launch = None
@@ -130,11 +132,13 @@ def end(found: Targets) -> Outcome:
     return Outcome(tuple(sorted(set(members) - set(left))), left[0], refused or f"survived SIGKILL: {survivors}")
 
 
-def retire(name: str, pid: int | None, homes: list[Path], start: int = 0) -> Outcome:
-    return end(targets(name, pid, homes, start))
+def retire(
+    name: str, pid: int | None, homes: list[Path], start: int = 0, table: dict[int, Process] | None = None
+) -> Outcome:
+    return end(targets(name, pid, homes, start, table))
 
 
-def reap(pids: list[int]) -> Outcome:
+def reap(pids: list[int], table: dict[int, Process] | None = None) -> Outcome:
     """End agent processes holding a name the swarm no longer records, each with its group when it leads one."""
-    table = processes()
+    table = processes() if table is None else table
     return end(_split([table[pid] for pid in pids if pid in table], None, table))
