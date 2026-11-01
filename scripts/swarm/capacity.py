@@ -2,14 +2,14 @@ import json
 import sys
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
-from scripts.swarm import autoscale, freeze, host_budget
+from scripts.swarm import autoscale, freeze, host_budget, master_pin
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from scripts.routing.reservation import Reservation
 
 LANES = ("eng", "ci", "plan")
-_Lanes = dict[str, dict[str, Any]]
 LABELS = {"claude": "Claude", "codex": "Codex"}
 
 
@@ -552,69 +551,18 @@ def _without_work(lanes: list[str]) -> str:
 
 def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list, warned: dict) -> list:
     seats = offered(observations, warned)
-    master = _master_lane(config)
+    master = master_pin.lane(config)
     if master is None or master.get("agent") == "codex":
         return seats
-    declared: str | None = master.get("account")
-    if declared and not _read(observations, declared):
+    if master_pin.pinned(master, observations, agents, config.slug):
         return seats
     if any(
-        agent.lane == "master"
-        and agent.state != "finished"
-        and ((agent.harness, agent.account) not in warned or _pinned(config.slug, agent, declared))
+        agent.lane == "master" and agent.state != "finished" and (agent.harness, agent.account) not in warned
         for agent in agents
     ):
         return seats
     reserved = pick(seats, lambda seat: seat.harness == "claude" and seat.kind == SUBSCRIPTION)
     return [replace(seat, cap=seat.cap - 1) if seat == reserved else seat for seat in seats]
-
-
-def _read(observations: list[Account], declared: str) -> bool:
-    """Whether the declared Claude master account has a quota reading, the only state a successor can leave it on."""
-    return any(
-        (row.harness, row.name) == ("claude", declared) and (row.five_left is not None or row.week_left is not None)
-        for row in observations
-    )
-
-
-def _pinned(slug: str, agent: Any, declared: str | None) -> bool:
-    """A live master whose successor the front door route forces back onto the declared master account."""
-    from scripts import front_door_route
-    from scripts.swarm_v2 import masters
-
-    if not declared or (agent.harness, agent.account) != ("claude", declared):
-        return False
-    return bool(front_door_route.check(agent.profile, masters.title(slug, agent.seat), []))
-
-
-def _lanes(config: SwarmConfig) -> _Lanes:
-    """The config's lane entries by lane name."""
-    return cast(_Lanes, config.lanes)
-
-
-def _master_lane(config: SwarmConfig) -> dict[str, Any] | None:
-    """The master lane entry of the config, absent when the swarm runs no master."""
-    return _lanes(config).get("master")
-
-
-def declared_master(environ: dict[str, str]) -> str:
-    """The declared Claude master account a master successor respawns on, empty when none is declared or readable."""
-    from redis.exceptions import RedisError
-
-    try:
-        declared = master_account.load(environ).get("claude")
-    except (OSError, RedisError):
-        return ""
-    return declared.slug if declared else ""
-
-
-def with_declared_master(config: SwarmConfig, environ: dict[str, str]) -> SwarmConfig:
-    """The config with the declared Claude master account on its master lane, where a master successor respawns."""
-    lane = _master_lane(config)
-    slug = declared_master(environ)
-    if lane is None or not slug:
-        return config
-    return replace(config, lanes={**_lanes(config), "master": {**lane, "account": slug}})
 
 
 def calculate(

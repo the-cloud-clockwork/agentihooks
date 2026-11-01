@@ -9,7 +9,7 @@ from scripts.hive import admission, placement_waits
 from scripts.hive.placement import LOCAL_FULL
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import blockers, capacity, freeze, panic, timing
+from scripts.swarm import blockers, capacity, freeze, master_pin, panic, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerGone
 from scripts.swarm.store import RedisStore
@@ -56,7 +56,7 @@ def eligible(store: RedisStore, slug: str, ledger: Any, at: int, runtime: Any, s
         host = capacity.granted(capacity.host_room(config, inputs), inputs.previous, inputs.now_ms)
         config, _ = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
-            capacity.with_declared_master(config, dict(os.environ)),
+            master_pin.with_declared(config, os.environ),
             inputs.observations,
             inputs.agents,
             demand,
