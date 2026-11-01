@@ -13,6 +13,7 @@ from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.tick.deadline import Deadline
+from scripts.tick.ports.source_control import ChangeRef
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -882,14 +883,19 @@ class IssuePort:
             raise subprocess.CalledProcessError(1, [], stderr=" boom\n")
         return answer
 
-    def issue_state(self, reference: str, *, deadline: Deadline) -> str | None:
-        return self._answer(("issue_state", reference), deadline, self.states[reference])
+    def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str | None:
+        url = _issue_url(reference)
+        return self._answer(("issue_state", url), deadline, self.states[url])
 
-    def close_issue(self, reference: str, *, deadline: Deadline) -> str | None:
-        return self._answer(("close_issue", reference), deadline, "closed")
+    def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str | None:
+        return self._answer(("close_issue", _issue_url(reference)), deadline, "closed")
 
-    def comment(self, reference: str, body: str, *, deadline: Deadline) -> str | None:
-        return self._answer(("comment", reference, body), deadline, None)
+    def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> str | None:
+        return self._answer(("comment", _issue_url(reference), body), deadline, None)
+
+
+def _issue_url(reference: ChangeRef) -> str:
+    return f"https://github.com/{reference.repository}/issues/{reference.number}"
 
 
 @pytest.fixture
@@ -905,7 +911,8 @@ def issues(merging, monkeypatch):
         return merging.shell(argv)
 
     monkeypatch.setattr(stack, "shell", shell)
-    monkeypatch.setattr(stack, "source_control", lambda url: (port, url))
+    parse = stack.source_control
+    monkeypatch.setattr(stack, "source_control", lambda url: (port, parse(url)[1]))
     merging.rows["t1"]["issue_url"] = ISSUE
     merging.pulls[URL] = MERGED
     return port
