@@ -20,7 +20,7 @@ def reached(elapsed_ms: int, limit_ms: int) -> bool:
 
 def passes(elapsed_ms: int) -> int:
     """The one minute passes an observation begun ``elapsed_ms`` ago spans, the first observation counting as one."""
-    return max(0, elapsed_ms + SLACK_MS) // PASS_MS + 1
+    return max(1, (elapsed_ms + SLACK_MS) // PASS_MS + 1)
 
 
 def anchored(now_ms: int, counted: int) -> int:

@@ -51,13 +51,11 @@ def calculate(
     current = sum(previous["ceilings"].values()) if previous is not None else sum(live.values())
     pending: PendingRaise = {"target": None, "ticks": 0}
     total = target
-    held = False
+    prior = previous["pending_raise"] if previous is not None else pending
+    since = prior.get("since", elapsed.anchored(now_ms, prior["ticks"])) if prior["ticks"] else now_ms
+    held = not elapsed.reached(now_ms - since, RAISE_MS)
     if target > current:
-        prior = previous["pending_raise"] if previous is not None else pending
-        since = prior.get("since", elapsed.anchored(now_ms, prior["ticks"])) if prior["ticks"] else now_ms
-        ticks = min(prior["ticks"] + 1, 3)
-        pending = {"target": target, "ticks": ticks, "since": since}
-        held = not elapsed.reached(now_ms - since, RAISE_MS)
+        pending = {"target": target, "ticks": min(prior["ticks"] + 1, 3), "since": since}
         total = current if held else min(target, current + 2)
         if total == target:
             pending = {"target": None, "ticks": 0}

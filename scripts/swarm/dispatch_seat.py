@@ -90,8 +90,7 @@ def uncovered(store: Any, slug: str, now_ms: int, write: bool = True) -> list[di
     if write and held is not previous:
         store.redis.set(key, json.dumps(held))
     named = held.get("named")
-    since = held.get("since", elapsed.anchored(held.get("at", now_ms), held.get("ticks", 1) - 1))
-    if not named or not elapsed.reached(held["at"] - since, STREAK_MS) or now_ms - held["at"] > STALE_MS:
+    if not named or not elapsed.reached(held["at"] - _since(held), STREAK_MS) or now_ms - held["at"] > STALE_MS:
         _forget_quota_lanes(store, slug, write)
         return []
     if named != "quota":
@@ -108,8 +107,12 @@ def streak(previous: dict[str, Any], found: dict[str, Any]) -> dict[str, Any]:
     named = found["bottleneck"]
     if named != previous.get("named"):
         return {"named": named, "ticks": 1, "at": found["at"], "since": found["at"]}
-    since = previous.get("since", elapsed.anchored(previous["at"], previous["ticks"] - 1))
-    return {"named": named, "ticks": previous["ticks"] + 1, "at": found["at"], "since": since}
+    return {"named": named, "ticks": previous["ticks"] + 1, "at": found["at"], "since": _since(previous)}
+
+
+def _since(held: dict[str, Any]) -> int:
+    """When the named streak began; a streak older code kept without a start is anchored from its report count."""
+    return held.get("since", elapsed.anchored(held["at"], held["ticks"] - 1))
 
 
 def _forget_quota_lanes(store, slug: str, write: bool) -> None:

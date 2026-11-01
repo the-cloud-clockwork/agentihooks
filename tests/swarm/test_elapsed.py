@@ -107,3 +107,18 @@ def test_an_input_wait_finding_lands_at_the_same_wall_time_at_either_pass(store,
         if found_at is None and waiting_on_input([store.agents("sw")[0].__dict__], held):
             found_at = at
     assert found_at == 3 * MINUTE
+
+
+def test_time_the_operator_holds_the_pane_never_counts_toward_idle(store):
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import _watch_idle
+    from tests.swarm.test_tick import FakeLedger
+
+    store.put_agent("sw", AgentRecord(IDLER, "eng", "t1"))
+    runtime, ledger = FakeRuntime(), FakeLedger([])
+    for at, typed in ((0, ""), (MINUTE, ""), (2 * MINUTE, "draft"), (30 * MINUTE, "")):
+        runtime.observe = lambda agent, typed=typed: PaneObservation("idle", typed=typed)
+        _watch_idle("sw", store, ledger, runtime, {}, store.agents("sw")[0], at)
+    assert store.agents("sw")[0].idle_ticks == 3
+    assert runtime.killed == []

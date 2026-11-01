@@ -692,6 +692,21 @@ def test_reports_three_minutes_apart_trigger_on_the_second_report():
     assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [2]
 
 
+def test_a_stored_streak_start_wins_over_its_report_count():
+    store = swarm()
+    started = {"named": "review", "ticks": 1, "at": NOW - 2 * MINUTE, "since": NOW - 4 * MINUTE}
+    store.redis.set(store.key(SLUG, dispatch_seat.STREAK), json.dumps(started))
+    report_at(store, "review", NOW - MINUTE)
+    assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [2]
+    assert streak_of(store)["since"] == NOW - 4 * MINUTE
+
+
+def test_a_streak_older_code_kept_is_anchored_from_its_report_count():
+    older = {"named": "review", "ticks": 3, "at": NOW - MINUTE}
+    found = dispatch_seat.streak(older, {"bottleneck": "review", "at": NOW})
+    assert found == {"named": "review", "ticks": 4, "at": NOW, "since": NOW - 3 * MINUTE}
+
+
 def test_another_share_restarts_the_streak_and_a_read_only_call_writes_nothing():
     store = swarm()
     report_at(store, "review", NOW - 2 * MINUTE)

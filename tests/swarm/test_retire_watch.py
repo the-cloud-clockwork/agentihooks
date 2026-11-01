@@ -48,10 +48,10 @@ def test_failures_three_minutes_apart_raise_the_finding_on_the_second(store):
 
 
 def test_rapid_retries_inside_a_minute_raise_no_finding(store):
-    for at in (0, 10_000, 20_000, 30_000, 89_999):
+    for at in (600_000, 610_000, 620_000, 630_000, 689_999):
         retire_watch.failed(store, "sw", NAME, REFUSED, at)
     assert retire_watch.findings(store, "sw") == []
-    retire_watch.failed(store, "sw", NAME, REFUSED, 90_000)
+    retire_watch.failed(store, "sw", NAME, REFUSED, 690_000)
     assert len(retire_watch.findings(store, "sw")) == 1
 
 
