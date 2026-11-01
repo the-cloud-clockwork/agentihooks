@@ -109,8 +109,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert rule["paths"]["include"] == ["/scripts/swarm/**", "*.test.py"]
     allowed = json.loads((_ROOT / ".semgrep/source-control-allowlist.json").read_text())
     assert rule["paths"]["exclude"] == allowed
-    assert "/scripts/tick/adapters/github.py" in allowed
-    assert all(path.endswith(".py") and "*" not in path for path in allowed)
+    assert allowed == ["/scripts/tick/adapters/github.py"]
 
 
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:

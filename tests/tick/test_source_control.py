@@ -323,3 +323,13 @@ def test_github_expired_deadline_prevents_external_reads(
 
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         getattr(provider, operation)(*args, deadline=Deadline(0, clock=lambda: 0.0))
+
+
+def test_the_feature_map_names_the_source_control_port_seam() -> None:
+    import json
+
+    root = Path(__file__).resolve().parents[2]
+    entries = {entry["id"]: entry for entry in json.loads((root / "feature-map.json").read_text())["features"]}
+    entry = entries["swarm-tick-source-control-port"]
+    assert entry["seam"] == "The source control port in scripts.tick.ports.source_control and its GitHub adapter"
+    assert all(test.startswith("tests/tick/test_source_control.py::") for test in entry["tests"])
