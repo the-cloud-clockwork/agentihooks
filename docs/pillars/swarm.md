@@ -5054,17 +5054,18 @@ stopped only at its 450 second deadline, with 30 seconds of grace. The pass keep
   `the controller lease is stale` when another controller holds it.
 - **For the whole pass.** One lease heartbeat runs from the start of the pass to its end: a background thread renews
   the lease once per tick interval, so a single step longer than the lease keeps it. The thread stops for good when
-  the lease is no longer this controller's (a higher epoch took over) and tries again at the next beat after a Redis
+  a renewal finds the lease stale, because a higher epoch took over or the lease expired, and on a hosted ledger
+  when the lease server cannot be reached or refuses the renewal. It tries again at the next beat after a Redis
   error. The master placement path under the tick lock holds its own heartbeat the same way.
 - **Before every step.** Each timed step of the pass, including every step wrapped to skip a refused ledger write,
   first renews the lease, extends the tick lock and records the swarm's last tick activity.
 
 Ledger writes in the pass carry the epoch of the ledger they write to, and the ledger server refuses a stale one. A
 launch, a hive launch collect and a hive launch expire each check the lease epoch first, with one read and no
-renewal. No ledger or runtime call renews the lease or starts a heartbeat of its own; until the change described in
-[One lease beat per tick pass](../reference/tick-adapters.md#one-lease-beat-per-tick-pass) every such call did.
-The refresh job, which runs the Doctor timer of a `doctor` swarm, keeps its own heartbeat for the length of its
-run.
+renewal. No ledger or runtime call renews the lease or starts a heartbeat of its own; the members involved are listed
+in [One lease heartbeat per tick pass](../reference/tick-adapters.md#one-lease-heartbeat-per-tick-pass).
+The refresh job, which runs the GitHub, Langfuse and Grafana refreshes and, for a `doctor` swarm, the Doctor timer,
+keeps its own heartbeat for the length of its run.
 
 The automatic snapshot never runs inside the pass. Step 12 of the list above only starts the detached snapshot job
 and returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
@@ -5085,10 +5086,10 @@ journalctl --user -t agentihooks-swarm --since "-12h" | grep "controller lease i
 journalctl --user -t agentihooks-swarm --since "-12h" | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
 ```
 
-The finished step records carry each step's name, outcome and `wall_s` duration. Since the pass heartbeat keeps
-the lease through a long step, a stale lease inside a pass means another controller took over, or the heartbeat
-could not reach Redis for three ticks. Work that runs outside a tick pass and can outlast the lease holds its own
-heartbeat, the way the refresh job does:
+The finished step records carry each step's name, outcome and `wall_s` duration. The pass lease heartbeat keeps
+the lease through a long step, so a stale lease inside a pass means another controller took over, the heartbeat
+could not reach Redis for three ticks, or on a hosted ledger the heartbeat stopped at an unreachable lease server.
+Work that runs outside a tick pass and can outlast the lease holds its own heartbeat, the way the refresh job does:
 
 ```python
 with lease.kept(store, slug, held), timing.tick(slug):

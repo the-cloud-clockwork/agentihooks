@@ -14,7 +14,8 @@ takes a `Deadline` keyword argument and is refused with `TimeoutError("tool dead
 passed, before the adapter touches Redis, the network, SQLite, git or a job.
 
 Tick step modules never import the adapted implementations. A unit test in CI walks every module under
-`scripts/tick` outside `scripts/tick/adapters` and fails on any direct import of them.
+`scripts/tick` outside `scripts/tick/adapters` and fails on a direct import of the modules listed under
+[The import check](#the-import-check).
 
 | Port | Adapter | Delegates to | Operations (read / write) |
 |---|---|---|---|
@@ -33,8 +34,8 @@ tick engine passes a `Tools` bundle to each step. Two adapters are already in us
 pass uses `PassProcesses` for the reaper's process scan, described under
 [One process scan per tick pass](#one-process-scan-per-tick-pass), and `scripts.swarm.stack.change` reads one pull
 request through `GitHubSourceControl`, described under [Source control adapter](#source-control-adapter). The ledger
-and coordination adapters have no caller outside their tests. The lease change delivered with them is already live in
-every pass: see [One lease beat per tick pass](#one-lease-beat-per-tick-pass).
+and coordination adapters have no caller outside their tests. Every pass holds one lease heartbeat, described under
+[One lease heartbeat per tick pass](#one-lease-heartbeat-per-tick-pass).
 
 ## Empty registry integration
 
@@ -173,8 +174,8 @@ reply = port.mutate([comment], deadline=Deadline.after(10.0))
 
 | Operation | Client call | Returns |
 |---|---|---|
-| `export()` | `ResourceClient.export(slug)` on the export route | The ledger export as a dictionary |
-| `mutate(operations)` | `ResourceClient.mutate(slug, stamped)` on the mutate route | The server's answer as a dictionary |
+| `export()` | `ResourceClient.export(slug)`, `POST /api/v1/ledgers/<slug>/export` | The ledger export as a dictionary |
+| `mutate(operations)` | `ResourceClient.mutate(slug, stamped)`, `POST /api/v1/ledgers/<slug>/operations` after a revision read of each target | The server's answer as a dictionary |
 
 - Each call refuses an expired deadline before it builds a client, so no request is sent.
 - The client is built per call with a request timeout of the smaller of the ledger request timeout
@@ -213,7 +214,7 @@ port = StoreCoordination(connect(), "rig-grade-swarm", hive_id())
 deadline = Deadline.after(5.0)
 config = port.read(deadline=deadline)
 held = port.lease(deadline=deadline)
-token = port.lock("placement", deadline=deadline.child(30.0))
+token = port.lock("placement", deadline=Deadline.after(30.0))
 port.configure(replace(config, max_eng=5), deadline=deadline)
 slots = port.capacity(deadline=deadline)
 port.mark("last-tick", 1793500000000, deadline=deadline)
@@ -234,15 +235,14 @@ port.mark("last-tick", None, deadline=deadline)
   holds a live lease or the swarm's controller host names another owner, and it raises the epoch when it takes over an
   expired lease. On a ledger served from a remote address the lease call goes to that server.
 - `lock` holds the lock for the time left on the deadline, rounded down to whole milliseconds and never under one, so
-  the lock expires by itself when the deadline does. Give the call a child deadline sized to the work the lock
-  guards. The adapter has no release operation; the lock ends at its expiry.
+  the lock expires by itself when the deadline does. Give the call a deadline sized to the work the lock guards;
+  a `child` deadline never outlasts its parent. The adapter has no release operation; the lock ends at its expiry.
 - `configure` compares every field of `settings` with the stored config and writes only the fields that differ, in
   one `update`. When nothing differs it writes nothing and returns the current config. `update` applies its own
   checks, so an invalid `state` or `autonomy` raises `SwarmError`.
 - `capacity` counts the launch slot records under the swarm root, across every swarm, and drops index entries whose
   slot record has expired.
 - `mark` stores `str(value)`. Deleting a mark that does not exist returns `False`.
-
 
 ## Source control adapter
 
@@ -593,26 +593,25 @@ def retire_all(names_and_pids):
     return [reaper.retire(name, pid, []) for name, pid in names_and_pids]
 ```
 
-## One lease beat per tick pass
+## One lease heartbeat per tick pass
 
 `scripts.swarm.lease.held_pass(store, slug, held)` holds the controller lease for one tick pass. `run_tick` enters it
 first, before the `before` group, and closes it in its `finally` block; the master placement path under the tick lock,
-`_under_tick_lock` in `scripts.swarm.tick`, holds one around its work too. Inside the pass:
+`_under_tick_lock` in `scripts.swarm.tick`, holds one around its work too. On entry it renews the lease once, then
+runs one `lease.kept` heartbeat thread until the pass ends. The renewal rules, the heartbeat interval and the renewal
+before each step are in [Controller lease during long steps](../pillars/swarm.md#controller-lease-during-long-steps).
 
-| What | When | Effect |
-|---|---|---|
-| Renewal | Once, on entry | A lease taken by another controller raises `SwarmError("the controller lease is stale")` and the pass does not start. |
-| Lease beat | One background thread for the whole pass | `lease.kept` renews the lease once per tick interval (60 seconds unless `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets another) until the pass ends. It stops for good once the lease is no longer this controller's and tries again at the next beat after a Redis error. |
-| Step boundary | Before every timed step | `keep_tick` renews the lease and extends the tick lock, as before. |
-| Pass epoch | For the whole pass | `lease.PASS` holds the store, the swarm and the held epoch, so ledger writes resolve their `controller_epoch` through `epoch_for`, described under [Ledger adapter](#ledger-adapter). |
-| Launches | Before each `spawn`, `collect` and `expire` | `FencedRuntime` calls `lease.require_epoch`, one lease read with no renewal, and raises `the controller lease is stale` when another controller now holds the lease. |
+| Pass member | Behavior |
+|---|---|
+| `lease.PASS` | Holds the store, the swarm and the held epoch for the pass, so ledger writes resolve their `controller_epoch` through `epoch_for`, described under [Ledger adapter](#ledger-adapter). Reset when the pass ends, even when it raises. |
+| `FencedRuntime.spawn`, `collect`, `expire` | Call `lease.require_epoch`, one lease read with no renewal, and raise `SwarmError("the controller lease is stale")` when another controller now holds the lease. |
+| `FencedRuntime.has_capacity` | Applies the deployment mode refusal only; it does not touch the lease. |
+| `FencedRuntime.launch_room` | Reads the room left for launches; it does not touch the lease. |
+| Every other `FencedRuntime` attribute | Forwarded to the wrapped runtime, such as `herdr_runtime`, `original_runtime` and `hive_launch`, with no renewal, fencing or thread. |
+| The ledger client | Used as given; no wrapper renews the lease on ledger calls. |
 
-Before this change `FencedLedger` wrapped the pass's ledger client and `FencedRuntime` intercepted every runtime
-attribute: each ledger or runtime call renewed the lease and the runtime calls started a beat thread of their own.
-`FencedLedger` is removed. `FencedRuntime` still refuses launches by deployment mode and still forwards every other
-attribute, such as `herdr_runtime`, `original_runtime`, `hive_launch` and `launch_room`, without renewing, fencing or
-starting a thread. `has_capacity` no longer renews the lease. The stopped swarm path, `_stopped_tick` in
-`scripts.swarm.cli`, keeps its `FencedRuntime` and passes the plain ledger client.
+The stopped swarm path, `_stopped_tick` in `scripts.swarm.cli`, uses the same `FencedRuntime` and the plain ledger
+client.
 
 `retire` and `relaunch` on the runtime are not checked against the lease epoch. A takeover during a step that makes
 several of those calls is caught at the next step boundary, where `keep_tick` renews and raises.
@@ -635,15 +634,21 @@ if held is not None:
 
 `Tools` in `scripts.tick.ports` holds one adapter per port. `Tools.for_effects(effects)` returns a copy whose ports
 allow read operations always and write operations only on the ports named in `effects`. In this example
-`source_control`, `runtime` and `processes` are the adapters built in their sections above, and the remaining names
-are built as in those sections.
+`source_control`, `runtime` and `processes` are the adapters, and `outbox` and `PASSES` the metrics values, built in
+their sections above.
 
 ```python
+import os
+
 from scripts.inbox.store import connect as inbox_connect
 from scripts.swarm.commands import hive_id
 from scripts.swarm.store import connect as swarm_connect
 from scripts.tick.adapters.coordination import StoreCoordination
+from scripts.tick.adapters.host import local_host
+from scripts.tick.adapters.inbox import StoreInbox
 from scripts.tick.adapters.ledger import ClientLedger, resource_client
+from scripts.tick.adapters.llm import ApiLlm
+from scripts.tick.adapters.metrics import SpoolMetrics
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools
 
@@ -694,6 +699,8 @@ when given. In `fake_tools`, the ledger fake answers `export` with an empty dict
 `None` for any operation without an answer; they stamp no epoch and hold no lock, so a test of epoch or lock
 behavior uses the real adapters.
 
+Ledger and coordination fakes answer from their dictionaries:
+
 ```python
 from scripts.tick.adapters.fakes import FakeCoordination, FakeLedger
 from scripts.tick.deadline import Deadline
@@ -706,6 +713,8 @@ assert ledger.mutate([{"op": "add"}], deadline=deadline) == {"applied": 1}
 assert coordination.lock("placement", deadline=deadline) == "token-1"
 assert [(call.operation, call.args) for call in coordination.calls] == [("lock", ("placement",))]
 ```
+
+The other fakes are built the same way:
 
 ```python
 from scripts.tick.adapters.fakes import FakeHost, FakeRuntime, fake_tools
@@ -766,6 +775,10 @@ under `scripts/tick` except those in `scripts/tick/adapters` and fails on any im
 - `scripts.swarm.host_budget`
 - `scripts.swarm.refresh_job`
 - `scripts.swarm.snapshot_job`
+
+The ledger and coordination delegates, `scripts.swarm_ledger.api.client`, `scripts.swarm.store`,
+`scripts.swarm.lease` and `scripts.routing.reservation`, are not on the list, so the check does not catch a tick
+module that imports them.
 
 Any relative import in a scanned module also fails, whatever it names, since the check cannot resolve it.
 The failure lists each module path with the names it imported. Move the call behind a port operation in the adapter
