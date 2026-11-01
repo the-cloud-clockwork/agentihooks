@@ -345,6 +345,19 @@ def test_blocks_moved_from_two_files_over_a_removed_line_grade_only_the_line_aft
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {8}}
 
 
+def test_a_move_into_a_non_ascii_name_is_skipped_and_a_name_git_quotes_stays_graded(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    pinned = commit("old.py", STEP)
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("")
+    (tmp_path / "hooks" / 'quo"te.py').write_text("VALUE = 1\n")
+    git("add", "hooks/old.py", 'hooks/quo"te.py')
+    commit("ñame.py", STEP)
+    assert discover_changes(tmp_path, pinned, "HEAD") == {'hooks/quo"te.py': {1}}
+
+
 @pytest.mark.parametrize(
     ("head", "expected"),
     [
