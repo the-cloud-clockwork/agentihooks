@@ -384,10 +384,10 @@ def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, m
 SAVED = [pull(1, run("Tests", "FAILURE")), pull(2, run("Lint", None, None), status("Gate", "SUCCESS"))]
 
 
-def test_the_cache_lists_once_and_keeps_the_listing_ten_minutes(store):
-    reads = []
+def test_the_cache_lists_once_and_keeps_the_listing_ten_minutes(store: RedisStore) -> None:
+    reads: list[str] = []
 
-    def reader(repo):
+    def reader(repo: str) -> list[OpenChange]:
         reads.append(repo)
         return SAVED
 
@@ -398,10 +398,10 @@ def test_the_cache_lists_once_and_keeps_the_listing_ten_minutes(store):
     assert fleet_red.TTL == 600
 
 
-def test_the_cache_keeps_each_swarm_and_repository_apart(store):
-    reads = []
+def test_the_cache_keeps_each_swarm_and_repository_apart(store: RedisStore) -> None:
+    reads: list[str] = []
 
-    def reader(repo):
+    def reader(repo: str) -> list[OpenChange]:
         reads.append(repo)
         return SAVED
 
@@ -414,10 +414,10 @@ def test_the_cache_keeps_each_swarm_and_repository_apart(store):
 @pytest.mark.parametrize(
     "error", [TimeoutError("x"), KeyError("x"), OSError("x"), ValueError("x"), subprocess.SubprocessError()]
 )
-def test_the_cache_keeps_a_failed_listing_as_none_for_ten_minutes(store, error):
-    reads = []
+def test_the_cache_keeps_a_failed_listing_as_none_for_ten_minutes(store: RedisStore, error: Exception) -> None:
+    reads: list[str] = []
 
-    def reader(repo):
+    def reader(repo: str) -> list[OpenChange]:
         reads.append(repo)
         raise error
 
@@ -427,10 +427,10 @@ def test_the_cache_keeps_a_failed_listing_as_none_for_ten_minutes(store, error):
     assert store.redis.ttl(store.key("sw", "fleet-red-pulls:o/r")) == 600
 
 
-def test_the_cache_keeps_an_empty_listing(store):
-    reads = []
+def test_the_cache_keeps_an_empty_listing(store: RedisStore) -> None:
+    reads: list[str] = []
 
-    def reader(repo):
+    def reader(repo: str) -> list[OpenChange]:
         reads.append(repo)
         return []
 
@@ -439,17 +439,19 @@ def test_the_cache_keeps_an_empty_listing(store):
     assert reads == ["o/r"]
 
 
-def test_the_cache_lists_through_read_without_a_reader(store, monkeypatch):
+def test_the_cache_lists_through_read_without_a_reader(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fleet_red, "read", lambda repo: SAVED if repo == "o/r" else [])
     assert fleet_red.cached(store, "sw", "o/r") == tuple(SAVED)
 
 
-def test_the_notice_pass_reads_through_the_cache_without_a_reader(store, monkeypatch):
+def test_the_notice_pass_reads_through_the_cache_without_a_reader(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     rows = {"red": task("red", pr_url=MINE)}
     both = [run("Tests", "FAILURE"), run("Semgrep", "FAILURE")]
-    reads = []
+    reads: list[str] = []
 
-    def reader(repo):
+    def reader(repo: str) -> list[OpenChange]:
         reads.append(repo)
         return fleet(both, *[both] * 3)
 
@@ -462,8 +464,10 @@ def test_the_notice_pass_reads_through_the_cache_without_a_reader(store, monkeyp
     assert reads == ["o/r"]
 
 
-def test_the_notice_pass_declares_nothing_while_the_cache_holds_a_failed_listing(store, monkeypatch):
-    def reader(repo):
+def test_the_notice_pass_declares_nothing_while_the_cache_holds_a_failed_listing(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def reader(repo: str) -> list[OpenChange]:
         raise TimeoutError("x")
 
     monkeypatch.setattr(fleet_red, "read", reader)
