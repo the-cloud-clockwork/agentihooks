@@ -442,7 +442,7 @@ def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_del
     assert ["git", "merge-base", "HEAD", "origin/dev"] in shell.calls
     assert ["git", "fetch", "origin", "eng-a"] not in shell.calls
     assert ["git", "fetch", "--", repo, "eng-a"] not in shell.calls
-    assert asked == [dependency_pr]
+    assert asked == [dependency_pr, ISSUE]
 
 
 @pytest.mark.parametrize(
