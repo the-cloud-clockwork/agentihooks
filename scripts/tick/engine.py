@@ -45,7 +45,7 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     clock = deadline.clock
     started = clock()
     try:
-        result = copy_context().run(timing.call, step.run, Context(ctx.view, deadline))
+        result = copy_context().run(timing.within, step.budget_s, step.run, Context(ctx.view, deadline))
     except (Exception, SystemExit) as exc:
         error = f"{type(exc).__module__}.{type(exc).__qualname__}"
         return StepRecord(step.name, clock() - started, step.budget_s, error)
