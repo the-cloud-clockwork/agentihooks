@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.563 · 2026-11-01
+
+### 2026-11-01 · 6cd258b2c2ec · #9273 · @nestorcolt
+
+**Hold spawning when tick pass p95 exceeds the stage budget**
+
+This change pauses new worker spawning whenever the p95 of the last ten completed tick passes exceeds the rollout stage's time budget (S1 384s, S2 240s, S3 120s, S4 60s), keeping this hold separate from transient host holds so each is tracked and cleared independently. It notifies the master once per breach with retry-safe delivery and automatically lifts the hold once tick performance recovers, preventing runaway spawning during slow rollout stages while avoiding noisy or duplicate alerts.
+
 ## v2.17.562 · 2026-11-01
 
 ### 2026-11-01 · 55f90c828b8a · #9277 · @agenticore-app
