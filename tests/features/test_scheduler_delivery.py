@@ -55,7 +55,7 @@ def test_scheduler_delivers_once_under_the_machine_lock_and_records_completion(
         calls.append(argv)
         assert scheduled_tick.main(forbidden) == 0
         assert scheduler.read(scheduled_tick.DELIVERED) == ""
-        return subprocess.Popen(argv, **kwargs)
+        return subprocess.Popen(argv, text=False, **kwargs)
 
     before = time.time()
     assert scheduled_tick.main(launch) == 0
