@@ -81,6 +81,9 @@ def test_each_group_reads_its_pass_state_under_the_group_budget(
         assert views[name].view.read(PASS, "now_ms") == 1_000
         assert views[name].view.read(PASS, "store") is store
         assert views[name].view.read(Domain("tasks"), "slug") is None
+    for name in ("agents", "tasks", "close"):
+        assert views[name].view.read(PASS, "config").state == "running"
+        assert set(views[name].view.read(PASS, "rows")) == {"t1"}
     for _, ctx in seen:
         assert ctx.view.read(Domain("tasks"), "t1") is None
         assert ctx.deadline.expires_at - monotonic() == pytest.approx(tick_module.GROUP_BUDGET_S, abs=5.0)

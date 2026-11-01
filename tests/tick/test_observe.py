@@ -139,6 +139,7 @@ def test_a_running_swarm_loads_its_config_and_skips_the_stopped_branch() -> None
     state, box = _state(store)
     assert actions(engine.run_group("start", _ctx(state))) == []
     assert box == {"config": SimpleNamespace(slug="sw", state="running", engine="tick")}
+    assert tick_module.step_stopped_branch("sw", box["config"], store, None, None, 0, box) == []
 
 
 def test_a_stopped_swarm_that_sleeps_finishes_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
