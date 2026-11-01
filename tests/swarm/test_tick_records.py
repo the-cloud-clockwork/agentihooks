@@ -1,4 +1,7 @@
 import json
+import time
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -6,6 +9,12 @@ import pytest
 from scripts.swarm import tick_stop, timing
 
 pytestmark = pytest.mark.unit
+
+
+def monotonic_clock(readings: list[float]) -> Any:
+    """Replace the timing module's clock only, leaving the global time module to other callers."""
+    clock = SimpleNamespace(monotonic=iter(readings).__next__, perf_counter=time.perf_counter, time_ns=time.time_ns)
+    return patch.object(timing, "time", clock)
 
 
 @pytest.mark.feature("swarm-tick-cost-report")
@@ -67,7 +76,7 @@ def test_budgeted_step_record_reads_late_past_its_budget_and_not_failed(ended: f
 
     @timing.instrument_tick
     def run_tick(actual: RedisStore, slug: str) -> list[str]:
-        with patch.object(timing.time, "monotonic", side_effect=[10.0, ended]):
+        with monotonic_clock([10.0, ended]):
             assert timing.within(2.5, sorted, [2, 1]) == [1, 2]
         return ["finished"]
 
@@ -89,7 +98,7 @@ def test_budgeted_step_that_raises_is_an_error_not_late() -> None:
     def fail() -> None:
         raise ValueError("private message")
 
-    with timing.tick("sw", store), patch.object(timing.time, "monotonic", side_effect=[0.0, 9.0]):
+    with timing.tick("sw", store), monotonic_clock([0.0, 9.0]):
         with pytest.raises(ValueError):
             timing.within(1.0, fail)
     record = json.loads(store.redis.xrange(store.key("sw", "tick:steps"))[0][1]["record"])
@@ -102,7 +111,7 @@ def test_unbudgeted_step_record_carries_no_budget() -> None:
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    with timing.tick("sw", store), patch.object(timing.time, "monotonic", side_effect=[0.0, 99.0]):
+    with timing.tick("sw", store), monotonic_clock([0.0, 99.0]):
         timing.call(sorted, [])
     record = json.loads(store.redis.xrange(store.key("sw", "tick:steps"))[0][1]["record"])
     assert record["outcome"] == "success"
