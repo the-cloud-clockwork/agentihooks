@@ -42,7 +42,6 @@ from scripts.swarm import (
     deliberate_exit,
     dev_red,
     difficulty,
-    dispatch_seat,
     dispatcher,
     failed_panes,
     fleet_red,
@@ -55,14 +54,10 @@ from scripts.swarm import (
     lifetime,
     live_binding,
     lost_runner,
-    master_alarm,
     master_move,
-    master_prompt_stall,
     master_questions,
     master_retire,
-    master_stall,
     master_start,
-    master_wake,
     outage,
     pane_evidence,
     panic,
@@ -82,7 +77,6 @@ from scripts.swarm import (
     stack,
     stale_nudge,
     successor_retry,
-    tick_master,
     time_left,
     timing,
 )
@@ -95,12 +89,12 @@ from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
-from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import observe as observe_steps
+from scripts.tick.steps import masters as master_steps
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60
@@ -362,12 +356,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
     passing["rows"] = rows
     actions += run_group("agents", config=config, **passing)
-    run_group("masters")
-    if config.state not in {"stopped", "stopping"}:
-        actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
-    actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(master_stall.run, slug, config, store, ledger, runtime, now_ms)
-    actions += skip_refused(master_prompt_stall.run, slug, config, store, ledger, runtime, now_ms)
+    actions.extend(master_steps.run_masters(locals()))
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
@@ -393,19 +382,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         actions += skip_refused(_collect_acks, slug, config, store, ledger, runtime, doc, now_ms)
         if not sleeping:
             actions += skip_refused(_codex_hook_order)
-            actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
-            actions += skip_refused(
-                tick_master.run,
-                slug,
-                config,
-                store,
-                ledger,
-                runtime,
-                now_ms,
-                lambda: _master(slug, config, store, runtime, now_ms),
-            )
-            actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
-            actions += skip_refused(master_seat_alarm.run, slug, store, ledger, runtime, doc)
+            actions.extend(master_steps.run_seats(locals()))
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE and panic.state(store) is None:
@@ -416,9 +393,8 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
                 with _placement_pass(runtime):
                     actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
                 store.redis.delete(due)
-        actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
-    actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
-    actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
+        actions.extend(master_steps.run_dispatch(locals()))
+    actions.extend(master_steps.run_watch(locals()))
     actions += run_group("close", config=config, **passing)
     return (
         actions

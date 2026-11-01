@@ -9,13 +9,15 @@ from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
 
 PASS = Domain("pass")
+LANE = Lane("tick")
+BUDGET_S = 600.0
 
 
 class CallStep:
     """A step running one call of the tick module with the pass state and writing the actions it returned."""
 
-    lane = Lane("tick")
-    budget_s = 600.0
+    lane = LANE
+    budget_s = BUDGET_S
     interval_s = 0.0
     needs: frozenset[str] = frozenset()
 
