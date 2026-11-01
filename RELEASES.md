@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.547 · 2026-11-01
+
+### 2026-11-01 · fcfc09affd1d · #9217 · @agenticore-app
+
+**Confirm the frozen controller termination from the container runtime in kind smoke**
+
+This fixes an intermittent kind smoke failure where, after the liveness probe restarted a frozen controller, Kubernetes sometimes reports a new container with an empty `lastState`, so the script couldn't confirm the old container's termination. `kind-smoke.sh` now polls for up to a minute, falling back to the kind node's container runtime (`crictl ps -a`) to check if the old container exited or was removed, before releasing the tick lock. The failure message also now reports the current id, last terminated id, and runtime state, making future diagnosis faster and reducing flaky red runs on the helm-kind smoke job.
+
 ## v2.17.544 · 2026-11-01
 
 ### 2026-11-01 · e79ef3b830de · #9196 · @nestorcolt
