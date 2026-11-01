@@ -97,7 +97,7 @@ from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
-from scripts.tick import engine
+from scripts.tick import engine, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 
@@ -218,9 +218,10 @@ class _FixedView:
         return self.values.get((domain, key))
 
 
-def run_group(name: str) -> None:
-    """Run the registered steps of tick group ``name`` in legacy order under the group budget."""
-    engine.run_group(name, Context(_FixedView({}), Deadline.after(GROUP_BUDGET_S)))
+def run_group(name: str, **state: object) -> list[str]:
+    """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
+    view = _FixedView({(steps.PASS, key): value for key, value in state.items()})
+    return steps.actions(engine.run_group(name, Context(view, Deadline.after(GROUP_BUDGET_S))))
 
 
 @reaper.scanning_pass
