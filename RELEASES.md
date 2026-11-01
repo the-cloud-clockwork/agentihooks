@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.544 · 2026-11-01
+
+### 2026-11-01 · e79ef3b830de · #9196 · @nestorcolt
+
+**Build every swarm gh command through the GitHub adapter and ban the builder outside it**
+
+This change routes every swarm gh command through the GitHub adapter's command builder, and adds a Semgrep rule that forbids using that builder anywhere outside the adapter, with a shrinking allowlist covering thirteen caller files plus the adapter itself. Publish's merged-branch read and the panic fix's branch read now go through the source control port, so an unreadable fix branch correctly reports a failed panic cancel. Health checks still use gh pr checks pending commit-status support. This moves the project closer to eliminating hardcoded GitHub calls, per the adapter gate task.
+
 ## v2.17.542 · 2026-11-01
 
 ### 2026-11-01 · ea63bbb18ad8 · #9194 · @agenticore-app
