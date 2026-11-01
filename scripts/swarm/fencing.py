@@ -699,8 +699,6 @@ def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) ->
 
     The same transaction rewrites the document, so a write that read it before the move retries onto the records.
     """
-    from redis.exceptions import WatchError
-
     from scripts.swarm.store import SwarmError
 
     if not writers_upgraded:
@@ -710,25 +708,21 @@ def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) ->
     port = RedisRecords(store.redis)
     states = RedisStateStore(store.redis, BUCKET)
     empty: dict[str, dict[str, Record]] = {name: {} for name in (*LOADED, ARCHIVE)}
+
+    def plan(pipe: Any) -> tuple[Callable[[Any], object], FencedBatch] | None:
+        if port.layout(slug) == RECORDS:
+            return None
+        entry = _entry(states, store, slug)
+        current = int(pipe.get(states.revision_key) or 0)
+        doc = _decode(entry.value)
+        hydrate_archive(store, doc)
+        writes = _changes(copy.deepcopy(EMPTY), doc, empty)
+        writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
+        moved = _encode({**json.loads(entry.value), MOVED: RECORDS})
+        return (lambda staged: states.queue_write(staged, slug, moved, current)), FencedBatch(tuple(writes))
+
     for _ in range(ATTEMPTS):
-        with store.redis.pipeline() as pipe:
-            try:
-                pipe.watch(states.watch_key, states.revision_key, port.revision_key(slug))
-                if port.layout(slug) == RECORDS:
-                    pipe.unwatch()
-                    return 0
-                entry = _entry(states, store, slug)
-                current = int(pipe.get(states.revision_key) or 0)
-                doc = _decode(entry.value)
-                hydrate_archive(store, doc)
-                writes = _changes(copy.deepcopy(EMPTY), doc, empty)
-                writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
-                moved = _encode({**json.loads(entry.value), MOVED: RECORDS})
-                pipe.multi()
-                states.queue_write(pipe, slug, moved, current)
-                port.queue_batch(pipe, slug, FencedBatch(tuple(writes)))
-                pipe.execute()
-                return len(writes)
-            except WatchError:
-                continue
+        written = port.move(slug, (states.watch_key, states.revision_key), plan)
+        if written is not None:
+            return written
     raise SwarmError(CONTENTION)

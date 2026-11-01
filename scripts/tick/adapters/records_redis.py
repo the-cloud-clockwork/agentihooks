@@ -1,7 +1,7 @@
 """Redis implementation of the fenced records port: per swarm hash tagged hashes written by one Lua script."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from scripts.tick.ports.records import FencedBatch, LeaseFence, Record, RevisionConflict, StaleLease
@@ -128,6 +128,34 @@ class RedisRecords:
         """Queues the fenced batch inside a watched transaction; its refusal surfaces when the transaction runs."""
         keys, args = self.batch_call(slug, batch)
         self._script(keys=keys, args=args, client=pipe)
+
+    def move(
+        self,
+        slug: str,
+        watched: Sequence[str],
+        plan: Callable[[Any], tuple[Callable[[Any], object], FencedBatch] | None],
+    ) -> int | None:
+        """Plans under a watch on watched and the record revision, then commits the plan's stage and batch at once.
+
+        Returns the batch size, 0 when the plan declines, or None when a watched key changed before the commit.
+        """
+        from redis.exceptions import WatchError
+
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(*watched, self.revision_key(slug))
+                planned = plan(pipe)
+                if planned is None:
+                    pipe.unwatch()
+                    return 0
+                stage, batch = planned
+                pipe.multi()
+                stage(pipe)
+                self.queue_batch(pipe, slug, batch)
+                pipe.execute()
+                return len(batch.writes)
+            except WatchError:
+                return None
 
     def fenced_batch(self, slug: str, batch: FencedBatch) -> int:
         """Checks the lease fence and every expected revision, then writes every record or none of them."""
