@@ -779,6 +779,7 @@ def _prompt_overrun(budget: PromptBudget) -> None:
 
 def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     from hooks.config import BROADCAST_ENABLED
+    from hooks.context import seat_notes
 
     run = budget.run
     run("secrets", _prompt_secrets, payload)
@@ -807,7 +808,7 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
         run("broadcasts", _prompt_broadcasts, session_id)
     run("refocus", _inject_refocus, session_id, "prompt")
     run("ledger_decision", _inject_ledger_decision, payload)
-    run("seat_notes", _prompt_seat_notes)
+    run("seat_notes", seat_notes.inject)
 
 
 def _prompt_quota_usage(session_id: str) -> None:
@@ -1106,15 +1107,6 @@ def _inject_ledger_decision(payload: dict) -> None:
     except Exception as e:
         log("ledger decision failed", {"error": str(e)})
 
-
-def _prompt_seat_notes() -> None:
-    from hooks.common import inject_context
-    from hooks.context.seat_notes import reminder
-    from hooks.targets.capabilities import can_inject_context
-
-    line = reminder()
-    if line and can_inject_context("UserPromptSubmit"):
-        inject_context(line, also_log=False, skip_compression=True, kind="refocus")
 
 
 def _inbox_blocks(session_id: str, cwd: str = "") -> list[str]:

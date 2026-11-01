@@ -17,3 +17,13 @@ def reminder(environ: Mapping[str, str] | None = None) -> str:
     if not slug or not naming.lane_of(env.get("AGENTIHOOKS_AGENT_NAME", "")):
         return ""
     return REMINDER.format(slug=slug)
+
+
+def inject() -> None:
+    """Inject the reminder on UserPromptSubmit through the target's context channel."""
+    from hooks.common import inject_context
+    from hooks.targets.capabilities import can_inject_context
+
+    line = reminder()
+    if line and can_inject_context("UserPromptSubmit"):
+        inject_context(line, also_log=False, skip_compression=True, kind="refocus")
