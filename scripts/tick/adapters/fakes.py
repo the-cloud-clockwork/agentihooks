@@ -1,9 +1,28 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools, Unsupported
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import SwarmConfig
+
+
+__all__ = [
+    "Call",
+    "FakeCoordination",
+    "FakeHost",
+    "FakeInbox",
+    "FakeLedger",
+    "FakeLlm",
+    "FakeMetrics",
+    "FakePort",
+    "FakeProcesses",
+    "FakeRuntime",
+    "FakeSourceControl",
+    "fake_tools",
+]
 
 
 @dataclass(frozen=True)
@@ -51,7 +70,7 @@ class FakeCoordination:
     def lock(self, name: str, *, deadline: Deadline) -> object:
         return _record(self, "lock", (name,), deadline)
 
-    def configure(self, settings: Mapping[str, object], *, deadline: Deadline) -> object:
+    def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object:
         return _record(self, "configure", (settings,), deadline)
 
     def capacity(self, *, deadline: Deadline) -> object:
@@ -190,8 +209,8 @@ class FakeHost:
         return _record(self, "run", (request,), deadline)
 
 
-def fake_tools() -> Tools:
-    return Tools(
+def fake_tools(effects: frozenset[str] | None = None) -> Tools:
+    tools = Tools(
         ledger=FakeLedger({"export": {}}),
         coordination=FakeCoordination(),
         source_control=FakeSourceControl({"queue_health": Unsupported("queue_health")}),
@@ -202,3 +221,4 @@ def fake_tools() -> Tools:
         metrics=FakeMetrics(),
         host=FakeHost(),
     )
+    return tools if effects is None else tools.for_effects(effects)

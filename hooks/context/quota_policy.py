@@ -164,15 +164,14 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
 
     limits = _load_native(session_id) or {}
     five, week = limits.get("five_hour") or {}, limits.get("seven_day") or {}
-    if not isinstance(five.get("used_percentage"), (int, float)) or not isinstance(
-        week.get("used_percentage"), (int, float)
-    ):
+    if not isinstance(week.get("used_percentage"), (int, float)):
         return None
+    five_used = five.get("used_percentage")
     now = time.time()
     five_reset = five.get("resets_at") if isinstance(five.get("resets_at"), (int, float)) else None
     week_reset = week.get("resets_at") if isinstance(week.get("resets_at"), (int, float)) else None
     return (
-        _effective(float(five["used_percentage"]), five_reset, now),
+        _effective(float(five_used), five_reset, now) if isinstance(five_used, (int, float)) else 0.0,
         _effective(float(week["used_percentage"]), week_reset, now),
         five_reset,
         week_reset,
@@ -195,9 +194,9 @@ def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "Prob
             newest[result.account] = (observed_at, result)
     candidates = []
     for observed_at, result in newest.values():
-        five = _effective(result.five_hour.used, result.five_hour.resets_at, now)
+        five = _effective(result.five_hour.used, result.five_hour.resets_at, now) or 0.0
         week = _effective(result.seven_day.used, result.seven_day.resets_at, now)
-        if five is None or week is None or result.provider_status == "rejected":
+        if week is None or result.provider_status == "rejected":
             continue
         fresh = session_bands.fresh(observed_at, now)
         cap = session_bands.cap(100.0 - five, 100.0 - week) if fresh else None
