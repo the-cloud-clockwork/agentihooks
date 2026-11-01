@@ -123,6 +123,7 @@
         "tests/tick/test_source_control.py::test_github_change_reads_an_empty_body_as_no_text",
         "tests/tick/test_source_control.py::test_a_change_record_defaults_to_no_body_and_not_a_draft",
         "tests/tick/test_source_control.py::test_github_merged_at_reads_the_first_merged_change_carrying_a_commit",
+        "tests/tick/test_source_control.py::test_github_open_changes_reads_each_open_pull_request_check_rollup",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
       ]
     },

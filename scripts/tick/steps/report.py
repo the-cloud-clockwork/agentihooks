@@ -200,6 +200,11 @@ def _snapshot_job(cli: Any, get: Get) -> None:
     get("box")["started"] = timing.call(cli.snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
 
 
+def _last_tick(cli: Any, get: Get) -> None:
+    store = get("store")
+    store.redis.set(store.key(get("slug"), "last-tick"), cli.now_ms())
+
+
 def _heartbeat(cli: Any, get: Get) -> None:
     tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))  # pyright: ignore[reportUnknownMemberType]
 
@@ -215,16 +220,17 @@ STEPS = (
     CallStep("waits end", "wrapper events", 40, held(_waits_end)),
     CallStep("merge pass", "wrapper events", 50, held(_merge_pass)),
     CallStep("stall watch", "wrapper events", 60, held(_stall_watch)),
-    CallStep("overrun pass", "wrapper events", 70, held(_overrun)),
+    CallStep("overrun pass", "wrapper events", 70, held(_overrun), frozenset({"stall watch"})),
     CallStep("quiet pass", "wrapper events", 80, held(_quiet)),
     CallStep("doc report", "wrapper events", 90, held(_doc_report)),
     CallStep("priorities sweep", "wrapper events", 100, held(_priorities)),
     CallStep("health findings", "wrapper events", 110, held(_health_findings)),
-    CallStep("findings pass", "wrapper events", 120, held(_findings_pass)),
-    CallStep("metrics record", "wrapper metrics", 10, held(_metrics)),
+    CallStep("findings pass", "wrapper events", 120, held(_findings_pass), frozenset({"health findings"})),
+    CallStep("metrics record", "wrapper metrics", 10, held(_metrics), frozenset({"health findings"})),
     CallStep("bottleneck status", "wrapper metrics", 20, held(_bottleneck_status)),
     CallStep("inbox wake", "wrapper metrics", 30, held(_inbox_wake)),
     CallStep("snapshot job", "wrapper metrics", 40, held(_snapshot_job)),
+    CallStep("last tick", "wrapper metrics", 50, held(_last_tick)),
     CallStep("heartbeat", "after", 10, held(_heartbeat)),
     CallStep("status publish", "wrapper status", 10, held(_status_publish)),
 )
