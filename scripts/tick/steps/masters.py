@@ -102,62 +102,89 @@ def _master_wake(tick: Any, get: Get) -> Any:
 
 
 def _retire_idle_master(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("store"), get("ledger"), get("runtime"), get("rows"), get("now_ms"))
-    return tick.skip_refused(lifetime.retire_idle_master, *args)
+    return tick.skip_refused(
+        lifetime.retire_idle_master,
+        get("slug"),
+        get("store"),
+        get("ledger"),
+        get("runtime"),
+        get("rows"),
+        get("now_ms"),
+    )
 
 
 def _master_stall(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms"))
-    return tick.skip_refused(master_stall.run, *args)
+    return tick.skip_refused(
+        master_stall.run, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
+    )
 
 
 def _prompt_stall(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms"))
-    return tick.skip_refused(master_prompt_stall.run, *args)
+    return tick.skip_refused(
+        master_prompt_stall.run, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
+    )
 
 
 def _master_down(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms"))
-    return tick.skip_refused(tick._master_down, *args)
+    return tick.skip_refused(
+        tick._master_down, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
+    )
 
 
 def _tick_master(tick: Any, get: Get) -> Any:
-    slug, config, store, runtime, now_ms = get("slug"), get("config"), get("store"), get("runtime"), get("now_ms")
     return tick.skip_refused(
         tick_master.run,
-        slug,
-        config,
-        store,
+        get("slug"),
+        get("config"),
+        get("store"),
         get("ledger"),
-        runtime,
-        now_ms,
-        lambda: tick._master(slug, config, store, runtime, now_ms),
+        get("runtime"),
+        get("now_ms"),
+        lambda: tick._master(get("slug"), get("config"), get("store"), get("runtime"), get("now_ms")),
     )
 
 
 def _master_scale(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("runtime"), get("doc"), get("now_ms"))
-    return tick.skip_refused(master_scale.run, *args)
+    return tick.skip_refused(
+        master_scale.run, get("slug"), get("config"), get("store"), get("runtime"), get("doc"), get("now_ms")
+    )
 
 
 def _seat_alarm(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("store"), get("ledger"), get("runtime"), get("doc"))
-    return tick.skip_refused(master_seat_alarm.run, *args)
+    return tick.skip_refused(
+        master_seat_alarm.run, get("slug"), get("store"), get("ledger"), get("runtime"), get("doc")
+    )
 
 
 def _dispatch_seat(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("runtime"), get("doc"), get("now_ms"), get("sleeping"))
-    return tick.skip_refused(dispatch_seat.run, *args)
+    return tick.skip_refused(
+        dispatch_seat.run,
+        get("slug"),
+        get("config"),
+        get("store"),
+        get("runtime"),
+        get("doc"),
+        get("now_ms"),
+        get("sleeping"),
+    )
 
 
 def _night_watch(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("store"), get("ledger"), get("runtime"), get("doc"), get("now_ms"), get("sleeping"))
-    return tick.skip_refused(tick._night_watch, *args)
+    return tick.skip_refused(
+        tick._night_watch,
+        get("slug"),
+        get("store"),
+        get("ledger"),
+        get("runtime"),
+        get("doc"),
+        get("now_ms"),
+        get("sleeping"),
+    )
 
 
 def _master_alarm(tick: Any, get: Get) -> Any:
-    slug, store = get("slug"), get("store")
-    return tick.skip_refused(master_alarm.run, slug, store, get("runtime"), tick_master.promoted(store, slug))
+    promoted = tick_master.promoted(get("store"), get("slug"))
+    return tick.skip_refused(master_alarm.run, get("slug"), get("store"), get("runtime"), promoted)
 
 
 STEPS = (
