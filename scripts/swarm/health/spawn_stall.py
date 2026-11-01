@@ -9,7 +9,7 @@ from scripts.hive import admission, placement_waits
 from scripts.hive.placement import LOCAL_FULL
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import blockers, capacity, freeze, panic, timing
+from scripts.swarm import blockers, capacity, freeze, master_pin, panic, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerGone
 from scripts.swarm.store import RedisStore
@@ -30,7 +30,7 @@ def save(store, slug: str, state: dict) -> None:
     store.redis.set(store.key(slug, "spawn-stall"), json.dumps(state))
 
 
-def eligible(store, slug: str, ledger, at: int, runtime, since: int | None = None) -> bool:
+def eligible(store: RedisStore, slug: str, ledger: Any, at: int, runtime: Any, since: int | None = None) -> bool:
     from scripts.swarm.tick import _ended
 
     config = store.config(slug)
@@ -56,7 +56,12 @@ def eligible(store, slug: str, ledger, at: int, runtime, since: int | None = Non
         host = capacity.granted(capacity.host_room(config, inputs), inputs.previous, inputs.now_ms)
         config, _ = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
-            config, inputs.observations, inputs.agents, demand, requirements, warned=inputs.warned
+            master_pin.with_declared(config, os.environ),
+            inputs.observations,
+            inputs.agents,
+            demand,
+            requirements,
+            warned=inputs.warned,
         )
         decision["host"] = host
     if (decision.get("host") or {}).get("room") == 0:

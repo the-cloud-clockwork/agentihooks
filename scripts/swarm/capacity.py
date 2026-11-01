@@ -9,7 +9,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
-from scripts.swarm import autoscale, freeze, host_budget
+from scripts.swarm import autoscale, freeze, host_budget, master_pin
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
@@ -551,8 +551,10 @@ def _without_work(lanes: list[str]) -> str:
 
 def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list, warned: dict) -> list:
     seats = offered(observations, warned)
-    master = config.lanes.get("master")
+    master = master_pin.lane(config)
     if master is None or master.get("agent") == "codex":
+        return seats
+    if master_pin.pinned(master, observations, agents, config.slug):
         return seats
     if any(
         agent.lane == "master" and agent.state != "finished" and (agent.harness, agent.account) not in warned
