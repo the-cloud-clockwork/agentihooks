@@ -196,6 +196,27 @@ def test_a_spawn_after_the_lease_was_stolen_mid_pass_refuses_to_launch(store, cl
     assert launched == ["one"]
 
 
+@pytest.mark.parametrize("operation", ["collect", "expire"])
+def test_a_hive_launch_call_after_the_lease_was_stolen_mid_pass_is_refused(store, clock, monkeypatch, operation):
+    store.create(SwarmConfig("sw", ".", 1, 0))
+    held = lease.acquire(store, "sw", "home")
+    monkeypatch.setattr(lease, "beat", lambda store, slug, held, stop: None)
+    calls = []
+    launch = SimpleNamespace(
+        collect=lambda request: calls.append(request.name) or SimpleNamespace(ok=True, value="placed"),
+        expire=lambda request: calls.append(request.name) or "expired",
+    )
+    runtime = controller.FencedRuntime(store, "sw", held, SimpleNamespace(hive_launch=launch), "local")
+    with lease.held_pass(store, "sw", held):
+        assert getattr(runtime, operation)(store.config("sw"), "eng", "one", {"id": "t"}) in ("placed", "expired")
+        clock[0] += lease.ttl_ms()
+        lease.acquire(store, "sw", "other")
+        with pytest.raises(SwarmError) as error:
+            getattr(runtime, operation)(store.config("sw"), "eng", "two", {"id": "t"})
+    assert str(error.value) == "the controller lease is stale"
+    assert calls == ["one"]
+
+
 def test_a_pass_fences_each_ledger_write_with_the_lease_of_the_swarm_that_owns_it(store, clock):
     for slug in ("sw", "peer", "idle"):
         store.create(SwarmConfig(slug, ".", 1, 0))

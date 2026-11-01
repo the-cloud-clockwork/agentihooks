@@ -257,6 +257,7 @@ class FencedRuntime:
         from scripts.swarm.tick import SpawnError
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
         outcome = self.runtime.hive_launch.collect(request)
         if not outcome.ok:
@@ -266,6 +267,7 @@ class FencedRuntime:
     def expire(self, config, lane, name, task):
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
         return self.runtime.hive_launch.expire(request)
 
