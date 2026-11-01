@@ -4342,6 +4342,20 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 
 ## The minute tick
 
+`agentihooks swarm <id> tick-report --passes 100` reports the latest retained
+passes with per step count, median, p95 and CPU share, plus pass p95 and the
+idle gaps between consecutive passes. CPU share uses the sum of own and reaped
+child CPU across retained steps, excluding the whole pass measurement. Nested
+step measurements can overlap. The report identifies passes with no retained
+steps; a partially trimmed pass can contain only its last steps.
+
+The tick retains at most 50,000 finished step records in its per swarm
+`tick:steps` stream and 50,000 pass records in `tick:passes`. Pass records carry
+start and end times, elapsed duration, active agent count, failed steps and
+outcome. Recording runs in the tick's instrumentation finally context, including
+early returns and exceptions. Redis recording failures leave a journal event
+and preserve the tick's result or exception.
+
 An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
 registers it and starts the scheduler runner; each tick pass re-registers it if it is gone. The
 `agentihooks-swarm` systemd timer and service an older install left are deleted only after a scheduler running the

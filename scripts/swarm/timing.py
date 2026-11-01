@@ -4,7 +4,7 @@ import resource
 import sys
 import time
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
@@ -16,7 +16,7 @@ from scripts.swarm import tick_stop
 
 PASS: ContextVar[dict[str, Any] | None] = ContextVar("tick_pass", default=None)
 STORE: ContextVar[Any] = ContextVar("tick_store", default=None)
-SWARM = ContextVar("tick_swarm", default=None)
+SWARM: ContextVar[str | None] = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
 ON_FAILURE = ContextVar("tick_failure", default=None)
 AGENT = ContextVar("tick_agent", default=None)
@@ -69,12 +69,17 @@ def append_record(store: Any, slug: str, stream: str, record: dict[str, Any]) ->
 
 
 @contextmanager
-def pass_record(store: Any, slug: str) -> Iterator[None]:
+def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     if store is None:
         yield
         return
     started = time.perf_counter()
-    record = {"pass_id": uuid4().hex, "start_ms": time.time_ns() // 1000000, "failed_steps": [], "outcome": "success"}
+    record: dict[str, Any] = {
+        "pass_id": uuid4().hex,
+        "start_ms": time.time_ns() // 1000000,
+        "failed_steps": [],
+        "outcome": "success",
+    }
     token = PASS.set(record)
     try:
         yield

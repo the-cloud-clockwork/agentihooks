@@ -99,3 +99,64 @@ def test_tick_pass_is_recorded_even_when_a_step_raises(outcome: str) -> None:
     steps = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
     assert [row["step"] for row in steps] == ["launch", "run_tick"]
     assert all(row["pass_id"] == record["pass_id"] for row in steps)
+
+
+def test_pass_records_exact_clocks_active_agents_and_cap() -> None:
+    from types import SimpleNamespace
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    agents = [SimpleNamespace(state="working"), SimpleNamespace(state="idle"), SimpleNamespace(state="finished")]
+    with (
+        patch.object(timing.time, "time_ns", side_effect=[1000000000, 3000000000]),
+        patch.object(timing.time, "perf_counter", side_effect=[2.0, 8.0]),
+        patch.object(timing, "uuid4", return_value=SimpleNamespace(hex="identity")),
+        patch.object(store, "agents", return_value=agents) as listing,
+        patch.object(store.redis, "xadd", wraps=store.redis.xadd) as append,
+        timing.pass_record(store, "sw"),
+    ):
+        assert timing.PASS.get()["pass_id"] == "identity"
+    listing.assert_called_once_with("sw")
+    append.assert_called_once_with(
+        store.key("sw", "tick:passes"),
+        {
+            "record": json.dumps(
+                {
+                    "pass_id": "identity",
+                    "start_ms": 1000,
+                    "failed_steps": [],
+                    "outcome": "success",
+                    "end_ms": 3000,
+                    "wall_s": 6.0,
+                    "agent_count": 2,
+                }
+            )
+        },
+        maxlen=50000,
+        approximate=False,
+    )
+    assert timing.PASS.get() is None
+
+
+def test_record_storage_failure_is_reported_without_masking_the_tick(capsys: pytest.CaptureFixture[str]) -> None:
+    import fakeredis
+    from redis.exceptions import ConnectionError
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    with patch.object(store.redis, "xadd", side_effect=ConnectionError("private connection details")):
+        timing.append_record(store, "sw", "tick:steps", {"value": 1})
+    assert (
+        capsys.readouterr().err
+        == json.dumps({"event": "swarm_tick_record_failed", "slug": "sw", "stream": "tick:steps"}) + "\n"
+    )
+    with patch.object(store, "agents", side_effect=ConnectionError("private connection details")):
+        timing.finish_pass(store, "sw", {})
+    assert (
+        capsys.readouterr().err
+        == json.dumps({"event": "swarm_tick_record_failed", "slug": "sw", "stream": "tick:passes"}) + "\n"
+    )

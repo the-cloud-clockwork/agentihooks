@@ -14,7 +14,7 @@ def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict
     ordered = sorted(passes, key=lambda row: row["start_ms"])
     identities = {row["pass_id"] for row in ordered}
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    present = set()
+    present: set[str] = set()
     orphan = 0
     for row in steps:
         if row["pass_id"] not in identities:
@@ -47,7 +47,7 @@ def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict
 
 
 def history(store: Any, slug: str, stream: str, limit: int) -> list[dict[str, Any]]:
-    records = []
+    records: list[dict[str, Any]] = []
     cursor = "+"
     for offset in range(0, limit, 256):
         rows = store.redis.xrevrange(store.key(slug, stream), max=cursor, count=min(256, limit - offset))

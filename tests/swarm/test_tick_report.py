@@ -82,3 +82,50 @@ def test_tick_report_parser_preserves_pass_limit() -> None:
     assert args.handler is tick_report.command
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["sw", "tick-report", "--passes", "0"])
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "50001"])
+def test_report_rejects_out_of_range_history(value: str) -> None:
+    import argparse
+
+    with pytest.raises(argparse.ArgumentTypeError) as caught:
+        tick_report.pass_count(value)
+    assert str(caught.value) == "passes must be between 1 and 50000"
+
+
+def test_report_history_crosses_page_boundaries() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    for number in range(257):
+        store.redis.xadd(store.key("sw", "tick:steps"), {"record": json.dumps({"n": number})})
+    rows = tick_report.history(store, "sw", "tick:steps", 257)
+    assert rows == [{"n": number} for number in reversed(range(257))]
+    assert tick_report.history(store, "sw", "tick:steps", 1) == [{"n": 256}]
+    assert tick_report.pass_count("1") == 1
+    assert tick_report.pass_count("50000") == 50000
+
+
+def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixture[str]) -> None:
+    import argparse
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    row = {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}
+    store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps(row)})
+    store.redis.xadd(store.key("sw", "tick:steps"), {"record": json.dumps(step("a", "launch", 1, 1, 0))})
+    tick_report.command(store, argparse.Namespace(slug="sw", passes=1))
+    assert capsys.readouterr().out == (
+        "Tick report: 1 recorded passes\n"
+        "Pass p95: 1.000s\n"
+        "Gap p95: n/a; largest gap: n/a\n"
+        "Passes without retained steps: 0\n"
+        "Step  Count  Median  P95  CPU share\n"
+        "launch  1  1.000s  1.000s  100.00%\n"
+        "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"
+    )
