@@ -30,43 +30,50 @@ that patch a function on `scripts.swarm.tick` still reach it.
 
 ## Pass state
 
-The tick builds one state dictionary after it reads the ledger and passes it to
-every group site:
+The tick builds one state dictionary at the start of the pass and adds the
+ledger values after the `observe` group reads them. Every group site receives it:
 
 | Key | Value |
 | --- | --- |
 | `slug`, `store`, `ledger`, `runtime` | The swarm and its collaborators |
-| `rows` | The ledger tasks keyed by id |
-| `doc` | The ledger state after `freeze.watched` |
+| `rows` | The ledger tasks keyed by id, from the `observe` group |
+| `doc` | The ledger state, from the `observe` group |
 | `now_ms` | The pass time |
-| `due` | The Redis key of the swarm's `spawn-due` marker |
+| `due` | The Redis key of the swarm's `spawn-due` marker, added after the `observe` group |
 | `box` | The exception holder described under [Exceptions](#exceptions) |
 | `config` | The swarm config, passed at each site because a pass can change it |
 | `sleeping` | Passed only at the acks site |
 
 ## Groups and their sites
 
-The groups run in this order in one pass. Groups added by this change are in
-bold; the others hold steps from earlier changes or none yet.
+The groups run in this order in one pass. Groups that hold the task, planning
+and placement steps are in bold; the others hold steps from other changes.
 
 | Order | Group | Site in the pass | Steps |
 | --- | --- | --- | --- |
-| 1 | `start` | First line of the pass | |
-| 2 | `observe` | After a stopped swarm is woken | |
-| 3 | **`due placement`** | After the ledger read, only when the swarm is `running`, not on the events engine, not sleeping, and the `spawn-due` marker exists | due spawn |
-| 4 | `agents` | After the launch checks and verification | reap, recover outages, strays, failed panes |
-| 5 | `masters` | After the agents | |
-| 6 | `tasks` | After the drained swarm check | orphans |
-| 7 | **`task passes`** | After the fleet red notice pass | run window, verification notices, size pass, grouping release, dispatcher group |
-| 8 | `place` | First line inside the placing lock | |
-| 9 | **`placement acks`** | After the time left refresh, inside the placing lock | collect acks, codex hook order |
-| 10 | **`placement`** | After the master seat alarm, inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
-| 11 | `close` | Last line of the pass | conversations, session models, handoff transfers, settle, close space |
+| 1 | `start` | First line of the pass | config load, stopped branch |
+| 2 | `observe` | After a stopped swarm is woken | pane evidence through verify, including **spawn due** at order 70 |
+| 3 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |
+| 4 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
+| 5 | `tasks` | After the drained swarm check | orphans |
+| 6 | **`task passes`** | After the fleet red notice pass | run window, verification notices, size pass, grouping release, dispatcher group |
+| 7 | `place` | First line inside the placing lock | |
+| 8 | **`placement acks`** | After the time left refresh, inside the placing lock | collect acks, codex hook order |
+| 9 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
+| 10 | **`placement`** | After the master seats, inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
+| 11 | `dispatch seat` | Last site inside the placing lock | dispatch seat |
+| 12 | `master watch` | After the placing lock | night watch, master alarm |
+| 13 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
+
+The group order and the context each site hands its steps are covered in
+[Tick adapters](tick-adapters.md#empty-registry-integration).
 
 ## The moved steps
 
 Each step makes the same call with the same arguments, through `skip_refused`,
-as the hand written line it replaced. Where the old line carried a condition,
+as the hand written line it replaced. The call looks the module up on the tick
+module (`tick.claim_hold`, `tick.bottleneck_remedy`, `tick.panic`), so a test
+that patches one of those names on `scripts.swarm.tick` reaches the step. Where the old line carried a condition,
 the step checks it and returns no actions when it does not hold.
 
 ### Task passes (`scripts.tick.steps.tasks`)
@@ -83,7 +90,6 @@ the step checks it and returns no actions when it does not hold.
 
 | Group | Order | Step | Call and condition |
 | --- | --- | --- | --- |
-| `due placement` | 10 | due spawn | `_spawn` under the `PLACING` lock and the placement pass. The site sets the `spawn-due` marker to the pass time after the group, whether it ran or not |
 | `placement acks` | 10 | collect acks | `_collect_acks`, every pass |
 | `placement acks` | 20 | codex hook order | `_codex_hook_order`, skipped while the swarm sleeps |
 | `placement` | 10 | rank pass | `dispatcher.rank_pass` |
@@ -91,11 +97,14 @@ the step checks it and returns no actions when it does not hold.
 | `placement` | 30 | preempt | `preempt.run` with the seats view, only when the swarm is `running`, not on the events engine and no panic is set |
 | `placement` | 40 | spawn | `_spawn` under the placement pass, only when the swarm is `running`, `readiness.tick_places` allows the engine to place and no panic is set. After it spawns, it deletes the `spawn-due` marker |
 
-The `spawn-due` marker pairs the due spawn with the spawn step. Each pass that
-reaches the due placement site sets the marker; the spawn step deletes it at the
-end of the pass. A marker still present at the next pass means the previous
-pass never reached its spawn, so the due spawn places first, before the agents
-and task groups can use up the pass.
+The `spawn-due` marker pairs the spawn step with the `spawn due` step of the
+`observe` group (`scripts.tick.steps.observe`, calling `tick.step_spawn_due`).
+When the swarm is `running`, not on the events engine and not sleeping, the
+spawn due step runs `_spawn` under the `PLACING` lock and the placement pass if
+the marker exists, then sets the marker to the pass time. The spawn step
+deletes it after it spawns. A marker still present at the next pass means the
+previous pass never reached its spawn, so the spawn due step places first,
+before the agents and task groups can use up the pass.
 
 ### Close (`scripts.tick.steps.tasks`)
 
@@ -105,8 +114,9 @@ and task groups can use up the pass.
 | 210 | close space | `_close_space` |
 
 The agent steps in `close` (orders 100 to 120) run before them. A stopped swarm
-that is not woken still returns early with its own hand written
-`_close_space` call and never reaches the `close` group.
+that is not woken ends the pass in the `stopped branch` step of the `start`
+group, which makes its own `_close_space` call, and never reaches the `close`
+group.
 
 ## Exceptions
 
@@ -158,9 +168,10 @@ registry.register(CallStep("example", TASK_PASSES, 60, held(_example)))
 | Test | What it holds |
 | --- | --- |
 | `tests/tick/test_tasks.py` | The task passes and close steps make the old calls in order, and a held exception skips the rest and is raised at the site |
-| `tests/tick/test_place.py` | Group membership and orders; the due spawn under the placing lock and pass; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
+| `tests/tick/test_place.py` | Group membership and orders; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
-| `tests/tick/test_agents.py` | The agent steps, and that settle and close space follow them in `close` |
+| `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
+| `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space |
 
 ## Troubleshooting
 
@@ -168,6 +179,6 @@ registry.register(CallStep("example", TASK_PASSES, 60, held(_example)))
 | --- | --- |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` or `Unordered writers` | Two registered steps share a name. Every `CallStep` writes only its own `actions:<name>` domain, so a new name clears both |
-| Spawning happens before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
+| Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
 | A tick pass raised and later steps of the same group did not run | Expected: the first moved step that raised holds the exception and the rest of the group's moved steps skip until it is raised at the site |
