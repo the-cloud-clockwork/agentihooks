@@ -207,19 +207,33 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
+@dataclass(frozen=True)
+class TickPass:
+    """The pass state a tick group site hands its steps."""
+
+    slug: str
+    store: RedisStore
+    ledger: Any
+    runtime: Any
+    now_ms: int
+    box: dict[str, Any] = field(default_factory=dict)
+    config: SwarmConfig | None = None
+    rows: dict[str, dict] | None = None
+
+
 class _PassView:
     """A view holding the pass state a tick group site hands its steps."""
 
-    def __init__(self, state: dict[str, object]) -> None:
+    def __init__(self, state: TickPass | None) -> None:
         """Keep the pass state of the group site."""
         self._state = state
 
     def read(self, domain: Domain, key: str) -> object | None:
         """Return the pass state under ``key``, nothing for any other domain."""
-        return self._state.get(key) if domain == steps.PASS else None
+        return getattr(self._state, key, None) if domain == steps.PASS else None
 
 
-def run_group(name: str, **state: object) -> list[str]:
+def run_group(name: str, state: TickPass | None = None) -> list[str]:
     """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
     return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
 
@@ -349,14 +363,14 @@ def _step_verify(
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
-    box: dict[str, Any] = {}
-    passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
-    actions = run_group("start", **passing)
+    passing = TickPass(slug, store, ledger, runtime, now_ms)
+    box = passing.box
+    actions = run_group("start", passing)
     observe_steps.raise_held(box)
     if "finished" in box:
         return actions + box["finished"]
     store.redis.delete(store.key(slug, SPAWN_HOLD))
-    actions += run_group("observe", **passing)
+    actions += run_group("observe", passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
     run_group("agents")

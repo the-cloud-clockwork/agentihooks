@@ -76,10 +76,13 @@ def test_each_group_reads_its_pass_state_under_the_group_budget(
 
 
 def test_a_pass_view_answers_only_pass_state_keys_it_holds() -> None:
-    view = tick_module._PassView({"slug": "sw"})
+    view = tick_module._PassView(tick_module.TickPass("sw", None, None, None, 7))
     assert view.read(PASS, "slug") == "sw"
-    assert view.read(PASS, "now_ms") is None
+    assert view.read(PASS, "now_ms") == 7
+    assert view.read(PASS, "config") is None
+    assert view.read(PASS, "missing") is None
     assert view.read(Domain("tasks"), "slug") is None
+    assert tick_module._PassView(None).read(PASS, "slug") is None
 
 
 def test_a_stopped_swarm_runs_only_the_start_group(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
