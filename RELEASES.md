@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.531 · 2026-11-01
+
+### 2026-11-01 · 83dbf1e5bd46 · #9157 · @nestorcolt
+
+**fix: make agentienv's multiline check shell-neutral so zsh can source the block**
+
+This fix replaces the multiline-value check in the agentienv rc block, which previously relied on bash-only features (`compgen` and `${!name}`), with a portable awk one-liner that scans exported environment variables for embedded newlines. The old check broke on macOS's default zsh shell, causing a "command not found" error when sourcing the block, as seen in the Smith matrix run against v2.17.527. The new approach works identically under bash and zsh, keeps the existing filtering and warning logic intact, and never exposes value text outside awk. New tests confirm the check is shell-neutral and that zsh can source it without errors.
+
 ## v2.17.530 · 2026-11-01
 
 ### 2026-11-01 · 6f5b56f55f75 · #9149 · @nestorcolt
