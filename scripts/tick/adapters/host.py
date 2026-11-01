@@ -2,10 +2,14 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from scripts.tick.adapters.inbox import check
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Unsupported
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
 
 __all__ = ["JobHost", "local_host"]
 
@@ -27,7 +31,7 @@ class JobHost:
         return Unsupported(name) if job is None else job(request)
 
 
-def local_host(store: object, slug: str, environ: Mapping[str, str]) -> JobHost:
+def local_host(store: "RedisStore", slug: str, environ: Mapping[str, str]) -> JobHost:
     """Wire the controller host sample and the refresh and snapshot jobs of one swarm."""
     from scripts.swarm import host_budget, refresh_job, snapshot_job
 
