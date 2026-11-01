@@ -555,6 +555,8 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
     if master is None or master.get("agent") == "codex":
         return seats
     declared = master.get("account", "")
+    if declared and not _read(observations, declared):
+        return seats
     if any(
         agent.lane == "master"
         and agent.state != "finished"
@@ -564,6 +566,14 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
         return seats
     reserved = pick(seats, lambda seat: seat.harness == "claude" and seat.kind == SUBSCRIPTION)
     return [replace(seat, cap=seat.cap - 1) if seat == reserved else seat for seat in seats]
+
+
+def _read(observations: list[Account], declared: str) -> bool:
+    """Whether the declared Claude master account has a quota reading, the only state a successor can leave it on."""
+    return any(
+        (row.harness, row.name) == ("claude", declared) and (row.five_left is not None or row.week_left is not None)
+        for row in observations
+    )
 
 
 def _pinned(slug: str, agent: Any, declared: str) -> bool:

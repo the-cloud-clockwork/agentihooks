@@ -992,6 +992,23 @@ def test_a_warned_master_pinned_to_its_declared_account_holds_no_seat(declared, 
     assert decision["effective"] == {"eng": expected, "ci": 0, "plan": 0}
 
 
+@pytest.mark.parametrize(
+    ("observed", "expected"),
+    [
+        ([account("open")], 3),
+        ([account("open"), capacity.Account("claude", "main", "UNKNOWN", 0, None, None)], 3),
+        ([account("open"), capacity.Account("claude", "main", "UNKNOWN", 0, None, 40)], 2),
+        ([account("open"), account("main", cap=0, harness="codex")], 3),
+        ([account("open"), account("main", cap=0)], 2),
+    ],
+)
+def test_a_declared_master_account_without_a_quota_reading_holds_no_seat(observed, expected):
+    lanes = {"master": {"agent": "claude", "account": "main"}}
+    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes=lanes)
+    decision = capacity.calculate(config, observed, [])
+    assert decision["effective"]["eng"] == expected
+
+
 @pytest.mark.parametrize(("declared", "expected"), [("warned", 3), ("open", 2)])
 def test_runtime_capacity_reads_the_declared_master_account(tmp_path, monkeypatch, declared, expected):
     from scripts.routing.master_account import MasterAccount
