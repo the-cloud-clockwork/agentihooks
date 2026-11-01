@@ -59,6 +59,8 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     if not outcome:
         return StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
     found = outcome[0]
+    if isinstance(found, BaseException) and not isinstance(found, (Exception, SystemExit)):
+        raise found
     if isinstance(found, BaseException):
         error = f"{type(found).__module__}.{type(found).__qualname__}"
         return StepRecord(step.name, clock() - started, step.budget_s, error)
