@@ -28,7 +28,6 @@ from scripts.swarm import (
 )
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
-from scripts.tick.adapters.github import command
 
 AWAITING = "merge"
 FIX = claim_order.FIX
@@ -113,7 +112,7 @@ def check(
             f"this swarm runs at {autonomy} autonomy, where the operator approves each merge; "
             "follow the ship steps in your prompt"
         )
-    url = row.get("pr_url")
+    url = str(row.get("pr_url") or "")
     if not url:
         raise SwarmError("record the pull request with swarm pr before swarm ready")
     pull = github(url)
@@ -123,10 +122,13 @@ def check(
         raise SwarmError(f"pull request {url} is merged; close the task with swarm done")
     if pull.state != "OPEN":
         raise SwarmError(f"pull request {url} is {pull.state.lower()}; swarm ready carries an open pull request")
-    draft = stack.shell(command(["pr", "view", url, "--json", "isDraft", "--jq", ".isDraft"]))
-    if draft.returncode != 0:
-        raise SwarmError(f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers")
-    if draft.stdout.strip() == "true":
+    try:
+        draft = stack.change(url, f"cannot read pull request {url}").draft
+    except SwarmError as exc:
+        raise SwarmError(
+            f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers"
+        ) from exc
+    if draft:
         raise SwarmError(f"pull request {url} is a draft; mark it ready for review with gh pr ready first")
     staged_compatibility.require(url, pull.head, pull.body)
     top = _checkout(url, pull.head, previous)

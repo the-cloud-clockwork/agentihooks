@@ -121,6 +121,8 @@ class GitHubSourceControl:
             body["merged"],
             body["html_url"],
             body["head"]["ref"],
+            body["body"] or "",
+            body["draft"],
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
