@@ -3,19 +3,21 @@
 import re
 
 from scripts.swarm import stack
-from scripts.tick.adapters.github import command
+from scripts.swarm.store import SwarmError
 from scripts.tick.deadline import Deadline
 
 KEYWORD = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+#(\d+)\b", re.IGNORECASE)
 COMMENT = "Closed by the swarm: pull request {url} merged into dev."
 
 
-def named(url):
-    done = stack.shell(command(["pr", "view", url, "--json", "body", "--jq", ".body"]))
-    if done.returncode != 0:
-        return [], [f"could not read the issues named by {url}: {done.stderr.strip()}"]
+def named(url: str) -> tuple[list[str], list[str]]:
+    """Return the issue urls a pull request body closes, or the action naming why the body could not be read."""
+    try:
+        body = stack.change(url, f"could not read the issues named by {url}").body
+    except SwarmError as exc:
+        return [], [str(exc)]
     repo = url.split("/pull/")[0]
-    return [f"{repo}/issues/{number}" for number in KEYWORD.findall(done.stdout)], []
+    return [f"{repo}/issues/{number}" for number in KEYWORD.findall(body)], []
 
 
 def settle(url, finished, rows):

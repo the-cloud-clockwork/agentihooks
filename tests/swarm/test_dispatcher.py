@@ -1111,14 +1111,15 @@ def test_a_failed_metrics_write_is_reported_as_an_action(store, home, monkeypatc
 def test_the_tick_runs_the_dispatcher_steps(monkeypatch):
     import inspect
 
-    from scripts.swarm import cli, tick
+    from scripts.swarm import tick
+    from scripts.tick.steps import report
 
     source = inspect.getsource(tick.tick)
     assert "grouping.group_pass" not in source and "dispatcher.group" in source
     placing = source[source.index("with PLACING:") :]
     assert placing.index("dispatcher.rank_pass") < placing.index("_spawn,")
-    run = inspect.getsource(cli.run_tick)
-    assert "priority_sweep.priority_pass" not in run and "dispatcher.priorities" in run
+    steps = inspect.getsource(report)
+    assert "priority_sweep.priority_pass" not in steps and "dispatcher.priorities" in steps
 
 
 def test_the_ledger_client_ranks_a_task_as_its_author(monkeypatch):
