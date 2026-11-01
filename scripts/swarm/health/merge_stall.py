@@ -1,10 +1,10 @@
 import json
+import re
 import subprocess
 import time
 from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
-from pathlib import Path
 
 from scripts.swarm import github_reads, timing
 from scripts.swarm.health.findings import Finding
@@ -15,6 +15,7 @@ HOUR_MS = 3_600_000
 CACHE_MS = 300_000
 RUNS = 10
 STREAK = 3
+REMOTE = re.compile(r"[a-z][a-z0-9+.-]*://|[\w-]+(\.[\w-]+)+/", re.IGNORECASE)
 FAILED = frozenset({"failure", "timed_out", "action_required", "startup_failure"})
 QUERY = """
 query($owner:String!,$name:String!,$cursor:String){
@@ -39,7 +40,7 @@ def request(repo: str, args: list[str]) -> dict:
             "swarm.merge_stall",
             args,
             subprocess.run,
-            cwd=repo if Path(repo).is_dir() else None,
+            cwd=None if REMOTE.match(repo) else repo,
             capture_output=True,
             text=True,
             timeout=min(20, remaining),
