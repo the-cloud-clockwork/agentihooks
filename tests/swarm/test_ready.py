@@ -868,9 +868,32 @@ MEMBER = "https://github.com/o/r/issues/7"
 CLOSED_BY = f"Closed by the swarm: pull request {URL} merged into dev."
 
 
+class IssuePort:
+    def __init__(self):
+        self.states = {ISSUE: "open", NAMED: "open"}
+        self.calls = []
+        self.fail = set()
+
+    def _answer(self, call, deadline, answer):
+        assert 59 < deadline.remaining <= stack.PORT_SECONDS
+        self.calls.append(call)
+        if call[0] in self.fail:
+            raise subprocess.CalledProcessError(1, [], stderr=" boom\n")
+        return answer
+
+    def issue_state(self, reference, *, deadline):
+        return self._answer(("issue_state", reference), deadline, self.states[reference])
+
+    def close_issue(self, reference, *, deadline):
+        return self._answer(("close_issue", reference), deadline, "closed")
+
+    def comment(self, reference, body, *, deadline):
+        return self._answer(("comment", reference, body), deadline, None)
+
+
 @pytest.fixture
 def issues(merging, monkeypatch):
-    states, body = {ISSUE: "OPEN", NAMED: "OPEN"}, "Fixes the parser.\n\nCloses #12\n"
+    port, body = IssuePort(), "Fixes the parser.\n\nCloses #12\n"
 
     def shell(argv):
         code = 1 if tuple(argv[:3]) in merging.shell.fail else 0
@@ -878,20 +901,17 @@ def issues(merging, monkeypatch):
             assert argv == BODY
             merging.shell.calls.append(argv)
             return subprocess.CompletedProcess(argv, code, stdout=body, stderr=" boom\n")
-        if argv[:3] == ["gh", "issue", "view"]:
-            assert argv[4:] == ["--json", "state", "--jq", ".state"]
-            merging.shell.calls.append(argv)
-            return subprocess.CompletedProcess(argv, code, stdout=states[argv[3]] + "\n", stderr=" boom\n")
         return merging.shell(argv)
 
     monkeypatch.setattr(stack, "shell", shell)
+    monkeypatch.setattr(stack, "source_control", lambda url: (port, url))
     merging.rows["t1"]["issue_url"] = ISSUE
     merging.pulls[URL] = MERGED
-    return states
+    return port
 
 
-def issue_writes(merging):
-    return [c for c in merging.shell.calls if c[:3] in (["gh", "issue", "comment"], ["gh", "issue", "close"])]
+def issue_writes(port):
+    return [call for call in port.calls if call[0] in ("close_issue", "comment")]
 
 
 def test_a_merged_ready_pull_request_closes_the_task_issue_and_the_issue_it_names(merging, issues):
@@ -901,11 +921,11 @@ def test_a_merged_ready_pull_request_closes_the_task_issue_and_the_issue_it_name
         f"closed issue {NAMED}",
         f"removed the worktree {TOP}",
     ]
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", ISSUE],
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
-        ["gh", "issue", "close", NAMED],
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", ISSUE),
+        ("comment", ISSUE, CLOSED_BY),
+        ("close_issue", NAMED),
+        ("comment", NAMED, CLOSED_BY),
     ]
 
 
@@ -913,49 +933,49 @@ def test_an_issue_linked_to_a_task_still_open_stays_open(merging, issues):
     merging.rows["t2"]["issue_url"] = NAMED
     merging.rows["t3"] = {"id": "t3", "state": "done", "issue_url": ISSUE}
     merging.run()
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", ISSUE],
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", ISSUE),
+        ("comment", ISSUE, CLOSED_BY),
     ]
 
 
 def test_an_issue_already_closed_gets_no_second_comment(merging, issues):
-    issues[ISSUE] = "CLOSED"
+    issues.states[ISSUE] = "closed"
     assert f"closed issue {ISSUE}" not in merging.run()
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", NAMED],
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", NAMED),
+        ("comment", NAMED, CLOSED_BY),
     ]
 
 
 def test_an_issue_the_swarm_cannot_close_is_reported_and_the_task_still_closes(merging, issues):
-    merging.shell.fail = (("gh", "issue", "close"),)
+    issues.fail = {"close_issue"}
     actions = merging.run()
     assert f"could not close issue {ISSUE}: boom" in actions
     assert merging.rows["t1"]["state"] == "done"
-    assert ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY] not in merging.shell.calls
+    assert ("comment", ISSUE, CLOSED_BY) not in issues.calls
 
 
 def test_a_closed_issue_whose_comment_fails_is_reported(merging, issues):
-    merging.shell.fail = (("gh", "issue", "comment"),)
+    issues.fail = {"comment"}
     actions = merging.run()
     assert f"closed issue {ISSUE}; could not comment on it: boom" in actions
     assert f"closed issue {ISSUE}" not in actions
 
 
 def test_an_issue_whose_state_cannot_be_read_is_reported_without_a_comment(merging, issues):
-    merging.shell.fail = (("gh", "issue", "view"),)
+    issues.fail = {"issue_state"}
     actions = merging.run()
     assert f"could not close issue {ISSUE}: boom" in actions and f"could not close issue {NAMED}: boom" in actions
-    assert issue_writes(merging) == []
+    assert issue_writes(issues) == []
 
 
 def test_a_pull_request_body_that_cannot_be_read_still_closes_the_task_issue(merging, issues):
     merging.shell.fail = (("gh", "pr", "view"),)
     assert f"could not read the issues named by {URL}: boom" in merging.run()
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", ISSUE],
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", ISSUE),
+        ("comment", ISSUE, CLOSED_BY),
     ]
 
 
@@ -963,13 +983,13 @@ def test_a_group_member_issue_closes_with_the_group(merging, issues):
     del merging.rows["t1"]["issue_url"]
     merging.rows["t1"]["group_members"] = ["t2"]
     merging.rows["t2"]["issue_url"] = MEMBER
-    issues[MEMBER] = "OPEN"
+    issues.states[MEMBER] = "open"
     merging.run()
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", MEMBER],
-        ["gh", "issue", "comment", MEMBER, "--body", CLOSED_BY],
-        ["gh", "issue", "close", NAMED],
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", MEMBER),
+        ("comment", MEMBER, CLOSED_BY),
+        ("close_issue", NAMED),
+        ("comment", NAMED, CLOSED_BY),
     ]
 
 
