@@ -5,6 +5,7 @@ import importlib.abc
 import importlib.machinery
 import json
 import sys
+import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import CodeType, ModuleType
@@ -68,7 +69,7 @@ def record(
     digest: str | None = None,
     files: dict[str, str] | None = None,
 ) -> None:
-    written = folder / f"{RECORD}.{pid}"
+    written = folder / f"{RECORD}.{pid}.{threading.get_ident()}"
     held: dict[str, object] = {
         "pid": pid,
         "stamp": stamp,
