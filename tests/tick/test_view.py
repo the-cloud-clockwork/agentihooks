@@ -162,7 +162,7 @@ def ledger_module() -> SimpleNamespace:
 
 
 def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from scripts.scheduler import service
     from scripts.swarm import ledger_client
@@ -174,6 +174,7 @@ def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
     assert view.start("sw") is None
     assert view.CURRENT.get() is None
     assert not view.view_file("http://ledger", "sw", tmp_path).exists()
+    assert capsys.readouterr().err == "ledger view of sw skipped: the ledger server refused named parts\n"
 
 
 def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

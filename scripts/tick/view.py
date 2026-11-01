@@ -6,6 +6,7 @@ window no longer covers the gap.
 """
 
 import hashlib
+import sys
 import urllib.error
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -77,6 +78,7 @@ def start(slug: str, service: bool = False) -> LedgerView | None:
     except urllib.error.HTTPError as exc:
         if exc.code != 400:
             raise
+        print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         view = None
     CURRENT.set(view)
     return view
