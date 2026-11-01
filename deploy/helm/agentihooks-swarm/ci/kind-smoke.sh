@@ -526,7 +526,7 @@ fi
 printf 'liveness probe restarted the frozen controller\n'
 frozen_runtime_state() {
   docker exec "$cluster-control-plane" crictl ps -a --id "${frozen_container#*://}" -o json \
-    | python3 -c 'import json, sys; found = json.load(sys.stdin)["containers"]; print(found[0]["state"] if found else "REMOVED")'
+    | python3 -c 'import json, sys; found = json.load(sys.stdin).get("containers") or []; print(found[0]["state"] if found else "REMOVED")'
 }
 confirmed=""
 for _ in $(seq 60); do
