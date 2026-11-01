@@ -17,10 +17,12 @@ from scripts.tick.ports.source_control import (
     CheckState,
     Comment,
     Merged,
+    OpenChange,
     QueueEntry,
     QueueHealth,
     RateLimit,
     RepositoryRun,
+    RollupCheck,
     Run,
     Tag,
 )
@@ -46,6 +48,24 @@ _QUEUE = """query($owner: String!, $name: String!, $base: String!) {
   }
 }"""
 
+_OPEN = """query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: OPEN, first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        url
+        commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+          __typename
+          ... on CheckRun { name conclusion startedAt completedAt }
+          ... on StatusContext { context state createdAt }
+        } } } } } }
+      }
+    }
+  }
+}"""
+
+_OPEN_PAGES = 2
+
 Git = Callable[..., subprocess.CompletedProcess[str]]
 
 _PAGE = 100
@@ -70,6 +90,20 @@ def _status_check(row: dict[str, Any]) -> CheckState:
     if row["state"] == "pending":
         return CheckState(row["context"], "pending", None, url)
     return CheckState(row["context"], "completed", row["state"], url)
+
+
+def _rollup_check(node: dict[str, Any]) -> RollupCheck:
+    """Read one rollup context: a check run by its conclusion and finish, a commit status by its state."""
+    if node["__typename"] == "CheckRun":
+        return RollupCheck(node["name"], node["conclusion"], node["completedAt"] or node["startedAt"])
+    return RollupCheck(node["context"], node["state"], node["createdAt"])
+
+
+def _open_change(node: dict[str, Any]) -> OpenChange:
+    """Read one open pull request with the check rollup of its newest commit."""
+    rollup = node["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
+    contexts: list[dict[str, Any]] = rollup["contexts"]["nodes"] if rollup else []
+    return OpenChange(node["url"], tuple(_rollup_check(context) for context in contexts))
 
 
 @dataclass(frozen=True)
@@ -231,3 +265,16 @@ class GitHubSourceControl:
         """Read when the first merged change carrying the commit merged, None when none did."""
         rows = self._api([f"repos/{self.repository}/commits/{commit}/pulls"], deadline)
         return next((row["merged_at"] for row in rows if row["merged_at"]), None)
+
+    def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]:
+        """List the repository's open pull requests with their check rollups, at most two pages of one hundred."""
+        owner, name = self.repository.split("/")
+        variables: dict[str, str | int] = {"owner": owner, "name": name}
+        changes: list[OpenChange] = []
+        for _ in range(_OPEN_PAGES):
+            pulls = self._graphql(_OPEN, variables, deadline)["repository"]["pullRequests"]
+            changes.extend(_open_change(node) for node in pulls["nodes"])
+            if not pulls["pageInfo"]["hasNextPage"]:
+                break
+            variables = {**variables, "after": pulls["pageInfo"]["endCursor"]}
+        return tuple(changes)

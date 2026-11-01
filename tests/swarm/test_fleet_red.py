@@ -1,11 +1,14 @@
+import inspect
 import subprocess
 from datetime import UTC, datetime
 
 import pytest
 
-from scripts.swarm import fleet_red
+from scripts.swarm import fleet_red, panic
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable
+from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.ports.source_control import OpenChange, RollupCheck
 
 pytestmark = pytest.mark.unit
 
@@ -16,20 +19,24 @@ STALE = "2026-10-27T19:59:59+00:00"
 EDGE = "2026-10-27T20:00:00+00:00"
 
 
-def run(name, conclusion, at=NOW):
-    return {"__typename": "CheckRun", "name": name, "conclusion": conclusion, "completedAt": at}
+def run(name: str, conclusion: str | None, at: str | None = NOW) -> RollupCheck:
+    return RollupCheck(name, conclusion, at)
 
 
-def status(context, state, at=NOW):
-    return {"__typename": "StatusContext", "context": context, "state": state, "startedAt": at}
+def status(context: str, state: str, at: str = NOW) -> RollupCheck:
+    return RollupCheck(context, state, at)
 
 
-def pull(number, *checks):
-    return {"url": f"https://github.com/o/r/pull/{number}", "statusCheckRollup": list(checks)}
+def pull(number: int, *checks: RollupCheck) -> OpenChange:
+    return OpenChange(f"https://github.com/o/r/pull/{number}", checks)
 
 
-def fleet(mine, *others):
+def fleet(mine: list[RollupCheck], *others: list[RollupCheck]) -> list[OpenChange]:
     return [pull(1, *mine), *[pull(n, *checks) for n, checks in enumerate(others, start=2)]]
+
+
+def red_elsewhere() -> list[OpenChange]:
+    return [OpenChange(f"https://github.com/x/y/pull/{n}", (run("Tests", "FAILURE"),)) for n in range(1, 5)]
 
 
 def task(task_id, **fields):
@@ -71,7 +78,7 @@ def test_only_pull_requests_with_a_check_inside_the_window_count():
 
 
 def test_a_check_without_a_time_does_not_place_a_pull_request_in_the_window():
-    untimed = [[{"name": "Tests", "conclusion": "FAILURE"}]] * 3
+    untimed = [[run("Tests", "FAILURE", None)]] * 3
     assert fleet_red.shared(fleet([run("Tests", "FAILURE")], *untimed), MINE, NOW_MS) == set()
 
 
@@ -116,9 +123,7 @@ def test_the_checker_reads_open_pull_requests_once_and_only_for_an_open_task_wit
 
 def test_the_checker_judges_each_pull_request_against_its_own_repository_read_once():
     reads = []
-    elsewhere = [
-        {"url": f"https://github.com/x/y/pull/{n}", "statusCheckRollup": [run("Tests", "FAILURE")]} for n in range(1, 5)
-    ]
+    elsewhere = red_elsewhere()
     green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
     listings = {"o/r": green, "x/y": elsewhere}
     admits = fleet_red.checker(lambda repo: reads.append(repo) or listings[repo], lambda: NOW_MS / 1000)
@@ -151,7 +156,8 @@ def test_the_checker_judges_the_window_at_its_clock():
 @pytest.mark.parametrize(
     "error",
     [
-        fleet_red.ReadError("no auth"),
+        TimeoutError("no auth"),
+        KeyError("no auth"),
         OSError("no auth"),
         ValueError("no auth"),
         subprocess.TimeoutExpired("no auth", 60),
@@ -171,29 +177,29 @@ def test_a_failed_read_admits_every_task_and_says_why(error, capsys):
     assert capsys.readouterr().err == f"fleet red hold skipped, listing open pull requests failed: {error}\n"
 
 
-def test_read_lists_open_pull_requests_with_their_check_rollup():
-    calls = []
+def test_read_lists_open_pull_requests_through_the_repository_port() -> None:
+    answer = (OpenChange("u", ()),)
+    provider, ports = FakeSourceControl({"open_changes": answer}), []
 
-    class Done:
-        returncode, stdout, stderr = 0, '[{"url": "u", "statusCheckRollup": []}]', ""
+    def port(repo: str) -> FakeSourceControl:
+        ports.append(repo)
+        return provider
 
-    found = fleet_red.read("o/r", lambda *args, **kwargs: calls.append((args, kwargs)) or Done())
-    assert found == [{"url": "u", "statusCheckRollup": []}]
-    ((args, kwargs),) = calls
-    assert args == (
-        ["gh", "pr", "list", "--repo", "o/r", "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],
-    )
-    assert kwargs == {"capture_output": True, "text": True, "timeout": 60}
+    assert fleet_red.read("o/r", port) is answer
+    assert ports == ["o/r"]
+    [call] = provider.calls
+    assert (call.operation, call.args) == ("open_changes", ())
+    assert 59 < call.deadline.remaining <= fleet_red.SECONDS == 60
 
 
-@pytest.mark.parametrize(("stderr", "why"), [(" no auth\n", "^no auth$"), ("", "^gh pr list exited 4$")])
-def test_read_raises_a_read_error_on_a_failed_listing(stderr, why):
-    class Failed:
-        returncode, stdout = 4, ""
+def test_read_reaches_each_repository_through_the_panic_repository_port() -> None:
+    assert inspect.signature(fleet_red.read).parameters["ports"].default is panic.port
 
-    Failed.stderr = stderr
-    with pytest.raises(fleet_red.ReadError, match=why):
-        fleet_red.read("o/r", lambda *args, **kwargs: Failed())
+
+def test_read_errors_are_the_port_errors() -> None:
+    from scripts.swarm.stack import PORT_ERRORS
+
+    assert fleet_red.ERRORS == PORT_ERRORS
 
 
 @pytest.fixture
@@ -261,9 +267,7 @@ def test_the_notice_pass_skips_claimed_tasks_and_forgets_a_hold_once_its_task_le
 
 def test_the_notice_pass_reads_each_repository_once_and_judges_each_task_against_its_own(store):
     away = "https://github.com/x/y/pull/1"
-    elsewhere = [
-        {"url": f"https://github.com/x/y/pull/{n}", "statusCheckRollup": [run("Tests", "FAILURE")]} for n in range(1, 5)
-    ]
+    elsewhere = red_elsewhere()
     green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
     listings, reads, ledger = {"o/r": green, "x/y": elsewhere}, [], Ledger()
     rows = {t["id"]: t for t in [task("home", pr_url=MINE), task("away", pr_url=away), task("odd", pr_url="x")]}
@@ -276,13 +280,11 @@ def test_the_notice_pass_reads_each_repository_once_and_judges_each_task_against
 
 def test_the_notice_pass_still_judges_a_repository_whose_neighbour_failed_to_read(store):
     away = "https://github.com/x/y/pull/1"
-    elsewhere = [
-        {"url": f"https://github.com/x/y/pull/{n}", "statusCheckRollup": [run("Tests", "FAILURE")]} for n in range(1, 5)
-    ]
+    elsewhere = red_elsewhere()
 
-    def reader(repo):
+    def reader(repo: str) -> list[OpenChange]:
         if repo == "o/r":
-            raise fleet_red.ReadError("no auth")
+            raise OSError("no auth")
         return elsewhere
 
     rows = {t["id"]: t for t in [task("home", pr_url=MINE), task("away", pr_url=away)]}
@@ -299,7 +301,7 @@ def test_the_notice_pass_reads_nothing_without_an_open_task_with_a_pull_request(
 
 
 @pytest.mark.parametrize(
-    "error", [fleet_red.ReadError("x"), OSError("x"), ValueError("x"), subprocess.SubprocessError()]
+    "error", [TimeoutError("x"), KeyError("x"), OSError("x"), ValueError("x"), subprocess.SubprocessError()]
 )
 def test_the_notice_pass_declares_nothing_when_the_read_fails(store, error):
     def reader(repo):

@@ -42,6 +42,7 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 SourceControl.issues_enabled.__name__,
                 SourceControl.latest_runs.__name__,
                 SourceControl.merged_at.__name__,
+                SourceControl.open_changes.__name__,
             ]
         ),
         frozenset(

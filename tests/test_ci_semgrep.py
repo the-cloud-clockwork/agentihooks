@@ -122,6 +122,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert "/scripts/swarm/ready.py" not in allowed
     assert "/scripts/swarm/ledger_host.py" not in allowed
     assert "/scripts/swarm/health/checks.py" not in allowed
+    assert "/scripts/swarm/fleet_red.py" not in allowed
 
 
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
