@@ -50,7 +50,7 @@ _QUEUE = """query($owner: String!, $name: String!, $base: String!) {
 
 _OPEN = """query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
-    pullRequests(states: OPEN, first: 100, after: $after) {
+    pullRequests(states: OPEN, first: 25, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes {
         url
@@ -64,7 +64,7 @@ _OPEN = """query($owner: String!, $name: String!, $after: String) {
   }
 }"""
 
-_OPEN_PAGES = 2
+_OPEN_PAGES = 8
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -119,7 +119,14 @@ class GitHubSourceControl:
         """Run one audited gh api call inside the deadline and return its output."""
         timeout = _live(deadline)
         result = github_reads.rest(
-            CALLER, ["api", *args], cwd=self.root, timeout=timeout, capture_output=True, text=True, check=True
+            CALLER,
+            ["api", *args],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return result.stdout
 
@@ -155,6 +162,7 @@ class GitHubSourceControl:
     def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
         """Read the state of one change."""
         body = self._api([f"repos/{reference.repository}/pulls/{reference.number}"], deadline)
+        fork: dict[str, str] | None = body["head"]["repo"]
         return ChangeState(
             reference,
             body["state"],
@@ -165,6 +173,7 @@ class GitHubSourceControl:
             body["head"]["ref"],
             body["body"] or "",
             body["draft"],
+            fork["full_name"] if fork else "",
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
@@ -267,7 +276,7 @@ class GitHubSourceControl:
         return next((row["merged_at"] for row in rows if row["merged_at"]), None)
 
     def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]:
-        """List the repository's open pull requests with their check rollups, at most two pages of one hundred."""
+        """List the repository's open pull requests with their check rollups, at most eight pages of twenty five."""
         owner, name = self.repository.split("/")
         variables: dict[str, str | int] = {"owner": owner, "name": name}
         changes: list[OpenChange] = []

@@ -1,6 +1,5 @@
 [
   "/scripts/swarm/ci_speed.py",
-  "/scripts/swarm/cli.py",
   "/scripts/swarm/github_reads.py",
   "/scripts/swarm/ledger_events.py",
   "/scripts/swarm/merge_queue.py",
