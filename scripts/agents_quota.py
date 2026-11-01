@@ -213,7 +213,9 @@ def without_routing(rows: list[QuotaRow], accounts: list) -> list[QuotaRow]:
 def duplicate_rows(environ: Mapping[str, str], sessions: dict[str, int], now: float | None = None) -> list[QuotaRow]:
     """Token accounts the router refuses because another token account holds the same ChatGPT account or token."""
     tokens = codex_router.token_accounts(environ)
-    repeated = {**codex_router.duplicates(tokens, environ, now), **codex_router.shadows(tokens, environ)}
+    repeated = codex_router.duplicates(tokens, environ, now)
+    shadowed = codex_router.shadows(tokens, environ)
+    repeated = {**repeated, **{name: repeated.get(kept, kept) for name, kept in shadowed.items()}}
     accounts = [codex_router.CodexAccount(name, f"{codex_router.CODEX_TOKEN_PREFIX}{name}") for name in repeated]
     identities = fingerprints(accounts, environ)
     return [

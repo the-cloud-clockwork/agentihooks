@@ -105,6 +105,7 @@ def test_balance_lists_every_refused_token_account_with_its_state_and_login_comm
         "AH_CX_TOKEN_keyed": "sk-placeholder",
         "AH_CX_TOKEN_noid": jwt({"exp": int(now + 9 * DAY), codex_router.OPENAI_AUTH_CLAIM: {}}),
         "AH_CX_TOKEN_twin": _environ(tmp_path)["AH_CX_TOKEN_gamma"],
+        "AH_CX_TOKEN_triplet": _environ(tmp_path)["AH_CX_TOKEN_alpha"],
     }
     for name, value in environ.items():
         monkeypatch.setenv(name, value)
@@ -112,7 +113,8 @@ def test_balance_lists_every_refused_token_account_with_its_state_and_login_comm
     monkeypatch.setattr(codex_router, "fresh_quotas", lambda *a, **kw: {})
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     rows = {row.account: row for row in agents_quota._codex(now) if row.kind != "api"}
-    assert sorted(rows) == ["alpha", "gamma", "keyed", KEPT, "noid", "old", "soon", "twin"]
+    assert sorted(rows) == ["alpha", "gamma", "keyed", KEPT, "noid", "old", "soon", "triplet", "twin"]
+    assert rows["triplet"].source.startswith(f"same ChatGPT account as {KEPT};")
     assert (rows["twin"].state, rows["twin"].sessions) == (agents_quota.DUPLICATE, 3)
     assert rows["twin"].source == (
         "same ChatGPT account as gamma; sign in its own account with agentihooks codex login twin"
