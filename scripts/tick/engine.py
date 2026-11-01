@@ -46,6 +46,7 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     """Run one step under a copied context and its own deadline, waiting at most its budget for it to end.
 
     A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
+    The next pass can start the same step while that thread still runs.
     """
     deadline = ctx.deadline.child(step.budget_s)
     clock = deadline.clock
