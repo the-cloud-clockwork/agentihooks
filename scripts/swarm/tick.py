@@ -64,7 +64,6 @@ from scripts.swarm import (
     master_start,
     master_wake,
     outage,
-    pane_evidence,
     panic,
     preempt,
     prerequisite_wait,
@@ -97,9 +96,10 @@ from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
-from scripts.tick import engine
+from scripts.tick import engine, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
+from scripts.tick.steps import observe as observe_steps
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60
@@ -207,68 +207,35 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-@dataclass(frozen=True)
-class _FixedView:
-    """A view that answers only the domain and key pairs it was built with."""
+class _PassView:
+    """A view holding the pass state a tick group site hands its steps."""
 
-    values: Mapping[tuple[Domain, str], object]
+    def __init__(self, state: dict[str, object]) -> None:
+        """Keep the pass state of the group site."""
+        self._state = state
 
     def read(self, domain: Domain, key: str) -> object | None:
-        """Return the value held for ``domain`` and ``key``, or nothing."""
-        return self.values.get((domain, key))
+        """Return the pass state under ``key``, nothing for any other domain."""
+        return self._state.get(key) if domain == steps.PASS else None
 
 
-def run_group(name: str) -> None:
-    """Run the registered steps of tick group ``name`` in legacy order under the group budget."""
-    engine.run_group(name, Context(_FixedView({}), Deadline.after(GROUP_BUDGET_S)))
+def run_group(name: str, **state: object) -> list[str]:
+    """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
+    return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
 
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
-    from scripts.swarm import automated_gc
-
-    run_group("start")
-    config = store.ensure_code(slug)
-    actions = []
-    if config.state == "stopped":
-        doc = timing.call(ledger.state, slug)
-        rows = {t["id"]: t for t in doc["tasks"]}
-        actions = automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
-        retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
-        if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return (
-                actions
-                + skip_refused(_close_space, slug, config, store, runtime)
-                + _bin_closed(slug, store, ledger, doc)
-            )
-        config = store.update(slug, state="paused")
-        actions.append("the operator wrote on the ledger, paused to start the master")
-    run_group("observe")
+    box: dict[str, Any] = {}
+    passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
+    actions = run_group("start", **passing)
+    observe_steps.raise_held(box)
+    if "finished" in box:
+        return actions + box["finished"]
     store.redis.delete(store.key(slug, SPAWN_HOLD))
-    actions += skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
-    actions += skip_refused(store.execution_registry.reconcile, slug, runtime, now_ms)
-    actions += skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
-    actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
-    doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
-    rows = {t["id"]: t for t in doc["tasks"]}
-    actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
-    due = store.key(slug, SPAWN_DUE)
-    if config.state == "running" and config.engine != EVENTS_ENGINE and not lifetime.sleeping(slug, store, rows):
-        if store.redis.exists(due):
-            with PLACING, _placement_pass(runtime):
-                actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
-        store.redis.set(due, now_ms)
-    actions += skip_dropped(
-        exits.sweep,
-        InboxStore(store.redis),
-        slug,
-        store,
-        lambda: {t["id"]: t for t in timing.call(ledger.state, slug)["tasks"]},
-    )
-    actions += skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
-    actions += skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
-    actions += skip_refused(resume.track_outages, slug, store, runtime, rows, now_ms) or []
-    actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
+    actions += run_group("observe", **passing)
+    observe_steps.raise_held(box)
+    config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
     run_group("agents")
     actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
