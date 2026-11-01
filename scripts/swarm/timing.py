@@ -111,7 +111,7 @@ def finish_pass(store: Any, slug: str, record: dict[str, Any]) -> None:
 
 
 @contextmanager
-def step(name: str, report: bool = True) -> Iterator[None]:
+def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
     slug = SWARM.get()
     if slug is None:
         yield
@@ -134,7 +134,7 @@ def step(name: str, report: bool = True) -> Iterator[None]:
     emit(sys.stderr, json.dumps(record))
     outcome = "success"
     try:
-        yield
+        yield record
     except tick_stop.Stopped:
         outcome = "stopped"
         raise
@@ -176,6 +176,19 @@ def call(function: Callable, *args, **kwargs) -> Any:
     keep()
     with step(named(function)):
         return function(*args, **kwargs)
+
+
+def within(budget_s: float, function: Callable[..., Any], *args: Any) -> Any:
+    """Run ``function`` as a timed step whose record carries ``budget_s`` and reads late when it overruns."""
+    keep()
+    with step(named(function)) as record:
+        if record is not None:
+            record["budget_s"] = budget_s
+        started = time.monotonic()
+        result = function(*args)
+        if record is not None:
+            record["late"] = time.monotonic() - started > budget_s
+        return result
 
 
 def timed(function: Callable, *args, **kwargs) -> Any:
