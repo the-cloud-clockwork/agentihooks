@@ -353,8 +353,10 @@ def test_a_move_into_a_non_ascii_name_is_skipped_and_a_name_git_quotes_stays_gra
     git("checkout", "-q", "-b", "branch")
     (tmp_path / "hooks" / "old.py").write_text("")
     (tmp_path / "hooks" / 'quo"te.py').write_text("VALUE = 1\n")
-    git("add", "hooks/old.py", 'hooks/quo"te.py')
-    commit("ñame.py", STEP)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ñame.py").write_text(STEP)
+    git("add", "hooks/old.py", 'hooks/quo"te.py', "scripts/ñame.py")
+    git("commit", "-q", "-m", "move")
     assert discover_changes(tmp_path, pinned, "HEAD") == {'hooks/quo"te.py': {1}}
 
 
