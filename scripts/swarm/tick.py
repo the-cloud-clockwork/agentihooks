@@ -935,9 +935,8 @@ def _watch_idle(
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
         same = agent.input_prompt == title
-        timing.timed(input_wait.mark, store, slug, agent.name, now_ms, same)
-        began = timing.timed(input_wait.since, store, slug, agent.name)
-        ticks = elapsed.passes(now_ms - (now_ms if began is None else began))
+        began = timing.timed(input_wait.mark, store, slug, agent.name, now_ms, agent.input_ticks if same else 0)
+        ticks = elapsed.passes(now_ms - began)
         waiting = replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0)
         timing.timed(store.put_agent, slug, waiting)
         return (
@@ -989,9 +988,7 @@ def _watch_idle(
     )
     if timing.timed(resume.recovery_holds, store, slug, agent, now_ms):
         return nudged
-    if elapsed.reached(now_ms - since, IDLE_KILL_MS) and runtime.retire(
-        idle, homes=reaper.scratch_homes(slug, idle.task)
-    ):
+    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
         why = f"; outage recovery could not proceed: {resume.recovery_blocker(store, slug, agent)}" if pending else ""
         return nudged + [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True) + why]
     return nudged
