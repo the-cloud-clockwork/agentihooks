@@ -60,7 +60,7 @@ def _stopped_branch(tick: Any, get: Get, box: Box) -> Any:
     retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
     if not tick._woken(slug, config, store, ledger) and (not retired or tick.lifetime.sleeping(slug, store, rows)):
         closed = tick.skip_refused(tick._close_space, slug, config, store, runtime)
-        box["finished"] = closed + tick._bin_closed(slug, store, ledger, doc)
+        closed + tick._bin_closed(slug, store, ledger, doc)
         return actions
     box["config"] = store.update(slug, state="paused")
     actions.append("the operator wrote on the ledger, paused to start the master")
