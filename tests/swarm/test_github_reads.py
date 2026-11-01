@@ -519,4 +519,3 @@ def test_rest_strips_slurped_page_headers_into_one_json_array(monkeypatch, tmp_p
 
     result = github_reads.rest("jobs", ["api", "repos/o/r/actions/runs/1/jobs", "--paginate", "--slurp"], run)
     assert json.loads(result.stdout) == [{"jobs": [1]}, {"jobs": [2]}]
-

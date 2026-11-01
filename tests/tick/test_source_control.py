@@ -470,9 +470,7 @@ def test_github_issues_enabled_reads_the_repository(
     provider, recorder = _provider(monkeypatch, tmp_path, [{"has_issues": enabled, "has_wiki": not enabled}])
 
     assert provider.issues_enabled(deadline=_deadline()) is enabled
-    assert recorder.calls == [
-        (github.CALLER, ["api", "repos/owner/project"], {"cwd": tmp_path, "timeout": 9, **REST})
-    ]
+    assert recorder.calls == [(github.CALLER, ["api", "repos/owner/project"], {"cwd": tmp_path, "timeout": 9, **REST})]
 
 
 def test_github_latest_runs_read_the_newest_runs_of_the_repository(
