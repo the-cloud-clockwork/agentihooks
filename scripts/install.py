@@ -2153,7 +2153,7 @@ def _update_bashrc_block() -> None:
         f"{_BLOCK_START}\n"
         f"{_AGENTIENV_CHECK}"
         f"agentienv() {{\n"
-        f"  local _c=0\n"
+        f'  local _c=0; [[ -n "${{ZSH_VERSION:-}}" ]] && setopt localoptions nonomatch\n'
         f"  set -a\n"
         f'  if [[ -f "{env_file}" ]]; then\n'
         f'    _agentienv_check "{env_file}"\n'
