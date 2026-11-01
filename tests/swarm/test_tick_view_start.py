@@ -56,7 +56,7 @@ def test_a_pass_with_a_ledger_client_stand_in_reads_no_view(env: tuple, monkeypa
 
     started = []
     monkeypatch.setattr(view, "start", lambda slug, service=False: started.append(slug))
-    monkeypatch.setattr(controller, "FencedLedger", fenced)
+    monkeypatch.setattr(controller, "FencedRuntime", fenced)
     with pytest.raises(RuntimeError, match="^fenced$"):
         cli.run_tick(store, "sw", StandIn(), rt, FakeHerdr({}))
     assert started == []
