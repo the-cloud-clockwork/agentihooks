@@ -31,6 +31,10 @@ class _Redis:
         self.log.append(("delete", key))
 
 
+def _probe(runtime: Any, *args: Any) -> None:
+    return None
+
+
 def _pass(log: list[Any], state: str = "running", engine_name: str = "tick", **extra: Any) -> dict[str, Any]:
     return {
         "slug": "sw",
@@ -86,7 +90,7 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         readiness=SimpleNamespace(
             tick_places=lambda engine_name, rows: log.append(("places", engine_name, rows)) or places
         ),
-        preempt=SimpleNamespace(probe="probe", Seats=_Seats, run="preempt"),
+        preempt=SimpleNamespace(probe=_probe, Seats=_Seats, run="preempt"),
     )
 
 
@@ -159,7 +163,7 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
     assert found == ["ran rank pass", "ran bottleneck remedy", "ran preempt", "ran spawn"]
     seats = calm[3][-1]
     assert seats.args[:4] == ("rows", "ended", "owner", "ready in order")
-    assert seats.args[4].func == "probe"
+    assert seats.args[4].func is _probe
     assert seats.args[4].args == ("runtime",)
     assert calm == [
         ("rank pass", "sw", config, store, "ledger", "doc", 7),
