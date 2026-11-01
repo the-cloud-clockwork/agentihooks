@@ -111,7 +111,7 @@ def finish_pass(store: Any, slug: str, record: dict[str, Any]) -> None:
 
 
 @contextmanager
-def step(name: str, report: bool = True, budget_s: float | None = None) -> Iterator[None]:
+def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
     slug = SWARM.get()
     if slug is None:
         yield
@@ -134,7 +134,7 @@ def step(name: str, report: bool = True, budget_s: float | None = None) -> Itera
     emit(sys.stderr, json.dumps(record))
     outcome = "success"
     try:
-        yield
+        yield record
     except tick_stop.Stopped:
         outcome = "stopped"
         raise
@@ -146,10 +146,6 @@ def step(name: str, report: bool = True, budget_s: float | None = None) -> Itera
         raise
     finally:
         ended = time.monotonic()
-        if budget_s is not None:
-            record["budget_s"] = budget_s
-            if outcome == "success" and ended - started > budget_s:
-                outcome = "late"
         own_end = resource.getrusage(resource.RUSAGE_THREAD)
         child_end = resource.getrusage(resource.RUSAGE_CHILDREN)
         record.update(
@@ -160,7 +156,7 @@ def step(name: str, report: bool = True, budget_s: float | None = None) -> Itera
             reaped_child_cpu_s=(child_end.ru_utime - child.ru_utime) + (child_end.ru_stime - child.ru_stime),
         )
         emit(sys.stderr, json.dumps(record))
-        if outcome not in ("success", "late") and (current := PASS.get()) is not None:
+        if outcome != "success" and (current := PASS.get()) is not None:
             current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:
             append_record(store, slug, "tick:steps", record)
@@ -183,10 +179,16 @@ def call(function: Callable, *args, **kwargs) -> Any:
 
 
 def within(budget_s: float, function: Callable[..., Any], *args: Any) -> Any:
-    """Run ``function`` as a timed step whose record reads late when it overruns ``budget_s``."""
+    """Run ``function`` as a timed step whose record carries ``budget_s`` and reads late when it overruns."""
     keep()
-    with step(named(function), budget_s=budget_s):
-        return function(*args)
+    with step(named(function)) as record:
+        if record is not None:
+            record["budget_s"] = budget_s
+        started = time.monotonic()
+        result = function(*args)
+        if record is not None:
+            record["late"] = time.monotonic() - started > budget_s
+        return result
 
 
 def timed(function: Callable, *args, **kwargs) -> Any:

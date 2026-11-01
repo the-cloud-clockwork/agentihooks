@@ -1,4 +1,3 @@
-import contextlib
 import io
 import json
 from types import SimpleNamespace
@@ -252,28 +251,19 @@ def test_timed_returns_the_result_of_its_call(capsys):
     ]
 
 
-@pytest.mark.parametrize(
-    ("ended", "failure", "outcome", "failed"),
-    [(12.5, None, "success", []), (12.6, None, "late", []), (12.6, ValueError, "error", ["budgeted"])],
-)
-def test_budgeted_step_reads_late_only_on_a_successful_overrun(
-    monkeypatch: pytest.MonkeyPatch,
-    ended: float,
-    failure: type[Exception] | None,
-    outcome: str,
-    failed: list[str],
+@pytest.mark.parametrize(("ended", "late"), [(12.5, False), (12.6, True)])
+def test_within_records_its_budget_and_reads_late_only_past_it(
+    monkeypatch: pytest.MonkeyPatch, ended: float, late: bool
 ) -> None:
     output = Output()
     monkeypatch.setattr(timing.sys, "stderr", output)
-    monkeypatch.setattr(timing, "time", SimpleNamespace(monotonic=iter([10.0, ended]).__next__))
-    current = {"pass_id": "p", "failed_steps": []}
-    swarm, passing = timing.SWARM.set("sw"), timing.PASS.set(current)
-    try:
-        with contextlib.suppress(ValueError), timing.step("budgeted", budget_s=2.5):
-            if failure is not None:
-                raise failure("private")
-    finally:
-        timing.PASS.reset(passing)
-        timing.SWARM.reset(swarm)
+    monkeypatch.setattr(timing, "time", SimpleNamespace(monotonic=iter([9.0, 10.0, ended, ended]).__next__))
+    with timing.tick("sw"):
+        assert timing.within(2.5, sorted, [2, 1]) == [1, 2]
     record = json.loads(output.getvalue().splitlines()[-1])
-    assert (record["outcome"], record["budget_s"], current["failed_steps"]) == (outcome, 2.5, failed)
+    assert (record["outcome"], record["budget_s"], record["late"]) == ("success", 2.5, late)
+
+
+def test_within_outside_a_tick_runs_the_call_and_records_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    assert timing.within(1.0, sorted, [2, 1]) == [1, 2]
+    assert capsys.readouterr().err == ""

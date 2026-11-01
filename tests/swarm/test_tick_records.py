@@ -66,8 +66,8 @@ def test_recording_scope_restores_the_parent_store() -> None:
 
 
 @pytest.mark.feature("swarm-tick-cost-report")
-@pytest.mark.parametrize(("ended", "outcome"), [(12.5, "success"), (12.6, "late")])
-def test_budgeted_step_record_reads_late_past_its_budget_and_not_failed(ended: float, outcome: str) -> None:
+@pytest.mark.parametrize(("ended", "late"), [(12.5, False), (12.6, True)])
+def test_budgeted_step_record_reads_late_past_its_budget_and_not_failed(ended: float, late: bool) -> None:
     import fakeredis
 
     from scripts.swarm.store import RedisStore
@@ -76,14 +76,19 @@ def test_budgeted_step_record_reads_late_past_its_budget_and_not_failed(ended: f
 
     @timing.instrument_tick
     def run_tick(actual: RedisStore, slug: str) -> list[str]:
-        with monotonic_clock([10.0, ended]):
+        with monotonic_clock([9.0, 10.0, ended, ended]):
             assert timing.within(2.5, sorted, [2, 1]) == [1, 2]
         return ["finished"]
 
     assert run_tick(store, "sw") == ["finished"]
     rows = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
-    assert (rows[0]["step"], rows[0]["outcome"], rows[0]["budget_s"]) == ("builtins.sorted", outcome, 2.5)
-    assert rows[0]["wall_s"] == pytest.approx(ended - 10.0)
+    assert (rows[0]["step"], rows[0]["outcome"], rows[0]["budget_s"], rows[0]["late"]) == (
+        "builtins.sorted",
+        "success",
+        2.5,
+        late,
+    )
+    assert rows[0]["wall_s"] == pytest.approx(ended - 9.0)
     passes = store.redis.xrange(store.key("sw", "tick:passes"))
     assert json.loads(passes[0][1]["record"])["failed_steps"] == []
 
@@ -98,11 +103,12 @@ def test_budgeted_step_that_raises_is_an_error_not_late() -> None:
     def fail() -> None:
         raise ValueError("private message")
 
-    with timing.tick("sw", store), monotonic_clock([0.0, 9.0]):
+    with timing.tick("sw", store), monotonic_clock([0.0, 0.0, 9.0]):
         with pytest.raises(ValueError):
             timing.within(1.0, fail)
     record = json.loads(store.redis.xrange(store.key("sw", "tick:steps"))[0][1]["record"])
     assert (record["outcome"], record["budget_s"]) == ("error", 1.0)
+    assert "late" not in record
 
 
 def test_unbudgeted_step_record_carries_no_budget() -> None:
