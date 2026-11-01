@@ -14,6 +14,8 @@ from scripts.inbox.seats import SeatRegistry
 from scripts.swarm import claim_hold, cli, dispatcher, stack, tick
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_comments, task_dependencies
+from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -103,6 +105,33 @@ def parked(env, monkeypatch, tmp_path):
 
 def park(doc):
     return cli.main(["sw", "--as", AGENT, "park", str(doc)])
+
+
+DEPENDENCY_PR = "https://github.com/o/r/pull/42"
+REFERENCE = ChangeRef("o/r", 42)
+
+
+def _state(state: str = "closed", merged: bool = False, base: str = "dev") -> ChangeState:
+    return ChangeState(REFERENCE, state, HEAD, base, merged, DEPENDENCY_PR)
+
+
+@dataclasses.dataclass
+class Refusing:
+    raised: BaseException
+
+    def change(self, reference: ChangeRef, *, deadline: object) -> ChangeState:
+        raise self.raised
+
+
+def _port(monkeypatch: pytest.MonkeyPatch, provider: object) -> list[str]:
+    asked: list[str] = []
+
+    def source_control(url: str) -> tuple[object, ChangeRef]:
+        asked.append(url)
+        return provider, REFERENCE
+
+    monkeypatch.setattr(stack, "source_control", source_control)
+    return asked
 
 
 def _refused(parked, capsys, says):
@@ -369,10 +398,10 @@ def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_del
     dependency_pr = "https://github.com/o/r/pull/42"
     ledger.rows["a"].update({"pr_url": dependency_pr, "branch_repo": repo})
 
+    asked = _port(monkeypatch, FakeSourceControl(answers={"change": _state(merged=True)}))
+
     def merged_dependency(argv):
         result = shell(argv)
-        if argv[:3] == ["gh", "pr", "view"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps({"state": "MERGED", "baseRefName": "dev"}), "")
         if argv == ["git", "fetch", "origin", "eng-a"]:
             return subprocess.CompletedProcess(argv, 1, "", "remote branch deleted")
         return result
@@ -386,28 +415,21 @@ def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_del
     assert ["git", "merge-base", "HEAD", "origin/dev"] in shell.calls
     assert ["git", "fetch", "origin", "eng-a"] not in shell.calls
     assert ["git", "fetch", "--", repo, "eng-a"] not in shell.calls
-    assert ["gh", "pr", "view", dependency_pr, "--json", "state,baseRefName"] in shell.calls
+    assert asked == [dependency_pr]
 
 
 @pytest.mark.parametrize(
     "pull",
     [
-        {"state": "OPEN", "baseRefName": "dev"},
-        {"state": "CLOSED", "baseRefName": "dev"},
-        {"state": "MERGED", "baseRefName": "main"},
+        _state("open", merged=False),
+        _state("closed", merged=False),
+        _state("closed", merged=True, base="main"),
     ],
 )
 def test_park_keeps_the_dependency_branch_until_its_pull_request_merges_into_dev(parked, monkeypatch, pull):
     _, ledger, _, shell, doc = parked
     ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
-
-    def dependency_pull(argv):
-        result = shell(argv)
-        if argv[:3] == ["gh", "pr", "view"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(pull), "")
-        return result
-
-    monkeypatch.setattr(stack, "shell", dependency_pull)
+    _port(monkeypatch, FakeSourceControl(answers={"change": pull}))
     assert park(doc) == 0
     assert ["git", "fetch", "origin", "eng-a"] in shell.calls
     assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
@@ -415,33 +437,67 @@ def test_park_keeps_the_dependency_branch_until_its_pull_request_merges_into_dev
 
 
 @pytest.mark.parametrize(
-    ("answer", "error"),
+    ("raised", "error"),
     [
-        ("not json", "Expecting value: line 1 column 1 (char 0)"),
-        ("{}", "'state'"),
-        ('{"state": "MERGED"}', "'baseRefName'"),
+        (ValueError("Expecting value: line 1 column 1 (char 0)"), "Expecting value: line 1 column 1 (char 0)"),
+        (KeyError("state"), "'state'"),
+        (TimeoutError("tool deadline expired"), "tool deadline expired"),
+        (subprocess.TimeoutExpired(["gh"], 60), "Command '['gh']' timed out after 60 seconds"),
+        (OSError("gh missing"), "gh missing"),
     ],
 )
-def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypatch, capsys, answer, error):
+def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypatch, capsys, raised, error):
     _, ledger, _, shell, _ = parked
     ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
-
-    def unreadable_pull(argv):
-        result = shell(argv)
-        if argv[:3] == ["gh", "pr", "view"]:
-            return subprocess.CompletedProcess(argv, 0, answer, "")
-        return result
-
-    monkeypatch.setattr(stack, "shell", unreadable_pull)
+    _port(monkeypatch, Refusing(raised))
     _refused(parked, capsys, f"cannot read the dependency pull request: {error}")
     assert ["git", "fetch", "origin", "dev"] not in shell.calls
 
 
-def test_park_refuses_when_the_dependency_pull_request_cannot_be_read(parked, capsys):
-    _, ledger, _, shell, _ = parked
+def test_park_refuses_when_the_dependency_pull_request_cannot_be_read(parked, monkeypatch, capsys):
+    _, ledger, _, _, _ = parked
     ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
-    shell.fail = (("gh", "pr", "view"),)
+    _port(monkeypatch, Refusing(subprocess.CalledProcessError(1, ["gh"], stderr=" boom\n")))
     _refused(parked, capsys, "cannot read the dependency pull request: boom")
+
+
+def test_park_refuses_when_the_dependency_pull_request_read_names_no_stderr(parked, monkeypatch, capsys):
+    _, ledger, _, _, _ = parked
+    ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
+    _port(monkeypatch, Refusing(subprocess.CalledProcessError(1, ["gh"])))
+    _refused(parked, capsys, "cannot read the dependency pull request: ")
+
+
+@pytest.mark.parametrize(
+    ("url", "repository", "number"),
+    [
+        ("https://github.com/o/r/pull/42", "o/r", 42),
+        ("https://github.com/owner/project/issues/7", "owner/project", 7),
+        ("https://github.com/owner/project/pull/9/files", "owner/project", 9),
+    ],
+)
+def test_source_control_names_the_github_port_and_the_change_a_url_names(url, repository, number):
+    from pathlib import Path
+
+    from scripts.tick.adapters.github import GitHubSourceControl
+    from scripts.tick.ports.source_control import ChangeRef
+
+    provider, reference = stack.source_control(url)
+    assert reference == ChangeRef(repository, number)
+    assert provider == GitHubSourceControl(repository, Path.cwd(), "dev")
+
+
+def test_change_reads_through_the_port_inside_its_deadline(monkeypatch):
+    from scripts.tick.adapters.fakes import FakeSourceControl
+
+    state = _state(merged=True)
+    provider = FakeSourceControl(answers={"change": state})
+    monkeypatch.setattr(stack, "source_control", lambda url: (provider, REFERENCE) if url == DEPENDENCY_PR else None)
+    assert stack.change(DEPENDENCY_PR, "refused") is state
+    [call] = provider.calls
+    assert (call.operation, call.args) == ("change", (REFERENCE,))
+    assert 0 < call.deadline.remaining <= stack.PORT_SECONDS
+    assert stack.PORT_SECONDS == 60.0
 
 
 @pytest.mark.parametrize("merged_before_stop", [False, True])

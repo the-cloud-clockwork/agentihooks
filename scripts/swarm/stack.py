@@ -3,6 +3,7 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
@@ -11,6 +12,11 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
+if TYPE_CHECKING:
+    from scripts.tick.ports.contracts import SourceControl
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+PORT_SECONDS = 60.0
 WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
 READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
 SSH_UNVERIFIED = ("Host key verification failed", "Permission denied (publickey")
@@ -132,18 +138,33 @@ def _foreign(open_):
     return [b for b in marked if repo_key(b["branch_repo"]) != home]
 
 
-def _merged_into_dev(dep):
+def source_control(url: str) -> "tuple[SourceControl, ChangeRef]":
+    """Return the source control port and the change reference a pull request or issue url names."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+    from scripts.tick.ports.source_control import ChangeRef
+
+    owner, name, _, number = url.removeprefix("https://github.com/").split("/")[:4]
+    return GitHubSourceControl(f"{owner}/{name}", Path.cwd(), "dev"), ChangeRef(f"{owner}/{name}", int(number))
+
+
+def change(url: str, refused: str) -> "ChangeState":
+    """Read one change through the source control port, refusing with a swarm error it cannot answer."""
+    from scripts.tick.deadline import Deadline
+
+    provider, reference = source_control(url)
+    try:
+        return provider.change(reference, deadline=Deadline.after(PORT_SECONDS))
+    except subprocess.CalledProcessError as exc:
+        raise SwarmError(f"{refused}: {(exc.stderr or '').strip()}") from exc
+    except (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError) as exc:
+        raise SwarmError(f"{refused}: {exc}") from exc
+
+
+def _merged_into_dev(dep: dict) -> bool:
     if not dep.get("pr_url"):
         return False
-    answer = _out(
-        ["gh", "pr", "view", dep["pr_url"], "--json", "state,baseRefName"],
-        "cannot read the dependency pull request",
-    )
-    try:
-        pull = json.loads(answer)
-        return pull["state"] == "MERGED" and pull["baseRefName"] == "dev"
-    except (ValueError, KeyError) as exc:
-        raise SwarmError(f"cannot read the dependency pull request: {exc}") from exc
+    pull = change(dep["pr_url"], "cannot read the dependency pull request")
+    return pull.merged and pull.base == "dev"
 
 
 def https_url(url: str) -> str:
