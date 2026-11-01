@@ -139,6 +139,8 @@ def test_the_tick_wrapper_runs_its_groups_before_and_after_the_tick(
         "wrapper refresh",
         "wrapper reboot",
         *TICK_GROUPS,
+        "wrapper relay",
+        "wrapper view",
         "wrapper events",
         "wrapper metrics",
         "after",
