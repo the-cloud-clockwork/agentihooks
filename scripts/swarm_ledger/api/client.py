@@ -153,6 +153,11 @@ class ResourceClient:
         kept[key] = (reply["generation"], state)
         return thawed(state)
 
+    def changes(self, slug: str, since: int, parts: tuple[str, ...]) -> dict:
+        """The export of the named parts as the changes since generation since, or in full when the server no
+        longer holds every change after it."""
+        return self.request(slug, "export", {"since": since, "parts": list(parts)})
+
     def stored_export(self, slug: str) -> dict:
         """The full export, read as the changes since the one the last command on this host stored for it."""
         path, kept = export_file(self.base, slug), {}

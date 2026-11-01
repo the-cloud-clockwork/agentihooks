@@ -217,7 +217,8 @@ PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 def export(handler: object, services: Services, slug: str, path: str, payload: dict) -> dict | None:
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
-        generation, body = services.repository.export_since(slug, payload["since"], export_text, export_changes)
+        parts = tuple(payload.get("parts", ()))
+        generation, body = services.repository.export_since(slug, payload["since"], export_text, export_changes, parts)
         body = body if isinstance(body, bytes) else body.encode()
         return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
     schemas.validate({"type": "object", "maxProperties": 0}, payload)
@@ -231,7 +232,16 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
 
 SINCE_SCHEMA = {
     "type": "object",
-    "properties": {"since": {"type": "integer", "minimum": 0}},
+    "properties": {
+        "since": {"type": "integer", "minimum": 0},
+        "parts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": True,
+            "items": {"type": "string", "minLength": 1},
+        },
+    },
     "required": ["since"],
     "additionalProperties": False,
 }
@@ -239,11 +249,13 @@ HIDDEN_META = ("seeds", "api_operations")
 HIDDEN_PATHS = [[key] for key in HIDDEN_META]
 
 
-def export_text(fragments: Fragment) -> bytes:
+def export_text(fragments: Fragment, parts: tuple[str, ...] = ()) -> bytes:
+    """The export of the stored ledger, only its top level parts named in parts when there are any."""
     meta = members({key: part for key, part in fragments.parts["_meta"].parts.items() if key not in HIDDEN_META})
     body = b",".join(
         encode(key).encode() + b":" + (meta if key == "_meta" else exported(part))
         for key, part in fragments.parts.items()
+        if not parts or key in parts
     )
     return b'{"data":{' + body + b"}}"
 
@@ -261,11 +273,14 @@ def identities(items: list) -> list:
     return [encode(parts[-1]) for _, parts, *_ in children(items, [], None)]
 
 
-def export_changes(state: dict, paths: set) -> str | None:
+def export_changes(state: dict, paths: set, parts: tuple[str, ...] = ()) -> str | None:
     """The export items whose rows changed: dictionary entries set or dropped, and for each list holding a
-    changed item its item identities in order with every changed item."""
+    changed item its item identities in order with every changed item; only the top level parts named in
+    parts when there are any."""
     view = {**state, "_meta": {key: item for key, item in state["_meta"].items() if key not in HIDDEN_META}}
     units = {unit for unit in map(change_unit, paths) if unit is not None} | {(encode("_meta"), encode("events"))}
+    named = {encode(part) for part in parts}
+    units = {unit for unit in units if not named or not unit or unit[0] in named}
     if () in units:
         return None
     kept = [unit for unit in units if not any(unit[:depth] in units for depth in range(1, len(unit)))]
