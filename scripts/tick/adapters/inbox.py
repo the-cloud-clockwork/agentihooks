@@ -30,6 +30,7 @@ class StoreInbox:
         check(deadline)
         return self.store.send(self.sender, address, body)
 
-    def close(self, item_id: str, *, deadline: Deadline) -> object:
+    def close(self, item_id: str, outcome: str, detail: str = "", *, deadline: Deadline) -> object:
+        """Close an item with the outcome kind and its detail; the store refuses a bare done on a work item."""
         check(deadline)
-        return self.store.close(item_id, self.sender, "done")
+        return self.store.close(item_id, self.sender, outcome, detail)
