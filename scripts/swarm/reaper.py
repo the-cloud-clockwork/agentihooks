@@ -127,8 +127,7 @@ def targets(
 
 
 def _members(found: Targets) -> dict[int, int]:
-    table = _table(None, [])
-    return {p.pid: p.start_time for p in table.values() if p.pgid in found.groups or p.pid in found.singles}
+    return {p.pid: p.start_time for p in processes().values() if p.pgid in found.groups or p.pid in found.singles}
 
 
 def _alive(members: dict[int, int]) -> list[int]:

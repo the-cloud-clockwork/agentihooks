@@ -292,7 +292,7 @@ def test_rescan_replaces_the_pass_snapshot() -> None:
     assert shared.scans == 2
 
 
-def test_real_termination_in_a_pass_reuses_the_selection_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_real_termination_in_a_pass_reads_membership_fresh_once_per_end(monkeypatch: pytest.MonkeyPatch) -> None:
     table = {80: _process(80, 80), 81: _process(81, 80), 90: _process(90, 90)}
     scans: list[int] = []
     sent: list[tuple[str, int, int]] = []
@@ -307,12 +307,12 @@ def test_real_termination_in_a_pass_reuses_the_selection_scan(monkeypatch: pytes
         return [reaper.retire("eng-a", 80, [], 800), reaper.reap([90])]
 
     assert tick_pass() == [reaper.Outcome((80, 81)), reaper.Outcome((90,))]
-    assert scans == [1]
+    assert scans == [1, 1, 1]
     assert sent == [("group", 80, reaper.signal.SIGTERM), ("group", 90, reaper.signal.SIGTERM)]
 
 
 def test_a_rescanned_process_is_waited_on_from_the_new_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
-    tables = [{}, {95: _process(95, 95)}]
+    tables = [{}, {95: _process(95, 95)}, {95: _process(95, 95)}]
     scans: list[int] = []
 
     def scan() -> dict[int, Process]:
@@ -329,4 +329,24 @@ def test_a_rescanned_process_is_waited_on_from_the_new_snapshot(monkeypatch: pyt
         return reaper.retire("eng-new", 95, [], 950)
 
     assert tick_pass() == reaper.Outcome((95,))
-    assert scans == [1, 1]
+    assert scans == [1, 1, 1]
+
+
+def test_a_member_joining_after_selection_is_waited_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    tables = [{100: _process(100, 100)}, {100: _process(100, 100), 101: _process(101, 100)}]
+    scans: list[int] = []
+
+    def scan() -> dict[int, Process]:
+        scans.append(1)
+        return tables[min(len(scans), 2) - 1]
+
+    monkeypatch.setattr(reaper, "processes", scan)
+    monkeypatch.setattr(reaper, "carries", lambda process, name: True)
+    monkeypatch.setattr(reaper, "_process", lambda pid, proc: None)
+    monkeypatch.setattr(reaper.os, "killpg", lambda pgid, sig: None)
+
+    @reaper.scanning_pass
+    def tick_pass() -> reaper.Outcome:
+        return reaper.retire("eng-a", 100, [], 1000)
+
+    assert tick_pass() == reaper.Outcome((100, 101))
