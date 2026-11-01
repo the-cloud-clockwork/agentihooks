@@ -315,7 +315,7 @@ def test_github_defaults() -> None:
 def test_github_expired_deadline_prevents_external_reads(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operation: str, args: tuple[object, ...]
 ) -> None:
-    def refuse(*args: object, **kwargs: object) -> None:
+    def refuse(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         pytest.fail("expired deadline reached the provider")
 
     monkeypatch.setattr(github.github_reads, "rest", refuse)
