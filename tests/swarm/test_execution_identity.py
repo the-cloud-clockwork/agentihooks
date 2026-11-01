@@ -2,6 +2,7 @@ import json
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -370,16 +371,18 @@ def test_updates_preserve_status_timestamp_until_status_changes(store, agent, mo
     assert store.execution("fixture", current.execution_id) == changed
 
 
-def _legacy_contention(store, monkeypatch, attempts, trips):
+def _legacy_contention(store: RedisStore, monkeypatch: pytest.MonkeyPatch, attempts: list[bool], trips: int) -> None:
     from redis.exceptions import WatchError
 
     original = store.redis.pipeline
 
-    def pipeline(*args, **kwargs):
+    def pipeline(*args: Any, **kwargs: Any) -> Any:
         pipe = original(*args, **kwargs)
         execute = pipe.execute
 
-        def contested():
+        def contested() -> Any:
+            if not pipe.watching:
+                return execute()
             attempts.append(True)
             if len(attempts) <= trips:
                 raise WatchError("synthetic competing controller")
@@ -689,17 +692,21 @@ def test_unbound_uid_never_hides_a_changed_runtime_target(store, agent, field):
 
 
 @pytest.mark.parametrize("changed_key", ["executions", "agents"])
-def test_legacy_write_retries_when_its_observed_state_changes(store, agent, monkeypatch, changed_key):
+def test_legacy_write_retries_when_its_observed_state_changes(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, changed_key: str
+) -> None:
     store.put_agent("fixture", agent)
     key = store.key("fixture", changed_key)
     watched = []
     original = store.redis.pipeline
 
-    def pipeline(*args, **kwargs):
+    def pipeline(*args: Any, **kwargs: Any) -> Any:
         pipe = original(*args, **kwargs)
         execute = pipe.execute
 
-        def competing_commit():
+        def competing_commit() -> Any:
+            if not pipe.watching:
+                return execute()
             watched.append(True)
             if len(watched) == 1:
                 if changed_key == "executions":
