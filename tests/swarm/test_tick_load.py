@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, tick_report, timing
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import MASTER, STALE, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.tick_scenarios.test_characterisation import BASE_MS, github_reply
@@ -213,6 +213,7 @@ def test_a_step_made_300_seconds_slower_breaks_the_budget(monkeypatch: pytest.Mo
     assert report["calls"]["planted"] == 1
     assert baseline <= budget() < report["pass_p95_s"]
     assert budget() - baseline < SLOWDOWN_S
+    assert report["outcome"] == STALE
 
 
 @pytest.mark.feature("swarm-tick-pass-budget")
