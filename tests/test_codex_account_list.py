@@ -159,7 +159,7 @@ def _expiring_at(account_id: str, exp: int) -> str:
     return jwt({"exp": exp, codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": account_id}})
 
 
-def test_refused_and_duplicate_rows_judge_expiry_at_the_table_time_not_the_clock():
+def test_refused_and_duplicate_rows_judge_expiry_at_the_table_time_not_the_clock() -> None:
     environ = {"AH_CX_TOKEN_aaa": _expiring_at("acct-9", 50), "AH_CX_TOKEN_bbb": _expiring_at("acct-9", 10**6)}
     assert agents_quota.refused_rows(environ, {}, 100.0) == []
     assert [(row.account, row.source) for row in agents_quota.duplicate_rows(environ, {}, 100.0)] == [
@@ -170,7 +170,7 @@ def test_refused_and_duplicate_rows_judge_expiry_at_the_table_time_not_the_clock
     ]
 
 
-def test_a_refused_row_counts_only_the_sessions_running_on_it():
+def test_a_refused_row_counts_only_the_sessions_running_on_it() -> None:
     environ = {"AH_CX_TOKEN_old": _expiring_at("acct-3", 50), "AH_CX_TOKEN_new": _expiring_at("acct-4", 10**6)}
     rows = agents_quota.refused_rows(environ, {"other": 4}, 10**6 + 100.0)
     assert sorted((row.account, row.state, row.sessions) for row in rows) == [
@@ -180,7 +180,7 @@ def test_a_refused_row_counts_only_the_sessions_running_on_it():
     assert agents_quota.refused_rows(environ, {}, 100.0)[0].account == "old"
 
 
-def test_a_token_is_expired_from_its_exp_second_on():
+def test_a_token_is_expired_from_its_exp_second_on() -> None:
     account = codex_router.CodexAccount("edge", "AH_CX_TOKEN_edge")
     environ = {"AH_CX_TOKEN_edge": _expiring_at("acct-5", 1000)}
     assert agents_quota._refused_state(account, environ, 1000.0) == agents_quota.EXPIRED
