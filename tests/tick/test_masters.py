@@ -171,6 +171,18 @@ def test_a_system_exit_is_held_too() -> None:
     assert isinstance(box[masters.RAISED], SystemExit)
 
 
+def test_a_held_step_hands_its_call_the_tick_and_the_reader() -> None:
+    seen: list[tuple[Any, Any]] = []
+    get = {"box": {}}.get
+
+    def record(tick: Any, reader: Any) -> list[str]:
+        seen.append((tick, reader))
+        return ["done"]
+
+    assert masters._held(record)("tick", get) == ["done"]
+    assert seen == [("tick", get)]
+
+
 def test_the_site_view_reads_the_locals_and_the_box_for_the_pass_domain() -> None:
     box: dict[str, Any] = {}
     view = masters._SiteView({"slug": "sw", "box": "shadowed"}, box)
