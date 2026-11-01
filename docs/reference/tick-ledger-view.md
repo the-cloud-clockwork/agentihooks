@@ -9,8 +9,8 @@ nav_order: 66
 Each tick pass keeps a stored view of its swarm ledger's tasks, metadata and
 phases, and refreshes it with one export read of what changed since the
 view's generation. The ledger server answers with only those three parts, and
-sends them in full only when it no longer holds every change since that
-generation. A pass on a large ledger therefore moves the rows that changed
+sends them in full only when the view has no generation yet or the server no
+longer holds every change since that generation. A pass on a large ledger therefore moves the rows that changed
 instead of the whole document.
 
 The view lives in `scripts.tick.view`; the export parts live in the ledger
@@ -18,8 +18,9 @@ API's `export` route. The feature map entry is `swarm-tick-delta-reads`.
 
 ## When a pass reads the view
 
-`scripts.swarm.cli.run_tick` starts the view once per pass, in the step that
-runs before the pass's first ledger read:
+`scripts.swarm.cli.run_tick` starts the view once per pass, inline after the
+ledger health probe, which reads the ledger's metadata, and before any tick
+step reads the ledger:
 
 1. The ledger health probe passes. A failed probe ends the pass as before and
    reads no view.
@@ -47,8 +48,9 @@ The view of one ledger is one JSON file:
 `<base>` is the ledger server address the ledger client resolves for the slug,
 so two servers holding the same slug keep separate views. The scheduler
 runtime folder is `scripts.scheduler.service.runtime_dir()`:
-`~/.cache/agentihooks/scheduler` for a workstation on the local Redis at
-`127.0.0.1:6379/0`, otherwise a subfolder of it named by a hash of the Redis
+`~/.cache/agentihooks/scheduler` when the Redis endpoint is
+`redis://127.0.0.1:6379/0` and the host is not a hive member (local mode, or
+no `AGENTIHOOKS_HIVE_ID`); otherwise a subfolder of it named by a hash of the Redis
 endpoint and hive, or of the bus identity when the event backend is the bus.
 
 The file holds the generation and the state, the same format the ledger
@@ -134,8 +136,10 @@ The server answers in full (`data`) when:
 - `since` is 0 or greater than the current generation;
 - more than 256 generations (`CHANGES_KEPT` in the SQLite repository) passed
   since `since`;
-- any generation in the gap has no recorded row changes;
-- a change replaced the whole document.
+- a generation in the gap has no recorded row changes, for example an
+  imported document;
+- a write in the gap changed more than 5000 paths (`PATHS_KEPT` in the
+  repository refresh module), so its row changes were not recorded.
 
 `ResourceClient.changes(slug, since, parts)` sends this request and returns the
 reply unchanged; the caller patches it with
@@ -157,7 +161,8 @@ EOF
 ```
 
 Each line prints the file name, the view's generation and its task count. The
-generation moves with each pass that saw a ledger write.
+generation is the ledger's write counter as of the pass's last refresh; it
+advances with ledger writes.
 
 ## Troubleshooting
 
