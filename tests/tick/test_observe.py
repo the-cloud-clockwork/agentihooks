@@ -139,6 +139,17 @@ def test_a_running_swarm_loads_its_config_and_skips_the_stopped_branch() -> None
     state, box = _state(store)
     assert actions(engine.run_group("start", _ctx(state))) == []
     assert box == {"config": SimpleNamespace(slug="sw", state="running", engine="tick")}
+    branch: Any = tick_module.step_stopped_branch
+    assert branch("sw", box["config"], store, None, None, 0, box) == []
+
+
+@pytest.mark.parametrize(("tracked", "expected"), [(None, []), (["outage"], ["outage"])])
+def test_track_outages_returns_a_list_whatever_the_tracker_returns(
+    monkeypatch: pytest.MonkeyPatch, tracked: list[str] | None, expected: list[str]
+) -> None:
+    monkeypatch.setattr(tick_module.resume, "track_outages", lambda *args: tracked)
+    track: Any = tick_module.step_track_outages
+    assert track("sw", None, None, {}, 0) == expected
 
 
 def test_a_stopped_swarm_that_sleeps_finishes_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,8 +160,8 @@ def test_a_stopped_swarm_that_sleeps_finishes_the_pass(monkeypatch: pytest.Monke
     monkeypatch.setattr(tick_module, "_woken", lambda slug, config, store, ledger: False)
     monkeypatch.setattr(tick_module, "_close_space", _fake(seen, "close", ["closed"]))
     monkeypatch.setattr(tick_module, "_bin_closed", _fake(seen, "bin", ["binned"]))
-    assert actions(engine.run_group("start", _ctx(state))) == ["cleaned"]
-    assert box["finished"] == ["closed", "binned"]
+    assert actions(engine.run_group("start", _ctx(state))) == ["cleaned", "closed", "binned"]
+    assert box["finished"] is True
     assert [name for name, _ in seen] == ["cleanup", "close", "bin"]
     assert seen[0][1][:5] == ("sw", store, state["ledger"], "runtime", 7)
     assert seen[0][1][5].args == ("sw", store, state["ledger"], {"t1": {"id": "t1"}})
@@ -166,8 +177,8 @@ def test_a_stopped_swarm_with_retired_tasks_awake_keeps_finishing(monkeypatch: p
     monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: True)
     monkeypatch.setattr(tick_module, "_close_space", lambda *args: [])
     monkeypatch.setattr(tick_module, "_bin_closed", lambda *args: ["binned"])
-    assert actions(engine.run_group("start", _ctx(state))) == []
-    assert box["finished"] == ["binned"]
+    assert actions(engine.run_group("start", _ctx(state))) == ["binned"]
+    assert box["finished"] is True
 
 
 def test_a_stopped_swarm_the_operator_wrote_to_pauses_to_start_the_master(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,7 +289,7 @@ def test_a_step_that_raises_holds_its_exception_and_stops_the_later_steps(monkey
     def broken(slug: str) -> None:
         raise ConnectionError(slug)
 
-    state["ledger"].state = broken
+    monkeypatch.setattr(state["ledger"], "state", broken)
     assert actions(engine.run_group("observe", _ctx(state))) == ["pane", "reconciled", "moved", "recovered"]
     assert [name for name, _ in seen] == ["panes", "reconcile", "fail over", "recover"]
     with pytest.raises(ConnectionError, match="^sw$"):

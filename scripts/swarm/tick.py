@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false, reportUnusedImport=false
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
@@ -32,8 +33,8 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     apply_wait,
-    bottleneck_remedy,
-    claim_hold,
+    bottleneck_remedy,  # noqa: F401
+    claim_hold,  # noqa: F401
     claim_order,
     content_refusal,
     continuation,
@@ -41,12 +42,12 @@ from scripts.swarm import (
     dead_resume,
     deliberate_exit,
     dev_red,
-    difficulty,
+    difficulty,  # noqa: F401
     dispatcher,
     failed_panes,
     fleet_red,
     freeze,
-    grouping,
+    grouping,  # noqa: F401
     input_wait,
     launch_check,
     ledger_events,
@@ -60,7 +61,7 @@ from scripts.swarm import (
     master_start,
     outage,
     pane_evidence,
-    panic,
+    panic,  # noqa: F401
     preempt,
     prerequisite_wait,
     profile_first,
@@ -95,6 +96,8 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import masters as master_steps
 from scripts.tick.steps import observe as observe_steps
+from scripts.tick.steps import place
+from scripts.tick.steps import tasks as task_steps
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60
@@ -219,12 +222,12 @@ def run_group(name: str, **state: object) -> list[str]:
     return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
 
 
-def _step_config_load(slug: str, store: RedisStore, box: dict[str, Any], **_: object) -> list[str]:
+def step_config_load(slug: str, store: RedisStore, box: dict[str, Any]) -> list[str]:
     box["config"] = store.ensure_code(slug)
     return []
 
 
-def _step_stopped_branch(
+def step_stopped_branch(
     slug: str,
     config: SwarmConfig,
     store: RedisStore,
@@ -232,62 +235,61 @@ def _step_stopped_branch(
     runtime: Any,
     now_ms: int,
     box: dict[str, Any],
-    **_: object,
 ) -> list[str]:
     from scripts.swarm import automated_gc
 
-    actions = []
+    actions: list[str] = []
     if config.state == "stopped":
         doc = timing.call(ledger.state, slug)
         rows = {t["id"]: t for t in doc["tasks"]}
         actions = automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            box["finished"] = skip_refused(_close_space, slug, config, store, runtime) + _bin_closed(
-                slug, store, ledger, doc
+            box["finished"] = True
+            return (
+                actions
+                + skip_refused(_close_space, slug, config, store, runtime)
+                + _bin_closed(slug, store, ledger, doc)
             )
-            return actions
         box["config"] = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     return actions
 
 
-def _step_pane_evidence(slug: str, store: RedisStore, runtime: Any, now_ms: int, **_: object) -> list[str]:
+def step_pane_evidence(slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
 
 
-def _step_execution_reconcile(slug: str, store: RedisStore, runtime: Any, now_ms: int, **_: object) -> list[str]:
+def step_execution_reconcile(slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return skip_refused(store.execution_registry.reconcile, slug, runtime, now_ms)
 
 
-def _step_master_move_fail_over(
-    slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int, **_: object
+def step_master_move_fail_over(
+    slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int
 ) -> list[str]:
     return skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
 
 
-def _step_recover_master(
-    slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int, **_: object
-) -> list[str]:
+def step_recover_master(slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return skip_refused(_recover_master, slug, config, store, runtime, now_ms)
 
 
-def _step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any], **_: object) -> list[str]:
+def step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any]) -> list[str]:
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     box.update(doc=doc, rows=rows)
     return []
 
 
-def _step_automated_cleanup(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict], now_ms: int, **_: object
+def step_automated_cleanup(
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
 ) -> list[str]:
     from scripts.swarm import automated_gc
 
     return automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
 
 
-def _step_spawn_due(
+def step_spawn_due(
     slug: str,
     config: SwarmConfig,
     store: RedisStore,
@@ -295,10 +297,9 @@ def _step_spawn_due(
     runtime: Any,
     now_ms: int,
     box: dict[str, Any],
-    **_: object,
 ) -> list[str]:
     rows, doc = box["rows"], box["doc"]
-    actions = []
+    actions: list[str] = []
     due = store.key(slug, SPAWN_DUE)
     if config.state == "running" and config.engine != EVENTS_ENGINE and not lifetime.sleeping(slug, store, rows):
         if store.redis.exists(due):
@@ -308,7 +309,7 @@ def _step_spawn_due(
     return actions
 
 
-def _step_exits_sweep(slug: str, store: RedisStore, ledger: Any, **_: object) -> list[str]:
+def step_exits_sweep(slug: str, store: RedisStore, ledger: Any) -> list[str]:
     return skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
@@ -318,26 +319,32 @@ def _step_exits_sweep(slug: str, store: RedisStore, ledger: Any, **_: object) ->
     )
 
 
-def _step_master_start_watch(
-    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, now_ms: int, **_: object
+def step_master_start_watch(
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, now_ms: int
 ) -> list[str]:
     return skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
 
 
-def _step_launch_checks(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict], doc: dict, now_ms: int, **_: object
+def step_launch_checks(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    doc: dict[str, Any],
+    now_ms: int,
 ) -> list[str]:
     return skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
 
 
-def _step_track_outages(
-    slug: str, store: RedisStore, runtime: Any, rows: dict[str, dict], now_ms: int, **_: object
+def step_track_outages(
+    slug: str, store: RedisStore, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
 ) -> list[str]:
     return skip_refused(resume.track_outages, slug, store, runtime, rows, now_ms) or []
 
 
-def _step_verify(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict], now_ms: int, **_: object
+def step_verify(
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
 ) -> list[str]:
     return skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
 
@@ -349,29 +356,26 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     actions = run_group("start", **passing)
     observe_steps.raise_held(box)
     if "finished" in box:
-        return actions + box["finished"]
+        return actions
     store.redis.delete(store.key(slug, SPAWN_HOLD))
     actions += run_group("observe", **passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
-    passing["rows"] = rows
-    actions += run_group("agents", config=config, **passing)
+    passing |= {"rows": rows, "doc": doc, "due": due}
+    actions += run_group("agents", **passing, config=config)
     actions.extend(master_steps.run_masters(locals()))
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += run_group("tasks", config=config, **passing)
+    actions += run_group("tasks", **passing, config=config)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
     actions += skip_refused(fleet_red.notice_pass, slug, store, ledger, rows, now_ms)
-    actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
-    actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
-    actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
-    actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
-    actions += skip_refused(dispatcher.group, slug, config, store, ledger, doc, now_ms)
+    actions += run_group(task_steps.TASK_PASSES, **passing, config=config)
+    task_steps.raise_held(box)
     from scripts.swarm import quota_notice
 
     with PLACING:
@@ -379,28 +383,17 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(lost_runner.sweep, slug, config, store, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
-        actions += skip_refused(_collect_acks, slug, config, store, ledger, runtime, doc, now_ms)
+        actions += run_group(place.ACKS, **passing, config=config, sleeping=sleeping)
+        task_steps.raise_held(box)
         if not sleeping:
-            actions += skip_refused(_codex_hook_order)
             actions.extend(master_steps.run_seats(locals()))
-            actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
-            actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
-            if config.state == "running" and config.engine != EVENTS_ENGINE and panic.state(store) is None:
-                placement = partial(preempt.probe, runtime)
-                seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order, placement)
-                actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
-            if config.state == "running" and readiness.tick_places(config.engine, rows) and panic.state(store) is None:
-                with _placement_pass(runtime):
-                    actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
-                store.redis.delete(due)
+            actions += run_group(place.PLACEMENT, **passing, config=config)
+            task_steps.raise_held(box)
         actions.extend(master_steps.run_dispatch(locals()))
     actions.extend(master_steps.run_watch(locals()))
-    actions += run_group("close", config=config, **passing)
-    return (
-        actions
-        + skip_refused(_settle, slug, config, store, ledger, rows, doc)
-        + skip_refused(_close_space, slug, config, store, runtime)
-    )
+    actions += run_group(task_steps.CLOSE, **passing, config=config)
+    task_steps.raise_held(box)
+    return actions
 
 
 def skip_refused(function, *args):
@@ -601,7 +594,7 @@ def _ended(agent, rows):
 
 
 def _launch_checks(
-    slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, doc: dict, now_ms: int
+    slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, doc: dict[str, Any], now_ms: int
 ) -> list[str]:
     waiting, actions = launch_check.pending(store, slug), []
     if not waiting:
@@ -2047,7 +2040,7 @@ def place_master(slug, store, runtime, now_ms):
     return _under_tick_lock(slug, store, place)
 
 
-def _under_tick_lock(slug, store, act):
+def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 
@@ -2063,7 +2056,8 @@ def _under_tick_lock(slug, store, act):
         config = store.ensure_code(slug)
         if config.state in ("stopping", "stopped"):
             return []
-        return act(config, held)
+        with lease.held_pass(store, slug, held):
+            return act(config, held)
     finally:
         controller.release_tick_lock(store, slug, token)
 

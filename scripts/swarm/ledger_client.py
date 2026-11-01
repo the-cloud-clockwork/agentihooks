@@ -53,10 +53,10 @@ class LedgerClient:
         self.service = service
         self.read_timeout = read_timeout
 
-    def _call(self, slug, ops=None):
+    def _call(self, slug: str, ops: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         from scripts.swarm import lease
 
-        if ops is not None and (epoch := lease.EPOCH.get()) is not None:
+        if ops is not None and (epoch := lease.epoch_for(slug)) is not None:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
@@ -307,11 +307,11 @@ class LedgerClient:
     def join(self, slug, name, role):
         self._call(slug, [_op("join", name, role=role)])
 
-    def _lifecycle(self, slug, payload):
+    def _lifecycle(self, slug: str, payload: dict[str, Any]) -> Any:
         from scripts.swarm import lease
         from scripts.swarm_ledger.api.client import ResourceClient
 
-        if (epoch := lease.EPOCH.get()) is not None:
+        if (epoch := lease.epoch_for(slug)) is not None:
             payload = {**payload, "controller_epoch": epoch}
         ledger = _ledger()
         try:

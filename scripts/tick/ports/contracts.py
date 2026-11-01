@@ -13,6 +13,7 @@ from scripts.tick.ports.source_control import (
     QueueEntry,
     QueueHealth,
     RateLimit,
+    RepositoryRun,
     Run,
     Tag,
 )
@@ -77,6 +78,14 @@ class SourceControl(Protocol):
     def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str: ...
 
     def rate_limit(self, *, deadline: Deadline) -> RateLimit: ...
+
+    def issues_enabled(self, *, deadline: Deadline) -> bool: ...
+
+    def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]: ...
+
+    def cancel_run(self, run_id: int, *, deadline: Deadline) -> None: ...
+
+    def merged_at(self, commit: str, *, deadline: Deadline) -> str | None: ...
 
 
 @runtime_checkable

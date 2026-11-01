@@ -19,7 +19,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Result, Write
-from scripts.tick.steps import ACTIONS, PASS, actions, masters
+from scripts.tick.steps import PASS, actions, actions_of, masters
 
 pytestmark = pytest.mark.unit
 
@@ -171,6 +171,18 @@ def test_a_system_exit_is_held_too() -> None:
     assert isinstance(box[masters.RAISED], SystemExit)
 
 
+def test_a_held_step_hands_its_call_the_tick_and_the_reader() -> None:
+    seen: list[tuple[Any, Any]] = []
+    get = {"box": {}}.get
+
+    def record(tick: Any, reader: Any) -> list[str]:
+        seen.append((tick, reader))
+        return ["done"]
+
+    assert masters._held(record)("tick", get) == ["done"]
+    assert seen == [("tick", get)]
+
+
 def test_the_site_view_reads_the_locals_and_the_box_for_the_pass_domain() -> None:
     box: dict[str, Any] = {}
     view = masters._SiteView({"slug": "sw", "box": "shadowed"}, box)
@@ -186,7 +198,7 @@ def test_a_site_runs_its_group_against_the_locals_under_the_step_budget(monkeypa
 
     def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
         seen.append((name, ctx))
-        result = Result((Write(ACTIONS, "one", ["ran"]),))
+        result = Result((Write(actions_of("one"), "one", ["ran"]),))
         return (engine.StepRecord("one", 0.0, 1.0, result=result),)
 
     monkeypatch.setattr(engine, "run_group", run_group)

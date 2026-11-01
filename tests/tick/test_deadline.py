@@ -1,5 +1,7 @@
 from importlib import import_module
 
+import pytest
+
 
 def test_deadline_uses_injected_monotonic_clock_and_clamps_remaining() -> None:
     module = import_module("scripts.tick.deadline")
@@ -31,3 +33,15 @@ def test_default_clock_and_zero_budget() -> None:
     module = import_module("scripts.tick.deadline")
     assert module.Deadline.after(0).expired is True
     assert module.Deadline.after(-1).remaining == 0.0
+
+
+def test_live_returns_the_seconds_left_and_refuses_an_expired_deadline() -> None:
+    module = import_module("scripts.tick.deadline")
+    now = [10.0]
+    deadline = module.Deadline.after(3.0, clock=lambda: now[0])
+    now[0] = 11.5
+    assert deadline.live() == 1.5
+    now[0] = 13.0
+    with pytest.raises(TimeoutError) as error:
+        deadline.live()
+    assert str(error.value) == "tool deadline expired"

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from functools import partial
+from types import SimpleNamespace
 from typing import Any
 
 from scripts.swarm import (
@@ -17,7 +18,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import BUDGET_S, PASS, CallStep, actions
+from scripts.tick.steps import PASS, CallStep, actions
 
 __all__ = [
     "DISPATCH",
@@ -42,6 +43,17 @@ WATCH = "master watch"
 RAISED = "raised"
 BOX = "box"
 QUIET_STATES = frozenset({"stopped", "stopping"})
+SEAT: Any = SimpleNamespace(
+    dispatch_seat=dispatch_seat,
+    lifetime=lifetime,
+    master_alarm=master_alarm,
+    master_prompt_stall=master_prompt_stall,
+    master_scale=master_scale,
+    master_seat_alarm=master_seat_alarm,
+    master_stall=master_stall,
+    master_wake=master_wake,
+    tick_master=tick_master,
+)
 
 
 class _SiteView:
@@ -62,7 +74,7 @@ class _SiteView:
 def run_site(group: str, found: Mapping[str, Any]) -> list[str]:
     """Run tick group ``group`` against the tick's locals ``found``, raising what a step held, returning actions."""
     box: dict[str, Any] = {}
-    records = engine.run_group(group, Context(_SiteView(found, box), Deadline.after(BUDGET_S)))
+    records = engine.run_group(group, Context(_SiteView(found, box), Deadline.after(CallStep.budget_s)))
     raise_held(box)
     return actions(records)
 
@@ -98,12 +110,12 @@ def raise_held(box: dict[str, Any]) -> None:
 def _master_wake(tick: Any, get: Get) -> Any:
     if get("config").state in QUIET_STATES:
         return []
-    return tick.skip_refused(master_wake.run, get("slug"), get("store"), get("runtime"), get("doc"), get("now_ms"))
+    return tick.skip_refused(SEAT.master_wake.run, get("slug"), get("store"), get("runtime"), get("doc"), get("now_ms"))
 
 
 def _retire_idle_master(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        lifetime.retire_idle_master,
+        SEAT.lifetime.retire_idle_master,
         get("slug"),
         get("store"),
         get("ledger"),
@@ -115,13 +127,19 @@ def _retire_idle_master(tick: Any, get: Get) -> Any:
 
 def _master_stall(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        master_stall.run, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
+        SEAT.master_stall.run, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
     )
 
 
 def _prompt_stall(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        master_prompt_stall.run, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
+        SEAT.master_prompt_stall.run,
+        get("slug"),
+        get("config"),
+        get("store"),
+        get("ledger"),
+        get("runtime"),
+        get("now_ms"),
     )
 
 
@@ -133,7 +151,7 @@ def _master_down(tick: Any, get: Get) -> Any:
 
 def _tick_master(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        tick_master.run,
+        SEAT.tick_master.run,
         get("slug"),
         get("config"),
         get("store"),
@@ -146,19 +164,19 @@ def _tick_master(tick: Any, get: Get) -> Any:
 
 def _master_scale(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        master_scale.run, get("slug"), get("config"), get("store"), get("runtime"), get("doc"), get("now_ms")
+        SEAT.master_scale.run, get("slug"), get("config"), get("store"), get("runtime"), get("doc"), get("now_ms")
     )
 
 
 def _seat_alarm(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        master_seat_alarm.run, get("slug"), get("store"), get("ledger"), get("runtime"), get("doc")
+        SEAT.master_seat_alarm.run, get("slug"), get("store"), get("ledger"), get("runtime"), get("doc")
     )
 
 
 def _dispatch_seat(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        dispatch_seat.run,
+        SEAT.dispatch_seat.run,
         get("slug"),
         get("config"),
         get("store"),
@@ -183,8 +201,8 @@ def _night_watch(tick: Any, get: Get) -> Any:
 
 
 def _master_alarm(tick: Any, get: Get) -> Any:
-    promoted = tick_master.promoted(get("store"), get("slug"))
-    return tick.skip_refused(master_alarm.run, get("slug"), get("store"), get("runtime"), promoted)
+    promoted = SEAT.tick_master.promoted(get("store"), get("slug"))
+    return tick.skip_refused(SEAT.master_alarm.run, get("slug"), get("store"), get("runtime"), promoted)
 
 
 STEPS = (

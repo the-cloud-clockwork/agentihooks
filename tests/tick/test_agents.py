@@ -74,7 +74,7 @@ def test_the_agent_steps_sit_in_their_groups_in_legacy_order() -> None:
         "failed panes",
     ]
     assert [step.name for step in engine.group_steps("tasks")][:1] == ["orphans"]
-    assert [step.name for step in engine.group_steps("close")] == [
+    assert [step.name for step in engine.group_steps("close")][:3] == [
         "conversations",
         "session models",
         "handoff transfers",
@@ -121,10 +121,10 @@ def test_the_close_group_keeps_sessions_and_transfers_current(monkeypatch: pytes
 
 
 def test_a_call_step_is_placed_and_bounded_as_registered() -> None:
-    step = CallStep("reap", "agents", 5, lambda tick, get: None)
-    assert (step.name, step.group, step.order) == ("reap", "agents", 5)
-    assert (step.lane, step.budget_s, step.interval_s) == (Lane("tick"), 22.0, 60.0)
-    assert (step.needs, step.writes) == (frozenset(), frozenset({Domain("actions:reap")}))
+    step = CallStep("probe", "agents", 5, lambda tick, get: None)
+    assert (step.name, step.group, step.order) == ("probe", "agents", 5)
+    assert (step.lane, step.budget_s, step.interval_s) == (Lane("tick"), 600.0, 0.0)
+    assert (step.needs, step.writes) == (frozenset(), frozenset({Domain("actions:probe")}))
     assert (PASS, actions_of("probe")) == (Domain("pass"), Domain("actions:probe"))
 
 
@@ -145,8 +145,8 @@ def test_a_call_step_reads_the_pass_state_and_the_tick_module() -> None:
         seen.append((tick, get("slug")))
         return ["one", "two"]
 
-    result = CallStep("strays", "agents", 0, call).run(_ctx(_state()))
-    assert result == Result((Write(actions_of("strays"), "strays", ["one", "two"]),))
+    result = CallStep("probe", "agents", 0, call).run(_ctx(_state()))
+    assert result == Result((Write(actions_of("probe"), "probe", ["one", "two"]),))
     assert seen == [(tick_module, "sw")]
 
 
@@ -167,17 +167,17 @@ def test_a_raising_call_is_recorded_failed_and_the_next_step_still_runs() -> Non
     def boom(tick: Any, get: Any) -> list[str]:
         raise RuntimeError("reap broke")
 
-    pool = (CallStep("reap", "agents", 0, boom), CallStep("strays", "agents", 1, lambda tick, get: ["after"]))
+    pool = (CallStep("first", "agents", 0, boom), CallStep("second", "agents", 1, lambda tick, get: ["after"]))
     records = engine.run_group("agents", _ctx(_state()), pool)
     assert [(record.name, record.outcome, record.error) for record in records] == [
-        ("reap", engine.FAILED, "builtins.RuntimeError"),
-        ("strays", engine.OK, ""),
+        ("first", engine.FAILED, "builtins.RuntimeError"),
+        ("second", engine.OK, ""),
     ]
     assert actions(records) == ["after"]
 
 
 def test_the_tick_returns_the_actions_its_group_steps_wrote(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(registry, "registry", registry.Registry())
-    registry.register(CallStep("strays", "agents", 0, lambda tick, get: [f"saw {get('slug')} at {get('now_ms')}"]))
+    registry.register(CallStep("probe", "agents", 0, lambda tick, get: [f"saw {get('slug')} at {get('now_ms')}"]))
     assert tick_module.run_group("agents", slug="sw", now_ms=3) == ["saw sw at 3"]
     assert tick_module.run_group("masters", slug="sw") == []

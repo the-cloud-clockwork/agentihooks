@@ -6,7 +6,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from scripts.swarm import controller, lease
+from scripts.swarm import lease
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_ledger import authority_context, ledger_authority, ledger_route, ledger_server
@@ -59,9 +59,10 @@ def test_a_transferred_hosted_tick_passes_and_the_old_local_epoch_is_refused(liv
         assert lease.acquire(source, SLUG, old.owner).epoch == transferred.epoch
         assert source.redis.get(source.key(SLUG, "control-owner")) is None
         assert lease.current(source, SLUG).epoch == transferred.epoch
-        tick = controller.FencedLedger(source, SLUG, transferred, LedgerClient())
-        tick.comment_phase(SLUG, "p1", "Transferred tick applied", "swarm")
-        state = tick.state(SLUG)
+        tick = LedgerClient()
+        with lease.held_pass(source, SLUG, transferred):
+            tick.comment_phase(SLUG, "p1", "Transferred tick applied", "swarm")
+            state = tick.state(SLUG)
         assert any(comment["text"] == "Transferred tick applied" for comment in state["phases"][0]["comments"])
         renewed = []
 
@@ -75,9 +76,8 @@ def test_a_transferred_hosted_tick_passes_and_the_old_local_epoch_is_refused(liv
         with lease.kept(source, SLUG, transferred):
             pass
         assert renewed == [transferred.epoch]
-        stale = controller.FencedLedger(source, SLUG, old, LedgerClient())
-        with pytest.raises(SwarmError, match="stale"):
-            stale.comment_phase(SLUG, "p1", "Stale tick refused", "swarm")
+        with pytest.raises(SwarmError, match="stale"), lease.held_pass(source, SLUG, old):
+            tick.comment_phase(SLUG, "p1", "Stale tick refused", "swarm")
     operation = {
         "op": "add",
         "id": uuid.uuid4().hex,

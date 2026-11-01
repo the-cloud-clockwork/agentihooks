@@ -61,15 +61,18 @@ import threading
 import time
 from collections.abc import MutableMapping
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from contextvars import copy_context
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
+import scripts.tick.steps.report  # noqa: F401
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
-from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
+from scripts.gates import Who, catalog, intent, lift, modes, quiet
 from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
@@ -78,11 +81,12 @@ from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
 from scripts.hive import scope
-from scripts.inbox import exits, outbox, relay, wake
+from scripts.inbox import exits, outbox
+from scripts.inbox import relay as relay
+from scripts.inbox import wake as wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import (
     affinity,
     agent_up,
@@ -96,25 +100,18 @@ from scripts.swarm import (
     delivery,
     dev_red,
     dispatch_seat,
-    dispatcher,
     doc_report,
     done_gate,
     failed_panes,
-    hive_ledger,
     idle,
     launch_check,
-    ledger_client,
     ledger_events,
-    ledger_probe,
-    ledger_watchdog,
     master_launch,
     master_move,
     merge_queue,
-    metrics,
     naming,
     outage,
     overlays,
-    overrun,
     panic,
     phase_planning,
     phase_state,
@@ -129,15 +126,12 @@ from scripts.swarm import (
     ready,
     reaper,
     reboot,
-    release_wait,
     remote_control,
     review_rounds,
     run_window,
     snapshot,
-    snapshot_job,
     stack,
     stages,
-    stall_watch,
     take_master,
     templates,
     tick_heartbeat,
@@ -148,6 +142,9 @@ from scripts.swarm import (
     trace_plan,
     waits,
 )
+from scripts.swarm import ledger_client as ledger_client
+from scripts.swarm import refresh_job as refresh_job
+from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
@@ -191,7 +188,9 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
+from scripts.tick import view as ledger_view
 from scripts.tick.adapters.github import command
+from scripts.tick.steps import host as host_steps
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -298,7 +297,6 @@ def _bin_stop(store, slug, ledger, runtime):
 def _stopped_tick(store, slug, ledger, runtime, held):
     from scripts.swarm import command_runner, controller
 
-    ledger = controller.FencedLedger(store, slug, held, ledger)
     runtime = controller.FencedRuntime(
         store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
     )
@@ -339,7 +337,7 @@ def run_tick(
     messenger: object | None = None,
     scheduled: bool = False,
 ) -> list[str]:
-    from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
+    from scripts.swarm import commands, controller, lease, tick_activity
 
     if not ledger_link.local_mode(os.environ) and not scheduled:
         return [CONTROLLER_TICKS]
@@ -360,22 +358,22 @@ def run_tick(
         tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc, view = {}, None
+    doc, view, beating = {}, None, ExitStack()
     try:
+        beating.enter_context(lease.held_pass(store, slug, held))
         timing.keep()
         run_group("before")
         if store.config(slug).state == "stopped":
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
-        timing.call(relay.relay, store.redis)
-        timing.call(LaunchSlots(store.redis).refresh_reported, now_ms())
-        outage.providers(store, slug, runtime, now_ms())
-        hive_ledger.observe(store, slug, now_ms())
-        if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
-            slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
-        ):
-            return ["Ledger health probe failed"]
-        ledger = controller.FencedLedger(store, slug, held, ledger)
+        box: dict[str, Any] = {}
+        passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
+        run_group("wrapper probes", **passing)
+        host_steps.raise_held(box)
+        if "stop" in box:
+            return box["stop"]
+        if ledger_view.reads(ledger):
+            ledger_view.start(slug, ledger.service)
         runtime = controller.FencedRuntime(
             store,
             slug,
@@ -383,14 +381,14 @@ def run_tick(
             runtime or routed(herdr=HerdrRuntime()),
             controller.deployment_for(store.config(slug), os.environ),
         )
-        from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
+        from scripts.swarm.health import spawn_stall
 
-        pressured = skip_refused(incidents.host_pressure, store, slug)
-        restarted = pressured + timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
-        probed = restarted + timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
-        timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)
+        passing |= {"ledger": ledger, "runtime": runtime}
+        probed = run_group("wrapper health", **passing)
+        host_steps.raise_held(box)
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
-            controls = timing.call(command_runner.consume, store, slug)
+            controls = run_group("wrapper commands", **passing)
+            host_steps.raise_held(box)
             if timing.call(ledger.binned, slug):
                 return _bin_stop(store, slug, ledger, runtime)
             inbox = InboxStore(store.redis)
@@ -402,93 +400,48 @@ def run_tick(
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
             store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
-            timing.call(urgent_hold.observe, store, slug, doc, now_ms())
-            actions = _phase_steps(inbox, store, slug, doc, ledger)
-            if scheduled:
-                from scripts.swarm import refresh_job
-
-                timing.call(refresh_job.start, store, slug)
+            actions = run_group("wrapper phases", **passing, inbox=inbox, doc=doc)
+            host_steps.raise_held(box)
+            run_group("wrapper refresh", **passing, scheduled=scheduled)
+            host_steps.raise_held(box)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
+            judging: dict[str, Any] = {}
             with ThreadPoolExecutor(max_workers=1) as worker:
-                judged = worker.submit(copy_context().run, _intent_pass, inbox, store, slug, doc, ledger, config)
+                judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
+                judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
                 try:
-                    actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
-                    actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+                    actions += run_group("wrapper reboot", **passing)
+                    host_steps.raise_held(box)
                 finally:
-                    view, checked = judged.result()
+                    judged.result()
+                    host_steps.raise_held(judging)
+                    view, checked = judging["judged"]
             actions += checked
-            timing.call(delivery.migrate_outbox, store, slug, inbox)
-            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
+            run_group("wrapper relay", **passing, inbox=inbox)
+            host_steps.raise_held(box)
+            agents = box["agents"]
             doc, config = timing.call(ledger.state, slug), store.config(slug)
-            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc, view)
-            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
-            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
-            actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
+            run_group("wrapper view", **passing, inbox=inbox, doc=doc, view=view)
+            host_steps.raise_held(box)
+            view = box["view"]
             rows = {t["id"]: t for t in doc["tasks"]}
-            actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
-            actions += skip_refused(
-                ready.merge_pass, ready.Pass(store, slug, ledger, view, ledger_events.view, now_ms()), rows
-            )
-            live = runtime.live_names() | {a.name for a in agents if a.runtime_backend != "local"}
-            actions += skip_refused(
-                stall_watch.stall_pass,
-                stall_watch.Watch(
-                    store,
-                    slug,
-                    ledger,
-                    view,
-                    frozenset(live),
-                    lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
-                    stall_watch.ready_lanes(slug, store, ledger, doc, now_ms()),
-                    now_ms(),
-                    released=release_wait.checker(config.repo),
-                    reread=ledger_events.view,
-                ),
-                doc,
-            )
-            actions += skip_refused(
-                overrun.overrun_pass,
-                overrun.Watch(
-                    store,
-                    slug,
-                    ledger,
-                    frozenset(live),
-                    lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
-                    now_ms(),
-                ),
-                doc,
-            )
-            actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
-            actions += skip_refused(
-                doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms(), config.watchdog_address
-            )
-            actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
-            found = timing.call(
-                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
-            )
-            actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found, doc)
-            actions += timing.call(
-                metrics.record_pass,
-                slug,
-                now_ms(),
-                len(actions),
-                os.environ,
-                metrics.metrics_swarm.TickInput(store, doc, found, view, ledger),
-            )
-            actions += skip_refused(bottleneck_status.refresh, slug, store, now_ms())
-            window = wake.window_ms(os.environ)
-            actions += skip_refused(wake.maintenance, inbox, slug, agents, now_ms(), window)
-            started = timing.call(snapshot_job.start, store, slug, now_ms(), os.environ)
-            store.redis.set(store.key(slug, "last-tick"), now_ms())
+            passing |= {"inbox": inbox, "doc": doc, "config": config, "view": view, "rows": rows, "agents": agents}
+            actions += run_group("wrapper events", **passing)
+            host_steps.raise_held(box)
+            actions += run_group("wrapper metrics", **passing, count=len(actions))
+            host_steps.raise_held(box)
             doc = timing.call(ledger.state, slug)
-            tick_heartbeat.write(store, slug, now_ms(), doc)
-            run_group("after")
+            run_group("after", **(passing | {"doc": doc}))
+            host_steps.raise_held(box)
+            started = box["started"]
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     finally:
         try:
-            _publish_tick_status(store, slug, doc, view)
+            published: dict[str, Any] = {}
+            run_group("wrapper status", store=store, slug=slug, doc=doc, view=view, box=published)
+            host_steps.raise_held(published)
         finally:
+            beating.close()
             timing.BEFORE_STEP.reset(keeping)
             tick_stop.drop(token)
             controller.release_tick_lock(store, slug, token)
@@ -1556,7 +1509,7 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":
         found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
-        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.gh)
+        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.port)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
         return
     if args.action == "off":

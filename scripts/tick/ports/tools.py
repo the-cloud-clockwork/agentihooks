@@ -39,6 +39,9 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 SourceControl.capabilities.__name__,
                 SourceControl.issue_state.__name__,
                 SourceControl.rate_limit.__name__,
+                SourceControl.issues_enabled.__name__,
+                SourceControl.latest_runs.__name__,
+                SourceControl.merged_at.__name__,
             ]
         ),
         frozenset(
@@ -47,6 +50,7 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 SourceControl.merge.__name__,
                 SourceControl.comment.__name__,
                 SourceControl.close_issue.__name__,
+                SourceControl.cancel_run.__name__,
             ]
         ),
     ),

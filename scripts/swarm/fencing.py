@@ -3,13 +3,25 @@
 import copy
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from hashlib import sha256
 from typing import Any, TypeVar
 
 from scripts.events import state
 from scripts.events.bus import StateConflict
 from scripts.events.redis_state import RedisStateStore
+from scripts.tick.adapters.records_redis import LAYOUT, META, RedisRecords
+from scripts.tick.ports.records import (
+    BLIND,
+    FencedBatch,
+    LeaseFence,
+    Record,
+    Records,
+    RecordWrite,
+    RevisionConflict,
+    StaleLease,
+)
 
 BUCKET = "fencing"
 COUNTERS = "counters"
@@ -50,6 +62,17 @@ LEGACY_JOURNALS = "claim-journal"
 LEGACY_DISABLED = "launch-grants-disabled"
 LEGACY_ORPHANS = "controller-orphans"
 T = TypeVar("T")
+RECORDS = "records"
+DOCUMENT = "document"
+RECORDS_SLUG = "records_slug"
+ARCHIVE = "archive"
+ARCHIVE_REF = "archive_ref"
+BY_NAME = "by-name"
+MOVED = "moved_to"
+SECTIONS = tuple(name for name, value in EMPTY.items() if isinstance(value, dict))
+LOADED = (META, *(name for name in SECTIONS if name != ARCHIVE), BY_NAME)
+STALE = "the controller lease is stale"
+HYDRATED: ContextVar[dict[str, dict[str, Record]] | None] = ContextVar("fencing_hydrated", default=None)
 
 
 def unavailable() -> tuple[type[BaseException], ...]:
@@ -133,6 +156,239 @@ def _decode(value: bytes) -> dict[str, Any]:
     return {**copy.deepcopy(EMPTY), **json.loads(value)}
 
 
+def _port(store: Any) -> RedisRecords:
+    return RedisRecords(store.redis, touched=_states(store).watch_key)
+
+
+def _migrated(store: Any, slug: str) -> RedisRecords | None:
+    if state.backend() != "redis":
+        return None
+    port = _port(store)
+    return port if port.layout(slug) == RECORDS else None
+
+
+def _assemble(slug: str, loaded: dict[str, dict[str, Record]]) -> dict[str, Any]:
+    doc = copy.deepcopy(EMPTY)
+    for name, rows in loaded.items():
+        values = {key: found.value for key, found in rows.items()}
+        if name == META:
+            values.pop(LAYOUT, None)
+            doc.update(values)
+        elif name in SECTIONS:
+            doc[name] = values
+    doc[RECORDS_SLUG] = slug
+    return doc
+
+
+def _read_records(store: Any, slug: str) -> dict[str, Any]:
+    return _assemble(slug, RedisRecords(store.redis).sections(slug, (*LOADED, ARCHIVE)))
+
+
+def _heads(rows: dict[str, Any]) -> dict[str, str]:
+    found: dict[str, tuple[Any, str]] = {}
+    for key, row in rows.items():
+        name, generation = row.get("name"), row.get("generation")
+        if isinstance(name, str) and isinstance(generation, int | float):
+            found[name] = max((generation, key), found.get(name, (generation, key)))
+    return {name: key for name, (_, key) in found.items()}
+
+
+def _expected(loaded: dict[str, dict[str, Record]], section: str, key: str) -> int:
+    if section not in loaded:
+        return BLIND
+    found = loaded[section].get(key)
+    return 0 if found is None else found.revision
+
+
+def _section_changes(
+    section: str, before: dict[str, Any], after: dict[str, Any], loaded: dict[str, dict[str, Record]]
+) -> list[RecordWrite]:
+    writes = [
+        RecordWrite("put", section, key, _expected(loaded, section, key), value)
+        for key, value in after.items()
+        if key not in before or before[key] != value
+    ]
+    removed = sorted(before.keys() - after.keys())
+    return writes + [RecordWrite("delete", section, key, _expected(loaded, section, key)) for key in removed]
+
+
+def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, dict[str, Record]]) -> list[RecordWrite]:
+    """Every record a change wrote, each expecting the revision it was read at, plus the derived name index."""
+    writes: list[RecordWrite] = []
+    for name in sorted((before.keys() | after.keys()) - {ARCHIVE_REF, RECORDS_SLUG}):
+        if name in SECTIONS:
+            writes += _section_changes(name, before.get(name, {}), after.get(name, {}), loaded)
+        elif name not in after:
+            writes.append(RecordWrite("delete", META, name, _expected(loaded, META, name)))
+        elif name not in before or before[name] != after[name]:
+            writes.append(RecordWrite("put", META, name, _expected(loaded, META, name), after[name]))
+    heads = (_heads(before.get("executions", {})), _heads(after.get("executions", {})))
+    return writes + _section_changes(BY_NAME, heads[0], heads[1], loaded)
+
+
+class Reads(dict[str, Any]):
+    """A section handed to a fenced change that remembers the keys the change read, or that it read every key."""
+
+    def __init__(self, values: dict[str, Any]) -> None:
+        super().__init__(values)
+        self.seen: set[str] = set()
+        self.whole = False
+
+    def __getitem__(self, key: str) -> Any:
+        self.seen.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        self.seen.add(key)
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        self.seen.add(str(key))
+        return super().__contains__(key)
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        self.seen.add(key)
+        return super().setdefault(key, default)
+
+    def pop(self, key: str, *default: Any) -> Any:
+        self.seen.add(key)
+        return super().pop(key, *default)
+
+    def untracked(self, key: str) -> Any:
+        """The value under key without counting it as read."""
+        return super().get(key)
+
+    def _every(self) -> None:
+        self.whole = True
+
+    def __iter__(self) -> Any:
+        self._every()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._every()
+        return super().__len__()
+
+    def __reversed__(self) -> Any:
+        self._every()
+        return super().__reversed__()
+
+    def keys(self) -> Any:
+        self._every()
+        return super().keys()
+
+    def values(self) -> Any:
+        self._every()
+        return super().values()
+
+    def items(self) -> Any:
+        self._every()
+        return super().items()
+
+    def __eq__(self, other: object) -> bool:
+        self._every()
+        return super().__eq__(other)
+
+    def __ne__(self, other: object) -> bool:
+        self._every()
+        return super().__ne__(other)
+
+    def copy(self) -> dict[str, Any]:
+        self._every()
+        return dict(super().items())
+
+    def __copy__(self) -> dict[str, Any]:
+        return self.copy()
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> dict[str, Any]:
+        return copy.deepcopy(self.copy(), memo)
+
+
+def _track(doc: dict[str, Any]) -> Reads:
+    return Reads({name: Reads(value) if name in SECTIONS and name != ARCHIVE else value for name, value in doc.items()})
+
+
+def _read_set(doc: Reads) -> dict[str, set[str] | None]:
+    """The keys each section's change read, None for a section it read whole; scalars sit under meta."""
+    reads: dict[str, set[str] | None] = {
+        META: None if doc.whole else {key for key in doc.seen if key not in (*SECTIONS, ARCHIVE_REF, RECORDS_SLUG)}
+    }
+    for name in SECTIONS:
+        section = doc.untracked(name)
+        if isinstance(section, Reads):
+            reads[name] = None if section.whole else set(section.seen)
+    return reads
+
+
+def _checks(
+    reads: dict[str, set[str] | None], loaded: dict[str, dict[str, Record]], writes: list[RecordWrite], fenced: bool
+) -> list[RecordWrite]:
+    """A revision check for each record the change read but did not write; a fence covers the lease itself."""
+    skip = {(write.section, write.key) for write in writes}
+    if fenced:
+        skip.add((META, "lease"))
+    checks: list[RecordWrite] = []
+    for section, keys in sorted(reads.items()):
+        for key in sorted(loaded.get(section, {}) if keys is None else keys):
+            if (section, key) not in skip:
+                checks.append(RecordWrite("check", section, key, _expected(loaded, section, key)))
+    return checks
+
+
+def _lease_fence(fence: Any) -> LeaseFence | None:
+    if fence is None:
+        return None
+    if isinstance(fence, int):
+        return LeaseFence("", fence, now_ms())
+    return LeaseFence(fence.owner, fence.epoch, now_ms())
+
+
+def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, Any]], T], fence: Any) -> T:
+    from scripts.swarm.store import SwarmError
+
+    for _ in range(ATTEMPTS):
+        loaded = port.sections(slug, LOADED)
+        assembled = _assemble(slug, loaded)
+        before = copy.deepcopy(assembled)
+        doc = _track(assembled)
+        hydrated: dict[str, dict[str, Record]] = {}
+        token = HYDRATED.set(hydrated)
+        try:
+            result = change(doc)
+        finally:
+            HYDRATED.reset(token)
+        reads = _read_set(doc)
+        if ARCHIVE in hydrated:
+            loaded[ARCHIVE] = hydrated[ARCHIVE]
+            before[ARCHIVE] = {key: found.value for key, found in hydrated[ARCHIVE].items()}
+        writes = _changes(before, doc, loaded)
+        if not writes:
+            return result
+        writes += _checks(reads, loaded, writes, fence is not None)
+        try:
+            port.fenced_batch(slug, FencedBatch(tuple(writes), _lease_fence(fence)))
+        except RevisionConflict:
+            continue
+        except StaleLease as exc:
+            raise SwarmError(STALE) from exc
+        return result
+    raise SwarmError(CONTENTION)
+
+
+def _record_archive(store: Any, slug: str) -> None:
+    rows = RedisRecords(store.redis).sections(slug, (ARCHIVE,))[ARCHIVE]
+    hydrated = HYDRATED.get()
+    if hydrated is not None:
+        hydrated.setdefault(ARCHIVE, rows)
+
+
+def _archived(store: Any, doc: dict[str, Any], execution_id: str) -> Any:
+    if RECORDS_SLUG in doc:
+        found = RedisRecords(store.redis).record(doc[RECORDS_SLUG], ARCHIVE, execution_id)
+        return None if found is None else found.value
+    return _archive_rows(store, doc.get(ARCHIVE_REF, "")).get(execution_id)
+
+
 def _archive_rows(store: Any, reference: str) -> dict[str, Any]:
     from scripts.swarm.store import SwarmError
 
@@ -173,9 +429,7 @@ def hydrate_archive(store: Any, doc: dict[str, Any]) -> None:
 def execution_row(store: Any, doc: dict[str, Any], execution_id: str) -> dict[str, Any] | None:
     """Finds an execution in the current rows, then the inline archive, then the external archive history."""
     return (
-        doc["executions"].get(execution_id)
-        or doc["archive"].get(execution_id)
-        or _archive_rows(store, doc.get("archive_ref", "")).get(execution_id)
+        doc["executions"].get(execution_id) or doc["archive"].get(execution_id) or _archived(store, doc, execution_id)
     )
 
 
@@ -220,6 +474,8 @@ def migrate_archive(store: Any, slug: str, *, writers_upgraded: bool = False) ->
 
 def read(store: Any, slug: str) -> dict[str, Any]:
     doc = _decode(_entry(_states(store), store, slug).value)
+    if MOVED in doc:
+        return _read_records(store, slug)
     hydrate_archive(store, doc)
     return doc
 
@@ -263,13 +519,15 @@ def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
     return {"lease": cached["lease"]}
 
 
-def write(store: Any, slug: str, change: Callable[[dict], T]) -> T:
+def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None) -> T:
     from scripts.swarm.store import SwarmError
 
     states = _states(store)
     for _ in range(ATTEMPTS):
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
+        if MOVED in doc:
+            return _write_records(_port(store), slug, change, fence)
         before = copy.deepcopy(doc)
         result = change(doc)
         if doc["archive"] and "archive_ref" in doc:
@@ -322,15 +580,136 @@ def watch(store: Any, pipe: Any) -> None:
         states.guard(pipe)
 
 
-def replace(store: Any, slug: str, saved: dict | None) -> None:
+def replace(store: Any, slug: str, saved: dict[str, Any] | None) -> None:
     """Puts back a saved document; a snapshot taken before the document existed is imported from its keys."""
-    restored = _legacy(store, slug) if saved is None else {**EMPTY, **saved}
+    restored: dict[str, Any] = _legacy(store, slug) if saved is None else {**EMPTY, **saved}
+    restored.pop(MOVED, None)
+    restored.pop(RECORDS_SLUG, None)
 
     def change(doc: dict[str, Any]) -> Any:
+        records = RECORDS_SLUG in doc
+        if records:
+            _record_archive(store, slug)
         doc.clear()
         doc.update(restored)
-        if "archive_ref" in doc:
-            doc["archive_ref"] = ""
+        if records:
+            doc.pop(ARCHIVE_REF, None)
+        elif ARCHIVE_REF in doc:
+            doc[ARCHIVE_REF] = ""
             _externalize_archive(store, slug, doc)
 
     write(store, slug, change)
+
+
+def _view(doc: dict[str, Any], section: str) -> dict[str, Any]:
+    if section == META:
+        return {key: value for key, value in doc.items() if key not in (*SECTIONS, ARCHIVE_REF, RECORDS_SLUG)}
+    if section == BY_NAME:
+        return _heads(doc["executions"])
+    return doc[section]
+
+
+def _admit(doc: dict[str, Any], revision: int, batch: FencedBatch) -> None:
+    fence = batch.lease
+    if fence is not None:
+        live = doc["lease"]
+        if (
+            not live
+            or (fence.owner and live["owner"] != fence.owner)
+            or live["epoch"] != fence.epoch
+            or live["expires_at"] <= fence.now_ms
+        ):
+            raise StaleLease(STALE)
+    for write in batch.writes:
+        found = revision if write.key in _view(doc, write.section) else 0
+        if write.expected != BLIND and write.expected != found:
+            raise RevisionConflict(f"fenced record {write.section}/{write.key} is not at revision {write.expected}")
+
+
+def _apply(doc: dict[str, Any], write: RecordWrite) -> None:
+    if write.kind == "check" or write.section == BY_NAME:
+        return
+    target = doc if write.section == META else doc[write.section]
+    if write.kind == "put":
+        target[write.key] = write.value
+    else:
+        target.pop(write.key, None)
+
+
+class WholeDocumentRecords:
+    """The records port over the whole fencing document, for bus deployments and swarms not yet migrated."""
+
+    def __init__(self, store: Any) -> None:
+        self.store = store
+
+    def layout(self, slug: str) -> str:
+        return DOCUMENT
+
+    def sections(self, slug: str, names: Sequence[str]) -> dict[str, dict[str, Record]]:
+        entry = _entry(_states(self.store), self.store, slug)
+        doc = _decode(entry.value)
+        if ARCHIVE in names:
+            hydrate_archive(self.store, doc)
+        return {name: {key: Record(entry.revision, value) for key, value in _view(doc, name).items()} for name in names}
+
+    def record(self, slug: str, section: str, key: str) -> Record | None:
+        return self.sections(slug, (section,))[section].get(key)
+
+    def fenced_batch(self, slug: str, batch: FencedBatch) -> int:
+        """Checks the lease fence and every expected revision against the document, then writes it whole."""
+        states = _states(self.store)
+        entry = _entry(states, self.store, slug)
+        doc = _decode(entry.value)
+        archived = any(write.section == ARCHIVE for write in batch.writes)
+        if archived:
+            hydrate_archive(self.store, doc)
+        _admit(doc, entry.revision, batch)
+        for write in batch.writes:
+            _apply(doc, write)
+        if archived:
+            _externalize_archive(self.store, slug, doc)
+        try:
+            written = states.update(slug, _encode(doc), entry.revision)
+        except StateConflict as exc:
+            raise RevisionConflict(str(exc)) from exc
+        _cache_lease(self.store, states, slug, doc, written)
+        return written
+
+
+def records(store: Any, slug: str) -> Records:
+    """The swarm's fenced records: per record Redis keys once migrated, else the whole document behind the same port."""
+    return _migrated(store, slug) or WholeDocumentRecords(store)
+
+
+def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) -> int:
+    """Moves the fencing document onto per record keys once every live reader and writer has both layouts.
+
+    The same transaction rewrites the document, so a write that read it before the move retries onto the records.
+    """
+    from scripts.swarm.store import SwarmError
+
+    if not writers_upgraded:
+        raise SwarmError("upgrade every live fencing reader and writer before migrating to per record keys")
+    if state.backend() != "redis":
+        raise SwarmError("per record fencing keys need the Redis state backend")
+    port = _port(store)
+    states = RedisStateStore(store.redis, BUCKET)
+    empty: dict[str, dict[str, Record]] = {name: {} for name in (*LOADED, ARCHIVE)}
+
+    def plan(pipe: Any) -> tuple[Callable[[Any], object], FencedBatch] | None:
+        if port.layout(slug) == RECORDS:
+            return None
+        entry = _entry(states, store, slug)
+        current = int(pipe.get(states.revision_key))
+        doc = _decode(entry.value)
+        hydrate_archive(store, doc)
+        writes = _changes(EMPTY, doc, empty)
+        writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
+        moved = _encode({**json.loads(entry.value), MOVED: RECORDS})
+        return (lambda staged: states.queue_write(staged, slug, moved, current)), FencedBatch(tuple(writes))
+
+    for _ in range(ATTEMPTS):
+        written = port.move(slug, (states.watch_key, states.revision_key), plan)
+        if written is not None:
+            return written
+    raise SwarmError(CONTENTION)

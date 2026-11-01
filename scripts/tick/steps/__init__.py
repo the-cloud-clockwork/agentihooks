@@ -7,26 +7,31 @@ from typing import Any, cast
 
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
-from scripts.tick.steps import budgets
 
 PASS = Domain("pass")
-LANE = Lane("tick")
-BUDGET_S = 600.0
 
 
 class CallStep:
     """A step running one call of the tick module with the pass state and writing the actions it returned."""
 
-    lane = LANE
-    needs: frozenset[str] = frozenset()
+    lane = Lane("tick")
+    budget_s = 600.0
+    interval_s = 0.0
 
-    def __init__(self, name: str, group: str, order: int, call: Callable[[Any, Callable[[str], Any]], Any]) -> None:
-        """Name the step, place it at ``order`` in tick group ``group`` and keep the call it runs."""
+    def __init__(
+        self,
+        name: str,
+        group: str,
+        order: int,
+        call: Callable[[Any, Callable[[str], Any]], Any],
+        needs: frozenset[str] = frozenset(),
+    ) -> None:
+        """Name the step, place it at ``order`` in tick group ``group``, keep the call it runs and the steps it needs."""
         self.name = name
+        self.needs = needs
         self.group = group
         self.order = order
         self.call = call
-        self.budget_s, self.interval_s = budgets.timing_of(name)
         self.writes = frozenset({actions_of(name)})
 
     def run(self, ctx: Context) -> Result:

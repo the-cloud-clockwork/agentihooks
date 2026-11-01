@@ -54,24 +54,6 @@
       ]
     },
     {
-      "id": "swarm-tick-step-isolation",
-      "origin": "plan",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-b9",
-      "behaviour": "Every registered tick step declares a budget from its tick report p95 and an interval from the plan's interval table; the engine waits on a step for at most its budget, records a step still running then as late and goes on, so a 300 second step before spawn no longer delays it, and spawn, needing only judge, orphans and preempt, starts by forty seconds into the pass.",
-      "seam": "scripts.tick.engine.run_group with step budgets from scripts.tick.steps.budgets.timing_of and the start bound from scripts.tick.registry.latest_start",
-      "tests": [
-        "tests/tick/test_step_isolation.py::test_a_300_second_step_before_spawn_no_longer_delays_spawn",
-        "tests/tick/test_step_isolation.py::test_a_step_that_ends_within_its_budget_is_kept_with_its_result",
-        "tests/tick/test_step_isolation.py::test_an_abandoned_record_reads_late_even_inside_its_budget",
-        "tests/tick/test_step_isolation.py::test_budgets_come_from_the_p95_with_headroom_in_whole_seconds",
-        "tests/tick/test_step_isolation.py::test_an_undeclared_step_is_refused",
-        "tests/tick/test_step_isolation.py::test_every_registered_call_step_declares_its_measured_timing",
-        "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
-        "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
-        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path"
-      ]
-    },
-    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
@@ -138,6 +120,9 @@
       "tests": [
         "tests/tick/test_source_control.py::test_github_change_uses_audited_reads_and_deadline",
         "tests/tick/test_source_control.py::test_github_change_names_its_head_branch",
+        "tests/tick/test_source_control.py::test_github_change_reads_an_empty_body_as_no_text",
+        "tests/tick/test_source_control.py::test_a_change_record_defaults_to_no_body_and_not_a_draft",
+        "tests/tick/test_source_control.py::test_github_merged_at_reads_the_first_merged_change_carrying_a_commit",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
       ]
     },
@@ -1164,6 +1149,30 @@
         "tests/swarm_ledger/test_freeze_page.py::test_every_plan_phase_slice_and_task_row_carries_a_freeze_button",
         "tests/swarm_ledger/test_freeze_page.py::test_freezing_a_plan_from_its_row_sends_the_freeze_and_disables_its_rows",
         "tests/swarm_ledger/test_freeze_page.py::test_unfreeze_sends_the_clear_and_restores_the_rows"
+      ]
+    },
+    {
+      "id": "swarm-tick-delta-reads",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c1",
+      "behaviour": "Each tick pass patches a stored view of the ledger's tasks, metadata and phases with one export read of the changes since the view's generation, and reads those parts in full only when the server's change window no longer covers the gap.",
+      "seam": "The export parts of the ledger API and the tick ledger view",
+      "tests": [
+        "tests/swarm_ledger/test_export_parts.py::test_parts_limit_the_full_export_to_the_named_parts",
+        "tests/swarm_ledger/test_export_parts.py::test_parts_limit_the_changes_to_the_named_parts",
+        "tests/swarm_ledger/test_export_parts.py::test_parts_without_meta_carry_no_events",
+        "tests/swarm_ledger/test_export_parts.py::test_a_changed_root_answers_the_named_parts_in_full",
+        "tests/swarm_ledger/test_export_parts.py::test_each_part_set_keeps_its_own_full_export",
+        "tests/swarm_ledger/test_export_parts.py::test_parts_must_be_a_list_of_distinct_names",
+        "tests/swarm_ledger/test_export_parts.py::test_the_client_reads_changes_of_the_named_parts",
+        "tests/tick/test_view.py::test_a_first_pass_reads_the_parts_in_full_and_stores_them",
+        "tests/tick/test_view.py::test_a_later_pass_makes_one_delta_call_and_patches_the_stored_view",
+        "tests/tick/test_view.py::test_an_exceeded_change_window_replaces_the_stored_view",
+        "tests/tick/test_view.py::test_a_patch_that_does_not_fit_falls_back_to_one_full_read",
+        "tests/tick/test_view.py::test_a_full_read_at_the_stored_generation_replaces_a_view_that_does_not_fit",
+        "tests/tick/test_view.py::test_an_unchanged_generation_leaves_the_stored_file",
+        "tests/tick/test_view.py::test_start_reads_through_the_ledger_client_and_holds_the_view",
+        "tests/swarm/test_tick_view_start.py::test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read"
       ]
     }
   ],

@@ -116,6 +116,11 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert all(path.endswith(".py") and "*" not in path for path in allowed)
     assert "/scripts/swarm/publish.py" not in allowed
     assert "/scripts/swarm/github_sampler.py" not in allowed
+    assert "/scripts/swarm/stack.py" not in allowed
+    assert "/scripts/swarm/panic.py" not in allowed
+    assert "/scripts/swarm/linked_issues.py" not in allowed
+    assert "/scripts/swarm/ready.py" not in allowed
+    assert "/scripts/swarm/ledger_host.py" not in allowed
 
 
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:

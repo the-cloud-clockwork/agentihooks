@@ -1,10 +1,8 @@
 """Sequential tick engine: run a group's registered steps, each isolated and bounded by its budget."""
 
 from collections.abc import Iterable
-from contextvars import Context as ContextCopy
 from contextvars import copy_context
 from dataclasses import dataclass
-from threading import Thread
 
 from scripts.swarm import timing
 from scripts.tick import registry
@@ -26,14 +24,13 @@ class StepRecord:
     budget_s: float
     error: str = ""
     result: Result | None = None
-    abandoned: bool = False
 
     @property
     def outcome(self) -> str:
-        """Return failed when the step raised, late when it ran past its budget or was left running, else ok."""
+        """Return failed when the step raised, late when it ran past its budget, else ok."""
         if self.error:
             return FAILED
-        return LATE if self.abandoned or self.wall_s > self.budget_s else OK
+        return LATE if self.wall_s > self.budget_s else OK
 
 
 def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, ...]:
@@ -43,30 +40,16 @@ def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, .
 
 
 def run_step(step: Step, ctx: Context) -> StepRecord:
-    """Run one step under a copied context and its own deadline, waiting at most its budget for it to end."""
+    """Run one step under a copied context and its own deadline, recording failure and overrun."""
     deadline = ctx.deadline.child(step.budget_s)
     clock = deadline.clock
     started = clock()
-    outcome: list[Result | BaseException] = []
-    caller = copy_context()
-    worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline)), daemon=True)
-    worker.start()
-    worker.join(step.budget_s)
-    if not outcome:
-        return StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
-    found = outcome[0]
-    if isinstance(found, BaseException):
-        error = f"{type(found).__module__}.{type(found).__qualname__}"
-        return StepRecord(step.name, clock() - started, step.budget_s, error)
-    return StepRecord(step.name, clock() - started, step.budget_s, result=found)
-
-
-def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context) -> None:
-    """Run ``step`` in the caller's copied context and append its result or the error it raised."""
     try:
-        outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx))
+        result = copy_context().run(timing.within, step.budget_s, step.run, Context(ctx.view, deadline))
     except (Exception, SystemExit) as exc:
-        outcome.append(exc)
+        error = f"{type(exc).__module__}.{type(exc).__qualname__}"
+        return StepRecord(step.name, clock() - started, step.budget_s, error)
+    return StepRecord(step.name, clock() - started, step.budget_s, result=result)
 
 
 def run_group(name: str, ctx: Context, steps: Iterable[Step] | None = None) -> tuple[StepRecord, ...]:

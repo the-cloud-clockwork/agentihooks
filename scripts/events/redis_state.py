@@ -100,6 +100,16 @@ class RedisStateStore:
                     continue
         raise StateConflict(f"state key {key!r} kept changing")
 
+    def queue_write(self, pipe: Any, key: str, value: bytes, current: int) -> int:
+        """Queues a write of key after revision current inside a transaction that already watches this store."""
+        written = current + 1
+        row = json.dumps({"revision": written, "value": base64.b64encode(value).decode()})
+        pipe.incr(self._revision)
+        pipe.hset(self._current, key, row)
+        pipe.rpush(self._history + key, row)
+        pipe.ltrim(self._history + key, -HISTORY, -1)
+        return written
+
     def _project(self, pipe: Any, key: str, value: bytes, revision: int, consistent: bool) -> None:
         if not consistent:
             pipe.delete(self._projected)
