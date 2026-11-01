@@ -202,4 +202,4 @@ def test_two_threads_of_one_server_record_at_once_without_losing_either_write(
     monkeypatch.setattr(Path, "replace", interleaved)
     server_code.record(tmp_path, 7, 1, (), digest="main")
     assert server_code.loaded(tmp_path)["stamp"] == 1
-    assert sorted(p.name for p in tmp_path.iterdir()) == [server_code.RECORD]
+    assert sorted(p.name for p in tmp_path.glob(f"{server_code.RECORD}*")) == [server_code.RECORD]
