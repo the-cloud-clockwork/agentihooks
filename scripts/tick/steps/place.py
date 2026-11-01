@@ -5,7 +5,7 @@ from functools import partial
 from typing import Any
 
 from scripts.tick import registry
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, budgets
 from scripts.tick.steps.tasks import held
 
 __all__ = ["ACKS", "PLACEMENT", "STEPS"]
@@ -72,7 +72,7 @@ STEPS = (
     CallStep("rank pass", PLACEMENT, 10, held(_rank_pass)),
     CallStep("bottleneck remedy", PLACEMENT, 20, held(_bottleneck_remedy)),
     CallStep("preempt", PLACEMENT, 30, held(_preempt)),
-    CallStep("spawn", PLACEMENT, 40, held(_spawn)),
+    CallStep("spawn", PLACEMENT, 40, held(_spawn), budgets.SPAWN_NEEDS),
 )
 
 for _step in STEPS:
