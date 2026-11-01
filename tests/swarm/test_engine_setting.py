@@ -61,7 +61,7 @@ def test_set_usage_names_the_engine_choices(env, capsys):  # noqa: F811
     run("sw", "create", "--repo", "/repo")
     capsys.readouterr()
     assert run("sw", "set", "unknown=value") == 1
-    assert capsys.readouterr().err.endswith("=<value>, engine=legacy|events\n")
+    assert capsys.readouterr().err.endswith("=<value>, engine=legacy|events, tick-mode=sequential|parallel\n")
 
 
 def test_events_switch_persists_the_checkout_origin_without_replacing_its_path(env, checkout):  # noqa: F811
