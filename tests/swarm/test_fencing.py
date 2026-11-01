@@ -44,6 +44,28 @@ def test_a_new_swarm_reads_an_empty_fencing_document(store):
     assert doc["executions"] == {}
 
 
+def test_a_first_read_returns_the_document_created_by_a_competitor(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.events.redis_state import RedisStateStore
+
+    monkeypatch.setenv(state.BACKEND_ENV, "redis")
+    original_create = RedisStateStore.create
+    winner = {**fencing.EMPTY, "epoch": 7, "legacy_owner": "competitor"}
+
+    def competing_create(self: RedisStateStore, key: str, value: bytes) -> int:
+        original_create(self, key, json.dumps(winner).encode())
+        return original_create(self, key, value)
+
+    monkeypatch.setattr(RedisStateStore, "create", competing_create)
+
+    doc = fencing.read(store, "sw")
+
+    assert doc["epoch"] == 7
+    assert doc["legacy_owner"] == "competitor"
+    assert fencing.read(store, "sw") == doc
+
+
 def test_a_write_commits_the_change_and_returns_its_result(store):
     def change(doc):
         doc["epoch"] = 4
