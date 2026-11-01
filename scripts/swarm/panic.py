@@ -10,10 +10,13 @@ import subprocess
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from scripts.swarm.store import PREFIX, RedisStore, SwarmError
-from scripts.tick.adapters.github import command
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.source_control import RepositoryRun
 
 FLEET = "fleet"
 HOUR_MS = 60 * 60 * 1000
@@ -30,7 +33,8 @@ REPOS = (
     "the-cloud-clockwork/antoncore",
 )
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
-Runner = Callable[[list[str]], str]
+TOOL_SECONDS = 60.0
+Ports = Callable[[str], SourceControl]
 
 
 @dataclass(frozen=True)
@@ -137,8 +141,11 @@ def alarm(store: RedisStore, now_ms: int) -> str:
     return ""
 
 
-def gh(argv: list[str]) -> str:
-    return subprocess.run(argv, capture_output=True, text=True, check=True, timeout=60).stdout
+def port(repository: str) -> SourceControl:
+    """Return the source control port for one fleet repository."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    return GitHubSourceControl(repository, Path.cwd(), "dev")
 
 
 def _branch(url: str) -> str:
@@ -148,23 +155,21 @@ def _branch(url: str) -> str:
     return stack.change(url, f"cannot read pull request {url}").head_branch
 
 
-def _spared(row: dict[str, str], branches: set[str]) -> bool:
-    return row["status"] not in ACTIVE or row["event"] == MERGE_QUEUE or row["headBranch"] in branches
+def _spared(row: RepositoryRun, branches: set[str]) -> bool:
+    return row.status not in ACTIVE or row.event == MERGE_QUEUE or row.branch in branches
 
 
-def cancel_runs(fixes: Iterable[str], repos: Iterable[str], run: Runner) -> list[str]:
+def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue and the named fix pull requests."""
     branches = {_branch(url) for url in fixes}
     cancelled: list[str] = []
     for repo in repos:
-        listing = command(
-            ["run", "list", "--repo", repo, "--limit", "100", "--json", "databaseId,event,headBranch,status"]
-        )
-        for row in json.loads(run(listing)):
+        provider = ports(repo)
+        for row in provider.latest_runs(deadline=Deadline.after(TOOL_SECONDS)):
             if _spared(row, branches):
                 continue
-            run(command(["run", "cancel", str(row["databaseId"]), "--repo", repo]))
-            cancelled.append(f"{repo} run {row['databaseId']} on {row['headBranch']}")
+            provider.cancel_run(row.id, deadline=Deadline.after(TOOL_SECONDS))
+            cancelled.append(f"{repo} run {row.id} on {row.branch}")
     return cancelled
 
 
@@ -172,7 +177,7 @@ def due_cancel(store: RedisStore, now_ms: int) -> bool:
     return bool(_client(store).set(_key("cancel"), now_ms, nx=True, px=CANCEL_EVERY_MS))
 
 
-def tick_pass(store: RedisStore, ok: bool, now_ms: int, run: Runner = gh) -> list[str]:
+def tick_pass(store: RedisStore, ok: bool, now_ms: int, ports: Ports = port) -> list[str]:
     """Counts the pass, runs the alarm and, while panic holds, cancels the fleet's other CI runs once a minute."""
     count_pass(store, ok, now_ms)
     actions = [changed] if (changed := alarm(store, now_ms)) else []
@@ -180,7 +185,7 @@ def tick_pass(store: RedisStore, ok: bool, now_ms: int, run: Runner = gh) -> lis
     if current is None or not due_cancel(store, now_ms):
         return actions
     try:
-        cancelled = cancel_runs(current.fixes, REPOS, run)
-    except (subprocess.SubprocessError, OSError, ValueError, SwarmError) as error:
+        cancelled = cancel_runs(current.fixes, REPOS, ports)
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
         return [*actions, f"panic cancel failed: {error}"]
     return [*actions, *(f"panic cancelled {line}" for line in cancelled)]

@@ -12,6 +12,7 @@ __all__ = [
     "QueueEntry",
     "QueueHealth",
     "RateLimit",
+    "RepositoryRun",
     "Run",
     "Tag",
 ]
@@ -50,6 +51,14 @@ class Run:
     status: str
     conclusion: str | None
     url: str
+
+
+@dataclass(frozen=True)
+class RepositoryRun:
+    id: int
+    branch: str
+    event: str
+    status: str
 
 
 @dataclass(frozen=True)

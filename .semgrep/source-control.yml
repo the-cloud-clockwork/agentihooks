@@ -24,6 +24,5 @@ rules:
         - "/scripts/swarm/linked_issues.py"
         - "/scripts/swarm/merge_queue.py"
         - "/scripts/swarm/mutation_wait.py"
-        - "/scripts/swarm/panic.py"
         - "/scripts/swarm/ready.py"
         - "/scripts/tick/adapters/github.py"
