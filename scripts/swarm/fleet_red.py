@@ -6,7 +6,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Any
+from typing import Any, Protocol
 
 from scripts.swarm import panic
 from scripts.swarm.ledger_events import RED, iso_ms
@@ -56,7 +56,29 @@ def read(repo: str, ports: Callable[[str], SourceControl] = panic.port) -> Pulls
     return ports(repo).open_changes(deadline=Deadline.after(SECONDS))
 
 
-def cached(store: RedisStore, slug: str, repo: str, reader: Reader | None = None) -> Pulls | None:
+class Saved(Protocol):
+    """The Redis calls the listing cache makes."""
+
+    def get(self, name: str) -> str | bytes | None:
+        """Return the value saved under the name, none when nothing is saved."""
+        ...
+
+    def set(self, name: str, value: str, *, ex: int) -> object:
+        """Save the value under the name for ex seconds."""
+        ...
+
+
+class Listings(Protocol):
+    """The swarm store parts the listing cache reads."""
+
+    redis: Saved
+
+    def key(self, slug: str, *parts: str) -> str:
+        """Name a swarm key."""
+        ...
+
+
+def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) -> Pulls | None:
     """Return the repository's open pull requests saved in the last ten minutes, else list and save them, a failed listing as none."""
     key = store.key(slug, f"fleet-red-pulls:{repo}")
     saved = store.redis.get(key)
