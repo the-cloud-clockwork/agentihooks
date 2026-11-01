@@ -246,6 +246,36 @@ def fencing(epoch: int | None) -> Iterator[None]:
         EPOCH.reset(token)
 
 
+PASS: ContextVar[tuple[RedisStore, str, int] | None] = ContextVar("controller_pass", default=None)
+
+
+def epoch_for(slug: str) -> int | None:
+    """The controller epoch a ledger write to slug carries: the fencing epoch in scope, else the pass's own epoch
+    for its swarm and the live owner's epoch for another swarm, else none."""
+    if (epoch := EPOCH.get()) is not None:
+        return epoch
+    held = PASS.get()
+    if held is None:
+        return None
+    store, own, epoch = held
+    if slug == own:
+        return epoch
+    owner = current(store, slug)
+    return owner.epoch if owner else None
+
+
+@contextmanager
+def held_pass(store: RedisStore, slug: str, held: Lease) -> Iterator[None]:
+    """Hold the lease for one pass: renew it once, keep one beat for the whole pass and fence its ledger writes."""
+    renew(store, slug, held)
+    token = PASS.set((store, slug, held.epoch))
+    try:
+        with kept(store, slug, held):
+            yield
+    finally:
+        PASS.reset(token)
+
+
 def release(store: RedisStore, slug: str, held: Lease) -> bool:
     if _address(slug):
         return _remote(slug, "release", {"owner": held.owner, "epoch": held.epoch})

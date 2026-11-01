@@ -56,7 +56,7 @@ class LedgerClient:
     def _call(self, slug, ops=None):
         from scripts.swarm import lease
 
-        if ops is not None and (epoch := lease.EPOCH.get()) is not None:
+        if ops is not None and (epoch := lease.epoch_for(slug)) is not None:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
@@ -311,7 +311,7 @@ class LedgerClient:
         from scripts.swarm import lease
         from scripts.swarm_ledger.api.client import ResourceClient
 
-        if (epoch := lease.EPOCH.get()) is not None:
+        if (epoch := lease.epoch_for(slug)) is not None:
             payload = {**payload, "controller_epoch": epoch}
         ledger = _ledger()
         try:

@@ -2004,7 +2004,8 @@ def _under_tick_lock(slug, store, act):
         config = store.ensure_code(slug)
         if config.state in ("stopping", "stopped"):
             return []
-        return act(config, held)
+        with lease.held_pass(store, slug, held):
+            return act(config, held)
     finally:
         controller.release_tick_lock(store, slug, token)
 
