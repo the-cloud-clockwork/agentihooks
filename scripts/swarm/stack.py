@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
 PORT_SECONDS = 60.0
+GITHUB = "https://github.com/"
 WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
 READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
 SSH_UNVERIFIED = ("Host key verification failed", "Permission denied (publickey")
@@ -143,7 +144,9 @@ def source_control(url: str) -> "tuple[SourceControl, ChangeRef]":
     from scripts.tick.adapters.github import GitHubSourceControl
     from scripts.tick.ports.source_control import ChangeRef
 
-    owner, name, _, number = url.removeprefix("https://github.com/").split("/")[:4]
+    if not url.startswith(GITHUB):
+        raise ValueError(f"{url} is not a GitHub pull request or issue url")
+    owner, name, _, number = url.removeprefix(GITHUB).split("/")[:4]
     return GitHubSourceControl(f"{owner}/{name}", Path.cwd(), "dev"), ChangeRef(f"{owner}/{name}", int(number))
 
 
@@ -151,8 +154,8 @@ def change(url: str, refused: str) -> "ChangeState":
     """Read one change through the source control port, refusing with a swarm error it cannot answer."""
     from scripts.tick.deadline import Deadline
 
-    provider, reference = source_control(url)
     try:
+        provider, reference = source_control(url)
         return provider.change(reference, deadline=Deadline.after(PORT_SECONDS))
     except subprocess.CalledProcessError as exc:
         raise SwarmError(f"{refused}: {(exc.stderr or '').strip()}") from exc

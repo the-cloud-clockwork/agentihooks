@@ -487,9 +487,16 @@ def test_source_control_names_the_github_port_and_the_change_a_url_names(url, re
     assert provider == GitHubSourceControl(repository, Path.cwd(), "dev")
 
 
-def test_change_reads_through_the_port_inside_its_deadline(monkeypatch):
-    from scripts.tick.adapters.fakes import FakeSourceControl
+@pytest.mark.parametrize(
+    "url",
+    ["http://github.com/o/r/pull/42", "git@github.com:o/r.git", "https://ghe.example/o/r/pull/42", "https://github.com/o/r"],
+)
+def test_change_refuses_a_url_that_names_no_github_change(url):
+    with pytest.raises(SwarmError, match="^refused: "):
+        stack.change(url, "refused")
 
+
+def test_change_reads_through_the_port_inside_its_deadline(monkeypatch):
     state = _state(merged=True)
     provider = FakeSourceControl(answers={"change": state})
     monkeypatch.setattr(stack, "source_control", lambda url: (provider, REFERENCE) if url == DEPENDENCY_PR else None)

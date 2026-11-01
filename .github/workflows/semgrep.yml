@@ -50,10 +50,12 @@ jobs:
         env:
           BASE: ${{ inputs.base }}
         run: |
-          if ! previous="$(git show "$BASE:.semgrep/source-control-allowlist.json" 2>/dev/null)"; then
+          git rev-parse --verify --quiet "$BASE^{commit}" > /dev/null || { echo "cannot read base $BASE" >&2; exit 1; }
+          if ! git cat-file -e "$BASE:.semgrep/source-control-allowlist.json" 2>/dev/null; then
             echo "The base holds no source control exception list; the head list starts it"
             exit 0
           fi
+          previous="$(git show "$BASE:.semgrep/source-control-allowlist.json")"
           PREVIOUS="$previous" python - <<'PY'
           import json
           import os
