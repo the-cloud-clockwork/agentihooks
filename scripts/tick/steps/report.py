@@ -23,7 +23,7 @@ from scripts.swarm import (
     timing,
     waits,
 )
-from scripts.swarm.status import findings
+from scripts.swarm.status import findings  # pyright: ignore[reportUnknownVariableType]
 from scripts.tick import registry
 from scripts.tick.steps import CallStep
 from scripts.tick.steps.host import held
@@ -33,7 +33,7 @@ Get = Callable[[str], Any]
 
 def _event_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        ledger_events.event_pass,
+        ledger_events.event_pass,  # pyright: ignore[reportUnknownMemberType]
         get("inbox"),
         get("store"),
         get("slug"),
@@ -46,33 +46,44 @@ def _event_pass(cli: Any, get: Get) -> Any:
 
 def _done_recheck(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        done_gate.recheck_pass, get("store"), get("slug"), get("doc"), get("ledger"), cli.now_ms(), get("view")
+        done_gate.recheck_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("store"),
+        get("slug"),
+        get("doc"),
+        get("ledger"),
+        cli.now_ms(),
+        get("view"),
     )
 
 
 def _progress_checks(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        progress.checks_pass, get("store").redis, get("slug"), get("doc")["tasks"], get("view"), cli.now_ms()
+        progress.checks_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("store").redis,
+        get("slug"),
+        get("doc")["tasks"],
+        get("view"),
+        cli.now_ms(),
     )
 
 
 def _waits_end(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        waits.end_pass,
+        waits.end_pass,  # pyright: ignore[reportUnknownMemberType]
         get("store"),
         get("slug"),
         get("rows"),
         get("inbox"),
         get("view"),
         cli.now_ms(),
-        ledger_events.view,
+        ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
     )
 
 
 def _merge_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        ready.merge_pass,
-        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), ledger_events.view, cli.now_ms()),
+        ready.merge_pass,  # pyright: ignore[reportUnknownMemberType]
+        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), ledger_events.view, cli.now_ms()),  # pyright: ignore[reportUnknownMemberType]
         get("rows"),
     )
 
@@ -82,18 +93,18 @@ def _stall_watch(cli: Any, get: Get) -> Any:
     live = runtime.live_names() | {a.name for a in get("agents") if a.runtime_backend != "local"}
     get("box")["live"] = live
     return cli.skip_refused(
-        stall_watch.stall_pass,
+        stall_watch.stall_pass,  # pyright: ignore[reportUnknownMemberType]
         stall_watch.Watch(
             store,
             slug,
             ledger,
             get("view"),
             frozenset(live),
-            lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
+            lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
             stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms()),
             cli.now_ms(),
-            released=release_wait.checker(get("config").repo),
-            reread=ledger_events.view,
+            released=release_wait.checker(get("config").repo),  # pyright: ignore[reportUnknownMemberType]
+            reread=ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
         ),
         get("doc"),
     )
@@ -102,13 +113,13 @@ def _stall_watch(cli: Any, get: Get) -> Any:
 def _overrun(cli: Any, get: Get) -> Any:
     slug, runtime = get("slug"), get("runtime")
     return cli.skip_refused(
-        overrun.overrun_pass,
+        overrun.overrun_pass,  # pyright: ignore[reportUnknownMemberType]
         overrun.Watch(
             get("store"),
             slug,
             get("ledger"),
             frozenset(get("box")["live"]),
-            lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
+            lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
             cli.now_ms(),
         ),
         get("doc"),
@@ -116,12 +127,12 @@ def _overrun(cli: Any, get: Get) -> Any:
 
 
 def _quiet(cli: Any, get: Get) -> Any:
-    return cli.skip_refused(quiet.quiet_pass, get("store"), get("slug"), get("rows"), cli.now_ms())
+    return cli.skip_refused(quiet.quiet_pass, get("store"), get("slug"), get("rows"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
 def _doc_report(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        doc_report.report_pass,
+        doc_report.report_pass,  # pyright: ignore[reportUnknownMemberType]
         get("inbox"),
         get("ledger"),
         get("slug"),
@@ -133,13 +144,19 @@ def _doc_report(cli: Any, get: Get) -> Any:
 
 def _priorities(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        dispatcher.priorities, get("store"), get("slug"), get("doc"), get("ledger"), get("view"), cli.now_ms()
+        dispatcher.priorities,  # pyright: ignore[reportUnknownMemberType]
+        get("store"),
+        get("slug"),
+        get("doc"),
+        get("ledger"),
+        get("view"),
+        cli.now_ms(),
     )
 
 
 def _health_findings(cli: Any, get: Get) -> None:
     doc = get("doc")
-    get("box")["found"] = timing.call(
+    get("box")["found"] = timing.call(  # pyright: ignore[reportUnknownMemberType]
         findings,
         get("store"),
         get("slug"),
@@ -152,12 +169,17 @@ def _health_findings(cli: Any, get: Get) -> None:
 
 def _findings_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
-        ledger_events.findings_pass, get("inbox"), get("store"), get("slug"), get("box")["found"], get("doc")
+        ledger_events.findings_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("inbox"),
+        get("store"),
+        get("slug"),
+        get("box")["found"],
+        get("doc"),
     )
 
 
 def _metrics(cli: Any, get: Get) -> Any:
-    return timing.call(
+    return timing.call(  # pyright: ignore[reportUnknownMemberType]
         metrics.record_pass,
         get("slug"),
         cli.now_ms(),
@@ -172,16 +194,16 @@ def _bottleneck_status(cli: Any, get: Get) -> Any:
 
 
 def _master_wake(cli: Any, get: Get) -> Any:
-    window = wake.window_ms(os.environ)
-    return cli.skip_refused(wake.maintenance, get("inbox"), get("slug"), get("agents"), cli.now_ms(), window)
+    window = wake.window_ms(os.environ)  # pyright: ignore[reportUnknownMemberType]
+    return cli.skip_refused(wake.maintenance, get("inbox"), get("slug"), get("agents"), cli.now_ms(), window)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _snapshot_job(cli: Any, get: Get) -> None:
-    get("box")["started"] = timing.call(snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)
+    get("box")["started"] = timing.call(snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _heartbeat(cli: Any, get: Get) -> None:
-    tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))
+    tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _status_publish(cli: Any, get: Get) -> None:

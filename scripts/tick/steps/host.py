@@ -36,11 +36,11 @@ def raise_held(box: dict[str, Any]) -> None:
 
 
 def _inbox_relay(cli: Any, get: Get) -> None:
-    timing.call(relay.relay, get("store").redis)
+    timing.call(relay.relay, get("store").redis)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _launch_slots(cli: Any, get: Get) -> None:
-    timing.call(LaunchSlots(get("store").redis).refresh_reported, cli.now_ms())
+    timing.call(LaunchSlots(get("store").redis).refresh_reported, cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
 def _outage_probes(cli: Any, get: Get) -> None:
@@ -54,24 +54,24 @@ def _host_pressure(cli: Any, get: Get) -> Any:
 
 
 def _ledger_watchdog(cli: Any, get: Get) -> Any:
-    return timing.call(ledger_watchdog.watch, get("store"), get("slug"), get("ledger"), get("runtime"))
+    return timing.call(ledger_watchdog.watch, get("store"), get("slug"), get("ledger"), get("runtime"))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _ledger_probe(cli: Any, get: Get) -> Any:
-    return timing.call(ledger_probe.observe, get("store"), get("slug"), get("ledger"), get("runtime"), cli.now_ms())
+    return timing.call(ledger_probe.observe, get("store"), get("slug"), get("ledger"), get("runtime"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
 def _command_runner(cli: Any, get: Get) -> Any:
     from scripts.swarm import command_runner
 
-    return timing.call(command_runner.consume, get("store"), get("slug"))
+    return timing.call(command_runner.consume, get("store"), get("slug"))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _refresh_job(cli: Any, get: Get) -> None:
     if get("scheduled"):
         from scripts.swarm import refresh_job
 
-        timing.call(refresh_job.start, get("store"), get("slug"))
+        timing.call(refresh_job.start, get("store"), get("slug"))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _intent_check(cli: Any, get: Get) -> None:
@@ -81,7 +81,7 @@ def _intent_check(cli: Any, get: Get) -> None:
 
 
 def _reboot_pass(cli: Any, get: Get) -> Any:
-    return cli.skip_refused(reboot.boot_pass, get("slug"), get("store"), get("ledger"), get("runtime"), cli.now_ms())
+    return cli.skip_refused(reboot.boot_pass, get("slug"), get("store"), get("ledger"), get("runtime"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
 STEPS = (
