@@ -115,6 +115,33 @@ def test_export_leaves_out_another_swarms_seats_and_inbox(store):
     assert keys and not any("sw-b" in key for key in keys)
 
 
+def test_export_reads_no_key_of_another_swarm():
+    import re
+
+    import fakeredis
+
+    class Recording(fakeredis.FakeRedis):
+        touched: list[str] = []
+        on = False
+
+        def execute_command(self, *args: object, **options: object) -> object:
+            if self.on and str(args[0]).upper() != "SCAN":
+                self.touched.extend(str(arg) for arg in args[1:])
+            return super().execute_command(*args, **options)
+
+    store = RedisStore(Recording(decode_responses=True))
+    seed(store, "sw")
+    seed(store, "sw-b")
+    other = store.names.code_of("sw-b")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    Recording.on = True
+    keys = set(store.export("sw")["keys"])
+    Recording.on = False
+    assert InboxStore(store.redis).key("address", eng) in keys
+    foreign = [arg for arg in Recording.touched if "sw-b" in arg or re.search(rf"\b{other}\b", arg)]
+    assert foreign == []
+
+
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
     seed(store, "sw")
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
