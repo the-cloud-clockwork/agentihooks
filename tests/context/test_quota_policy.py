@@ -51,7 +51,7 @@ def test_other_accounts_read_a_week_only_account_and_refuse_a_rejected_or_weekle
     from scripts import claude_quota_balancer as balancer
 
     for account in ("open", "spent", "rejected", "weekless"):
-        monkeypatch.setenv(f"AH_CC_TOKEN_{account}", "available")
+        monkeypatch.setenv(f"AH_CC_TOKEN_{account}", f"available-{account}")
     week = balancer.QuotaWindow(30.0, None)
     missing = balancer.QuotaWindow()
     spent = balancer.QuotaWindow(90.0, time.time() - 60)
