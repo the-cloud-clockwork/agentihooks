@@ -116,6 +116,7 @@ def test_resource_client_bounds_each_request_by_the_ledger_timeout_and_the_deadl
     build = ledger_adapter.resource_client("sw", service=True)
     short, long = build(2.5), build(30.0)
     assert (short.base, short.timeout) == ("http://ledger/sw", 2.5)
+    assert short.credentials == {"X-Ledger-Agent": "swarm"}
     assert (long.base, long.timeout) == ("http://ledger/sw", 10)
     assert seen == [("sw", True), ("sw", True)]
     assert ledger_adapter.resource_client("sw")(1.0).timeout == 1.0

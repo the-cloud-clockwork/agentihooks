@@ -3,7 +3,7 @@ bounded by its deadline and every write stamped with the controller epoch of its
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm import lease
 from scripts.swarm_ledger.api.client import ResourceClient
@@ -38,7 +38,8 @@ class ClientLedger:
 
     def export(self, *, deadline: Deadline) -> dict[str, object]:
         client: Any = self.clients(deadline.live())
-        return cast(dict[str, object], client.export(self.slug))
+        exported: dict[str, object] = client.export(self.slug)
+        return exported
 
     def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> dict[str, object]:
         client: Any = self.clients(deadline.live())
@@ -46,4 +47,5 @@ class ClientLedger:
         stamped = [
             dict(operation) if epoch is None else {**operation, "controller_epoch": epoch} for operation in operations
         ]
-        return cast(dict[str, object], client.mutate(self.slug, stamped))
+        mutated: dict[str, object] = client.mutate(self.slug, stamped)
+        return mutated
