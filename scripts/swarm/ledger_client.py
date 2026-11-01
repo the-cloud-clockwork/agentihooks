@@ -72,6 +72,10 @@ class LedgerClient:
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
+        if ops:
+            from scripts.tick import view
+
+            view.wrote()
         return state
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
