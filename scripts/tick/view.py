@@ -8,7 +8,8 @@ window no longer covers the gap.
 import hashlib
 import sys
 import urllib.error
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,18 @@ from typing import Any
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
 
-__all__ = ["CURRENT", "PARTS", "LedgerView", "Reader", "refreshed", "start", "view_file"]
+__all__ = [
+    "CURRENT",
+    "PARTS",
+    "REFRESH",
+    "LedgerView",
+    "Reader",
+    "document",
+    "holding",
+    "refreshed",
+    "start",
+    "view_file",
+]
 
 PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
 
@@ -42,6 +54,7 @@ class LedgerView:
 
 
 CURRENT: ContextVar[LedgerView | None] = ContextVar("tick_ledger_view", default=None)
+REFRESH: ContextVar[tuple[str, Callable[[], LedgerView]] | None] = ContextVar("tick_ledger_refresh", default=None)
 
 
 def view_file(base: str, slug: str, directory: Path) -> Path:
@@ -79,14 +92,41 @@ def start(slug: str, service: bool) -> LedgerView | None:
     ledger: Any = _ledger()
     base: str = ledger.base(slug)
     client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
+    path = view_file(base, slug, scheduler.runtime_dir())
+
+    def refresh() -> LedgerView:
+        """The held view patched with one delta read."""
+        return refreshed(path, lambda since, parts: client.changes(slug, since, parts))
+
     try:
-        view = refreshed(
-            view_file(base, slug, scheduler.runtime_dir()), lambda since, parts: client.changes(slug, since, parts)
-        )
+        view = refresh()
     except urllib.error.HTTPError as exc:
         if exc.code != 400:
             raise
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         view = None
     CURRENT.set(view)
+    REFRESH.set(None if view is None else (slug, refresh))
     return view
+
+
+def document(slug: str) -> dict[str, Any] | None:
+    """The whole document of ledger ``slug`` from the pass's held view patched with one delta read, or nothing
+    when the pass holds no view of that ledger."""
+    held = REFRESH.get()
+    if held is None or held[0] != slug:
+        return None
+    view = held[1]()
+    CURRENT.set(view)
+    return view.document
+
+
+@contextmanager
+def holding() -> Iterator[None]:
+    """Hold no view on entry and drop whatever view the block started on exit."""
+    current, refresh = CURRENT.set(None), REFRESH.set(None)
+    try:
+        yield
+    finally:
+        REFRESH.reset(refresh)
+        CURRENT.reset(current)

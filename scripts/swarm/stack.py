@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
 from scripts.swarm import apply_wait
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import LedgerClient, pass_state
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
@@ -320,7 +320,7 @@ def _ledger_note(open_):
 
 
 def park(store, slug: str, agent, text: str, ledger) -> dict:
-    state = ledger.state(slug)
+    state = pass_state(ledger, slug)
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
     if ledger_kinds.read_only(row):
@@ -458,7 +458,7 @@ def _rebase(base: str) -> None:
 
 
 def restack(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
-    rows = {t["id"]: t for t in ledger.state(slug)["tasks"]}
+    rows = {t["id"]: t for t in pass_state(ledger, slug)["tasks"]}
     row = rows.get(agent.task) or {}
     if not row.get("parked_on") or not row.get("stacked_base"):
         raise SwarmError("this task has no parked work with a stacked base")

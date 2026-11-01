@@ -11,7 +11,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import blockers, capacity, freeze, master_pin, panic, timing
 from scripts.swarm.health.findings import Finding
-from scripts.swarm.ledger_client import LedgerGone
+from scripts.swarm.ledger_client import LedgerGone, pass_state
 from scripts.swarm.store import RedisStore
 
 STALL_MS = 600_000
@@ -37,7 +37,7 @@ def eligible(store: RedisStore, slug: str, ledger: Any, at: int, runtime: Any, s
     if config.state != "running":
         return False
     try:
-        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
     except LedgerGone:
         return False
     ready = placeable(store, slug, ready, at if since is None else since)

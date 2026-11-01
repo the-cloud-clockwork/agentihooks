@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from scripts.ci_budget import GATE
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, dev_red, github_reads, naming, promotion_owner
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_alerts, ledger_comments
@@ -291,7 +292,7 @@ def _red(slug, store, ledger, doc, last, causes, repo):
     held, present = _held_causes(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
     alerted = _alerted(doc, run_id)
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        state = ledger.state(previous)
+        state = pass_state(ledger, previous)
         held.update(_held_causes(redis, previous, state))
         alerted = alerted or _alerted(state, run_id)
     lane, actions, new = "", [], []
@@ -362,7 +363,7 @@ def _recover(slug, redis, ledger, doc, last, repo):
     actions = _green(slug, ledger, doc, last)
     _release(redis, slug, doc)
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        state = ledger.state(previous)
+        state = pass_state(ledger, previous)
         actions.extend(_green(previous, ledger, state, last))
         _release(redis, previous, state)
     return actions
@@ -437,7 +438,7 @@ def refresh(
         if seen:
             store.redis.set(key(slug, "seen"), seen)
         if slug in store.slugs():
-            doc = ledger.state(slug)
+            doc = pass_state(ledger, slug)
         actions = _refresh(slug, config, store, ledger, doc, now_ms, run)
         if handled := store.redis.get(key(slug, "seen")):
             store.redis.hset(record, "seen", handled)

@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 
 from scripts.swarm import phase_state, slice_check
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import ASSIST, MANUAL, MASTER, SwarmError
 
 BUTTONS = "use Approve plan or Send back on the phase in the ledger page"
@@ -38,7 +39,7 @@ def refusal(agent, autonomy, phase, doc):
 
 
 def decide(ledger, slug, agent, autonomy, phase_id, decision):
-    doc = ledger.state(slug)
+    doc = pass_state(ledger, slug)
     phase = next((p for p in doc["phases"] if p["id"] == phase_id), None)
     if phase is None:
         raise SwarmError(f"phase {phase_id} is not in ledger {slug}")
@@ -52,7 +53,7 @@ def decide(ledger, slug, agent, autonomy, phase_id, decision):
     record = {"reason": override, "problems": problems} if override else None
     state = DECISIONS[decision.action]
     ledger.review_phase(slug, phase_id, state, by=agent.name, note=decision.note, override=record)
-    review = next(p for p in ledger.state(slug)["phases"] if p["id"] == phase_id)["review"]
+    review = next(p for p in pass_state(ledger, slug)["phases"] if p["id"] == phase_id)["review"]
     result = {"phase": phase_id, **{k: review[k] for k in ("state", "rounds", "escalated") if k in review}}
     return {**result, "problems": problems, **({"override": override} if override else {})}
 

@@ -9,6 +9,7 @@ from scripts.handoff import envelope, transfers
 from scripts.swarm import affinity, launch_check, master_retire, naming
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import MASTER
 
 STALLED = "stalled"
@@ -62,7 +63,7 @@ def parent_blocked(slug, store, ledger):
     task = slug.split("-")[2]
     return any(
         re.sub(r"[^a-z0-9]", "", row["id"].lower()) == task and row.get("state") == "blocked"
-        for row in ledger.state(parent)["tasks"]
+        for row in pass_state(ledger, parent)["tasks"]
     )
 
 
@@ -88,7 +89,7 @@ def run(slug, config, store, ledger, runtime, now_ms):
 
 
 def recycle(slug, store, ledger, master, text, now_ms, reason):
-    found = envelope.build(store, slug, master, "recycle", ledger.state(slug)["tasks"], now_ms)
+    found = envelope.build(store, slug, master, "recycle", pass_state(ledger, slug)["tasks"], now_ms)
     store.put_handoff(slug, MASTER, text, seat=master.seat, envelope=found)
     transfers.record(store, slug, master, reason, text, now_ms)
     store.put_agent(slug, replace(master, state="finished"))

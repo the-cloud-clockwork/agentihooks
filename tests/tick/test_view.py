@@ -216,3 +216,65 @@ def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> N
     held = view.refreshed(tmp_path / "sw.json", Reader({"generation": 3, "data": state}))
     assert held.document == state
     assert (held.tasks, held.meta, held.phases) == (state["tasks"], state["_meta"], state["phases"])
+
+
+class Whole:
+    """A ledger that records each whole state read and answers it with its own document."""
+
+    def __init__(self, doc: dict) -> None:
+        self.doc, self.reads = doc, []
+
+    def state(self, slug: str) -> dict:
+        self.reads.append(slug)
+        return self.doc
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_pass_holding_a_view_reads_each_document_through_one_delta_read() -> None:
+    from scripts.swarm.ledger_client import pass_state
+
+    refreshes = []
+
+    def refresh() -> view.LedgerView:
+        refreshes.append(len(refreshes))
+        return view.LedgerView(7 + len(refreshes), {**STATE, "overview": f"read {len(refreshes)}"})
+
+    ledger = Whole({"tasks": []})
+    with view.holding():
+        view.REFRESH.set(("sw", refresh))
+        first, second = pass_state(ledger, "sw"), pass_state(ledger, "sw")
+        held = view.CURRENT.get()
+    assert (first["overview"], second["overview"]) == ("read 1", "read 2")
+    assert refreshes == [0, 1]
+    assert held is not None and held.generation == 9
+    assert ledger.reads == []
+
+
+def test_a_pass_reads_another_ledger_whole() -> None:
+    from scripts.swarm.ledger_client import pass_state
+
+    ledger = Whole({"tasks": [{"id": "peer"}]})
+    with view.holding():
+        view.REFRESH.set(("sw", lambda: pytest.fail("the view of sw refreshed for its peer")))
+        assert pass_state(ledger, "peer") == {"tasks": [{"id": "peer"}]}
+    assert ledger.reads == ["peer"]
+
+
+def test_without_a_held_view_the_ledger_is_read_whole() -> None:
+    from scripts.swarm.ledger_client import pass_state
+
+    ledger = Whole({"tasks": []})
+    assert view.document("sw") is None
+    assert pass_state(ledger, "sw") == {"tasks": []}
+    assert ledger.reads == ["sw"]
+
+
+def test_holding_drops_the_view_the_block_started() -> None:
+    outer = view.LedgerView(1, STATE)
+    view.CURRENT.set(outer)
+    with view.holding():
+        assert (view.CURRENT.get(), view.REFRESH.get()) == (None, None)
+        view.CURRENT.set(view.LedgerView(2, STATE))
+        view.REFRESH.set(("sw", lambda: view.LedgerView(3, STATE)))
+    assert (view.CURRENT.get(), view.REFRESH.get()) == (outer, None)
+    view.CURRENT.set(None)

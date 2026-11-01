@@ -82,7 +82,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm import idle as idle_state
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.ledger_client import LedgerRefused, pass_state
 from scripts.swarm.naming import lane_of, parse, seat_label
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
@@ -240,7 +240,7 @@ def step_stopped_branch(
 
     actions: list[str] = []
     if config.state == "stopped":
-        doc = timing.call(ledger.state, slug)
+        doc = timing.call(pass_state, ledger, slug)
         rows = {t["id"]: t for t in doc["tasks"]}
         actions = automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
@@ -275,7 +275,7 @@ def step_recover_master(slug: str, config: SwarmConfig, store: RedisStore, runti
 
 
 def step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any]) -> list[str]:
-    doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
+    doc = freeze.watched(slug, store, ledger, timing.call(pass_state, ledger, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     box.update(doc=doc, rows=rows)
     return []
@@ -315,7 +315,7 @@ def step_exits_sweep(slug: str, store: RedisStore, ledger: Any) -> list[str]:
         InboxStore(store.redis),
         slug,
         store,
-        lambda: {t["id"]: t for t in timing.call(ledger.state, slug)["tasks"]},
+        lambda: {t["id"]: t for t in timing.call(pass_state, ledger, slug)["tasks"]},
     )
 
 
@@ -607,7 +607,7 @@ def _launch_checks(
     agents, canaries = [agent for agent, _ in confirmed], {agent.name: miss for agent, miss in confirmed}
     facts = runtime.bindings(agents)
     if any(launch_check.joined_at(agent, doc) is None for agent in agents):
-        doc = ledger.state(slug)
+        doc = pass_state(ledger, slug)
     for agent in agents:
         found = launch_check.misses(
             store,
