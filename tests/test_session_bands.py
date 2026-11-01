@@ -20,10 +20,17 @@ def test_a_week_under_five_percent_takes_no_new_session(week_left, seats):
     assert session_bands.week_cap(week_left) == seats
 
 
-def test_a_missing_reading_has_no_cap():
-    assert session_bands.cap(None, 50) is None
+def test_a_missing_week_reading_has_no_cap():
     assert session_bands.cap(50, None) is None
+    assert session_bands.cap(None, None) is None
     assert session_bands.week_cap(None) is None
+
+
+def test_a_missing_five_hour_window_caps_from_the_week_alone():
+    assert session_bands.cap(None, 50) == session_bands.TOP_BAND
+    assert session_bands.cap(None, 4.9) == 0
+    assert session_bands.scaled_cap(None, 50, 20) == 10
+    assert session_bands.scaled_cap(None, 4.9, 20) == 0
 
 
 def test_todays_claude_accounts_and_codex():
@@ -139,8 +146,8 @@ def test_a_hive_cap_grows_with_the_smaller_window_under_the_ceiling(five_left, w
     assert session_bands.scaled_cap(five_left, week_left, ceiling) == seats
 
 
-def test_a_hive_cap_without_a_reading_is_unknown():
-    assert session_bands.scaled_cap(None, 50, 12) is None
+def test_a_hive_cap_without_a_week_reading_is_unknown():
+    assert session_bands.scaled_cap(None, None, 12) is None
     assert session_bands.scaled_cap(50, None, 12) is None
 
 
