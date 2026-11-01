@@ -356,7 +356,7 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
         delivered = publish_queue.open_head(remote, task.get("pr_url", ""))
         if delivered == recorded and descends(root, recorded):
             return recorded
-        if not delivered and cut_from(root, recorded) and settled(root, task):
+        if not delivered and cut_from(root, recorded) and settled(task):
             return branch
         raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
     return branch
@@ -378,11 +378,11 @@ def drop_repository(task: dict, repository: Path) -> dict:
     }
 
 
-def settled(root: Path, task: dict) -> bool:
-    url = task.get("pr_url")
+def settled(task: dict[str, object]) -> bool:
+    url = str(task.get("pr_url") or "")
     if not url:
         return True
-    return json.loads(execute(["gh", "pr", "view", url, "--json", "state"], root))["state"] in ("CLOSED", "MERGED")
+    return stack.change(url, f"cannot read pull request {url}").state == "closed"
 
 
 def gate_python(repo: Path) -> str:
