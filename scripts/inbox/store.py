@@ -475,20 +475,15 @@ class InboxStore:
             rows = pipe.execute()
         return {item_id: [json.loads(entry) for entry in row] for item_id, row in zip(item_ids, rows)}
 
-    def keys_for(self, belongs):
-        """The keys of every address belongs() accepts, its items and their histories, and those
-        addresses' memberships in the shared waiting and indexed sets."""
-        prefix = self.key("address", "")
-        seen = {key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")}
-        seen.update(self.redis.smembers(self.key("open-indexed")))
-        size_prefix = self.key("open-size", "")
-        seen.update(key[len(size_prefix) :] for key in self.redis.scan_iter(match=size_prefix + "*"))
-        addresses = sorted(a for a in seen if belongs(a))
+    def keys_at(self, addresses: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+        """The keys of the given addresses, their items and their histories, and those addresses' memberships in
+        the shared waiting, indexed and wake sets, read by name with no scan."""
         keys, wake_ids = [], []
-        waiting_wakes = self.redis.smembers(self.key("wake-outbox"))
+        wake = self.key("wake-outbox")
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
-            wake_ids.extend(item_id for item_id in ids if item_id in waiting_wakes)
+            waiting = self.redis.smismember(wake, ids) if ids else []
+            wake_ids.extend(item_id for item_id, held in zip(ids, waiting) if held)
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
             keys += [key for key in (self.key("entry", item_id) for item_id in ids) if self.redis.exists(key)]
@@ -497,7 +492,7 @@ class InboxStore:
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
             for shared in ("waiting", "indexed", "open-indexed")
         }
-        members[self.key("wake-outbox")] = wake_ids
+        members[wake] = wake_ids
         return keys, {key: found for key, found in members.items() if found}
 
     def read(self, item_id, reader):

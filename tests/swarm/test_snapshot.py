@@ -115,6 +115,49 @@ def test_export_leaves_out_another_swarms_seats_and_inbox(store):
     assert keys and not any("sw-b" in key for key in keys)
 
 
+def test_export_reads_no_key_of_another_swarm() -> None:
+    import re
+
+    import fakeredis
+
+    from scripts.inbox.seats import SCAN_PAGE
+
+    class Recording(fakeredis.FakeRedis):
+        touched: list[tuple[str, ...]] = []
+        scans: list[tuple[str, ...]] = []
+        on = False
+
+        def execute_command(self, *args: object, **options: object) -> object:
+            if self.on:
+                words = tuple(str(arg) for arg in args)
+                (self.scans if words[0].upper() == "SCAN" else self.touched).append(words)
+            return super().execute_command(*args, **options)
+
+    store = RedisStore(Recording(decode_responses=True))
+    seed(store, "sw")
+    seed(store, "sw-b")
+    other = store.names.code_of("sw-b")
+    theirs = set(store.export("sw-b")["keys"])
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    Recording.touched.clear()
+    Recording.on = True
+    keys = set(store.export("sw")["keys"])
+    Recording.on = False
+    assert InboxStore(store.redis).key("address", eng) in keys
+    read = {arg for words in Recording.touched for arg in words[1:]}
+    assert theirs and not read & theirs
+    assert [arg for arg in read if "sw-b" in arg or re.search(rf"\b{other}\b", arg)] == []
+    assert Recording.scans and all("COUNT" in words[-2] and words[-1] == str(SCAN_PAGE) for words in Recording.scans)
+
+
+def test_export_keeps_the_mail_of_a_seat_that_holds_only_memory(store: RedisStore) -> None:
+    seed(store, "sw")
+    store.memory.learn("eng-3@sw", "someone", "read the plan first", 30)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", "eng-3@sw", "pick this up")
+    assert inbox.key("item", item.id) in store.export("sw")["keys"]
+
+
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
     seed(store, "sw")
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)

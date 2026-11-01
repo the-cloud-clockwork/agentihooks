@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
+from scripts.inbox.seats import SCAN_PAGE, SeatMemory, SeatRegistry, SwarmCulture
 from scripts.inbox.store import InboxStore
 from scripts.swarm import default_models, effort_range, timing
 from scripts.swarm.execution import ExecutionRegistry, _finished_life, occupants_of, records_of
@@ -795,16 +795,20 @@ class RedisStore:
         self.redis.srem(f"{PREFIX}:index", slug)
         self.names.release(slug)
 
-    def export(self, slug):
+    def export(self, slug: str) -> dict[str, Any]:
         """Everything the swarm holds: its own keys, its fencing document, its seats and memory, its inbox addresses."""
         from scripts.swarm import fencing
 
         self.config(slug)
-        own = [key for key in self.redis.scan_iter(match=self.key(slug, "*")) if key != self.key(slug, "tick-lock")]
-        inbox, members = InboxStore(self.redis).keys_for(lambda address: of_swarm(address, slug, self.names))
-        keys = (
-            sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
-        )
+        scanned = self.redis.scan_iter(match=self.key(slug, "*"), count=SCAN_PAGE)
+        own = [key for key in scanned if key != self.key(slug, "tick-lock")]
+        seats = self.seats.swarm_keys(slug)
+        named = set(self.seats.agent_names(slug)) | {row["name"] for row in self.names.names(slug)}
+        named |= {alias for name in list(named) for alias in self.names.aliases(name)}
+        held = (key[len(self.seats.key("")) :].split(":", 1)[0] for key in seats if key.startswith(self.seats.key("")))
+        seated = {address for address in held if address.endswith(f"@{slug}")}
+        inbox, members = InboxStore(self.redis).keys_at(sorted(named | seated))
+        keys = sorted(own) + seats + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
         return {
             "keys": _dump(self.redis, keys),
             "members": {f"{PREFIX}:index": [slug], **members},

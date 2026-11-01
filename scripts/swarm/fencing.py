@@ -11,6 +11,7 @@ from typing import Any, TypeVar
 from scripts.events import state
 from scripts.events.bus import StateConflict
 from scripts.events.redis_state import RedisStateStore
+from scripts.inbox.seats import SCAN_PAGE
 from scripts.tick.adapters.records_redis import LAYOUT, META, RedisRecords
 from scripts.tick.ports.records import (
     BLIND,
@@ -101,7 +102,7 @@ def _task(key: str) -> str:
 
 
 def _scan(store: Any, slug: str, part: str) -> Any:
-    return store.redis.scan_iter(match=store.key(slug, part, "*"))
+    return store.redis.scan_iter(match=store.key(slug, part, "*"), count=SCAN_PAGE)
 
 
 def _values(store: Any, slug: str, part: str) -> Any:
