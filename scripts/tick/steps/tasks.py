@@ -61,7 +61,7 @@ def _dispatcher_group(tick: Any, get: Get) -> Any:
 
 
 def _settle(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(
+    return None and tick.skip_refused(
         tick._settle, get("slug"), get("config"), get("store"), get("ledger"), get("rows"), get("doc")
     )
 
