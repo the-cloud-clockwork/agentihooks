@@ -10,7 +10,7 @@ from scripts.swarm import command_runner, incidents, ledger_probe, ledger_watchd
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import BUDGET_S, LANE, PASS, actions, host
+from scripts.tick.steps import PASS, CallStep, actions, host
 
 pytestmark = pytest.mark.unit
 
@@ -96,7 +96,7 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (LANE, BUDGET_S)
+        assert (step.lane, step.budget_s) == (CallStep.lane, CallStep.budget_s)
 
 
 def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatch: pytest.MonkeyPatch) -> None:
