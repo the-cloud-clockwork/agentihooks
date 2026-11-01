@@ -298,11 +298,11 @@ def _step_spawn_due(
     store: RedisStore,
     ledger: Any,
     runtime: Any,
-    rows: dict[str, dict],
-    doc: dict,
     now_ms: int,
+    box: dict[str, Any],
     **_: object,
 ) -> list[str]:
+    rows, doc = box["rows"], box["doc"]
     actions = []
     due = store.key(slug, SPAWN_DUE)
     if config.state == "running" and config.engine != EVENTS_ENGINE and not lifetime.sleeping(slug, store, rows):
