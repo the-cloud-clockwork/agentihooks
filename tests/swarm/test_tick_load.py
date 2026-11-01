@@ -155,7 +155,7 @@ def load(monkeypatch: pytest.MonkeyPatch, slowdown_s: float = 0.0) -> dict[str, 
     clock.reset()
     migrate = delivery.migrate_outbox
 
-    def stepped(*args: Any, **kwargs: Any) -> None:
+    def stepped(*args: Any, **kwargs: Any) -> Any:
         clock.charge("planted", slowdown_s)
         return migrate(*args, **kwargs)
 
