@@ -2,7 +2,7 @@ import json
 import sys
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from scripts.routing.reservation import Reservation
 
 LANES = ("eng", "ci", "plan")
+_Lanes = dict[str, dict[str, Any]]
 LABELS = {"claude": "Claude", "codex": "Codex"}
 
 
@@ -551,10 +552,10 @@ def _without_work(lanes: list[str]) -> str:
 
 def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list, warned: dict) -> list:
     seats = offered(observations, warned)
-    master = config.lanes.get("master")
+    master = _master_lane(config)
     if master is None or master.get("agent") == "codex":
         return seats
-    declared = master.get("account")
+    declared: str | None = master.get("account")
     if declared and not _read(observations, declared):
         return seats
     if any(
@@ -586,7 +587,17 @@ def _pinned(slug: str, agent: Any, declared: str | None) -> bool:
     return bool(front_door_route.check(agent.profile, masters.title(slug, agent.seat), []))
 
 
-def declared_master(environ: dict) -> str:
+def _lanes(config: SwarmConfig) -> _Lanes:
+    """The config's lane entries by lane name."""
+    return cast(_Lanes, config.lanes)
+
+
+def _master_lane(config: SwarmConfig) -> dict[str, Any] | None:
+    """The master lane entry of the config, absent when the swarm runs no master."""
+    return _lanes(config).get("master")
+
+
+def declared_master(environ: dict[str, str]) -> str:
     """The declared Claude master account a master successor respawns on, empty when none is declared or readable."""
     from redis.exceptions import RedisError
 
@@ -597,13 +608,13 @@ def declared_master(environ: dict) -> str:
     return declared.slug if declared else ""
 
 
-def with_declared_master(config: SwarmConfig, environ: dict) -> SwarmConfig:
+def with_declared_master(config: SwarmConfig, environ: dict[str, str]) -> SwarmConfig:
     """The config with the declared Claude master account on its master lane, where a master successor respawns."""
-    lane = config.lanes.get("master")
+    lane = _master_lane(config)
     slug = declared_master(environ)
     if lane is None or not slug:
         return config
-    return replace(config, lanes={**config.lanes, "master": {**lane, "account": slug}})
+    return replace(config, lanes={**_lanes(config), "master": {**lane, "account": slug}})
 
 
 def calculate(
