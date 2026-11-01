@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import lightweight common module at startup
 from hooks.common import log
-from hooks.context import tool_end
+from hooks.context import seat_notes, tool_end
 from hooks.prompt_budget import PromptBudget
 
 
@@ -789,6 +789,7 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     run("signals", _prompt_signals, payload, session_id, typed)
     if typed:
         run("gate_lifts", _arm_gate_lifts, payload)
+    run("seat_notes", seat_notes.inject)
     run("amygdala", _prompt_amygdala, session_id)
     run("confirm_inbox", _confirm_inbox, session_id)
     run("swarm_heartbeat", _swarm_heartbeat, "working", payload.get("prompt", ""))
