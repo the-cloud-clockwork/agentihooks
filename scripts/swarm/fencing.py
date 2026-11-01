@@ -343,7 +343,7 @@ def _lease_fence(fence: Any) -> LeaseFence | None:
     return LeaseFence(fence.owner, fence.epoch, now_ms())
 
 
-def _write_records(store: Any, port: RedisRecords, slug: str, change: Callable[[dict[str, Any]], T], fence: Any) -> T:
+def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, Any]], T], fence: Any) -> T:
     from scripts.swarm.store import SwarmError
 
     for _ in range(ATTEMPTS):
@@ -527,7 +527,7 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
         if MOVED in doc:
-            return _write_records(store, _port(store), slug, change, fence)
+            return _write_records(_port(store), slug, change, fence)
         before = copy.deepcopy(doc)
         result = change(doc)
         if doc["archive"] and "archive_ref" in doc:
