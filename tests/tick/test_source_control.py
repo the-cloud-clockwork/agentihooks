@@ -205,13 +205,25 @@ def test_github_checks_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tm
             {"name": "tests", "status": "in_progress", "conclusion": None, "html_url": "https://c/2"},
         ]
     }
-    provider, recorder = _provider(monkeypatch, tmp_path, [PULL, runs])
+    statuses = {
+        "statuses": [
+            {"context": "Gate — Required", "state": "pending", "target_url": "https://s/1"},
+            {"context": "sonar", "state": "success", "target_url": None},
+            {"context": "deploy", "state": "error", "target_url": "https://s/3"},
+        ]
+    }
+    provider, recorder = _provider(monkeypatch, tmp_path, [PULL, runs, statuses])
 
     assert provider.checks(REFERENCE, deadline=_deadline()) == (
         port.CheckState("lint", "completed", "success", "https://c/1"),
         port.CheckState("tests", "in_progress", None, "https://c/2"),
+        port.CheckState("Gate — Required", "pending", None, "https://s/1"),
+        port.CheckState("sonar", "completed", "success", ""),
+        port.CheckState("deploy", "completed", "error", "https://s/3"),
     )
     assert recorder.calls[1][1] == ["api", "repos/owner/project/commits/head/check-runs?per_page=100&page=1"]
+    assert recorder.calls[2][1] == ["api", "repos/owner/project/commits/head/status"]
+    assert len(recorder.calls) == 3
 
 
 def test_github_runs_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -233,12 +245,15 @@ def test_github_runs_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tmp_
 
 def test_github_checks_follow_full_pages(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     row = {"name": "lint", "status": "completed", "conclusion": "success", "html_url": "https://c/1"}
-    provider, recorder = _provider(monkeypatch, tmp_path, [PULL, {"check_runs": [row] * 100}, {"check_runs": [row]}])
+    provider, recorder = _provider(
+        monkeypatch, tmp_path, [PULL, {"check_runs": [row] * 100}, {"check_runs": [row]}, {"statuses": []}]
+    )
 
     assert len(provider.checks(REFERENCE, deadline=_deadline())) == 101
     assert [call[1][1] for call in recorder.calls[1:]] == [
         "repos/owner/project/commits/head/check-runs?per_page=100&page=1",
         "repos/owner/project/commits/head/check-runs?per_page=100&page=2",
+        "repos/owner/project/commits/head/status",
     ]
 
 
@@ -362,6 +377,72 @@ def test_github_merged_at_reads_the_first_merged_change_carrying_a_commit(
     ]
 
 
+def _open_page(urls: list[str], contexts: list[dict[str, str | None]], cursor: str | None) -> dict[str, object]:
+    nodes = [
+        {"url": url, "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": contexts}}}}]}}
+        for url in urls
+    ]
+    info = {"hasNextPage": cursor is not None, "endCursor": cursor}
+    return {"data": {"repository": {"pullRequests": {"pageInfo": info, "nodes": nodes}}}}
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_open_changes_reads_each_open_pull_request_check_rollup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    contexts: list[dict[str, str | None]] = [
+        {"__typename": "CheckRun", "name": "Tests", "conclusion": "FAILURE", "startedAt": "s", "completedAt": "c"},
+        {"__typename": "CheckRun", "name": "Lint", "conclusion": None, "startedAt": "s", "completedAt": None},
+        {"__typename": "StatusContext", "context": "Gate", "state": "PENDING", "createdAt": "g"},
+    ]
+    first = _open_page(["https://github.com/owner/project/pull/1"], contexts, "next")
+    bare = {
+        "url": "https://github.com/owner/project/pull/2",
+        "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]},
+    }
+    second = {
+        "data": {
+            "repository": {"pullRequests": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [bare]}}
+        }
+    }
+    provider, recorder = _provider(monkeypatch, tmp_path, [first, second])
+
+    assert provider.open_changes(deadline=_deadline()) == (
+        port.OpenChange(
+            "https://github.com/owner/project/pull/1",
+            (
+                port.RollupCheck("Tests", "FAILURE", "c"),
+                port.RollupCheck("Lint", None, "s"),
+                port.RollupCheck("Gate", "PENDING", "g"),
+            ),
+        ),
+        port.OpenChange("https://github.com/owner/project/pull/2", ()),
+    )
+    query = ["api", "graphql", "-f", f"query={github._OPEN}", "-f", "owner=owner", "-f", "name=project"]
+    assert recorder.calls == [
+        (github.CALLER, query, {"cwd": tmp_path, "timeout": 9, **OPTIONS}),
+        (github.CALLER, [*query, "-f", "after=next"], {"cwd": tmp_path, "timeout": 9, **OPTIONS}),
+    ]
+
+
+def test_github_open_changes_reads_one_page_when_no_next_page(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider, recorder = _provider(monkeypatch, tmp_path, [_open_page(["u0"], [], None)])
+
+    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()),)
+    assert len(recorder.calls) == 1
+
+
+def test_github_open_changes_stops_after_two_hundred_pull_requests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pages: list[object] = [_open_page([f"u{n}"], [], f"c{n}") for n in range(3)]
+    provider, recorder = _provider(monkeypatch, tmp_path, pages)
+
+    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()), port.OpenChange("u1", ()))
+    assert len(recorder.calls) == 2
+    assert "pullRequests(states: OPEN, first: 100, after: $after)" in github._OPEN
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_github_issues_enabled_reads_the_repository(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool
@@ -431,6 +512,7 @@ def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
         ("latest_runs", (), (port.RepositoryRun(1, "feature", "push", "queued"),)),
         ("cancel_run", (5,), None),
         ("merged_at", ("abc123",), "2026-10-19T21:20:03Z"),
+        ("open_changes", (), (port.OpenChange("u", (port.RollupCheck("Tests", "FAILURE", "t"),)),)),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(
@@ -484,6 +566,7 @@ def test_github_defaults() -> None:
         ("latest_runs", ()),
         ("cancel_run", (5,)),
         ("merged_at", ("abc123",)),
+        ("open_changes", ()),
     ],
 )
 def test_github_expired_deadline_prevents_external_reads(

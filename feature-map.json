@@ -55,13 +55,14 @@
     },
     {
       "id": "swarm-tick-step-isolation",
-      "origin": "plan",
+      "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-b9",
       "behaviour": "Every registered tick step declares a budget from its tick report p95 and an interval from the plan's interval table; the engine waits on a step for at most its budget, records a step still running then as late and goes on, so a 300 second step before spawn no longer delays it, and spawn, needing only judge, orphans and preempt, starts by forty seconds into the pass.",
       "seam": "scripts.tick.engine.run_group with step budgets from scripts.tick.steps.budgets.timing_of and the start bound from scripts.tick.registry.latest_start",
       "tests": [
         "tests/tick/test_step_isolation.py::test_a_300_second_step_before_spawn_no_longer_delays_spawn",
         "tests/tick/test_step_isolation.py::test_a_step_that_ends_within_its_budget_is_kept_with_its_result",
+        "tests/tick/test_step_isolation.py::test_an_abandoned_step_keeps_its_wall_time_and_a_daemon_thread",
         "tests/tick/test_step_isolation.py::test_an_abandoned_record_reads_late_even_inside_its_budget",
         "tests/tick/test_step_isolation.py::test_budgets_come_from_the_p95_with_headroom_in_whole_seconds",
         "tests/tick/test_step_isolation.py::test_an_undeclared_step_is_refused",
@@ -141,6 +142,7 @@
         "tests/tick/test_source_control.py::test_github_change_reads_an_empty_body_as_no_text",
         "tests/tick/test_source_control.py::test_a_change_record_defaults_to_no_body_and_not_a_draft",
         "tests/tick/test_source_control.py::test_github_merged_at_reads_the_first_merged_change_carrying_a_commit",
+        "tests/tick/test_source_control.py::test_github_open_changes_reads_each_open_pull_request_check_rollup",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
       ]
     },

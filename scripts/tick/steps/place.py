@@ -4,9 +4,6 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
-import scripts.tick.steps.agents  # noqa: F401
-import scripts.tick.steps.observe  # noqa: F401
-import scripts.tick.steps.report  # noqa: F401
 from scripts.tick import registry
 from scripts.tick.steps import CallStep, budgets
 from scripts.tick.steps.tasks import held

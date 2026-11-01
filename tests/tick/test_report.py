@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.gates import progress, quiet
 from scripts.inbox import wake
 from scripts.swarm import (
@@ -210,7 +211,7 @@ def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
         "metrics record": frozenset({"health findings"}),
     }
     assert {step.needs for step in host.STEPS} == {frozenset()}
-    assert CallStep("x", "g", 1, host.held(lambda cli, get: None)).needs == frozenset()
+    assert CallStep("heartbeat", "g", 1, host.held(lambda cli, get: None)).needs == frozenset()
 
 
 def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,5 +222,6 @@ def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_the_status_publish_hands_over_the_doc_and_view(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper status", calls, _pass(), monkeypatch) == []
-    assert calls == [("publish", STORE, "sw", DOC, "view")]
+    failure = RuntimeError("tick failed")
+    assert _run("wrapper status", calls, _pass(failure=failure), monkeypatch) == []
+    assert calls == [("publish", STORE, "sw", DOC, "view", failure)]
