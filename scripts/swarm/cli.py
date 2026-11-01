@@ -227,6 +227,7 @@ CONFIG_KEYS = {
     **TRANSPORT_KEYS,
     HIVE_PLACEMENT: "hive_placement",
     "engine": "engine",
+    "tick-mode": "tick_mode",
     "watchdog-address": "watchdog_address",
     "placement-mode": "placement_mode",
     PLACEMENT_NODES: "placement_nodes",
@@ -1073,7 +1074,11 @@ def api_address(value):
 
 
 def config_value(key, value):
-    if key in default_models.KEYS or key in TRANSPORT_KEYS or key in ("engine", "watchdog-address", "placement-mode"):
+    if (
+        key in default_models.KEYS
+        or key in TRANSPORT_KEYS
+        or key in ("engine", "tick-mode", "watchdog-address", "placement-mode")
+    ):
         return value
     if key == HIVE_PLACEMENT:
         return on_off(value)
@@ -1174,7 +1179,7 @@ def cmd_set(store, args):
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
-                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events"
+                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events, tick-mode=sequential|parallel"
             )
         changes[SETTABLE[key]] = int(value)
     changes = _engine_origin(store.config(args.slug), changes)
@@ -1215,6 +1220,7 @@ def cmd_set(store, args):
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "engine": config.engine,
+                "tick_mode": config.tick_mode,
                 "window": run_window.report(config.window, now_ms()),
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
