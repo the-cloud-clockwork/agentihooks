@@ -21,8 +21,6 @@ rules:
         - "/scripts/swarm/health/checks.py"
         - "/scripts/swarm/ledger_events.py"
         - "/scripts/swarm/ledger_host.py"
-        - "/scripts/swarm/linked_issues.py"
         - "/scripts/swarm/merge_queue.py"
         - "/scripts/swarm/mutation_wait.py"
-        - "/scripts/swarm/ready.py"
         - "/scripts/tick/adapters/github.py"

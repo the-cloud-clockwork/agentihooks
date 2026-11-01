@@ -33,6 +33,8 @@ class ChangeState:
     merged: bool
     url: str
     head_branch: str = ""
+    body: str = ""
+    draft: bool = False
 
 
 @dataclass(frozen=True)
