@@ -1817,8 +1817,6 @@ def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup)
 
 
 def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(setup, monkeypatch):
-    from contextlib import contextmanager
-
     from scripts.swarm import controller
     from scripts.swarm.tick import ACK_LATER, SpawnError
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
@@ -1829,14 +1827,7 @@ def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(s
         Outcome("spawn", Status.OK, "hive", "placed"),
         Outcome("spawn", Status.PENDING, "hive", detail="waiting"),
     ]
-    kept = []
-
-    @contextmanager
-    def keep(store, slug, held):
-        kept.append((store, slug, held))
-        yield
-
-    monkeypatch.setattr(controller.lease, "kept", keep)
+    monkeypatch.setattr(controller.lease, "kept", Mock(side_effect=AssertionError("collect starts no beat")))
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
     task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
     assert fenced.collect(setup.config, "eng", "engineer", task) == "placed"
@@ -1846,25 +1837,15 @@ def test_a_controller_collect_resumes_the_order_without_placing_the_seat_again(s
     with pytest.raises(SpawnError) as raised:
         fenced.collect(setup.config, "eng", "engineer", task)
     assert (str(raised.value), raised.value.status) == ("waiting", Status.PENDING)
-    assert kept == [(setup.store, setup.config.slug, setup.held)] * 2
 
 
 def test_a_controller_expire_retires_the_order_under_the_held_lease(setup, monkeypatch):
-    from contextlib import contextmanager
-
     from scripts.swarm import controller
     from scripts.swarm.tick import ACK_LATER
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
-    routed, kept = Mock(), []
-
-    @contextmanager
-    def keep(store, slug, held):
-        kept.append((store, slug, held))
-        yield
-        routed.hive_launch.expire.assert_called_once()
-
-    monkeypatch.setattr(controller.lease, "kept", keep)
+    routed = Mock()
+    monkeypatch.setattr(controller.lease, "kept", Mock(side_effect=AssertionError("expire starts no beat")))
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
     task = {"id": "task", "seat": "eng-1@fixture", ACK_LATER: True}
     routed.hive_launch.expire.return_value = False
@@ -1872,7 +1853,6 @@ def test_a_controller_expire_retires_the_order_under_the_held_lease(setup, monke
     routed.hive_launch.expire.assert_called_once_with(
         SpawnRequest(setup.config, "eng", "engineer", {**task, "controller_epoch": setup.held.epoch})
     )
-    assert kept == [(setup.store, setup.config.slug, setup.held)]
 
 
 @pytest.mark.parametrize("state", ["launching", "working"])
