@@ -196,7 +196,7 @@ def test_newest_on_dev_asks_github_for_the_merge_of_the_dev_tip(monkeypatch):
     ],
 )
 def test_merged_at_reads_the_merge_time_of_a_commit_through_the_origin_port(
-    monkeypatch: pytest.MonkeyPatch, answer: object, expected: float | None
+    monkeypatch: pytest.MonkeyPatch, answer: str | Exception | None, expected: float | None
 ) -> None:
     port = MergedPort(answer)
     roots = []
@@ -209,7 +209,7 @@ def test_merged_at_reads_the_merge_time_of_a_commit_through_the_origin_port(
 
 
 class MergedPort:
-    def __init__(self, answer: object) -> None:
+    def __init__(self, answer: str | Exception | None) -> None:
         self.answer, self.asked, self.remaining = answer, [], 0.0
 
     def merged_at(self, commit: str, *, deadline: Deadline) -> str | None:
