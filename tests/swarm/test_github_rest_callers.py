@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from scripts.swarm import github_reads, github_sampler, ledger_events, merge_queue
+from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.ports.source_control import RateLimit
 
 pytestmark = pytest.mark.unit
@@ -85,8 +86,9 @@ def test_the_sampler_counts_used_calls_across_a_window_reset():
     assert github_sampler.spent([(5, 1), (5, 1)]) == 0
 
 
-class Quota:
+class Quota(FakeSourceControl):
     def __init__(self, used):
+        super().__init__()
         self.used = used
         self.deadlines = []
 

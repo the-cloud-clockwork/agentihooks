@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
 PORT_SECONDS = 60.0
+PORT_ERRORS = (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError)
 GITHUB = "https://github.com/"
 WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
 READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
@@ -162,6 +163,20 @@ def change(url: str, refused: str) -> "ChangeState":
         raise SwarmError(f"{refused}: {(exc.stderr or '').strip()}") from exc
     except (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError) as exc:
         raise SwarmError(f"{refused}: {exc}") from exc
+
+
+def login_source_control() -> "SourceControl":
+    """Return the source control port for reads that belong to the login rather than one repository."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    return GitHubSourceControl("", Path.cwd(), "dev")
+
+
+def refusal(exc: Exception) -> str:
+    """Return the words a failed port call gives: the provider's error output, else the exception text."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        return (exc.stderr or "").strip()
+    return str(exc)
 
 
 def _merged_into_dev(dep: dict[str, object]) -> bool:
