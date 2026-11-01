@@ -39,6 +39,7 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 SourceControl.capabilities.__name__,
                 SourceControl.issue_state.__name__,
                 SourceControl.rate_limit.__name__,
+                SourceControl.issues_enabled.__name__,
             ]
         ),
         frozenset(
