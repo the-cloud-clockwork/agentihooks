@@ -46,6 +46,7 @@ CASES = [
     ("source_control", "issue_state", ("value",), False),
     ("source_control", "close_issue", ("value",), True),
     ("source_control", "rate_limit", (), False),
+    ("source_control", "issues_enabled", (), False),
     ("runtime", "inspect", ("value",), False),
     ("runtime", "launch", ({},), True),
     ("runtime", "stop", ("value",), True),

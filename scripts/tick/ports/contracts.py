@@ -78,6 +78,8 @@ class SourceControl(Protocol):
 
     def rate_limit(self, *, deadline: Deadline) -> RateLimit: ...
 
+    def issues_enabled(self, *, deadline: Deadline) -> bool: ...
+
 
 @runtime_checkable
 class Runtime(Protocol):

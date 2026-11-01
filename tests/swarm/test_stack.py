@@ -16,7 +16,8 @@ from scripts.swarm import claim_hold, cli, dispatcher, stack, tick
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_comments, task_dependencies
 from scripts.tick.adapters.fakes import FakeSourceControl
-from scripts.tick.ports.source_control import ChangeRef, ChangeState
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.source_control import ChangeRef, ChangeState, Comment
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -25,6 +26,8 @@ AGENT = "engineer@a1b2c3-0001"
 HEAD = "a" * 40
 BASE = "b" * 40
 ISSUE = "https://github.com/o/r/issues/7"
+COMMENTS = "repos/o/r/issues/7/comments"
+REPO_READ = ["gh", "api", "repos/o/r"]
 NOW = 5_000
 NOTE = "The next engineer restacks it onto dev and finishes it."
 READ_FIRST = "- ledger:sw/tasks/t1 the task and its contract\n"
@@ -40,7 +43,7 @@ REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo"
 
 class Shell:
     def __init__(self):
-        self.calls, self.remote, self.issues, self.fail = [], HEAD, json.dumps({"hasIssuesEnabled": True}), ()
+        self.calls, self.remote, self.issues, self.fail = [], HEAD, json.dumps({"has_issues": True}), ()
         self.status, self.top, self.origin, self.probe = "", TOP, "git@github.com:O/r.git", ""
 
     def __call__(self, argv):
@@ -57,12 +60,32 @@ class Shell:
             ("git", "ls-remote"): self.probe + (f"{self.remote}\trefs/heads/{argv[-1]}" if self.remote else ""),
             ("git", "merge-base"): BASE,
             ("git", "rev-list"): "3",
-            ("gh", "repo"): self.issues,
+            ("gh", "api"): self.issues,
         }.get(tuple(argv[:2]), "")
         return subprocess.CompletedProcess(argv, code, stdout=out + "\n", stderr=" boom\n" if code else "")
 
     def comments(self):
-        return [c for c in self.calls if c[:3] == ["gh", "issue", "comment"] and tuple(c[:3]) not in self.fail]
+        return [c for c in self.calls if c[:3] == ["gh", "api", COMMENTS] and tuple(c[:3]) not in self.fail]
+
+
+class ShellPort(FakeSourceControl):
+    """Source control fake answering through the shell fake, so failures and call order stay in one log."""
+
+    def _run(self, argv: list[str]) -> str:
+        done = stack.shell(argv)
+        if done.returncode:
+            raise subprocess.CalledProcessError(done.returncode, argv, stderr=done.stderr)
+        return done.stdout
+
+    def issues_enabled(self, *, deadline: Deadline) -> bool:
+        assert 59 < deadline.remaining <= stack.PORT_SECONDS
+        return json.loads(self._run(REPO_READ))["has_issues"]
+
+    def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment:
+        assert 59 < deadline.remaining <= stack.PORT_SECONDS
+        path = f"repos/{reference.repository}/issues/{reference.number}/comments"
+        self._run(["gh", "api", path, "-f", f"body={body}"])
+        return Comment(reference, path)
 
 
 def _slug_checked(ledger, name):
@@ -94,6 +117,9 @@ def parked(env, monkeypatch, tmp_path):
         _slug_checked(ledger, name)
     shell = Shell()
     monkeypatch.setattr(stack, "shell", shell)
+    parse = stack.source_control
+    monkeypatch.setattr(stack, "source_control", lambda url: (ShellPort(), parse(url)[1]))
+    monkeypatch.setattr(stack, "repository_source_control", ShellPort)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
     store.memory.add_recap("eng-1@sw", "engineer@a1b2c3-0000", "t1", "an earlier recap", 1)
     (tmp_path / ".agentihooks" / "swarm" / "sw" / "tasks" / "t1").mkdir(parents=True)
@@ -192,13 +218,13 @@ def test_park_refuses_a_worktree_outside_the_worktree_script_root(parked, capsys
 def test_park_refuses_a_task_without_an_issue_where_the_repo_has_issues(parked, capsys):
     parked[1].rows["t1"]["issue_url"] = ""
     _refused(parked, capsys, "the repo has issues; open one and run swarm issue before parking")
-    assert parked[3].calls[-1] == ["gh", "repo", "view", "--json", "hasIssuesEnabled"]
+    assert parked[3].calls[-1] == REPO_READ
 
 
 def test_park_refuses_an_unreadable_answer_on_issues(parked, capsys):
     parked[1].rows["t1"]["issue_url"] = ""
     parked[3].issues = "{}"
-    _refused(parked, capsys, "cannot tell whether the repo has issues: 'hasIssuesEnabled'")
+    _refused(parked, capsys, "cannot tell whether the repo has issues: 'has_issues'")
 
 
 @pytest.mark.parametrize(
@@ -209,14 +235,14 @@ def test_park_refuses_an_unreadable_answer_on_issues(parked, capsys):
         (("git", "rev-parse", "--show-toplevel"), "cannot locate the worktree"),
         (("git", "rev-parse", "--path-format=absolute"), "cannot locate the repo"),
         (("bash", str(stack.WT_SCRIPT), "root"), "cannot locate the worktree root"),
-        (("gh", "repo", "view"), "cannot tell whether the repo has issues"),
+        (tuple(REPO_READ), "cannot tell whether the repo has issues"),
         (("git", "fetch", "origin"), "cannot fetch eng-a"),
         (("git", "merge-base", "HEAD"), "eng-a shares no history"),
         (("git", "rev-list", "--count"), f"cannot count {BASE}"),
     ],
 )
 def test_park_refuses_when_a_command_fails(parked, capsys, failing, says):
-    if failing[1] == "repo":
+    if failing == tuple(REPO_READ):
         parked[1].rows["t1"]["issue_url"] = ""
     parked[3].fail = (failing,)
     _refused(parked, capsys, f"{says}: boom")
@@ -260,7 +286,7 @@ def test_park_stacks_on_dev_when_every_open_dependency_is_a_branchless_non_code_
         ["git", "fetch", "origin", "dev"],
         ["git", "merge-base", "HEAD", "origin/dev"],
         ["git", "rev-list", "--count", BASE],
-        ["gh", "issue", "comment", ISSUE, "--body", body],
+        ["gh", "api", COMMENTS, "-f", f"body={body}"],
         REMOVE,
     ]
     assert json.loads(capsys.readouterr().out)["stacked_base"] == BASE
@@ -320,7 +346,7 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
         ["git", "fetch", "origin", "eng-a"],
         ["git", "merge-base", "HEAD", "origin/eng-a"],
         ["git", "rev-list", "--count", BASE],
-        ["gh", "issue", "comment", ISSUE, "--body", body],
+        ["gh", "api", COMMENTS, "-f", f"body={body}"],
         REMOVE,
     ]
     assert json.loads(capsys.readouterr().out) == {
@@ -416,7 +442,7 @@ def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_del
     assert ["git", "merge-base", "HEAD", "origin/dev"] in shell.calls
     assert ["git", "fetch", "origin", "eng-a"] not in shell.calls
     assert ["git", "fetch", "--", repo, "eng-a"] not in shell.calls
-    assert asked == [dependency_pr]
+    assert asked == [dependency_pr, ISSUE]
 
 
 @pytest.mark.parametrize(
@@ -507,6 +533,21 @@ def test_login_source_control_is_the_github_port_bound_to_no_repository(
 
     monkeypatch.chdir(tmp_path)
     assert stack.login_source_control() == GitHubSourceControl("", tmp_path, "dev")
+
+
+def test_repository_source_control_is_the_github_port_of_the_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    shell = Shell()
+    monkeypatch.setattr(stack, "shell", shell)
+    monkeypatch.chdir(tmp_path)
+    assert stack.repository_source_control() == GitHubSourceControl("o/r", tmp_path, "dev")
+    assert shell.calls == [["git", "remote", "get-url", "origin"]]
+    monkeypatch.setattr(shell, "fail", (("git", "remote", "get-url"),))
+    with pytest.raises(SwarmError, match="^cannot read the repo origin: boom$"):
+        stack.repository_source_control()
 
 
 def test_a_port_refusal_reports_the_provider_output_else_the_exception_text() -> None:
@@ -624,7 +665,7 @@ def test_park_stacks_on_the_deepest_of_several_dependency_branches(parked, monke
     assert ledger.rows["t1"]["stacked_base"] == "1" * 40
     [comment] = shell.comments()
     body = f"Parked on branch `eng-t1` until a (`eng-a`), b (`eng-b`), gone merges. Stacked base `{'1' * 40}`. {NOTE}"
-    assert comment[-1] == body
+    assert comment[-1] == f"body={body}"
     note = f"Parked on its branch until Build the parser and Write the schema and its dependency is done. {NOTE}"
     assert ledger.comments == [("sw", "t1", note, AGENT)]
 
@@ -650,7 +691,7 @@ def test_park_fetches_a_dependency_branch_from_its_other_repository(parked, caps
         ["git", "fetch", "origin", "dev"],
         ["git", "merge-base", "HEAD", "origin/dev"],
         ["git", "rev-list", "--count", BASE],
-        ["gh", "issue", "comment", ISSUE, "--body", body],
+        ["gh", "api", COMMENTS, "-f", f"body={body}"],
         REMOVE,
     ]
     assert json.loads(capsys.readouterr().out)["parked_repos"] == [OTHER]
@@ -914,7 +955,7 @@ def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_updat
     seen = []
 
     def answer(argv):
-        if argv[:3] == ["gh", "issue", "comment"]:
+        if argv[:3] == ["gh", "api", COMMENTS]:
             seen.append((list(ledger.comments), list(ledger.updates)))
         return shell(argv)
 
@@ -924,7 +965,7 @@ def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_updat
 
     monkeypatch.setattr(stack, "shell", answer)
     ledger.comment = amend
-    shell.fail = (("gh", "issue", "comment"),)
+    shell.fail = (("gh", "api", COMMENTS),)
     assert park(doc) == 1
     assert capsys.readouterr().err == "swarm: could not comment on the issue: boom\n"
     assert seen == [([note], [])]
@@ -998,10 +1039,10 @@ def test_a_public_url_drops_credentials_from_a_scheme_url(url, public):
 def test_park_without_issues_skips_the_issue_comment(parked):
     _, ledger, _, shell, doc = parked
     ledger.rows["t1"]["issue_url"] = ""
-    shell.issues = json.dumps({"hasIssuesEnabled": False})
+    shell.issues = json.dumps({"has_issues": False})
     assert park(doc) == 0
     assert shell.comments() == [] and ledger.rows["t1"]["parked_on"] == ["a"]
-    assert ["gh", "repo", "view", "--json", "hasIssuesEnabled"] in shell.calls
+    assert REPO_READ in shell.calls
 
 
 def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(parked):

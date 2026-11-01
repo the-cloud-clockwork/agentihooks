@@ -64,7 +64,8 @@ def test_each_group_reads_its_pass_state_under_the_group_budget(
     seen = _spy(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     views = dict(seen)
-    for name in ("start", "observe"):
+    assert views["masters"].view.read(PASS, "slug") is None
+    for name in ("start", "observe", "agents", "tasks", "close"):
         assert views[name].view.read(PASS, "slug") == "sw"
         assert views[name].view.read(PASS, "now_ms") == 1_000
         assert views[name].view.read(PASS, "store") is store
