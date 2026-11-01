@@ -554,10 +554,11 @@ def test_a_closed_unclaimed_alert_is_not_sent_again_while_the_task_still_waits()
 def test_the_tick_runs_the_stall_pass_after_the_merge_pass():
     import inspect
 
-    from scripts.swarm import cli
+    from scripts.tick.steps import report
 
-    source = inspect.getsource(cli.run_tick)
+    source = inspect.getsource(report)
     assert source.index("ready.merge_pass") < source.index("stall_watch.stall_pass")
+    assert source.index('"merge pass"') < source.index('"stall watch"')
 
 
 def _alert(**fields):
@@ -1415,9 +1416,9 @@ def test_the_pull_request_view_reads_check_starts_and_the_latest_reopen_or_queue
 def test_the_tick_rereads_a_stall_from_github_before_acting():
     import inspect
 
-    from scripts.swarm import cli
+    from scripts.tick.steps import report
 
-    assert "reread=ledger_events.view" in inspect.getsource(cli.run_tick)
+    assert "reread=ledger_events.view" in inspect.getsource(report)
 
 
 def test_a_new_owner_inside_its_limit_costs_no_github_reread():
@@ -1487,6 +1488,6 @@ def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_uncl
 def test_the_tick_reads_stall_readiness_through_the_watched_focus() -> None:
     import inspect
 
-    from scripts.swarm import cli
+    from scripts.tick.steps import report
 
-    assert "stall_watch.ready_lanes(slug, store, ledger, doc, now_ms())" in inspect.getsource(cli.run_tick)
+    assert 'stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms())' in inspect.getsource(report)

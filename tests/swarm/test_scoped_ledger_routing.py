@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
+from scripts.inbox import relay
+from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import cli, lease
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import authority_context, ledger, ledger_link, ledger_route
@@ -42,8 +44,8 @@ def test_only_the_selected_tick_uses_the_hosted_ledger(store, monkeypatch):
     seen = {}
     before = dict(os.environ)
     monkeypatch.setattr(cli.outbox, "flush", lambda *_: None)
-    monkeypatch.setattr(cli.relay, "relay", lambda *_: None)
-    monkeypatch.setattr(cli.LaunchSlots, "refresh_reported", lambda *_: None)
+    monkeypatch.setattr(relay, "relay", lambda *_: None)
+    monkeypatch.setattr(LaunchSlots, "refresh_reported", lambda *_: None)
     monkeypatch.setattr(cli.outage, "providers", lambda *_: None)
     monkeypatch.setattr(cli, "_publish_tick_status", lambda *_: None)
     monkeypatch.setattr(lease, "acquire", lambda *_: lease.Lease("host", 4, 10**15))
