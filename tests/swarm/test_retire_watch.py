@@ -108,7 +108,7 @@ def test_swarm_status_lists_the_retire_finding(store, monkeypatch):
     from scripts.swarm import status
 
     monkeypatch.setattr(status.activity, "counts", lambda slug: {})
-    for at in (1, 2, 3):
+    for at in (0, 60_000, 120_000):
         retire_watch.failed(store, "sw", NAME, REFUSED, at)
     found = status.findings(store, "sw", store.config("sw"), [], [])
     assert [f["id"] for f in found] == [f"retire-failed/{NAME}"]
@@ -128,7 +128,7 @@ def test_retire_findings_identify_the_original_hive_and_removed_host_count(store
                 name, "eng", "task", seat=f"eng-{index}@sw", state="finished", runtime_target={"host_id": "removed"}
             ),
         )
-        for at in (1, 2, 3):
+        for at in (0, 60_000, 120_000):
             retire_watch.failed(store, "sw", name, {"process": 0, "refusal": "waiting for acknowledgement"}, at)
     if indexed:
         store.redis.sadd(registry.INDEX, "removed")

@@ -958,8 +958,7 @@ def _watch_idle(
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
     nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == MASTER or (held and not exhausted):
-        if agent.idle_ticks:
-            timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name)
+        timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, agent.idle_ticks)
         timing.timed(store.put_agent, slug, agent)
         return nudged
     state = idle_state.verdict(
@@ -976,8 +975,7 @@ def _watch_idle(
         or timing.timed(ledger_probe.holding, store, slug)
         or timing.timed(automated_gc.owned, slug, agent)
     ):
-        if agent.idle_ticks:
-            timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name)
+        timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, agent.idle_ticks)
         timing.timed(store.put_agent, slug, agent)
         return nudged
     since = timing.timed(elapsed.start, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks)

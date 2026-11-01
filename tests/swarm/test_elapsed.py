@@ -44,7 +44,9 @@ def test_start_anchors_a_count_older_code_kept_without_a_start(store):
 
 def test_hold_drops_the_start_so_the_next_pass_anchors_to_the_count(store):
     elapsed.start(store, "sw", elapsed.IDLE_SINCE, IDLER, 5 * MINUTE, 0)
-    elapsed.hold(store, "sw", elapsed.IDLE_SINCE, IDLER)
+    elapsed.hold(store, "sw", elapsed.IDLE_SINCE, IDLER, 0)
+    assert elapsed.read(store, "sw", elapsed.IDLE_SINCE, IDLER) == 5 * MINUTE
+    elapsed.hold(store, "sw", elapsed.IDLE_SINCE, IDLER, 2)
     assert elapsed.read(store, "sw", elapsed.IDLE_SINCE, IDLER) is None
     since = elapsed.start(store, "sw", elapsed.IDLE_SINCE, IDLER, 40 * MINUTE, 2)
     assert elapsed.passes(40 * MINUTE - since) == 3

@@ -1556,11 +1556,11 @@ def test_each_idle_tick_is_recorded_in_the_gate_log_with_its_time_and_task(store
     assert log.recent("sw") == []
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    tick("sw", store, ledger, runtime, now_ms=3_000)
+    tick("sw", store, ledger, runtime, now_ms=62_000)
     rows = [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"], r["at"]) for r in log.recent("sw")]
     assert rows == [
         ("idle-ticks", "count", "engineer@a1b2c3-0001", "t1", "idle tick 1", 2_000),
-        ("idle-ticks", "count", "engineer@a1b2c3-0001", "t1", "idle tick 2", 3_000),
+        ("idle-ticks", "count", "engineer@a1b2c3-0001", "t1", "idle tick 2", 62_000),
     ]
 
 
@@ -1588,9 +1588,9 @@ def test_a_busy_turn_resets_the_idle_count(store):
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    for status in ["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1):
+    for n, status in enumerate(["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1)):
         runtime.statuses["engineer@a1b2c3-0001"] = status
-        tick("sw", store, ledger, runtime, now_ms=2_000)
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert workers(store)[0].idle_ticks == IDLE_NUDGE_TICKS - 1
 
 
@@ -1693,15 +1693,15 @@ def test_a_retire_failing_three_ticks_is_a_health_finding(store):
     runtime.stuck.add(first.name)
     runtime.refusals[first.name] = {"process": 4242, "refusal": "signal to 4242 refused: Operation not permitted"}
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    tick("sw", store, ledger, runtime, now_ms=3_000)
+    tick("sw", store, ledger, runtime, now_ms=62_000)
     assert retire_watch.findings(store, "sw") == []
-    tick("sw", store, ledger, runtime, now_ms=4_000)
-    assert [(r["since"], r["at"]) for r in retire_watch.rows(store, "sw")] == [(2_000, 4_000)]
+    tick("sw", store, ledger, runtime, now_ms=122_000)
+    assert [(r["since"], r["at"]) for r in retire_watch.rows(store, "sw")] == [(2_000, 122_000)]
     (found,) = retire_watch.findings(store, "sw")
     assert found.id == f"retire-failed/{first.name}"
     assert found.evidence == ("process 4242", "refusal: signal to 4242 refused: Operation not permitted")
     runtime.stuck.clear()
-    tick("sw", store, ledger, runtime, now_ms=5_000)
+    tick("sw", store, ledger, runtime, now_ms=182_000)
     assert retire_watch.findings(store, "sw") == []
 
 
