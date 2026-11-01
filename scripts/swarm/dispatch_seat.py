@@ -11,12 +11,14 @@ again under its own name, is no trigger.
 
 import json
 from dataclasses import replace
+from typing import Any
 
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     bottleneck,
     capacity,
     dev_red,
+    elapsed,
     launch_check,
     lifetime,
     priority_sweep,
@@ -31,7 +33,7 @@ SEAT = "dispatcher"
 SENDER = "swarm"
 STALE_MS = 15 * 60 * 1000
 STREAK = "bottleneck-streak"
-TICKS = 3
+STREAK_MS = 2 * elapsed.PASS_MS
 SENT = "dispatch-sent"
 LEFT = "dispatch-left"
 CLOSED = "its triggers closed"
@@ -80,7 +82,7 @@ def _routing_applied(store, slug: str, write: bool) -> bool:
     )
 
 
-def uncovered(store, slug: str, now_ms: int, write: bool = True) -> list[dict]:
+def uncovered(store: Any, slug: str, now_ms: int, write: bool = True) -> list[dict[str, Any]]:
     key = store.key(slug, STREAK)
     previous = json.loads(store.redis.get(key) or "{}")
     found = bottleneck.read(store, slug)
@@ -88,7 +90,8 @@ def uncovered(store, slug: str, now_ms: int, write: bool = True) -> list[dict]:
     if write and held is not previous:
         store.redis.set(key, json.dumps(held))
     named = held.get("named")
-    if not named or held["ticks"] < TICKS or now_ms - held["at"] > STALE_MS:
+    since = held.get("since", elapsed.anchored(held.get("at", now_ms), held.get("ticks", 1) - 1))
+    if not named or not elapsed.reached(held["at"] - since, STREAK_MS) or now_ms - held["at"] > STALE_MS:
         _forget_quota_lanes(store, slug, write)
         return []
     if named != "quota":
@@ -99,12 +102,14 @@ def uncovered(store, slug: str, now_ms: int, write: bool = True) -> list[dict]:
     return [{"id": f"{BOTTLENECK}{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
 
 
-def streak(previous: dict, found: dict) -> dict:
+def streak(previous: dict[str, Any], found: dict[str, Any]) -> dict[str, Any]:
     if not found or found.get("at") == previous.get("at"):
         return previous
     named = found["bottleneck"]
-    ticks = previous["ticks"] + 1 if named == previous.get("named") else 1
-    return {"named": named, "ticks": ticks, "at": found["at"]}
+    if named != previous.get("named"):
+        return {"named": named, "ticks": 1, "at": found["at"], "since": found["at"]}
+    since = previous.get("since", elapsed.anchored(previous["at"], previous["ticks"] - 1))
+    return {"named": named, "ticks": previous["ticks"] + 1, "at": found["at"], "since": since}
 
 
 def _forget_quota_lanes(store, slug: str, write: bool) -> None:

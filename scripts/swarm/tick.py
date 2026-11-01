@@ -44,6 +44,7 @@ from scripts.swarm import (
     dev_red,
     difficulty,  # noqa: F401
     dispatcher,
+    elapsed,
     failed_panes,
     fleet_red,
     freeze,
@@ -124,8 +125,10 @@ MASTER_DOWN = (
     "The master is down and is being relaunched. Your message waits for the new master, which receives it as soon "
     "as it starts."
 )
-IDLE_NUDGE_TICKS = 3
-IDLE_KILL_TICKS = 20
+IDLE_NUDGE_MS = 2 * elapsed.PASS_MS
+IDLE_KILL_MS = 19 * elapsed.PASS_MS
+IDLE_NUDGE_TICKS = elapsed.passes(IDLE_NUDGE_MS)
+IDLE_KILL_TICKS = elapsed.passes(IDLE_KILL_MS)
 IDLE_TICKS = "idle-ticks"
 LANES = ("eng", "ci", "plan")
 ACTIVE = ("claimed", "pr")
@@ -911,7 +914,15 @@ def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
     return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
-def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
+def _watch_idle(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
     from scripts.swarm import automated_gc
 
     observed = timing.timed(_observe, runtime, agent)
@@ -924,8 +935,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
         same = agent.input_prompt == title
-        ticks = agent.input_ticks + 1 if same else 1
         timing.timed(input_wait.mark, store, slug, agent.name, now_ms, same)
+        ticks = elapsed.passes(now_ms - (timing.timed(input_wait.since, store, slug, agent.name) or now_ms))
         waiting = replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0)
         timing.timed(store.put_agent, slug, waiting)
         return (
@@ -946,6 +957,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
     nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == MASTER or (held and not exhausted):
+        timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks)
         timing.timed(store.put_agent, slug, agent)
         return nudged
     state = idle_state.verdict(
@@ -962,9 +974,11 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         or timing.timed(ledger_probe.holding, store, slug)
         or timing.timed(automated_gc.owned, slug, agent)
     ):
+        timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks)
         timing.timed(store.put_agent, slug, agent)
         return nudged
-    idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
+    since = timing.timed(elapsed.start, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks)
+    idle = replace(agent, idle_ticks=elapsed.passes(now_ms - since))
     timing.timed(store.put_agent, slug, idle)
     who = Who(name=agent.name, task=agent.task)
     timing.timed(
@@ -974,17 +988,21 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     )
     if timing.timed(resume.recovery_holds, store, slug, agent, now_ms):
         return nudged
-    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
+    if elapsed.reached(now_ms - since, IDLE_KILL_MS) and runtime.retire(
+        idle, homes=reaper.scratch_homes(slug, idle.task)
+    ):
         why = f"; outage recovery could not proceed: {resume.recovery_blocker(store, slug, agent)}" if pending else ""
         return nudged + [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True) + why]
     return nudged
 
 
-def _stale_nudge(slug, store, agent, observed, pending, now_ms):
+def _stale_nudge(
+    slug: str, store: RedisStore, agent: AgentRecord, observed: Any, pending: bool, now_ms: int
+) -> list[str]:
     """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
     if agent.lane == MASTER or not agent.task or pending or timing.timed(outage.open_records, slug):
         return []
-    if agent.idle_ticks + 1 >= IDLE_KILL_TICKS:
+    if elapsed.due(store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks, IDLE_KILL_MS):
         return []
     if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         return []
