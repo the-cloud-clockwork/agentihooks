@@ -13,6 +13,7 @@ from scripts.gates.push_stop import (
     GATE_FAILED,
     GATE_LATE,
     GATE_SLOW,
+    PANIC_HELD,
     PROGRESS,
     PUSH_LATE,
     RESERVE_S,
@@ -1130,3 +1131,58 @@ def test_pushed_work_with_an_origin_off_github_and_no_pull_request_is_still_refu
     git(rig.seed, "remote", "set-url", "origin", str(rig.origin))
     rig.commit()
     assert (rig.stop().allowed, rig.stop().reason) == (False, PROGRESS.format(swarm=SLUG))
+
+
+def panic_on(rig):
+    from scripts.swarm import panic
+
+    panic.engage(rig.store, "test", False, (), NOW)
+
+
+def test_fleet_panic_keeps_the_stop_hook_from_pushing_and_names_panic(rig):
+    panic_on(rig)
+    rig.commit()
+    decision = rig.stop()
+    assert rig.remote_head() == ""
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PANIC_HELD.format(path=rig.tree)}")
+    assert rig.ledger.comments == []
+
+
+@pytest.mark.parametrize(
+    "on",
+    [
+        None,
+        {"kind": "checks", "target": "https://github.com/o/r/pull/7"},
+        {"kind": "merge", "target": "https://github.com/o/r/pull/7"},
+        {"kind": "task", "target": "t9"},
+    ],
+)
+def test_any_live_declared_wait_lets_the_stop_pass_while_fleet_panic_holds(rig, on):
+    panic_on(rig)
+    rig.commit()
+    wait_on(rig, on)
+    assert rig.stop().allowed
+    assert rig.remote_head() == ""
+    assert rig.inbox() == []
+
+
+def test_an_ended_wait_still_refuses_the_stop_while_fleet_panic_holds(rig):
+    panic_on(rig)
+    rig.commit()
+    wait_on(rig, None, at=NOW - 120_000, until=NOW)
+    assert not rig.stop().allowed
+
+
+def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(monkeypatch, rig):
+    from redis.exceptions import RedisError
+
+    from scripts.swarm import panic
+
+    def broken(store):
+        raise RedisError("down")
+
+    monkeypatch.setattr(panic, "state", broken)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head

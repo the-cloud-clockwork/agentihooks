@@ -368,7 +368,7 @@
   "scripts/gates/placement.py": 126,
   "scripts/gates/progress.py": 84,
   "scripts/gates/prompts.py": 119,
-  "scripts/gates/push_stop.py": 344,
+  "scripts/gates/push_stop.py": 323,
   "scripts/gates/quiet.py": 222,
   "scripts/gates/reruns.py": 104,
   "scripts/gates/sign_ins.py": 46,
