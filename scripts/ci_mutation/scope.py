@@ -1,4 +1,5 @@
 import ast
+import json
 import re
 import subprocess
 import unicodedata
@@ -177,7 +178,8 @@ def moved_lines(root: Path, comparison: str) -> dict[str, set[int]]:
         if text.startswith("diff --git "):
             header = True
         elif header and text.startswith("+++ "):
-            current = moved.setdefault(text.removeprefix("+++ b/").removesuffix("\t"), set())
+            path = text.removeprefix("+++ ").removesuffix("\t")
+            current = moved.setdefault((json.loads(path) if path.startswith('"') else path).removeprefix("b/"), set())
         elif hunk:
             header, line = False, int(hunk[1])
         elif not header and text.startswith("+"):

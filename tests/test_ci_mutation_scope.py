@@ -345,17 +345,24 @@ def test_blocks_moved_from_two_files_over_a_removed_line_grade_only_the_line_aft
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {8}}
 
 
-def test_a_move_into_a_non_ascii_name_is_skipped_and_a_file_git_quotes_is_graded_in_full(tmp_path):
+def test_moves_into_a_non_ascii_name_and_a_name_git_quotes_are_skipped_and_their_new_lines_graded(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 
+    other = (
+        "def other(rows):\n"
+        "    counted = {row.key: row.value for row in rows if row.value}\n"
+        "    return sorted(counted.items(), key=lambda pair: pair[1])\n"
+    )
     git, commit = _repo(tmp_path)
-    pinned = commit("old.py", STEP)
+    commit("old.py", STEP)
+    pinned = commit("other.py", other)
     git("checkout", "-q", "-b", "branch")
     (tmp_path / "hooks" / "old.py").write_text("")
-    (tmp_path / "hooks" / 'quo"te.py').write_text("VALUE = 1\n")
+    (tmp_path / "hooks" / "other.py").write_text("")
+    (tmp_path / "hooks" / 'quo"te.py').write_text(f"VALUE = 1\n{other}")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "ñame.py").write_text(STEP)
-    git("add", "hooks/old.py", 'hooks/quo"te.py', "scripts/ñame.py")
+    git("add", "hooks/old.py", "hooks/other.py", 'hooks/quo"te.py', "scripts/ñame.py")
     git("commit", "-q", "-m", "move")
     assert discover_changes(tmp_path, pinned, "HEAD") == {'hooks/quo"te.py': {1}}
 
