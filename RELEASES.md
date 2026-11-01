@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.535 · 2026-11-01
+
+### 2026-11-01 · 0242bb8836e7 · #9153 · @nestorcolt
+
+**Record bounded tick costs and report pass gaps**
+
+This change adds durable visibility into tick performance by recording one finished entry per tick step plus one pass summary per run, each written into capped per-swarm Redis streams (bounded to 50,000 records) so history doesn't grow unbounded. A new CLI command, agentihooks swarm SLUG tick-report, surfaces this data as per-step counts, median and p95 latency, CPU share, and pass-level p95 and gaps, making it possible to see exactly where time and CPU go on the live tick and catch regressions before they spread, which is the foundation the rest of the measured-and-guarded phase depends on.
+
+### 2026-11-01 · 11e4d6f52763 · #9150 · @agenticore-app
+
+**Replay tick golden scenarios in an advisory equivalence job**
+
+This adds a new workflow-dispatch-only CI job that replays all twenty four canonical tick golden scenarios concurrently on a chosen base and head, comparing their outputs to prove equivalence before any phase B move pull request merges, and verifies the check actually catches regressions by failing outward when a reap action fault is planted. It runs independently of the existing frozen ledger equivalence workflow and required gates, so nothing already protecting merges is touched, while giving every future move PR a concrete, attachable proof run id showing base and head behave identically.
+
 ## v2.17.534 · 2026-11-01
 
 ### 2026-11-01 · 0343ad72fa2c · #9165 · @nestorcolt
