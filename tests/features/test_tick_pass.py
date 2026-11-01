@@ -6,13 +6,10 @@ import pytest
 import yaml
 
 from scripts.swarm import cli, idle, launch_check
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import LedgerClient, _ledger
 from tests.features.conftest import Agent, Swarm
 from tests.features.test_harness import _until
 from tests.swarm.test_tick import FakeRuntime
-
-
-from scripts.swarm.ledger_client import _ledger
 
 @pytest.mark.feature
 def test_the_real_backend_feature_suite_holds_both_promotion_jobs() -> None:
