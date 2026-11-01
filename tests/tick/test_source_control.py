@@ -17,6 +17,8 @@ PULL = {
     "base": {"ref": "dev"},
     "merged": False,
     "html_url": "https://github.com/owner/project/pull/7",
+    "body": "Closes #12",
+    "draft": True,
 }
 OPTIONS = {"capture_output": True, "text": True, "check": True}
 
@@ -153,7 +155,15 @@ def test_github_change_uses_audited_reads_and_deadline(monkeypatch: pytest.Monke
     provider, recorder = _provider(monkeypatch, tmp_path, [PULL])
 
     assert provider.change(REFERENCE, deadline=_deadline()) == port.ChangeState(
-        REFERENCE, "open", "head", "dev", False, "https://github.com/owner/project/pull/7", "engineer-1"
+        REFERENCE,
+        "open",
+        "head",
+        "dev",
+        False,
+        "https://github.com/owner/project/pull/7",
+        "engineer-1",
+        "Closes #12",
+        True,
     )
     assert recorder.calls == [
         ("tick.source_control", ["api", "repos/owner/project/pulls/7"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
@@ -166,6 +176,20 @@ def test_github_change_names_its_head_branch(monkeypatch: pytest.MonkeyPatch, tm
     provider, _ = _provider(monkeypatch, tmp_path, [pull])
 
     assert provider.change(REFERENCE, deadline=_deadline()).head_branch == "engineer-2"
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_change_reads_an_empty_body_as_no_text(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider, _ = _provider(monkeypatch, tmp_path, [{**PULL, "body": None, "draft": False}])
+
+    change = provider.change(REFERENCE, deadline=_deadline())
+    assert (change.body, change.draft) == ("", False)
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_a_change_record_defaults_to_no_body_and_not_a_draft() -> None:
+    change = port.ChangeState(REFERENCE, "open", "head", "dev", False, "https://x/7")
+    assert (change.head_branch, change.body, change.draft) == ("", "", False)
 
 
 @pytest.mark.feature("swarm-tick-source-control-port")
