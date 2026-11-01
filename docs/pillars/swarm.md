@@ -5054,8 +5054,9 @@ stopped only at its 450 second deadline, with 30 seconds of grace. The pass keep
   `the controller lease is stale` when another controller holds it.
 - **For the whole pass.** One lease heartbeat runs from the start of the pass to its end: a background thread renews
   the lease once per tick interval, so a single step longer than the lease keeps it. The thread stops for good when
-  a renewal finds the lease stale, because a higher epoch took over or the lease expired, and on a hosted ledger
-  when the lease server cannot be reached or refuses the renewal. It tries again at the next beat after a Redis
+  a renewal finds the lease stale, because a higher epoch took over or the lease expired, and on a
+  [hosted ledger](../reference/hosted-ledger-auth.md#hosted-server), whose server holds the controller lease, when
+  that server cannot be reached or refuses the renewal. It tries again at the next beat after a Redis
   error. The master placement path under the tick lock holds its own heartbeat the same way.
 - **Before every step.** Each timed step of the pass, including every step wrapped to skip a refused ledger write,
   first renews the lease, extends the tick lock and records the swarm's last tick activity.
@@ -5088,7 +5089,7 @@ journalctl --user -t agentihooks-swarm --since "-12h" | grep '"event": "swarm_ti
 
 The finished step records carry each step's name, outcome and `wall_s` duration. The pass lease heartbeat keeps
 the lease through a long step, so a stale lease inside a pass means another controller took over, the heartbeat
-could not reach Redis for three ticks, or on a hosted ledger the heartbeat stopped at an unreachable lease server.
+could not reach Redis for three ticks, or on a hosted ledger the heartbeat stopped when it could not reach the ledger server.
 Work that runs outside a tick pass and can outlast the lease holds its own heartbeat, the way the refresh job does:
 
 ```python
@@ -5107,8 +5108,8 @@ read current executions only, and how to measure `scope.readings` and stopped pa
 
 ### Doctor timer pass
 
-A `doctor` swarm runs the Doctor timer, `scripts.doctor.cli.timer`, as one step of its own tick pass, inside the
-lease heartbeat above. The step counts against the same limits as every other step of that pass: the 450 second pass
+A `doctor` swarm runs the Doctor timer, `scripts.doctor.cli.timer`, in the refresh job, which keeps its own
+heartbeat. The step counts against the same limits as every other step of that pass: the 450 second pass
 deadline and the scheduler holder's nine minute stop. When the tick still ran as the `agentihooks-swarm` systemd
 service, a Doctor step of 216 to 291 seconds pushed the whole tick past the service start timeout, so the service
 killed it and both swarms on the machine got about one pass every ten minutes. The step has to finish well inside a

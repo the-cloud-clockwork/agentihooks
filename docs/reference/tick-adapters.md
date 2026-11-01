@@ -235,8 +235,7 @@ port.mark("last-tick", None, deadline=deadline)
   holds a live lease or the swarm's controller host names another owner, and it raises the epoch when it takes over an
   expired lease. On a ledger served from a remote address the lease call goes to that server.
 - `lock` holds the lock for the time left on the deadline, rounded down to whole milliseconds and never under one, so
-  the lock expires by itself when the deadline does. Give the call a deadline sized to the work the lock guards;
-  a `child` deadline never outlasts its parent. The adapter has no release operation; the lock ends at its expiry.
+  the lock expires by itself when the deadline does. Give the call a deadline sized to the work the lock guards. The adapter has no release operation; the lock ends at its expiry.
 - `configure` compares every field of `settings` with the stored config and writes only the fields that differ, in
   one `update`. When nothing differs it writes nothing and returns the current config. `update` applies its own
   checks, so an invalid `state` or `autonomy` raises `SwarmError`.
@@ -605,7 +604,7 @@ before each step are in [Controller lease during long steps](../pillars/swarm.md
 |---|---|
 | `lease.PASS` | Holds the store, the swarm and the held epoch for the pass, so ledger writes resolve their `controller_epoch` through `epoch_for`, described under [Ledger adapter](#ledger-adapter). Reset when the pass ends, even when it raises. |
 | `FencedRuntime.spawn`, `collect`, `expire` | Call `lease.require_epoch`, one lease read with no renewal, and raise `SwarmError("the controller lease is stale")` when another controller now holds the lease. |
-| `FencedRuntime.has_capacity` | Applies the deployment mode refusal only; it does not touch the lease. |
+| `FencedRuntime.has_capacity` | Applies the deployment mode refusal, then asks the wrapped runtime's `has_capacity` for a local deployment; it does not touch the lease. |
 | `FencedRuntime.launch_room` | Reads the room left for launches; it does not touch the lease. |
 | Every other `FencedRuntime` attribute | Forwarded to the wrapped runtime, such as `herdr_runtime`, `original_runtime` and `hive_launch`, with no renewal, fencing or thread. |
 | The ledger client | Used as given; no wrapper renews the lease on ledger calls. |
