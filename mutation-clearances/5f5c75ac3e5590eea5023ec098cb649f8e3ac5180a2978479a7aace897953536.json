@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/scope.py:scripts.ci_mutation.scope.x_moved_lines:06fa83ce1da172a298375852ce917eb0ac141c57a01596a9c4b7a57362b2ae54": {
+    "reader": "standards_reader",
+    "reason": "Initialises the current file set to None. It is only dereferenced on an added line, which git emits only after a +++ header in the same section has assigned it, so the initial value is never read."
+  }
+}
