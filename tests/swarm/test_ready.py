@@ -12,6 +12,7 @@ from scripts.swarm import capacity, cli, linked_issues, merge_queue, ready, stac
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.tick.deadline import Deadline
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -869,25 +870,25 @@ CLOSED_BY = f"Closed by the swarm: pull request {URL} merged into dev."
 
 
 class IssuePort:
-    def __init__(self):
+    def __init__(self) -> None:
         self.states = {ISSUE: "open", NAMED: "open"}
-        self.calls = []
-        self.fail = set()
+        self.calls: list[tuple[str, ...]] = []
+        self.fail: set[str] = set()
 
-    def _answer(self, call, deadline, answer):
+    def _answer(self, call: tuple[str, ...], deadline: Deadline, answer: str | None) -> str | None:
         assert 59 < deadline.remaining <= stack.PORT_SECONDS
         self.calls.append(call)
         if call[0] in self.fail:
             raise subprocess.CalledProcessError(1, [], stderr=" boom\n")
         return answer
 
-    def issue_state(self, reference, *, deadline):
+    def issue_state(self, reference: str, *, deadline: Deadline) -> str | None:
         return self._answer(("issue_state", reference), deadline, self.states[reference])
 
-    def close_issue(self, reference, *, deadline):
+    def close_issue(self, reference: str, *, deadline: Deadline) -> str | None:
         return self._answer(("close_issue", reference), deadline, "closed")
 
-    def comment(self, reference, body, *, deadline):
+    def comment(self, reference: str, body: str, *, deadline: Deadline) -> str | None:
         return self._answer(("comment", reference, body), deadline, None)
 
 

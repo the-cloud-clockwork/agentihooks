@@ -161,7 +161,7 @@ def change(url: str, refused: str) -> "ChangeState":
         return provider.change(reference, deadline=Deadline.after(PORT_SECONDS))
     except subprocess.CalledProcessError as exc:
         raise SwarmError(f"{refused}: {(exc.stderr or '').strip()}") from exc
-    except (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError) as exc:
+    except PORT_ERRORS as exc:
         raise SwarmError(f"{refused}: {exc}") from exc
 
 

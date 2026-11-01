@@ -1,10 +1,12 @@
 import json
 import subprocess
+from collections.abc import Iterator
 
 import pytest
 
 from scripts.swarm import github_reads, github_sampler, ledger_events, merge_queue
 from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import RateLimit
 
 pytestmark = pytest.mark.unit
@@ -87,22 +89,22 @@ def test_the_sampler_counts_used_calls_across_a_window_reset():
 
 
 class Quota(FakeSourceControl):
-    def __init__(self, used):
+    def __init__(self, used: Iterator[int]) -> None:
         super().__init__()
         self.used = used
-        self.deadlines = []
+        self.deadlines: list[Deadline] = []
 
-    def rate_limit(self, *, deadline):
+    def rate_limit(self, *, deadline: Deadline) -> RateLimit:
         assert 29 < deadline.remaining <= github_sampler.RATE_LIMIT_SECONDS == 30
         self.deadlines.append(deadline)
         return RateLimit(next(self.used), 1, 5)
 
 
-def rate_limit(used):
+def rate_limit(used: Iterator[int]) -> Quota:
     return Quota(used)
 
 
-def test_the_sampler_reads_the_core_quota_through_the_login_port(monkeypatch):
+def test_the_sampler_reads_the_core_quota_through_the_login_port(monkeypatch: pytest.MonkeyPatch) -> None:
     quota = Quota(iter([12]))
     monkeypatch.setattr(github_sampler.stack, "login_source_control", lambda: quota)
     assert github_sampler.core() == (12, 5)
