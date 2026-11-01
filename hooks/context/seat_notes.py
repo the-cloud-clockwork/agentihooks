@@ -8,22 +8,20 @@ REMINDER = (
 )
 
 
-def reminder(environ: Mapping[str, str] | None = None) -> str:
+def reminder(env: Mapping[str, str]) -> str:
     """The reminder for a session bound to a swarm seat, '' for any other session."""
     from scripts.swarm import naming
 
-    env = os.environ if environ is None else environ
-    slug = env.get("AGENTIHOOKS_SWARM", "")
-    if not slug or not naming.lane_of(env.get("AGENTIHOOKS_AGENT_NAME", "")):
+    slug = env.get("AGENTIHOOKS_SWARM")
+    if not slug or not naming.lane_of(str(env.get("AGENTIHOOKS_AGENT_NAME"))):
         return ""
     return REMINDER.format(slug=slug)
 
 
 def inject() -> None:
-    """Inject the reminder on UserPromptSubmit through the target's context channel."""
+    """Inject the reminder on UserPromptSubmit; inject_context routes it into each target's context channel."""
     from hooks.common import inject_context
-    from hooks.targets.capabilities import can_inject_context
 
-    line = reminder()
-    if line and can_inject_context("UserPromptSubmit"):
-        inject_context(line, also_log=False, skip_compression=True, kind="refocus")
+    line = reminder(os.environ)
+    if line:
+        inject_context(line)
