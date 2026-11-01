@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.540 · 2026-11-01
+
+### 2026-11-01 · ef39ec8cea30 · #9188 · @agenticore-app
+
+**Document the tick runtime and processes adapters**
+
+This change updates the tick adapters reference documentation to cover behavior already shipped in PR #9161, describing how RouterRuntime handles arguments, operations, unknown handles, launch request keys, outcome passthrough, and single deadline checks, plus how PassProcesses performs scan and rescan so each tick does exactly one process scan shared across steps rather than a scan per step. It adds the declared effects rows, fakes, troubleshooting entries, index entry, and a changelog fragment, giving operators and contributors an accurate, trustworthy reference for how these adapters actually behave rather than leaving the delivered seam undocumented.
+
 ## v2.17.539 · 2026-11-01
 
 ### 2026-11-01 · dc405c20089b · #9183 · @agenticore-app
