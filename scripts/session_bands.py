@@ -44,8 +44,10 @@ def cap(five_left: float | None, week_left: float | None) -> int | None:
 
 def scaled_cap(five_left: float | None, week_left: float | None, ceiling: int) -> int | None:
     banded = cap(five_left, week_left)
-    left = week_left if five_left is None else min(five_left, week_left or 0.0)
-    return banded and min(ceiling, max(banded, int(ceiling * (left or 0.0) / 100)))
+    if not banded:
+        return banded
+    left = min(window for window in (five_left, week_left) if window is not None)
+    return min(ceiling, max(banded, int(ceiling * left / 100)))
 
 
 def hive_ceiling(environ: Mapping[str, str]) -> int:

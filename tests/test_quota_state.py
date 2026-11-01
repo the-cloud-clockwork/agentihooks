@@ -41,7 +41,7 @@ def test_routing_left_is_the_week_for_codex_and_the_lower_window_for_claude():
     assert quota_state.routing_left("codex", None, 40.0) == 40.0
     assert quota_state.routing_left("claude", 5.0, 40.0) == 5.0
     assert quota_state.routing_left("claude", 50.0, 40.0) == 40.0
-    assert quota_state.routing_left("claude", None, 40.0) is None
+    assert quota_state.routing_left("claude", None, 40.0) == 40.0
     assert quota_state.routing_left("claude", 40.0, None) is None
 
 

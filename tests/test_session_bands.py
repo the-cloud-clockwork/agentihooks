@@ -146,8 +146,8 @@ def test_a_hive_cap_grows_with_the_smaller_window_under_the_ceiling(five_left, w
     assert session_bands.scaled_cap(five_left, week_left, ceiling) == seats
 
 
-def test_a_hive_cap_without_a_reading_is_unknown():
-    assert session_bands.scaled_cap(None, 50, 12) is None
+def test_a_hive_cap_without_a_week_reading_is_unknown():
+    assert session_bands.scaled_cap(None, None, 12) is None
     assert session_bands.scaled_cap(50, None, 12) is None
 
 

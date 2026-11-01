@@ -71,9 +71,15 @@ def test_a_rejected_status_reads_as_blocked():
 
 
 @pytest.mark.parametrize("five", [None, "soon", "inf", "nan"])
-def test_a_missing_or_unreadable_window_reads_as_unavailable(five):
+def test_a_missing_or_unreadable_five_hour_window_reads_from_the_week(five):
     found = claude_usage.result("a", _headers(five=five), BODY, 5)
-    assert (found.state, found.five_hour.used, found.error) == ("UNKNOWN", None, "rate-limit windows unavailable")
+    assert (found.state, found.five_hour.used, found.error) == ("NORMAL", None, "")
+
+
+@pytest.mark.parametrize("week", [None, "soon", "inf", "nan"])
+def test_a_missing_or_unreadable_week_window_reads_as_unavailable(week):
+    found = claude_usage.result("a", _headers(week=week), BODY, 5)
+    assert (found.state, found.seven_day.used, found.error) == ("UNKNOWN", None, "rate-limit windows unavailable")
 
 
 def test_a_missing_status_reads_as_unknown_status():
