@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from scripts.tick.adapters import fakes
 
 from scripts.tick import ports
-from scripts.tick.adapters import fakes
 from scripts.tick.deadline import Deadline
 
 
