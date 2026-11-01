@@ -230,7 +230,7 @@
   "scripts/ci_mutation/evidence.py": 5,
   "scripts/ci_mutation/identity.py": 27,
   "scripts/ci_mutation/killers.py": 29,
-  "scripts/ci_mutation/measured.py": 116,
+  "scripts/ci_mutation/measured.py": 115,
   "scripts/ci_mutation/merge.py": 76,
   "scripts/ci_mutation/mutant_shards.py": 32,
   "scripts/ci_mutation/plan.py": 224,
