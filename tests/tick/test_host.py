@@ -53,7 +53,9 @@ def _cli(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespace
         calls.append(("intent", *args))
         return ("view", "checked")
 
-    return SimpleNamespace(now_ms=lambda: 7, skip_refused=skip_refused, _intent_pass=intent_pass)
+    return SimpleNamespace(
+        now_ms=lambda: 7, skip_refused=skip_refused, _intent_pass=intent_pass, relay=relay, refresh_job=refresh_job
+    )
 
 
 def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[str]:

@@ -88,6 +88,8 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
         now_ms=lambda: 7,
         skip_refused=skip_refused,
         _publish_tick_status=lambda *args: calls.append(("publish", *args)),
+        wake=wake,
+        snapshot_job=snapshot_job,
     )
     monkeypatch.setattr(host, "import_module", lambda name: cli)
     monkeypatch.setattr(timing, "call", call)
