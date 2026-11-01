@@ -278,7 +278,7 @@ def test_a_step_that_raises_holds_its_exception_and_stops_the_later_steps(monkey
     def broken(slug: str) -> None:
         raise ConnectionError(slug)
 
-    state["ledger"].state = broken
+    monkeypatch.setattr(state["ledger"], "state", broken)
     assert actions(engine.run_group("observe", _ctx(state))) == ["pane", "reconciled", "moved", "recovered"]
     assert [name for name, _ in seen] == ["panes", "reconcile", "fail over", "recover"]
     with pytest.raises(ConnectionError, match="^sw$"):

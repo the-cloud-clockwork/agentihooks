@@ -213,13 +213,13 @@ class TickPass:
     """The pass state a tick group site hands its steps."""
 
     slug: str
-    store: RedisStore
+    store: Any
     ledger: Any
     runtime: Any
     now_ms: int
     box: dict[str, Any] = field(default_factory=dict)
     config: SwarmConfig | None = None
-    rows: dict[str, dict] | None = None
+    rows: dict[str, dict[str, Any]] | None = None
 
 
 class _PassView:
@@ -239,12 +239,12 @@ def run_group(name: str, state: TickPass | None = None) -> list[str]:
     return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
 
 
-def _step_config_load(slug: str, store: RedisStore, box: dict[str, Any], **_: object) -> list[str]:
+def step_config_load(slug: str, store: RedisStore, box: dict[str, Any], **_: object) -> list[str]:
     box["config"] = store.ensure_code(slug)
     return []
 
 
-def _step_stopped_branch(
+def step_stopped_branch(
     slug: str,
     config: SwarmConfig,
     store: RedisStore,
@@ -256,7 +256,7 @@ def _step_stopped_branch(
 ) -> list[str]:
     from scripts.swarm import automated_gc
 
-    actions = []
+    actions: list[str] = []
     if config.state == "stopped":
         doc = timing.call(ledger.state, slug)
         rows = {t["id"]: t for t in doc["tasks"]}
@@ -272,42 +272,42 @@ def _step_stopped_branch(
     return actions
 
 
-def _step_pane_evidence(slug: str, store: RedisStore, runtime: Any, now_ms: int, **_: object) -> list[str]:
+def step_pane_evidence(slug: str, store: RedisStore, runtime: Any, now_ms: int, **_: object) -> list[str]:
     return skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
 
 
-def _step_execution_reconcile(slug: str, store: RedisStore, runtime: Any, now_ms: int, **_: object) -> list[str]:
+def step_execution_reconcile(slug: str, store: RedisStore, runtime: Any, now_ms: int, **_: object) -> list[str]:
     return skip_refused(store.execution_registry.reconcile, slug, runtime, now_ms)
 
 
-def _step_master_move_fail_over(
+def step_master_move_fail_over(
     slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int, **_: object
 ) -> list[str]:
     return skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
 
 
-def _step_recover_master(
+def step_recover_master(
     slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int, **_: object
 ) -> list[str]:
     return skip_refused(_recover_master, slug, config, store, runtime, now_ms)
 
 
-def _step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any], **_: object) -> list[str]:
+def step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any], **_: object) -> list[str]:
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     box.update(doc=doc, rows=rows)
     return []
 
 
-def _step_automated_cleanup(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict], now_ms: int, **_: object
+def step_automated_cleanup(
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int, **_: object
 ) -> list[str]:
     from scripts.swarm import automated_gc
 
     return automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
 
 
-def _step_spawn_due(
+def step_spawn_due(
     slug: str,
     config: SwarmConfig,
     store: RedisStore,
@@ -318,7 +318,7 @@ def _step_spawn_due(
     **_: object,
 ) -> list[str]:
     rows, doc = box["rows"], box["doc"]
-    actions = []
+    actions: list[str] = []
     due = store.key(slug, SPAWN_DUE)
     if config.state == "running" and config.engine != EVENTS_ENGINE and not lifetime.sleeping(slug, store, rows):
         if store.redis.exists(due):
@@ -328,7 +328,7 @@ def _step_spawn_due(
     return actions
 
 
-def _step_exits_sweep(slug: str, store: RedisStore, ledger: Any, **_: object) -> list[str]:
+def step_exits_sweep(slug: str, store: RedisStore, ledger: Any, **_: object) -> list[str]:
     return skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
@@ -338,26 +338,33 @@ def _step_exits_sweep(slug: str, store: RedisStore, ledger: Any, **_: object) ->
     )
 
 
-def _step_master_start_watch(
+def step_master_start_watch(
     slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, now_ms: int, **_: object
 ) -> list[str]:
     return skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
 
 
-def _step_launch_checks(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict], doc: dict, now_ms: int, **_: object
+def step_launch_checks(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    doc: dict[str, Any],
+    now_ms: int,
+    **_: object,
 ) -> list[str]:
     return skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
 
 
-def _step_track_outages(
-    slug: str, store: RedisStore, runtime: Any, rows: dict[str, dict], now_ms: int, **_: object
+def step_track_outages(
+    slug: str, store: RedisStore, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int, **_: object
 ) -> list[str]:
     return skip_refused(resume.track_outages, slug, store, runtime, rows, now_ms) or []
 
 
-def _step_verify(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict], now_ms: int, **_: object
+def step_verify(
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int, **_: object
 ) -> list[str]:
     return skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
 
@@ -638,7 +645,7 @@ def _ended(agent, rows):
 
 
 def _launch_checks(
-    slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, doc: dict, now_ms: int
+    slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, doc: dict[str, Any], now_ms: int
 ) -> list[str]:
     waiting, actions = launch_check.pending(store, slug), []
     if not waiting:
