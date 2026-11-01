@@ -1,9 +1,21 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools, Unsupported
+from scripts.tick.ports.source_control import (
+    Capabilities,
+    ChangeRef,
+    ChangeState,
+    CheckState,
+    Comment,
+    Merged,
+    QueueEntry,
+    QueueHealth,
+    Run,
+    Tag,
+)
 
 if TYPE_CHECKING:
     from scripts.swarm.store import SwarmConfig
@@ -90,43 +102,47 @@ class FakeCoordination:
 
 @dataclass
 class FakeSourceControl:
+    """Source control fake that records calls and answers Unsupported for queue operations without a queue."""
+
     answers: dict[str, object] = field(default_factory=dict)
     calls: list[Call] = field(default_factory=list)
+    merge_queue: bool = False
 
-    def change(self, reference: str, *, deadline: Deadline) -> object:
-        return _record(self, "change", (reference,), deadline)
+    def _queued(self, operation: str, answer: object) -> object:
+        """Return the supplied answer, or Unsupported for a queue operation when the fake has no queue."""
+        return answer if operation in self.answers or self.merge_queue else Unsupported(operation)
 
-    def checks(self, reference: str, *, deadline: Deadline) -> object:
-        return _record(self, "checks", (reference,), deadline)
+    def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
+        return cast(ChangeState, _record(self, "change", (reference,), deadline))
 
-    def runs(self, reference: str, *, deadline: Deadline) -> object:
-        return _record(self, "runs", (reference,), deadline)
+    def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
+        return cast(tuple[CheckState, ...], _record(self, "checks", (reference,), deadline) or ())
 
-    def enqueue(self, reference: str, *, deadline: Deadline) -> object:
-        return _record(self, "enqueue", (reference,), deadline)
+    def runs(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[Run, ...]:
+        return cast(tuple[Run, ...], _record(self, "runs", (reference,), deadline) or ())
 
-    def merge(self, reference: str, *, deadline: Deadline) -> object:
-        return _record(self, "merge", (reference,), deadline)
-
-    def queue_health(self, *, deadline: Deadline) -> object:
-        return _record(self, "queue_health", (), deadline)
-
-    def tags(self, *, deadline: Deadline) -> object:
-        return _record(self, "tags", (), deadline)
-
-    def comment(self, reference: str, body: str, *, deadline: Deadline) -> object:
-        return _record(
-            self,
-            "comment",
-            (
-                reference,
-                body,
-            ),
-            deadline,
+    def enqueue(self, reference: ChangeRef, *, deadline: Deadline) -> QueueEntry | Unsupported:
+        return cast(
+            "QueueEntry | Unsupported", self._queued("enqueue", _record(self, "enqueue", (reference,), deadline))
         )
 
-    def capabilities(self, *, deadline: Deadline) -> object:
-        return _record(self, "capabilities", (), deadline)
+    def merge(self, reference: ChangeRef, *, deadline: Deadline) -> Merged:
+        return cast(Merged, _record(self, "merge", (reference,), deadline))
+
+    def queue_health(self, *, deadline: Deadline) -> QueueHealth | Unsupported:
+        return cast(
+            "QueueHealth | Unsupported", self._queued("queue_health", _record(self, "queue_health", (), deadline))
+        )
+
+    def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
+        return cast(tuple[Tag, ...], _record(self, "tags", (), deadline) or ())
+
+    def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment:
+        return cast(Comment, _record(self, "comment", (reference, body), deadline))
+
+    def capabilities(self, *, deadline: Deadline) -> Capabilities:
+        answer = _record(self, "capabilities", (), deadline)
+        return cast(Capabilities, answer) if answer is not None else Capabilities(merge_queue=self.merge_queue)
 
 
 @dataclass
@@ -213,7 +229,7 @@ def fake_tools(effects: frozenset[str] | None = None) -> Tools:
     tools = Tools(
         ledger=FakeLedger({"export": {}}),
         coordination=FakeCoordination(),
-        source_control=FakeSourceControl({"queue_health": Unsupported("queue_health")}),
+        source_control=FakeSourceControl(),
         runtime=FakeRuntime(),
         processes=FakeProcesses({"scan": ()}),
         inbox=FakeInbox(),
