@@ -53,24 +53,25 @@ same function, so all four refuse with the same message.
 `StoreInbox(store, sender)` wraps an `InboxStore` and acts as one sender, normally the tick's own address.
 
 ```python
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import connect
 from scripts.tick.adapters.inbox import StoreInbox
 from scripts.tick.deadline import Deadline
 
-port = StoreInbox(InboxStore(redis_client), "tick@rig-grade-swarm")
+port = StoreInbox(connect(), "tick@rig-grade-swarm")
 items = port.read("eng-1@rig-grade-swarm", deadline=Deadline.after(2.0))
 item = port.send("eng-1@rig-grade-swarm", "wake", deadline=Deadline.after(2.0))
-port.close(item.id, deadline=Deadline.after(2.0))
 ```
 
 | Operation | Store call | Returns |
 |---|---|---|
 | `read(address)` | `store.inbox(address)` | The address's items |
 | `send(address, body)` | `store.send(sender, address, body)` | The new item |
-| `close(item_id)` | `store.close(item_id, sender, "done")` | The closed item, or `None` |
+| `close(item_id)` | `store.close(item_id, sender, "done")` | The closed item |
 
-`send` passes no `ref`, `fyi`, `task` or `item_id`, and `close` always closes as `done` with the adapter's sender as
-closer. A step that needs another outcome uses the store's own commands outside the tick.
+`send` passes no `ref`, `fyi`, `task` or `item_id`. `close` closes as `done` with the adapter's sender as closer and
+no outcome detail. The store accepts that only for an item sent with `fyi`; any other item raises
+`InboxError("done needs an outcome naming where the work went")`, and closing an already closed item raises
+`InboxError("message <id> is closed: <reason>")`. The sender must also act for the item's address.
 
 ## Llm adapter
 
@@ -78,9 +79,17 @@ closer. A step that needs another outcome uses the store's own commands outside 
 backend with `deadline.remaining` as its HTTP timeout, so the classifier request ends no later than the deadline.
 
 ```python
+from hooks.classifier import YesNo
 from scripts.tick.adapters.llm import ApiLlm
 from scripts.tick.deadline import Deadline
 
+questions = {
+    "stuck": YesNo(
+        "Is the agent waiting on something outside its task?",
+        true="It waits on an outside event.",
+        false="It is working on its task.",
+    )
+}
 port = ApiLlm("liquid", "https://litellm.example")
 result = port.classify(
     {"state": {"task": "t1", "phase": "build"}, "questions": questions},
@@ -93,7 +102,8 @@ result = port.classify(
 - The default backend posts to `<url>/v1/decisions` with the key in `AGENTIHOOKS_CLASSIFIER_LITELLM_KEY` and returns a
   `DecisionResult` with `answers`, `source` and `cost`.
 - Backend errors are not caught. A timeout, refused key or unparsable answer raises `BackendFailure`; an HTTP 400 for
-  a bad request raises `ClassifierRequestError`.
+  a bad request raises `ClassifierRequestError`, except a 400 whose message names the context or tokens, which raises
+  `BackendFailure` with `input too long`.
 - `backend` is any callable taking `(model, url, timeout_s)` and returning an object with `decide(request)`. Tests pass
   a recording function here.
 
@@ -102,14 +112,18 @@ The adapter calls one model with no failover. Failover across models and the dec
 
 ## Metrics adapter
 
-`SpoolMetrics(box, tables)` appends rows to the local metrics spool, the SQLite outbox in
+`SpoolMetrics(outbox, tables)` appends rows to the local metrics spool, the SQLite outbox in
 `scripts.swarm.metrics_outbox`. `tables` maps the names a step uses to `Table` definitions.
 
 ```python
-from scripts.swarm.metrics_outbox import Table
+import os
+
+from scripts.swarm import metrics_outbox
+from scripts.swarm.metrics_outbox import Outbox, Table
 from scripts.tick.adapters.metrics import SpoolMetrics
 from scripts.tick.deadline import Deadline
 
+outbox = Outbox(metrics_outbox.spool_path(), metrics_outbox.settings(os.environ))
 PASSES = Table("tick_passes", (("seconds", "Float64"),))
 row = {
     "event_id": "pass-1",
@@ -126,7 +140,7 @@ written = port.emit({"passes": [row]}, deadline=Deadline.after(1.0))
 ```
 
 A row carries exactly the base columns `event_id`, `ledger`, `ts_ms`, `plan`, `phase`, `slice` and `task` plus the
-table's own columns. `outbox` is a `scripts.swarm.metrics_outbox.Outbox`.
+table's own columns. `metrics_outbox.settings` reads the ClickHouse sink the outbox later flushes to.
 
 - Every table in the call is written in one SQLite transaction through `append_many`, so either every row is spooled
   or none is. The adapter passes a checkpoint that writes nothing extra.
@@ -153,11 +167,14 @@ that lacks a capability from a failure.
 
 ```python
 import os
+import time
 
+from scripts.swarm.store import connect
 from scripts.tick.adapters.host import local_host
 from scripts.tick.deadline import Deadline
 
-port = local_host(store, "rig-grade-swarm", os.environ)
+now_ms = int(time.time() * 1000)
+port = local_host(connect(), "rig-grade-swarm", os.environ)
 sample = port.read("sample", deadline=Deadline.after(1.0))
 port.run({"job": "refresh"}, deadline=Deadline.after(1.0))
 port.run({"job": "snapshot", "now_ms": now_ms}, deadline=Deadline.after(1.0))
@@ -174,9 +191,13 @@ swarm is running, its snapshot interval has passed and no snapshot job holds the
 ## Declared effects
 
 `Tools` in `scripts.tick.ports` holds one adapter per port. `Tools.for_effects(effects)` returns a copy whose ports
-allow read operations always and write operations only on the ports named in `effects`.
+allow read operations always and write operations only on the ports named in `effects`. In this example `ledger`,
+`coordination`, `source_control`, `runtime` and `processes` stand for the adapters of the other five ports, and the
+remaining names are built as in the sections above.
 
 ```python
+from scripts.inbox.store import connect as inbox_connect
+from scripts.swarm.store import connect as swarm_connect
 from scripts.tick.ports import Tools
 
 tools = Tools(
@@ -185,11 +206,12 @@ tools = Tools(
     source_control=source_control,
     runtime=runtime,
     processes=processes,
-    inbox=StoreInbox(inbox_store, "tick@rig-grade-swarm"),
-    llm=ApiLlm("liquid", litellm_url),
-    metrics=SpoolMetrics(outbox, tables),
-    host=local_host(store, "rig-grade-swarm", os.environ),
+    inbox=StoreInbox(inbox_connect(), "tick@rig-grade-swarm"),
+    llm=ApiLlm("liquid", "https://litellm.example"),
+    metrics=SpoolMetrics(outbox, {"passes": PASSES}),
+    host=local_host(swarm_connect(), "rig-grade-swarm", os.environ),
 )
+deadline = Deadline.after(5.0)
 step_tools = tools.for_effects(frozenset({"inbox", "metrics"}))
 step_tools.inbox.send("eng-1@rig-grade-swarm", "wake", deadline=deadline)
 step_tools.host.read("sample", deadline=deadline)
@@ -248,6 +270,7 @@ the step.
 | `UndeclaredEffect: <port> is not a declared effect` | A step called a write operation on a port missing from its effects. | Declare the port in the step's effects. |
 | `TypeError: tools require a Deadline keyword argument` | A restricted port was called without `deadline=`. | Pass the step's `Deadline` by keyword. |
 | `KeyError: 'unknown metrics table: <name>'` | `emit` named a table the adapter was not built with. | Add the `Table` to the `tables` mapping. |
-| `BackendFailure: <model>: timeout` from `classify` | The decisions API did not answer within `deadline.remaining`. | Raise the deadline, or read [Decision classifier](classifier.md#failover) for a model that answers faster. |
+| `BackendFailure: <model>: timeout` from `classify` | The decisions API did not answer within `deadline.remaining`. | Raise the deadline, or build `ApiLlm` with a model that answers faster. |
+| `InboxError: done needs an outcome naming where the work went` from `inbox.close` | The item was not sent with `fyi`, and the adapter closes without an outcome. | Close the item with `agentihooks msg close <id> done <where the work went>` or answer it with `agentihooks msg reply <id> <text>`. |
 | `Unsupported(name)` from `host.read` or `host.run` | The host has no reading or job by that name. | Add it to the `JobHost` mappings or handle the missing capability in the step. |
 | `test_no_tick_step_module_imports_an_adapted_implementation` fails | A tick module imports one of the adapted implementations. | Route the call through the matching adapter. |
