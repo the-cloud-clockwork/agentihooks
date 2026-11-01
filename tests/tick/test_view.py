@@ -1,3 +1,7 @@
+import io
+import urllib.error
+from collections.abc import Callable
+from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -77,6 +81,17 @@ def test_a_patch_that_does_not_fit_falls_back_to_one_full_read(tmp_path: Path) -
 
 
 @pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_full_read_at_the_stored_generation_replaces_a_view_that_does_not_fit(tmp_path: Path) -> None:
+    path = tmp_path / "sw.json"
+    api.write_export_file(path, 7, {"tasks": []})
+    reader = Reader(changed(7), {"generation": 7, "data": STATE})
+    held = view.refreshed(path, reader)
+    assert reader.calls == [(7, view.PARTS), (0, view.PARTS)]
+    assert (held.generation, held.tasks) == (7, STATE["tasks"])
+    assert api.read_export_file(path) == (7, STATE)
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
 def test_an_unchanged_generation_leaves_the_stored_file(tmp_path: Path) -> None:
     path = tmp_path / "sw.json"
     api.write_export_file(path, 7, STATE)
@@ -133,3 +148,41 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     assert view.CURRENT.get() is held
     assert held.generation == 11
     assert api.read_export_file(view.view_file("http://ledger/sw", "sw", tmp_path)) == (11, STATE)
+
+
+def refusing(code: int) -> Callable[..., dict]:
+    def changes(self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...]) -> dict:
+        raise urllib.error.HTTPError("http://ledger/export", code, "refused", Message(), io.BytesIO(b"{}"))
+
+    return changes
+
+
+def ledger_module() -> SimpleNamespace:
+    return SimpleNamespace(base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4)
+
+
+def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.scheduler import service
+    from scripts.swarm import ledger_client
+
+    monkeypatch.setattr(ledger_client, "_ledger", ledger_module)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", refusing(400))
+    view.CURRENT.set(view.LedgerView(1, STATE))
+    assert view.start("sw") is None
+    assert view.CURRENT.get() is None
+    assert not view.view_file("http://ledger", "sw", tmp_path).exists()
+
+
+def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.scheduler import service
+    from scripts.swarm import ledger_client
+
+    monkeypatch.setattr(ledger_client, "_ledger", ledger_module)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", refusing(503))
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        view.start("sw")
+    assert raised.value.code == 503

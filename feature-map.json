@@ -1166,6 +1166,7 @@
         "tests/tick/test_view.py::test_a_later_pass_makes_one_delta_call_and_patches_the_stored_view",
         "tests/tick/test_view.py::test_an_exceeded_change_window_replaces_the_stored_view",
         "tests/tick/test_view.py::test_a_patch_that_does_not_fit_falls_back_to_one_full_read",
+        "tests/tick/test_view.py::test_a_full_read_at_the_stored_generation_replaces_a_view_that_does_not_fit",
         "tests/tick/test_view.py::test_an_unchanged_generation_leaves_the_stored_file",
         "tests/tick/test_view.py::test_start_reads_through_the_ledger_client_and_holds_the_view",
         "tests/swarm/test_tick_view_start.py::test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read"

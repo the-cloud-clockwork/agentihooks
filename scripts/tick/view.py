@@ -6,11 +6,12 @@ window no longer covers the gap.
 """
 
 import hashlib
+import urllib.error
 from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
 
-from scripts.swarm_ledger.api.client import patched, read_export_file, write_export_file
+from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
 
 __all__ = ["CURRENT", "PARTS", "LedgerView", "Reader", "refreshed", "start", "view_file"]
 
@@ -45,31 +46,37 @@ def view_file(base: str, slug: str, directory: Path) -> Path:
 
 
 def refreshed(path: Path, reader: Reader) -> LedgerView:
-    """The view stored at path patched with one delta read, stored back when its generation moved."""
+    """The view stored at path patched with one delta read, stored back when its generation moved or a stored
+    view that no longer fits was replaced by a full read."""
     stored = read_export_file(path)
     generation, held = stored if stored is not None else (0, None)
     reply = reader(generation, PARTS)
     try:
         state = patched(held, reply["changes"]) if "changes" in reply else reply["data"]
     except (KeyError, IndexError, TypeError, AttributeError):
-        reply = reader(0, PARTS)
+        reply, generation = reader(0, PARTS), None
         state = reply["data"]
     if reply["generation"] != generation:
         write_export_file(path, reply["generation"], state)
     return LedgerView(reply["generation"], state)
 
 
-def start(slug: str, service: bool = False) -> LedgerView:
-    """Patch the stored view of this swarm's ledger with one delta read and hold it for the rest of the pass."""
+def start(slug: str, service: bool = False) -> LedgerView | None:
+    """Patch the stored view of this swarm's ledger with one delta read and hold it for the rest of the pass;
+    hold nothing when the ledger server refuses named parts because it predates them."""
     from scripts.scheduler import service as scheduler
     from scripts.swarm.ledger_client import _ledger
-    from scripts.swarm_ledger.api.client import ResourceClient
 
     ledger = _ledger()
     base = ledger.base(slug)
     client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
-    view = refreshed(
-        view_file(base, slug, scheduler.runtime_dir()), lambda since, parts: client.changes(slug, since, parts)
-    )
+    try:
+        view = refreshed(
+            view_file(base, slug, scheduler.runtime_dir()), lambda since, parts: client.changes(slug, since, parts)
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code != 400:
+            raise
+        view = None
     CURRENT.set(view)
     return view

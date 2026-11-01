@@ -77,6 +77,8 @@ def test_parts_must_be_a_list_of_distinct_names(live: dict) -> None:
         {"since": 0, "parts": []},
         {"since": 0, "parts": ["tasks", "tasks"]},
         {"since": 0, "parts": [1]},
+        {"since": 0, "parts": ["chat"]},
+        {"since": 0, "parts": ["tasks", "overview"]},
         {"parts": ["tasks"]},
     ):
         status, _, _ = send(

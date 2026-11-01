@@ -237,9 +237,8 @@ SINCE_SCHEMA = {
         "parts": {
             "type": "array",
             "minItems": 1,
-            "maxItems": 16,
             "uniqueItems": True,
-            "items": {"type": "string", "minLength": 1},
+            "items": {"enum": ["tasks", "_meta", "phases"]},
         },
     },
     "required": ["since"],
