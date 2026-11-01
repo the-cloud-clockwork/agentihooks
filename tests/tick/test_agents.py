@@ -132,6 +132,7 @@ def test_the_registered_agent_steps_declare_writers_the_registry_accepts() -> No
     fresh = registry.Registry()
     for step in agents.STEPS:
         fresh.register(step)
+    fresh.validate()
     assert {domain for step in agents.STEPS for domain in step.writes} == {
         actions_of(step.name) for step in agents.STEPS
     }
