@@ -4,8 +4,10 @@ import secrets
 import sqlite3
 import threading
 import weakref
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
@@ -589,9 +591,12 @@ class SQLiteLedgerRepository:
                     heap.release()
         return entry.views[view]
 
-    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
-        """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
-        change after generation since, else view(fragments) of the stored ledger, built as encoded_view builds."""
+    def export_since(
+        self, slug: str, since: int, view: Callable[..., Any], changes: Callable[..., Any], parts: tuple[str, ...] = ()
+    ) -> tuple[int, str | bytes]:
+        """(generation, text) of the stored ledger: changes(state, paths, parts) when the database recorded every
+        row change after generation since, else view(fragments, parts) of the stored ledger, built once per part
+        set as encoded_view builds."""
         self._adopt(slug)
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
@@ -601,15 +606,16 @@ class SQLiteLedgerRepository:
                 if 0 < since <= entry.generation
                 else None
             )
-        text = None if paths is None else changes(entry.state, paths)
+        text = None if paths is None else changes(entry.state, paths, parts)
         if text is not None:
             return entry.generation, text
-        if view not in entry.views:
+        key = (view, parts)
+        if key not in entry.views:
             with VIEW_BUILD:
-                if view not in entry.views:
-                    entry.views[view] = view(entry.fragments)
+                if key not in entry.views:
+                    entry.views[key] = view(entry.fragments, parts)
                     heap.release()
-        return entry.generation, entry.views[view]
+        return entry.generation, entry.views[key]
 
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
