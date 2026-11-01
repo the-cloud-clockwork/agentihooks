@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false, reportUnusedImport=false
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
