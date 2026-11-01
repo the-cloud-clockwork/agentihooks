@@ -978,6 +978,56 @@ def test_master_reservation_preserves_api_capacity():
     ]
 
 
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [("warned", 3), ("", 2), ("open", 2)],
+)
+def test_a_warned_master_pinned_to_its_declared_account_holds_no_seat(declared, expected):
+    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes={"master": {"agent": "claude"}})
+    agents = [AgentRecord("master", "master", "master", harness="claude", account="warned", state="working")]
+    observed = [account("open"), account("warned", sessions=1)]
+    decision = capacity.calculate(config, observed, agents, warned={("claude", "warned"): "week"}, master=declared)
+    assert decision["effective"] == {"eng": expected, "ci": 0, "plan": 0}
+
+
+@pytest.mark.parametrize(("declared", "expected"), [("warned", 3), ("open", 2)])
+def test_runtime_capacity_reads_the_declared_master_account(tmp_path, monkeypatch, declared, expected):
+    from scripts.routing.master_account import MasterAccount
+
+    observed = [account("open"), account("warned", left=5, sessions=1)]
+    runtime, config, _ = _runtime_probe(tmp_path, monkeypatch, observed)
+    runtime.quota_accounts = lambda *args, **kwargs: observed
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": MasterAccount("claude", declared)})
+    config = replace(
+        config,
+        max_eng=4,
+        max_plan=0,
+        scaling="manual",
+        lanes={"master": {"agent": "claude"}, "eng": {"agent": "claude"}},
+    )
+    agents = [AgentRecord("previous", "master", "master", harness="claude", account="warned", state="working")]
+    decision = runtime.quota_capacity(config, agents, 123)
+    assert decision["effective"]["eng"] == expected
+
+
+@pytest.mark.parametrize("error", ["redis", "os"])
+def test_an_unreadable_master_account_declares_no_master(monkeypatch, error):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    def down(env):
+        raise RedisConnectionError("down") if error == "redis" else OSError("down")
+
+    monkeypatch.setattr(capacity.master_account, "load", down)
+    assert capacity.declared_master({}) == ""
+
+
+def test_an_undeclared_claude_master_declares_no_master(monkeypatch):
+    from scripts.routing.master_account import MasterAccount
+
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"codex": MasterAccount("codex", "cx")})
+    assert capacity.declared_master({}) == ""
+
+
 @pytest.mark.parametrize("state", ["starting", "working"])
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 def test_an_occupied_master_does_not_reserve_another_claude_seat(state, harness):
