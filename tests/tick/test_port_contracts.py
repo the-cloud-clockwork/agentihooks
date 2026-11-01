@@ -151,3 +151,19 @@ def test_fake_expired_deadline_and_default_answer() -> None:
     deadline = Deadline.after(10)
     assert fake.send("seat", "hello", deadline=deadline) is None
     assert fake.calls == [fakes.Call("send", ("seat", "hello"), deadline)]
+
+
+def test_guard_checks_deadline_before_calling_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    providers = fakes.fake_tools()
+    seen: list[Deadline] = []
+
+    def send(address: str, body: str, *, deadline: Deadline) -> object:
+        seen.append(deadline)
+        return None
+
+    monkeypatch.setattr(providers.inbox, "send", send)
+    tools = providers.for_effects(frozenset({"inbox"}))
+    with pytest.raises(TimeoutError) as error:
+        tools.inbox.send("seat", "hello", deadline=Deadline(0, lambda: 0))
+    assert str(error.value) == "tool deadline expired"
+    assert seen == []

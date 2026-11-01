@@ -1,6 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass, fields
-from typing import cast
+from dataclasses import dataclass, fields, replace
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import (
@@ -51,7 +50,7 @@ class _RestrictedPort:
                 raise TypeError("tools require a Deadline keyword argument")
             if deadline.expired:
                 raise TimeoutError("tool deadline expired")
-            method = cast(Callable[..., object], getattr(self.adapter, operation))
+            method: Callable[..., object] = getattr(self.adapter, operation)
             return method(*args, **kwargs)
 
         return invoke
@@ -74,14 +73,4 @@ class Tools:
             field.name: _RestrictedPort(getattr(self, field.name), field.name, field.name in effects)
             for field in fields(self)
         }
-        return Tools(
-            ledger=cast(Ledger, ports["ledger"]),
-            coordination=cast(Coordination, ports["coordination"]),
-            source_control=cast(SourceControl, ports["source_control"]),
-            runtime=cast(Runtime, ports["runtime"]),
-            processes=cast(Processes, ports["processes"]),
-            inbox=cast(Inbox, ports["inbox"]),
-            llm=cast(Llm, ports["llm"]),
-            metrics=cast(Metrics, ports["metrics"]),
-            host=cast(Host, ports["host"]),
-        )
+        return replace(self, **ports)
