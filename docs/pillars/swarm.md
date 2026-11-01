@@ -5048,22 +5048,34 @@ to another hive`.
 ### Controller lease during long steps
 
 A tick pass can run longer than its lease: the lease lasts three ticks (180 seconds by default), and a pass is
-stopped only at its 450 second deadline, with 30 seconds of grace. The pass keeps the lease in two ways.
+stopped only at its 450 second deadline, with 30 seconds of grace. The pass keeps the lease in three ways.
 
+- **At the start of the pass.** The pass renews the lease once and refuses to start with
+  `the controller lease is stale` when another controller holds it.
+- **For the whole pass.** One lease heartbeat runs from the start of the pass to its end: a background thread renews
+  the lease once per tick interval, so a single step longer than the lease keeps it. The thread stops for good when
+  a renewal finds the lease stale, because a higher epoch took over or the lease expired, and on a
+  [hosted ledger](../reference/hosted-ledger-auth.md#hosted-server), whose server holds the controller lease (see
+  [Coordination adapter](../reference/tick-adapters.md#coordination-adapter)), when that server cannot be reached or
+  refuses the renewal. It tries again at the next beat after a Redis
+  error. The master placement path under the tick lock holds its own heartbeat the same way.
 - **Before every step.** Each timed step of the pass, including every step wrapped to skip a refused ledger write,
-  first renews the lease, extends the tick lock and records the swarm's last tick activity. Renewal happens only at
-  step boundaries, so a single step longer than the lease still loses it.
-- **During a step that can outlast the lease.** Such a step runs inside a lease heartbeat: a background thread renews
-  the lease once per tick interval until the step returns. The thread stops for good when the lease is no longer
-  this controller's (a higher epoch took over) and tries again at the next beat after a Redis error. Today the
-  Doctor timer of a `doctor` swarm runs this way.
+  first renews the lease, extends the tick lock and records the swarm's last tick activity.
+
+Ledger writes in the pass carry the epoch of the ledger they write to, and the ledger server refuses a stale one. A
+launch, a hive launch collect and a hive launch expire each check the lease epoch first, with one read and no
+renewal. No ledger or runtime call renews the lease or starts a heartbeat of its own; the members involved are listed
+in [One lease heartbeat per tick pass](../reference/tick-adapters.md#one-lease-heartbeat-per-tick-pass).
+The refresh job, which runs the GitHub, Langfuse and Grafana refreshes and, for a `doctor` swarm, the Doctor timer,
+keeps its own heartbeat for the length of its run.
 
 The automatic snapshot never runs inside the pass. Step 12 of the list above only starts the detached snapshot job
 and returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
 most 30 minutes once it starts; a tick that finds the lock held starts no second job. Two jobs started before
 either holds the lock race for it: the first to take it writes the snapshot, the other exits without one.
 
-A lease that expires mid pass ends the pass at its next step, fenced ledger call or spawn with this journal line:
+A lease taken over mid pass ends the pass at its next step boundary or launch with this journal line, and a ledger
+write in between is refused:
 
 ```text
 rig-grade-swarm: SwarmError: the controller lease is stale
@@ -5076,13 +5088,16 @@ journalctl --user -t agentihooks-swarm --since "-12h" | grep "controller lease i
 journalctl --user -t agentihooks-swarm --since "-12h" | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
 ```
 
-The finished step records carry each step's name, outcome and `wall_s` duration. The step that
-ran longer than the lease before the error is the one to move inside a heartbeat. Any tick step that can run longer than the lease
-belongs inside the heartbeat, the way the Doctor timer does:
+The finished step records carry each step's name, outcome and `wall_s` duration. The pass lease heartbeat keeps
+the lease through a long step, so a stale lease inside a pass means another controller took over, the heartbeat
+could not reach Redis for three ticks, or on a hosted ledger the heartbeat stopped when it could not reach the ledger
+server.
+Work that runs outside a tick pass and can outlast the lease holds its own heartbeat, the way the refresh job does:
 
 ```python
-with lease.kept(store, slug, held):
-    actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
+with lease.kept(store, slug, held), timing.tick(slug):
+    for refresh in refreshes(store, slug, ledger, now_ms):
+        actions += refresh()
 ```
 
 The next pass acquires a new lease with a higher epoch when no other controller holds it, so one stale pass loses
@@ -5095,12 +5110,10 @@ read current executions only, and how to measure `scope.readings` and stopped pa
 
 ### Doctor timer pass
 
-A `doctor` swarm runs the Doctor timer, `scripts.doctor.cli.timer`, as one step of its own tick pass, inside the
-lease heartbeat above. The step counts against the same limits as every other step of that pass: the 450 second pass
-deadline and the scheduler holder's nine minute stop. When the tick still ran as the `agentihooks-swarm` systemd
-service, a Doctor step of 216 to 291 seconds pushed the whole tick past the service start timeout, so the service
-killed it and both swarms on the machine got about one pass every ten minutes. The step has to finish well inside a
-minute so the tick of the watched swarm and of the Doctor keep their minute cadence.
+A `doctor` swarm runs the Doctor timer, `scripts.doctor.cli.timer`, in the refresh job, which keeps its own
+heartbeat. The tick starts that job as a detached process and does not wait for it, so the timer is outside the 450
+second pass deadline. The job holds the swarm's refresh lock for at most 15 minutes (`LOCK_MS` in
+`scripts.swarm.refresh_job`), and the tick starts it at most once every five minutes (`START_EVERY_MS`).
 
 #### What one timer step does
 
@@ -5299,7 +5312,7 @@ by fast forwarding the main checkout at 09:37:59 UTC on 18 October 2026. On 22 O
 | A `doctor.<name>` record with `"outcome": "error"` | Its `error` field, and the Doctor tick's action line `the <name> detector failed: ...` | That detector raised; the other detectors of the pass still reported |
 | `doctor.inbox` takes tens of seconds again | The receiver check under [Inbox receiver read](#inbox-receiver-read) and the inbox size it prints | Under a second for the receivers means the time is spent elsewhere in the inbox step; seconds there means a per address read came back |
 | An `inbox past window` finding on mail to an empty seat | The seat swarm's `state`, `max_eng`, `max_ci` and `max_plan` in its stored configuration | A seat waits for its next occupant unless its swarm is stopped or the seat number is above the lane cap |
-| `controller lease is stale` after a Doctor step | [Controller lease during long steps](#controller-lease-during-long-steps) | The heartbeat lost the lease to a higher epoch; the next pass takes a new one |
+| `controller lease is stale` after a Doctor step | [Controller lease during long steps](#controller-lease-during-long-steps) | The refresh job heartbeat lost the lease to a higher epoch; the next pass takes a new one |
 | Tick runs killed by the service start timeout | The timeout count above and the timer step walls in the same window | A step past the timeout ends the whole tick; bound the slowest step |
 
 ### Worker execution lease through a controller rollout

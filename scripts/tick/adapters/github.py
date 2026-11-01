@@ -216,3 +216,8 @@ class GitHubSourceControl:
     def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
         """Ask GitHub to cancel one workflow run of the repository; its answer carries no body to read."""
         self._call([f"repos/{self.repository}/actions/runs/{run_id}/cancel", "-X", "POST"], deadline)
+
+    def merged_at(self, commit: str, *, deadline: Deadline) -> str | None:
+        """Read when the first merged change carrying the commit merged, None when none did."""
+        rows = self._api([f"repos/{self.repository}/commits/{commit}/pulls"], deadline)
+        return next((row["merged_at"] for row in rows if row["merged_at"]), None)

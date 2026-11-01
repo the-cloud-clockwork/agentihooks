@@ -85,6 +85,8 @@ class SourceControl(Protocol):
 
     def cancel_run(self, run_id: int, *, deadline: Deadline) -> None: ...
 
+    def merged_at(self, commit: str, *, deadline: Deadline) -> str | None: ...
+
 
 @runtime_checkable
 class Runtime(Protocol):
