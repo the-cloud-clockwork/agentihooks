@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false, reportUnusedImport=false
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
@@ -42,7 +43,6 @@ from scripts.swarm import (
     deliberate_exit,
     dev_red,
     difficulty,  # noqa: F401
-    dispatch_seat,
     dispatcher,
     failed_panes,
     fleet_red,
@@ -55,14 +55,10 @@ from scripts.swarm import (
     lifetime,
     live_binding,
     lost_runner,
-    master_alarm,
     master_move,
-    master_prompt_stall,
     master_questions,
     master_retire,
-    master_stall,
     master_start,
-    master_wake,
     outage,
     pane_evidence,
     panic,  # noqa: F401
@@ -82,7 +78,6 @@ from scripts.swarm import (
     stack,
     stale_nudge,
     successor_retry,
-    tick_master,
     time_left,
     timing,
 )
@@ -95,11 +90,11 @@ from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
-from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
+from scripts.tick.steps import masters as master_steps
 from scripts.tick.steps import place
 from scripts.tick.steps import tasks as task_steps
 
@@ -276,12 +271,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     actions += skip_refused(resume.track_outages, slug, store, runtime, rows, now_ms) or []
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
     actions += run_group("agents", config=config, **passing)
-    run_group("masters")
-    if config.state not in {"stopped", "stopping"}:
-        actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
-    actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(master_stall.run, slug, config, store, ledger, runtime, now_ms)
-    actions += skip_refused(master_prompt_stall.run, slug, config, store, ledger, runtime, now_ms)
+    actions.extend(master_steps.run_masters(locals()))
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
@@ -304,24 +294,11 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         actions += run_group(place.ACKS, **passing, config=config, sleeping=sleeping)
         task_steps.raise_held(box)
         if not sleeping:
-            actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
-            actions += skip_refused(
-                tick_master.run,
-                slug,
-                config,
-                store,
-                ledger,
-                runtime,
-                now_ms,
-                lambda: _master(slug, config, store, runtime, now_ms),
-            )
-            actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
-            actions += skip_refused(master_seat_alarm.run, slug, store, ledger, runtime, doc)
+            actions.extend(master_steps.run_seats(locals()))
             actions += run_group(place.PLACEMENT, **passing, config=config)
             task_steps.raise_held(box)
-        actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
-    actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
-    actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
+        actions.extend(master_steps.run_dispatch(locals()))
+    actions.extend(master_steps.run_watch(locals()))
     actions += run_group(task_steps.CLOSE, **passing, config=config)
     task_steps.raise_held(box)
     return actions

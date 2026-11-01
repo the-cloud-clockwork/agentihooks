@@ -28,7 +28,10 @@ TICK_GROUPS = [
     "task passes",
     "place",
     "placement acks",
+    "master seats",
     "placement",
+    "dispatch seat",
+    "master watch",
     "close",
 ]
 
@@ -62,7 +65,7 @@ class _Marker:
         return Result()
 
 
-def test_a_tick_pass_runs_the_seven_groups_in_order(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+def test_a_tick_pass_runs_its_groups_in_order(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     seen = _spy(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert [name for name, _ in seen] == TICK_GROUPS
