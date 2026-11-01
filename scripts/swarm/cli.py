@@ -61,6 +61,7 @@ import threading
 import time
 from collections.abc import MutableMapping
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from contextvars import copy_context
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -299,7 +300,6 @@ def _bin_stop(store, slug, ledger, runtime):
 def _stopped_tick(store, slug, ledger, runtime, held):
     from scripts.swarm import command_runner, controller
 
-    ledger = controller.FencedLedger(store, slug, held, ledger)
     runtime = controller.FencedRuntime(
         store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
     )
@@ -361,8 +361,9 @@ def run_tick(
         tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc, view = {}, None
+    doc, view, passing = {}, None, ExitStack()
     try:
+        passing.enter_context(lease.held_pass(store, slug, held))
         timing.keep()
         run_group("before")
         if store.config(slug).state == "stopped":
@@ -378,7 +379,6 @@ def run_tick(
             return ["Ledger health probe failed"]
         if ledger_view.reads(ledger):
             ledger_view.start(slug, ledger.service)
-        ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
             store,
             slug,
@@ -492,6 +492,7 @@ def run_tick(
         try:
             _publish_tick_status(store, slug, doc, view)
         finally:
+            passing.close()
             timing.BEFORE_STEP.reset(keeping)
             tick_stop.drop(token)
             controller.release_tick_lock(store, slug, token)
