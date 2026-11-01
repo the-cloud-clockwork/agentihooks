@@ -72,7 +72,7 @@ def test_a_failed_feature_job_files_one_promotion_fixer_on_real_backends(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(_ledger(), "BASE", f"http://127.0.0.1:{swarm.ledger.env['LEDGER_PORT']}")
     store, slug = swarm.store, swarm.ledger.slug
-    store.update(slug, max_ci_agents=1, repo=str(tmp_path))
+    store.update(slug, max_ci=1, repo=str(tmp_path))
     ledger = LedgerClient()
     failed = {
         "id": 41251658525,
