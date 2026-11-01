@@ -1,12 +1,14 @@
 """Sequential tick engine: run a group's registered steps, each isolated and bounded by its budget."""
 
+import json
 import os
 from collections.abc import Iterable
 from contextvars import copy_context
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import tick_report, timing
 from scripts.tick import registry
 from scripts.tick.step import Context, Result, Step
@@ -66,7 +68,8 @@ STAGE_TARGETS = {"S1": 384.0, "S2": 240.0, "S3": 120.0, "S4": 60.0}
 
 
 def pass_budget_hold(store: Any, slug: str) -> str:
-    return store.redis.get(store.key(slug, PASS_BUDGET_HOLD)) or ""
+    raw = store.redis.get(store.key(slug, PASS_BUDGET_HOLD))
+    return json.loads(raw)["text"] if raw else ""
 
 
 def update_pass_budget(store: Any, slug: str) -> str:
@@ -79,8 +82,15 @@ def update_pass_budget(store: Any, slug: str) -> str:
     key = store.key(slug, PASS_BUDGET_HOLD)
     if measured is not None and measured > target:
         text = f"holding spawns: pass p95 {measured:g}s exceeds {stage} target {target:g}s"
-        if store.redis.set(key, text, nx=True):
-            InboxStore(store.redis).send("swarm", f"master@{slug}", text, fyi=True)
-        return pass_budget_hold(store, slug)
+        store.redis.set(key, json.dumps({"text": text, "notice": uuid4().hex, "notified": False}), nx=True)
+        held = json.loads(store.redis.get(key))
+        if not held["notified"]:
+            try:
+                InboxStore(store.redis).send("swarm", f"master@{slug}", held["text"], fyi=True, item_id=held["notice"])
+            except DuplicateItem:
+                pass
+            held["notified"] = True
+            store.redis.set(key, json.dumps(held))
+        return held["text"]
     store.redis.delete(key)
     return ""

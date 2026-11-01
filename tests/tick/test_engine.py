@@ -219,7 +219,7 @@ def test_pass_budget_holds_once_and_recovers(monkeypatch: pytest.MonkeyPatch) ->
         assert held == "holding spawns: pass p95 400s exceeds S1 target 384s"
         assert engine.pass_budget_hold(store, "sw") == held
         assert engine.update_pass_budget(store, "sw") == held
-        inbox.return_value.send.assert_called_once_with("swarm", "master@sw", held, fyi=True)
+        inbox.return_value.send.assert_called_once_with("swarm", "master@sw", held, fyi=True, item_id=mock.ANY)
         for _ in range(10):
             store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 384.0})})
         assert engine.update_pass_budget(store, "sw") == ""
@@ -248,3 +248,32 @@ def test_pass_budget_uses_selected_stage(stage: str, target: float, monkeypatch:
             == f"holding spawns: pass p95 {target + 1:g}s exceeds {stage} target {target:g}s"
         )
         inbox.return_value.send.assert_called_once()
+
+
+@pytest.mark.parametrize("delivered", [False, True])
+def test_pass_budget_retries_notification_with_the_same_identity(delivered: bool) -> None:
+    import json
+
+    import fakeredis
+
+    from scripts.inbox.store import DuplicateItem
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    for _ in range(10):
+        store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 1000.0})})
+    with mock.patch("scripts.tick.engine.InboxStore") as inbox:
+        inbox.return_value.send.side_effect = [
+            RuntimeError("unavailable"),
+            DuplicateItem("already sent") if delivered else None,
+        ]
+        with pytest.raises(RuntimeError, match="unavailable"):
+            engine.update_pass_budget(store, "sw")
+        assert engine.pass_budget_hold(store, "sw")
+        held = engine.update_pass_budget(store, "sw")
+        assert held
+        first, second = inbox.return_value.send.call_args_list
+        assert first == second
+        assert first.kwargs["item_id"]
+        assert engine.update_pass_budget(store, "sw") == held
+        assert inbox.return_value.send.call_count == 2
