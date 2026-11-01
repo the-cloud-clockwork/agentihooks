@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any, Protocol
 
+import scripts.tick.steps.agents  # noqa: F401
 from hooks.context import context_recycle
 from scripts.doctor import priming
 from scripts.gates import Who, modes
@@ -359,11 +360,8 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     actions += run_group("observe", **passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
-    run_group("agents")
-    actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(_strays, slug, config, store, runtime)
-    actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
+    passing["rows"] = rows
+    actions += run_group("agents", config=config, **passing)
     run_group("masters")
     if config.state not in {"stopped", "stopping"}:
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
@@ -374,9 +372,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    if config.engine != EVENTS_ENGINE:
-        actions += skip_refused(_orphans, slug, store, ledger, rows)
-    run_group("tasks")
+    actions += run_group("tasks", config=config, **passing)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
@@ -423,10 +419,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
-    actions += skip_refused(_conversations, slug, store, runtime) or []
-    actions += skip_refused(_session_models, slug, store) or []
-    actions += skip_refused(transfers.observe, store, slug, runtime.live_names()) or []
-    run_group("close")
+    actions += run_group("close", config=config, **passing)
     return (
         actions
         + skip_refused(_settle, slug, config, store, ledger, rows, doc)
