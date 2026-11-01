@@ -119,7 +119,7 @@ def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("findings pass", "wrapper events", 120),
         ("metrics record", "wrapper metrics", 10),
         ("bottleneck status", "wrapper metrics", 20),
-        ("master wake", "wrapper metrics", 30),
+        ("inbox wake", "wrapper metrics", 30),
         ("snapshot job", "wrapper metrics", 40),
         ("heartbeat", "after", 10),
         ("status publish", "wrapper status", 10),

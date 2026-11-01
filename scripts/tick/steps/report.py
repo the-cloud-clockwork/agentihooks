@@ -193,7 +193,7 @@ def _bottleneck_status(cli: Any, get: Get) -> Any:
     return cli.skip_refused(bottleneck_status.refresh, get("slug"), get("store"), cli.now_ms())
 
 
-def _master_wake(cli: Any, get: Get) -> Any:
+def _inbox_wake(cli: Any, get: Get) -> Any:
     window = wake.window_ms(os.environ)  # pyright: ignore[reportUnknownMemberType]
     return cli.skip_refused(wake.maintenance, get("inbox"), get("slug"), get("agents"), cli.now_ms(), window)  # pyright: ignore[reportUnknownMemberType]
 
@@ -225,7 +225,7 @@ STEPS = (
     CallStep("findings pass", "wrapper events", 120, held(_findings_pass)),
     CallStep("metrics record", "wrapper metrics", 10, held(_metrics)),
     CallStep("bottleneck status", "wrapper metrics", 20, held(_bottleneck_status)),
-    CallStep("master wake", "wrapper metrics", 30, held(_master_wake)),
+    CallStep("inbox wake", "wrapper metrics", 30, held(_inbox_wake)),
     CallStep("snapshot job", "wrapper metrics", 40, held(_snapshot_job)),
     CallStep("heartbeat", "after", 10, held(_heartbeat)),
     CallStep("status publish", "wrapper status", 10, held(_status_publish)),
