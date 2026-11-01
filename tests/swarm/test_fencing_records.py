@@ -337,7 +337,7 @@ def test_a_saved_export_restores_onto_records(store: Any) -> None:
     _migrated(store)
     fencing.write(store, "sw", lambda doc: doc["archive"].update(x=_row("x", "old", 0)))
     fencing.write(store, "sw", lambda doc: doc["grants"].update(g={"n": 1}))
-    saved = fencing.read(store, "sw")
+    saved = {**fencing.read(store, "sw"), fencing.MOVED: fencing.RECORDS}
     fencing.write(store, "sw", lambda doc: doc["grants"].update(h={"n": 2}))
     fencing.write(store, "sw", lambda doc: doc["archive"].update(y=_row("y", "old", 0)))
 
@@ -347,6 +347,7 @@ def test_a_saved_export_restores_onto_records(store: Any) -> None:
     assert restored["grants"] == {"g": {"n": 1}}
     assert set(restored["archive"]) == {"x"}
     assert restored["archive_ref"] == "records:sw"
+    assert fencing.MOVED not in restored
 
 
 def test_a_records_write_aborts_a_watched_transaction(store: Any) -> None:
@@ -815,6 +816,7 @@ def test_reads_remember_single_keys_and_whole_scans() -> None:
         lambda found: list(found.keys()),
         lambda found: list(found.values()),
         lambda found: list(found.items()),
+        lambda found: list(reversed(found)),
         lambda found: found == {"a": 1},
         lambda found: found != {"a": 1},
         lambda found: found.copy(),

@@ -262,6 +262,10 @@ class Reads(dict[str, Any]):
         self._every()
         return super().__len__()
 
+    def __reversed__(self) -> Any:
+        self._every()
+        return super().__reversed__()
+
     def keys(self) -> Any:
         self._every()
         return super().keys()
@@ -593,6 +597,7 @@ def watch(store: Any, pipe: Any, slug: str) -> None:
 def replace(store: Any, slug: str, saved: dict[str, Any] | None) -> None:
     """Puts back a saved document; a snapshot taken before the document existed is imported from its keys."""
     restored: dict[str, Any] = _legacy(store, slug) if saved is None else {**EMPTY, **saved}
+    restored.pop(MOVED, None)
 
     def change(doc: dict[str, Any]) -> Any:
         records = doc.get(ARCHIVE_REF, "").startswith(RECORDS_REF)
