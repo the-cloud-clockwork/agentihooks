@@ -193,7 +193,7 @@ class FakeInbox:
         )
 
     def close(self, item_id: str, outcome: str, detail: str = "", *, deadline: Deadline) -> object:
-        """Refuse what the inbox store refuses: an unknown outcome, a missing detail, or a bare done on a work item."""
+        """Refuse an unknown outcome, a missing detail or a bare done on a work item, as the inbox store does."""
         state, reason = close_reason(outcome, detail)
         if state == "done" and reason == "done" and item_id not in self.information:
             raise InboxError("done needs an outcome naming where the work went")
