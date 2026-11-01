@@ -400,16 +400,17 @@ def _codex(now: float, force: bool = False) -> list[QuotaRow]:
     from scripts import codex_router
     from scripts.routing.codex_api import CodexApiSource
 
-    pool = codex_router.CodexAccountSource().pool(os.environ)
+    environ = router_environ(dict(os.environ))
+    pool = codex_router.CodexAccountSource().pool(environ)
     sessions = codex_sessions_by_account()
-    live = codex_router.routed_live(pool, sessions, os.environ)
-    quotas = codex_router.fresh_quotas(pool, os.environ, now, force=force)
-    quotas.update(codex_router.quotas(live, os.environ))
-    identities = fingerprints(pool + live, os.environ)
+    live = codex_router.routed_live(pool, sessions, environ)
+    quotas = codex_router.fresh_quotas(pool, environ, now, force=force)
+    quotas.update(codex_router.quotas(live, environ))
+    identities = fingerprints(pool + live, environ)
     rows = without_routing(codex_rows(pool + live, quotas, sessions, now, identities=identities), live)
     master = _masters("codex").get("codex")
     marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
-    return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
+    return mark_next(marked, next_account(pool, quotas, sessions, now, dict(environ)))
 
 
 def _render_live(
@@ -420,7 +421,8 @@ def _render_live(
 
     live = {"claude": sessions, **({} if fable else {"codex": codex_sessions_by_account()})}
     table = render(rows, int(now), unlisted_sessions(rows, live), fable, current)
-    notes = [] if fable else [*codex_router.identity_warnings(os.environ), codex_router.default_distinction(os.environ)]
+    environ = router_environ(dict(os.environ))
+    notes = [] if fable else [*codex_router.identity_warnings(environ), codex_router.default_distinction(environ)]
     for harness in sorted({row.agent for row in rows if row.master}):
         held = reservation.current(harness, os.environ)
         if held and held.reason:
