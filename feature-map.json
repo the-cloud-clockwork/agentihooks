@@ -72,6 +72,20 @@
       ]
     },
     {
+      "id": "swarm-tick-no-shared-rows",
+      "origin": "plan",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",
+      "behaviour": "Tick steps share no mutable ledger state: the pass hands steps a read only rows mapping, spawn preparation and reaping work on their own copies, the ledger view is deep frozen under CI so a step changing it fails, and a ledger write marks the held view stale so the next step reads a fresh one.",
+      "seam": "scripts.tick.view.LedgerView with scripts.tick.view.current and wrote, and the rows mapping scripts.swarm.tick.step_ledger_state puts in the pass box",
+      "tests": [
+        "tests/tick/test_no_mutation.py::test_a_step_mutating_the_view_fails_under_ci",
+        "tests/tick/test_no_mutation.py::test_outside_ci_the_view_holds_the_state_it_was_given",
+        "tests/tick/test_no_mutation.py::test_a_ledger_write_makes_the_next_step_read_a_fresh_view",
+        "tests/tick/test_no_mutation.py::test_a_ledger_client_write_marks_the_held_view_stale",
+        "tests/tick/test_no_mutation.py::test_the_pass_hands_steps_rows_no_step_can_assign_into"
+      ]
+    },
+    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
