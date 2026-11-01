@@ -245,7 +245,7 @@ def refused_rows(environ: Mapping[str, str], sessions: dict[str, int], now: floa
     """Token accounts the router refuses for their own credential, each naming what clears the refusal."""
     tokens = codex_router.token_accounts(environ)
     repeated = codex_router.duplicates(tokens, environ, now)
-    rows = []
+    rows: list[QuotaRow] = []
     for account in tokens:
         reason = codex_router.refusal(account, environ, now)
         if account.name in repeated or not reason:
