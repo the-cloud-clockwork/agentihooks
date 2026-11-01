@@ -446,7 +446,13 @@ def test_park_keeps_the_dependency_branch_until_its_pull_request_merges_into_dev
         (OSError("gh missing"), "gh missing"),
     ],
 )
-def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypatch, capsys, raised, error):
+def test_park_refuses_unreadable_dependency_pull_request_state(
+    parked: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    raised: BaseException,
+    error: str,
+) -> None:
     _, ledger, _, shell, _ = parked
     ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
     _port(monkeypatch, Refusing(raised))
@@ -454,14 +460,18 @@ def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypat
     assert ["git", "fetch", "origin", "dev"] not in shell.calls
 
 
-def test_park_refuses_when_the_dependency_pull_request_cannot_be_read(parked, monkeypatch, capsys):
+def test_park_refuses_when_the_dependency_pull_request_cannot_be_read(
+    parked: tuple, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, _, _ = parked
     ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
     _port(monkeypatch, Refusing(subprocess.CalledProcessError(1, ["gh"], stderr=" boom\n")))
     _refused(parked, capsys, "cannot read the dependency pull request: boom")
 
 
-def test_park_refuses_when_the_dependency_pull_request_read_names_no_stderr(parked, monkeypatch, capsys):
+def test_park_refuses_when_the_dependency_pull_request_read_names_no_stderr(
+    parked: tuple, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, _, _ = parked
     ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
     _port(monkeypatch, Refusing(subprocess.CalledProcessError(1, ["gh"])))
@@ -476,7 +486,9 @@ def test_park_refuses_when_the_dependency_pull_request_read_names_no_stderr(park
         ("https://github.com/owner/project/pull/9/files", "owner/project", 9),
     ],
 )
-def test_source_control_names_the_github_port_and_the_change_a_url_names(url, repository, number):
+def test_source_control_names_the_github_port_and_the_change_a_url_names(
+    url: str, repository: str, number: int
+) -> None:
     from pathlib import Path
 
     from scripts.tick.adapters.github import GitHubSourceControl
@@ -496,12 +508,12 @@ def test_source_control_names_the_github_port_and_the_change_a_url_names(url, re
         "https://github.com/o/r",
     ],
 )
-def test_change_refuses_a_url_that_names_no_github_change(url):
+def test_change_refuses_a_url_that_names_no_github_change(url: str) -> None:
     with pytest.raises(SwarmError, match="^refused: "):
         stack.change(url, "refused")
 
 
-def test_change_reads_through_the_port_inside_its_deadline(monkeypatch):
+def test_change_reads_through_the_port_inside_its_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     state = _state(merged=True)
     provider = FakeSourceControl(answers={"change": state})
     monkeypatch.setattr(stack, "source_control", lambda url: (provider, REFERENCE) if url == DEPENDENCY_PR else None)

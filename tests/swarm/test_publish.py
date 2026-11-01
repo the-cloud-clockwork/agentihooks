@@ -1786,7 +1786,9 @@ def test_branch_mapping_only_queries_conflicting_delivery_records(
 
 
 @pytest.mark.parametrize(("state", "merged"), [("open", False), ("closed", False), ("closed", True)])
-def test_successor_publishes_past_a_settled_pull_request_only(publication, monkeypatch, state, merged):
+def test_successor_publishes_past_a_settled_pull_request_only(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, state: str, merged: bool
+) -> None:
     from scripts.swarm import publish
     from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
@@ -1797,7 +1799,7 @@ def test_successor_publishes_past_a_settled_pull_request_only(publication, monke
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, pull: "")
     viewed = []
 
-    def change(asked, refused):
+    def change(asked: str, refused: str) -> ChangeState:
         assert (asked, refused) == (url, f"cannot read pull request {url}")
         viewed.append(asked)
         return ChangeState(ChangeRef("example/repo", 7), state, "a" * 40, "dev", merged, url)
