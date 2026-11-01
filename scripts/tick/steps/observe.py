@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from functools import partial
-from importlib import import_module
 from typing import Any
 
 from scripts.tick import registry
@@ -38,11 +37,11 @@ def raise_held(box: Box) -> None:
 
 
 def _cleanup(tick: Any, get: Get, rows: dict[str, Any]) -> Any:
+    from scripts.swarm import automated_gc
+
     slug, store, ledger = get("slug"), get("store"), get("ledger")
     collected = partial(tick._collected, slug, store, ledger, rows)
-    return import_module("scripts.swarm.automated_gc").run(
-        slug, store, ledger, get("runtime"), get("now_ms"), collected
-    )
+    return automated_gc.run(slug, store, ledger, get("runtime"), get("now_ms"), collected)
 
 
 def _config_load(tick: Any, get: Get, box: Box) -> Any:
