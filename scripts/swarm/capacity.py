@@ -554,7 +554,7 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
     master = config.lanes.get("master")
     if master is None or master.get("agent") == "codex":
         return seats
-    declared = master.get("account", "")
+    declared = master.get("account")
     if declared and not _read(observations, declared):
         return seats
     if any(
@@ -576,14 +576,14 @@ def _read(observations: list[Account], declared: str) -> bool:
     )
 
 
-def _pinned(slug: str, agent: Any, declared: str) -> bool:
+def _pinned(slug: str, agent: Any, declared: str | None) -> bool:
     """A live master whose successor the front door route forces back onto the declared master account."""
     from scripts import front_door_route
     from scripts.swarm_v2 import masters
 
     if not declared or (agent.harness, agent.account) != ("claude", declared):
         return False
-    return bool(front_door_route.check(agent.profile, masters.title(slug, agent.seat), [], agent.harness))
+    return bool(front_door_route.check(agent.profile, masters.title(slug, agent.seat), []))
 
 
 def declared_master(environ: dict) -> str:
