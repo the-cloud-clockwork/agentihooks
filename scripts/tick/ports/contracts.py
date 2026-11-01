@@ -1,8 +1,11 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from scripts.tick.deadline import Deadline
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import SwarmConfig
 
 
 @dataclass(frozen=True)
@@ -29,7 +32,7 @@ class Coordination(Protocol):
 
     def lock(self, name: str, *, deadline: Deadline) -> object: ...
 
-    def configure(self, settings: Mapping[str, object], *, deadline: Deadline) -> object: ...
+    def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object: ...
 
     def capacity(self, *, deadline: Deadline) -> object: ...
 

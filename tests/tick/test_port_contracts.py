@@ -69,6 +69,12 @@ CASES = [
 @pytest.mark.parametrize("port,operation,args,write", CASES)
 def test_every_fake_and_guarded_operation(port: str, operation: str, args: tuple[object, ...], write: bool) -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
+    if operation == "configure":
+        from scripts.swarm.store import SwarmConfig
+
+        args = (SwarmConfig("swarm", "repo", 1, 1),)
     fake = getattr(providers, port)
     expected = object()
     fake.answers[operation] = expected
@@ -107,10 +113,12 @@ def test_fake_satisfies_each_port_protocol(port: str, protocol: type) -> None:
 
 def test_missing_or_invalid_deadline_is_refused() -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     tools = providers.for_effects(frozenset())
     for kwargs in ({}, {"deadline": None}, {"deadline": 1}):
         with pytest.raises(TypeError, match="^tools require a Deadline keyword argument$"):
-            tools.ledger.export(**kwargs)
+            getattr(tools.ledger, "export")(**kwargs)
     assert providers.ledger.calls == []
 
 
@@ -122,6 +130,8 @@ def test_unknown_tool_is_refused() -> None:
 
 def test_restricting_tools_cannot_restore_an_effect() -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     tools = providers.for_effects(frozenset()).for_effects(frozenset({"inbox"}))
     with pytest.raises(contracts.UndeclaredEffect, match="^inbox is not a declared effect$"):
         tools.inbox.send("seat", "hello", deadline=Deadline.after(10))
@@ -138,6 +148,8 @@ class UndeclaredStep:
 
 def test_step_cannot_act_through_an_undeclared_port() -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     with pytest.raises(contracts.UndeclaredEffect, match="^inbox is not a declared effect$"):
         UndeclaredStep().run(providers, Deadline.after(10))
     assert providers.inbox.calls == []
@@ -155,6 +167,8 @@ def test_fake_expired_deadline_and_default_answer() -> None:
 
 def test_guard_checks_deadline_before_calling_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     seen: list[Deadline] = []
 
     def send(address: str, body: str, *, deadline: Deadline) -> object:
@@ -167,3 +181,15 @@ def test_guard_checks_deadline_before_calling_provider(monkeypatch: pytest.Monke
         tools.inbox.send("seat", "hello", deadline=Deadline(0, lambda: 0))
     assert str(error.value) == "tool deadline expired"
     assert seen == []
+
+
+@pytest.mark.parametrize("effects", [frozenset(), frozenset({"inbox"})])
+def test_fake_factory_restricts_declared_effects(effects: frozenset[str]) -> None:
+    tools = fakes.fake_tools(effects)
+    deadline = Deadline.after(10)
+    assert tools.ledger.export(deadline=deadline) == {}
+    if "inbox" in effects:
+        assert tools.inbox.send("seat", "hello", deadline=deadline) is None
+    else:
+        with pytest.raises(contracts.UndeclaredEffect, match="^inbox is not a declared effect$"):
+            tools.inbox.send("seat", "hello", deadline=deadline)

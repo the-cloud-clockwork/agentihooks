@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, replace
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import (
@@ -16,18 +16,40 @@ from scripts.tick.ports.contracts import (
 )
 
 _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
-    "ledger": (frozenset(["export"]), frozenset(["mutate"])),
-    "coordination": (frozenset(["read", "capacity"]), frozenset(["lease", "lock", "configure", "mark"])),
-    "source_control": (
-        frozenset(["change", "checks", "runs", "queue_health", "tags", "capabilities"]),
-        frozenset(["enqueue", "merge", "comment"]),
+    "ledger": (frozenset([Ledger.export.__name__]), frozenset([Ledger.mutate.__name__])),
+    "coordination": (
+        frozenset([Coordination.read.__name__, Coordination.capacity.__name__]),
+        frozenset(
+            [
+                Coordination.lease.__name__,
+                Coordination.lock.__name__,
+                Coordination.configure.__name__,
+                Coordination.mark.__name__,
+            ]
+        ),
     ),
-    "runtime": (frozenset(["inspect", "panes"]), frozenset(["launch", "stop"])),
-    "processes": (frozenset(["scan"]), frozenset()),
-    "inbox": (frozenset(["read"]), frozenset(["send", "close"])),
-    "llm": (frozenset(), frozenset(["classify"])),
-    "metrics": (frozenset(), frozenset(["emit"])),
-    "host": (frozenset(["read"]), frozenset(["run"])),
+    "source_control": (
+        frozenset(
+            [
+                SourceControl.change.__name__,
+                SourceControl.checks.__name__,
+                SourceControl.runs.__name__,
+                SourceControl.queue_health.__name__,
+                SourceControl.tags.__name__,
+                SourceControl.capabilities.__name__,
+            ]
+        ),
+        frozenset([SourceControl.enqueue.__name__, SourceControl.merge.__name__, SourceControl.comment.__name__]),
+    ),
+    "runtime": (
+        frozenset([Runtime.inspect.__name__, Runtime.panes.__name__]),
+        frozenset([Runtime.launch.__name__, Runtime.stop.__name__]),
+    ),
+    "processes": (frozenset([Processes.scan.__name__]), frozenset()),
+    "inbox": (frozenset([Inbox.read.__name__]), frozenset([Inbox.send.__name__, Inbox.close.__name__])),
+    "llm": (frozenset(), frozenset([Llm.classify.__name__])),
+    "metrics": (frozenset(), frozenset([Metrics.emit.__name__])),
+    "host": (frozenset([Host.read.__name__]), frozenset([Host.run.__name__])),
 }
 
 
@@ -69,8 +91,16 @@ class Tools:
     host: Host
 
     def for_effects(self, effects: frozenset[str]) -> "Tools":
-        ports = {
-            field.name: _RestrictedPort(getattr(self, field.name), field.name, field.name in effects)
-            for field in fields(self)
+        adapters = {
+            "ledger": self.ledger,
+            "coordination": self.coordination,
+            "source_control": self.source_control,
+            "runtime": self.runtime,
+            "processes": self.processes,
+            "inbox": self.inbox,
+            "llm": self.llm,
+            "metrics": self.metrics,
+            "host": self.host,
         }
+        ports = {name: _RestrictedPort(adapter, name, name in effects) for name, adapter in adapters.items()}
         return replace(self, **ports)
