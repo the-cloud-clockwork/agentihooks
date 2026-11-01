@@ -209,7 +209,6 @@ class FencedRuntime:
         spawn_stall.refuse_local(self.store, self.slug, machine, taken, maximum, lease.now_ms(self.store))
 
     def has_capacity(self, config) -> bool:
-        lease.renew(self.store, self.slug, self.held)
         if self._mode_refusal():
             return False
         return self.deployment != LOCAL or self.runtime.has_capacity(config)
