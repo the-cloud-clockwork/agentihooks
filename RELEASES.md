@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.562 · 2026-11-01
+
+### 2026-11-01 · 55f90c828b8a · #9277 · @agenticore-app
+
+**Document per record fencing keys and the fenced batch**
+
+This change adds a new reference page documenting how per-record fencing keys and the atomic fenced batch work, covering the Redis key layout, the Lua script's lease/epoch/revision checks, how fencing.write translates changes into puts, deletes, and reads with retries, the one-time migration path, inspection commands, measured bytes per change, and known limitations. It links this page from the reference index and the swarm-v2 execution-identity doc. This matters because it gives operators a verified, checked-against-source explanation of behavior already shipped in PR #9249, closing the documentation gap tracked in issue #9276.
+
 ## v2.17.561 · 2026-11-01
 
 ### 2026-11-01 · bc83baf076c5 · #9271 · @nestorcolt
