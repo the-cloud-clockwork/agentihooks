@@ -1,7 +1,7 @@
 ---
 title: Swarm elapsed thresholds
 parent: Reference
-nav_order: 29
+nav_order: 68
 permalink: /docs/reference/swarm-thresholds/
 ---
 
