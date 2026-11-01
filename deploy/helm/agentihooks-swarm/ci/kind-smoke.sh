@@ -524,12 +524,32 @@ if [[ $restarts != 1 ]]; then
   exit 1
 fi
 printf 'liveness probe restarted the frozen controller\n'
-terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
-current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
-if [[ $terminated != "$frozen_container" || $current == "$frozen_container" ]]; then
-  printf 'the frozen controller container has no confirmed termination record\n' >&2
+frozen_runtime_state() {
+  docker exec "$cluster-control-plane" crictl ps -a --id "${frozen_container#*://}" -o json \
+    | python3 -c 'import json, sys; found = json.load(sys.stdin)["containers"]; print(found[0]["state"] if found else "REMOVED")'
+}
+confirmed=""
+for _ in $(seq 60); do
+  terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
+  current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
+  if [[ $current != "$frozen_container" ]]; then
+    if [[ $terminated == "$frozen_container" ]]; then
+      confirmed="pod status"
+      break
+    fi
+    runtime="$(frozen_runtime_state)" || runtime=""
+    if [[ $runtime == CONTAINER_EXITED || $runtime == REMOVED ]]; then
+      confirmed="container runtime ($runtime)"
+      break
+    fi
+  fi
+  sleep 1
+done
+if [[ -z $confirmed ]]; then
+  printf 'the frozen controller container has no confirmed termination record (current %s, last terminated %s, runtime %s)\n' "$current" "$terminated" "${runtime:-unread}" >&2
   exit 1
 fi
+printf 'the frozen controller container terminated, confirmed by the %s\n' "$confirmed"
 kubectl exec -i "$ledger_pod" -- env SLUG="$slug" TOKEN="$frozen_lock" python - <<'RELEASE'
 import os
 
