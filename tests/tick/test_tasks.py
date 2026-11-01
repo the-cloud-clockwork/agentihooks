@@ -135,15 +135,15 @@ def test_a_held_system_exit_is_raised_again() -> None:
     assert raised.value.code == 3
 
 
-def test_a_held_step_gets_the_tick_it_was_called_with() -> None:
+def test_a_held_step_gets_the_tick_and_lookup_it_was_called_with() -> None:
     seen: list[Any] = []
     tick = object()
 
     def step(given: Any, get: Any) -> list[str]:
         seen.append(given)
-        return ["ran"]
+        return [get("name")]
 
-    assert tasks.held(step)(tick, {"box": {}}.get) == ["ran"]
+    assert tasks.held(step)(tick, {"box": {}, "name": "ran"}.get) == ["ran"]
     assert seen == [tick]
 
 
