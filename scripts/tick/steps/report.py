@@ -5,7 +5,6 @@ from collections.abc import Callable
 from typing import Any
 
 from scripts.gates import progress, quiet
-from scripts.inbox import wake
 from scripts.swarm import (
     bottleneck_status,
     dispatcher,
@@ -17,7 +16,6 @@ from scripts.swarm import (
     ready,
     reaper,
     release_wait,
-    snapshot_job,
     stall_watch,
     tick_heartbeat,
     timing,
@@ -194,12 +192,12 @@ def _bottleneck_status(cli: Any, get: Get) -> Any:
 
 
 def _inbox_wake(cli: Any, get: Get) -> Any:
-    window = wake.window_ms(os.environ)  # pyright: ignore[reportUnknownMemberType]
-    return cli.skip_refused(wake.maintenance, get("inbox"), get("slug"), get("agents"), cli.now_ms(), window)  # pyright: ignore[reportUnknownMemberType]
+    window = cli.wake.window_ms(os.environ)  # pyright: ignore[reportUnknownMemberType]
+    return cli.skip_refused(cli.wake.maintenance, get("inbox"), get("slug"), get("agents"), cli.now_ms(), window)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _snapshot_job(cli: Any, get: Get) -> None:
-    get("box")["started"] = timing.call(snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
+    get("box")["started"] = timing.call(cli.snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _heartbeat(cli: Any, get: Get) -> None:

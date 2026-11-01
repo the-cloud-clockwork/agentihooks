@@ -81,6 +81,8 @@ from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
 from scripts.hive import scope
 from scripts.inbox import exits, outbox
+from scripts.inbox import relay as relay
+from scripts.inbox import wake as wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
@@ -141,6 +143,8 @@ from scripts.swarm import (
     trace_plan,
     waits,
 )
+from scripts.swarm import refresh_job as refresh_job
+from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused

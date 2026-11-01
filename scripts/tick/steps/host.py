@@ -4,7 +4,6 @@ from collections.abc import Callable
 from importlib import import_module
 from typing import Any
 
-from scripts.inbox import relay
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import ledger_probe, ledger_watchdog, outage, reboot, timing
 from scripts.tick import registry
@@ -36,7 +35,7 @@ def raise_held(box: dict[str, Any]) -> None:
 
 
 def _inbox_relay(cli: Any, get: Get) -> None:
-    timing.call(relay.relay, get("store").redis)  # pyright: ignore[reportUnknownMemberType]
+    timing.call(cli.relay.relay, get("store").redis)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _launch_slots(cli: Any, get: Get) -> None:
@@ -69,9 +68,7 @@ def _command_runner(cli: Any, get: Get) -> Any:
 
 def _refresh_job(cli: Any, get: Get) -> None:
     if get("scheduled"):
-        from scripts.swarm import refresh_job
-
-        timing.call(refresh_job.start, get("store"), get("slug"))  # pyright: ignore[reportUnknownMemberType]
+        timing.call(cli.refresh_job.start, get("store"), get("slug"))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _intent_check(cli: Any, get: Get) -> None:
