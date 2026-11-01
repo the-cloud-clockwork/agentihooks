@@ -409,3 +409,47 @@ def test_the_master_pool_holds_only_masters_whose_inboxes_share_its_world(redis,
     monkeypatch.setattr(pool, "live_masters", lambda client, slug: ["master@fixture", "master-2@fixture"])
 
     assert InboxStore(redis, world="").pool.masters_for("engineer@0001-0001", "master@fixture") == pooled
+
+
+def test_host_hash_hit_uses_one_field_read(redis: object, swarm: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import scope
+    from scripts.swarm.execution import ExecutionRegistry
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    calls = []
+    original = redis.hget
+
+    def read(key: str, field: str) -> str | None:
+        calls.append((key, field))
+        return original(key, field)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("host lookup scanned the execution registry")
+
+    monkeypatch.setattr(ExecutionRegistry, "hive", forbidden)
+    with scope.one_pass():
+        scope.joined(redis)
+        monkeypatch.setattr(redis, "hget", read)
+        assert scope.host(redis, "fixture", name) == "m1"
+    assert calls == [(swarm.key("fixture", "hosts"), name)]
+
+
+def test_host_hash_miss_keeps_legacy_lookup(redis: object, swarm: object) -> None:
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    redis.delete(swarm.key("fixture", "hosts"))
+    assert scope.host(redis, "fixture", name) == "m1"
+
+
+def test_removing_an_agent_removes_its_host(redis: object, swarm: object) -> None:
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+    swarm.drop_agent("fixture", name)
+    assert redis.hget(swarm.key("fixture", "hosts"), name) is None
+    assert scope.host(redis, "fixture", name) == ""
