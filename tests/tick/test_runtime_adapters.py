@@ -16,7 +16,7 @@ from scripts.tick.adapters import runtime as runtime_adapter
 from scripts.tick.deadline import Deadline
 
 
-def _process(pid: int, pgid: int, argv: tuple[str, ...] = ("claude",)) -> Process:
+def _proc_row(pid: int, pgid: int, argv: tuple[str, ...] = ("claude",)) -> Process:
     return Process(pid=pid, ppid=1, pgid=pgid, sid=pgid, start_time=pid * 10, state="S", comm="claude", argv=argv)
 
 
@@ -53,7 +53,7 @@ def _runtime(
 
 def test_one_scan_serves_every_read_of_a_pass() -> None:
     scans: list[int] = []
-    table = {10: _process(10, 10), 11: _process(11, 10)}
+    table = {10: _proc_row(10, 10), 11: _proc_row(11, 10)}
 
     def scan() -> dict[int, Process]:
         scans.append(1)
@@ -68,7 +68,7 @@ def test_one_scan_serves_every_read_of_a_pass() -> None:
 
 
 def test_each_pass_scans_afresh() -> None:
-    tables = [{1: _process(1, 1)}, {2: _process(2, 2)}]
+    tables = [{1: _proc_row(1, 1)}, {2: _proc_row(2, 2)}]
     first = process_adapter.PassProcesses(lambda: tables[0])
     second = process_adapter.PassProcesses(lambda: tables[1])
     deadline = Deadline.after(10)
@@ -98,7 +98,7 @@ def test_the_pass_wrapper_forwards_positional_and_keyword_arguments() -> None:
 
 def test_a_live_process_missing_from_the_snapshot_is_read_from_proc(monkeypatch: pytest.MonkeyPatch) -> None:
     own = os.getpid()
-    tables: list[dict[int, Process]] = [{}, {own: _process(own, own)}]
+    tables: list[dict[int, Process]] = [{}, {own: _proc_row(own, own)}]
     scans: list[int] = []
     ended: list[reaper.Targets] = []
 
@@ -189,7 +189,7 @@ def test_expired_deadline_refuses_pane_list_before_herdr() -> None:
 
 
 def test_a_tick_pass_scans_processes_once_for_every_retire_and_reap(monkeypatch: pytest.MonkeyPatch) -> None:
-    table = {40: _process(40, 40), 41: _process(41, 41)}
+    table = {40: _proc_row(40, 40), 41: _proc_row(41, 41)}
     scans: list[int] = []
     ended: list[reaper.Targets] = []
 
@@ -239,7 +239,7 @@ def test_outside_a_pass_every_selection_scans(monkeypatch: pytest.MonkeyPatch) -
 def test_an_exited_process_missing_from_the_snapshot_keeps_it(monkeypatch: pytest.MonkeyPatch) -> None:
     scans: list[int] = []
     ended: list[reaper.Targets] = []
-    monkeypatch.setattr(reaper, "processes", lambda: scans.append(1) or {70: _process(70, 70)})
+    monkeypatch.setattr(reaper, "processes", lambda: scans.append(1) or {70: _proc_row(70, 70)})
     monkeypatch.setattr(reaper, "_process", lambda pid, proc: None)
     monkeypatch.setattr(reaper, "end", lambda found: ended.append(found) or reaper.Outcome(()))
 
@@ -254,7 +254,7 @@ def test_an_exited_process_missing_from_the_snapshot_keeps_it(monkeypatch: pytes
 
 
 def test_a_live_process_newer_than_the_pass_snapshot_rescans(monkeypatch: pytest.MonkeyPatch) -> None:
-    tables = [{50: _process(50, 50)}, {50: _process(50, 50), 51: _process(51, 51)}]
+    tables = [{50: _proc_row(50, 50)}, {50: _proc_row(50, 50), 51: _proc_row(51, 51)}]
     scans: list[int] = []
     ended: list[reaper.Targets] = []
 
@@ -287,7 +287,7 @@ def test_the_tick_entry_carries_the_scan_pass_wrapper() -> None:
 
 def test_liveness_reads_each_member_without_a_table_scan(monkeypatch: pytest.MonkeyPatch) -> None:
     read: list[int] = []
-    alive = {60: _process(60, 60), 62: Process(62, 1, 62, 62, 620, "Z", "claude", ())}
+    alive = {60: _proc_row(60, 60), 62: Process(62, 1, 62, 62, 620, "Z", "claude", ())}
 
     def one(pid: int, proc: Path) -> Process | None:
         read.append(pid)
@@ -301,7 +301,7 @@ def test_liveness_reads_each_member_without_a_table_scan(monkeypatch: pytest.Mon
 
 
 def test_rescan_replaces_the_pass_snapshot() -> None:
-    tables = [{1: _process(1, 1)}, {2: _process(2, 2)}]
+    tables = [{1: _proc_row(1, 1)}, {2: _proc_row(2, 2)}]
     scans: list[int] = []
     shared = process_adapter.PassProcesses(lambda: scans.append(1) or tables[len(scans) - 1])
     deadline = Deadline.after(10)
@@ -312,7 +312,7 @@ def test_rescan_replaces_the_pass_snapshot() -> None:
 
 
 def test_real_termination_in_a_pass_reads_membership_fresh_once_per_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    table = {80: _process(80, 80), 81: _process(81, 80), 90: _process(90, 90)}
+    table = {80: _proc_row(80, 80), 81: _proc_row(81, 80), 90: _proc_row(90, 90)}
     scans: list[int] = []
     sent: list[tuple[str, int, int]] = []
     monkeypatch.setattr(reaper, "processes", lambda: scans.append(1) or table)
@@ -331,7 +331,7 @@ def test_real_termination_in_a_pass_reads_membership_fresh_once_per_end(monkeypa
 
 
 def test_a_rescanned_process_is_waited_on_from_the_new_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
-    tables = [{}, {95: _process(95, 95)}, {95: _process(95, 95)}]
+    tables = [{}, {95: _proc_row(95, 95)}, {95: _proc_row(95, 95)}]
     scans: list[int] = []
 
     def scan() -> dict[int, Process]:
@@ -352,7 +352,7 @@ def test_a_rescanned_process_is_waited_on_from_the_new_snapshot(monkeypatch: pyt
 
 
 def test_a_member_joining_after_selection_is_waited_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    tables = [{100: _process(100, 100)}, {100: _process(100, 100), 101: _process(101, 100)}]
+    tables = [{100: _proc_row(100, 100)}, {100: _proc_row(100, 100), 101: _proc_row(101, 100)}]
     scans: list[int] = []
 
     def scan() -> dict[int, Process]:
