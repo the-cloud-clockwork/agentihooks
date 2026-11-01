@@ -249,3 +249,21 @@ def test_timed_returns_the_result_of_its_call(capsys):
         ("started", "builtins.divmod", None),
         ("finished", "builtins.divmod", "success"),
     ]
+
+
+@pytest.mark.parametrize(("ended", "late"), [(12.5, False), (12.6, True)])
+def test_within_records_its_budget_and_reads_late_only_past_it(
+    monkeypatch: pytest.MonkeyPatch, ended: float, late: bool
+) -> None:
+    output = Output()
+    monkeypatch.setattr(timing.sys, "stderr", output)
+    monkeypatch.setattr(timing, "time", SimpleNamespace(monotonic=iter([9.0, 10.0, ended, ended]).__next__))
+    with timing.tick("sw"):
+        assert timing.within(2.5, sorted, [2, 1]) == [1, 2]
+    record = json.loads(output.getvalue().splitlines()[-1])
+    assert (record["outcome"], record["budget_s"], record["late"]) == ("success", 2.5, late)
+
+
+def test_within_outside_a_tick_runs_the_call_and_records_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    assert timing.within(1.0, sorted, [2, 1]) == [1, 2]
+    assert capsys.readouterr().err == ""
