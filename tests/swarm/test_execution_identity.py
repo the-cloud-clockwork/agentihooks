@@ -789,3 +789,27 @@ def test_the_hive_ack_binds_the_full_target_over_the_host_only_target(store, age
     stale = store.start_execution("fixture", replace(agent, state="launching", runtime_target={"host_id": "hive"}))
     store.put_agent("fixture", replace(stale, state="working", runtime_target=HIVE_TARGET, pane_id="w1:p2"))
     assert store.execution("fixture", stale.execution_id).runtime_target == HIVE_TARGET
+
+
+@pytest.mark.parametrize("query", ["get", "records", "occupants", "managed", "agents"])
+def test_registry_queries_use_record_port(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, query: str
+) -> None:
+    from scripts.swarm import fencing
+
+    current = store.start_execution("fixture", agent)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("registry read the whole fencing document")
+
+    monkeypatch.setattr(fencing, "read", forbidden)
+    monkeypatch.setattr(fencing, "read_executions", forbidden)
+    registry = store.execution_registry
+    if query == "get":
+        assert registry.get("fixture", current.execution_id) == current
+    elif query == "managed":
+        assert registry.managed("fixture", agent.name)
+    elif query == "occupants":
+        assert registry.occupants("fixture") == {current.seat: current}
+    else:
+        assert getattr(registry, query)("fixture") == [current]
