@@ -93,13 +93,14 @@ def test_every_group_reached_after_the_deadline_is_reported_over_budget(tmp_path
     assert "hooks/sample.py: not mutated, over budget" in capsys.readouterr().out
 
 
-def test_a_survivor_priced_on_its_head_that_outlasts_the_shard_deadline_is_red_as_over_budget(tmp_path, monkeypatch):
+@pytest.mark.parametrize("stage", ["scripts.ci_mutation.selection", "scripts.ci_mutation.report"])
+def test_a_mutation_child_killed_at_the_shard_deadline_turns_the_gate_red_as_over_budget(tmp_path, monkeypatch, stage):
     timeouts = []
 
     def process(command, cwd, timeout, log):
         timeouts.append(timeout)
         log.write_text("")
-        return None
+        return None if stage in command else 0
 
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", lambda root, work, paths, tests: None)
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
@@ -110,7 +111,7 @@ def test_a_survivor_priced_on_its_head_that_outlasts_the_shard_deadline_is_red_a
         {"path": "hooks/sample.py", "reason": "over budget"},
         {"path": "scripts/ci_mutation/identity.py", "reason": "over budget"},
     ]
-    assert len(timeouts) == 2
+    assert len(timeouts) == (2 if stage.endswith("selection") else 4)
     assert all(0 < timeout <= 600 for timeout in timeouts)
 
 

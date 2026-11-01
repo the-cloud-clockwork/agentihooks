@@ -43,7 +43,7 @@ def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, 
 
 
 def head_seconds(seconds: list[float]) -> float:
-    """Price the fastest tests that fit the head budget, or the fastest one, where most mutants die."""
+    """Price the fastest tests that fit the head budget, or the single fastest one."""
     spent = 0.0
     for taken in sorted(seconds):
         if spent + taken <= HEAD_SECONDS:
