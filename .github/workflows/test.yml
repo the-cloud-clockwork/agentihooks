@@ -1420,6 +1420,11 @@ jobs:
         timeout-minutes: 3
         uses: ./.github/actions/nats-server
 
+      - name: Install zsh for the shell rc block tests
+        if: needs.split.outputs.source == ''
+        timeout-minutes: 3
+        uses: ./.github/actions/zsh
+
       - name: Install the browser that page tests drive
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && github.event_name != 'merge_group'
         timeout-minutes: 6
@@ -1841,6 +1846,10 @@ jobs:
         if: steps.nats.outcome != 'success'
         timeout-minutes: 3
         uses: ./.github/actions/nats-server
+
+      - name: Install zsh for the shell rc block tests
+        timeout-minutes: 3
+        uses: ./.github/actions/zsh
 
       - name: Install the browser that page tests drive
         if: matrix.python-version == '3.12'
