@@ -17,13 +17,20 @@ FAILED = "failed"
 
 @dataclass(frozen=True)
 class StepRecord:
-    """Outcome of one step run: its name, outcome, wall time, error and result."""
+    """Outcome of one step run: its name, wall time against its budget, error and result."""
 
     name: str
-    outcome: str
     wall_s: float
+    budget_s: float
     error: str = ""
     result: Result | None = None
+
+    @property
+    def outcome(self) -> str:
+        """Return failed when the step raised, late when it ran past its budget, else ok."""
+        if self.error:
+            return FAILED
+        return LATE if self.wall_s > self.budget_s else OK
 
 
 def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, ...]:
@@ -41,9 +48,8 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
         result = copy_context().run(timing.call, step.run, Context(ctx.view, deadline))
     except (Exception, SystemExit) as exc:
         error = f"{type(exc).__module__}.{type(exc).__qualname__}"
-        return StepRecord(step.name, FAILED, clock() - started, error)
-    wall = clock() - started
-    return StepRecord(step.name, LATE if wall > step.budget_s else OK, wall, result=result)
+        return StepRecord(step.name, clock() - started, step.budget_s, error)
+    return StepRecord(step.name, clock() - started, step.budget_s, result=result)
 
 
 def run_group(name: str, ctx: Context, steps: Iterable[Step] | None = None) -> tuple[StepRecord, ...]:
