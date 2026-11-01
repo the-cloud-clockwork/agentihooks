@@ -35,15 +35,17 @@ def week_cap(week_left: float | None) -> int | None:
 
 
 def cap(five_left: float | None, week_left: float | None) -> int | None:
-    if five_left is None:
-        return None
+    """Live sessions from the week reading, lowered by a five hour window only when the provider reports one."""
     week = week_cap(week_left)
-    return None if week is None else min(week, five_hour_cap(five_left))
+    if week is None or five_left is None:
+        return week
+    return min(week, five_hour_cap(five_left))
 
 
 def scaled_cap(five_left: float | None, week_left: float | None, ceiling: int) -> int | None:
     banded = cap(five_left, week_left)
-    return banded and min(ceiling, max(banded, int(ceiling * min(five_left, week_left) / 100)))
+    left = week_left if five_left is None else min(five_left, week_left or 0.0)
+    return banded and min(ceiling, max(banded, int(ceiling * (left or 0.0) / 100)))
 
 
 def hive_ceiling(environ: Mapping[str, str]) -> int:

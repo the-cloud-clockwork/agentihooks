@@ -29,6 +29,16 @@ def _decide(five, week, others, push=False):
     )
 
 
+def test_a_session_with_only_a_week_window_still_reads_its_windows(monkeypatch):
+    from hooks.context import quota_usage
+
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    monkeypatch.setattr(quota_usage, "_load_native", lambda session: {"seven_day": {"used_percentage": 92.0}})
+    assert qp._session_windows("s") == (0.0, 92.0, None, None)
+    monkeypatch.setattr(quota_usage, "_load_native", lambda session: {"five_hour": {"used_percentage": 92.0}})
+    assert qp._session_windows("s") is None
+
+
 def test_below_both_triggers_nothing_happens():
     assert _decide(98.9, 97.9, []) is None
 

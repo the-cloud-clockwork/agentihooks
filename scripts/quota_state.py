@@ -6,7 +6,8 @@ BANDS = frozenset({"NORMAL", "REDUCE", "DRAIN_SOON", "DRAIN", "BLOCKED"})
 
 
 def claude_left(five: float | None, week: float | None) -> float | None:
-    return None if five is None or week is None else min(five, week)
+    """Routing left: the week alone when the provider reports no five hour window."""
+    return week if five is None or week is None else min(five, week)
 
 
 def routing_left(harness: str, five: float | None, week: float | None) -> float | None:

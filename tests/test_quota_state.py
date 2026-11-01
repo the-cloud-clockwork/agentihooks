@@ -5,6 +5,17 @@ from scripts.swarm import capacity, drain_watch, quota_view
 from scripts.swarm.health.findings import Limits
 
 
+def test_a_claude_account_with_no_five_hour_window_routes_on_its_week():
+    assert quota_state.claude_left(None, 62.0) == 62.0
+    assert quota_state.claude_left(40.0, 62.0) == 40.0
+    assert quota_state.claude_left(None, None) is None
+    assert balancer._state("allowed", QuotaWindow(), QuotaWindow(38.0, None)) == ("NORMAL", 62.0)
+    assert balancer._state("allowed", QuotaWindow(), QuotaWindow()) == ("UNKNOWN", None)
+    assert balancer._state("rejected", QuotaWindow(), QuotaWindow(38.0, None)) == ("BLOCKED", 0.0)
+    result = ProbeResult("a", "allowed", "NORMAL", 62.0, QuotaWindow(), QuotaWindow(38.0, None))
+    assert balancer.account_cap(result) == 6
+
+
 def test_the_vocabulary_names_four_states_and_drains_at_ten_percent_routing_left():
     assert (quota_state.OPEN, quota_state.DRAIN, quota_state.CLOSED, quota_state.UNKNOWN) == (
         "OPEN",
