@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.532 · 2026-11-01
+
+### 2026-11-01 · dfdddf09cd01 · #9163 · @nestorcolt
+
+**Add inbox, llm, metrics and host tick adapters behind deadline ports**
+
+This change wires the inbox store, LLM classifier, metrics spool, and host jobs behind the tick system's deadline-aware ports, so tick steps call through uniform adapters instead of touching those implementations directly. Each adapter rejects calls once its deadline has passed, and only the classifier call passes along remaining time to its underlying HTTP timeout. An AST-based test enforces that no tick step module bypasses these adapters with direct or relative imports, with a planted fault proving the check works. Wiring the adapters into the actual tick composition root is left as follow-up work.
+
 ## v2.17.531 · 2026-11-01
 
 ### 2026-11-01 · 83dbf1e5bd46 · #9157 · @nestorcolt
