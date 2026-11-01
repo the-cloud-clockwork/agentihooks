@@ -151,8 +151,6 @@ def moved_lines(root: Path, comparison: str) -> dict[str, set[int]]:
     """Name the head lines one whole diff colours as moved unchanged, so moves between files count too."""
     command = [
         "git",
-        "-c",
-        "color.diff.newMoved=blue",
         "diff",
         "--no-renames",
         "--no-ext-diff",
@@ -181,7 +179,7 @@ def moved_lines(root: Path, comparison: str) -> dict[str, set[int]]:
         elif hunk:
             header, line = False, int(hunk[1])
         elif not header and text.startswith("+"):
-            if raw.startswith("\x1b[34m"):
+            if raw.startswith("\x1b[1;36m"):
                 current.add(line)
             line += 1
     return moved
@@ -207,7 +205,7 @@ def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
         if bare_tree(blob(root, fork, name)) == bare_tree(blob(root, head, name)):
             continue
         diff = subprocess.check_output(["git", "diff", "-U0", comparison, "--", name], cwd=root).decode()
-        if lines := changed_lines(diff) - moved.get(name, set()):
+        if lines := changed_lines(diff) - moved[name]:
             changes[name] = lines
     return changes
 
