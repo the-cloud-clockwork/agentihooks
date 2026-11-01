@@ -398,7 +398,7 @@ class HerdrRuntime:
         host = capacity.granted(capacity.host_room(config, inputs), previous, inputs.now_ms)
         config, scaled = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
-            replace(config, lanes={"master": {}, **config.lanes}),
+            capacity.with_declared_master(replace(config, lanes={"master": {}, **config.lanes}), dict(os.environ)),
             self._quota_accounts,
             agents,
             demand,

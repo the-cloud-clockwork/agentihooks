@@ -554,13 +554,36 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
     master = config.lanes.get("master")
     if master is None or master.get("agent") == "codex":
         return seats
+    pinned = {("claude", master["account"])} if master.get("account") else set()
     if any(
-        agent.lane == "master" and agent.state != "finished" and (agent.harness, agent.account) not in warned
+        agent.lane == "master"
+        and agent.state != "finished"
+        and ((agent.harness, agent.account) not in warned or (agent.harness, agent.account) in pinned)
         for agent in agents
     ):
         return seats
     reserved = pick(seats, lambda seat: seat.harness == "claude" and seat.kind == SUBSCRIPTION)
     return [replace(seat, cap=seat.cap - 1) if seat == reserved else seat for seat in seats]
+
+
+def declared_master(environ: dict) -> str:
+    """The declared Claude master account a master successor respawns on, empty when none is declared or readable."""
+    from redis.exceptions import RedisError
+
+    try:
+        declared = master_account.load(environ).get("claude")
+    except (OSError, RedisError):
+        return ""
+    return declared.slug if declared else ""
+
+
+def with_declared_master(config: SwarmConfig, environ: dict) -> SwarmConfig:
+    """The config with the declared Claude master account on its master lane, where a master successor respawns."""
+    lane = config.lanes.get("master")
+    slug = declared_master(environ)
+    if lane is None or not slug:
+        return config
+    return replace(config, lanes={**config.lanes, "master": {**lane, "account": slug}})
 
 
 def calculate(

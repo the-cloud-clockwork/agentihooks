@@ -983,10 +983,11 @@ def test_master_reservation_preserves_api_capacity():
     [("warned", 3), ("", 2), ("open", 2)],
 )
 def test_a_warned_master_pinned_to_its_declared_account_holds_no_seat(declared, expected):
-    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes={"master": {"agent": "claude"}})
+    lanes = {"master": {"agent": "claude", "account": declared}}
+    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes=lanes)
     agents = [AgentRecord("master", "master", "master", harness="claude", account="warned", state="working")]
     observed = [account("open"), account("warned", sessions=1)]
-    decision = capacity.calculate(config, observed, agents, warned={("claude", "warned"): "week"}, master=declared)
+    decision = capacity.calculate(config, observed, agents, warned={("claude", "warned"): "week"})
     assert decision["effective"] == {"eng": expected, "ci": 0, "plan": 0}
 
 
@@ -1026,6 +1027,27 @@ def test_an_undeclared_claude_master_declares_no_master(monkeypatch):
 
     monkeypatch.setattr(capacity.master_account, "load", lambda env: {"codex": MasterAccount("codex", "cx")})
     assert capacity.declared_master({}) == ""
+
+
+@pytest.mark.parametrize(("lanes", "declared"), [({}, "main"), ({"master": {"agent": "claude"}}, "")])
+def test_a_config_without_a_master_lane_or_declared_account_stays_unchanged(monkeypatch, lanes, declared):
+    from scripts.routing.master_account import MasterAccount
+
+    found = {"claude": MasterAccount("claude", declared)} if declared else {}
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: found)
+    config = SwarmConfig("sw", "/repo", lanes=lanes)
+    assert capacity.with_declared_master(config, {}) is config
+
+
+def test_the_declared_master_account_joins_the_master_lane(monkeypatch):
+    from scripts.routing.master_account import MasterAccount
+
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": MasterAccount("claude", "main")})
+    config = SwarmConfig("sw", "/repo", lanes={"master": {"agent": "claude"}, "eng": {"agent": "codex"}})
+    assert capacity.with_declared_master(config, {}).lanes == {
+        "master": {"agent": "claude", "account": "main"},
+        "eng": {"agent": "codex"},
+    }
 
 
 @pytest.mark.parametrize("state", ["starting", "working"])
