@@ -73,9 +73,14 @@ def pass_budget_hold(store: Any, slug: str) -> str:
 
 
 def update_pass_budget(store: Any, slug: str) -> str:
+    from redis.exceptions import RedisError
+
     stage = os.environ.get("AGENTIHOOKS_TICK_STAGE", "S1")
     target = STAGE_TARGETS[stage]
-    rows = tick_report.history(store, slug, "tick:passes", PASS_WINDOW)
+    try:
+        rows = tick_report.history(store, slug, "tick:passes", PASS_WINDOW)
+    except RedisError:
+        rows = []
     if len(rows) < PASS_WINDOW:
         return pass_budget_hold(store, slug)
     measured = tick_report.p95([row["wall_s"] for row in rows])
