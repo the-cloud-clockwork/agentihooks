@@ -17,11 +17,18 @@ class CallStep:
     lane = Lane("tick")
     budget_s = 600.0
     interval_s = 0.0
-    needs: frozenset[str] = frozenset()
 
-    def __init__(self, name: str, group: str, order: int, call: Callable[[Any, Callable[[str], Any]], Any]) -> None:
-        """Name the step, place it at ``order`` in tick group ``group`` and keep the call it runs."""
+    def __init__(
+        self,
+        name: str,
+        group: str,
+        order: int,
+        call: Callable[[Any, Callable[[str], Any]], Any],
+        needs: frozenset[str] = frozenset(),
+    ) -> None:
+        """Name the step, place it at ``order`` in tick group ``group``, keep the call it runs and the steps it needs."""
         self.name = name
+        self.needs = needs
         self.group = group
         self.order = order
         self.call = call
