@@ -31,6 +31,18 @@ def test_a_pull_request_with_a_pending_check_waits_on_checks():
     assert seen == [["gh", "pr", "checks", URL]]
 
 
+def test_the_checks_read_captures_text_output_under_a_twenty_second_timeout() -> None:
+    """The gh pr checks read captures text output and stops after twenty seconds."""
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def run(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, options))
+        return subprocess.CompletedProcess(argv, 8, stdout=PENDING, stderr="")
+
+    assert checks.pending(URL, run) is True
+    assert calls == [(["gh", "pr", "checks", URL], {"capture_output": True, "text": True, "timeout": 20})]
+
+
 def test_finished_failed_or_unreadable_checks_do_not_wait():
     assert checks.pending(URL, runner(PASSED)) is False
     assert checks.pending(URL, runner("lint\tfail\t8s\thttps://x/1\n", 1)) is False

@@ -30,6 +30,7 @@ class ChangeState:
     base: str
     merged: bool
     url: str
+    head_branch: str = ""
 
 
 @dataclass(frozen=True)

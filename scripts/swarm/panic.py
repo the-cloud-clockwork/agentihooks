@@ -12,7 +12,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from scripts.swarm.store import PREFIX, RedisStore
+from scripts.swarm.store import PREFIX, RedisStore, SwarmError
+from scripts.tick.adapters.github import command
 
 FLEET = "fleet"
 HOUR_MS = 60 * 60 * 1000
@@ -140,8 +141,11 @@ def gh(argv: list[str]) -> str:
     return subprocess.run(argv, capture_output=True, text=True, check=True, timeout=60).stdout
 
 
-def _branch(url: str, run: Runner) -> str:
-    return run(["gh", "pr", "view", url, "--json", "headRefName", "--jq", ".headRefName"]).strip()
+def _branch(url: str) -> str:
+    """Return the head branch of a fix pull request, read through the source control port."""
+    from scripts.swarm import stack
+
+    return stack.change(url, f"cannot read pull request {url}").head_branch
 
 
 def _spared(row: dict[str, str], branches: set[str]) -> bool:
@@ -150,24 +154,16 @@ def _spared(row: dict[str, str], branches: set[str]) -> bool:
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], run: Runner) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue and the named fix pull requests."""
-    branches = {_branch(url, run) for url in fixes}
+    branches = {_branch(url) for url in fixes}
     cancelled: list[str] = []
     for repo in repos:
-        listing = [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            repo,
-            "--limit",
-            "100",
-            "--json",
-            "databaseId,event,headBranch,status",
-        ]
+        listing = command(
+            ["run", "list", "--repo", repo, "--limit", "100", "--json", "databaseId,event,headBranch,status"]
+        )
         for row in json.loads(run(listing)):
             if _spared(row, branches):
                 continue
-            run(["gh", "run", "cancel", str(row["databaseId"]), "--repo", repo])
+            run(command(["run", "cancel", str(row["databaseId"]), "--repo", repo]))
             cancelled.append(f"{repo} run {row['databaseId']} on {row['headBranch']}")
     return cancelled
 
@@ -185,6 +181,6 @@ def tick_pass(store: RedisStore, ok: bool, now_ms: int, run: Runner = gh) -> lis
         return actions
     try:
         cancelled = cancel_runs(current.fixes, REPOS, run)
-    except (subprocess.SubprocessError, OSError, ValueError) as error:
+    except (subprocess.SubprocessError, OSError, ValueError, SwarmError) as error:
         return [*actions, f"panic cancel failed: {error}"]
     return [*actions, *(f"panic cancelled {line}" for line in cancelled)]
