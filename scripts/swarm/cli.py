@@ -184,6 +184,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
+from scripts.tick import view as ledger_view
 from scripts.tick.adapters.github import command
 from scripts.tick.steps import host as host_steps
 
@@ -370,6 +371,8 @@ def run_tick(
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
         ):
             return ["Ledger health probe failed"]
+        if ledger_view.reads(ledger):
+            ledger_view.start(slug, ledger.service)
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
             store,
@@ -1506,7 +1509,7 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":
         found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
-        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.gh)
+        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.port)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
         return
     if args.action == "off":

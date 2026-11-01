@@ -20,7 +20,18 @@ from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
 
 pytestmark = pytest.mark.unit
 
-TICK_GROUPS = ["start", "observe", "agents", "masters", "tasks", "place", "close"]
+TICK_GROUPS = [
+    "start",
+    "observe",
+    "agents",
+    "masters",
+    "tasks",
+    "place",
+    "master seats",
+    "dispatch seat",
+    "master watch",
+    "close",
+]
 
 
 def _spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Context]]:
@@ -52,7 +63,7 @@ class _Marker:
         return Result()
 
 
-def test_a_tick_pass_runs_the_seven_groups_in_order(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+def test_a_tick_pass_runs_its_groups_in_order(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     seen = _spy(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert [name for name, _ in seen] == TICK_GROUPS
