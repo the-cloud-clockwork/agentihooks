@@ -15,6 +15,7 @@ from scripts.tick.adapters.fakes import Call, FakeSourceControl
 from scripts.tick.adapters.github import GitHubSourceControl
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import RepositoryRun
+from scripts.tick.steps import place
 
 pytestmark = pytest.mark.unit
 
@@ -400,8 +401,8 @@ def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch:
 
 
 def test_the_tick_spawns_nothing_while_panic_holds():
-    source = Path(panic.__file__).with_name("tick.py").read_text()
-    assert "config.engine != EVENTS_ENGINE and panic.state(store) is None:\n" in source
+    source = Path(place.__file__).read_text()
+    assert "config.engine != tick.EVENTS_ENGINE and tick.panic.state(store) is None:\n" in source
 
 
 def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys):
