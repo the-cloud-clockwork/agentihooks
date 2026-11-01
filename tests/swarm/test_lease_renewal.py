@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
+from scripts.gates import progress
+from scripts.inbox import wake
 from scripts.swarm import cli, controller, fencing, lease, timing
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -236,7 +238,7 @@ def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # no
         return []
 
     monkeypatch.setattr(cli.phase_planning, "planning_pass", slow)
-    monkeypatch.setattr(cli.wake, "maintenance", slow)
+    monkeypatch.setattr(wake, "maintenance", slow)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started > lease.ttl_ms()
     assert lease.current(store, "sw").epoch == 1
@@ -308,7 +310,7 @@ def test_run_tick_with_slow_steps_that_never_touch_the_ledger_finishes(env, cloc
         clock[0] += 120000
         return []
 
-    for module, name in ((cli.progress, "checks_pass"), (cli.waits, "end_pass"), (cli.quiet, "quiet_pass")):
+    for module, name in ((progress, "checks_pass"), (cli.waits, "end_pass"), (cli.quiet, "quiet_pass")):
         monkeypatch.setattr(module, name, slow)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started == 360000
@@ -327,7 +329,7 @@ def test_run_tick_stops_between_steps_when_another_controller_took_the_lease(env
         lease.acquire(store, "sw", "other")
         return []
 
-    monkeypatch.setattr(cli.progress, "checks_pass", stolen)
+    monkeypatch.setattr(progress, "checks_pass", stolen)
     monkeypatch.setattr(cli.waits, "end_pass", lambda *args: later.append(args) or [])
     with pytest.raises(SwarmError) as error:
         cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
