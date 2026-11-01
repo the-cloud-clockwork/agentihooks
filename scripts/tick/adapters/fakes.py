@@ -154,6 +154,9 @@ class FakeSourceControl:
     def rate_limit(self, *, deadline: Deadline) -> RateLimit:
         return _record(self, "rate_limit", (), deadline)
 
+    def issues_enabled(self, *, deadline: Deadline) -> bool:
+        return _record(self, "issues_enabled", (), deadline)
+
 
 @dataclass
 class FakeRuntime:
