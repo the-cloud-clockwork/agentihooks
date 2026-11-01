@@ -405,8 +405,8 @@ def run_tick(
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             judging: dict[str, Any] = {}
             with ThreadPoolExecutor(max_workers=1) as worker:
-                intent = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
-                judged = worker.submit(copy_context().run, run_group, "wrapper intent", **intent)
+                judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
+                judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
                 try:
                     actions += run_group("wrapper reboot", **passing)
                     host_steps.raise_held(box)
