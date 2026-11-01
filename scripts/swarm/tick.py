@@ -1958,7 +1958,7 @@ def place_master(slug, store, runtime, now_ms):
     return _under_tick_lock(slug, store, place)
 
 
-def _under_tick_lock(slug, store, act):
+def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 
@@ -1974,7 +1974,8 @@ def _under_tick_lock(slug, store, act):
         config = store.ensure_code(slug)
         if config.state in ("stopping", "stopped"):
             return []
-        return act(config, held)
+        with lease.held_pass(store, slug, held):
+            return act(config, held)
     finally:
         controller.release_tick_lock(store, slug, token)
 
