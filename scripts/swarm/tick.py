@@ -89,7 +89,7 @@ from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, Redi
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import masters as master_seats
-from scripts.tick import engine, steps
+from scripts.tick import engine
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import masters as master_steps
@@ -200,21 +200,17 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-class _PassView:
-    """A view holding the pass state a tick group site hands its steps."""
-
-    def __init__(self, state: dict[str, object]) -> None:
-        """Keep the pass state of the group site."""
-        self._state = state
+class _Unread:
+    """A view that holds nothing until the ledger view reaches the engine."""
 
     def read(self, domain: Domain, key: str) -> object | None:
-        """Return the pass state under ``key``, nothing for any other domain."""
-        return self._state.get(key) if domain == steps.PASS else None
+        """Return nothing for every domain and key."""
+        return None
 
 
-def run_group(name: str, **state: object) -> list[str]:
-    """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
-    return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
+def run_group(name: str) -> None:
+    """Run the registered steps of tick group ``name`` in legacy order under the group budget."""
+    engine.run_group(name, Context(_Unread(), Deadline.after(GROUP_BUDGET_S)))
 
 
 @reaper.scanning_pass
@@ -268,10 +264,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_strays, slug, config, store, runtime)
     actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
-    box: dict[str, Any] = {}
-    passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
-    actions += run_group("masters", **passing, config=config, doc=doc, rows=rows)
-    master_steps.raise_held(box)
+    actions.extend(master_steps.run_masters(locals()))
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
@@ -299,8 +292,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         actions += skip_refused(_collect_acks, slug, config, store, ledger, runtime, doc, now_ms)
         if not sleeping:
             actions += skip_refused(_codex_hook_order)
-            actions += run_group(master_steps.SEATS, **passing, config=config, doc=doc)
-            master_steps.raise_held(box)
+            actions.extend(master_steps.run_seats(locals()))
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE and panic.state(store) is None:
@@ -311,10 +303,8 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
                 with _placement_pass(runtime):
                     actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
                 store.redis.delete(due)
-        actions += run_group(master_steps.DISPATCH, **passing, config=config, doc=doc, sleeping=sleeping)
-        master_steps.raise_held(box)
-    actions += run_group(master_steps.WATCH, **passing, doc=doc, sleeping=sleeping)
-    master_steps.raise_held(box)
+        actions.extend(master_steps.run_dispatch(locals()))
+    actions.extend(master_steps.run_watch(locals()))
     actions += skip_refused(_conversations, slug, store, runtime) or []
     actions += skip_refused(_session_models, slug, store) or []
     actions += skip_refused(transfers.observe, store, slug, runtime.live_names()) or []

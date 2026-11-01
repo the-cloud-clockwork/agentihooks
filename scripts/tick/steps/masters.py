@@ -1,6 +1,7 @@
-"""The master and dispatcher seat steps of the tick pass, run at their sites in today's order."""
+"""The master and dispatcher seat steps of the tick pass, run at their four sites in today's order."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any
 
 from scripts.swarm import (
@@ -13,10 +14,25 @@ from scripts.swarm import (
     tick_master,
 )
 from scripts.swarm_v2 import master_scale, master_seat_alarm
-from scripts.tick import registry
-from scripts.tick.steps import CallStep
+from scripts.tick import engine, registry
+from scripts.tick.deadline import Deadline
+from scripts.tick.step import Context, Domain
+from scripts.tick.steps import BUDGET_S, PASS, CallStep, actions
 
-__all__ = ["DISPATCH", "MASTERS", "RAISED", "SEATS", "STEPS", "WATCH", "raise_held"]
+__all__ = [
+    "DISPATCH",
+    "MASTERS",
+    "RAISED",
+    "SEATS",
+    "STEPS",
+    "WATCH",
+    "raise_held",
+    "run_dispatch",
+    "run_masters",
+    "run_seats",
+    "run_site",
+    "run_watch",
+]
 
 Get = Callable[[str], Any]
 MASTERS = "masters"
@@ -24,13 +40,44 @@ SEATS = "master seats"
 DISPATCH = "dispatch seat"
 WATCH = "master watch"
 RAISED = "raised"
+BOX = "box"
+QUIET_STATES = frozenset({"stopped", "stopping"})
+
+
+class _SiteView:
+    """A view holding the tick's locals at a site and the box its steps hold an exception in."""
+
+    def __init__(self, found: Mapping[str, Any], box: dict[str, Any]) -> None:
+        """Keep the site's locals and the box."""
+        self._found = found
+        self._box = box
+
+    def read(self, domain: Domain, key: str) -> object | None:
+        """Return the box or the local under ``key`` for the pass domain, nothing for any other domain."""
+        if domain != PASS:
+            return None
+        return self._box if key == BOX else self._found.get(key)
+
+
+def run_site(group: str, found: Mapping[str, Any]) -> list[str]:
+    """Run tick group ``group`` against the tick's locals ``found``, raising what a step held, returning actions."""
+    box: dict[str, Any] = {}
+    records = engine.run_group(group, Context(_SiteView(found, box), Deadline.after(BUDGET_S)))
+    raise_held(box)
+    return actions(records)
+
+
+run_masters = partial(run_site, MASTERS)
+run_seats = partial(run_site, SEATS)
+run_dispatch = partial(run_site, DISPATCH)
+run_watch = partial(run_site, WATCH)
 
 
 def _held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
     """Wrap ``call`` to skip once a step held an exception and to hold the exception it raises."""
 
     def run(tick: Any, get: Get) -> Any:
-        box = get("box")
+        box = get(BOX)
         if RAISED in box:
             return []
         try:
@@ -49,7 +96,7 @@ def raise_held(box: dict[str, Any]) -> None:
 
 
 def _master_wake(tick: Any, get: Get) -> Any:
-    if get("config").state in {"stopped", "stopping"}:
+    if get("config").state in QUIET_STATES:
         return []
     return tick.skip_refused(master_wake.run, get("slug"), get("store"), get("runtime"), get("doc"), get("now_ms"))
 
