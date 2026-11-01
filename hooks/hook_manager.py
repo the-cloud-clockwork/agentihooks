@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import lightweight common module at startup
 from hooks.common import log
-from hooks.context import tool_end
+from hooks.context import seat_notes, tool_end
 from hooks.prompt_budget import PromptBudget
 
 
@@ -779,7 +779,6 @@ def _prompt_overrun(budget: PromptBudget) -> None:
 
 def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     from hooks.config import BROADCAST_ENABLED
-    from hooks.context import seat_notes
 
     run = budget.run
     run("secrets", _prompt_secrets, payload)
@@ -1106,7 +1105,6 @@ def _inject_ledger_decision(payload: dict) -> None:
             inject_context(context, also_log=False, skip_compression=True, kind="alert")
     except Exception as e:
         log("ledger decision failed", {"error": str(e)})
-
 
 
 def _inbox_blocks(session_id: str, cwd: str = "") -> list[str]:
