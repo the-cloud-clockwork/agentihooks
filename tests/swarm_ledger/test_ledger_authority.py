@@ -419,6 +419,37 @@ def test_controller_ledger_operations_carry_epoch(monkeypatch):
     assert "controller_epoch" not in calls[1][0]
 
 
+def test_controller_lifecycle_actions_carry_the_epoch_of_their_ledger(monkeypatch):
+    from types import SimpleNamespace
+
+    import fakeredis
+
+    from scripts.swarm import lease, ledger_client
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_ledger import ledger_link
+    from scripts.swarm_ledger.api import client as api_client
+
+    saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = lease.acquire(saved, SLUG, "home")
+    assert held is not None
+    sent = []
+    transport = SimpleNamespace(base=lambda slug: f"http://ledger/{slug}", credentials=lambda slug, service: {})
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: transport)
+    monkeypatch.setattr(ledger_link, "remote", lambda slug: slug == SLUG)
+    monkeypatch.setattr(
+        api_client.ResourceClient,
+        "request",
+        lambda self, slug, path, payload: sent.append((slug, path, payload)) or {"data": "binned"},
+    )
+    with lease.held_pass(saved, SLUG, held):
+        assert LedgerClient().binned(SLUG) == "binned"
+    assert LedgerClient().binned(SLUG) == "binned"
+    assert sent == [
+        (SLUG, "lifecycle/actions", {"action": "binned", "controller_epoch": held.epoch}),
+        (SLUG, "lifecycle/actions", {"action": "binned"}),
+    ]
+
+
 def test_takeover_before_repository_write_refuses_stale_controller(crew, monkeypatch):
     import fakeredis
 

@@ -181,6 +181,7 @@ def test_a_pass_whose_lease_was_stolen_refuses_to_start(store, clock):
 def test_a_spawn_after_the_lease_was_stolen_mid_pass_refuses_to_launch(store, clock, monkeypatch):
     store.create(SwarmConfig("sw", ".", 1, 0))
     held = lease.acquire(store, "sw", "home")
+    assert held is not None
     monkeypatch.setattr(lease, "beat", lambda store, slug, held, stop: None)
     launched = []
     runtime = controller.FencedRuntime(
@@ -200,6 +201,7 @@ def test_a_spawn_after_the_lease_was_stolen_mid_pass_refuses_to_launch(store, cl
 def test_a_hive_launch_call_after_the_lease_was_stolen_mid_pass_is_refused(store, clock, monkeypatch, operation):
     store.create(SwarmConfig("sw", ".", 1, 0))
     held = lease.acquire(store, "sw", "home")
+    assert held is not None
     monkeypatch.setattr(lease, "beat", lambda store, slug, held, stop: None)
     calls = []
     launch = SimpleNamespace(

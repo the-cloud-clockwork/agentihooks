@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -10,6 +10,9 @@ from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.tick.adapters import ledger as ledger_adapter
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Ledger
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.unit
 
@@ -70,6 +73,16 @@ def test_mutate_stamps_each_operation_with_the_epoch_of_its_ledger() -> None:
     assert client.calls == [
         ("mutate", "sw", [{"op": "add", "controller_epoch": 7}, {"op": "close", "controller_epoch": 7}])
     ]
+
+
+def test_mutate_inside_a_pass_stamps_the_pass_epoch_of_its_own_swarm() -> None:
+    adapter, client, _ = _ledger()
+    token = lease.PASS.set((cast("RedisStore", object()), "sw", 12))
+    try:
+        adapter.mutate([{"op": "add"}], deadline=Deadline(5.0, _clock([0.0])))
+    finally:
+        lease.PASS.reset(token)
+    assert client.calls == [("mutate", "sw", [{"op": "add", "controller_epoch": 12}])]
 
 
 @pytest.mark.parametrize("operation", ["export", "mutate"])

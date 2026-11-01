@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
@@ -59,7 +59,7 @@ class FencedRuntime:
             )
         self.runtime, self.deployment = runtime, deployment
 
-    def __getattr__(self, name: str) -> object:
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.runtime, name)
 
     def _mode_refusal(self) -> str:

@@ -1,7 +1,7 @@
 import os
 import socket
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -265,7 +265,7 @@ def epoch_for(slug: str) -> int | None:
 
 
 @contextmanager
-def held_pass(store: RedisStore, slug: str, held: Lease) -> Iterator[None]:
+def held_pass(store: RedisStore, slug: str, held: Lease) -> Generator[None]:
     """Hold the lease for one pass: renew it once, keep one beat for the whole pass and fence its ledger writes."""
     renew(store, slug, held)
     token = PASS.set((store, slug, held.epoch))

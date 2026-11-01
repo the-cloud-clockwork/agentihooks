@@ -1958,7 +1958,7 @@ def place_master(slug, store, runtime, now_ms):
     return _under_tick_lock(slug, store, place)
 
 
-def _under_tick_lock(slug, store, act):
+def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 

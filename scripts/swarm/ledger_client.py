@@ -53,7 +53,7 @@ class LedgerClient:
         self.service = service
         self.read_timeout = read_timeout
 
-    def _call(self, slug, ops=None):
+    def _call(self, slug: str, ops: list[dict[str, Any]] | None = None):
         from scripts.swarm import lease
 
         if ops is not None and (epoch := lease.epoch_for(slug)) is not None:
@@ -307,7 +307,7 @@ class LedgerClient:
     def join(self, slug, name, role):
         self._call(slug, [_op("join", name, role=role)])
 
-    def _lifecycle(self, slug, payload):
+    def _lifecycle(self, slug: str, payload: dict[str, Any]):
         from scripts.swarm import lease
         from scripts.swarm_ledger.api.client import ResourceClient
 
