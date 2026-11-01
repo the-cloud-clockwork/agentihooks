@@ -227,7 +227,7 @@ class RedisStore:
         self.redis.hset(self.key(config.slug, "config"), mapping=_fields(config))
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
-    def config(self, slug):
+    def config(self, slug: str) -> SwarmConfig:
         raw = self.redis.hgetall(self.key(slug, "config"))
         if not raw:
             raise SwarmError(f"no swarm {slug}")
