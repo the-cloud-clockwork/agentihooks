@@ -44,6 +44,7 @@ def test_scan_keeps_the_reusable_workflow_steps():
     assert [step.get("name") for step in steps[2:]] == [
         "Install Semgrep",
         "Own rules hold on their fixtures and the code",
+        "Source control exceptions only shrink",
         "Resolve the merge base of the head and the base",
         "Fail on findings new against the base",
     ]
@@ -95,6 +96,29 @@ def test_feature_map_links_are_required_alongside_feature_rule_fixtures():
     steps = _jobs()["feature-tests"]["steps"]
     assert any(step.get("run") == "python -m scripts.feature_map" for step in steps)
     assert any(step.get("run") == 'python -m pip install semgrep==1.177.0 "pyyaml>=6.0"' for step in steps)
+
+
+def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -> None:
+    import json
+
+    rule = yaml.safe_load((_ROOT / ".semgrep/source-control.yml").read_text())["rules"][0]
+    assert rule["id"] == "swarm-source-control-port"
+    assert rule["languages"] == ["python"]
+    assert rule["severity"] == "ERROR"
+    assert rule["pattern"] == '["gh", ...]'
+    assert rule["paths"]["include"] == ["/scripts/swarm/**", "*.test.py"]
+    allowed = json.loads((_ROOT / ".semgrep/source-control-allowlist.json").read_text())
+    assert rule["paths"]["exclude"] == allowed
+    assert "/scripts/tick/adapters/github.py" in allowed
+    assert all(path.endswith(".py") and "*" not in path for path in allowed)
+
+
+def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
+    steps = _jobs()["scan"]["steps"]
+    step = next(step for step in steps if step.get("name") == "Source control exceptions only shrink")
+    assert step["env"]["BASE"] == "${{ inputs.base }}"
+    assert 'git show "$BASE:.semgrep/source-control-allowlist.json"' in step["run"]
+    assert "current <= previous" in step["run"]
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():
