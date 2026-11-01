@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import (
     dispatch_seat,
     lifetime,

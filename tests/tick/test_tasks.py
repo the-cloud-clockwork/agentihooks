@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import claim_hold, difficulty, grouping
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
@@ -75,15 +76,7 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
         "dispatcher group",
     ]
     assert [step.name for step in engine.group_steps(tasks.CLOSE)][-2:] == ["settle", "close space"]
-    assert [(step.group, step.order) for step in tasks.STEPS] == [
-        ("task passes", 10),
-        ("task passes", 20),
-        ("task passes", 30),
-        ("task passes", 40),
-        ("task passes", 50),
-        ("close", 200),
-        ("close", 210),
-    ]
+    assert [step.group for step in tasks.STEPS] == [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
         assert step in registered

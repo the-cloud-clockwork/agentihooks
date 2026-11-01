@@ -89,7 +89,7 @@ The fencing state lives in one Redis state bucket shared by every swarm, under `
 |---|---|---|
 | `…:fencing:current` | hash, one field per swarm slug | the whole document and its revision |
 | `…:fencing:revision` | counter | the bucket revision, raised by every write of any swarm |
-| `…:fencing:history:<slug>` | list | the swarm's last 64 document revisions |
+| `…:fencing:history:<slug>` | list | the swarm's last 2 document revisions |
 | `…:fencing:projected` | hash, one field per swarm slug | the swarm's `executions` alone, with the revision of the write that made it |
 | `…:fencing:published` | string | the bucket revision at the last write that published a copy |
 
@@ -110,6 +110,9 @@ The fencing state lives in one Redis state bucket shared by every swarm, under `
   credentials and hive registry stores, `python -m scripts.swarm.redis_commands` lists both keys and the `GET`, `SET`,
   `DEL` and `HDEL` commands; it does not map the fencing bucket. See the
   [Redis command map](../reference/redis-command-map.md).
+
+A swarm moved onto per record keys no longer writes this document or its copy; its fencing state and the reads that
+follow it are described in [Fencing records](../reference/fencing-records.md).
 
 Nothing is configured. The copy is used only with the Redis state backend (`AGENTIHOOKS_STATE_BACKEND` unset or
 `redis`); with the `bus` backend these reads load the whole document as before.

@@ -12,6 +12,7 @@ from scripts.tick.ports.source_control import (
     CheckState,
     Comment,
     Merged,
+    OpenChange,
     QueueEntry,
     QueueHealth,
     RateLimit,
@@ -163,6 +164,9 @@ class FakeSourceControl:
 
     def merged_at(self, commit: str, *, deadline: Deadline) -> str | None:
         return _record(self, "merged_at", (commit,), deadline)
+
+    def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]:
+        return _record(self, "open_changes", (), deadline)
 
     def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
         return _record(self, "cancel_run", (run_id,), deadline)

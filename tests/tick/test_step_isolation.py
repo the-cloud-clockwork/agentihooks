@@ -1,12 +1,13 @@
 from dataclasses import dataclass, field
-from threading import Event
+from threading import Event, Thread, current_thread, main_thread
 from time import monotonic
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Domain, Lane, Result
+from scripts.tick.step import Context, Domain, Lane, Result, Step
 from scripts.tick.steps import CallStep, agents, budgets, host, masters, observe, place, report, tasks
 
 pytestmark = pytest.mark.unit
@@ -58,6 +59,31 @@ def test_a_300_second_step_before_spawn_no_longer_delays_spawn() -> None:
 def test_a_step_that_ends_within_its_budget_is_kept_with_its_result() -> None:
     record = engine.run_step(TimedStep("quick", 5.0), Context(View(), Deadline.after(60.0)))
     assert (record.outcome, record.abandoned, record.result, record.error) == (engine.OK, False, Result(), "")
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_an_abandoned_step_keeps_its_wall_time_and_a_daemon_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    readings = iter([0.0, 0.0, 10.0, 10.25])
+    made: list[Thread] = []
+
+    def clock() -> float:
+        return next(readings) if current_thread() is main_thread() else 0.0
+
+    class Recording(Thread):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)  # pyright: ignore[reportArgumentType]
+            made.append(self)
+
+    monkeypatch.setattr(engine, "Thread", Recording)
+    hold = Event()
+    try:
+        record = engine.run_step(
+            TimedStep("stuck", 0.1, hold=hold), Context(View(), Deadline.after(600.0, clock=clock))
+        )
+    finally:
+        hold.set()
+    assert record == engine.StepRecord("stuck", 0.25, 0.1, abandoned=True)
+    assert [thread.daemon for thread in made] == [True]
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
@@ -117,5 +143,5 @@ def test_latest_start_follows_the_longest_needs_path() -> None:
     second = TimedStep("b", 4.0, needs=frozenset({"a"}))
     side = TimedStep("c", 5.0)
     last = TimedStep("d", 1.0, needs=frozenset({"b", "c"}))
-    steps = [first, second, side, last]
+    steps: list[Step] = [first, second, side, last]
     assert [registry.latest_start(name, steps) for name in "abcd"] == [0.0, 3.0, 0.0, 7.0]
