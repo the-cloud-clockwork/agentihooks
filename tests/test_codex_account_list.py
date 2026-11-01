@@ -114,7 +114,9 @@ def test_balance_lists_every_refused_token_account_with_its_state_and_login_comm
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     rows = {row.account: row for row in agents_quota._codex(now) if row.kind != "api"}
     assert sorted(rows) == ["alpha", "gamma", "keyed", KEPT, "noid", "old", "soon", "triplet", "twin"]
-    assert rows["triplet"].source.startswith(f"same ChatGPT account as {KEPT};")
+    assert rows["triplet"].source == (
+        f"same ChatGPT account as {KEPT}; sign in its own account with agentihooks codex login triplet"
+    )
     assert (rows["twin"].state, rows["twin"].sessions) == (agents_quota.DUPLICATE, 3)
     assert rows["twin"].source == (
         "same ChatGPT account as gamma; sign in its own account with agentihooks codex login twin"
