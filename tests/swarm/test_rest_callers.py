@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -55,7 +56,9 @@ def test_rest_callers_charge_the_shared_log(tmp_path, monkeypatch, caller, faile
 
 
 @pytest.mark.parametrize("remote", [True, False])
-def test_merge_stall_runs_without_working_folder_for_a_remote_repo(tmp_path, monkeypatch, remote):
+def test_merge_stall_sets_working_folder_only_for_a_local_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: bool
+) -> None:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     repo = "github.com/the-cloud-clockwork/agentihooks" if remote else str(tmp_path)
     run = Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
