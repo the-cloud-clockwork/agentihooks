@@ -198,3 +198,53 @@ def test_group_steps_reads_registered_steps_by_default() -> None:
 
 def test_empty_group_runs_nothing() -> None:
     assert engine.run_group("tasks", context(Clock()), []) == ()
+
+
+def test_pass_budget_holds_once_and_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.delenv("AGENTIHOOKS_TICK_STAGE", raising=False)
+    with mock.patch("scripts.tick.engine.InboxStore") as inbox:
+        for _ in range(9):
+            store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 400.0})})
+        assert engine.update_pass_budget(store, "sw") == ""
+        inbox.assert_not_called()
+        store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 400.0})})
+        held = engine.update_pass_budget(store, "sw")
+        assert held == "holding spawns: pass p95 400s exceeds S1 target 384s"
+        assert engine.pass_budget_hold(store, "sw") == held
+        assert engine.update_pass_budget(store, "sw") == held
+        inbox.return_value.send.assert_called_once_with("swarm", "master@sw", held, fyi=True)
+        for _ in range(10):
+            store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 384.0})})
+        assert engine.update_pass_budget(store, "sw") == ""
+        assert engine.pass_budget_hold(store, "sw") == ""
+        assert inbox.return_value.send.call_count == 1
+
+
+@pytest.mark.parametrize(("stage", "target"), [("S1", 384.0), ("S2", 240.0), ("S3", 120.0), ("S4", 60.0)])
+def test_pass_budget_uses_selected_stage(stage: str, target: float, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setenv("AGENTIHOOKS_TICK_STAGE", stage)
+    for _ in range(10):
+        store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": target})})
+    with mock.patch("scripts.tick.engine.InboxStore") as inbox:
+        assert engine.update_pass_budget(store, "sw") == ""
+        inbox.assert_not_called()
+        store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": target + 1})})
+        assert (
+            engine.update_pass_budget(store, "sw")
+            == f"holding spawns: pass p95 {target + 1:g}s exceeds {stage} target {target:g}s"
+        )
+        inbox.return_value.send.assert_called_once()
