@@ -55,7 +55,7 @@
     },
     {
       "id": "swarm-tick-step-isolation",
-      "origin": "operator",
+      "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-b9",
       "behaviour": "Every registered tick step declares a budget from its tick report p95 and an interval from the plan's interval table; the engine waits on a step for at most its budget, records a step still running then as late and goes on, so a 300 second step before spawn no longer delays it, and spawn, needing only judge, orphans and preempt, starts by forty seconds into the pass.",
       "seam": "scripts.tick.engine.run_group with step budgets from scripts.tick.steps.budgets.timing_of and the start bound from scripts.tick.registry.latest_start",
