@@ -359,9 +359,9 @@ def run_tick(
         tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc, view, passing = {}, None, ExitStack()
+    doc, view, beating = {}, None, ExitStack()
     try:
-        passing.enter_context(lease.held_pass(store, slug, held))
+        beating.enter_context(lease.held_pass(store, slug, held))
         timing.keep()
         run_group("before")
         if store.config(slug).state == "stopped":
@@ -446,7 +446,7 @@ def run_tick(
             run_group("wrapper status", store=store, slug=slug, doc=doc, view=view, box=published)
             host_steps.raise_held(published)
         finally:
-            passing.close()
+            beating.close()
             timing.BEFORE_STEP.reset(keeping)
             tick_stop.drop(token)
             controller.release_tick_lock(store, slug, token)
