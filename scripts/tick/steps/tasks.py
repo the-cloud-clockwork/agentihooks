@@ -1,0 +1,83 @@
+"""The task steps of the tick pass, run at their sites in today's order: task passes, then settle and close space."""
+
+from collections.abc import Callable
+from typing import Any
+
+from scripts.swarm import claim_hold, difficulty, grouping
+from scripts.tick import registry
+from scripts.tick.steps import CallStep
+
+__all__ = ["CLOSE", "RAISED", "STEPS", "TASK_PASSES", "held", "raise_held"]
+
+Get = Callable[[str], Any]
+TASK_PASSES = "task passes"
+CLOSE = "close"
+RAISED = "raised"
+
+
+def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
+    """Wrap ``call`` to skip once a step held an exception and to hold the exception it raises."""
+
+    def run(tick: Any, get: Get) -> Any:
+        box = get("box")
+        if RAISED in box:
+            return []
+        try:
+            return call(tick, get)
+        except (Exception, SystemExit) as exc:
+            box[RAISED] = exc
+            return []
+
+    return run
+
+
+def raise_held(box: dict[str, Any]) -> None:
+    """Raise the exception a step held, as the hand written pass let it escape."""
+    if RAISED in box:
+        raise box[RAISED]
+
+
+def _run_window(tick: Any, get: Get) -> Any:
+    args = (get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms"))
+    return tick.skip_refused(tick.run_window.step, *args)
+
+
+def _verification_notices(tick: Any, get: Get) -> Any:
+    args = (get("slug"), get("store"), get("doc"), get("now_ms"))
+    return tick.skip_refused(claim_hold.verification_notices, *args)
+
+
+def _size_pass(tick: Any, get: Get) -> Any:
+    return tick.skip_refused(difficulty.size_pass, get("slug"), get("ledger"), get("doc"))
+
+
+def _grouping_release(tick: Any, get: Get) -> Any:
+    return tick.skip_refused(grouping.release_pass, get("slug"), get("store"), get("ledger"), get("doc"))
+
+
+def _dispatcher_group(tick: Any, get: Get) -> Any:
+    args = (get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms"))
+    return tick.skip_refused(tick.dispatcher.group, *args)
+
+
+def _settle(tick: Any, get: Get) -> Any:
+    args = (get("slug"), get("config"), get("store"), get("ledger"), get("rows"), get("doc"))
+    return tick.skip_refused(tick._settle, *args)
+
+
+def _close_space(tick: Any, get: Get) -> Any:
+    return tick.skip_refused(tick._close_space, get("slug"), get("config"), get("store"), get("runtime"))
+
+
+STEPS = (
+    CallStep("run window", TASK_PASSES, 10, held(_run_window)),
+    CallStep("verification notices", TASK_PASSES, 20, held(_verification_notices)),
+    CallStep("size pass", TASK_PASSES, 30, held(_size_pass)),
+    CallStep("grouping release", TASK_PASSES, 40, held(_grouping_release)),
+    CallStep("dispatcher group", TASK_PASSES, 50, held(_dispatcher_group)),
+    CallStep("settle", CLOSE, 200, held(_settle)),
+    CallStep("close space", CLOSE, 210, held(_close_space)),
+)
+
+for _step in STEPS:
+    registry.register(_step)

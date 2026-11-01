@@ -18,7 +18,18 @@ from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
 
 pytestmark = pytest.mark.unit
 
-TICK_GROUPS = ["start", "observe", "agents", "masters", "tasks", "place", "close"]
+TICK_GROUPS = [
+    "start",
+    "observe",
+    "agents",
+    "masters",
+    "tasks",
+    "task passes",
+    "place",
+    "placement acks",
+    "placement",
+    "close",
+]
 
 
 def _spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Context]]:
