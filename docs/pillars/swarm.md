@@ -5089,7 +5089,8 @@ journalctl --user -t agentihooks-swarm --since "-12h" | grep '"event": "swarm_ti
 
 The finished step records carry each step's name, outcome and `wall_s` duration. The pass lease heartbeat keeps
 the lease through a long step, so a stale lease inside a pass means another controller took over, the heartbeat
-could not reach Redis for three ticks, or on a hosted ledger the heartbeat stopped when it could not reach the ledger server.
+could not reach Redis for three ticks, or on a hosted ledger the heartbeat stopped when it could not reach the ledger
+server.
 Work that runs outside a tick pass and can outlast the lease holds its own heartbeat, the way the refresh job does:
 
 ```python

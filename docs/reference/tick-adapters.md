@@ -235,7 +235,8 @@ port.mark("last-tick", None, deadline=deadline)
   holds a live lease or the swarm's controller host names another owner, and it raises the epoch when it takes over an
   expired lease. On a ledger served from a remote address the lease call goes to that server.
 - `lock` holds the lock for the time left on the deadline, rounded down to whole milliseconds and never under one, so
-  the lock expires by itself when the deadline does. Give the call a deadline sized to the work the lock guards. The adapter has no release operation; the lock ends at its expiry.
+  the lock expires by itself when the deadline does. Give the call a deadline sized to the work the lock guards. The
+  adapter has no release operation; the lock ends at its expiry.
 - `configure` compares every field of `settings` with the stored config and writes only the fields that differ, in
   one `update`. When nothing differs it writes nothing and returns the current config. `update` applies its own
   checks, so an invalid `state` or `autonomy` raises `SwarmError`.
