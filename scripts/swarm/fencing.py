@@ -170,6 +170,15 @@ def hydrate_archive(store: Any, doc: dict[str, Any]) -> None:
     doc["archive"] = {**_archive_rows(store, doc.get("archive_ref", "")), **doc["archive"]}
 
 
+def execution_row(store: Any, doc: dict[str, Any], execution_id: str) -> dict[str, Any] | None:
+    """Finds an execution in the current rows, then the inline archive, then the external archive history."""
+    return (
+        doc["executions"].get(execution_id)
+        or doc["archive"].get(execution_id)
+        or _archive_rows(store, doc.get("archive_ref", "")).get(execution_id)
+    )
+
+
 def _externalize_archive(store: Any, slug: str, doc: dict[str, Any]) -> None:
     if "archive_ref" not in doc:
         return
