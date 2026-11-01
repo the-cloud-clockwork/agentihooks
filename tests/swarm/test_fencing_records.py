@@ -50,13 +50,14 @@ def _log(store: Any) -> list[dict[str, str]]:
 
 
 def test_every_record_of_a_swarm_shares_its_hash_tag(store: Any) -> None:
+    from scripts.swarm.store import PREFIX
     from scripts.tick.adapters.records_redis import RedisRecords
 
     port = RedisRecords(store.redis, "root")
     assert port.key("sw", "executions") == "root:{sw}:fence:executions"
     assert port.revision_key("sw") == "root:{sw}:fence:revision"
     assert port.log_key("sw") == "root:{sw}:fence:log"
-    assert RedisRecords(store.redis).key("sw", "meta") == "agentihooks:swarm:{sw}:fence:meta"
+    assert RedisRecords(store.redis).key("sw", "meta") == f"{PREFIX}:{{sw}}:fence:meta"
 
 
 def test_both_layouts_answer_the_records_port(store: Any) -> None:
@@ -97,7 +98,7 @@ def test_migration_waits_for_every_writer_and_the_redis_backend(store: Any, monk
     from scripts.swarm import fencing
     from scripts.swarm.store import SwarmError
 
-    with pytest.raises(SwarmError, match="upgrade every live fencing writer"):
+    with pytest.raises(SwarmError, match="upgrade every live fencing reader and writer"):
         fencing.migrate_records(store, "sw")
     monkeypatch.setenv(state.BACKEND_ENV, "bus")
     with pytest.raises(SwarmError, match="need the Redis state backend"):
@@ -134,14 +135,23 @@ def test_a_pass_on_records_writes_no_whole_document(store: Any, clock: list[int]
 
     lease.fenced(store, "sw", held, lambda doc: doc["executions"].update(a=_row("a", "eng", 1)))
     lease.fenced(store, "sw", held.epoch, lambda doc: doc["intents"].update(i={"epoch": held.epoch}))
+    lease.fenced(
+        store, "sw", held, lambda doc: doc["executions"].update(old=_row("old", "gone", 0), new=_row("new", "gone", 1))
+    )
+    with lease.fencing(held.epoch):
+        assert store.execution_registry.archive("sw") == 1
+    assert fencing.authority_held(store, "sw", "none") is False
     clock[0] += lease.ttl_ms() - lease.tick_ms()
     renewed = lease.renew(store, "sw", held)
 
     assert _document(store) == document
-    assert fencing.read(store, "sw")["executions"] == {"a": _row("a", "eng", 1)}
+    assert set(fencing.read(store, "sw")["archive"]) == {"old"}
+    assert fencing.execution_row(store, fencing.read(store, "sw"), "old") == _row("old", "gone", 0)
+    current = {"a": _row("a", "eng", 1), "new": _row("new", "gone", 1)}
+    assert fencing.read(store, "sw")["executions"] == current
     assert fencing.read(store, "sw")["intents"] == {"i": {"epoch": held.epoch}}
     assert fencing.read_lease(store, "sw") == {"lease": renewed.__dict__}
-    assert fencing.read_executions(store, "sw") == {"a": _row("a", "eng", 1)}
+    assert fencing.read_executions(store, "sw") == current
 
 
 def test_a_stale_controller_racing_a_takeover_is_refused_at_the_write(store: Any, clock: list[int]) -> None:
@@ -275,7 +285,7 @@ def test_moving_rows_into_the_archive_writes_only_the_moved_rows(store: Any) -> 
     fencing.write(store, "sw", move)
     entries = _log(store)
     assert len(entries) == count + 1
-    assert entries[-1]["records"] == "5"
+    assert entries[-1]["records"] == "4"
     assert port.record("sw", "archive", "a").value == _row("a", "eng", 1)
     assert fencing.read(store, "sw")["archive"]["0"]["note"] == "kept"
     bare = {"executions": {}, "archive": {}, "archive_ref": "records:sw"}
@@ -327,7 +337,7 @@ def test_a_saved_export_restores_onto_records(store: Any) -> None:
     _migrated(store)
     fencing.write(store, "sw", lambda doc: doc["archive"].update(x=_row("x", "old", 0)))
     fencing.write(store, "sw", lambda doc: doc["grants"].update(g={"n": 1}))
-    saved = fencing.read(store, "sw")
+    saved = {**fencing.read(store, "sw"), fencing.MOVED: fencing.RECORDS}
     fencing.write(store, "sw", lambda doc: doc["grants"].update(h={"n": 2}))
     fencing.write(store, "sw", lambda doc: doc["archive"].update(y=_row("y", "old", 0)))
 
@@ -337,6 +347,7 @@ def test_a_saved_export_restores_onto_records(store: Any) -> None:
     assert restored["grants"] == {"g": {"n": 1}}
     assert set(restored["archive"]) == {"x"}
     assert restored["archive_ref"] == "records:sw"
+    assert fencing.MOVED not in restored
 
 
 def test_a_records_write_aborts_a_watched_transaction(store: Any) -> None:
@@ -353,12 +364,83 @@ def test_a_records_write_aborts_a_watched_transaction(store: Any) -> None:
         with pytest.raises(WatchError):
             pipe.execute()
     with store.redis.pipeline() as pipe:
-        fencing.watch(store, pipe)
+        fencing.watch(store, pipe, "other")
         fencing.write(store, "sw", lambda doc: doc.update(epoch=4))
         pipe.multi()
         pipe.set("probe", "2")
         pipe.execute()
     assert store.redis.get("probe") == "2"
+
+
+def test_a_document_write_aborts_a_watched_transaction(store: Any) -> None:
+    from redis.exceptions import WatchError
+
+    from scripts.swarm import fencing
+
+    with store.redis.pipeline() as pipe:
+        fencing.watch(store, pipe, "sw")
+        fencing.write(store, "sw", lambda doc: doc.update(epoch=3))
+        pipe.multi()
+        pipe.set("probe", "1")
+        with pytest.raises(WatchError):
+            pipe.execute()
+
+
+def test_two_writers_on_one_hydrated_archive_row_retry_the_second(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(x={"a": 1, "b": 1}))
+    calls: list[int] = []
+
+    def outer(doc: dict[str, Any]) -> None:
+        calls.append(1)
+        fencing.hydrate_archive(store, doc)
+        if len(calls) == 1:
+
+            def inner(other: dict[str, Any]) -> None:
+                fencing.hydrate_archive(store, other)
+                other["archive"]["x"]["a"] = 2
+
+            fencing.write(store, "sw", inner)
+        doc["archive"]["x"]["b"] = 2
+
+    fencing.write(store, "sw", outer)
+    assert len(calls) == 2
+    assert fencing.read(store, "sw")["archive"]["x"] == {"a": 2, "b": 2}
+
+
+def test_a_migration_racing_another_migration_writes_nothing(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import fencing
+
+    fencing.read(store, "sw")
+    real = fencing.hydrate_archive
+    calls: list[int] = []
+
+    def racing(saved: Any, doc: dict[str, Any]) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            monkeypatch.setattr(fencing, "hydrate_archive", real)
+            fencing.migrate_records(store, "sw", writers_upgraded=True)
+        real(saved, doc)
+
+    monkeypatch.setattr(fencing, "hydrate_archive", racing)
+    assert fencing.migrate_records(store, "sw", writers_upgraded=True) == 0
+    assert calls == [1]
+    assert fencing.records(store, "sw").layout("sw") == fencing.RECORDS
+
+
+def test_a_whole_document_batch_keeps_the_external_archive(store: Any) -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.ports.records import FencedBatch, RecordWrite
+
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(z=_row("z", "old", 0)))
+    fencing.migrate_archive(store, "sw", writers_upgraded=True)
+    port = fencing.WholeDocumentRecords(store)
+    port.fenced_batch("sw", FencedBatch((RecordWrite("put", "grants", "g", 0, {"n": 1}),)))
+    doc = fencing.read(store, "sw")
+    assert doc["grants"] == {"g": {"n": 1}}
+    assert doc["archive"] == {"z": _row("z", "old", 0)}
 
 
 def test_the_fenced_batch_checks_the_lease_and_writes_all_or_nothing(store: Any) -> None:
@@ -556,7 +638,258 @@ def test_the_migration_command_needs_the_writer_rollout(
     monkeypatch.setattr(records_migration.store, "connect", lambda: store)
     with pytest.raises(SystemExit):
         records_migration.main(["sw"])
-    assert "upgrade every live fencing writer" in capsys.readouterr().err
+    assert "upgrade every live fencing reader and writer" in capsys.readouterr().err
     records_migration.main(["sw", "--writers-upgraded"])
     assert capsys.readouterr().out.strip() == "1"
     assert fencing.records(store, "sw").layout("sw") == fencing.RECORDS
+
+
+def test_a_document_write_in_flight_across_the_move_lands_on_the_records(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    fencing.read(store, "sw")
+    calls: list[int] = []
+
+    def change(doc: dict[str, Any]) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            fencing.migrate_records(store, "sw", writers_upgraded=True)
+        doc["grants"]["g"] = {"n": 1}
+
+    fencing.write(store, "sw", change)
+    assert len(calls) == 2
+    assert fencing.read(store, "sw")["grants"] == {"g": {"n": 1}}
+    assert json.loads(_document(store).value)[fencing.MOVED] == fencing.RECORDS
+    assert "g" not in json.loads(_document(store).value)["grants"]
+
+
+def test_a_move_between_the_layout_check_and_the_read_retries_onto_the_records(
+    store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fencing
+
+    fencing.read(store, "sw")
+    real = fencing._migrated
+    checks: list[int] = []
+
+    def moving(saved: Any, slug: str) -> Any:
+        found = real(saved, slug)
+        checks.append(1)
+        if len(checks) == 1:
+            fencing.migrate_records(store, "sw", writers_upgraded=True)
+        return found
+
+    monkeypatch.setattr(fencing, "_migrated", moving)
+    calls: list[int] = []
+    fencing.write(store, "sw", lambda doc: calls.append(1) or doc["grants"].update(g={"n": 1}))
+    assert calls == [1]
+    assert len(checks) == 2
+    assert fencing.read(store, "sw")["grants"] == {"g": {"n": 1}}
+    assert "g" not in json.loads(_document(store).value)["grants"]
+
+
+def test_a_record_the_change_read_is_checked_at_the_write(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["claims"].update(t1={"agent": "a"}))
+    calls: list[int] = []
+
+    def outer(doc: dict[str, Any]) -> None:
+        calls.append(1)
+        seen = doc["claims"].get("t1")
+        if len(calls) == 1:
+            fencing.write(store, "sw", lambda other: other["claims"].update(t1={"agent": "b"}))
+        doc["executions"]["e"] = {"claim": seen}
+
+    fencing.write(store, "sw", outer)
+    assert len(calls) == 2
+    assert fencing.read(store, "sw")["executions"]["e"] == {"claim": {"agent": "b"}}
+
+
+def test_an_absent_record_the_change_read_is_checked_at_the_write(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    _migrated(store)
+    calls: list[int] = []
+
+    def outer(doc: dict[str, Any]) -> None:
+        calls.append(1)
+        held = "t9" in doc["claims"]
+        if len(calls) == 1:
+            fencing.write(store, "sw", lambda other: other["claims"].update(t9={"agent": "b"}))
+        doc["grants"]["g"] = {"held": held}
+
+    fencing.write(store, "sw", outer)
+    assert len(calls) == 2
+    assert fencing.read(store, "sw")["grants"] == {"g": {"held": True}}
+
+
+def test_a_section_the_change_scanned_is_checked_whole(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["grants"].update(g={"n": 1}, h={"n": 1}))
+    calls: list[int] = []
+
+    def outer(doc: dict[str, Any]) -> None:
+        calls.append(1)
+        total = sum(row["n"] for row in doc["grants"].values())
+        if len(calls) == 1:
+            fencing.write(store, "sw", lambda other: other["grants"].update(h={"n": 5}))
+        doc["registrations"]["r"] = {"total": total}
+
+    fencing.write(store, "sw", outer)
+    assert len(calls) == 2
+    assert fencing.read(store, "sw")["registrations"] == {"r": {"total": 6}}
+
+
+def test_a_fenced_change_leaves_the_lease_to_the_fence(store: Any, clock: list[int]) -> None:
+    from scripts.swarm import fencing, lease
+
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    _migrated(store)
+    calls: list[int] = []
+
+    def change(doc: dict[str, Any]) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            clock[0] += lease.ttl_ms() - lease.tick_ms()
+            lease.renew(store, "sw", held)
+        doc["intents"]["i"] = {"n": 1}
+
+    lease.fenced(store, "sw", held, change)
+    assert calls == [1]
+    assert fencing.read(store, "sw")["intents"] == {"i": {"n": 1}}
+
+
+def test_an_unfenced_change_that_read_the_lease_retries_after_a_renewal(store: Any, clock: list[int]) -> None:
+    from scripts.swarm import fencing, lease
+
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    _migrated(store)
+    calls: list[int] = []
+
+    def change(doc: dict[str, Any]) -> None:
+        calls.append(1)
+        owner = doc["lease"]["owner"]
+        if len(calls) == 1:
+            clock[0] += lease.ttl_ms() - lease.tick_ms()
+            lease.renew(store, "sw", held)
+        doc["intents"]["i"] = {"owner": owner}
+
+    fencing.write(store, "sw", change)
+    assert len(calls) == 2
+    unread: list[int] = []
+
+    def blind(doc: dict[str, Any]) -> None:
+        unread.append(1)
+        if len(unread) == 1:
+            clock[0] += lease.ttl_ms() - lease.tick_ms()
+            lease.renew(store, "sw", held)
+        doc["intents"]["j"] = {"n": 1}
+
+    fencing.write(store, "sw", blind)
+    assert unread == [1]
+
+
+def test_reads_remember_single_keys_and_whole_scans() -> None:
+    import copy
+
+    from scripts.swarm import fencing
+
+    single = fencing.Reads({"a": 1, "b": 2})
+    assert single["a"] == 1
+    assert single.get("c") is None
+    assert single.get("c", 7) == 7
+    assert "d" not in single
+    assert single.setdefault("e", 5) == 5
+    assert single.pop("b") == 2
+    assert single.pop("z", 0) == 0
+    assert single.seen == {"a", "c", "d", "e", "b", "z"}
+    assert not single.whole
+    scans: list[Any] = [
+        list,
+        len,
+        lambda found: list(found.keys()),
+        lambda found: list(found.values()),
+        lambda found: list(found.items()),
+        lambda found: list(reversed(found)),
+        lambda found: found == {"a": 1},
+        lambda found: found != {"a": 1},
+        lambda found: found.copy(),
+        copy.copy,
+        copy.deepcopy,
+    ]
+    for scan in scans:
+        found = fencing.Reads({"a": 1})
+        scan(found)
+        assert found.whole
+    plain = copy.deepcopy(fencing.Reads({"a": {"b": 1}}))
+    assert type(plain) is dict and plain == {"a": {"b": 1}}
+    assert type(copy.copy(fencing.Reads({"a": 1}))) is dict
+    assert fencing.Reads({"a": 1}).copy() == {"a": 1}
+    assert fencing.Reads({"a": 1}) == {"a": 1}
+    assert not (fencing.Reads({"a": 1}) != {"a": 1})
+    assert fencing.Reads({"a": 1}) != {"a": 2}
+
+
+def test_the_read_set_names_scalars_sections_and_whole_scans() -> None:
+    from scripts.swarm import fencing
+
+    doc = fencing._track({**fencing.EMPTY, "archive": {"x": 1}, "grants": {"g": 1}})
+    doc["executions"].get("e")
+    list(doc["grants"].values())
+    doc.get("epoch")
+    doc.get("archive_ref")
+    reads = fencing._read_set(doc)
+    assert reads["meta"] == {"epoch"}
+    assert reads["executions"] == {"e"}
+    assert reads["grants"] is None
+    assert reads["claims"] == set()
+    assert "archive" not in reads
+    assert type(doc.untracked("archive")) is dict
+    assert "archive" not in doc.seen
+    list(doc)
+    assert fencing._read_set(doc)["meta"] is None
+
+
+def test_checks_skip_written_records_and_a_fenced_lease() -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.ports.records import Record, RecordWrite
+
+    loaded = {
+        "meta": {"lease": Record(3, None), "epoch": Record(4, 1)},
+        "grants": {"g": Record(5, 1), "h": Record(6, 1)},
+        "claims": {},
+    }
+    reads: dict[str, set[str] | None] = {"meta": {"lease", "epoch"}, "grants": None, "claims": {"t"}}
+    written = [RecordWrite("put", "grants", "g", 5, 2)]
+    assert fencing._checks(reads, loaded, written, False) == [
+        RecordWrite("check", "claims", "t", 0),
+        RecordWrite("check", "grants", "h", 6),
+        RecordWrite("check", "meta", "epoch", 4),
+        RecordWrite("check", "meta", "lease", 3),
+    ]
+    assert fencing._checks(reads, loaded, written, True) == [
+        RecordWrite("check", "claims", "t", 0),
+        RecordWrite("check", "grants", "h", 6),
+        RecordWrite("check", "meta", "epoch", 4),
+    ]
+
+
+def test_queue_write_stages_the_next_document_revision(store: Any) -> None:
+    from scripts.events.redis_state import RedisStateStore
+
+    states = RedisStateStore(store.redis, "probe")
+    first = states.create("k", b"one")
+    with store.redis.pipeline() as pipe:
+        pipe.multi()
+        assert states.queue_write(pipe, "k", b"two", first) == first + 1
+        pipe.execute()
+    entry = states.get("k")
+    assert entry is not None and (entry.value, entry.revision) == (b"two", first + 1)
+    assert [found.value for found in states.watch("k")] == [b"one", b"two"]
+    assert store.redis.get(states.revision_key) == str(first + 1)
