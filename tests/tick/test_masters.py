@@ -75,19 +75,19 @@ def _call(name: str, state: dict[str, Any]) -> tuple[list[tuple[Any, ...]], Any]
 
 
 def test_the_steps_sit_at_their_sites_in_todays_order() -> None:
-    sites = [(step.name, step.group, step.order) for step in masters.STEPS]
+    sites = [(step.name, step.group) for step in masters.STEPS]
     assert sites == [
-        ("master wake", "masters", 10),
-        ("retire idle master", "masters", 20),
-        ("master stall", "masters", 30),
-        ("prompt stall", "masters", 40),
-        ("master down", "master seats", 10),
-        ("tick master", "master seats", 20),
-        ("master scale", "master seats", 30),
-        ("seat alarm", "master seats", 40),
-        ("dispatch seat", "dispatch seat", 10),
-        ("night watch", "master watch", 10),
-        ("master alarm", "master watch", 20),
+        ("master wake", "masters"),
+        ("retire idle master", "masters"),
+        ("master stall", "masters"),
+        ("prompt stall", "masters"),
+        ("master down", "master seats"),
+        ("tick master", "master seats"),
+        ("master scale", "master seats"),
+        ("seat alarm", "master seats"),
+        ("dispatch seat", "dispatch seat"),
+        ("night watch", "master watch"),
+        ("master alarm", "master watch"),
     ]
     registered = [step.name for wave in registry.waves() for step in wave]
     assert all(step.name in registered for step in masters.STEPS)

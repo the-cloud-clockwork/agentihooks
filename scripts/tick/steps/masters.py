@@ -206,17 +206,17 @@ def _master_alarm(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
-    CallStep("master wake", MASTERS, 10, _held(_master_wake)),
-    CallStep("retire idle master", MASTERS, 20, _held(_retire_idle_master)),
-    CallStep("master stall", MASTERS, 30, _held(_master_stall)),
-    CallStep("prompt stall", MASTERS, 40, _held(_prompt_stall)),
-    CallStep("master down", SEATS, 10, _held(_master_down)),
-    CallStep("tick master", SEATS, 20, _held(_tick_master)),
-    CallStep("master scale", SEATS, 30, _held(_master_scale)),
-    CallStep("seat alarm", SEATS, 40, _held(_seat_alarm)),
-    CallStep("dispatch seat", DISPATCH, 10, _held(_dispatch_seat)),
-    CallStep("night watch", WATCH, 10, _held(_night_watch)),
-    CallStep("master alarm", WATCH, 20, _held(_master_alarm)),
+    CallStep("master wake", MASTERS, _held(_master_wake)),
+    CallStep("retire idle master", MASTERS, _held(_retire_idle_master)),
+    CallStep("master stall", MASTERS, _held(_master_stall)),
+    CallStep("prompt stall", MASTERS, _held(_prompt_stall)),
+    CallStep("master down", SEATS, _held(_master_down)),
+    CallStep("tick master", SEATS, _held(_tick_master)),
+    CallStep("master scale", SEATS, _held(_master_scale)),
+    CallStep("seat alarm", SEATS, _held(_seat_alarm)),
+    CallStep("dispatch seat", DISPATCH, _held(_dispatch_seat)),
+    CallStep("night watch", WATCH, _held(_night_watch)),
+    CallStep("master alarm", WATCH, _held(_master_alarm)),
 )
 
 for _step in STEPS:

@@ -10,7 +10,7 @@ from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, budgets, place, tasks
+from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, actions, actions_of, budgets, place, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -118,7 +118,13 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
         "preempt",
         "spawn",
     ]
-    assert [step.order for step in place.STEPS] == [10, 20, 10, 20, 30, 40]
+    declared = {step.name: (step.needs, step.reads, step.writes - {actions_of(step.name)}) for step in place.STEPS}
+    assert declared["preempt"] == (frozenset({"reap"}), frozenset({AGENTS}), frozenset({AGENTS}))
+    assert declared["spawn"] == (budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), frozenset({AGENTS, TASKS}))
+    assert {name: value for name, value in declared.items() if name not in {"preempt", "spawn"}} == {
+        name: (frozenset(), frozenset(), frozenset())
+        for name in ("collect acks", "codex hook order", "rank pass", "bottleneck remedy")
+    }
     registered = [step for wave in registry.waves() for step in wave]
     for step in place.STEPS:
         assert step in registered

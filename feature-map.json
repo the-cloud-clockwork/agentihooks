@@ -72,6 +72,21 @@
       ]
     },
     {
+      "id": "swarm-tick-declared-edges",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
+      "behaviour": "Tick steps carry no hand written order: each declares its needs, reads and writes, the registry waves keep reap before the orphan reopen before spawn, preempt after reap and settle last, every group still runs in today's order, and the reap, reopen and spawn, drained to running and settle last scenarios hold through the tick core.",
+      "seam": "scripts.tick.registry.waves and ordered, scripts.tick.engine.group_steps and scripts.swarm.tick.tick with fake Redis, ledger and runtime",
+      "tests": [
+        "tests/swarm/tick_scenarios/test_declared_edges.py::test_registry_waves_reproduce_todays_constraints",
+        "tests/swarm/tick_scenarios/test_declared_edges.py::test_every_group_runs_in_todays_order_from_needs_and_registration",
+        "tests/swarm/tick_scenarios/test_declared_edges.py::test_the_steps_on_each_edge_declare_what_they_read_and_write",
+        "tests/swarm/tick_scenarios/test_declared_edges.py::test_a_reaped_or_orphaned_task_is_reopened_then_spawned_in_one_pass",
+        "tests/swarm/tick_scenarios/test_declared_edges.py::test_a_drained_swarm_with_new_work_runs_again_before_the_spawn_check",
+        "tests/swarm/tick_scenarios/test_declared_edges.py::test_settle_runs_last_and_drains_only_a_pass_with_nothing_left_to_spawn"
+      ]
+    },
+    {
       "id": "swarm-tick-no-shared-rows",
       "origin": "plan",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",

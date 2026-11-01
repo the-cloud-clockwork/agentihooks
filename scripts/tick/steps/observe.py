@@ -32,20 +32,20 @@ def raise_held(box: dict[str, Any]) -> None:
 
 
 STEPS = (
-    CallStep("config load", "start", 10, partial(_run, lambda tick: tick.step_config_load)),
-    CallStep("stopped branch", "start", 20, partial(_run, lambda tick: tick.step_stopped_branch)),
-    CallStep("pane evidence", "observe", 10, partial(_run, lambda tick: tick.step_pane_evidence)),
-    CallStep("execution reconcile", "observe", 20, partial(_run, lambda tick: tick.step_execution_reconcile)),
-    CallStep("master move fail over", "observe", 30, partial(_run, lambda tick: tick.step_master_move_fail_over)),
-    CallStep("recover master", "observe", 40, partial(_run, lambda tick: tick.step_recover_master)),
-    CallStep("ledger state", "observe", 50, partial(_run, lambda tick: tick.step_ledger_state)),
-    CallStep("automated cleanup", "observe", 60, partial(_run, lambda tick: tick.step_automated_cleanup)),
-    CallStep("spawn due", "observe", 70, partial(_run, lambda tick: tick.step_spawn_due)),
-    CallStep("exits sweep", "observe", 80, partial(_run, lambda tick: tick.step_exits_sweep)),
-    CallStep("master start watch", "observe", 90, partial(_run, lambda tick: tick.step_master_start_watch)),
-    CallStep("launch checks", "observe", 100, partial(_run, lambda tick: tick.step_launch_checks)),
-    CallStep("track outages", "observe", 110, partial(_run, lambda tick: tick.step_track_outages)),
-    CallStep("verify", "observe", 120, partial(_run, lambda tick: tick.step_verify)),
+    CallStep("config load", "start", partial(_run, lambda tick: tick.step_config_load)),
+    CallStep("stopped branch", "start", partial(_run, lambda tick: tick.step_stopped_branch)),
+    CallStep("pane evidence", "observe", partial(_run, lambda tick: tick.step_pane_evidence)),
+    CallStep("execution reconcile", "observe", partial(_run, lambda tick: tick.step_execution_reconcile)),
+    CallStep("master move fail over", "observe", partial(_run, lambda tick: tick.step_master_move_fail_over)),
+    CallStep("recover master", "observe", partial(_run, lambda tick: tick.step_recover_master)),
+    CallStep("ledger state", "observe", partial(_run, lambda tick: tick.step_ledger_state)),
+    CallStep("automated cleanup", "observe", partial(_run, lambda tick: tick.step_automated_cleanup)),
+    CallStep("spawn due", "observe", partial(_run, lambda tick: tick.step_spawn_due)),
+    CallStep("exits sweep", "observe", partial(_run, lambda tick: tick.step_exits_sweep)),
+    CallStep("master start watch", "observe", partial(_run, lambda tick: tick.step_master_start_watch)),
+    CallStep("launch checks", "observe", partial(_run, lambda tick: tick.step_launch_checks)),
+    CallStep("track outages", "observe", partial(_run, lambda tick: tick.step_track_outages)),
+    CallStep("verify", "observe", partial(_run, lambda tick: tick.step_verify)),
 )
 
 list(map(registry.register, STEPS))

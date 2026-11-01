@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from scripts.tick import registry
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep
 
 __all__ = ["CLOSE", "RAISED", "STEPS", "TASK_PASSES", "held", "raise_held"]
 
@@ -71,13 +71,15 @@ def _close_space(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
-    CallStep("run window", TASK_PASSES, 10, held(_run_window)),
-    CallStep("verification notices", TASK_PASSES, 20, held(_verification_notices)),
-    CallStep("size pass", TASK_PASSES, 30, held(_size_pass)),
-    CallStep("grouping release", TASK_PASSES, 40, held(_grouping_release)),
-    CallStep("dispatcher group", TASK_PASSES, 50, held(_dispatcher_group)),
-    CallStep("settle", CLOSE, 200, held(_settle)),
-    CallStep("close space", CLOSE, 210, held(_close_space)),
+    CallStep("run window", TASK_PASSES, held(_run_window)),
+    CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
+    CallStep("size pass", TASK_PASSES, held(_size_pass)),
+    CallStep("grouping release", TASK_PASSES, held(_grouping_release)),
+    CallStep("dispatcher group", TASK_PASSES, held(_dispatcher_group)),
+    CallStep(
+        "settle", CLOSE, held(_settle), frozenset({"spawn"}), frozenset({AGENTS, TASKS, SWARM}), frozenset({SWARM})
+    ),
+    CallStep("close space", CLOSE, held(_close_space)),
 )
 
 for _step in STEPS:

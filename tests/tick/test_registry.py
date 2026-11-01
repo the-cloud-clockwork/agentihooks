@@ -10,9 +10,9 @@ class SampleStep:
     name: str
     needs: frozenset[str] = frozenset()
     writes: frozenset[str] = frozenset()
+    reads: frozenset[str] = frozenset()
     lane: str = "local"
     group: str = "observe"
-    order: int = 0
     budget_s: float = 1.0
     interval_s: float = 0.0
 
@@ -30,16 +30,72 @@ def test_empty_registry() -> None:
     assert subject.waves() == ()
 
 
-def test_waves_preserve_order_and_dependency_barriers() -> None:
+def test_waves_keep_registration_order_and_dependency_barriers() -> None:
     subject = registry().Registry()
-    first = SampleStep("first", order=2)
-    second = SampleStep("second", order=1)
+    first = SampleStep("first")
+    second = SampleStep("second")
     third = SampleStep("third", frozenset({"first"}))
     fourth = SampleStep("fourth", frozenset({"second", "third"}))
     for step in (first, second, third, fourth):
         subject.register(step)
-    assert subject.waves() == ((second, first), (third,), (fourth,))
-    assert subject.waves() == ((second, first), (third,), (fourth,))
+    assert subject.waves() == ((first, second), (third,), (fourth,))
+    assert subject.waves() == ((first, second), (third,), (fourth,))
+    assert subject.steps() == (first, second, third, fourth)
+
+
+def test_a_step_has_no_order_field() -> None:
+    step_module = import_module("scripts.tick.step")
+    assert "order" not in step_module.Step.__dict__
+    assert "reads" in step_module.Step.__dict__
+
+
+def test_unordered_reader_and_writer_refused() -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", writes=frozenset({"tasks"})))
+    subject.register(SampleStep("b", reads=frozenset({"tasks", "agents"})))
+    with pytest.raises(ValueError) as error:
+        subject.validate()
+    assert str(error.value) == "Unordered reader and writer in lane local for tasks: a, b"
+
+
+def test_a_writer_read_first_is_refused_in_either_position() -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", reads=frozenset({"swarm"})))
+    subject.register(SampleStep("b", writes=frozenset({"swarm"})))
+    with pytest.raises(ValueError) as error:
+        subject.steps()
+    assert str(error.value) == "Unordered reader and writer in lane local for swarm: a, b"
+
+
+def test_ordered_reader_and_writer_or_other_lanes_accepted() -> None:
+    subject = registry().Registry()
+    writer = SampleStep("a", writes=frozenset({"tasks"}))
+    reader = SampleStep("b", frozenset({"a"}), reads=frozenset({"tasks"}))
+    remote = SampleStep("c", reads=frozenset({"tasks"}), lane="remote")
+    for step in (writer, reader, remote):
+        subject.register(step)
+    assert subject.waves() == ((writer, remote), (reader,))
+
+
+def test_ordered_puts_each_step_after_the_steps_it_needs() -> None:
+    late = SampleStep("late", frozenset({"early", "elsewhere"}))
+    early = SampleStep("early")
+    free = SampleStep("free")
+    assert registry().ordered([late, early, free]) == (early, late, free)
+    assert registry().ordered([free, early]) == (free, early)
+    assert registry().ordered([]) == ()
+
+
+def test_ordered_refuses_a_cycle() -> None:
+    a, b = SampleStep("a", frozenset({"b"})), SampleStep("b", frozenset({"a"}))
+    with pytest.raises(ValueError) as error:
+        registry().ordered([a, b, SampleStep("c")])
+    assert str(error.value) == "Dependency cycle: a, b"
+
+
+def test_module_steps_reads_the_shared_registry() -> None:
+    module = registry()
+    assert module.steps() == module.registry.steps()
 
 
 def test_equal_orders_keep_registration_order() -> None:

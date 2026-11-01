@@ -108,26 +108,26 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
 
 
 def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert [(step.name, step.group, step.order) for step in host.STEPS] == [
-        ("inbox relay", "wrapper probes", 10),
-        ("launch slots", "wrapper probes", 20),
-        ("outage probes", "wrapper probes", 30),
-        ("hive ledger", "wrapper probes", 40),
-        ("ledger health", "wrapper probes", 50),
-        ("host pressure", "wrapper health", 10),
-        ("ledger watchdog", "wrapper health", 20),
-        ("ledger probe", "wrapper health", 30),
-        ("prompt backlog", "wrapper health", 40),
-        ("command runner", "wrapper commands", 10),
-        ("urgent hold", "wrapper phases", 10),
-        ("planning and phase pass", "wrapper phases", 20),
-        ("refresh job", "wrapper refresh", 10),
-        ("intent check", "wrapper intent", 10),
-        ("reboot pass", "wrapper reboot", 10),
-        ("tick call", "wrapper reboot", 20),
-        ("outbox migration", "wrapper relay", 10),
-        ("page relay", "wrapper relay", 20),
-        ("tick view", "wrapper view", 10),
+    assert [(step.name, step.group) for step in host.STEPS] == [
+        ("inbox relay", "wrapper probes"),
+        ("launch slots", "wrapper probes"),
+        ("outage probes", "wrapper probes"),
+        ("hive ledger", "wrapper probes"),
+        ("ledger health", "wrapper probes"),
+        ("host pressure", "wrapper health"),
+        ("ledger watchdog", "wrapper health"),
+        ("ledger probe", "wrapper health"),
+        ("prompt backlog", "wrapper health"),
+        ("command runner", "wrapper commands"),
+        ("urgent hold", "wrapper phases"),
+        ("planning and phase pass", "wrapper phases"),
+        ("refresh job", "wrapper refresh"),
+        ("intent check", "wrapper intent"),
+        ("reboot pass", "wrapper reboot"),
+        ("tick call", "wrapper reboot"),
+        ("outbox migration", "wrapper relay"),
+        ("page relay", "wrapper relay"),
+        ("tick view", "wrapper view"),
     ]
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:

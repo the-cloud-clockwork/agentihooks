@@ -106,26 +106,26 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
 
 
 def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert [(step.name, step.group, step.order) for step in report.STEPS] == [
-        ("ledger event pass", "wrapper events", 10),
-        ("done recheck", "wrapper events", 20),
-        ("progress checks", "wrapper events", 30),
-        ("waits end", "wrapper events", 40),
-        ("merge pass", "wrapper events", 50),
-        ("stall watch", "wrapper events", 60),
-        ("overrun pass", "wrapper events", 70),
-        ("quiet pass", "wrapper events", 80),
-        ("doc report", "wrapper events", 90),
-        ("priorities sweep", "wrapper events", 100),
-        ("health findings", "wrapper events", 110),
-        ("findings pass", "wrapper events", 120),
-        ("metrics record", "wrapper metrics", 10),
-        ("bottleneck status", "wrapper metrics", 20),
-        ("inbox wake", "wrapper metrics", 30),
-        ("snapshot job", "wrapper metrics", 40),
-        ("last tick", "wrapper metrics", 50),
-        ("heartbeat", "after", 10),
-        ("status publish", "wrapper status", 10),
+    assert [(step.name, step.group) for step in report.STEPS] == [
+        ("ledger event pass", "wrapper events"),
+        ("done recheck", "wrapper events"),
+        ("progress checks", "wrapper events"),
+        ("waits end", "wrapper events"),
+        ("merge pass", "wrapper events"),
+        ("stall watch", "wrapper events"),
+        ("overrun pass", "wrapper events"),
+        ("quiet pass", "wrapper events"),
+        ("doc report", "wrapper events"),
+        ("priorities sweep", "wrapper events"),
+        ("health findings", "wrapper events"),
+        ("findings pass", "wrapper events"),
+        ("metrics record", "wrapper metrics"),
+        ("bottleneck status", "wrapper metrics"),
+        ("inbox wake", "wrapper metrics"),
+        ("snapshot job", "wrapper metrics"),
+        ("last tick", "wrapper metrics"),
+        ("heartbeat", "after"),
+        ("status publish", "wrapper status"),
     ]
     registered = [step for wave in registry.waves() for step in wave]
     for step in report.STEPS:
@@ -197,7 +197,7 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
         ("skip", bottleneck_status.refresh, "sw", store, 7),
         ("skip", wake.maintenance, "inbox", "sw", AGENTS, 7, ("window", True)),
         ("call", snapshot_job.start, store, "sw", 7, os.environ),
-        ("set", "sw/last-tick", 7),
+        ("set", "sw/last-tick"),
     ]
     assert box == {"found": ["f"], "started": ["ran 4"]}
 
@@ -210,7 +210,7 @@ def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
         "metrics record": frozenset({"health findings"}),
     }
     assert {step.needs for step in host.STEPS} == {frozenset()}
-    assert CallStep("x", "g", 1, host.held(lambda cli, get: None)).needs == frozenset()
+    assert CallStep("x", "g", host.held(lambda cli, get: None)).needs == frozenset()
 
 
 def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:

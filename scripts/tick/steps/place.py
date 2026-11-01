@@ -8,14 +8,16 @@ import scripts.tick.steps.agents  # noqa: F401
 import scripts.tick.steps.observe  # noqa: F401
 import scripts.tick.steps.report  # noqa: F401
 from scripts.tick import registry
-from scripts.tick.steps import CallStep, budgets
+from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets
 from scripts.tick.steps.tasks import held
 
-__all__ = ["ACKS", "PLACEMENT", "STEPS"]
+__all__ = ["ACKS", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
 
 Get = Callable[[str], Any]
 ACKS = "placement acks"
 PLACEMENT = "placement"
+PREEMPT_NEEDS = frozenset({"reap"})
+PLACED = frozenset({AGENTS, TASKS})
 
 
 def _spawn_args(get: Get) -> tuple[Any, ...]:
@@ -70,12 +72,12 @@ def _spawn(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
-    CallStep("collect acks", ACKS, 10, held(_collect_acks)),
-    CallStep("codex hook order", ACKS, 20, held(_codex_hook_order)),
-    CallStep("rank pass", PLACEMENT, 10, held(_rank_pass)),
-    CallStep("bottleneck remedy", PLACEMENT, 20, held(_bottleneck_remedy)),
-    CallStep("preempt", PLACEMENT, 30, held(_preempt)),
-    CallStep("spawn", PLACEMENT, 40, held(_spawn), budgets.SPAWN_NEEDS),
+    CallStep("collect acks", ACKS, held(_collect_acks)),
+    CallStep("codex hook order", ACKS, held(_codex_hook_order)),
+    CallStep("rank pass", PLACEMENT, held(_rank_pass)),
+    CallStep("bottleneck remedy", PLACEMENT, held(_bottleneck_remedy)),
+    CallStep("preempt", PLACEMENT, held(_preempt), PREEMPT_NEEDS, frozenset({AGENTS}), frozenset({AGENTS})),
+    CallStep("spawn", PLACEMENT, held(_spawn), budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), PLACED),
 )
 
 for _step in STEPS:
