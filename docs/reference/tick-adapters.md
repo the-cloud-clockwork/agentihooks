@@ -225,12 +225,11 @@ def agent(name):
 port = RouterRuntime(routed(os.environ).router, agent)
 deadline = Deadline.after(5.0)
 port.inspect("eng-1", deadline=deadline)
-port.launch({"config": config, "lane": "eng", "name": "eng-2", "task": {"id": "t1"}}, deadline=deadline)
+request = {"config": store.config(slug), "lane": "eng", "name": "eng-2", "task": {"id": "t1"}}
+port.launch(request, deadline=deadline)
 port.stop("eng-1", deadline=deadline)
 port.panes(deadline=deadline)
 ```
-
-`config` stands for the swarm configuration the tick already holds for its spawns.
 
 | Operation | Router or herdr call | Returns |
 |---|---|---|
