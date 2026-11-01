@@ -432,15 +432,15 @@ def test_github_open_changes_reads_one_page_when_no_next_page(monkeypatch: pytes
     assert len(recorder.calls) == 1
 
 
-def test_github_open_changes_stops_after_two_hundred_pull_requests(
+def test_github_open_changes_stops_after_two_hundred_pull_requests_in_pages_of_twenty_five(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    pages: list[object] = [_open_page([f"u{n}"], [], f"c{n}") for n in range(3)]
+    pages: list[object] = [_open_page([f"u{n}"], [], f"c{n}") for n in range(9)]
     provider, recorder = _provider(monkeypatch, tmp_path, pages)
 
-    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()), port.OpenChange("u1", ()))
-    assert len(recorder.calls) == 2
-    assert "pullRequests(states: OPEN, first: 100, after: $after)" in github._OPEN
+    assert provider.open_changes(deadline=_deadline()) == tuple(port.OpenChange(f"u{n}", ()) for n in range(8))
+    assert len(recorder.calls) == 8
+    assert "pullRequests(states: OPEN, first: 25, after: $after)" in github._OPEN
 
 
 @pytest.mark.parametrize("enabled", [True, False])
