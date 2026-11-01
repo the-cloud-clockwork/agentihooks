@@ -110,8 +110,7 @@ def calm(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
 
 def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert (place.DUE, place.ACKS, place.PLACEMENT) == ("due placement", "placement acks", "placement")
-    assert [step.name for step in engine.group_steps(place.DUE)] == ["due spawn"]
+    assert (place.ACKS, place.PLACEMENT) == ("placement acks", "placement")
     assert [step.name for step in engine.group_steps(place.ACKS)] == ["collect acks", "codex hook order"]
     assert [step.name for step in engine.group_steps(place.PLACEMENT)] == [
         "rank pass",
@@ -119,24 +118,11 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
         "preempt",
         "spawn",
     ]
-    assert [step.order for step in place.STEPS] == [10, 10, 20, 10, 20, 30, 40]
+    assert [step.order for step in place.STEPS] == [10, 20, 10, 20, 30, 40]
     registered = [step for wave in registry.waves() for step in wave]
     for step in place.STEPS:
         assert step in registered
         assert (step.lane, step.budget_s) == (CallStep.lane, CallStep.budget_s)
-
-
-def test_the_due_spawn_places_under_the_placing_lock_and_pass(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    state = _pass(calm)
-    found = _run(place.DUE, _tick(calm), state, monkeypatch)
-    assert found == ["ran spawn"]
-    assert calm == [
-        "enter placing",
-        ("enter pass", "runtime"),
-        ("spawn", "sw", state["config"], state["store"], "ledger", "runtime", "rows", "doc", 7),
-        ("leave pass", "runtime"),
-        "leave placing",
-    ]
 
 
 def test_collect_acks_then_the_codex_hook_order_while_awake(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:

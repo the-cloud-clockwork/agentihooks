@@ -8,10 +8,9 @@ from scripts.tick import registry
 from scripts.tick.steps import CallStep
 from scripts.tick.steps.tasks import held
 
-__all__ = ["ACKS", "DUE", "PLACEMENT", "STEPS"]
+__all__ = ["ACKS", "PLACEMENT", "STEPS"]
 
 Get = Callable[[str], Any]
-DUE = "due placement"
 ACKS = "placement acks"
 PLACEMENT = "placement"
 
@@ -19,11 +18,6 @@ PLACEMENT = "placement"
 def _spawn_args(get: Get) -> tuple[Any, ...]:
     keys = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
     return tuple(get(key) for key in keys)
-
-
-def _due_spawn(tick: Any, get: Get) -> Any:
-    with tick.PLACING, tick._placement_pass(get("runtime")):
-        return tick.skip_refused(tick._spawn, *_spawn_args(get))
 
 
 def _collect_acks(tick: Any, get: Get) -> Any:
@@ -73,7 +67,6 @@ def _spawn(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
-    CallStep("due spawn", DUE, 10, held(_due_spawn)),
     CallStep("collect acks", ACKS, 10, held(_collect_acks)),
     CallStep("codex hook order", ACKS, 20, held(_codex_hook_order)),
     CallStep("rank pass", PLACEMENT, 10, held(_rank_pass)),

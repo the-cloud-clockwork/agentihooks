@@ -13,7 +13,7 @@ from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import PASS
+from scripts.tick.steps import PASS, observe
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -79,16 +79,28 @@ def test_each_group_reads_its_pass_state_under_the_group_budget(
     seen = _spy(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     views = dict(seen)
-    assert views["start"].view.read(PASS, "slug") is None
-    for name in ("agents", "tasks", "close"):
+    assert views["place"].view.read(PASS, "slug") is None
+    for name in ("start", "observe", "agents", "tasks", "close"):
         assert views[name].view.read(PASS, "slug") == "sw"
         assert views[name].view.read(PASS, "now_ms") == 1_000
         assert views[name].view.read(PASS, "store") is store
         assert views[name].view.read(Domain("tasks"), "slug") is None
+    for name in ("agents", "tasks", "close"):
+        config: Any = views[name].view.read(PASS, "config")
+        rows: Any = views[name].view.read(PASS, "rows")
+        assert config.state == "running"
+        assert set(rows) == {"t1"}
     for _, ctx in seen:
         assert ctx.view.read(Domain("tasks"), "t1") is None
         assert ctx.deadline.expires_at - monotonic() == pytest.approx(tick_module.GROUP_BUDGET_S, abs=5.0)
     assert tick_module.GROUP_BUDGET_S == 600.0
+
+
+def test_a_pass_view_answers_only_pass_state_keys_it_holds() -> None:
+    view = tick_module._PassView({"slug": "sw"})
+    assert view.read(PASS, "slug") == "sw"
+    assert view.read(PASS, "now_ms") is None
+    assert view.read(Domain("tasks"), "slug") is None
 
 
 def test_a_stopped_swarm_runs_only_the_start_group(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
@@ -101,6 +113,8 @@ def test_a_stopped_swarm_runs_only_the_start_group(store: RedisStore, monkeypatc
 def test_a_registered_step_runs_in_its_tick_group(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     monkeypatch.setattr(registry, "registry", registry.Registry())
     ran: list[str] = []
+    for step in observe.STEPS:
+        registry.register(step)
     registry.register(_Marker("agents", ran))
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert ran == ["agents"]
