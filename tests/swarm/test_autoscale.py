@@ -1,6 +1,8 @@
 import pytest
 
-from scripts.swarm.autoscale import calculate
+from scripts.swarm.autoscale import Decision, calculate
+
+MINUTE = 60_000
 
 
 @pytest.mark.feature("swarm-autoscale")
@@ -12,8 +14,8 @@ def test_more_accounts_raise_the_ceiling_only_on_the_third_tick():
         "reason": "",
     }
     decisions = []
-    for _ in range(3):
-        previous = calculate(live, {"claude": 4, "codex": 2}, 10, {"eng": 100}, previous)
+    for n in range(3):
+        previous = calculate(live, {"claude": 4, "codex": 2}, 10, {"eng": 100}, previous, n * MINUTE)
         decisions.append(previous)
     assert [d["ceilings"] for d in decisions] == [
         {"plan": 0, "ci": 0, "eng": 4},
@@ -21,9 +23,9 @@ def test_more_accounts_raise_the_ceiling_only_on_the_third_tick():
         {"plan": 0, "ci": 0, "eng": 6},
     ]
     assert [d["pending_raise"] for d in decisions] == [
-        {"target": 8, "ticks": 1},
-        {"target": 8, "ticks": 2},
-        {"target": 8, "ticks": 3},
+        {"target": 8, "ticks": 1, "since": 0},
+        {"target": 8, "ticks": 2, "since": 0},
+        {"target": 8, "ticks": 3, "since": 0},
     ]
 
 
@@ -62,8 +64,8 @@ def test_reason_names_quota_seats_host_room_and_the_held_raise():
 def test_a_raise_climbs_two_seats_each_tick_after_three_ticks_then_clears():
     previous = None
     decisions = []
-    for _ in range(6):
-        previous = calculate({"eng": 2}, {"claude": 8}, 20, {"eng": 100}, previous)
+    for n in range(6):
+        previous = calculate({"eng": 2}, {"claude": 8}, 20, {"eng": 100}, previous, n * MINUTE)
         decisions.append(previous)
     assert [sum(d["ceilings"].values()) for d in decisions] == [3, 3, 5, 7, 9, 10]
     assert [d["pending_raise"]["ticks"] for d in decisions] == [1, 2, 3, 3, 3, 0]
@@ -84,8 +86,8 @@ def test_a_quota_reset_waits_three_ticks_after_an_immediate_drain():
     assert drained["reason"] == "Quota seats 0 (claude 0, codex 0); host room 20; ceiling 4 of 4."
     decisions = []
     previous = drained
-    for _ in range(3):
-        previous = calculate(live, {"claude": 2, "codex": 0}, 20, {"eng": 100}, previous)
+    for n in range(3):
+        previous = calculate(live, {"claude": 2, "codex": 0}, 20, {"eng": 100}, previous, n * MINUTE)
         decisions.append(previous)
     assert [d["ceilings"] for d in decisions] == [
         {"plan": 1, "ci": 1, "eng": 3},
@@ -111,14 +113,14 @@ def test_host_room_caps_the_target_and_applies_a_lower_ceiling_at_once():
 
 def test_a_changed_target_keeps_counting_until_the_raise_is_interrupted():
     previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100})
-    previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100}, previous)
-    changed = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, previous)
+    previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100}, previous, MINUTE)
+    changed = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, previous, 2 * MINUTE)
     assert changed["ceilings"] == {"plan": 0, "ci": 0, "eng": 5}
-    assert changed["pending_raise"] == {"target": 9, "ticks": 3}
-    interrupted = calculate({"eng": 2}, {"claude": 0}, 10, {"eng": 100}, changed)
+    assert changed["pending_raise"] == {"target": 9, "ticks": 3, "since": 0}
+    interrupted = calculate({"eng": 2}, {"claude": 0}, 10, {"eng": 100}, changed, 3 * MINUTE)
     assert interrupted["pending_raise"] == {"target": None, "ticks": 0}
-    restarted = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, interrupted)
-    assert restarted["pending_raise"] == {"target": 9, "ticks": 1}
+    restarted = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, interrupted, 4 * MINUTE)
+    assert restarted["pending_raise"] == {"target": 9, "ticks": 1, "since": 4 * MINUTE}
 
 
 def test_unused_seats_stay_unallocated_after_all_ready_demand_is_met():
@@ -216,7 +218,7 @@ def test_new_ready_work_gets_a_seat_while_a_capacity_raise_is_held():
         {"ceilings": {"eng": 1, "ci": 3, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}},
     )
     assert decision["ceilings"] == {"eng": 2, "ci": 3, "plan": 0}
-    assert decision["pending_raise"] == {"target": 18, "ticks": 1}
+    assert decision["pending_raise"] == {"target": 18, "ticks": 1, "since": 0}
 
 
 def test_a_raise_whose_target_grows_each_tick_still_lifts_the_ceiling_on_the_third_tick():
@@ -227,13 +229,34 @@ def test_a_raise_whose_target_grows_each_tick_still_lifts_the_ceiling_on_the_thi
         "reason": "",
     }
     decisions = []
-    for room in (15, 20, 25, 30):
-        previous = calculate(live, {"claude": 23, "codex": 10}, room, {"eng": 5}, previous)
+    for n, room in enumerate((15, 20, 25, 30)):
+        previous = calculate(live, {"claude": 23, "codex": 10}, room, {"eng": 5}, previous, n * MINUTE)
         decisions.append(previous)
     assert [d["pending_raise"] for d in decisions] == [
-        {"target": 22, "ticks": 1},
-        {"target": 27, "ticks": 2},
-        {"target": 32, "ticks": 3},
-        {"target": 37, "ticks": 3},
+        {"target": 22, "ticks": 1, "since": 0},
+        {"target": 27, "ticks": 2, "since": 0},
+        {"target": 32, "ticks": 3, "since": 0},
+        {"target": 37, "ticks": 3, "since": 0},
     ]
     assert [sum(d["ceilings"].values()) for d in decisions] == [9, 9, 11, 12]
+
+
+def test_a_raise_at_a_three_minute_pass_lifts_on_the_second_pass():
+    previous = None
+    decisions = []
+    for n in range(3):
+        previous = calculate({"eng": 2}, {"claude": 8}, 20, {"eng": 100}, previous, n * 3 * MINUTE)
+        decisions.append(previous)
+    assert [sum(d["ceilings"].values()) for d in decisions] == [3, 5, 7]
+    assert decisions[1]["reason"].endswith("raise held by the two seat per tick limit.")
+
+
+def test_a_pending_raise_older_code_stored_keeps_its_counted_passes():
+    previous: Decision = {
+        "ceilings": {"plan": 0, "ci": 0, "eng": 3},
+        "pending_raise": {"target": 10, "ticks": 1},
+        "reason": "",
+    }
+    decision = calculate({"eng": 2}, {"claude": 8}, 20, {"eng": 100}, previous, 10 * MINUTE)
+    assert decision["pending_raise"] == {"target": 10, "ticks": 2, "since": 9 * MINUTE}
+    assert decision["reason"].endswith("raise held at tick 2 of 3.")

@@ -1357,7 +1357,7 @@ def test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened(st
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert runtime.nudged == []
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
 
@@ -1578,7 +1578,7 @@ def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store, state):
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert runtime.killed == ["engineer@a1b2c3-0001"]
     assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
 

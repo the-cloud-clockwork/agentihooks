@@ -679,9 +679,17 @@ def test_three_fresh_reports_naming_one_share_trigger_and_a_repeat_counts_once(n
         report_at(store, named, NOW - (3 - n) * MINUTE)
         assert dispatch_seat.uncovered(store, SLUG, NOW) == []
     assert dispatch_seat.uncovered(store, SLUG, NOW) == []
-    assert streak_of(store) == {"named": named, "ticks": 2, "at": NOW - 2 * MINUTE}
+    assert streak_of(store) == {"named": named, "ticks": 2, "at": NOW - 2 * MINUTE, "since": NOW - 3 * MINUTE}
     report_at(store, named, NOW - MINUTE)
     assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [3]
+
+
+def test_reports_three_minutes_apart_trigger_on_the_second_report():
+    store = swarm()
+    report_at(store, "review", NOW - 4 * MINUTE)
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    report_at(store, "review", NOW - MINUTE)
+    assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [2]
 
 
 def test_another_share_restarts_the_streak_and_a_read_only_call_writes_nothing():
@@ -690,9 +698,9 @@ def test_another_share_restarts_the_streak_and_a_read_only_call_writes_nothing()
     dispatch_seat.uncovered(store, SLUG, NOW)
     report_at(store, "ci", NOW - MINUTE)
     dispatch_seat.uncovered(store, SLUG, NOW, write=False)
-    assert streak_of(store) == {"named": "review", "ticks": 1, "at": NOW - 2 * MINUTE}
+    assert streak_of(store) == {"named": "review", "ticks": 1, "at": NOW - 2 * MINUTE, "since": NOW - 2 * MINUTE}
     dispatch_seat.uncovered(store, SLUG, NOW)
-    assert streak_of(store) == {"named": "ci", "ticks": 1, "at": NOW - MINUTE}
+    assert streak_of(store) == {"named": "ci", "ticks": 1, "at": NOW - MINUTE, "since": NOW - MINUTE}
 
 
 def test_no_report_leaves_the_streak_unwritten():

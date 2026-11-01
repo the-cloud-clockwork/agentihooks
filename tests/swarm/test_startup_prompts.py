@@ -63,7 +63,7 @@ def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
     for n in range(1, 5):
         beat(store.redis, "prompt-proof", agent.name, "working", n)
         agent = store.agents("prompt-proof")[0]
-        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, n)
+        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, n * 60_000)
         report = status_report(store, "prompt-proof", ledger.state("prompt-proof"), runtime)
         assert report["agents"][0]["status"] == "waiting"
         assert report["agents"][0]["input_ticks"] == n

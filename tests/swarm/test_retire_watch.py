@@ -25,19 +25,34 @@ def test_each_failed_tick_counts_and_keeps_the_first_time(store):
 
 
 def test_the_finding_appears_on_the_third_failed_tick(store):
-    for at in (1, 2):
+    for at in (0, 60_000):
         retire_watch.failed(store, "sw", NAME, REFUSED, at)
     assert retire_watch.findings(store, "sw") == []
-    retire_watch.failed(store, "sw", NAME, REFUSED, 3)
+    retire_watch.failed(store, "sw", NAME, REFUSED, 120_000)
     (found,) = retire_watch.findings(store, "sw")
     assert found.as_dict() == {
         "kind": "retire failed",
         "subject": NAME,
         "summary": f"{NAME} is still running after 3 retire attempts",
         "evidence": ["process 77", "refusal: survived SIGKILL: 77"],
-        "threshold": "a retire failing 3 ticks",
+        "threshold": "a retire failing for 2 minutes",
     }
     assert found.measure == 3
+
+
+def test_failures_three_minutes_apart_raise_the_finding_on_the_second(store):
+    retire_watch.failed(store, "sw", NAME, REFUSED, 0)
+    assert retire_watch.findings(store, "sw") == []
+    retire_watch.failed(store, "sw", NAME, REFUSED, 180_000)
+    assert [found.measure for found in retire_watch.findings(store, "sw")] == [2]
+
+
+def test_rapid_retries_inside_a_minute_raise_no_finding(store):
+    for at in (0, 10_000, 20_000, 30_000, 89_999):
+        retire_watch.failed(store, "sw", NAME, REFUSED, at)
+    assert retire_watch.findings(store, "sw") == []
+    retire_watch.failed(store, "sw", NAME, REFUSED, 90_000)
+    assert len(retire_watch.findings(store, "sw")) == 1
 
 
 def test_a_dropped_agent_clears_its_failures(store):
