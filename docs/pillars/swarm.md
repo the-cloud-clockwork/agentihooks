@@ -4342,6 +4342,15 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 
 ## The minute tick
 
+The scheduler cron fires the tick every minute. `AGENTIHOOKS_TICK_CADENCE`, whole
+minutes from one to five and one when unset, stretches only the slow lane: a slow
+lane step runs at the larger of its own interval and the cadence, while critical
+lane steps keep their interval. Every guard outlasts one missed slow pass, so a
+cadence is refused when twice it exceeds the 690 second delivery guard or the ten
+minute heartbeat limit, when the lease TTL drops below two cron minutes, or when
+the stale watcher's pass and slug window no longer fit inside the heartbeat limit
+less the cadence. Six minutes breaks the delivery guard and the heartbeat limit.
+
 `agentihooks swarm <id> tick-report --passes 100` reports the latest retained
 passes with per step count, median, p95 and CPU share, plus pass p95 and the
 idle gaps between consecutive passes. CPU share uses the sum of own and reaped
