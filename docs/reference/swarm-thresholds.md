@@ -99,8 +99,9 @@ idle retirement.
 Waiting on the same input prompt retains its start time. A different prompt
 starts a new interval; leaving the prompt clears that input wait.
 
-Event starts are stored separately from agent rows in Redis, with a one day
-TTL. Existing strict row readers remain compatible. Legacy idle counts,
+Idle and input event starts are stored separately from agent rows in Redis,
+with a one day TTL. Dispatch streaks and pending raises keep their start in
+their existing records. Existing strict row readers remain compatible. Legacy idle counts,
 dispatch streaks and pending raises without a start timestamp are anchored
 using the previous one minute assumption. This preserves progress but cannot
 reconstruct the historical cadence. Counts such as `idle_ticks` and
