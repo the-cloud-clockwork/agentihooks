@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from scripts.inbox import wake
 from scripts.swarm import cli, command_runner
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
@@ -131,3 +132,18 @@ def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
     with pytest.raises(RuntimeError, match="^consume failed$"):
         cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
     assert [name for name, _ in seen][-2:] == [host.COMMANDS, report.STATUS]
+
+
+def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    calls = []
+    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
+    monkeypatch.setenv(wake.WINDOW_ENV, "60")
+    monkeypatch.setattr(wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
+    monkeypatch.setattr(wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
+    cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert calls == [(9_000_000, 60_000)]

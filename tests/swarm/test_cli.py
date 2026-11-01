@@ -931,18 +931,6 @@ def test_tick_records_failed_stage_and_releases_its_lock(env, monkeypatch, capsy
     assert cli.timing.SWARM.get() is None
 
 
-def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, monkeypatch):
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    calls = []
-    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
-    monkeypatch.setenv(wake.WINDOW_ENV, "60")
-    monkeypatch.setattr(wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
-    monkeypatch.setattr(wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert calls == [(9_000_000, 60_000)]
-
-
 def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
     from scripts.swarm import grafana_alerts, langfuse, refresh_job
 
