@@ -7,11 +7,6 @@
     }
   },
   "outside_gate": {
-    "equivalence.yml/tick-equivalence": {
-      "reason": "Advisory replay compares tick golden observations on base and head and proves a dropped reap action is detected before phase B moves.",
-      "owner": "ci-5@rig-grade-swarm",
-      "expires": "2027-04-30"
-    },
     "equivalence.yml/ledger-equivalence": {
       "reason": "Replays ledger storage and pages on every pull request that touches the ledger package, its tests or this workflow; the equivalence gate task wires it into the gate.",
       "owner": "ci-1@rig-grade-swarm",
