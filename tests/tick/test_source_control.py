@@ -327,6 +327,51 @@ def test_github_issues_enabled_reads_the_repository(
     ]
 
 
+def test_github_latest_runs_read_the_newest_runs_of_the_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rows = [
+        {"id": 5, "head_branch": "feature", "event": "pull_request", "status": "queued", "name": "Tests"},
+        {"id": 6, "head_branch": "dev", "event": "push", "status": "completed", "name": "Lint"},
+    ]
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"total_count": 2, "workflow_runs": rows}])
+
+    assert provider.latest_runs(deadline=_deadline()) == (
+        port.RepositoryRun(5, "feature", "pull_request", "queued"),
+        port.RepositoryRun(6, "dev", "push", "completed"),
+    )
+    assert recorder.calls == [
+        (
+            github.CALLER,
+            ["api", "repos/owner/project/actions/runs?per_page=100"],
+            {"cwd": tmp_path, "timeout": 9, **OPTIONS},
+        )
+    ]
+
+
+@pytest.mark.parametrize("body", ["", "{}"])
+def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, body: str
+) -> None:
+    seen: list[tuple[str, list[str], dict[str, object]]] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        seen.append((caller, args, options))
+        return subprocess.CompletedProcess(["gh", *args], 0, body, "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    assert provider.cancel_run(5, deadline=_deadline()) is None
+    assert seen == [
+        (
+            github.CALLER,
+            ["api", "repos/owner/project/actions/runs/5/cancel", "-X", "POST"],
+            {"cwd": tmp_path, "timeout": 9, **OPTIONS},
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     "operation,args,answer",
     [
@@ -334,6 +379,8 @@ def test_github_issues_enabled_reads_the_repository(
         ("close_issue", (REFERENCE,), "closed"),
         ("rate_limit", (), port.RateLimit(1, 2, 3)),
         ("issues_enabled", (), True),
+        ("latest_runs", (), (port.RepositoryRun(1, "feature", "push", "queued"),)),
+        ("cancel_run", (5,), None),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(
@@ -384,6 +431,8 @@ def test_github_defaults() -> None:
         ("close_issue", (REFERENCE,)),
         ("rate_limit", ()),
         ("issues_enabled", ()),
+        ("latest_runs", ()),
+        ("cancel_run", (5,)),
     ],
 )
 def test_github_expired_deadline_prevents_external_reads(
