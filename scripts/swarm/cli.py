@@ -179,7 +179,7 @@ from scripts.swarm.store import (
     Unreachable,
     connect,
 )
-from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
+from scripts.swarm.tick import agent_status, primed, run_group, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import (
     ledger_creator,
     ledger_kinds,
@@ -363,6 +363,7 @@ def run_tick(
     doc, view = {}, None
     try:
         timing.keep()
+        run_group("before")
         if store.config(slug).state == "stopped":
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
@@ -482,6 +483,7 @@ def run_tick(
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             doc = timing.call(ledger.state, slug)
             tick_heartbeat.write(store, slug, now_ms(), doc)
+            run_group("after")
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     finally:
         try:
