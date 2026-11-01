@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.554 · 2026-11-01
+
+### 2026-11-01 · 0a840aea3e0d · #9246 · @nestorcolt
+
+**Hand the tick wrapper steps after fencing the fenced runtime**
+
+This fix closes a regression from pull request 9225: after the fencing step ran, the wrapper's pass state was still carrying the pre-fencing runtime, so later steps—ledger watchdog, ledger probe, reboot pass, and the event/metrics steps—were operating on the unfenced runtime and ledger instead of the fenced one. The change updates the pass state to take the fenced runtime with the fenced ledger, ensuring all downstream steps see consistent, properly fenced state rather than silently reverting to pre-fence data.
+
 ## v2.17.550 · 2026-11-01
 
 ### 2026-11-01 · 6b86ac25c522 · #9236 · @agenticore-app
