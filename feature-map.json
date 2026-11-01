@@ -62,6 +62,7 @@
       "tests": [
         "tests/tick/test_step_isolation.py::test_a_300_second_step_before_spawn_no_longer_delays_spawn",
         "tests/tick/test_step_isolation.py::test_a_step_that_ends_within_its_budget_is_kept_with_its_result",
+        "tests/tick/test_step_isolation.py::test_an_abandoned_step_keeps_its_wall_time_and_a_daemon_thread",
         "tests/tick/test_step_isolation.py::test_an_abandoned_record_reads_late_even_inside_its_budget",
         "tests/tick/test_step_isolation.py::test_budgets_come_from_the_p95_with_headroom_in_whole_seconds",
         "tests/tick/test_step_isolation.py::test_an_undeclared_step_is_refused",
