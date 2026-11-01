@@ -118,7 +118,9 @@ def test_pass_records_exact_clocks_active_agents_and_cap() -> None:
         patch.object(store.redis, "xadd", wraps=store.redis.xadd) as append,
         timing.pass_record(store, "sw"),
     ):
-        assert timing.PASS.get()["pass_id"] == "identity"
+        current = timing.PASS.get()
+        assert current is not None
+        assert current["pass_id"] == "identity"
     listing.assert_called_once_with("sw")
     append.assert_called_once_with(
         store.key("sw", "tick:passes"),
