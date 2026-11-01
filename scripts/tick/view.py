@@ -68,7 +68,7 @@ def reads(ledger: object) -> bool:
     return type(ledger) is LedgerClient
 
 
-def start(slug: str, service: bool = False) -> LedgerView | None:
+def start(slug: str, service: bool) -> LedgerView | None:
     """Patch the stored view of this swarm's ledger with one delta read and hold it for the rest of the pass;
     hold nothing when the ledger server refuses named parts because it predates them."""
     from scripts.scheduler import service as scheduler
