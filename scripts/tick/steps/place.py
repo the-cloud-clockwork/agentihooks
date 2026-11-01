@@ -29,7 +29,7 @@ def _due_spawn(tick: Any, get: Get) -> Any:
 
 def _collect_acks(tick: Any, get: Get) -> Any:
     keys = ("slug", "config", "store", "ledger", "runtime", "doc", "now_ms")
-    return tick.skip_refused(tick._collect_acks, *(get(key) for key in keys))
+    return tick.skip_refused(tick._collect_acks, *map(get, keys))
 
 
 def _codex_hook_order(tick: Any, get: Get) -> Any:
@@ -39,13 +39,15 @@ def _codex_hook_order(tick: Any, get: Get) -> Any:
 
 
 def _rank_pass(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms"))
-    return tick.skip_refused(tick.dispatcher.rank_pass, *args)
+    return tick.skip_refused(
+        tick.dispatcher.rank_pass, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
+    )
 
 
 def _bottleneck_remedy(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("store"), get("ledger"), get("doc"), get("now_ms"))
-    return tick.skip_refused(bottleneck_remedy.step, *args)
+    return tick.skip_refused(
+        bottleneck_remedy.step, get("slug"), get("store"), get("ledger"), get("doc"), get("now_ms")
+    )
 
 
 def _preempt(tick: Any, get: Get) -> Any:

@@ -38,13 +38,13 @@ def raise_held(box: dict[str, Any]) -> None:
 
 
 def _run_window(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms"))
-    return tick.skip_refused(tick.run_window.step, *args)
+    return tick.skip_refused(
+        tick.run_window.step, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
+    )
 
 
 def _verification_notices(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("store"), get("doc"), get("now_ms"))
-    return tick.skip_refused(claim_hold.verification_notices, *args)
+    return tick.skip_refused(claim_hold.verification_notices, get("slug"), get("store"), get("doc"), get("now_ms"))
 
 
 def _size_pass(tick: Any, get: Get) -> Any:
@@ -56,13 +56,15 @@ def _grouping_release(tick: Any, get: Get) -> Any:
 
 
 def _dispatcher_group(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms"))
-    return tick.skip_refused(tick.dispatcher.group, *args)
+    return tick.skip_refused(
+        tick.dispatcher.group, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
+    )
 
 
 def _settle(tick: Any, get: Get) -> Any:
-    args = (get("slug"), get("config"), get("store"), get("ledger"), get("rows"), get("doc"))
-    return tick.skip_refused(tick._settle, *args)
+    return tick.skip_refused(
+        tick._settle, get("slug"), get("config"), get("store"), get("ledger"), get("rows"), get("doc")
+    )
 
 
 def _close_space(tick: Any, get: Get) -> Any:
