@@ -137,8 +137,8 @@ The server answers in full (`data`) when:
 - `since` is 0 or greater than the current generation;
 - more than 256 generations (`CHANGES_KEPT` in the SQLite repository) passed
   since `since`;
-- a generation in the gap has no recorded row changes, for example an
-  imported document;
+- a generation in the gap has no recorded row changes, for example after a
+  document was imported in place of the ledger, which records none;
 - a write in the gap changed more than 5000 paths (`PATHS_KEPT` in the
   repository refresh module), so its row changes were not recorded.
 
@@ -184,4 +184,4 @@ advances with ledger writes.
   exports, events only with `_meta`, a changed root, one cached export per part
   set, request validation, and the client's `changes` call.
 - `tests/swarm/test_tick_view_start.py`: the pass starts the view once before
-  its first ledger read, and never for a stand in ledger.
+  its first ledger read, and never for a stand-in ledger.
