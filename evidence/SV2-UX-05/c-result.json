@@ -48,6 +48,7 @@
         "swarm:state:names:history:seq.4f32044a655f32e8528edea64dbfd11cba810b8790e6e6e23d28ad3a75980734",
         "swarm:state:names:revision",
         "swarm:sv2-ux-05:agents",
+        "swarm:sv2-ux-05:hosts",
         "swarm:sv2-ux-05:config",
         "swarm:sv2-ux-05:context-evidence",
         "swarm:sv2-ux-05:lease-cache",

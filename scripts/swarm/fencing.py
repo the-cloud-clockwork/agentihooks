@@ -164,8 +164,7 @@ def _port(store: Any) -> RedisRecords:
 def _migrated(store: Any, slug: str) -> RedisRecords | None:
     if state.backend() != "redis":
         return None
-    port = _port(store)
-    return port if port.layout(slug) == RECORDS else None
+    return _port(store) if RedisRecords(store.redis).layout(slug) == RECORDS else None
 
 
 def _assemble(slug: str, loaded: dict[str, dict[str, Record]]) -> dict[str, Any]:
@@ -654,8 +653,17 @@ class WholeDocumentRecords:
         return DOCUMENT
 
     def sections(self, slug: str, names: Sequence[str]) -> dict[str, dict[str, Record]]:
-        entry = _entry(_states(self.store), self.store, slug)
-        doc = _decode(entry.value)
+        states = _states(self.store)
+        entry = (
+            states.get_projection(slug)
+            if isinstance(states, RedisStateStore) and set(names) <= {"executions", BY_NAME}
+            else None
+        )
+        if entry is None:
+            entry = _entry(states, self.store, slug)
+            doc = _decode(entry.value)
+        else:
+            doc = {"executions": json.loads(entry.value)}
         if ARCHIVE in names:
             hydrate_archive(self.store, doc)
         return {name: {key: Record(entry.revision, value) for key, value in _view(doc, name).items()} for name in names}
