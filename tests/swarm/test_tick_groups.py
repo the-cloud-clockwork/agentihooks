@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from scripts.inbox import wake
-from scripts.swarm import cli, command_runner
+from scripts.swarm import cli, command_runner, controller
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
@@ -148,6 +148,20 @@ def test_the_wrapper_hands_metrics_the_action_count_and_after_the_reread_doc(
     assert isinstance(sites["wrapper metrics"].view.read(PASS, "count"), int)
     assert sites["after"].view.read(PASS, "doc") is states[-1]
     assert len(states) > 1
+
+
+def test_the_wrapper_steps_after_fencing_read_the_fenced_runtime(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+    cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    sites = dict(seen)
+    assert sites["wrapper probes"].view.read(PASS, "runtime") is rt
+    for group in ("wrapper health", "wrapper commands", "wrapper reboot", "wrapper events", "wrapper metrics"):
+        assert isinstance(sites[group].view.read(PASS, "runtime"), controller.FencedRuntime)
 
 
 def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
