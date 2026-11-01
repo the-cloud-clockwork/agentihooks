@@ -5,6 +5,10 @@ from collections import defaultdict
 from statistics import median
 from typing import Any
 
+from scripts.swarm.timing import HISTORY_LIMIT
+
+PAGE_SIZE = 256
+
 
 def p95(values: list[float]) -> float | None:
     return sorted(values)[math.ceil(len(values) * 0.95) - 1] if values else None
@@ -49,8 +53,8 @@ def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict
 def history(store: Any, slug: str, stream: str, limit: int) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     cursor = "+"
-    for offset in range(0, limit, 256):
-        rows = store.redis.xrevrange(store.key(slug, stream), max=cursor, count=min(256, limit - offset))
+    for offset in range(0, limit, PAGE_SIZE):
+        rows = store.redis.xrevrange(store.key(slug, stream), max=cursor, count=min(PAGE_SIZE, limit - offset))
         if not rows:
             break
         records.extend(json.loads(fields["record"]) for _, fields in rows)
@@ -61,7 +65,7 @@ def history(store: Any, slug: str, stream: str, limit: int) -> list[dict[str, An
 def read(store: Any, slug: str, passes: int) -> dict[str, Any]:
     selected = history(store, slug, "tick:passes", passes)
     identities = {row["pass_id"] for row in selected}
-    steps = [row for row in history(store, slug, "tick:steps", 50000) if row.get("pass_id") in identities]
+    steps = [row for row in history(store, slug, "tick:steps", HISTORY_LIMIT) if row.get("pass_id") in identities]
     return summarize(selected, steps)
 
 

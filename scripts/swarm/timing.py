@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from scripts.swarm import tick_stop
 
+HISTORY_LIMIT = 50000
 PASS: ContextVar[dict[str, Any] | None] = ContextVar("tick_pass", default=None)
 STORE: ContextVar[Any] = ContextVar("tick_store", default=None)
 SWARM: ContextVar[str | None] = ContextVar("tick_swarm", default=None)
@@ -63,7 +64,9 @@ def append_record(store: Any, slug: str, stream: str, record: dict[str, Any]) ->
     from redis.exceptions import RedisError
 
     try:
-        store.redis.xadd(store.key(slug, stream), {"record": json.dumps(record)}, maxlen=50000, approximate=False)
+        store.redis.xadd(
+            store.key(slug, stream), {"record": json.dumps(record)}, maxlen=HISTORY_LIMIT, approximate=False
+        )
     except RedisError:
         emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": stream}))
 

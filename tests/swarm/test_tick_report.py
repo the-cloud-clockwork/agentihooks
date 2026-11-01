@@ -79,6 +79,7 @@ def test_tick_report_parser_preserves_pass_limit() -> None:
     args = cli.build_parser().parse_args(["sw", "tick-report", "--passes", "3"])
     assert args.slug == "sw"
     assert args.passes == 3
+    assert cli.build_parser().parse_args(["sw", "tick-report"]).passes == 100
     assert args.handler is tick_report.command
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["sw", "tick-report", "--passes", "0"])
@@ -99,11 +100,11 @@ def test_report_history_crosses_page_boundaries() -> None:
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    for number in range(257):
+    for number in range(300):
         store.redis.xadd(store.key("sw", "tick:steps"), {"record": json.dumps({"n": number})})
     rows = tick_report.history(store, "sw", "tick:steps", 257)
-    assert rows == [{"n": number} for number in reversed(range(257))]
-    assert tick_report.history(store, "sw", "tick:steps", 1) == [{"n": 256}]
+    assert rows == [{"n": number} for number in range(299, 42, -1)]
+    assert tick_report.history(store, "sw", "tick:steps", 1) == [{"n": 299}]
     assert tick_report.pass_count("1") == 1
     assert tick_report.pass_count("50000") == 50000
 
@@ -129,3 +130,37 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
         "launch  1  1.000s  1.000s  100.00%\n"
         "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"
     )
+
+
+def test_report_counts_all_orphans_and_keeps_later_steps() -> None:
+    passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}]
+    rows = [step("orphan", "ignored", 1, 1, 0), step("other", "ignored", 1, 1, 0), step("a", "launch", 1, 1, 0)]
+    report = tick_report.summarize(passes, rows)
+    assert report["orphan_steps"] == 2
+    assert report["passes_without_steps"] == 0
+    assert report["steps"] == [{"step": "launch", "count": 1, "median_s": 1.0, "p95_s": 1.0, "cpu_share": 100.0}]
+
+
+def test_report_keeps_subsecond_gaps_and_clamps_overlaps() -> None:
+    passes = [
+        {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0},
+        {"pass_id": "b", "start_ms": 2200, "end_ms": 3200, "wall_s": 1.0},
+    ]
+    assert tick_report.summarize(passes, [])["gap_p95_s"] == 0.2
+    passes[1]["start_ms"] = 1900
+    assert tick_report.summarize(passes, [])["gap_p95_s"] == 0.0
+
+
+def test_report_command_prints_measured_gaps(capsys: pytest.CaptureFixture[str]) -> None:
+    import argparse
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    for number in range(2):
+        row = {"pass_id": str(number), "start_ms": number * 10000, "end_ms": number * 10000 + 1000, "wall_s": 1.0}
+        store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps(row)})
+    tick_report.command(store, argparse.Namespace(slug="sw", passes=2))
+    assert "Gap p95: 9.000s; largest gap: 9.000s\n" in capsys.readouterr().out
