@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from hooks.proc import Process
 from scripts.swarm import reaper
 from scripts.swarm.store import AgentRecord
-from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, Status
 from scripts.tick.adapters import processes as process_adapter
 from scripts.tick.adapters import runtime as runtime_adapter
 from scripts.tick.deadline import Deadline
@@ -41,7 +43,7 @@ def _runtime(
     router = _Router()
     homes = {"eng-a": (Path("/scratch/a"),)}
     adapter = runtime_adapter.RouterRuntime(
-        router,
+        cast(RuntimeRouter, router),
         agents.get,
         herdr=herdr or (lambda args: {"panes": [{"pane_id": "w1:p1", "args": args}]}),
         homes=lambda agent: homes.get(agent.name, ()),
@@ -49,7 +51,7 @@ def _runtime(
     return adapter, router
 
 
-def test_one_scan_serves_every_step_of_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_one_scan_serves_every_read_of_a_pass() -> None:
     scans: list[int] = []
     table = {10: _process(10, 10), 11: _process(11, 10)}
 
@@ -59,15 +61,10 @@ def test_one_scan_serves_every_step_of_a_pass(monkeypatch: pytest.MonkeyPatch) -
 
     shared = process_adapter.PassProcesses(scan)
     deadline = Deadline.after(10)
-    monkeypatch.setattr(reaper, "processes", lambda: pytest.fail("a step scanned processes itself"))
-    monkeypatch.setattr(reaper, "carries", lambda process, name: name == "eng-a")
     first = shared.scan(deadline=deadline)
     second = shared.scan(deadline=deadline)
-    found = reaper.targets("eng-a", 10, [], table=second)
     assert first is second is table
     assert scans == [1]
-    assert shared.scans == 1
-    assert found == reaper.Targets(frozenset([10]), frozenset())
 
 
 def test_each_pass_scans_afresh() -> None:
@@ -83,26 +80,47 @@ def test_expired_deadline_refuses_scan_before_reading_processes() -> None:
     shared = process_adapter.PassProcesses(lambda: pytest.fail("scanned after the deadline"))
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         shared.scan(deadline=Deadline(0.0, clock=lambda: 1.0))
-    assert shared.scans == 0
 
 
-def test_reap_selects_from_the_shared_table(monkeypatch: pytest.MonkeyPatch) -> None:
-    table = {20: _process(20, 20), 21: _process(21, 21)}
+def test_expired_deadline_refuses_rescan_before_reading_processes() -> None:
+    shared = process_adapter.PassProcesses(lambda: pytest.fail("rescanned after the deadline"))
+    with pytest.raises(TimeoutError, match="^tool deadline expired$"):
+        shared.rescan(deadline=Deadline(0.0, clock=lambda: 1.0))
+
+
+def test_the_pass_wrapper_forwards_positional_and_keyword_arguments() -> None:
+    def step(first: int, second: int, *, third: int) -> tuple[int, int, int, bool]:
+        return first, second, third, reaper.PASS.get() is not None
+
+    assert reaper.scanning_pass(step)(1, 2, third=3) == (1, 2, 3, True)
+    assert reaper.PASS.get() is None
+
+
+def test_a_live_process_missing_from_the_snapshot_is_read_from_proc(monkeypatch: pytest.MonkeyPatch) -> None:
+    own = os.getpid()
+    tables: list[dict[int, Process]] = [{}, {own: _process(own, own)}]
+    scans: list[int] = []
     ended: list[reaper.Targets] = []
-    monkeypatch.setattr(reaper, "processes", lambda: pytest.fail("reap scanned processes itself"))
+
+    def scan() -> dict[int, Process]:
+        scans.append(1)
+        return tables[len(scans) - 1]
+
+    monkeypatch.setattr(reaper, "processes", scan)
     monkeypatch.setattr(reaper, "end", lambda found: ended.append(found) or reaper.Outcome(()))
-    reaper.reap([20, 99], table=table)
-    assert ended == [reaper.Targets(frozenset([20]), frozenset())]
+    reaper.scanning_pass(lambda: reaper.reap([own]))()
+    assert scans == [1, 1]
+    assert len(ended) == 1
 
 
-def test_retire_selects_from_the_shared_table(monkeypatch: pytest.MonkeyPatch) -> None:
-    table = {30: _process(30, 30, ("claude", "--name", "eng-b"))}
-    ended: list[reaper.Targets] = []
-    monkeypatch.setattr(reaper, "processes", lambda: pytest.fail("retire scanned processes itself"))
-    monkeypatch.setattr(reaper, "carries", lambda process, name: name == "eng-b")
-    monkeypatch.setattr(reaper, "end", lambda found: ended.append(found) or reaper.Outcome(()))
-    reaper.retire("eng-b", 30, [], 300, table=table)
-    assert ended == [reaper.Targets(frozenset([30]), frozenset())]
+def test_herdr_default_calls_the_swarm_herdr_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import runtime as swarm_runtime
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(swarm_runtime, "herdr_call", lambda args: calls.append(args) or {"panes": [{"pane_id": "p"}]})
+    adapter = runtime_adapter.RouterRuntime(cast(RuntimeRouter, _Router()), {}.get)
+    assert adapter.panes(deadline=Deadline.after(10)) == [{"pane_id": "p"}]
+    assert calls == [["pane", "list"]]
 
 
 def test_inspect_observes_the_named_agent_through_the_router() -> None:
@@ -262,7 +280,7 @@ def test_a_live_process_newer_than_the_pass_snapshot_rescans(monkeypatch: pytest
 def test_the_tick_entry_carries_the_scan_pass_wrapper() -> None:
     from scripts.swarm import tick
 
-    assert tick.tick.__wrapped__.__name__ == "tick"
+    assert getattr(tick.tick, "__wrapped__").__name__ == "tick"
     assert tick.tick.__qualname__ == "tick"
     assert tick.tick.__code__ is reaper.scanning_pass(lambda: None).__code__
 
@@ -284,12 +302,13 @@ def test_liveness_reads_each_member_without_a_table_scan(monkeypatch: pytest.Mon
 
 def test_rescan_replaces_the_pass_snapshot() -> None:
     tables = [{1: _process(1, 1)}, {2: _process(2, 2)}]
-    shared = process_adapter.PassProcesses(lambda: tables[shared.scans])
+    scans: list[int] = []
+    shared = process_adapter.PassProcesses(lambda: scans.append(1) or tables[len(scans) - 1])
     deadline = Deadline.after(10)
     assert shared.scan(deadline=deadline) == tables[0]
     assert shared.rescan(deadline=deadline) == tables[1]
     assert shared.scan(deadline=deadline) == tables[1]
-    assert shared.scans == 2
+    assert scans == [1, 1]
 
 
 def test_real_termination_in_a_pass_reads_membership_fresh_once_per_end(monkeypatch: pytest.MonkeyPatch) -> None:

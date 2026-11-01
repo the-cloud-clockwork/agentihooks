@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import cast
 
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, Status
@@ -20,9 +21,9 @@ def _missing(operation: str, handle: str) -> Outcome:
 
 
 def _herdr(args: list[str]) -> dict[str, object]:
-    from scripts.swarm.runtime import herdr_call
+    from scripts.swarm.runtime import herdr_call  # pyright: ignore[reportUnknownVariableType]
 
-    return herdr_call(args)
+    return cast(dict[str, object], herdr_call(args))  # pyright: ignore[reportUnknownVariableType]
 
 
 class RouterRuntime:
@@ -44,14 +45,17 @@ class RouterRuntime:
 
     def launch(self, request: Mapping[str, object], *, deadline: Deadline) -> Outcome:
         _live(deadline)
-        return self.router.spawn(SpawnRequest(**request))
+        lane, name, task = str(request["lane"]), str(request["name"]), cast(dict[str, object], request["task"])
+        return self.router.spawn(SpawnRequest(request["config"], lane, name, task))
 
     def stop(self, handle: str, *, deadline: Deadline) -> Outcome:
         _live(deadline)
         agent = self.agents(handle)
-        return _missing("stop", handle) if agent is None else self.router.terminate(agent, self.homes(agent))
+        if agent is None:
+            return _missing("stop", handle)
+        return self.router.terminate(agent, self.homes(agent))  # pyright: ignore[reportUnknownMemberType]
 
     def panes(self, *, deadline: Deadline) -> list[dict[str, object]]:
         _live(deadline)
-        listed = self.herdr(["pane", "list"]).get("panes", [])
-        return list(listed) if isinstance(listed, list) else []
+        listed = self.herdr(["pane", "list"]).get("panes")
+        return cast(list[dict[str, object]], listed) if isinstance(listed, list) else []
