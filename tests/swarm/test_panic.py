@@ -11,6 +11,10 @@ from scripts.swarm import cli, panic
 from scripts.swarm.health import spawn_stall
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 from scripts.swarm.tick_watch import STALE_TICK, _alert
+from scripts.tick.adapters.fakes import Call, FakeSourceControl
+from scripts.tick.adapters.github import GitHubSourceControl
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.source_control import RepositoryRun
 from scripts.tick.steps import place
 
 pytestmark = pytest.mark.unit
@@ -41,18 +45,27 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float, dict[str,
 
 
 class Runs:
-    def __init__(self, rows: dict[str, list[dict[str, Any]]]) -> None:
+    def __init__(self, rows: dict[str, list[RepositoryRun]]) -> None:
         self.rows = rows
-        self.calls: list[list[str]] = []
+        self.made: dict[str, FakeSourceControl] = {}
 
-    def __call__(self, argv: list[str]) -> str:
-        self.calls.append(argv)
-        if argv[:3] == ["gh", "run", "list"]:
-            return json.dumps(self.rows.get(argv[4], []))
-        return ""
+    def __call__(self, repository: str) -> FakeSourceControl:
+        answers: dict[str, object] = {"latest_runs": tuple(self.rows.get(repository, []))}
+        return self.made.setdefault(repository, FakeSourceControl(answers))
+
+    def calls(self) -> list[tuple[str, Call]]:
+        return [(repository, call) for repository, port in self.made.items() for call in port.calls]
 
     def cancelled(self) -> list[str]:
-        return [f"{argv[5]}:{argv[3]}" for argv in self.calls if argv[:3] == ["gh", "run", "cancel"]]
+        return [f"{repository}:{call.args[0]}" for repository, call in self.calls() if call.operation == "cancel_run"]
+
+
+class Broken(FakeSourceControl):
+    def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]:
+        raise subprocess.CalledProcessError(1, ["listing"])
+
+    def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
+        pytest.fail("a failed listing reached the cancel")
 
 
 def _branches(monkeypatch: pytest.MonkeyPatch, branches: dict[str, str]) -> list[str]:
@@ -70,8 +83,8 @@ def _branches(monkeypatch: pytest.MonkeyPatch, branches: dict[str, str]) -> list
     return asked
 
 
-def _row(run_id: int, branch: str, status: str = "in_progress", event: str = "pull_request") -> dict[str, Any]:
-    return {"databaseId": run_id, "headBranch": branch, "status": status, "event": event}
+def _row(run_id: int, branch: str, status: str = "in_progress", event: str = "pull_request") -> RepositoryRun:
+    return RepositoryRun(run_id, branch, event, status)
 
 
 def _errors(store: RedisStore, count: int, at: int, category: str = "SpawnError") -> None:
@@ -308,15 +321,16 @@ def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs(monkeypatc
     )
     cancelled = panic.cancel_runs([FIX], ["o/a", "o/b"], runs)
     assert cancelled == ["o/a run 1 on feature", "o/a run 5 on waiting", "o/b run 6 on other"]
-    assert [argv for argv in runs.calls if argv[:3] == ["gh", "run", "cancel"]] == [
-        ["gh", "run", "cancel", "1", "--repo", "o/a"],
-        ["gh", "run", "cancel", "5", "--repo", "o/a"],
-        ["gh", "run", "cancel", "6", "--repo", "o/b"],
+    assert [(repository, call.operation, call.args) for repository, call in runs.calls()] == [
+        ("o/a", "latest_runs", ()),
+        ("o/a", "cancel_run", (1,)),
+        ("o/a", "cancel_run", (5,)),
+        ("o/b", "latest_runs", ()),
+        ("o/b", "cancel_run", (6,)),
     ]
+    assert all(panic.TOOL_SECONDS - 5 < call.deadline.remaining <= panic.TOOL_SECONDS for _, call in runs.calls())
+    assert panic.TOOL_SECONDS == 60.0
     assert asked == [FIX]
-    assert not [argv for argv in runs.calls if argv[:3] == ["gh", "pr", "view"]]
-    listing = ["gh", "run", "list", "--repo", "o/a", "--limit", "100", "--json", "databaseId,event,headBranch,status"]
-    assert listing in runs.calls
 
 
 def test_every_active_status_is_cancelled():
@@ -333,16 +347,11 @@ def test_the_fleet_repos_include_hooks_bundle_and_antoncore():
     )
 
 
-def test_gh_runs_the_command_and_returns_stdout(monkeypatch):
-    seen: dict[str, Any] = {}
-
-    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        seen.update(argv=argv, **kwargs)
-        return subprocess.CompletedProcess(argv, 0, stdout="out", stderr="")
-
-    monkeypatch.setattr(panic.subprocess, "run", run)
-    assert panic.gh(["gh", "x"]) == "out"
-    assert seen == {"argv": ["gh", "x"], "capture_output": True, "text": True, "check": True, "timeout": 60}
+def test_port_answers_the_repository_through_the_source_control_adapter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert panic.port("o/a") == GitHubSourceControl("o/a", tmp_path, "dev")
 
 
 def test_tick_pass_cancels_once_a_minute_while_panic_holds(store, counted):
@@ -357,7 +366,7 @@ def test_tick_pass_cancels_once_a_minute_while_panic_holds(store, counted):
 def test_tick_pass_without_panic_cancels_nothing(store, counted):
     runs = Runs({repo: [_row(1, "busy")] for repo in panic.REPOS})
     assert panic.tick_pass(store, True, 1_000, runs) == []
-    assert runs.calls == []
+    assert runs.calls() == []
     assert panic.level(store, 1_000) == 1.0
 
 
@@ -371,10 +380,7 @@ def test_tick_pass_engages_and_cancels_in_one_pass(store, counted):
 def test_tick_pass_reports_a_failed_cancel(store, counted):
     panic.engage(store, "pressed", False, [], 0)
 
-    def broken(argv: list[str]) -> str:
-        raise subprocess.CalledProcessError(1, argv)
-
-    found = panic.tick_pass(store, True, 1_000, broken)
+    found = panic.tick_pass(store, True, 1_000, lambda repository: Broken())
     assert len(found) == 1
     assert found[0].startswith("panic cancel failed: ")
 
@@ -402,7 +408,7 @@ def test_the_tick_spawns_nothing_while_panic_holds():
 def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys):
     _branches(monkeypatch, {FIX: "fix-branch"})
     runs = Runs({repo: [_row(7, "busy"), _row(8, "fix-branch")] for repo in panic.REPOS})
-    monkeypatch.setattr(panic, "gh", runs)
+    monkeypatch.setattr(panic, "port", runs)
     args = cli.build_parser().parse_args([SLUG, "panic", "on", "--fix", FIX])
     before = cli.now_ms()
     args.handler(store, args)
@@ -479,7 +485,7 @@ def test_panic_status_rounds_the_level_to_three_places(store, counted, capsys):
 
 def test_the_panic_button_without_a_fix_spares_only_the_merge_queue(store, counted, monkeypatch, capsys):
     runs = Runs({})
-    monkeypatch.setattr(panic, "gh", runs)
+    monkeypatch.setattr(panic, "port", runs)
     args = cli.build_parser().parse_args([SLUG, "panic", "on"])
     assert args.fix == []
     args.handler(store, args)

@@ -15,6 +15,7 @@ from scripts.tick.ports.source_control import (
     QueueEntry,
     QueueHealth,
     RateLimit,
+    RepositoryRun,
     Run,
     Tag,
 )
@@ -156,6 +157,12 @@ class FakeSourceControl:
 
     def issues_enabled(self, *, deadline: Deadline) -> bool:
         return _record(self, "issues_enabled", (), deadline)
+
+    def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]:
+        return _record(self, "latest_runs", (), deadline)
+
+    def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
+        return _record(self, "cancel_run", (run_id,), deadline)
 
 
 @dataclass
