@@ -30,13 +30,16 @@ def root(world: str) -> str:
 
 
 def host(redis: "Redis", slug: str, name: str) -> str:
-    """The joined member that runs name in slug, '' for any other host; a member recognises only itself."""
+    """The joined member that runs name; a missing host projection uses the legacy registry."""
     from scripts.swarm.store import RedisStore
 
     hosts = joined(redis)
     if not hosts:
         return ""
-    placed = RedisStore(redis).execution_registry.hive(slug, name)
+    store = RedisStore(redis)
+    placed = redis.hget(store.key(slug, "hosts"), name)
+    if placed is None:
+        placed = store.execution_registry.hive(slug, name)
     return placed if placed in hosts else ""
 
 

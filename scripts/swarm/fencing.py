@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from hashlib import sha256
+from secrets import randbelow
 from typing import Any, TypeVar
 
 from scripts.events import state
@@ -343,10 +344,15 @@ def _lease_fence(fence: Any) -> LeaseFence | None:
     return LeaseFence(fence.owner, fence.epoch, now_ms())
 
 
+def _retry(attempt: int) -> None:
+    if attempt + 1 < ATTEMPTS:
+        time.sleep((1 + randbelow(min(1 << attempt, 32))) / 1000)
+
+
 def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, Any]], T], fence: Any) -> T:
     from scripts.swarm.store import SwarmError
 
-    for _ in range(ATTEMPTS):
+    for attempt in range(ATTEMPTS):
         loaded = port.sections(slug, LOADED)
         assembled = _assemble(slug, loaded)
         before = copy.deepcopy(assembled)
@@ -368,6 +374,7 @@ def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, An
         try:
             port.fenced_batch(slug, FencedBatch(tuple(writes), _lease_fence(fence)))
         except RevisionConflict:
+            _retry(attempt)
             continue
         except StaleLease as exc:
             raise SwarmError(STALE) from exc
@@ -523,7 +530,7 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
     from scripts.swarm.store import SwarmError
 
     states = _states(store)
-    for _ in range(ATTEMPTS):
+    for attempt in range(ATTEMPTS):
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
         if MOVED in doc:
@@ -538,6 +545,7 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
         try:
             written = states.update(slug, _encode(doc), entry.revision)
         except StateConflict:
+            _retry(attempt)
             continue
         _cache_lease(store, states, slug, doc, written)
         return result
