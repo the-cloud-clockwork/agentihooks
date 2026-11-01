@@ -121,3 +121,19 @@ def test_a_legacy_writer_cannot_leave_stale_routing_rows(monkeypatch: pytest.Mon
     doc["executions"]["active"]["hive"] = "hive-b"
     states.update("sw", json.dumps(doc).encode(), entry.revision)
     assert store.agents("sw")[0].hive == "hive-b"
+
+
+def test_execution_and_name_sections_share_the_lightweight_projection(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fakeredis import FakeRedis
+
+    store = RedisStore(FakeRedis(decode_responses=True))
+    row = {"name": "agent", "generation": 1}
+    fencing.write(store, "sw", lambda doc: doc.update(executions={"attempt": row}))
+
+    def forbidden(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("combined execution projection read the full document")
+
+    monkeypatch.setattr(fencing, "_entry", forbidden)
+    found = fencing.WholeDocumentRecords(store).sections("sw", ("executions", fencing.BY_NAME))
+    assert {key: record.value for key, record in found["executions"].items()} == {"attempt": row}
+    assert {key: record.value for key, record in found[fencing.BY_NAME].items()} == {"agent": "attempt"}

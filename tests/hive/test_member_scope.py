@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -175,16 +176,17 @@ def test_members_of_an_empty_index_opens_no_pipeline(redis, monkeypatch):
     assert scope.members(redis) == []
 
 
-def relaunch(redis, store, name, hive, generation):
+def relaunch(redis: Any, store: Any, name: str, hive: str, generation: int) -> None:
     from scripts.swarm import fencing
 
-    def change(doc):
+    def change(doc: dict) -> None:
         execution_id, row = next((eid, row) for eid, row in doc["executions"].items() if row["name"] == name)
         updated = {**row, "execution_id": f"exe-{hive}-{generation}", "generation": generation, "hive": hive}
         del doc["executions"][execution_id]
         doc["executions"][updated["execution_id"]] = updated
 
     fencing.write(store, "fixture", change)
+    redis.hdel(store.key("fixture", "hosts"), name)
 
 
 def test_host_reads_one_agents_latest_placement_without_the_agent_list(redis, swarm, monkeypatch):
@@ -409,3 +411,88 @@ def test_the_master_pool_holds_only_masters_whose_inboxes_share_its_world(redis,
     monkeypatch.setattr(pool, "live_masters", lambda client, slug: ["master@fixture", "master-2@fixture"])
 
     assert InboxStore(redis, world="").pool.masters_for("engineer@0001-0001", "master@fixture") == pooled
+
+
+def test_host_hash_hit_uses_one_field_read(redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import scope
+    from scripts.swarm.execution import ExecutionRegistry
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    calls = []
+    original = redis.hget
+
+    def read(key: str, field: str) -> str | None:
+        calls.append((key, field))
+        return original(key, field)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("host lookup scanned the execution registry")
+
+    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", "true")
+    monkeypatch.setattr(ExecutionRegistry, "hive", forbidden)
+    with scope.one_pass():
+        scope.joined(redis)
+        monkeypatch.setattr(redis, "hget", read)
+        assert scope.host(redis, "fixture", name) == "m1"
+    assert calls == [(swarm.key("fixture", "hosts"), name)]
+
+
+def test_host_hash_miss_keeps_legacy_lookup(redis: Any, swarm: Any) -> None:
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    redis.delete(swarm.key("fixture", "hosts"))
+    assert scope.host(redis, "fixture", name) == "m1"
+
+
+def test_removing_an_agent_removes_its_host(redis: Any, swarm: Any) -> None:
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+    swarm.drop_agent("fixture", name)
+    assert redis.hget(swarm.key("fixture", "hosts"), name) is None
+    assert scope.host(redis, "fixture", name) == ""
+
+
+@pytest.mark.parametrize("legacy_change", ["remove", "move"])
+def test_host_projection_stays_untrusted_until_every_writer_upgrades(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch, legacy_change: str
+) -> None:
+    from scripts.hive import scope
+    from scripts.swarm import fencing
+
+    monkeypatch.delenv("SWARM_HOST_PROJECTION_ENABLED", raising=False)
+    join(redis, "m1")
+    join(redis, "m2")
+    name = place(swarm, "m1")
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+
+    def move(doc: dict) -> None:
+        row = next(row for row in doc["executions"].values() if row["name"] == name)
+        row["hive"] = "m2"
+
+    if legacy_change == "remove":
+        redis.hdel(swarm.key("fixture", "agents"), name)
+        expected = ""
+    else:
+        fencing.write(swarm, "fixture", move)
+        expected = "m2"
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+    assert scope.host(redis, "fixture", name) == expected
+
+
+def test_renaming_an_agent_removes_only_its_old_host_projection(redis: Any, swarm: Any) -> None:
+    from dataclasses import replace
+
+    join(redis, "m1")
+    old = place(swarm, "m1")
+    current = swarm.agents("fixture")[0]
+    other = place(swarm, "m1", seat="eng-2@fixture")
+    renamed = replace(current, name="renamed-agent", hive="m2")
+    swarm.project_agent("fixture", renamed, previous=current, removed=old)
+    assert redis.hgetall(swarm.key("fixture", "hosts")) == {other: "m1", renamed.name: "m2"}
+    assert not redis.hexists(swarm.key("fixture", "agents"), old)

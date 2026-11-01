@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from hashlib import sha256
+from random import uniform
 from typing import Any, TypeVar
 
 from scripts.events import state
@@ -163,8 +164,7 @@ def _port(store: Any) -> RedisRecords:
 def _migrated(store: Any, slug: str) -> RedisRecords | None:
     if state.backend() != "redis":
         return None
-    port = _port(store)
-    return port if port.layout(slug) == RECORDS else None
+    return _port(store) if RedisRecords(store.redis).layout(slug) == RECORDS else None
 
 
 def _assemble(slug: str, loaded: dict[str, dict[str, Record]]) -> dict[str, Any]:
@@ -343,10 +343,15 @@ def _lease_fence(fence: Any) -> LeaseFence | None:
     return LeaseFence(fence.owner, fence.epoch, now_ms())
 
 
+def _retry(attempt: int) -> None:
+    if attempt + 1 < ATTEMPTS:
+        time.sleep(uniform(0.001, 0.032))
+
+
 def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, Any]], T], fence: Any) -> T:
     from scripts.swarm.store import SwarmError
 
-    for _ in range(ATTEMPTS):
+    for attempt in range(ATTEMPTS):
         loaded = port.sections(slug, LOADED)
         assembled = _assemble(slug, loaded)
         before = copy.deepcopy(assembled)
@@ -368,6 +373,7 @@ def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, An
         try:
             port.fenced_batch(slug, FencedBatch(tuple(writes), _lease_fence(fence)))
         except RevisionConflict:
+            _retry(attempt)
             continue
         except StaleLease as exc:
             raise SwarmError(STALE) from exc
@@ -481,12 +487,8 @@ def read(store: Any, slug: str) -> dict[str, Any]:
 
 
 def read_executions(store: Any, slug: str) -> dict[str, Any]:
-    states = _states(store)
-    if isinstance(states, RedisStateStore):
-        entry = states.get_projection(slug)
-        if entry is not None:
-            return json.loads(entry.value)
-    return read(store, slug)["executions"]
+    rows = records(store, slug).sections(slug, ("executions",))["executions"]
+    return {key: row.value for key, row in rows.items()}
 
 
 LEASE_CACHE = "lease-cache"
@@ -523,7 +525,7 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
     from scripts.swarm.store import SwarmError
 
     states = _states(store)
-    for _ in range(ATTEMPTS):
+    for attempt in range(ATTEMPTS):
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
         if MOVED in doc:
@@ -538,6 +540,7 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
         try:
             written = states.update(slug, _encode(doc), entry.revision)
         except StateConflict:
+            _retry(attempt)
             continue
         _cache_lease(store, states, slug, doc, written)
         return result
@@ -646,8 +649,17 @@ class WholeDocumentRecords:
         return DOCUMENT
 
     def sections(self, slug: str, names: Sequence[str]) -> dict[str, dict[str, Record]]:
-        entry = _entry(_states(self.store), self.store, slug)
-        doc = _decode(entry.value)
+        states = _states(self.store)
+        entry = (
+            states.get_projection(slug)
+            if isinstance(states, RedisStateStore) and set(names) <= {"executions", BY_NAME}
+            else None
+        )
+        if entry is None:
+            entry = _entry(states, self.store, slug)
+            doc = _decode(entry.value)
+        else:
+            doc = {"executions": json.loads(entry.value)}
         if ARCHIVE in names:
             hydrate_archive(self.store, doc)
         return {name: {key: Record(entry.revision, value) for key, value in _view(doc, name).items()} for name in names}
