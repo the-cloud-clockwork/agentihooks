@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -29,12 +30,14 @@ class _Router:
         self.calls.append(("spawn", request, None))
         return Outcome("spawn", Status.OK, "local", value=request.name)
 
-    def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome:
+    def terminate(self, agent: AgentRecord, homes: tuple[Path, ...] = ()) -> Outcome:
         self.calls.append(("terminate", agent, homes))
         return Outcome("terminate", Status.OK, "local", value=agent.name)
 
 
-def _runtime(agents: dict[str, AgentRecord], herdr: object = None) -> tuple[runtime_adapter.RouterRuntime, _Router]:
+def _runtime(
+    agents: dict[str, AgentRecord], herdr: Callable[[list[str]], dict[str, object]] | None = None
+) -> tuple[runtime_adapter.RouterRuntime, _Router]:
     router = _Router()
     homes = {"eng-a": (Path("/scratch/a"),)}
     adapter = runtime_adapter.RouterRuntime(
@@ -165,3 +168,97 @@ def test_expired_deadline_refuses_pane_list_before_herdr() -> None:
     adapter, _ = _runtime({}, lambda args: pytest.fail("listed panes after the deadline"))
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         adapter.panes(deadline=Deadline(0.0, clock=lambda: 1.0))
+
+
+def test_a_tick_pass_scans_processes_once_for_every_retire_and_reap(monkeypatch: pytest.MonkeyPatch) -> None:
+    table = {40: _process(40, 40), 41: _process(41, 41)}
+    scans: list[int] = []
+    ended: list[reaper.Targets] = []
+
+    def scan() -> dict[int, Process]:
+        scans.append(1)
+        return table
+
+    monkeypatch.setattr(reaper, "processes", scan)
+    monkeypatch.setattr(reaper, "carries", lambda process, name: True)
+    monkeypatch.setattr(reaper, "end", lambda found: ended.append(found) or reaper.Outcome(()))
+
+    @reaper.scanning_pass
+    def tick_pass() -> None:
+        reaper.retire("eng-a", 40, [], 400)
+        reaper.retire("eng-b", 41, [], 410)
+        reaper.reap([40, 41])
+
+    tick_pass()
+    assert scans == [1]
+    assert ended == [
+        reaper.Targets(frozenset([40]), frozenset()),
+        reaper.Targets(frozenset([41]), frozenset()),
+        reaper.Targets(frozenset([40, 41]), frozenset()),
+    ]
+    assert reaper.PASS.get() is None
+
+
+def test_each_tick_pass_takes_its_own_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    scans: list[int] = []
+    monkeypatch.setattr(reaper, "processes", lambda: scans.append(1) or {})
+    monkeypatch.setattr(reaper, "end", lambda found: reaper.Outcome(()))
+    tick_pass = reaper.scanning_pass(lambda: reaper.reap([]))
+    tick_pass()
+    tick_pass()
+    assert scans == [1, 1]
+
+
+def test_outside_a_pass_every_selection_scans(monkeypatch: pytest.MonkeyPatch) -> None:
+    scans: list[int] = []
+    monkeypatch.setattr(reaper, "processes", lambda: scans.append(1) or {})
+    monkeypatch.setattr(reaper, "end", lambda found: reaper.Outcome(()))
+    reaper.reap([])
+    reaper.reap([])
+    assert scans == [1, 1]
+
+
+def test_a_process_newer_than_the_pass_snapshot_rescans(monkeypatch: pytest.MonkeyPatch) -> None:
+    tables = [{50: _process(50, 50)}, {50: _process(50, 50), 51: _process(51, 51)}]
+    scans: list[int] = []
+    ended: list[reaper.Targets] = []
+
+    def scan() -> dict[int, Process]:
+        scans.append(1)
+        return tables[len(scans) - 1]
+
+    monkeypatch.setattr(reaper, "processes", scan)
+    monkeypatch.setattr(reaper, "carries", lambda process, name: True)
+    monkeypatch.setattr(reaper, "end", lambda found: ended.append(found) or reaper.Outcome(()))
+
+    @reaper.scanning_pass
+    def tick_pass() -> None:
+        reaper.reap([50])
+        reaper.retire("eng-new", 51, [], 510)
+
+    tick_pass()
+    assert scans == [1, 1]
+    assert ended == [reaper.Targets(frozenset([50]), frozenset()), reaper.Targets(frozenset([51]), frozenset())]
+
+
+def test_the_tick_entry_runs_inside_one_scan_pass() -> None:
+    from scripts.swarm import tick
+
+    assert tick.tick.__wrapped__.__name__ == "tick"
+    assert tick.tick.__qualname__ == "tick"
+    assert tick.tick.__code__ is reaper.scanning_pass(lambda: None).__code__
+
+
+def test_liveness_reads_each_member_without_a_table_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    read: list[int] = []
+    alive = {60: _process(60, 60), 62: Process(62, 1, 62, 62, 620, "Z", "claude", ())}
+
+    def one(pid: int, proc: Path) -> Process | None:
+        read.append(pid)
+        assert proc == Path("/proc")
+        return alive.get(pid)
+
+    monkeypatch.setattr(reaper, "processes", lambda: pytest.fail("liveness scanned the whole table"))
+    monkeypatch.setattr(reaper, "_process", one)
+    assert reaper._alive({60: 600, 61: 610, 62: 620, 63: 1}) == [60]
+    assert sorted(read) == [60, 61, 62, 63]

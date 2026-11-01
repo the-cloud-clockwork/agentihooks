@@ -15,6 +15,10 @@ def _live(deadline: Deadline) -> None:
         raise TimeoutError("tool deadline expired")
 
 
+def _missing(operation: str, handle: str) -> Outcome:
+    return Outcome(operation, Status.UNAVAILABLE, "", detail=f"no agent named {handle}")
+
+
 def _herdr(args: list[str]) -> dict[str, object]:
     from scripts.swarm.runtime import herdr_call
 
@@ -33,13 +37,10 @@ class RouterRuntime:
     ) -> None:
         self.router, self.agents, self.herdr, self.homes = router, agents, herdr, homes
 
-    def _missing(self, operation: str, handle: str) -> Outcome:
-        return Outcome(operation, Status.UNAVAILABLE, "", detail=f"no agent named {handle}")
-
     def inspect(self, handle: str, *, deadline: Deadline) -> Outcome:
         _live(deadline)
         agent = self.agents(handle)
-        return self._missing("inspect", handle) if agent is None else self.router.observe(agent)
+        return _missing("inspect", handle) if agent is None else self.router.observe(agent)
 
     def launch(self, request: Mapping[str, object], *, deadline: Deadline) -> Outcome:
         _live(deadline)
@@ -48,7 +49,7 @@ class RouterRuntime:
     def stop(self, handle: str, *, deadline: Deadline) -> Outcome:
         _live(deadline)
         agent = self.agents(handle)
-        return self._missing("stop", handle) if agent is None else self.router.terminate(agent, self.homes(agent))
+        return _missing("stop", handle) if agent is None else self.router.terminate(agent, self.homes(agent))
 
     def panes(self, *, deadline: Deadline) -> list[dict[str, object]]:
         _live(deadline)
