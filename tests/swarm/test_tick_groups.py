@@ -12,6 +12,7 @@ from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
 from scripts.tick.step import Context, Domain, Lane, Result
+from scripts.tick.steps import observe
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -78,6 +79,8 @@ def test_a_stopped_swarm_runs_only_the_start_group(store: RedisStore, monkeypatc
 def test_a_registered_step_runs_in_its_tick_group(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     monkeypatch.setattr(registry, "registry", registry.Registry())
     ran: list[str] = []
+    for step in observe.STEPS:
+        registry.register(step)
     registry.register(_Marker("agents", ran))
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert ran == ["agents"]
