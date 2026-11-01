@@ -126,7 +126,7 @@ class Transport:
             from scripts.codex_session.binding import RECORDS
             from scripts.swarm import fencing
 
-            fencing.watch(store, pipe)
+            fencing.watch(store, pipe, self.slug)
             pipe.watch(store.key(self.slug, RECORDS))
         record = self.bindings.get(self.slug, self.execution_id)
         if record is None or record.state in {EXITED, FAILED, STOOD_DOWN}:
