@@ -112,9 +112,10 @@ def test_failed_record_carries_wall_time() -> None:
         raise ValueError("bad")
 
     record = engine.run_step(FakeStep("fail", 1, fail), context(clock))
-    assert (record.outcome, record.wall_s, record.error, record.result) == (
+    assert (record.outcome, record.wall_s, record.budget_s, record.error, record.result) == (
         engine.FAILED,
         2.0,
+        5.0,
         "builtins.ValueError",
         None,
     )

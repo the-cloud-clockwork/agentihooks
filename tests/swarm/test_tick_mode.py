@@ -32,8 +32,9 @@ def test_missing_stored_tick_mode_remains_sequential() -> None:
 
 @pytest.mark.parametrize("mode", ["", "unknown", "SEQUENTIAL"])
 def test_invalid_tick_mode_is_rejected(mode: str) -> None:
-    with pytest.raises(SwarmError, match="tick mode"):
+    with pytest.raises(SwarmError) as raised:
         SwarmConfig("demo", ".", 1, 1, tick_mode=mode)
+    assert str(raised.value) == "tick mode must be one of sequential, parallel"
 
 
 @pytest.mark.parametrize("mode", ["sequential", "parallel"])
