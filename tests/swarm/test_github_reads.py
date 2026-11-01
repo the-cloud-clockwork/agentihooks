@@ -520,18 +520,3 @@ def test_rest_strips_slurped_page_headers_into_one_json_array(monkeypatch, tmp_p
     result = github_reads.rest("jobs", ["api", "repos/o/r/actions/runs/1/jobs", "--paginate", "--slurp"], run)
     assert json.loads(result.stdout) == [{"jobs": [1]}, {"jobs": [2]}]
 
-
-@pytest.mark.parametrize("args", [["pr", "view", "1"], ["api", "repos/o/r/pulls/1"]])
-def test_rest_runs_through_subprocess_run_as_it_stands_at_call_time(monkeypatch, tmp_path, args):
-    import subprocess
-
-    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    calls = []
-
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="{}")
-
-    monkeypatch.setattr(subprocess, "run", run)
-    result = github_reads.rest("pulls", args, timeout=5)
-    assert calls == [(["gh", *args], {"timeout": 5})] and result.stdout == "{}"

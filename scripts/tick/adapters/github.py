@@ -119,7 +119,14 @@ class GitHubSourceControl:
         """Run one audited gh api call inside the deadline and return its output."""
         timeout = _live(deadline)
         result = github_reads.rest(
-            CALLER, ["api", *args], cwd=self.root, timeout=timeout, capture_output=True, text=True, check=True
+            CALLER,
+            ["api", *args],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return result.stdout
 

@@ -212,12 +212,9 @@ def _not_modified(output: str | bytes | None) -> bool:
 
 
 def rest(
-    caller: str, args: list[str], run: Callable[..., subprocess.CompletedProcess[Any]] | None = None, **options: Any
+    caller: str, args: list[str], run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run, **options: Any
 ) -> subprocess.CompletedProcess[Any]:
-    """Run one gh call and charge its REST endpoint, through subprocess.run as it stands at call time by default."""
     from scripts import gh_audit
-
-    run = run or subprocess.run
 
     path = gh_audit.endpoint(_github.command(args)) if args[0] == "api" else None
     if path is None:
