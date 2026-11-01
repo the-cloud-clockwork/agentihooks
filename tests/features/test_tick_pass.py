@@ -12,6 +12,8 @@ from tests.features.test_harness import _until
 from tests.swarm.test_tick import FakeRuntime
 
 
+from scripts.swarm.ledger_client import _ledger
+
 @pytest.mark.feature
 def test_the_real_backend_feature_suite_holds_both_promotion_jobs() -> None:
     root = Path(__file__).resolve().parents[2]
@@ -51,6 +53,7 @@ def test_a_tick_pass_uses_real_backends_with_scripted_agents(
     runtime = FakeRuntime(full=True)
     runtime.live.update(agent.record.name for agent in launched)
     ledger = LedgerClient()
+    monkeypatch.setattr(_ledger(), "BASE", f"http://127.0.0.1:{swarm.ledger.env['LEDGER_PORT']}")
     before = int(time.time() * 1000)
     actions = cli.run_tick(store, slug, ledger=ledger, runtime=runtime)
     assert isinstance(actions, list)
