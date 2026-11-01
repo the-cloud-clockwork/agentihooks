@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
@@ -17,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any, Protocol
 
-import scripts.tick.steps.agents  # noqa: F401
+import scripts.tick.steps.agents  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from hooks.context import context_recycle
 from scripts.doctor import priming
 from scripts.gates import Who, modes
