@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.542 · 2026-11-01
+
+### 2026-11-01 · ea63bbb18ad8 · #9194 · @agenticore-app
+
+**Document the tick source control port and the GitHub adapter**
+
+This change adds documentation for the source control port and its GitHub adapter introduced in PR #9166, covering the provider-neutral records, the nine operations split by read/write effects, and how GitHubSourceControl handles audited gh calls, timeouts, paging, merge queue behavior, tag listing via git ls-remote, and error handling. It also documents the first consumer (swarm stack change used by park and publish), the FakeSourceControl test defaults, and adds troubleshooting entries, a reference index row, and a changelog fragment, giving operators a clear map of how source control effects are declared and swapped between providers.
+
 ## v2.17.540 · 2026-11-01
 
 ### 2026-11-01 · ef39ec8cea30 · #9188 · @agenticore-app
