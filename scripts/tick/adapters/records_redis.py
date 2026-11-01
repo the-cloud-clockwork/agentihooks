@@ -109,9 +109,7 @@ class RedisRecords:
             for name in names:
                 pipe.hgetall(self.key(slug, name))
             found = pipe.execute()
-        return {
-            name: {field: _decode(raw) for field, raw in rows.items()} for name, rows in zip(names, found, strict=True)
-        }
+        return {name: {field: _decode(raw) for field, raw in found[index].items()} for index, name in enumerate(names)}
 
     def record(self, slug: str, section: str, key: str) -> Record | None:
         return _record(self.redis.hget(self.key(slug, section), key))

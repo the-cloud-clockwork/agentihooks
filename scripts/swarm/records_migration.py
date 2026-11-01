@@ -8,7 +8,7 @@ from scripts.swarm import fencing, store
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Migrates one swarm and prints how many records it wrote; an already migrated swarm writes none."""
-    parser = argparse.ArgumentParser(description="Move a swarm's fencing document onto per record keys")
+    parser = argparse.ArgumentParser()
     parser.add_argument("slug")
     parser.add_argument("--writers-upgraded", action="store_true")
     args = parser.parse_args(argv)

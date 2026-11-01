@@ -74,6 +74,7 @@ def test_both_layouts_answer_the_records_port(store: Any) -> None:
     whole = fencing.records(store, "sw")
     assert isinstance(whole, fencing.WholeDocumentRecords)
     assert whole.layout("sw") == fencing.DOCUMENT
+    assert whole.sections("sw", ("meta",))["meta"]["epoch"].value == 0
     port = _migrated(store)
     assert isinstance(port, Records)
     assert port.layout("sw") == fencing.RECORDS
@@ -106,10 +107,12 @@ def test_migration_waits_for_every_writer_and_the_redis_backend(store: Any, monk
     from scripts.swarm import fencing
     from scripts.swarm.store import SwarmError
 
-    with pytest.raises(SwarmError, match="upgrade every live fencing reader and writer"):
+    with pytest.raises(
+        SwarmError, match="^upgrade every live fencing reader and writer before migrating to per record keys$"
+    ):
         fencing.migrate_records(store, "sw")
     monkeypatch.setenv(state.BACKEND_ENV, "bus")
-    with pytest.raises(SwarmError, match="need the Redis state backend"):
+    with pytest.raises(SwarmError, match="^per record fencing keys need the Redis state backend$"):
         fencing.migrate_records(store, "sw", writers_upgraded=True)
     assert fencing.records(store, "sw").layout("sw") == fencing.DOCUMENT
 
@@ -527,6 +530,9 @@ def test_the_whole_document_port_reads_sections_and_records(store: Any) -> None:
     assert "executions" not in found["meta"]
     assert found["archive"]["z"].value == _row("z", "old", 0)
     assert port.record("sw", "executions", "missing") is None
+    single = port.record("sw", "executions", "a")
+    assert single is not None
+    assert single.__dict__ == {"revision": revision, "value": _row("a", "eng", 1)}
 
 
 def test_the_whole_document_port_fences_and_applies_a_batch(store: Any, clock: list[int]) -> None:
@@ -543,7 +549,7 @@ def test_the_whole_document_port_fences_and_applies_a_batch(store: Any, clock: l
         LeaseFence("home", held.epoch + 1, clock[0]),
         LeaseFence("home", held.epoch, held.expires_at),
     ):
-        with pytest.raises(StaleLease):
+        with pytest.raises(StaleLease, match=f"^{fencing.STALE}$"):
             port.fenced_batch("sw", FencedBatch((), stale))
     with pytest.raises(RevisionConflict, match="grants/g is not at revision 3"):
         port.fenced_batch("sw", FencedBatch((RecordWrite("put", "grants", "g", 3, 1),), fence))
@@ -598,8 +604,10 @@ def test_the_whole_document_port_refuses_a_concurrent_document_write(
         return real(self, key, value, revision)
 
     monkeypatch.setattr(RedisStateStore, "update", raced)
-    with pytest.raises(RevisionConflict):
+    with pytest.raises(RevisionConflict) as refused:
         port.fenced_batch("sw", FencedBatch((RecordWrite("put", "grants", "g", BLIND, 1),)))
+    assert str(refused.value) == str(refused.value.__cause__)
+    assert "not at revision" in str(refused.value)
 
 
 def test_the_migration_command_needs_the_writer_rollout(
@@ -610,7 +618,11 @@ def test_the_migration_command_needs_the_writer_rollout(
     monkeypatch.setattr(records_migration.store, "connect", lambda: store)
     with pytest.raises(SystemExit):
         records_migration.main(["sw"])
-    assert "upgrade every live fencing reader and writer" in capsys.readouterr().err
+    assert (
+        capsys.readouterr()
+        .err.rstrip()
+        .endswith(": error: upgrade every live fencing reader and writer before migrating to per record keys")
+    )
     records_migration.main(["sw", "--writers-upgraded"])
     assert capsys.readouterr().out.strip() == "1"
     assert fencing.records(store, "sw").layout("sw") == fencing.RECORDS
@@ -825,6 +837,7 @@ def test_checks_skip_written_records_and_a_fenced_lease() -> None:
         RecordWrite("check", "grants", "h", 6),
         RecordWrite("check", "meta", "epoch", 4),
     ]
+    assert fencing._checks({"intents": None}, {}, [], False) == []
 
 
 def test_queue_write_stages_the_next_document_revision(store: Any) -> None:
@@ -840,3 +853,143 @@ def test_queue_write_stages_the_next_document_revision(store: Any) -> None:
     assert entry is not None and (entry.value, entry.revision) == (b"two", first + 1)
     assert [found.value for found in states.watch("k")] == [b"one", b"two"]
     assert store.redis.get(states.revision_key) == str(first + 1)
+    with store.redis.pipeline() as pipe:
+        pipe.multi()
+        states.queue_write(pipe, "k", b"three", first + 1)
+        pipe.execute()
+    assert [found.value for found in states.watch("k")] == [b"two", b"three"]
+
+
+def test_a_change_that_adds_or_drops_sections_writes_their_records_and_name_heads() -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.ports.records import BLIND, Record, RecordWrite
+
+    before = {"executions": {"a": _row("a", "eng", 1)}, "grants": {"g": {"n": 1}}, "epoch": 1}
+    loaded = {"meta": {"epoch": Record(4, 1)}, "grants": {"g": Record(7, {"n": 1})}}
+    assert fencing._changes(before, {}, loaded) == [
+        RecordWrite("delete", "meta", "epoch", 4),
+        RecordWrite("delete", "executions", "a", BLIND),
+        RecordWrite("delete", "grants", "g", 7),
+        RecordWrite("delete", "by-name", "eng", BLIND),
+    ]
+    assert fencing._changes({}, {"executions": {"a": _row("a", "eng", 1)}, "grants": {"g": 1}}, {}) == [
+        RecordWrite("put", "executions", "a", BLIND, _row("a", "eng", 1)),
+        RecordWrite("put", "grants", "g", BLIND, 1),
+        RecordWrite("put", "by-name", "eng", BLIND, "a"),
+    ]
+
+
+def test_reads_compare_whole_and_copy_through_the_memo() -> None:
+    import copy
+
+    from scripts.swarm import fencing
+
+    assert fencing.Reads({}).whole is False
+    shared = {"n": 1}
+    reads = fencing.Reads({"x": shared})
+    assert reads.__eq__({"x": {"n": 1}}) is True
+    assert reads.__ne__({"x": {"n": 1}}) is False
+    assert reads.whole
+    copied = copy.deepcopy([shared, reads])
+    assert copied[1] == {"x": {"n": 1}}
+    assert copied[1]["x"] is copied[0]
+    added = fencing.Reads({})
+    assert added.setdefault("k", 2) == 2
+    assert added == {"k": 2}
+    assert added.seen == {"k"}
+
+
+def test_assembling_meta_without_a_layout_keeps_its_scalars() -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.ports.records import Record
+
+    doc = fencing._assemble("sw", {"meta": {"epoch": Record(1, 3)}})
+    assert doc["epoch"] == 3
+    assert doc[fencing.RECORDS_SLUG] == "sw"
+
+
+def test_a_records_change_sees_its_swarm_and_leaves_the_empty_template(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    _migrated(store)
+    assert fencing.write(store, "sw", lambda doc: doc[fencing.RECORDS_SLUG]) == "sw"
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(y=_row("y", "old", 0)))
+    assert fencing.EMPTY["archive"] == {}
+
+
+def test_a_migration_that_keeps_racing_gives_up(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import fencing
+    from scripts.swarm.store import SwarmError
+    from scripts.tick.adapters.records_redis import RedisRecords
+
+    monkeypatch.setattr(fencing, "ATTEMPTS", 2)
+    monkeypatch.setattr(RedisRecords, "move", lambda self, slug, watched, plan: None)
+    with pytest.raises(SwarmError, match="^the swarm fencing state kept changing; nothing was committed$"):
+        fencing.migrate_records(store, "sw", writers_upgraded=True)
+
+
+def test_a_document_restore_drops_the_records_marker(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    fencing.replace(store, "sw", {fencing.RECORDS_SLUG: "sw", "epoch": 3})
+    stored = json.loads(_document(store).value)
+    assert stored["epoch"] == 3
+    assert fencing.RECORDS_SLUG not in stored
+
+
+def test_a_whole_document_batch_on_a_new_swarm_imports_it_first(store: Any) -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.ports.records import BLIND, FencedBatch, RecordWrite
+
+    port = fencing.WholeDocumentRecords(store)
+    port.fenced_batch(
+        "sw",
+        FencedBatch((RecordWrite("put", "grants", "g", BLIND, 1), RecordWrite("delete", "claims", "absent", BLIND))),
+    )
+    assert fencing.read(store, "sw")["grants"] == {"g": 1}
+
+
+def test_a_whole_document_archive_batch_keeps_the_archive_external(store: Any) -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.ports.records import BLIND, FencedBatch, RecordWrite
+
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(z=_row("z", "old", 0)))
+    fencing.migrate_archive(store, "sw", writers_upgraded=True)
+    port = fencing.WholeDocumentRecords(store)
+    port.fenced_batch("sw", FencedBatch((RecordWrite("put", "archive", "y", BLIND, _row("y", "old", 1)),)))
+    stored = json.loads(_document(store).value)
+    assert stored["archive"] == {}
+    assert stored["archive_ref"].startswith("sw:archive:")
+    assert set(port.sections("sw", ("archive",))["archive"]) == {"y", "z"}
+
+
+def test_records_read_every_section_in_one_transaction(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.tick.adapters.records_redis import RedisRecords
+
+    real = store.redis.pipeline
+    seen: list[dict[str, Any]] = []
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs)
+        return real(*args, **kwargs)
+
+    port = RedisRecords(store.redis)
+    assert port.layout("sw") == ""
+    monkeypatch.setattr(store.redis, "pipeline", spy)
+    assert port.sections("sw", ("grants", "claims")) == {"grants": {}, "claims": {}}
+    assert seen == [{"transaction": True}]
+
+
+def test_a_move_gives_way_when_a_records_batch_lands_under_its_watch(store: Any) -> None:
+    from scripts.tick.adapters.records_redis import RedisRecords
+    from scripts.tick.ports.records import FencedBatch, RecordWrite
+
+    port = RedisRecords(store.redis)
+
+    def plan(pipe: Any) -> tuple[Any, FencedBatch]:
+        port.fenced_batch("sw", FencedBatch((RecordWrite("put", "grants", "g", 0, {"n": 1}),)))
+        return (lambda staged: None), FencedBatch((RecordWrite("put", "grants", "h", 0, {"n": 2}),))
+
+    assert port.move("sw", (), plan) is None
+    assert port.record("sw", "grants", "h") is None
+    assert port.record("sw", "grants", "g") is not None

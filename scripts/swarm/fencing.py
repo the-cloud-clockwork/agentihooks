@@ -157,7 +157,7 @@ def _decode(value: bytes) -> dict[str, Any]:
 
 
 def _port(store: Any) -> RedisRecords:
-    return RedisRecords(store.redis, touched=RedisStateStore(store.redis, BUCKET).watch_key)
+    return RedisRecords(store.redis, touched=_states(store).watch_key)
 
 
 def _migrated(store: Any, slug: str) -> RedisRecords | None:
@@ -189,15 +189,14 @@ def _heads(rows: dict[str, Any]) -> dict[str, str]:
     for key, row in rows.items():
         name, generation = row.get("name"), row.get("generation")
         if isinstance(name, str) and isinstance(generation, int | float):
-            if name not in found or (generation, key) > found[name]:
-                found[name] = (generation, key)
+            found[name] = max((generation, key), found.get(name, (generation, key)))
     return {name: key for name, (_, key) in found.items()}
 
 
 def _expected(loaded: dict[str, dict[str, Record]], section: str, key: str) -> int:
     if section not in loaded:
         return BLIND
-    found = loaded.get(section, {}).get(key)
+    found = loaded[section].get(key)
     return 0 if found is None else found.revision
 
 
@@ -376,12 +375,11 @@ def _write_records(store: Any, port: RedisRecords, slug: str, change: Callable[[
     raise SwarmError(CONTENTION)
 
 
-def _record_archive(store: Any, slug: str) -> dict[str, Any]:
+def _record_archive(store: Any, slug: str) -> None:
     rows = RedisRecords(store.redis).sections(slug, (ARCHIVE,))[ARCHIVE]
     hydrated = HYDRATED.get()
     if hydrated is not None:
         hydrated.setdefault(ARCHIVE, rows)
-    return {key: copy.deepcopy(found.value) for key, found in rows.items()}
 
 
 def _archived(store: Any, doc: dict[str, Any], execution_id: str) -> Any:
@@ -702,10 +700,10 @@ def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) ->
         if port.layout(slug) == RECORDS:
             return None
         entry = _entry(states, store, slug)
-        current = int(pipe.get(states.revision_key) or 0)
+        current = int(pipe.get(states.revision_key))
         doc = _decode(entry.value)
         hydrate_archive(store, doc)
-        writes = _changes(copy.deepcopy(EMPTY), doc, empty)
+        writes = _changes(EMPTY, doc, empty)
         writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
         moved = _encode({**json.loads(entry.value), MOVED: RECORDS})
         return (lambda staged: states.queue_write(staged, slug, moved, current)), FencedBatch(tuple(writes))
