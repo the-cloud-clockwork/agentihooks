@@ -10,7 +10,6 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -97,9 +96,10 @@ from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
-from scripts.tick import engine
+from scripts.tick import engine, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
+from scripts.tick.steps import agents as agent_steps  # noqa: F401
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60
@@ -207,20 +207,21 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-@dataclass(frozen=True)
-class _FixedView:
-    """A view that answers only the domain and key pairs it was built with."""
+class _Pass:
+    """A view holding the pass state a tick group site hands its steps."""
 
-    values: Mapping[tuple[Domain, str], object]
+    def __init__(self, state: dict[str, object]) -> None:
+        """Keep the pass state of the group site."""
+        self._state = state
 
     def read(self, domain: Domain, key: str) -> object | None:
-        """Return the value held for ``domain`` and ``key``, or nothing."""
-        return self.values.get((domain, key))
+        """Return the pass state under ``key``, nothing for any other domain."""
+        return self._state.get(key) if domain == steps.PASS else None
 
 
-def run_group(name: str) -> None:
-    """Run the registered steps of tick group ``name`` in legacy order under the group budget."""
-    engine.run_group(name, Context(_FixedView({}), Deadline.after(GROUP_BUDGET_S)))
+def run_group(name: str, **state: object) -> list[str]:
+    """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
+    return steps.actions(engine.run_group(name, Context(_Pass(state), Deadline.after(GROUP_BUDGET_S))))
 
 
 @reaper.scanning_pass
@@ -269,11 +270,8 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     actions += skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
     actions += skip_refused(resume.track_outages, slug, store, runtime, rows, now_ms) or []
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
-    run_group("agents")
-    actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(_strays, slug, config, store, runtime)
-    actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
+    passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "rows": rows, "now_ms": now_ms}
+    actions += run_group("agents", config=config, **passing)
     run_group("masters")
     if config.state not in {"stopped", "stopping"}:
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
@@ -284,9 +282,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    if config.engine != EVENTS_ENGINE:
-        actions += skip_refused(_orphans, slug, store, ledger, rows)
-    run_group("tasks")
+    actions += run_group("tasks", config=config, **passing)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
@@ -333,10 +329,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
-    actions += skip_refused(_conversations, slug, store, runtime) or []
-    actions += skip_refused(_session_models, slug, store) or []
-    actions += skip_refused(transfers.observe, store, slug, runtime.live_names()) or []
-    run_group("close")
+    actions += run_group("close", config=config, **passing)
     return (
         actions
         + skip_refused(_settle, slug, config, store, ledger, rows, doc)

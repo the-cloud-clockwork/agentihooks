@@ -76,13 +76,6 @@ def test_each_group_reads_its_pass_state_under_the_group_budget(
     assert tick_module.GROUP_BUDGET_S == 600.0
 
 
-def test_a_fixed_view_answers_only_the_pairs_it_holds() -> None:
-    view = tick_module._FixedView({(Domain("tasks"), "t1"): "row"})
-    assert view.read(Domain("tasks"), "t1") == "row"
-    assert view.read(Domain("tasks"), "t2") is None
-    assert view.read(Domain("agents"), "t1") is None
-
-
 def test_a_stopped_swarm_runs_only_the_start_group(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     store.update("sw", state="stopped")
     seen = _spy(monkeypatch)
