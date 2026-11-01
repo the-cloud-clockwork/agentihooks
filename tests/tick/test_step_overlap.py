@@ -45,6 +45,8 @@ def _ctx() -> Context:
 def _finish(step: BlockingStep) -> None:
     step.release.set()
     assert step.ended.wait(30.0)
+    engine._RUNNING[step.name].join(30.0)
+    assert not engine._RUNNING[step.name].is_alive()
 
 
 @pytest.mark.feature("swarm-tick-step-overlap-hold")
@@ -68,8 +70,7 @@ def test_a_step_runs_again_once_its_earlier_run_ended() -> None:
         engine.run_step(step, _ctx())
     finally:
         _finish(step)
-    step.ended.clear()
-    step.release.set()
+    step.budget_s = 30.0
     record = engine.run_step(step, _ctx())
     assert (record.outcome, record.held, record.abandoned) == (engine.OK, False, False)
     assert step.runs == [1, 2]
