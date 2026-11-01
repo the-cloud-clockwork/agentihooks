@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.530 · 2026-11-01
+
+### 2026-11-01 · 6f5b56f55f75 · #9149 · @nestorcolt
+
+**Open Claude seats from the week when no five hour window is reported**
+
+This change fixes a seat-allocation bug introduced after Claude dropped the five-hour window from Max account reporting: previously, accounts lacking that window were treated as unknown and skipped, silently starving the fleet of seats and leaving tonight's fifteen-agent tick plan far short of capacity. Now, session cap, routing, account state, and the session quota policy fall back to opening seats from the current week when no five-hour window is reported, while still honoring explicit rejections and respecting real reported bands when present, restoring full seat availability.
+
 ## v2.17.529 · 2026-11-01
 
 ### 2026-11-01 · 07e0adfc1e53 · #9155 · @agenticore-app
