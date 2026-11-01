@@ -9,6 +9,10 @@ SEAT_LINE = "SEAT NOTES: run `agentihooks swarm demo-swarm learned`"
 TARGETS = ("claude", "codex", "copilot")
 
 
+def _skip(*args: object) -> None:
+    """A prompt step that reads swarm state outside the test's isolation, replaced with nothing."""
+
+
 def _prompt_output(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], target: str) -> str:
     import hooks.hook_manager as hm
     from hooks.targets import emitter
@@ -17,6 +21,8 @@ def _prompt_output(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixtur
         monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
     else:
         monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    for step in ("_swarm_heartbeat", "_swarm_ledger", "_inject_refocus"):
+        monkeypatch.setattr(hm, step, _skip)
     emitter.drain()
     capsys.readouterr()
     with patch("hooks._redis.get_redis", return_value=None):
@@ -70,7 +76,7 @@ def test_a_swarm_without_an_agent_name_is_not_a_seat() -> None:
 def test_the_line_names_the_learned_command_for_the_seats_swarm() -> None:
     from hooks.context.seat_notes import reminder
 
-    line = reminder({"AGENTIHOOKS_SWARM": "demo-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-1"})
+    line = reminder({"AGENTIHOOKS_SWARM": "demo-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0001"})
 
     assert line == (
         "SEAT NOTES: run `agentihooks swarm demo-swarm learned` before any tool call for context "
