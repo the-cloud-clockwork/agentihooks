@@ -13,6 +13,17 @@
       ]
     },
     {
+      "id": "swarm-tick-characterisation",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a2",
+      "behaviour": "Twelve fake swarm scenarios preserve ordered actions, Redis state and ledger writes through the tick core and the fenced run tick entry; dropping a reap action breaks the golden comparison.",
+      "seam": "scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with fake Redis, ledger, runtime and Herdr",
+      "tests": [
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_tick_matches_golden",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_dropped_reap_action_breaks_golden"
+      ]
+    },
+    {
       "id": "semgrep-feature-tests",
       "origin": "operator",
       "operator_words": "We need to put a fucking feature semgrep test. You know semgrep? We're going to start to establish testing for features. We're going to start establishing the use of semgrep for features and we're going to establish a system for semgrep. Semgrep is going to fucking put a feature test so that if it fails again we know that we had a regression.",
