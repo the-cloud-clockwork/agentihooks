@@ -44,6 +44,7 @@ MOVED = {
     ("codex-cache.yml", "seed"): STANDARD,
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
+    ("tick-equivalence.yml", "tick-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,
     ("helm-kind-published.yml", "kind"): STANDARD,
     ("hierarchy-cpu.yml", "grade"): LIGHT,
