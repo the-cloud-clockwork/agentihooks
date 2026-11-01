@@ -86,3 +86,24 @@ def test_a_three_minute_pass_acts_at_its_first_pass_at_or_after_the_same_wall_ti
     slow = 3 * MINUTE
     found = stalled_and_retired(store, slow)
     assert found == tuple(-(-at // slow) * slow for at in (2 * MINUTE, 19 * MINUTE)) == (3 * MINUTE, 21 * MINUTE)
+
+
+@pytest.mark.parametrize("period_ms", [MINUTE, 3 * MINUTE])
+def test_an_input_wait_finding_lands_at_the_same_wall_time_at_either_pass(store, period_ms):
+    from scripts.swarm.health.findings import waiting_on_input
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import _watch_idle
+    from tests.swarm.test_tick import FakeLedger
+
+    store.put_agent("sw", AgentRecord(IDLER, "eng", "t1"))
+    runtime, ledger = FakeRuntime(), FakeLedger([{"id": "t1", "state": "claimed"}])
+    runtime.observe = lambda agent: PaneObservation("waiting", "Allow this?")
+    held = {"t1": {"id": "t1", "state": "claimed"}}
+    found_at = None
+    for n in range(6):
+        at = n * period_ms
+        _watch_idle("sw", store, ledger, runtime, ledger.rows, store.agents("sw")[0], at)
+        if found_at is None and waiting_on_input([store.agents("sw")[0].__dict__], held):
+            found_at = at
+    assert found_at == 3 * MINUTE
