@@ -129,15 +129,22 @@ def test_redis_state_retries_a_write_raced_on_another_key(monkeypatch):
     store = RedisStateStore(client, "work")
     other = RedisStateStore(client, "work")
     raced = []
-    incr = client.incr
+    real_pipeline = client.pipeline
 
-    def racing(name, amount=1):
-        if not raced:
-            raced.append(None)
-            raced[0] = other.create("other", b"raced")
-        return incr(name, amount)
+    def racing_pipeline(*args, **kwargs):
+        pipe = real_pipeline(*args, **kwargs)
+        execute = pipe.execute
 
-    monkeypatch.setattr(client, "incr", racing)
+        def commit():
+            if not raced:
+                raced.append(True)
+                other.create("other", b"raced")
+            return execute()
+
+        pipe.execute = commit
+        return pipe
+
+    monkeypatch.setattr(client, "pipeline", racing_pipeline)
     revision = store.create("key", b"mine")
     assert raced and store.get("key").value == b"mine"
     assert store.get("key").revision == revision
@@ -162,15 +169,22 @@ def test_redis_state_gives_up_on_a_key_that_keeps_changing(monkeypatch):
 
     client = fakeredis.FakeRedis(decode_responses=True)
     store = RedisStateStore(client, "work")
-    incr = client.incr
     races = []
+    real_pipeline = client.pipeline
 
-    def racing(name, amount=1):
-        races.append(name)
-        client.hset(store._current, "other", "{}")
-        return incr(name, amount)
+    def racing_pipeline(*args, **kwargs):
+        pipe = real_pipeline(*args, **kwargs)
+        execute = pipe.execute
 
-    monkeypatch.setattr(client, "incr", racing)
+        def commit():
+            races.append(None)
+            client.hset(store._current, "other", "{}")
+            return execute()
+
+        pipe.execute = commit
+        return pipe
+
+    monkeypatch.setattr(client, "pipeline", racing_pipeline)
     with pytest.raises(StateConflict) as changing:
         store.create("key", b"mine")
     assert str(changing.value) == "state key 'key' kept changing"
