@@ -428,7 +428,7 @@ def test_github_open_changes_reads_each_open_pull_request_check_rollup(
 def test_github_open_changes_stops_after_two_hundred_pull_requests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    pages = [_open_page([f"u{n}"], [], f"c{n}") for n in range(3)]
+    pages: list[object] = [_open_page([f"u{n}"], [], f"c{n}") for n in range(3)]
     provider, recorder = _provider(monkeypatch, tmp_path, pages)
 
     assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()), port.OpenChange("u1", ()))
