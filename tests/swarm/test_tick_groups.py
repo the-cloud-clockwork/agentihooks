@@ -6,12 +6,13 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import cli
+from scripts.swarm import cli, command_runner
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
 from scripts.tick.step import Context, Domain, Lane, Result
+from scripts.tick.steps import host, report
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -98,4 +99,35 @@ def test_the_tick_wrapper_runs_its_groups_before_and_after_the_tick(
     run("sw", "create", "--repo", "/repo")
     seen = _spy(monkeypatch)
     cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
-    assert [name for name, _ in seen] == ["before", *TICK_GROUPS, "after"]
+    names = [name for name, _ in seen]
+    assert names.count(host.INTENT) == 1
+    assert [name for name in names if name != host.INTENT] == [
+        "before",
+        host.PROBES,
+        host.HEALTH,
+        host.COMMANDS,
+        host.REFRESH,
+        host.REBOOT,
+        *TICK_GROUPS,
+        report.EVENTS,
+        report.METRICS,
+        "after",
+        report.STATUS,
+    ]
+
+
+def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+
+    def consume(*args: object) -> list[str]:
+        raise RuntimeError("consume failed")
+
+    monkeypatch.setattr(command_runner, "consume", consume)
+    with pytest.raises(RuntimeError, match="^consume failed$"):
+        cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert [name for name, _ in seen][-2:] == [host.COMMANDS, report.STATUS]
