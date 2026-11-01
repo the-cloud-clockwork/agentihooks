@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, tick_report, timing
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.tick_scenarios.test_characterisation import BASE_MS, github_reply
@@ -26,7 +26,7 @@ INITIAL_BUDGET_S = 384.0
 SLOWDOWN_S = 300.0
 AGENTS = {"eng": 10, "ci": 5}
 TASKS = 900
-LATENCY_S = {"ledger": 0.25, "runtime": 0.5, "redis": 0.002}
+LATENCY_S = {"ledger": 2.0, "runtime": 1.0, "redis": 0.01}
 
 
 class VirtualClock:
@@ -131,7 +131,7 @@ def load(monkeypatch: pytest.MonkeyPatch, slowdown_s: float = 0.0) -> dict[str, 
     """Run one fenced tick pass under the virtual clock and return its tick report."""
     import fakeredis
 
-    from scripts.swarm import commands, incidents, reboot
+    from scripts.swarm import commands, delivery, incidents, reboot
     from scripts.swarm.health import merge_stall
 
     clock = VirtualClock()
@@ -153,16 +153,20 @@ def load(monkeypatch: pytest.MonkeyPatch, slowdown_s: float = 0.0) -> dict[str, 
     slow_methods(ledger, "ledger", clock, monkeypatch)
     slow_methods(runtime, "runtime", clock, monkeypatch)
     clock.reset()
-    core = cli.tick
+    migrate = delivery.migrate_outbox
 
-    def stepped(*args: Any, **kwargs: Any) -> list[str]:
+    def stepped(*args: Any, **kwargs: Any) -> None:
         clock.charge("planted", slowdown_s)
-        return core(*args, **kwargs)
+        return migrate(*args, **kwargs)
 
-    monkeypatch.setattr(cli, "tick", stepped)
-    actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    monkeypatch.setattr(delivery, "migrate_outbox", stepped)
+    try:
+        outcome: Any = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    except SwarmError as exc:
+        outcome = str(exc)
     report = tick_report.read(store, "sw", 1)
-    report.update(actions=actions, calls=dict(clock.calls), agents=len(store.agents("sw")), tasks=len(ledger.rows))
+    workers = [agent for agent in store.agents("sw") if agent.lane != MASTER]
+    report.update(outcome=outcome, calls=dict(clock.calls), agents=len(workers), tasks=len(ledger.rows))
     print("TICK_LOAD=" + json.dumps(report, sort_keys=True, default=str))
     return report
 
@@ -191,6 +195,7 @@ def check_budget(current: float, base: float) -> None:
 def test_simulated_load_pass_fits_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     report = load(monkeypatch)
     assert (report["agents"], report["tasks"], report["pass_count"]) == (15, TASKS, 1)
+    assert isinstance(report["outcome"], list), report["outcome"]
     assert report["pass_p95_s"] <= budget(), f"simulated pass {report['pass_p95_s']}s exceeds {budget()}s"
 
 
