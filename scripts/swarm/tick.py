@@ -211,7 +211,7 @@ class Runtime(Protocol):
 class _FixedView:
     """A view that answers only the domain and key pairs it was built with."""
 
-    values: Mapping[tuple[Domain, str], object] = field(default_factory=dict)
+    values: Mapping[tuple[Domain, str], object]
 
     def read(self, domain: Domain, key: str) -> object | None:
         """Return the value held for ``domain`` and ``key``, or nothing."""
@@ -220,7 +220,7 @@ class _FixedView:
 
 def run_group(name: str) -> None:
     """Run the registered steps of tick group ``name`` in legacy order under the group budget."""
-    engine.run_group(name, Context(_FixedView(), Deadline.after(GROUP_BUDGET_S)))
+    engine.run_group(name, Context(_FixedView({}), Deadline.after(GROUP_BUDGET_S)))
 
 
 @reaper.scanning_pass
