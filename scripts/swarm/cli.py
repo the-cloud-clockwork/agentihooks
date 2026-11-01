@@ -2429,7 +2429,9 @@ def cmd_terminal(store, args):
     print(json.dumps(operator_terminal.command(store, args.slug, args.execution, os.environ, Who.from_env())))
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
+    from scripts.swarm import tick_report
+
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -2465,6 +2467,9 @@ def build_parser():
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("probe").set_defaults(handler=probe_command)
+    report = sub.add_parser("tick-report")
+    report.add_argument("--passes", type=tick_report.pass_count, default=100)
+    report.set_defaults(handler=tick_report.command)
     sub.add_parser("ledger-ready")
     for verb in ("freeze", "focus", "unfreeze"):
         frozen = sub.add_parser(verb)
