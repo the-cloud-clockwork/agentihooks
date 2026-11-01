@@ -219,6 +219,7 @@ def test_pass_budget_holds_once_and_recovers(monkeypatch: pytest.MonkeyPatch) ->
         assert held == "holding spawns: pass p95 400s exceeds S1 target 384s"
         assert engine.pass_budget_hold(store, "sw") == held
         assert engine.update_pass_budget(store, "sw") == held
+        inbox.assert_called_once_with(store.redis)
         inbox.return_value.send.assert_called_once_with("swarm", "master@sw", held, fyi=True, item_id=mock.ANY)
         for _ in range(10):
             store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 384.0})})
