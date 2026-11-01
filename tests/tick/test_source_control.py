@@ -17,6 +17,8 @@ PULL = {
     "base": {"ref": "dev"},
     "merged": False,
     "html_url": "https://github.com/owner/project/pull/7",
+    "body": "Closes #12",
+    "draft": True,
 }
 OPTIONS = {"capture_output": True, "text": True, "check": True}
 
@@ -153,7 +155,15 @@ def test_github_change_uses_audited_reads_and_deadline(monkeypatch: pytest.Monke
     provider, recorder = _provider(monkeypatch, tmp_path, [PULL])
 
     assert provider.change(REFERENCE, deadline=_deadline()) == port.ChangeState(
-        REFERENCE, "open", "head", "dev", False, "https://github.com/owner/project/pull/7", "engineer-1"
+        REFERENCE,
+        "open",
+        "head",
+        "dev",
+        False,
+        "https://github.com/owner/project/pull/7",
+        "engineer-1",
+        "Closes #12",
+        True,
     )
     assert recorder.calls == [
         ("tick.source_control", ["api", "repos/owner/project/pulls/7"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
@@ -166,6 +176,20 @@ def test_github_change_names_its_head_branch(monkeypatch: pytest.MonkeyPatch, tm
     provider, _ = _provider(monkeypatch, tmp_path, [pull])
 
     assert provider.change(REFERENCE, deadline=_deadline()).head_branch == "engineer-2"
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_change_reads_an_empty_body_as_no_text(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider, _ = _provider(monkeypatch, tmp_path, [{**PULL, "body": None, "draft": False}])
+
+    change = provider.change(REFERENCE, deadline=_deadline())
+    assert (change.body, change.draft) == ("", False)
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_a_change_record_defaults_to_no_body_and_not_a_draft() -> None:
+    change = port.ChangeState(REFERENCE, "open", "head", "dev", False, "https://x/7")
+    assert (change.head_branch, change.body, change.draft) == ("", "", False)
 
 
 @pytest.mark.feature("swarm-tick-source-control-port")
@@ -327,6 +351,53 @@ def test_github_issues_enabled_reads_the_repository(
     ]
 
 
+def test_github_latest_runs_read_the_newest_runs_of_the_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rows = [
+        {"id": 5, "head_branch": "feature", "event": "pull_request", "status": "queued", "name": "Tests"},
+        {"id": 6, "head_branch": "dev", "event": "push", "status": "completed", "name": "Lint"},
+        {"id": 7, "head_branch": None, "event": "schedule", "status": "in_progress", "name": "Nightly"},
+    ]
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"total_count": 3, "workflow_runs": rows}])
+
+    assert provider.latest_runs(deadline=_deadline()) == (
+        port.RepositoryRun(5, "feature", "pull_request", "queued"),
+        port.RepositoryRun(6, "dev", "push", "completed"),
+        port.RepositoryRun(7, None, "schedule", "in_progress"),
+    )
+    assert recorder.calls == [
+        (
+            github.CALLER,
+            ["api", "repos/owner/project/actions/runs?per_page=100"],
+            {"cwd": tmp_path, "timeout": 9, **OPTIONS},
+        )
+    ]
+
+
+@pytest.mark.parametrize("body", ["", "{}"])
+def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, body: str
+) -> None:
+    seen: list[tuple[str, list[str], dict[str, object]]] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        seen.append((caller, args, options))
+        return subprocess.CompletedProcess(["gh", *args], 0, body, "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    assert provider.cancel_run(5, deadline=_deadline()) is None
+    assert seen == [
+        (
+            github.CALLER,
+            ["api", "repos/owner/project/actions/runs/5/cancel", "-X", "POST"],
+            {"cwd": tmp_path, "timeout": 9, **OPTIONS},
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     "operation,args,answer",
     [
@@ -334,6 +405,8 @@ def test_github_issues_enabled_reads_the_repository(
         ("close_issue", (REFERENCE,), "closed"),
         ("rate_limit", (), port.RateLimit(1, 2, 3)),
         ("issues_enabled", (), True),
+        ("latest_runs", (), (port.RepositoryRun(1, "feature", "push", "queued"),)),
+        ("cancel_run", (5,), None),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(
@@ -384,6 +457,8 @@ def test_github_defaults() -> None:
         ("close_issue", (REFERENCE,)),
         ("rate_limit", ()),
         ("issues_enabled", ()),
+        ("latest_runs", ()),
+        ("cancel_run", (5,)),
     ],
 )
 def test_github_expired_deadline_prevents_external_reads(

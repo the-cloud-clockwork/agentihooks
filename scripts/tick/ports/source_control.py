@@ -12,6 +12,7 @@ __all__ = [
     "QueueEntry",
     "QueueHealth",
     "RateLimit",
+    "RepositoryRun",
     "Run",
     "Tag",
 ]
@@ -32,6 +33,8 @@ class ChangeState:
     merged: bool
     url: str
     head_branch: str = ""
+    body: str = ""
+    draft: bool = False
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,14 @@ class Run:
     status: str
     conclusion: str | None
     url: str
+
+
+@dataclass(frozen=True)
+class RepositoryRun:
+    id: int
+    branch: str | None
+    event: str
+    status: str
 
 
 @dataclass(frozen=True)

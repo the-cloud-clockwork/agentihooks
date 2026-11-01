@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/scope.py:scripts.ci_mutation.scope.x_moved_lines:efe803f664fddd869ff164e1c62593cbe400136ffdd69456eca47ee0bbfe4cb8": {
+    "reader": "standards_reader",
+    "reason": "Uppercases the core.quotePath setting. Git config names are case-insensitive and boolean values parse case-insensitively, so FALSE disables path quoting exactly as false does."
+  }
+}

@@ -20,6 +20,7 @@ from scripts.tick.ports.source_control import (
     QueueEntry,
     QueueHealth,
     RateLimit,
+    RepositoryRun,
     Run,
     Tag,
 )
@@ -72,13 +73,17 @@ class GitHubSourceControl:
     base: str
     git: Git = subprocess.run
 
-    def _api(self, args: list[str], deadline: Deadline) -> Any:
-        """Run one audited gh api call inside the deadline and decode its JSON body."""
+    def _call(self, args: list[str], deadline: Deadline) -> str:
+        """Run one audited gh api call inside the deadline and return its output."""
         timeout = _live(deadline)
         result = github_reads.rest(
             CALLER, ["api", *args], cwd=self.root, timeout=timeout, capture_output=True, text=True, check=True
         )
-        return json.loads(result.stdout)
+        return result.stdout
+
+    def _api(self, args: list[str], deadline: Deadline) -> Any:
+        """Run one audited gh api call inside the deadline and decode its JSON body."""
+        return json.loads(self._call(args, deadline))
 
     def _pages(self, path: str, key: str, deadline: Deadline) -> list[Any]:
         """Read every page of a listing until a short page, at most the page limit."""
@@ -116,6 +121,8 @@ class GitHubSourceControl:
             body["merged"],
             body["html_url"],
             body["head"]["ref"],
+            body["body"] or "",
+            body["draft"],
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
@@ -200,3 +207,12 @@ class GitHubSourceControl:
     def issues_enabled(self, *, deadline: Deadline) -> bool:
         """Read whether the repository takes issues."""
         return self._api([f"repos/{self.repository}"], deadline)["has_issues"]
+
+    def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]:
+        """Read the newest workflow runs of the repository, one page."""
+        rows = self._api([f"repos/{self.repository}/actions/runs?per_page={_PAGE}"], deadline)["workflow_runs"]
+        return tuple(RepositoryRun(row["id"], row["head_branch"], row["event"], row["status"]) for row in rows)
+
+    def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
+        """Ask GitHub to cancel one workflow run of the repository; its answer carries no body to read."""
+        self._call([f"repos/{self.repository}/actions/runs/{run_id}/cancel", "-X", "POST"], deadline)

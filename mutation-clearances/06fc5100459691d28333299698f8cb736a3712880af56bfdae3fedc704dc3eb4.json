@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/scope.py:scripts.ci_mutation.scope.x_moved_lines:96911d8b8bf222d53651f377048ef87bb447ade5b6b3414f981114fdef35d00e": {
+    "reader": "standards_reader",
+    "reason": "Starts header as True. Every non-empty diff begins with a diff --git line that sets header True anyway, and empty output reads no lines, so behaviour is unchanged."
+  }
+}

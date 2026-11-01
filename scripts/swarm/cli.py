@@ -1560,7 +1560,7 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":
         found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
-        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.gh)
+        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.port)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
         return
     if args.action == "off":
