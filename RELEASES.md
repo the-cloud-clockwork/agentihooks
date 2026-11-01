@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.538 · 2026-11-01
+
+### 2026-11-01 · 34a2f997caf3 · #9181 · @agenticore-app
+
+**Document the inbox, llm, metrics and host tick adapters**
+
+This change adds a new reference page documenting the tick adapters introduced earlier (StoreInbox, ApiLlm, SpoolMetrics, JobHost, and local_host), covering their operations, return values, errors, declared effects via Tools.for_effects, their fakes, and the import check that keeps tick steps from reaching into the adapted modules directly, plus troubleshooting guidance. It also adds an index row and a changelog fragment. It's documentation only, verified by running the page's own examples against current code, so it carries no runtime risk but gives operators and contributors a clear, tested reference for how these adapters behave and fail.
+
 ## v2.17.535 · 2026-11-01
 
 ### 2026-11-01 · 0242bb8836e7 · #9153 · @nestorcolt
