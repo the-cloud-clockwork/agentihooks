@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.549 · 2026-11-01
+
+### 2026-11-01 · 866f11b0e334 · #9213 · @nestorcolt
+
+**Run the tick's master and dispatcher seat steps as registered engine steps**
+
+This change converts the tick's master and dispatcher seat logic—eleven hand written calls spanning masters, master seats, dispatch seat, and master watch—into registered engine steps defined in a new `scripts/tick/steps/masters.py` module, with each tick site reduced to a single extend call that runs the group and surfaces exceptions properly. This shrinks the tick module's complexity (type baseline drops from 3496 to 3490), keeps execution order and behavior identical as verified by tick equivalence and planted-fault tests, and sets up a clean path for a follow up to remove the temporary untyped `SEAT` namespace once the seat modules are fully typed.
+
+### 2026-11-01 · cb15ee2bea3d · #9224 · @nestorcolt
+
+**Patch a stored tick ledger view from one export read of named parts**
+
+Each tick pass now patches a cached ledger view (tasks, metadata, phases) with a single delta export since its last generation, instead of re-reading the whole ledger every time. The export route gains an optional `parts` filter so callers fetch only what they need, and the view logic falls back to a full read only when the server's change window no longer covers the gap. This cuts CPU and contention on large ledgers, letting parallel waves run without colliding, and unblocks the next stage of the rollout; servers predating this change degrade gracefully with a stderr warning rather than failing.
+
+### 2026-11-01 · e9a97ee92519 · #9232 · @agenticore-app
+
+**Document the empty registry tick integration contract**
+
+This change updates the tick adapter documentation to fully describe the empty registry engine contract delivered in #9201: the seven ordered group call sites (start, observe, agents, masters, tasks, place, close), the wrapper-before-and-completion-only-after pattern, fresh empty views per group, and the independent 600 second deadline each group gets. It also adds internal usage notes, configuration limits, early-return behavior, troubleshooting guidance, and the golden equivalence evidence proving byte-identical output with no steps registered, while explicitly scoping that empty-registry guarantee to this delivery so future work registering real steps isn't mistakenly assumed to preserve it.
+
 ## v2.17.548 · 2026-11-01
 
 ### 2026-11-01 · 2ee703361052 · #9221 · @nestorcolt
