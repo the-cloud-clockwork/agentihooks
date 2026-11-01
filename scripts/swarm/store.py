@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-from scripts.inbox.seats import SCAN_PAGE, SeatMemory, SeatRegistry, SwarmCulture, of_swarm
+from scripts.inbox.seats import SCAN_PAGE, SeatMemory, SeatRegistry, SwarmCulture
 from scripts.inbox.store import InboxStore
 from scripts.swarm import default_models, effort_range, timing
 from scripts.swarm.execution import ExecutionRegistry, _finished_life, occupants_of, records_of
@@ -802,14 +802,12 @@ class RedisStore:
         self.config(slug)
         scanned = self.redis.scan_iter(match=self.key(slug, "*"), count=SCAN_PAGE)
         own = [key for key in scanned if key != self.key(slug, "tick-lock")]
+        seats = self.seats.swarm_keys(slug)
         named = set(self.seats.agent_names(slug)) | {row["name"] for row in self.names.names(slug)}
         named |= {alias for name in list(named) for alias in self.names.aliases(name)}
-        inbox, members = InboxStore(self.redis).keys_for(
-            lambda address: address in named or of_swarm(address, slug), f"*@{slug}", named
-        )
-        keys = (
-            sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
-        )
+        seated = {key[len(self.seats.key("")) :] for key in seats if key.endswith(f"@{slug}")}
+        inbox, members = InboxStore(self.redis).keys_at(sorted(named | seated))
+        keys = sorted(own) + seats + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
         return {
             "keys": _dump(self.redis, keys),
             "members": {f"{PREFIX}:index": [slug], **members},
