@@ -149,8 +149,8 @@ def test_a_stopped_swarm_that_sleeps_finishes_the_pass(monkeypatch: pytest.Monke
     monkeypatch.setattr(tick_module, "_woken", lambda slug, config, store, ledger: False)
     monkeypatch.setattr(tick_module, "_close_space", _fake(seen, "close", ["closed"]))
     monkeypatch.setattr(tick_module, "_bin_closed", _fake(seen, "bin", ["binned"]))
-    assert actions(engine.run_group("start", _ctx(state))) == ["cleaned"]
-    assert box["finished"] == ["closed", "binned"]
+    assert actions(engine.run_group("start", _ctx(state))) == ["cleaned", "closed", "binned"]
+    assert box["finished"] is True
     assert [name for name, _ in seen] == ["cleanup", "close", "bin"]
     assert seen[0][1][:5] == ("sw", store, state["ledger"], "runtime", 7)
     assert seen[0][1][5].args == ("sw", store, state["ledger"], {"t1": {"id": "t1"}})
@@ -166,8 +166,8 @@ def test_a_stopped_swarm_with_retired_tasks_awake_keeps_finishing(monkeypatch: p
     monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: True)
     monkeypatch.setattr(tick_module, "_close_space", lambda *args: [])
     monkeypatch.setattr(tick_module, "_bin_closed", lambda *args: ["binned"])
-    assert actions(engine.run_group("start", _ctx(state))) == []
-    assert box["finished"] == ["binned"]
+    assert actions(engine.run_group("start", _ctx(state))) == ["binned"]
+    assert box["finished"] is True
 
 
 def test_a_stopped_swarm_the_operator_wrote_to_pauses_to_start_the_master(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,13 +1,13 @@
 """The start and observation steps of the tick pass: config load, the stopped branch and the observation sweeps."""
 
 from collections.abc import Callable
+from inspect import signature
 from typing import Any
 
 from scripts.tick import registry
 from scripts.tick.steps import CallStep
 
 RAISED = "raised"
-KEYS = ("slug", "store", "ledger", "runtime", "now_ms", "box")
 
 
 def _held(pick: Callable[[Any], Callable[..., Any]]) -> Callable[[Any, Callable[[str], Any]], Any]:
@@ -18,7 +18,11 @@ def _held(pick: Callable[[Any], Callable[..., Any]]) -> Callable[[Any, Callable[
         if RAISED in box:
             return []
         try:
-            return pick(tick)(**{key: get(key) for key in KEYS}, **box)
+            call, values = (
+                pick(tick),
+                {**{key: get(key) for key in ("slug", "store", "ledger", "runtime", "now_ms", "box")}, **box},
+            )
+            return call(**{name: values[name] for name in signature(call).parameters})
         except (Exception, SystemExit) as exc:
             box[RAISED] = exc
             return []
@@ -49,5 +53,4 @@ STEPS = (
     CallStep("verify", "observe", 120, _held(lambda tick: tick.step_verify)),
 )
 
-for _step in STEPS:
-    registry.register(_step)
+list(map(registry.register, STEPS))

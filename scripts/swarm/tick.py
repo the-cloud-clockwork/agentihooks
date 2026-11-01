@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -208,38 +209,24 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-@dataclass(frozen=True)
-class TickPass:
-    """The pass state a tick group site hands its steps."""
-
-    slug: str
-    store: Any
-    ledger: Any
-    runtime: Any
-    now_ms: int
-    box: dict[str, Any] = field(default_factory=dict)
-    config: SwarmConfig | None = None
-    rows: dict[str, dict[str, Any]] | None = None
-
-
 class _PassView:
     """A view holding the pass state a tick group site hands its steps."""
 
-    def __init__(self, state: TickPass | None) -> None:
+    def __init__(self, state: dict[str, object]) -> None:
         """Keep the pass state of the group site."""
         self._state = state
 
     def read(self, domain: Domain, key: str) -> object | None:
         """Return the pass state under ``key``, nothing for any other domain."""
-        return getattr(self._state, key, None) if domain == steps.PASS else None
+        return self._state.get(key) if domain == steps.PASS else None
 
 
-def run_group(name: str, state: TickPass | None = None) -> list[str]:
+def run_group(name: str, state: Mapping[str, object] | None = None) -> list[str]:
     """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
-    return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
+    return steps.actions(engine.run_group(name, Context(_PassView(dict(state or {})), Deadline.after(GROUP_BUDGET_S))))
 
 
-def step_config_load(slug: str, store: RedisStore, box: dict[str, Any], **_: object) -> list[str]:
+def step_config_load(slug: str, store: RedisStore, box: dict[str, Any]) -> list[str]:
     box["config"] = store.ensure_code(slug)
     return []
 
@@ -252,7 +239,6 @@ def step_stopped_branch(
     runtime: Any,
     now_ms: int,
     box: dict[str, Any],
-    **_: object,
 ) -> list[str]:
     from scripts.swarm import automated_gc
 
@@ -263,36 +249,36 @@ def step_stopped_branch(
         actions = automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            box["finished"] = skip_refused(_close_space, slug, config, store, runtime) + _bin_closed(
-                slug, store, ledger, doc
+            box["finished"] = True
+            return (
+                actions
+                + skip_refused(_close_space, slug, config, store, runtime)
+                + _bin_closed(slug, store, ledger, doc)
             )
-            return actions
         box["config"] = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     return actions
 
 
-def step_pane_evidence(slug: str, store: RedisStore, runtime: Any, now_ms: int, **_: object) -> list[str]:
+def step_pane_evidence(slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
 
 
-def step_execution_reconcile(slug: str, store: RedisStore, runtime: Any, now_ms: int, **_: object) -> list[str]:
+def step_execution_reconcile(slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return skip_refused(store.execution_registry.reconcile, slug, runtime, now_ms)
 
 
 def step_master_move_fail_over(
-    slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int, **_: object
+    slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int
 ) -> list[str]:
     return skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
 
 
-def step_recover_master(
-    slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int, **_: object
-) -> list[str]:
+def step_recover_master(slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return skip_refused(_recover_master, slug, config, store, runtime, now_ms)
 
 
-def step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any], **_: object) -> list[str]:
+def step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any]) -> list[str]:
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     box.update(doc=doc, rows=rows)
@@ -300,7 +286,7 @@ def step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, 
 
 
 def step_automated_cleanup(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int, **_: object
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
 ) -> list[str]:
     from scripts.swarm import automated_gc
 
@@ -315,7 +301,6 @@ def step_spawn_due(
     runtime: Any,
     now_ms: int,
     box: dict[str, Any],
-    **_: object,
 ) -> list[str]:
     rows, doc = box["rows"], box["doc"]
     actions: list[str] = []
@@ -328,7 +313,7 @@ def step_spawn_due(
     return actions
 
 
-def step_exits_sweep(slug: str, store: RedisStore, ledger: Any, **_: object) -> list[str]:
+def step_exits_sweep(slug: str, store: RedisStore, ledger: Any) -> list[str]:
     return skip_dropped(
         exits.sweep,
         InboxStore(store.redis),
@@ -339,7 +324,7 @@ def step_exits_sweep(slug: str, store: RedisStore, ledger: Any, **_: object) -> 
 
 
 def step_master_start_watch(
-    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, now_ms: int, **_: object
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, now_ms: int
 ) -> list[str]:
     return skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
 
@@ -352,36 +337,35 @@ def step_launch_checks(
     rows: dict[str, dict[str, Any]],
     doc: dict[str, Any],
     now_ms: int,
-    **_: object,
 ) -> list[str]:
     return skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
 
 
 def step_track_outages(
-    slug: str, store: RedisStore, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int, **_: object
+    slug: str, store: RedisStore, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
 ) -> list[str]:
     return skip_refused(resume.track_outages, slug, store, runtime, rows, now_ms) or []
 
 
 def step_verify(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int, **_: object
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
 ) -> list[str]:
     return skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
 
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
-    passing = TickPass(slug, store, ledger, runtime, now_ms)
-    box = passing.box
+    box: dict[str, Any] = {}
+    passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
     actions = run_group("start", passing)
     observe_steps.raise_held(box)
     if "finished" in box:
-        return actions + box["finished"]
+        return actions
     store.redis.delete(store.key(slug, SPAWN_HOLD))
     actions += run_group("observe", passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
-    actions += run_group("agents", replace(passing, config=config, rows=rows))
+    actions += run_group("agents", {**passing, "config": config, "rows": rows})
     run_group("masters")
     if config.state not in {"stopped", "stopping"}:
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
@@ -392,7 +376,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += run_group("tasks", replace(passing, config=config, rows=rows))
+    actions += run_group("tasks", {**passing, "config": config, "rows": rows})
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
@@ -439,7 +423,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
-    actions += run_group("close", replace(passing, config=config, rows=rows))
+    actions += run_group("close", {**passing, "config": config, "rows": rows})
     return (
         actions
         + skip_refused(_settle, slug, config, store, ledger, rows, doc)
