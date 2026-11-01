@@ -533,6 +533,24 @@ def test_the_refined_plan_heads_each_split_with_the_planned_direct_tests(tmp_pat
     assert refined["splits"]["scripts.sample.x_f"]["head"] == [nodes[0], nodes[12]]
 
 
+def test_each_unit_of_a_split_whose_head_holds_direct_tests_costs_those_direct_tests():
+    from scripts.ci_mutation.measured import measured_plan
+
+    nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
+    durations = {**dict.fromkeys(nodes, 130.0), nodes[0]: 1.0, nodes[1]: 5.0, nodes[12]: 15.0}
+    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": durations}]
+    names = [f"scripts.sample.x_f__mutmut_{index}" for index in range(1, 11)]
+    plain = measured_plan([(names, results)])
+    assert all(cost > 100.0 for cost in plain["unit_costs"][names[0]])
+    assert "first" not in plain["splits"]["scripts.sample.x_f"]
+    planned = measured_plan([(names, results)], direct={"scripts.sample.": [nodes[12]]})
+    split = planned["splits"]["scripts.sample.x_f"]
+    assert split["head"] == [nodes[0], nodes[12]]
+    assert split["first"] == pytest.approx(5.6 + 1.25 * 15.0)
+    assert planned["unit_costs"][names[0]] == pytest.approx([5.6 + 1.25 * 15.0] * len(split["slices"]))
+    assert planned["costs"][names[0]] == pytest.approx((5.6 + 1.25 * 15.0) * len(split["slices"]))
+
+
 def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mutants_and_covers_every_test():
     from scripts.ci_mutation.measured import measured_plan
 

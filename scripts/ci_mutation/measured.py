@@ -131,6 +131,8 @@ def measured_splits(
             splits[function] = {**kept, "costs": costs}
         elif split:
             splits[function] = split
+        if early := [seconds[node] for node in splits.get(function, {}).get("head", ()) if is_direct(node, first)]:
+            splits[function]["first"] = MUTANT_SECONDS + 1.25 * head_seconds(early)
     return splits
 
 
@@ -214,7 +216,7 @@ def measured_plan(
             unit_costs[name] = []
             for tests, fallback in zip(split["slices"], split["costs"], strict=True):
                 observed = memory.cost(name, {*split["head"], *tests}) if memory is not None else None
-                unit_costs[name].append(observed if observed is not None else fallback)
+                unit_costs[name].append(observed if observed is not None else split.get("first", fallback))
     return plan_shards(costs, limit=limit, splits=splits, unit_costs=unit_costs)
 
 
