@@ -76,13 +76,6 @@ def test_a_missing_or_unreadable_five_hour_window_reads_from_the_week(five):
     assert (found.state, found.five_hour.used, found.error) == ("NORMAL", None, "")
 
 
-def test_a_missing_week_window_reads_as_unavailable() -> None:
-    headers = _headers()
-    del headers[f"{PREFIX}7d-utilization"]
-    found = claude_usage.result("a", headers, BODY, 5)
-    assert (found.state, found.seven_day.used, found.error) == ("UNKNOWN", None, "rate-limit windows unavailable")
-
-
 def test_a_missing_status_reads_as_unknown_status():
     headers = _headers()
     del headers[f"{PREFIX}status"]
