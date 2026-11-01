@@ -249,7 +249,12 @@ def test_the_name_index_follows_the_newest_execution(store: Any) -> None:
 def test_name_heads_pick_the_later_row_on_a_tie() -> None:
     from scripts.swarm import fencing
 
-    rows = {"a": _row("a", "eng", 1), "b": _row("b", "eng", 1), "c": _row("c", "eng", 0), "d": {"name": 3, "generation": 9}}
+    rows = {
+        "a": _row("a", "eng", 1),
+        "b": _row("b", "eng", 1),
+        "c": _row("c", "eng", 0),
+        "d": {"name": 3, "generation": 9},
+    }
     assert fencing._heads(rows) == {"eng": "b"}
     assert fencing._heads({"e": {"name": "x", "generation": 1.5}}) == {"x": "e"}
 
