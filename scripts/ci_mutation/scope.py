@@ -303,7 +303,7 @@ def select_tests(root: Path, source: Path, helpers: bool = True) -> list[str]:
         or source.suffix == ".js"
         and source.name in text
     } | importing({module})
-    added = set() if helpers is False else reaching
+    added: set[Path] = set() if helpers is False else reaching
     while added:
         added = importing({module_name(path.relative_to(root)) for path in added}) - reaching
         reaching |= added

@@ -4,7 +4,7 @@ import json
 import math
 import os
 import subprocess
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,7 @@ def measured_costs(
     names: list[str],
     results: list[dict],
     memory: KillMemory | None = None,
-    direct: dict[str, Collection[str]] | None = None,
+    direct: Mapping[str, Collection[str]] | None = None,
 ) -> dict[str, float]:
     tests, durations, missing = function_tests(results)
     functions = {function: sum(durations.get(node, missing) for node in nodes) for function, nodes in tests.items()}
@@ -112,11 +112,11 @@ def measured_splits(
     results: list[dict],
     limit: int = 10,
     memory: KillMemory | None = None,
-    direct: dict[str, Collection[str]] | None = None,
-) -> dict[str, dict]:
+    direct: Mapping[str, Collection[str]] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Split long mutants; a head holding direct tests prices every unit at them, since each unit runs them first."""
     tests, durations, missing = function_tests(results)
-    splits = {}
+    splits: dict[str, dict[str, Any]] = {}
     for function in sorted({function_name(name) for name in names} & tests.keys()):
         seconds = {node: durations.get(node, missing) for node in tests[function]}
         first = (direct or {}).get(function.rpartition(".")[0] + ".", ())
@@ -132,7 +132,9 @@ def measured_splits(
             splits[function] = {**kept, "costs": costs}
         elif split:
             splits[function] = split
-        if early := [seconds[node] for node in splits.get(function, {}).get("head", ()) if is_direct(node, first)]:
+        if early := [
+            seconds[node] for node in (splits[function]["head"] if function in splits else ()) if is_direct(node, first)
+        ]:
             splits[function]["first"] = MUTANT_SECONDS + 1.25 * head_seconds(early)
     return splits
 
@@ -202,7 +204,7 @@ def measured_plan(
     groups: list[tuple[list[str], list[dict]]],
     memory: KillMemory | None = None,
     limit: int = 10,
-    direct: dict[str, Collection[str]] | None = None,
+    direct: Mapping[str, Collection[str]] | None = None,
 ) -> dict:
     limit = min(limit, sum(len(names) for names, _ in groups))
     costs, splits, unit_costs = {}, {}, {}
