@@ -509,6 +509,7 @@ class RedisStore:
             self._project_row(pipe, slug, agent, previous)
             if removed:
                 pipe.hdel(self.key(slug, "agents"), removed)
+                pipe.hdel(self.key(slug, "hosts"), removed)
             timing.timed(pipe.execute)
 
         self._projection(slug, write, PROJECTION_CONTENTION)
@@ -545,6 +546,7 @@ class RedisStore:
 
         row = {field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}
         pipe.hset(self.key(slug, "agents"), agent.name, json.dumps(row))
+        pipe.hset(self.key(slug, "hosts"), agent.name, agent.hive)
         if agent.desired_route_kind:
             pipe.hset(self.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
         else:
@@ -625,6 +627,7 @@ class RedisStore:
                             json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
                         )
                     pipe.hdel(self.key(slug, "agents"), name)
+                    pipe.hdel(self.key(slug, "hosts"), name)
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
                     pipe.hdel(self.key(slug, "retire-failures"), name)

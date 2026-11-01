@@ -93,14 +93,19 @@ class ExecutionRegistry:
         return lease.fenced(self.store, slug, lease.EPOCH.get(), archived if history else change)
 
     def records(self, slug: str) -> list[AgentRecord]:
-        return records_of(fencing.read(self.store, slug))
+        loaded = fencing.records(self.store, slug).sections(slug, ("executions", "archive"))
+        return records_of({section: {key: row.value for key, row in rows.items()} for section, rows in loaded.items()})
 
     def occupants(self, slug: str) -> dict[str, AgentRecord]:
-        return occupants_of({"executions": fencing.read_executions(self.store, slug)})
+        rows = fencing.records(self.store, slug).sections(slug, ("executions",))["executions"]
+        return occupants_of({"executions": {key: row.value for key, row in rows.items()}})
 
     def managed(self, slug: str, name: str) -> bool:
-        doc = fencing.read(self.store, slug)
-        return any(row["name"] == name for section in ("executions", "archive") for row in doc[section].values())
+        port = fencing.records(self.store, slug)
+        if port.record(slug, "by-name", name) is not None:
+            return True
+        rows = port.sections(slug, ("archive",))["archive"]
+        return any(row.value["name"] == name for row in rows.values())
 
     def archive(self, slug: str) -> int:
         listed = self.store.listed(slug)
@@ -127,13 +132,16 @@ class ExecutionRegistry:
     def hive(self, slug: str, name: str) -> str:
         if name not in self.store.listed(slug):
             return ""
-        rows = [row for row in fencing.read_executions(self.store, slug).values() if row["name"] == name]
-        hive = max(rows, key=lambda row: row["generation"]).get("hive") if rows else None
+        port = fencing.records(self.store, slug)
+        head = port.record(slug, "by-name", name)
+        row = port.record(slug, "executions", head.value) if head is not None else None
+        hive = row.value.get("hive") if row is not None else None
         return hive if isinstance(hive, str) else ""
 
     def agents(self, slug: str) -> list[AgentRecord]:
         projections, desired = self.store.projections(slug)
-        attempts = [row for row in fencing.read_executions(self.store, slug).values() if row["name"] in projections]
+        rows = fencing.records(self.store, slug).sections(slug, ("executions",))["executions"]
+        attempts = [row.value for row in rows.values() if row.value["name"] in projections]
         heads = latest(attempts, "name")
         result = []
         for name, row in sorted(projections.items()):
@@ -159,11 +167,11 @@ class ExecutionRegistry:
             self.update(slug, agent)
 
     def get(self, slug: str, execution_id: str) -> AgentRecord:
-        doc = fencing.read(self.store, slug)
-        row = doc["executions"].get(execution_id) or doc["archive"].get(execution_id)
-        if not row:
+        port = fencing.records(self.store, slug)
+        row = port.record(slug, "executions", execution_id) or port.record(slug, "archive", execution_id)
+        if row is None:
             self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
-        return _record(row)
+        return _record(row.value)
 
     def validate(self, slug: str, agent: AgentRecord) -> None:
         if agent.runtime_backend not in ("local", "kubernetes"):
