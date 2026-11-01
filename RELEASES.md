@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.539 · 2026-11-01
+
+### 2026-11-01 · dc405c20089b · #9183 · @agenticore-app
+
+**Retry worker image tool downloads on a cut response body**
+
+This change fixes a worker-image build failure where tool downloads would die on a cut response body, raising http.client.IncompleteRead, which the fetch retry loop didn't treat as transient. Now fetch also retries IncompleteRead and ConnectionResetError using the same five-attempt backoff already applied to 5xx responses and timeouts, while permanent HTTP errors, DNS failures, and checksum mismatches still fail immediately. This should prevent flaky build breaks caused by truncated downloads over unreliable connections.
+
 ## v2.17.538 · 2026-11-01
 
 ### 2026-11-01 · 34a2f997caf3 · #9181 · @agenticore-app
