@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.529 · 2026-11-01
+
+### 2026-11-01 · 07e0adfc1e53 · #9155 · @agenticore-app
+
+**Define tick ports and enforce declared tool effects**
+
+This change establishes nine typed external ports for tick steps, each with mandatory deadlines, so every outside system interaction goes through a well-defined, swappable contract rather than ad hoc calls. Unsupported capabilities now return explicit answers instead of silent failures, and Tools enforce declared effects by refusing writes outside their stated scope while still allowing reads. Recording fakes cover all ports for deterministic testing, with fake_tools able to mirror the same effect restrictions. This locks in the contract that dependent engine and adapter work will build on, catching undeclared-effect misuse early through tests rather than at runtime in production.
+
 ## v2.17.528 · 2026-11-01
 
 ### 2026-10-31 · 1e6ecd36ab8a · #9135 · @agenticore-app
