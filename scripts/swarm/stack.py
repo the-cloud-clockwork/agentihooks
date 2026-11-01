@@ -182,6 +182,13 @@ def repository_source_control() -> "SourceControl":
     return GitHubSourceControl(origin.removeprefix("github.com/"), Path.cwd(), "dev")
 
 
+def origin_source_control(root: Path) -> "SourceControl":
+    """Return the source control port for the repository a checkout's origin names, run from that checkout."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    return GitHubSourceControl(origin_key(str(root)).removeprefix("github.com/"), root, "dev")
+
+
 def refusal(exc: Exception) -> str:
     """Return the words a failed port call gives: the provider's error output, else the exception text."""
     if isinstance(exc, subprocess.CalledProcessError):
