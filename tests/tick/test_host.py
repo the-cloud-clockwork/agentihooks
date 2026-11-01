@@ -6,7 +6,21 @@ from typing import Any
 import pytest
 
 from scripts.inbox import relay
-from scripts.swarm import command_runner, incidents, ledger_probe, ledger_watchdog, outage, reboot, refresh_job, timing
+from scripts.swarm import (
+    command_runner,
+    delivery,
+    hive_ledger,
+    incidents,
+    ledger_client,
+    ledger_events,
+    ledger_probe,
+    ledger_watchdog,
+    outage,
+    reboot,
+    refresh_job,
+    timing,
+)
+from scripts.swarm.health import prompt_backlog, urgent_hold
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -29,6 +43,7 @@ class _Slots:
 
 
 STORE = SimpleNamespace(redis="redis")
+TICK = object()
 
 
 def _pass(box: dict[str, Any] | None = None, **extra: object) -> dict[str, Any]:
@@ -53,8 +68,20 @@ def _cli(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespace
         calls.append(("intent", *args))
         return ("view", "checked")
 
+    def phase_steps(*args: Any) -> list[str]:
+        calls.append(("phases", *args))
+        return ["phased"]
+
     return SimpleNamespace(
-        now_ms=lambda: 7, skip_refused=skip_refused, _intent_pass=intent_pass, relay=relay, refresh_job=refresh_job
+        now_ms=lambda: 7,
+        skip_refused=skip_refused,
+        _intent_pass=intent_pass,
+        _phase_steps=phase_steps,
+        relay=relay,
+        refresh_job=refresh_job,
+        tick=TICK,
+        routed=lambda herdr: ("routed", herdr),
+        HerdrRuntime=lambda: "herdr",
     )
 
 
@@ -74,6 +101,7 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
     monkeypatch.setattr(timing, "call", call)
     monkeypatch.setattr(host, "LaunchSlots", _Slots)
     monkeypatch.setattr(outage, "providers", lambda *args: calls.append(("providers", *args)))
+    monkeypatch.setattr(hive_ledger, "observe", lambda *args: calls.append(("hive", *args)))
     found = actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0))))
     assert set(loaded) <= {"scripts.swarm.cli"}
     return found
@@ -84,13 +112,22 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("inbox relay", "wrapper probes", 10),
         ("launch slots", "wrapper probes", 20),
         ("outage probes", "wrapper probes", 30),
+        ("hive ledger", "wrapper probes", 40),
+        ("ledger health", "wrapper probes", 50),
         ("host pressure", "wrapper health", 10),
         ("ledger watchdog", "wrapper health", 20),
         ("ledger probe", "wrapper health", 30),
+        ("prompt backlog", "wrapper health", 40),
         ("command runner", "wrapper commands", 10),
+        ("urgent hold", "wrapper phases", 10),
+        ("phase steps", "wrapper phases", 20),
         ("refresh job", "wrapper refresh", 10),
         ("intent check", "wrapper intent", 10),
         ("reboot pass", "wrapper reboot", 10),
+        ("tick call", "wrapper reboot", 20),
+        ("outbox migration", "wrapper relay", 10),
+        ("page relay", "wrapper relay", 20),
+        ("tick view", "wrapper view", 10),
     ]
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:
@@ -105,6 +142,7 @@ def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatc
         ("call", relay.relay, "redis"),
         ("call", ("refresh reported", "redis"), 7),
         ("providers", STORE, "sw", "runtime", 7),
+        ("hive", STORE, "sw", 7),
     ]
 
 
@@ -115,6 +153,7 @@ def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch
         ("skip", incidents.host_pressure, STORE, "sw"),
         ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
         ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
+        ("call", prompt_backlog.observe, STORE, "sw", 0),
     ]
 
 
@@ -122,6 +161,101 @@ def test_the_command_runner_consumes_the_commands(monkeypatch: pytest.MonkeyPatc
     calls: list[tuple[Any, ...]] = []
     assert _run("wrapper commands", calls, _pass(), monkeypatch) == ["ran 1"]
     assert calls == [("call", command_runner.consume, STORE, "sw")]
+
+
+class _Client(ledger_client.LedgerClient):
+    def __init__(self, metadata: object) -> None:
+        self.found = metadata
+
+    def metadata(self, slug: str) -> object:
+        return self.found
+
+
+def _health(monkeypatch: pytest.MonkeyPatch, healthy: bool, metadata: object) -> tuple[dict[str, Any], list[object]]:
+    seen: list[object] = []
+
+    def ledger_health(slug: str, now: int, probe: Any) -> bool:
+        seen.extend([slug, now, probe()])
+        return healthy
+
+    monkeypatch.setattr(outage, "ledger_health", ledger_health)
+    box: dict[str, Any] = {}
+    _run("wrapper probes", [], _pass(box, ledger=_Client(metadata)), monkeypatch)
+    return box, seen
+
+
+def test_a_failed_ledger_health_probe_stops_the_tick_through_the_box(monkeypatch: pytest.MonkeyPatch) -> None:
+    box, seen = _health(monkeypatch, False, None)
+    assert box == {"stop": ["Ledger health probe failed"]}
+    assert seen == ["sw", 7, False]
+
+
+def test_a_healthy_ledger_leaves_the_tick_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    box, seen = _health(monkeypatch, True, {})
+    assert box == {}
+    assert seen == ["sw", 7, True]
+
+
+def test_a_ledger_that_is_no_client_skips_the_health_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(outage, "ledger_health", lambda *args: pytest.fail("probed"))
+    box: dict[str, Any] = {}
+    _run("wrapper probes", [], _pass(box), monkeypatch)
+    assert box == {}
+
+
+def test_the_phase_steps_observe_the_urgent_hold_then_run_the_phases(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    assert _run("wrapper phases", calls, _pass(inbox="inbox", doc="doc"), monkeypatch) == ["phased"]
+    assert calls == [
+        ("call", urgent_hold.observe, STORE, "sw", "doc", 7),
+        ("phases", "inbox", STORE, "sw", "doc", "ledger"),
+    ]
+
+
+def test_the_tick_call_runs_after_the_reboot_pass_with_the_pass_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
+    assert calls[1] == ("call", TICK, "sw", STORE, "ledger", "runtime", 7)
+    calls.clear()
+    _run("wrapper reboot", calls, _pass(runtime=None), monkeypatch)
+    assert calls[1] == ("call", TICK, "sw", STORE, "ledger", ("routed", "herdr"), 7)
+
+
+class _Agent:
+    def __init__(self, name: str, state: str) -> None:
+        self.name, self.state = name, state
+
+
+def test_the_relay_migrates_the_outbox_then_relays_live_agents_to_the_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    live, done = _Agent("a", "working"), _Agent("b", "finished")
+    store = SimpleNamespace(redis="redis", agents=lambda slug: [live, done])
+
+    def call(function: Any, *args: Any) -> Any:
+        calls.append(("call", function, *args))
+        return function(*args) if function == store.agents else ["migrated"]
+
+    monkeypatch.setattr(host, "import_module", lambda name: _cli(calls))
+    monkeypatch.setattr(timing, "call", call)
+    box: dict[str, Any] = {}
+    state = _pass(box, store=store, inbox="inbox")
+    found = actions(engine.run_group("wrapper relay", Context(_State(state), Deadline.after(60.0))))
+    assert found == []
+    assert calls == [
+        ("call", delivery.migrate_outbox, store, "sw", "inbox"),
+        ("call", store.agents, "sw"),
+        ("skip", delivery.relay_to_page, "inbox", "sw", [live], "ledger"),
+    ]
+    assert box == {"agents": [live]}
+
+
+def test_the_tick_view_keeps_the_view_in_the_box(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    box: dict[str, Any] = {}
+    state = _pass(box, inbox="inbox", doc="doc", view="judged")
+    assert _run("wrapper view", calls, state, monkeypatch) == []
+    assert calls == [("call", ledger_events.tick_view, "inbox", STORE, "sw", "doc", "judged")]
+    assert box == {"view": ["ran 1"]}
 
 
 def test_the_refresh_job_starts_only_on_a_scheduled_tick(monkeypatch: pytest.MonkeyPatch) -> None:
