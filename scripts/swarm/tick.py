@@ -10,7 +10,6 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
