@@ -717,7 +717,7 @@
   "scripts/swarm/slice_screen.py": 93,
   "scripts/swarm/snapshot.py": 338,
   "scripts/swarm/snapshot_job.py": 85,
-  "scripts/swarm/stack.py": 217,
+  "scripts/swarm/stack.py": 216,
   "scripts/swarm/stack_clients.py": 3,
   "scripts/swarm/stack_init.py": 34,
   "scripts/swarm/stage_cover.py": 49,

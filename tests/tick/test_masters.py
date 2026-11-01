@@ -19,7 +19,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Result, Write
-from scripts.tick.steps import ACTIONS, PASS, actions, masters
+from scripts.tick.steps import PASS, actions, actions_of, masters
 
 pytestmark = pytest.mark.unit
 
@@ -198,7 +198,7 @@ def test_a_site_runs_its_group_against_the_locals_under_the_step_budget(monkeypa
 
     def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
         seen.append((name, ctx))
-        result = Result((Write(ACTIONS, "one", ["ran"]),))
+        result = Result((Write(actions_of("one"), "one", ["ran"]),))
         return (engine.StepRecord("one", 0.0, 1.0, result=result),)
 
     monkeypatch.setattr(engine, "run_group", run_group)

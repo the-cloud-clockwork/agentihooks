@@ -18,7 +18,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import BUDGET_S, PASS, CallStep, actions
+from scripts.tick.steps import PASS, CallStep, actions
 
 __all__ = [
     "DISPATCH",
@@ -74,7 +74,7 @@ class _SiteView:
 def run_site(group: str, found: Mapping[str, Any]) -> list[str]:
     """Run tick group ``group`` against the tick's locals ``found``, raising what a step held, returning actions."""
     box: dict[str, Any] = {}
-    records = engine.run_group(group, Context(_SiteView(found, box), Deadline.after(BUDGET_S)))
+    records = engine.run_group(group, Context(_SiteView(found, box), Deadline.after(CallStep.budget_s)))
     raise_held(box)
     return actions(records)
 

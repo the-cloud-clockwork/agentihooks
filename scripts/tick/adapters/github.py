@@ -196,3 +196,7 @@ class GitHubSourceControl:
         """Read the core REST quota of the login, a read GitHub does not charge."""
         core = self._api(["rate_limit"], deadline)["resources"]["core"]
         return RateLimit(core["used"], core["remaining"], core["reset"])
+
+    def issues_enabled(self, *, deadline: Deadline) -> bool:
+        """Read whether the repository takes issues."""
+        return self._api([f"repos/{self.repository}"], deadline)["has_issues"]
