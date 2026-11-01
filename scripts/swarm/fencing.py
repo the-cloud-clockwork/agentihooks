@@ -101,7 +101,9 @@ def _task(key: str) -> str:
 
 
 def _scan(store: Any, slug: str, part: str) -> Any:
-    return store.redis.scan_iter(match=store.key(slug, part, "*"))
+    from scripts.inbox.seats import SCAN_PAGE
+
+    return store.redis.scan_iter(match=store.key(slug, part, "*"), count=SCAN_PAGE)
 
 
 def _values(store: Any, slug: str, part: str) -> Any:

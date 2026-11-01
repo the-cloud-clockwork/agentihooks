@@ -120,26 +120,34 @@ def test_export_reads_no_key_of_another_swarm() -> None:
 
     import fakeredis
 
+    from scripts.inbox.seats import SCAN_PAGE
+
     class Recording(fakeredis.FakeRedis):
         touched: list[str] = []
+        scans: list[tuple[str, ...]] = []
         on = False
 
         def execute_command(self, *args: object, **options: object) -> object:
-            if self.on and str(args[0]).upper() != "SCAN":
-                self.touched.extend(str(arg) for arg in args[1:])
+            if self.on:
+                words = tuple(str(arg) for arg in args)
+                (self.scans if words[0].upper() == "SCAN" else self.touched).append(words)
             return super().execute_command(*args, **options)
 
     store = RedisStore(Recording(decode_responses=True))
     seed(store, "sw")
     seed(store, "sw-b")
     other = store.names.code_of("sw-b")
+    theirs = set(store.export("sw-b")["keys"])
     eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    Recording.touched.clear()
     Recording.on = True
     keys = set(store.export("sw")["keys"])
     Recording.on = False
     assert InboxStore(store.redis).key("address", eng) in keys
-    foreign = [arg for arg in Recording.touched if "sw-b" in arg or re.search(rf"\b{other}\b", arg)]
-    assert foreign == []
+    read = {arg for words in Recording.touched for arg in words[1:]}
+    assert theirs and not read & theirs
+    assert [arg for arg in read if "sw-b" in arg or re.search(rf"\b{other}\b", arg)] == []
+    assert Recording.scans and all(words[-2:] == ("COUNT", str(SCAN_PAGE)) for words in Recording.scans)
 
 
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
