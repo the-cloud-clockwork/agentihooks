@@ -1,7 +1,7 @@
 ---
 title: Tick engine steps
 parent: Reference
-nav_order: 66
+nav_order: 67
 ---
 
 # Tick engine steps
@@ -40,7 +40,7 @@ ledger values after the `observe` group reads them. Every group site receives it
 | `doc` | The ledger state, from the `observe` group |
 | `now_ms` | The pass time |
 | `due` | The Redis key of the swarm's `spawn-due` marker, added after the `observe` group |
-| `box` | The exception holder described under [Exceptions](#exceptions) |
+| `box` | The exception holder described under [Exceptions](#exceptions). The master groups (`masters`, `master seats`, `dispatch seat`, `master watch`) run through `masters.run_site`, which gives each site a fresh holder of its own |
 | `config` | The swarm config, passed at each site because a pass can change it |
 | `sleeping` | Passed only at the acks site |
 
@@ -52,7 +52,7 @@ and placement steps are in bold; the others hold steps from other changes.
 | Order | Group | Site in the pass | Steps |
 | --- | --- | --- | --- |
 | 1 | `start` | First line of the pass | config load, stopped branch |
-| 2 | `observe` | After a stopped swarm is woken | pane evidence through verify, including **spawn due** at order 70 |
+| 2 | `observe` | After `start`, unless the stopped branch ended the pass | pane evidence through verify, including **spawn due** at order 70 |
 | 3 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |
 | 4 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
 | 5 | `tasks` | After the drained swarm check | orphans |
@@ -178,7 +178,7 @@ registry.register(CallStep("example", TASK_PASSES, 60, held(_example)))
 | Symptom | Check |
 | --- | --- |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
-| Import of the tick fails with `Duplicate step name` or `Unordered writers` | Two registered steps share a name. Every `CallStep` writes only its own `actions:<name>` domain, so a new name clears both |
+| Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
 | A tick pass raised and later steps of the same group did not run | Expected: the first moved step that raised holds the exception and the rest of the group's moved steps skip until it is raised at the site |
