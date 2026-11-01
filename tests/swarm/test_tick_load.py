@@ -179,9 +179,16 @@ def budget() -> float:
 def base_budget() -> float:
     """The pass budget on the integration branch, the initial budget before it holds one."""
     relative = BUDGET.relative_to(ROOT).as_posix()
-    shown = subprocess.run(["git", "show", f"origin/dev:{relative}"], cwd=ROOT, capture_output=True, text=True)
-    if shown.returncode:
+    resolved = subprocess.run(["git", "rev-parse", "--verify", "origin/dev"], cwd=ROOT, capture_output=True, text=True)
+    assert resolved.returncode == 0, "origin/dev does not resolve, so the base budget cannot be read"
+    listed = subprocess.run(
+        ["git", "ls-tree", "--name-only", "origin/dev", relative], cwd=ROOT, capture_output=True, text=True, check=True
+    )
+    if not listed.stdout.strip():
         return INITIAL_BUDGET_S
+    shown = subprocess.run(
+        ["git", "show", f"origin/dev:{relative}"], cwd=ROOT, capture_output=True, text=True, check=True
+    )
     return float(json.loads(shown.stdout)["pass_budget_s"])
 
 
@@ -201,9 +208,11 @@ def test_simulated_load_pass_fits_the_budget(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.feature("swarm-tick-pass-budget")
 def test_a_step_made_300_seconds_slower_breaks_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    baseline = load(monkeypatch)["pass_p95_s"]
     report = load(monkeypatch, SLOWDOWN_S)
     assert report["calls"]["planted"] == 1
-    assert report["pass_p95_s"] > budget()
+    assert baseline <= budget() < report["pass_p95_s"]
+    assert report["pass_p95_s"] - baseline >= SLOWDOWN_S
 
 
 @pytest.mark.feature("swarm-tick-pass-budget")
