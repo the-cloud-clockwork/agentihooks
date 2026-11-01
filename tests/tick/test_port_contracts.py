@@ -58,7 +58,7 @@ CASES = [
         ),
         True,
     ),
-    ("inbox", "close", ("value",), True),
+    ("inbox", "close", ("value", "done", "merged"), True),
     ("llm", "classify", ({},), True),
     ("metrics", "emit", ({},), True),
     ("host", "read", ("value",), False),
