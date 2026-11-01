@@ -185,7 +185,7 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch: pytes
     assert ledger_server.LOADED_STAMP > 0
 
 
-def test_two_threads_of_one_server_record_at_once_without_losing_either_write(
+def test_two_threads_of_one_server_record_at_once_and_leave_one_whole_record(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     replace = Path.replace
