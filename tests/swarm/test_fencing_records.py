@@ -50,13 +50,14 @@ def _log(store: Any) -> list[dict[str, str]]:
 
 
 def test_every_record_of_a_swarm_shares_its_hash_tag(store: Any) -> None:
+    from scripts.swarm.store import PREFIX
     from scripts.tick.adapters.records_redis import RedisRecords
 
     port = RedisRecords(store.redis, "root")
     assert port.key("sw", "executions") == "root:{sw}:fence:executions"
     assert port.revision_key("sw") == "root:{sw}:fence:revision"
     assert port.log_key("sw") == "root:{sw}:fence:log"
-    assert RedisRecords(store.redis).key("sw", "meta") == "agentihooks:swarm:{sw}:fence:meta"
+    assert RedisRecords(store.redis).key("sw", "meta") == f"{PREFIX}:{{sw}}:fence:meta"
 
 
 def test_both_layouts_answer_the_records_port(store: Any) -> None:
@@ -97,7 +98,7 @@ def test_migration_waits_for_every_writer_and_the_redis_backend(store: Any, monk
     from scripts.swarm import fencing
     from scripts.swarm.store import SwarmError
 
-    with pytest.raises(SwarmError, match="upgrade every live fencing writer"):
+    with pytest.raises(SwarmError, match="upgrade every live fencing reader and writer"):
         fencing.migrate_records(store, "sw")
     monkeypatch.setenv(state.BACKEND_ENV, "bus")
     with pytest.raises(SwarmError, match="need the Redis state backend"):
@@ -353,12 +354,83 @@ def test_a_records_write_aborts_a_watched_transaction(store: Any) -> None:
         with pytest.raises(WatchError):
             pipe.execute()
     with store.redis.pipeline() as pipe:
-        fencing.watch(store, pipe)
+        fencing.watch(store, pipe, "other")
         fencing.write(store, "sw", lambda doc: doc.update(epoch=4))
         pipe.multi()
         pipe.set("probe", "2")
         pipe.execute()
     assert store.redis.get("probe") == "2"
+
+
+def test_a_document_write_aborts_a_watched_transaction(store: Any) -> None:
+    from redis.exceptions import WatchError
+
+    from scripts.swarm import fencing
+
+    with store.redis.pipeline() as pipe:
+        fencing.watch(store, pipe, "sw")
+        fencing.write(store, "sw", lambda doc: doc.update(epoch=3))
+        pipe.multi()
+        pipe.set("probe", "1")
+        with pytest.raises(WatchError):
+            pipe.execute()
+
+
+def test_two_writers_on_one_hydrated_archive_row_retry_the_second(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(x={"a": 1, "b": 1}))
+    calls: list[int] = []
+
+    def outer(doc: dict[str, Any]) -> None:
+        calls.append(1)
+        fencing.hydrate_archive(store, doc)
+        if len(calls) == 1:
+
+            def inner(other: dict[str, Any]) -> None:
+                fencing.hydrate_archive(store, other)
+                other["archive"]["x"]["a"] = 2
+
+            fencing.write(store, "sw", inner)
+        doc["archive"]["x"]["b"] = 2
+
+    fencing.write(store, "sw", outer)
+    assert len(calls) == 2
+    assert fencing.read(store, "sw")["archive"]["x"] == {"a": 2, "b": 2}
+
+
+def test_a_migration_racing_another_migration_writes_nothing(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import fencing
+
+    fencing.read(store, "sw")
+    real = fencing.hydrate_archive
+    calls: list[int] = []
+
+    def racing(saved: Any, doc: dict[str, Any]) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            monkeypatch.setattr(fencing, "hydrate_archive", real)
+            fencing.migrate_records(store, "sw", writers_upgraded=True)
+        real(saved, doc)
+
+    monkeypatch.setattr(fencing, "hydrate_archive", racing)
+    assert fencing.migrate_records(store, "sw", writers_upgraded=True) == 0
+    assert calls == [1]
+    assert fencing.records(store, "sw").layout("sw") == fencing.RECORDS
+
+
+def test_a_whole_document_batch_keeps_the_external_archive(store: Any) -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.ports.records import FencedBatch, RecordWrite
+
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(z=_row("z", "old", 0)))
+    fencing.migrate_archive(store, "sw", writers_upgraded=True)
+    port = fencing.WholeDocumentRecords(store)
+    port.fenced_batch("sw", FencedBatch((RecordWrite("put", "grants", "g", 0, {"n": 1}),)))
+    doc = fencing.read(store, "sw")
+    assert doc["grants"] == {"g": {"n": 1}}
+    assert doc["archive"] == {"z": _row("z", "old", 0)}
 
 
 def test_the_fenced_batch_checks_the_lease_and_writes_all_or_nothing(store: Any) -> None:
@@ -556,7 +628,7 @@ def test_the_migration_command_needs_the_writer_rollout(
     monkeypatch.setattr(records_migration.store, "connect", lambda: store)
     with pytest.raises(SystemExit):
         records_migration.main(["sw"])
-    assert "upgrade every live fencing writer" in capsys.readouterr().err
+    assert "upgrade every live fencing reader and writer" in capsys.readouterr().err
     records_migration.main(["sw", "--writers-upgraded"])
     assert capsys.readouterr().out.strip() == "1"
     assert fencing.records(store, "sw").layout("sw") == fencing.RECORDS

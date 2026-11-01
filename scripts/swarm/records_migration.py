@@ -13,7 +13,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--writers-upgraded", action="store_true")
     args = parser.parse_args(argv)
     if not args.writers_upgraded:
-        parser.error("upgrade every live fencing writer before migrating to per record keys")
+        parser.error("upgrade every live fencing reader and writer before migrating to per record keys")
     connected = store.connect()  # pyright: ignore[reportUnknownMemberType]
     print(fencing.migrate_records(connected, args.slug, writers_upgraded=True))
 

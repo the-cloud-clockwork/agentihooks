@@ -180,13 +180,13 @@ def _heads(rows: dict[str, Any]) -> dict[str, str]:
     for key, row in rows.items():
         name, generation = row.get("name"), row.get("generation")
         if isinstance(name, str) and isinstance(generation, int | float):
-            if name not in found or generation >= found[name][0]:
+            if name not in found or (generation, key) > found[name]:
                 found[name] = (generation, key)
     return {name: key for name, (_, key) in found.items()}
 
 
 def _expected(loaded: dict[str, dict[str, Record]], section: str, key: str) -> int:
-    if section == ARCHIVE:
+    if section not in loaded:
         return BLIND
     found = loaded.get(section, {}).get(key)
     return 0 if found is None else found.revision
@@ -476,13 +476,12 @@ def bump(store: Any, slug: str, part: str) -> None:
     raise SwarmError(CONTENTION)
 
 
-def watch(store: Any, pipe: Any, slug: str = "") -> None:
+def watch(store: Any, pipe: Any, slug: str) -> None:
     """Makes a Redis transaction abort when any fencing document or the swarm's fenced records change."""
     states = _states(store)
     if isinstance(states, RedisStateStore):
         states.guard(pipe)
-        if slug:
-            pipe.watch(RedisRecords(store.redis).revision_key(slug))
+        pipe.watch(RedisRecords(store.redis).revision_key(slug))
 
 
 def replace(store: Any, slug: str, saved: dict[str, Any] | None) -> None:
@@ -563,12 +562,14 @@ class WholeDocumentRecords:
         states = _states(self.store)
         entry = _entry(states, self.store, slug)
         doc = _decode(entry.value)
-        if any(write.section == ARCHIVE for write in batch.writes):
+        archived = any(write.section == ARCHIVE for write in batch.writes)
+        if archived:
             hydrate_archive(self.store, doc)
         _admit(doc, entry.revision, batch)
         for write in batch.writes:
             _apply(doc, write)
-        _externalize_archive(self.store, slug, doc)
+        if archived:
+            _externalize_archive(self.store, slug, doc)
         try:
             written = states.update(slug, _encode(doc), entry.revision)
         except StateConflict as exc:
@@ -583,26 +584,28 @@ def records(store: Any, slug: str) -> Records:
 
 
 def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) -> int:
-    """Copies the whole fencing document into per record keys once every live fencing writer reads both layouts."""
+    """Copies the whole fencing document into per record keys once every live fencing reader and writer has both layouts."""
     from redis.exceptions import WatchError
 
     from scripts.swarm.store import SwarmError
 
     if not writers_upgraded:
-        raise SwarmError("upgrade every live fencing writer before migrating to per record keys")
+        raise SwarmError("upgrade every live fencing reader and writer before migrating to per record keys")
     if state.backend() != "redis":
         raise SwarmError("per record fencing keys need the Redis state backend")
     port = RedisRecords(store.redis)
     states = RedisStateStore(store.redis, BUCKET)
+    empty: dict[str, dict[str, Record]] = {name: {} for name in (*LOADED, ARCHIVE)}
     for _ in range(ATTEMPTS):
-        if port.layout(slug) == RECORDS:
-            return 0
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(states.watch_key, states.revision_key, port.revision_key(slug))
+                if port.layout(slug) == RECORDS:
+                    pipe.unwatch()
+                    return 0
                 doc = _decode(_entry(states, store, slug).value)
                 hydrate_archive(store, doc)
-                writes = _changes(copy.deepcopy(EMPTY), doc, {}, False)
+                writes = _changes(copy.deepcopy(EMPTY), doc, empty, False)
                 writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
                 pipe.multi()
                 port.queue_batch(pipe, slug, FencedBatch(tuple(writes)))
