@@ -123,7 +123,7 @@ def test_export_reads_no_key_of_another_swarm() -> None:
     from scripts.inbox.seats import SCAN_PAGE
 
     class Recording(fakeredis.FakeRedis):
-        touched: list[str] = []
+        touched: list[tuple[str, ...]] = []
         scans: list[tuple[str, ...]] = []
         on = False
 
