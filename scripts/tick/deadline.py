@@ -23,3 +23,9 @@ class Deadline:
 
     def child(self, seconds: float) -> "Deadline":
         return Deadline(min(self.expires_at, self.clock() + seconds), self.clock)
+
+    def live(self) -> float:
+        """The seconds left, refusing a deadline that has already expired."""
+        if self.expired:
+            raise TimeoutError("tool deadline expired")
+        return self.remaining
