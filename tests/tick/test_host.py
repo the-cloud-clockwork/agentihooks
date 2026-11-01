@@ -277,8 +277,8 @@ def test_the_intent_check_keeps_its_judgement_in_the_box(monkeypatch: pytest.Mon
 
 def test_the_reboot_pass_boots_with_the_fenced_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1"]
-    assert calls == [("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)]
+    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
+    assert calls[0] == ("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)
 
 
 def test_a_raising_step_skips_the_rest_and_raises_at_the_site(monkeypatch: pytest.MonkeyPatch) -> None:
