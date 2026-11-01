@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -52,6 +53,29 @@ def test_rest_callers_charge_the_shared_log(tmp_path, monkeypatch, caller, faile
     assert run.call_args.kwargs["cwd"] == str(tmp_path)
     if caller == "swarm.merge_stall":
         assert run.call_args.kwargs["timeout"] == 20
+
+
+@pytest.mark.parametrize(
+    ("repo", "cwd"),
+    [
+        ("github.com/the-cloud-clockwork/agentihooks", None),
+        ("GitHub.com/the-cloud-clockwork/agentihooks", None),
+        ("https://github.com/the-cloud-clockwork/agentihooks", None),
+        ("git+ssh://git@github.com/the-cloud-clockwork/agentihooks", None),
+        ("/repo", "/repo"),
+        ("repo", "repo"),
+        ("work/repo.git", "work/repo.git"),
+        ("./github.com/repo", "./github.com/repo"),
+    ],
+)
+def test_merge_stall_sets_working_folder_only_for_a_local_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: str, cwd: str | None
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
+    monkeypatch.setattr(merge_stall.subprocess, "run", run)
+    assert merge_stall.request(repo, ["api", "repos/example/project/actions/runs"]) == {}
+    assert run.call_args.kwargs["cwd"] == cwd
 
 
 def test_failing_test_log_read_is_charged_to_promotion_watch(tmp_path, monkeypatch):
