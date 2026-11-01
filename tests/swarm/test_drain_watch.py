@@ -78,7 +78,8 @@ def test_an_agent_still_working_on_a_closed_account_past_its_warning_is_a_findin
 def test_an_open_account_with_ten_percent_or_less_routing_left_counts_as_draining():
     assert drain_watch.draining(_read(row("a", "OPEN", five=40.0, week=10.0)), Limits(), 100.0)
     assert not drain_watch.draining(_read(row("a", "OPEN", five=40.0, week=10.5)), Limits(), 100.0)
-    assert not drain_watch.draining(_read(row("a", "UNKNOWN", five=None, week=3.0)), Limits(), 100.0)
+    assert drain_watch.draining(_read({**row("a", "OPEN", week=3.0), "five_left": None}), Limits(), 100.0)
+    assert not drain_watch.draining(_read({**row("a", "UNKNOWN", five=None), "week_left": None}), Limits(), 100.0)
     assert drain_watch.draining(_read(row("a", "OPEN", five=40.0, week=15.0)), Limits(drain_left=15), 100.0)
     assert limits({"AGENTIHOOKS_HEALTH_DRAIN_LEFT": "15"}).drain_left == 15
     found = drain_watch.findings(_drain_swarm("OPEN", week=9.0), SLUG, Limits(), 1_000_000 + 11 * MINUTE)

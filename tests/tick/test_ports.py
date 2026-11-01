@@ -22,6 +22,8 @@ from scripts.tick.deadline import Deadline
 )
 def test_undeclared_step_effect_refuses_before_adapter(port: str, operation: str) -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     tools = providers.for_effects(frozenset())
     with pytest.raises(ports.UndeclaredEffect, match=f"^{port} is not a declared effect$"):
         getattr(getattr(tools, port), operation)("request", deadline=Deadline.after(10))
@@ -30,6 +32,8 @@ def test_undeclared_step_effect_refuses_before_adapter(port: str, operation: str
 
 def test_read_tools_remain_available_and_forward_deadline() -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     deadline = Deadline.after(10)
     tools = providers.for_effects(frozenset())
     assert tools.ledger.export(deadline=deadline) == {}
@@ -39,6 +43,8 @@ def test_read_tools_remain_available_and_forward_deadline() -> None:
 
 def test_declared_effect_calls_adapter_with_deadline() -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     deadline = Deadline.after(10)
     tools = providers.for_effects(frozenset({"inbox"}))
     assert tools.inbox.send("seat", "hello", deadline=deadline) is None
@@ -48,12 +54,16 @@ def test_declared_effect_calls_adapter_with_deadline() -> None:
 
 def test_unsupported_is_provider_answer() -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     answer = providers.source_control.queue_health(deadline=Deadline.after(10))
     assert answer == ports.Unsupported("queue_health")
 
 
 def test_expired_deadline_refuses_before_adapter() -> None:
     providers = fakes.fake_tools()
+    assert isinstance(providers.ledger, fakes.FakeLedger)
+    assert isinstance(providers.inbox, fakes.FakeInbox)
     tools = providers.for_effects(frozenset({"inbox"}))
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         tools.inbox.send("seat", "hello", deadline=Deadline(0, lambda: 0))
