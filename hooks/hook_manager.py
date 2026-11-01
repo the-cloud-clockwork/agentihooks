@@ -782,7 +782,6 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
 
     run = budget.run
     run("secrets", _prompt_secrets, payload)
-    run("seat_notes", seat_notes.inject)
     typed = bool(run("operator_words", _operator_words, payload))
     run("operator_mode", _operator_mode, payload, typed)
     run("master_coding", _master_coding, payload, typed)
@@ -790,6 +789,7 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     run("signals", _prompt_signals, payload, session_id, typed)
     if typed:
         run("gate_lifts", _arm_gate_lifts, payload)
+    run("seat_notes", seat_notes.inject)
     run("amygdala", _prompt_amygdala, session_id)
     run("confirm_inbox", _confirm_inbox, session_id)
     run("swarm_heartbeat", _swarm_heartbeat, "working", payload.get("prompt", ""))
