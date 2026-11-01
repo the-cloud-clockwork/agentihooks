@@ -115,7 +115,7 @@ def test_export_leaves_out_another_swarms_seats_and_inbox(store):
     assert keys and not any("sw-b" in key for key in keys)
 
 
-def test_export_reads_no_key_of_another_swarm():
+def test_export_reads_no_key_of_another_swarm() -> None:
     import re
 
     import fakeredis
