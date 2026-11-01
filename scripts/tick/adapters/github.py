@@ -50,7 +50,7 @@ _QUEUE = """query($owner: String!, $name: String!, $base: String!) {
 
 _OPEN = """query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
-    pullRequests(states: OPEN, first: 100, after: $after) {
+    pullRequests(states: OPEN, first: 25, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes {
         url
@@ -64,7 +64,7 @@ _OPEN = """query($owner: String!, $name: String!, $after: String) {
   }
 }"""
 
-_OPEN_PAGES = 2
+_OPEN_PAGES = 8
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -267,7 +267,7 @@ class GitHubSourceControl:
         return next((row["merged_at"] for row in rows if row["merged_at"]), None)
 
     def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]:
-        """List the repository's open pull requests with their check rollups, at most two pages of one hundred."""
+        """List the repository's open pull requests with their check rollups, at most eight pages of twenty five."""
         owner, name = self.repository.split("/")
         variables: dict[str, str | int] = {"owner": owner, "name": name}
         changes: list[OpenChange] = []
