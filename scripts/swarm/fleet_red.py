@@ -1,9 +1,11 @@
 """Hold the claim of a task whose pull request is red only from checks failing on most other open pull requests."""
 
+import json
 import re
 import sys
 import time
 from collections.abc import Callable, Sequence
+from functools import partial
 from typing import Any
 
 from scripts.swarm import panic
@@ -12,12 +14,13 @@ from scripts.swarm.stack import PORT_ERRORS
 from scripts.swarm.store import RedisStore
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
-from scripts.tick.ports.source_control import OpenChange
+from scripts.tick.ports.source_control import OpenChange, RollupCheck
 
 MIN_OTHERS = 3
 PULL = re.compile(r"https://github\.com/([^/]+/[^/]+)/pull/\d+")
 WINDOW_MS = 6 * 3_600_000
 SECONDS = 60
+TTL = 600
 ERRORS = PORT_ERRORS
 NOTICE = (
     "The swarm holds this task unclaimed: its pull request {url} is red only from {checks}, which also fail on "
@@ -51,6 +54,24 @@ def repository(url: str) -> str:
 def read(repo: str, ports: Callable[[str], SourceControl] = panic.port) -> Pulls:
     """List the repository's open pull requests with their check rollups through its source control port."""
     return ports(repo).open_changes(deadline=Deadline.after(SECONDS))
+
+
+def cached(store: RedisStore, slug: str, repo: str, reader: Reader | None = None) -> Pulls | None:
+    """Return the repository's open pull requests saved in the last ten minutes, else list and save them, a failed listing as none."""
+    key = store.key(slug, f"fleet-red-pulls:{repo}")
+    saved = store.redis.get(key)
+    if saved is not None:
+        rows = json.loads(saved)
+        if rows is None:
+            return None
+        return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows)
+    try:
+        pulls: Pulls | None = tuple((reader or read)(repo))
+    except ERRORS:
+        pulls = None
+    listing = None if pulls is None else [[p.url, [[c.name, c.result, c.at] for c in p.checks]] for p in pulls]
+    store.redis.set(key, json.dumps(listing), ex=TTL)
+    return pulls
 
 
 def shared(pulls: Pulls, url: str, now_ms: int) -> set[str]:
@@ -103,13 +124,14 @@ def notice_pass(
     waiting = set(unclaimed) - store.claimed(slug, unclaimed)
     cleared = [store.key(slug, f"fleet-red:{task['id']}") for task in rows.values() if task["id"] not in waiting]
     listings: dict[str, Pulls | None] = {}
+    fetch: Callable[[str], Pulls | None] = reader or partial(cached, store, slug)
     actions = []
     for task_id in [task_id for task_id in unclaimed if task_id in waiting]:
         url, key = rows[task_id]["pr_url"], store.key(slug, f"fleet-red:{task_id}")
         repo = repository(url)
         if repo not in listings:
             try:
-                listings[repo] = (reader or read)(repo) if repo else []
+                listings[repo] = fetch(repo) if repo else []
             except ERRORS:
                 listings[repo] = None
         pulls = listings[repo]
