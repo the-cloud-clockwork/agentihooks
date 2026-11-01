@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import cli
+from scripts.inbox import wake
+from scripts.swarm import cli, command_runner
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
@@ -110,4 +111,72 @@ def test_the_tick_wrapper_runs_its_groups_before_and_after_the_tick(
     run("sw", "create", "--repo", "/repo")
     seen = _spy(monkeypatch)
     cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
-    assert [name for name, _ in seen] == ["before", *TICK_GROUPS, "after"]
+    names = [name for name, _ in seen]
+    assert names.count("wrapper intent") == 1
+    assert [name for name in names if name != "wrapper intent"] == [
+        "before",
+        "wrapper probes",
+        "wrapper health",
+        "wrapper commands",
+        "wrapper refresh",
+        "wrapper reboot",
+        *TICK_GROUPS,
+        "wrapper events",
+        "wrapper metrics",
+        "after",
+        "wrapper status",
+    ]
+
+
+def test_the_wrapper_hands_metrics_the_action_count_and_after_the_reread_doc(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+    states: list[dict[str, Any]] = []
+    real = ledger.state
+
+    def state(slug: str) -> dict[str, Any]:
+        states.append(dict(real(slug)))
+        return states[-1]
+
+    monkeypatch.setattr(ledger, "state", state)
+    cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    sites = dict(seen)
+    assert isinstance(sites["wrapper metrics"].view.read(PASS, "count"), int)
+    assert sites["after"].view.read(PASS, "doc") is states[-1]
+    assert len(states) > 1
+
+
+def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+
+    def consume(*args: object) -> list[str]:
+        raise RuntimeError("consume failed")
+
+    monkeypatch.setattr(command_runner, "consume", consume)
+    with pytest.raises(RuntimeError, match="^consume failed$"):
+        cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert [name for name, _ in seen][-2:] == ["wrapper commands", "wrapper status"]
+
+
+def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    calls = []
+    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
+    monkeypatch.setenv(wake.WINDOW_ENV, "60")
+    monkeypatch.setattr(wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
+    monkeypatch.setattr(wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
+    cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert calls == [(9_000_000, 60_000)]
