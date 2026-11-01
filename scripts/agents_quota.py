@@ -33,8 +33,12 @@ RETIRED_AFTER_S = session_bands.FRESH_SECONDS
 STALE = "STALE"
 CLOSED = "CLOSED"
 DUPLICATE = "DUPLICATE"
-DUPLICATE_SOURCE = "same ChatGPT account as {kept}"
+DUPLICATE_SOURCE = "same ChatGPT account as {kept}; sign in its own account with agentihooks codex login {name}"
 EXPIRED_SOURCE = "token expired: run {login}"
+EXPIRED = "EXPIRED"
+EXPIRING = "EXPIRING"
+REFUSED = "REFUSED"
+TOKEN_LOGIN = "agentihooks codex login {name}"
 NEXT_MARK = "(next)"
 RESERVED_MARK = "(reserved)"
 CURRENT_MARK = "(current)"
@@ -206,11 +210,14 @@ def without_routing(rows: list[QuotaRow], accounts: list) -> list[QuotaRow]:
     return [replace(row, cap=None, routing_left=None) if row.account in names else row for row in rows]
 
 
-def duplicate_rows(environ: Mapping[str, str], sessions: dict[str, int]) -> list[QuotaRow]:
-    """Token accounts the router refuses because another token account holds the same ChatGPT account."""
+def duplicate_rows(environ: Mapping[str, str], sessions: dict[str, int], now: float | None = None) -> list[QuotaRow]:
+    """Token accounts the router refuses because another token account holds the same ChatGPT account or token."""
     tokens = codex_router.token_accounts(environ)
-    repeated = codex_router.duplicates(tokens, environ)
-    identities = fingerprints([account for account in tokens if account.name in repeated], environ)
+    repeated = codex_router.duplicates(tokens, environ, now)
+    shadowed = codex_router.shadows(tokens, environ)
+    repeated = {**repeated, **{name: repeated.get(kept, kept) for name, kept in shadowed.items()}}
+    accounts = [codex_router.CodexAccount(name, f"{codex_router.CODEX_TOKEN_PREFIX}{name}") for name in repeated]
+    identities = fingerprints(accounts, environ)
     return [
         QuotaRow(
             agent="codex",
@@ -220,12 +227,61 @@ def duplicate_rows(environ: Mapping[str, str], sessions: dict[str, int]) -> list
             five_hour_left=None,
             seven_day_left=None,
             seven_day_resets_at=None,
-            source=DUPLICATE_SOURCE.format(kept=repeated[account.name]),
+            source=DUPLICATE_SOURCE.format(kept=repeated[account.name], name=account.name),
             identity=identities[account.name],
         )
-        for account in tokens
-        if account.name in repeated
+        for account in accounts
     ]
+
+
+def _refused_state(account: "codex_router.CodexAccount", environ: Mapping[str, str], now: float) -> str:
+    if not codex_router.expiring(account, environ, now):
+        return REFUSED
+    exp = codex_router.expires_at(account, environ)
+    return EXPIRED if exp is not None and exp <= now else EXPIRING
+
+
+def refused_rows(environ: Mapping[str, str], sessions: dict[str, int], now: float) -> list[QuotaRow]:
+    """Token accounts the router refuses for their own credential, each naming what clears the refusal."""
+    tokens = codex_router.token_accounts(environ)
+    repeated = codex_router.duplicates(tokens, environ, now)
+    rows: list[QuotaRow] = []
+    for account in tokens:
+        reason = codex_router.refusal(account, environ, now)
+        if account.name in repeated or not reason:
+            continue
+        state = _refused_state(account, environ, now)
+        rows.append(
+            QuotaRow(
+                agent="codex",
+                account=account.name,
+                state=state,
+                sessions=sessions.get(account.name, 0),
+                five_hour_left=None,
+                seven_day_left=None,
+                seven_day_resets_at=None,
+                source=_refused_source(account, environ, state, reason),
+            )
+        )
+    return rows
+
+
+def _refused_source(account: "codex_router.CodexAccount", environ: Mapping[str, str], state: str, reason: str) -> str:
+    login = TOKEN_LOGIN.format(name=account.name)
+    if state == EXPIRED:
+        return EXPIRED_SOURCE.format(login=login)
+    if login in reason or environ[account.env_name].startswith(codex_router.API_KEY_PREFIX):
+        return reason
+    return f"{reason}; run {login}"
+
+
+def with_unrouted(
+    rows: list[QuotaRow], environ: Mapping[str, str], sessions: dict[str, int], now: float
+) -> list[QuotaRow]:
+    """Every token account the router refuses, duplicate or by credential, replacing any row the table lists for it."""
+    found = {row.account: row for row in duplicate_rows(environ, sessions, now) + refused_rows(environ, sessions, now)}
+    kept = [found.pop(row.account, row) if row.agent == "codex" else row for row in rows]
+    return kept + list(found.values())
 
 
 def next_account(pool: list, quotas: dict, sessions: dict[str, int], now: float, environ: dict[str, str]) -> str:
@@ -408,6 +464,7 @@ def _codex(now: float, force: bool = False) -> list[QuotaRow]:
     quotas.update(codex_router.quotas(live, environ))
     identities = fingerprints(pool + live, environ)
     rows = without_routing(codex_rows(pool + live, quotas, sessions, now, identities=identities), live)
+    rows = with_unrouted(rows, os.environ, sessions, now)
     master = _masters("codex").get("codex")
     marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
     return mark_next(marked, next_account(pool, quotas, sessions, now, dict(environ)))
@@ -523,7 +580,7 @@ def _page_quota(now: float) -> dict:
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
     codex = codex_rows(pool + elsewhere, quotas, codex_live, now, identities=fingerprints(pool + elsewhere, os.environ))
-    rows = claude + without_routing(codex, elsewhere) + duplicate_rows(os.environ, codex_live)
+    rows = claude + with_unrouted(without_routing(codex, elsewhere), os.environ, codex_live, now)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
     rows = with_masters(rows, _masters(), live)
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}
