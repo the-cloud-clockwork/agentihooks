@@ -189,7 +189,7 @@ def test_two_threads_of_one_server_record_at_once_without_losing_either_write(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     replace = Path.replace
-    nested: list[BaseException | None] = []
+    nested: list[None] = []
 
     def interleaved(self: Path, target: Path) -> Path:
         if not nested:
