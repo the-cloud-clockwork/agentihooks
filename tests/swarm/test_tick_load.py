@@ -14,7 +14,8 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, tick_report, timing
-from scripts.swarm.store import MASTER, STALE, AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.lease import STALE
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.tick_scenarios.test_characterisation import BASE_MS, github_reply
