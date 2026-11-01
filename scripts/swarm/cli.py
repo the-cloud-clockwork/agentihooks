@@ -191,6 +191,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
+from scripts.tick import view as ledger_view
 from scripts.tick.adapters.github import command
 
 SETTABLE = {
@@ -375,6 +376,8 @@ def run_tick(
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
         ):
             return ["Ledger health probe failed"]
+        if ledger_view.reads(ledger):
+            ledger_view.start(slug, ledger.service)
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
             store,

@@ -32,6 +32,91 @@ pass uses `PassProcesses` for the reaper's process scan, described under
 [One process scan per tick pass](#one-process-scan-per-tick-pass), and `scripts.swarm.stack.change` reads one pull
 request through `GitHubSourceControl`, described under [Source control adapter](#source-control-adapter).
 
+## Empty registry integration
+
+[Pull request 9201](https://github.com/the-cloud-clockwork/agentihooks/pull/9201) connected the tick pass to
+`scripts.tick.engine.run_group` before any production steps were registered. This section describes that delivery
+boundary. Later changes register existing work as steps; the empty registry claim applies to the original delivery.
+
+The integration added call sites around the existing work without moving it. Each reached site calls
+`scripts.swarm.tick.run_group(name)`, which supplies the context to the engine. A completed wrapper pass reaches
+the groups in this order:
+
+| Group | Call site in the original integration |
+|---|---|
+| `before` | In `run_tick`, after timing retention and before checking whether the swarm is stopped. |
+| `start` | At entry to `tick`, before loading the swarm configuration and its stopped early return. |
+| `observe` | Before clearing the spawn hold and reconciling pane and execution evidence. |
+| `agents` | Before reaping agents and recovering outages. |
+| `masters` | Before waking or retiring masters. |
+| `tasks` | Before reopening tasks and refreshing promotion state. |
+| `place` | Inside the placement lock, before quota refresh and placement work. |
+| `close` | Before the final settlement calls in the tick return expression. |
+| `after` | In `run_tick`, after writing the last tick and heartbeat, before its normal return. |
+
+These are reached call sites. Calling `tick` directly on a stopped swarm reaches only `start`. The wrapper calls
+`before` even on its stopped path, which returns without reaching `tick` or `after`. An exception or another early
+return before the normal wrapper return also skips `after`; it is not a cleanup hook in `finally`. The `close` group
+precedes settlement, so reaching it does not prove that the whole wrapper completed.
+
+### Usage and configuration
+
+No operator flag, environment variable or swarm setting enables these call sites. In the original delivery,
+contributors could invoke an individual site through the same helper the tick uses:
+
+```python
+from scripts.swarm.tick import run_group
+
+run_group("observe")
+```
+
+This is an internal API example for an isolated development process at the empty registry delivery. The helper
+returns `None` and discards the engine's step records. It does not run the surrounding legacy observation work.
+Once steps are registered, calling a group can execute their effects; it is not an operator diagnostic command.
+
+Every helper invocation constructs its own `Context` with these values:
+
+| Value | Original integration behavior |
+|---|---|
+| `view` | A fixed view with an empty mapping. Every domain and key lookup returns `None`. |
+| `deadline` | `Deadline.after(GROUP_BUDGET_S)`, freshly created for that call. |
+| `GROUP_BUDGET_S` | The source constant `600.0` seconds, with no runtime override introduced by this change. |
+
+For example, a step reading `ctx.view.read(Domain("tasks"), "t1")` receives `None` at this boundary. It cannot use
+that view to read a live task, agent or ledger record. The integration supplies neither populated state nor an
+adapter bundle to those reads. Adding such inputs requires a code change, as does changing the group budget.
+
+The six hundred seconds belong to each group context. They are not a shared pass deadline or a new timeout around
+the legacy calls between sites. See [Deadlines](#deadlines) for deadline semantics and
+[Tick load budget](tick-load-budget.md) for the separate simulated whole pass budget.
+
+### Verification and troubleshooting
+
+With no registered steps, the engine has no step work to execute at these sites. The delivery preserved the golden
+replay output. Its final head passed
+[Tick equivalence run 41287855934](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41287855934),
+comparing the delivered head with its base. A deliberately dropped reap action failed
+[run 41284317455](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41284317455), showing that the
+comparison detects a changed action. These are delivery proofs, not evidence that later registered steps leave
+every pass unchanged.
+
+Inspect the recorded result without running a local test or a live tick:
+
+```bash
+gh pr view 9201 --repo the-cloud-clockwork/agentihooks --json body,mergeCommit,state
+gh run view 41287855934 --repo the-cloud-clockwork/agentihooks --json conclusion,headSha,url
+```
+
+On a hive, prefix each `gh` command with `python -m scripts.github_app_cli exec` to use its renewed application
+token. The equivalence workflow retains a `tick-equivalence` artifact for seven days; after expiry, use the retained
+run conclusion and pull request evidence. The group site tests cover order, stopped behavior, the empty view,
+the fresh budget and execution of a registered marker step. Run regression checks through CI.
+
+If an expected group is absent, check which return or failure ended the pass before that site. If `after` is absent,
+check whether the wrapper reached its normal completion path. If a step sees no task data, the empty view explains
+that result at this delivery boundary. If a later pass differs, inspect its registered steps and delivery revision
+before applying the original empty registry equivalence claim.
+
 ## Deadlines
 
 `scripts.tick.deadline.Deadline` holds an absolute expiry on a clock, `time.monotonic` by default.
