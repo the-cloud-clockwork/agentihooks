@@ -10,7 +10,7 @@ from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, place, tasks
+from scripts.tick.steps import PASS, CallStep, actions, budgets, place, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -122,7 +122,7 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in place.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, CallStep.budget_s)
+        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
 
 
 def test_collect_acks_then_the_codex_hook_order_while_awake(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:

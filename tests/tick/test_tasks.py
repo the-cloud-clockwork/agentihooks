@@ -9,7 +9,7 @@ from scripts.swarm import claim_hold, difficulty, grouping
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, tasks
+from scripts.tick.steps import PASS, CallStep, actions, budgets, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -87,7 +87,7 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, CallStep.budget_s)
+        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
 
 
 def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:

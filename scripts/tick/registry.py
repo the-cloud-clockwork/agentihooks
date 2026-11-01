@@ -3,7 +3,7 @@ from math import isfinite
 
 from scripts.tick.step import Step
 
-__all__ = ["Registry", "register", "registry", "validate", "waves"]
+__all__ = ["Registry", "latest_start", "register", "registry", "validate", "waves"]
 
 
 def _validate_timing(steps: list[Step]) -> None:
@@ -85,3 +85,13 @@ def validate() -> None:
 
 def waves() -> tuple[tuple[Step, ...], ...]:
     return registry.waves()
+
+
+def latest_start(name: str, steps: list[Step]) -> float:
+    """Return how many seconds into the pass step ``name`` starts at the latest when every step it needs ends by its budget."""
+    by_name = {step.name: step for step in steps}
+    starts: dict[str, float] = {}
+    for wave in _dependency_waves(steps):
+        for step in wave:
+            starts[step.name] = max((starts[need] + by_name[need].budget_s for need in step.needs), default=0.0)
+    return starts[name]

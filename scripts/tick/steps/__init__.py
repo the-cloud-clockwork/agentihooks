@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
+from scripts.tick.steps import budgets
 
 PASS = Domain("pass")
 
@@ -15,8 +16,6 @@ class CallStep:
     """A step running one call of the tick module with the pass state and writing the actions it returned."""
 
     lane = Lane("tick")
-    budget_s = 600.0
-    interval_s = 0.0
 
     def __init__(
         self,
@@ -32,6 +31,7 @@ class CallStep:
         self.group = group
         self.order = order
         self.call = call
+        self.budget_s, self.interval_s = budgets.timing_of(name)
         self.writes = frozenset({actions_of(name)})
 
     def run(self, ctx: Context) -> Result:
