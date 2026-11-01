@@ -16,7 +16,8 @@ from scripts.swarm import claim_hold, cli, dispatcher, stack, tick
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_comments, task_dependencies
 from scripts.tick.adapters.fakes import FakeSourceControl
-from scripts.tick.ports.source_control import ChangeRef, ChangeState
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.source_control import ChangeRef, ChangeState, Comment
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -65,6 +66,26 @@ class Shell:
         return [c for c in self.calls if c[:3] == ["gh", "issue", "comment"] and tuple(c[:3]) not in self.fail]
 
 
+class ShellPort(FakeSourceControl):
+    """Source control fake answering through the shell fake, so failures and call order stay in one log."""
+
+    def _run(self, argv: list[str]) -> str:
+        done = stack.shell(argv)
+        if done.returncode:
+            raise subprocess.CalledProcessError(done.returncode, argv, stderr=done.stderr)
+        return done.stdout
+
+    def issues_enabled(self, *, deadline: Deadline) -> bool:
+        assert 59 < deadline.remaining <= stack.PORT_SECONDS
+        return json.loads(self._run(["gh", "repo", "view", "--json", "hasIssuesEnabled"]))["hasIssuesEnabled"]
+
+    def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment:
+        assert 59 < deadline.remaining <= stack.PORT_SECONDS
+        url = f"https://github.com/{reference.repository}/issues/{reference.number}"
+        self._run(["gh", "issue", "comment", url, "--body", body])
+        return Comment(reference, url)
+
+
 def _slug_checked(ledger, name):
     method = getattr(ledger, name)
 
@@ -94,6 +115,9 @@ def parked(env, monkeypatch, tmp_path):
         _slug_checked(ledger, name)
     shell = Shell()
     monkeypatch.setattr(stack, "shell", shell)
+    parse = stack.source_control
+    monkeypatch.setattr(stack, "source_control", lambda url: (ShellPort(), parse(url)[1]))
+    monkeypatch.setattr(stack, "repository_source_control", ShellPort)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
     store.memory.add_recap("eng-1@sw", "engineer@a1b2c3-0000", "t1", "an earlier recap", 1)
     (tmp_path / ".agentihooks" / "swarm" / "sw" / "tasks" / "t1").mkdir(parents=True)
@@ -507,6 +531,21 @@ def test_login_source_control_is_the_github_port_bound_to_no_repository(
 
     monkeypatch.chdir(tmp_path)
     assert stack.login_source_control() == GitHubSourceControl("", tmp_path, "dev")
+
+
+def test_repository_source_control_is_the_github_port_of_the_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    shell = Shell()
+    monkeypatch.setattr(stack, "shell", shell)
+    monkeypatch.chdir(tmp_path)
+    assert stack.repository_source_control() == GitHubSourceControl("o/r", tmp_path, "dev")
+    assert shell.calls == [["git", "remote", "get-url", "origin"]]
+    monkeypatch.setattr(shell, "fail", (("git", "remote", "get-url"),))
+    with pytest.raises(SwarmError, match="^cannot read the repo origin: boom$"):
+        stack.repository_source_control()
 
 
 def test_a_port_refusal_reports_the_provider_output_else_the_exception_text() -> None:

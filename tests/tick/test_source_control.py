@@ -315,12 +315,25 @@ def test_github_rate_limit_reads_the_core_quota(monkeypatch: pytest.MonkeyPatch,
     assert recorder.calls[0][1] == ["api", "rate_limit"]
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_github_issues_enabled_reads_the_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool
+) -> None:
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"has_issues": enabled, "has_wiki": not enabled}])
+
+    assert provider.issues_enabled(deadline=_deadline()) is enabled
+    assert recorder.calls == [
+        (github.CALLER, ["api", "repos/owner/project"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
+    ]
+
+
 @pytest.mark.parametrize(
     "operation,args,answer",
     [
         ("issue_state", (REFERENCE,), "open"),
         ("close_issue", (REFERENCE,), "closed"),
         ("rate_limit", (), port.RateLimit(1, 2, 3)),
+        ("issues_enabled", (), True),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(
@@ -370,6 +383,7 @@ def test_github_defaults() -> None:
         ("issue_state", (REFERENCE,)),
         ("close_issue", (REFERENCE,)),
         ("rate_limit", ()),
+        ("issues_enabled", ()),
     ],
 )
 def test_github_expired_deadline_prevents_external_reads(
