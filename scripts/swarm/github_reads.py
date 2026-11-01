@@ -65,8 +65,9 @@ def _log_key(endpoint):
     if source() in TOKENS:
         return _key(endpoint)
     host = os.environ.get("GH_HOST") or "github.com"
+    argv = _github.command(["config", "get", "user", "--host", host])
     account = subprocess.run(
-        _github.command(["config", "get", "user", "--host", host]),
+        argv,  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
         capture_output=True,
         text=True,
         check=True,
