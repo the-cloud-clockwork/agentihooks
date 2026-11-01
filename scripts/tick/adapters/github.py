@@ -119,7 +119,14 @@ class GitHubSourceControl:
         """Run one audited gh api call inside the deadline and return its output."""
         timeout = _live(deadline)
         result = github_reads.rest(
-            CALLER, ["api", *args], cwd=self.root, timeout=timeout, capture_output=True, text=True, check=True
+            CALLER,
+            ["api", *args],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return result.stdout
 
@@ -155,6 +162,7 @@ class GitHubSourceControl:
     def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
         """Read the state of one change."""
         body = self._api([f"repos/{reference.repository}/pulls/{reference.number}"], deadline)
+        fork: dict[str, str] | None = body["head"]["repo"]
         return ChangeState(
             reference,
             body["state"],
@@ -165,6 +173,7 @@ class GitHubSourceControl:
             body["head"]["ref"],
             body["body"] or "",
             body["draft"],
+            fork["full_name"] if fork else "",
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
