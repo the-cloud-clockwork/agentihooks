@@ -93,8 +93,8 @@ from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import observe as observe_steps
 from scripts.tick.steps import masters as master_steps
+from scripts.tick.steps import observe as observe_steps
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60
