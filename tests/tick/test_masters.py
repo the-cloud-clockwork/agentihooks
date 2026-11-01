@@ -56,8 +56,12 @@ def _tick(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
         skip_refused=skip_refused,
         _master_down="master down",
         _night_watch="night watch",
-        _master=lambda *args: ("master", *args),
+        _master=_master,
     )
+
+
+def _master(*args: Any) -> tuple[Any, ...]:
+    return ("master", *args)
 
 
 def _step(name: str) -> Any:
@@ -172,8 +176,9 @@ def test_the_site_view_reads_the_locals_and_the_box_for_the_pass_domain() -> Non
     view = masters._SiteView({"slug": "sw", "box": "shadowed"}, box)
     assert view.read(PASS, "slug") == "sw"
     assert view.read(PASS, "box") is box
-    assert view.read(PASS, "doc") is None
     assert view.read(Domain("tasks"), "slug") is None
+    with pytest.raises(KeyError, match="doc"):
+        view.read(PASS, "doc")
 
 
 def test_a_site_runs_its_group_against_the_locals_under_the_step_budget(monkeypatch: pytest.MonkeyPatch) -> None:

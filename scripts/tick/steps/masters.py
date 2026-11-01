@@ -56,7 +56,7 @@ class _SiteView:
         """Return the box or the local under ``key`` for the pass domain, nothing for any other domain."""
         if domain != PASS:
             return None
-        return self._box if key == BOX else self._found.get(key)
+        return self._box if key == BOX else self._found[key]
 
 
 def run_site(group: str, found: Mapping[str, Any]) -> list[str]:
