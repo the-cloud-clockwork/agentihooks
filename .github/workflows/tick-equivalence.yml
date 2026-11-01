@@ -1,6 +1,7 @@
 name: Tick equivalence
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       base:
@@ -17,9 +18,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
-  queue: max
-  cancel-in-progress: false
+  group: ${{ github.workflow == 'Tick equivalence' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tick-equivalence-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Tick equivalence' && 'max' || 'single' }}
 
 jobs:
   tick-equivalence:
@@ -49,6 +49,11 @@ jobs:
         env:
           TICK_EQUIVALENCE_PLANT: ${{ inputs.tick_plant && '1' || '0' }}
         run: bash head/tests/swarm/tick_equivalence.sh
+      - name: Hold the simulated tick load to its pass budget
+        run: |
+          git -C head fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev
+          cd head
+          python -m pytest tests/swarm/test_tick_load.py -n 0 --tb=short
       - name: Record the advisory run for the move pull request
         if: always()
         env:
