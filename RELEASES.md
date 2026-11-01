@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.534 · 2026-11-01
+
+### 2026-11-01 · 0343ad72fa2c · #9165 · @nestorcolt
+
+**Read externalized archive history in fenced execution lookups**
+
+This change fixes a reader gap left by the fencing archive migration: `TaskAuthority._execution` and `OperationJournal._current` were still looking for execution rows only in the raw document, so archived executions wrongly fell into the "unknown identity" branch instead of being recognized as stale. A new shared helper, `fencing.execution_row`, now checks current rows, then the inline archive, then the external archive history, without writing back to the document, and both readers use it. This closes the last gap exposed by the archive migration, keeping task authority admission and the operation journal correct for archived executions while leaving the stored document shape unchanged.
+
 ## v2.17.532 · 2026-11-01
 
 ### 2026-11-01 · dfdddf09cd01 · #9163 · @nestorcolt
