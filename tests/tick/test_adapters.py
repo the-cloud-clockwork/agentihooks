@@ -157,6 +157,7 @@ def test_host_reads_and_runs_named_jobs() -> None:
     assert port.read("disk", deadline=_open()) == ports.Unsupported("disk")
     assert port.run({"job": "build"}, deadline=_open()) == ports.Unsupported("build")
     assert port.run({}, deadline=_open()) == ports.Unsupported("")
+    assert port.run({"job": 7}, deadline=_open()) == ports.Unsupported("7")
 
 
 @pytest.mark.parametrize("operation,arg", [("read", "sample"), ("run", {"job": "refresh"})])
@@ -197,6 +198,8 @@ def _banned_imports(source: str) -> list[str]:
         names: list[str] = []
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level:
+            found.append(f"relative import {'.' * node.level}{node.module or ''}")
         elif isinstance(node, ast.ImportFrom) and node.module:
             names = [node.module, *(f"{node.module}.{alias.name}" for alias in node.names)]
         found += [name for name in names if any(name == ban or name.startswith(f"{ban}.") for ban in BANNED)]
@@ -209,6 +212,10 @@ def test_the_import_check_catches_a_planted_direct_import() -> None:
         "hooks.classifier.api",
     ]
     assert _banned_imports("from scripts.inbox.store import InboxStore\n") == ["scripts.inbox.store"]
+    assert _banned_imports("from ..swarm import refresh_job\nfrom .. import inbox\n") == [
+        "relative import ..swarm",
+        "relative import ..",
+    ]
     assert _banned_imports("from scripts.tick.ports import Tools\nimport scripts.inboxes\n") == []
 
 
