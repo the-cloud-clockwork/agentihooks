@@ -163,10 +163,11 @@ def change(url: str, refused: str) -> "ChangeState":
         raise SwarmError(f"{refused}: {exc}") from exc
 
 
-def _merged_into_dev(dep: dict) -> bool:
-    if not dep.get("pr_url"):
+def _merged_into_dev(dep: dict[str, object]) -> bool:
+    url = dep.get("pr_url")
+    if not url:
         return False
-    pull = change(dep["pr_url"], "cannot read the dependency pull request")
+    pull = change(str(url), "cannot read the dependency pull request")
     return pull.merged and pull.base == "dev"
 
 

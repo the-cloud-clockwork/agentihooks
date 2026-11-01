@@ -378,8 +378,8 @@ def drop_repository(task: dict, repository: Path) -> dict:
     }
 
 
-def settled(task: dict) -> bool:
-    url = task.get("pr_url")
+def settled(task: dict[str, object]) -> bool:
+    url = str(task.get("pr_url") or "")
     if not url:
         return True
     return stack.change(url, f"cannot read pull request {url}").state == "closed"
