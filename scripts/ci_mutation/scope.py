@@ -209,7 +209,7 @@ def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
         if bare_tree(blob(root, fork, name)) == bare_tree(blob(root, head, name)):
             continue
         diff = subprocess.check_output(["git", "diff", "-U0", comparison, "--", name], cwd=root).decode()
-        if lines := changed_lines(diff) - moved.get(name, set()):
+        if lines := changed_lines(diff) - moved[name]:
             changes[name] = lines
     return changes
 
