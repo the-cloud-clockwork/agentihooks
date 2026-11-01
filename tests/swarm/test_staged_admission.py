@@ -10,6 +10,7 @@ import pytest
 from scripts.swarm import ledger_events, merge_queue, ready
 from scripts.swarm.staged_compatibility import MARKER
 from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.swarm.test_merge_queue import ENTRY, OPEN, URL, checked_resource, runner
 
@@ -29,9 +30,15 @@ def read_real_pull(monkeypatch):
     monkeypatch.setattr(ledger_events, "view", READ_PULL)
 
 
-def ready_change(url: str, refused: str) -> ChangeState:
-    """Answer the draft read of swarm ready with an open pull request that is not a draft."""
-    return ChangeState(ChangeRef("o/r", 7), "open", HEAD, "dev", False, url)
+class ReadyPort:
+    def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
+        """Answer the draft read of swarm ready with an open pull request that is not a draft."""
+        return ChangeState(reference, "open", HEAD, "dev", False, URL)
+
+
+def ready_port(url: str) -> tuple[ReadyPort, ChangeRef]:
+    """Return the fake port and the change reference swarm ready reads its draft flag through."""
+    return ReadyPort(), ChangeRef("o/r", 7)
 
 
 def declaration(family):
@@ -164,7 +171,7 @@ def test_ready_refuses_unfinished_staged_work_before_releasing_owner(monkeypatch
     proof["complete"] = False
     pull = type("Pull", (), {"head": HEAD, "state": "OPEN", "body": body(proof), "queued": False})()
     agent = AgentRecord(name="ci-1", lane="ci", profile="cicd", task="t1")
-    monkeypatch.setattr(ready.stack, "change", ready_change)
+    monkeypatch.setattr(ready.stack, "source_control", ready_port)
     monkeypatch.setattr(ready, "_checkout", lambda *args: "/worktree")
     with pytest.raises(SwarmError, match="planned prerequisite edits"):
         ready.check({"kind": "ci", "pr_url": URL}, agent, "full", lambda url: pull, 1)
@@ -268,7 +275,7 @@ def test_malformed_declarations_fail_closed(change):
 def test_unreadable_declaration_keeps_the_ready_owner(monkeypatch, bad_body, diagnostic):
     pull = type("Pull", (), {"head": HEAD, "state": "OPEN", "body": bad_body, "queued": False})()
     agent = AgentRecord(name="ci-1", lane="ci", task="t1")
-    monkeypatch.setattr(ready.stack, "change", ready_change)
+    monkeypatch.setattr(ready.stack, "source_control", ready_port)
     monkeypatch.setattr(ready, "_checkout", lambda *args: pytest.fail("unfinished proof reached checkout release"))
     with pytest.raises(SwarmError) as error:
         ready.check({"kind": "ci", "pr_url": URL}, agent, "full", lambda url: pull, 1)
@@ -431,7 +438,7 @@ def test_ready_accepts_complete_proof_on_its_observed_head(monkeypatch, suffix):
     proof, endpoints = staged("promotion API contracts")
     pull = ledger_events.pull_request({"state": "OPEN", "headRefOid": HEAD, "body": body(proof) + suffix})
     agent = AgentRecord(name="ci-1", lane="ci", task="t1")
-    monkeypatch.setattr(ready.stack, "change", ready_change)
+    monkeypatch.setattr(ready.stack, "source_control", ready_port)
     monkeypatch.setattr(ready, "_checkout", lambda *args: "/worktree")
     monkeypatch.setattr(merge_queue, "rest", lambda path, run: endpoints[path])
     found = ready.check({"kind": "ci", "pr_url": URL}, agent, "full", lambda url: pull, 1)
@@ -567,7 +574,7 @@ def test_unreadable_proof_response_names_the_repair(response):
 def test_ready_bounds_unterminated_declaration_parsing(monkeypatch):
     pull = ledger_events.pull_request({"state": "OPEN", "headRefOid": HEAD, "body": MARKER + " " * 65_000})
     agent = AgentRecord(name="ci-1", lane="ci", task="t1")
-    monkeypatch.setattr(ready.stack, "change", ready_change)
+    monkeypatch.setattr(ready.stack, "source_control", ready_port)
     monkeypatch.setattr(ready, "_checkout", lambda *args: pytest.fail("unfinished proof reached checkout release"))
 
     def deadline(signum, frame):
@@ -589,7 +596,7 @@ def test_ready_preserves_unicode_whitespace_after_the_declaration_marker(monkeyp
     declaration_body = MARKER + "\u00a0" + json.dumps(proof) + "-->"
     pull = ledger_events.pull_request({"state": "OPEN", "headRefOid": HEAD, "body": declaration_body})
     agent = AgentRecord(name="ci-1", lane="ci", task="t1")
-    monkeypatch.setattr(ready.stack, "change", ready_change)
+    monkeypatch.setattr(ready.stack, "source_control", ready_port)
     monkeypatch.setattr(ready, "_checkout", lambda *args: "/worktree")
     monkeypatch.setattr(merge_queue, "rest", lambda path, run: endpoints[path])
     assert ready.check({"kind": "ci", "pr_url": URL}, agent, "full", lambda url: pull, 1)["head"] == HEAD

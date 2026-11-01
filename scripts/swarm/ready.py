@@ -28,6 +28,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
+from scripts.tick.deadline import Deadline
 
 AWAITING = "merge"
 FIX = claim_order.FIX
@@ -123,8 +124,9 @@ def check(
     if pull.state != "OPEN":
         raise SwarmError(f"pull request {url} is {pull.state.lower()}; swarm ready carries an open pull request")
     try:
-        draft = stack.change(url, f"cannot read pull request {url}").draft
-    except SwarmError as exc:
+        provider, reference = stack.source_control(url)
+        draft = provider.change(reference, deadline=Deadline.after(stack.PORT_SECONDS)).draft
+    except stack.PORT_ERRORS as exc:
         raise SwarmError(
             f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers"
         ) from exc
