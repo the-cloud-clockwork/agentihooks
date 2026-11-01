@@ -91,6 +91,8 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
             tick_places=lambda engine_name, rows: log.append(("places", engine_name, rows)) or places
         ),
         preempt=SimpleNamespace(probe=_probe, Seats=_Seats, run="preempt"),
+        bottleneck_remedy=bottleneck_remedy,
+        panic=panic,
     )
 
 

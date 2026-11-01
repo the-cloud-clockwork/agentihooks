@@ -3,7 +3,6 @@
 from collections.abc import Callable
 from typing import Any
 
-from scripts.swarm import claim_hold, difficulty, grouping
 from scripts.tick import registry
 from scripts.tick.steps import CallStep
 
@@ -44,15 +43,15 @@ def _run_window(tick: Any, get: Get) -> Any:
 
 
 def _verification_notices(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(claim_hold.verification_notices, get("slug"), get("store"), get("doc"), get("now_ms"))
+    return tick.skip_refused(tick.claim_hold.verification_notices, get("slug"), get("store"), get("doc"), get("now_ms"))
 
 
 def _size_pass(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(difficulty.size_pass, get("slug"), get("ledger"), get("doc"))
+    return tick.skip_refused(tick.difficulty.size_pass, get("slug"), get("ledger"), get("doc"))
 
 
 def _grouping_release(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(grouping.release_pass, get("slug"), get("store"), get("ledger"), get("doc"))
+    return tick.skip_refused(tick.grouping.release_pass, get("slug"), get("store"), get("ledger"), get("doc"))
 
 
 def _dispatcher_group(tick: Any, get: Get) -> Any:

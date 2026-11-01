@@ -32,6 +32,8 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     apply_wait,
+    bottleneck_remedy,  # noqa: F401
+    claim_hold,  # noqa: F401
     claim_order,
     content_refusal,
     continuation,
@@ -39,11 +41,13 @@ from scripts.swarm import (
     dead_resume,
     deliberate_exit,
     dev_red,
+    difficulty,  # noqa: F401
     dispatch_seat,
     dispatcher,
     failed_panes,
     fleet_red,
     freeze,
+    grouping,  # noqa: F401
     input_wait,
     launch_check,
     ledger_events,
@@ -61,6 +65,7 @@ from scripts.swarm import (
     master_wake,
     outage,
     pane_evidence,
+    panic,  # noqa: F401
     preempt,
     prerequisite_wait,
     profile_first,

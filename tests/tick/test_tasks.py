@@ -51,6 +51,9 @@ def _tick(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespac
         skip_refused=skip_refused,
         run_window=SimpleNamespace(step="run window"),
         dispatcher=SimpleNamespace(group="dispatcher group"),
+        claim_hold=claim_hold,
+        difficulty=difficulty,
+        grouping=grouping,
         _settle="settle",
         _close_space="close space",
     )
