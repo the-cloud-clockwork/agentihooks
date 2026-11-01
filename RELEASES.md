@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.528 · 2026-11-01
+
+### 2026-10-31 · 1e6ecd36ab8a · #9135 · @agenticore-app
+
+**Define tick step contracts and validate dependency waves**
+
+This change introduces typed tick step contracts (Step, Domain, Lane, Context, Write, Result) plus a Registry that validates steps before they can run: it rejects duplicate names, unknown or cyclic dependencies, and same-lane steps writing a shared domain without an ordered dependency path, then computes safe execution waves respecting order and registration sequence. A Deadline type with clamped remaining time and non-extending child deadlines is also added. This establishes a guarded boundary for scheduling future tick execution safely; wiring the actual engine execution is deferred to a later change.
+
+### 2026-10-31 · 518902c206e5 · #9142 · @agenticore-app
+
+**Characterise swarm tick passes with canonical goldens**
+
+This change adds a safety net ahead of upcoming structural changes to the swarm tick logic: it introduces twelve scenarios run through both tick entry points, using fake Redis, ledger, runtime and Herdr, and commits canonical JSON goldens of the resulting actions and state writes. A new feature entry registers baseline and dropped-reap-action checks, and an exported output lets other tests compare against the same goldens. This ensures any future refactor that silently drops an action, like removing the first reap, is caught immediately rather than discovered later.
+
 ## v2.17.526 · 2026-10-31
 
 ### 2026-10-31 · 56a7b44d795b · #9116 · @agenticore-app
