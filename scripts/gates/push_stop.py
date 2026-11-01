@@ -1,6 +1,7 @@
-"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself, then refuses the stop over
-uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push,
-unless a checked wait on another task not yet done, or on the merge of a pull request still open, holds it."""
+"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless fleet panic holds,
+then refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no
+ledger line since the push, unless any declared wait during fleet panic, a checked wait on another task not yet done,
+or one on the merge of a pull request still open, holds it."""
 
 import os
 import re
@@ -10,6 +11,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from hooks.config import CONDITIONS_TIMEOUT_SEC
 from scripts.gates.base import Decision
@@ -48,6 +50,7 @@ GATE_LATE = (
     "Run python -m scripts.ci_prepush there and commit."
 )
 PUSH_LATE = "The stop hook had too little time left to push {path}, so it did not push it. Push it yourself."
+PANIC_HELD = "Fleet panic holds every push but the fix, so the stop hook did not push {path}."
 
 
 @dataclass(frozen=True)
@@ -220,8 +223,11 @@ class PushStop:
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
         store, owed, progress, failed, found = self.connect(), False, False, [], trees(self.root(), who.name)
+        frozen = self.frozen(store)
         for tree in found:
-            if tree.unpushed and (refused := self.held(tree)):
+            if tree.unpushed and frozen:
+                failed.append(PANIC_HELD.format(path=tree.path))
+            elif tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
             elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
                 self.record(store, ledger, who, tree, branch)
@@ -232,7 +238,7 @@ class PushStop:
         if not (owed or progress):
             self.settle(store, who)
             return Decision()
-        if self.waiting(store, who, doc, task, any(tree.dirty for tree in found)):
+        if self.waiting(store, who, doc, task, any(tree.dirty for tree in found), frozen):
             return Decision()
         reason = " ".join(
             filter(None, [TEMPLATE if owed else "", PROGRESS.format(swarm=who.swarm) if progress else ""])
@@ -247,16 +253,29 @@ class PushStop:
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
 
-    def waiting(self, store, who, doc, task, dirty):
-        """Whether a live checked wait holds the stop, so a refused push never deadlocks: one on another unfinished
-        task, or one on the merge of a pull request still open, which a push would drop from the queue, while every
-        change is committed."""
+    def frozen(self, store: Any) -> bool:
+        """Whether fleet panic holds, which denies every push but the fix; a Redis error reads as no panic."""
+        from redis.exceptions import RedisError
+
+        from scripts.swarm import panic
+
+        try:
+            return panic.state(store) is not None
+        except RedisError:
+            return False
+
+    def waiting(self, store: Any, who: Any, doc: Any, task: Any, dirty: bool, frozen: bool = False) -> bool:
+        """Whether a live checked wait holds the stop, so a refused push never deadlocks: any declared wait while
+        fleet panic holds, one on another unfinished task, or one on the merge of a pull request still open, which a
+        push would drop from the queue, while every change is committed."""
         from scripts.swarm import idle, waits
 
         held = idle.wait(store.redis, who.swarm, who.name)
         on = (held or {}).get("on") or {}
         if not (held and held["until"] > self.now()):
             return False
+        if frozen:
+            return True
         if on.get("kind") == "merge" and not dirty:
             pull = self.github()(on["target"])
             return pull is not None and pull.state == "OPEN"
