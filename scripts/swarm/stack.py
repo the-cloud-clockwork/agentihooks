@@ -11,6 +11,7 @@ from scripts.swarm import apply_wait
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
+from scripts.tick.adapters.github import command
 
 if TYPE_CHECKING:
     from scripts.tick.ports.contracts import SourceControl
@@ -86,7 +87,7 @@ def worktree() -> str:
 def _issue_ready(row):
     if row.get("issue_url"):
         return
-    answer = _out(["gh", "repo", "view", "--json", "hasIssuesEnabled"], "cannot tell whether the repo has issues")
+    answer = _out(command(["repo", "view", "--json", "hasIssuesEnabled"]), "cannot tell whether the repo has issues")
     try:
         has_issues = json.loads(answer)["hasIssuesEnabled"]
     except (ValueError, KeyError) as exc:
@@ -293,7 +294,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
     if row.get("issue_url"):
         body = _issue_body(row, open_, base, foreign)
-        _out(["gh", "issue", "comment", row["issue_url"], "--body", body], "could not comment on the issue")
+        _out(command(["issue", "comment", row["issue_url"], "--body", body]), "could not comment on the issue")
     repos = {}
     for dep in foreign:
         repos.setdefault(repo_key(dep["branch_repo"]), dep["branch_repo"])

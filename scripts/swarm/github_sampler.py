@@ -10,13 +10,14 @@ import time
 from collections import Counter
 
 from scripts.swarm import github_reads
+from scripts.tick.adapters.github import command
 
 DOCTOR = "doctor."
 GRAPHQL = "graphql"
 
 
 def core(run=subprocess.run) -> tuple[int, int]:
-    done = run(["gh", "api", "rate_limit"], capture_output=True, text=True, check=True, timeout=30)
+    done = run(command(["api", "rate_limit"]), capture_output=True, text=True, check=True, timeout=30)
     found = json.loads(done.stdout)["resources"]["core"]
     return found["used"], found["reset"]
 

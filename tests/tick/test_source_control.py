@@ -13,7 +13,7 @@ REFERENCE = port.ChangeRef("owner/project", 7)
 PULL = {
     "number": 7,
     "state": "open",
-    "head": {"sha": "head"},
+    "head": {"sha": "head", "ref": "engineer-1"},
     "base": {"ref": "dev"},
     "merged": False,
     "html_url": "https://github.com/owner/project/pull/7",
@@ -148,15 +148,30 @@ def test_domain_types_preserve_provider_neutral_state() -> None:
     )
 
 
+@pytest.mark.feature("swarm-tick-source-control-port")
 def test_github_change_uses_audited_reads_and_deadline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     provider, recorder = _provider(monkeypatch, tmp_path, [PULL])
 
     assert provider.change(REFERENCE, deadline=_deadline()) == port.ChangeState(
-        REFERENCE, "open", "head", "dev", False, "https://github.com/owner/project/pull/7"
+        REFERENCE, "open", "head", "dev", False, "https://github.com/owner/project/pull/7", "engineer-1"
     )
     assert recorder.calls == [
         ("tick.source_control", ["api", "repos/owner/project/pulls/7"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
     ]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_change_names_its_head_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pull = {**PULL, "head": {"sha": "head", "ref": "engineer-2"}}
+    provider, _ = _provider(monkeypatch, tmp_path, [pull])
+
+    assert provider.change(REFERENCE, deadline=_deadline()).head_branch == "engineer-2"
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_command_is_the_one_gh_command_line() -> None:
+    assert github.command(["pr", "view", "7"]) == ["gh", "pr", "view", "7"]
+    assert github.command([]) == ["gh"]
 
 
 def test_github_checks_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -323,3 +338,11 @@ def test_github_expired_deadline_prevents_external_reads(
 
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         getattr(provider, operation)(*args, deadline=Deadline(0, clock=lambda: 0.0))
+
+
+def test_the_feature_map_names_the_source_control_port_seam() -> None:
+    root = Path(__file__).resolve().parents[2]
+    entries = {entry["id"]: entry for entry in json.loads((root / "feature-map.json").read_text())["features"]}
+    entry = entries["swarm-tick-source-control-port"]
+    assert entry["seam"] == "The source control port in scripts.tick.ports.source_control and its GitHub adapter"
+    assert all(test.startswith("tests/tick/test_source_control.py::") for test in entry["tests"])

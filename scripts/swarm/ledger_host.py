@@ -7,6 +7,8 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from scripts.tick.adapters.github import command
+
 REPO = Path(__file__).resolve().parents[2]
 PROC = Path("/proc")
 SAMPLE_S = 0.5
@@ -106,7 +108,7 @@ def newest_on_dev(repo: Path = REPO, now: float | None = None) -> dict:
 def merged_at(repo: Path, sha: str) -> float | None:
     try:
         found = subprocess.run(
-            ["gh", "api", f"repos/{{owner}}/{{repo}}/commits/{sha}/pulls", "--jq", MERGED_JQ],
+            command(["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/pulls", "--jq", MERGED_JQ]),
             cwd=repo,
             capture_output=True,
             text=True,

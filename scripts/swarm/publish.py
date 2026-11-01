@@ -199,13 +199,13 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     return record
 
 
-def merged_record(repo: Path, task: dict) -> bool:
+def merged_record(repo: Path, task: dict[str, str]) -> bool:
     if not task.get("branch") or not task.get("pr_url"):
         return False
     if stack.repo_key(task["pr_url"].split("/pull/")[0]) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
         return False
-    pull = json.loads(execute(["gh", "pr", "view", task["pr_url"], "--json", "state,headRefName"], Path(repo)))
-    return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
+    pull = stack.change(task["pr_url"], f"cannot read pull request {task['pr_url']}")
+    return pull.merged and pull.head_branch == task["branch"]
 
 
 def open_pull_head(root: Path, task: dict, branch: str, remote: str) -> str:

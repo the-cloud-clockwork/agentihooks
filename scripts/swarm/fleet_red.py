@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 
 from scripts.swarm.ledger_events import RED, iso_ms
+from scripts.tick.adapters.github import command
 
 MIN_OTHERS = 3
 PULL = re.compile(r"https://github\.com/([^/]+/[^/]+)/pull/\d+")
@@ -47,7 +48,7 @@ def repository(url: str) -> str:
 
 def read(repo: str, run: Callable = subprocess.run) -> list[dict]:
     found = run(
-        ["gh", "pr", "list", "--repo", repo, "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"],
+        command(["pr", "list", "--repo", repo, "--state", "open", "--limit", "200", "--json", "url,statusCheckRollup"]),
         capture_output=True,
         text=True,
         timeout=60,

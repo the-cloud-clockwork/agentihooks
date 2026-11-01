@@ -23,6 +23,7 @@ from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
 from scripts.swarm_v2 import masters
+from scripts.tick.adapters.github import command
 
 MINUTE_MS = 60_000
 TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
@@ -325,7 +326,7 @@ def view(url, run=subprocess.run, required_checks=None):
     try:
         github_reads.charge("swarm.checks.fresh", "graphql", time.time())
         done = run(
-            ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"],
+            command(["api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"]),
             capture_output=True,
             text=True,
             timeout=20,
@@ -480,7 +481,7 @@ def _graphql(query, run, **variables):
     github_reads.charge("swarm.checks", "graphql", time.time())
     try:
         done = run(
-            ["gh", "api", "graphql", "-f", f"query={query}"]
+            command(["api", "graphql", "-f", f"query={query}"])
             + [arg for name, value in variables.items() for arg in ("-f", f"{name}={value}")],
             capture_output=True,
             text=True,
