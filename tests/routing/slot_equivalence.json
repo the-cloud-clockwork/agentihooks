@@ -1557,7 +1557,7 @@
       "env_name": "AH_CC_TOKEN_ALPHA",
       "max_sessions": 6,
       "sessions": 0,
-      "source": "live"
+      "source": "cached"
     },
     "rejected_only": {
       "error": "no Claude account has a free session under its quota band",

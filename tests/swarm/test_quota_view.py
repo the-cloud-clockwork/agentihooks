@@ -89,7 +89,7 @@ def test_codex_routing_left_is_its_week_left():
     codex = row("personal", "REDUCE", 3, None, 35.0, "codex")
     assert quota_view.routing_left(codex) == 35.0
     assert quota_view.routing_left({**codex, "five_left": 20.0}) == 35.0
-    assert quota_view.routing_left(row("alpha", five=None, week=None)) is None
+    assert quota_view.routing_left({**row("alpha", five=None), "week_left": None}) is None
     assert quota_view.lines({**DECISION, "accounts": [codex]}, 1_000_000, LIVE, "manual")[2] == (
         "quota account codex personal  reduce  routing 35% left  sessions 3"
     )
