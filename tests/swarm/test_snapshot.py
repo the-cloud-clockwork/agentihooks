@@ -150,6 +150,14 @@ def test_export_reads_no_key_of_another_swarm() -> None:
     assert Recording.scans and all(words[-2:] == ("COUNT", str(SCAN_PAGE)) for words in Recording.scans)
 
 
+def test_export_keeps_the_mail_of_a_seat_that_holds_only_memory(store: RedisStore) -> None:
+    seed(store, "sw")
+    store.memory.learn("eng-3@sw", "someone", "read the plan first", 30)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", "eng-3@sw", "pick this up")
+    assert inbox.key("item", item.id) in store.export("sw")["keys"]
+
+
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
     seed(store, "sw")
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
