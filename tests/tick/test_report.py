@@ -123,6 +123,7 @@ def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("bottleneck status", "wrapper metrics", 20),
         ("inbox wake", "wrapper metrics", 30),
         ("snapshot job", "wrapper metrics", 40),
+        ("last tick", "wrapper metrics", 50),
         ("heartbeat", "after", 10),
         ("status publish", "wrapper status", 10),
     ]
@@ -187,15 +188,29 @@ def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest
 def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {"found": ["f"]}
-    found = _run("wrapper metrics", calls, _pass(box, count=5), monkeypatch)
+    redis = SimpleNamespace(set=lambda key, value: calls.append(("set", key, value)))
+    store = SimpleNamespace(redis=redis, key=lambda slug, mark: f"{slug}/{mark}")
+    found = _run("wrapper metrics", calls, _pass(box, store=store, count=5), monkeypatch)
     assert found == ["ran 1", "ran 2", "ran 3"]
     assert calls == [
-        ("call", metrics.record_pass, "sw", 7, 5, os.environ, ("input", STORE, DOC, ["f"], "view", "ledger")),
-        ("skip", bottleneck_status.refresh, "sw", STORE, 7),
+        ("call", metrics.record_pass, "sw", 7, 5, os.environ, ("input", store, DOC, ["f"], "view", "ledger")),
+        ("skip", bottleneck_status.refresh, "sw", store, 7),
         ("skip", wake.maintenance, "inbox", "sw", AGENTS, 7, ("window", True)),
-        ("call", snapshot_job.start, STORE, "sw", 7, os.environ),
+        ("call", snapshot_job.start, store, "sw", 7, os.environ),
+        ("set", "sw/last-tick", 7),
     ]
-    assert box["started"] == ["ran 4"]
+    assert box == {"found": ["f"], "started": ["ran 4"]}
+
+
+def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
+    needs = {step.name: step.needs for step in report.STEPS if step.needs}
+    assert needs == {
+        "overrun pass": frozenset({"stall watch"}),
+        "findings pass": frozenset({"health findings"}),
+        "metrics record": frozenset({"health findings"}),
+    }
+    assert {step.needs for step in host.STEPS} == {frozenset()}
+    assert CallStep("x", "g", 1, host.held(lambda cli, get: None)).needs == frozenset()
 
 
 def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
