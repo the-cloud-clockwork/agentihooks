@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/scope.py:scripts.ci_mutation.scope.x_moved_lines:9a1f1fa4a9eb02ed444e22ce8fdfe0c91c88ed4479212550db6063ce8c8b805b": {
+    "reader": "standards_reader",
+    "reason": "Lowercases the config key core.quotePath. Git config section and variable names are case-insensitive, so git reads the same setting and quotes paths identically."
+  }
+}

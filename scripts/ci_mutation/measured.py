@@ -114,6 +114,7 @@ def measured_splits(
     memory: KillMemory | None = None,
     direct: dict[str, Collection[str]] | None = None,
 ) -> dict[str, dict]:
+    """Split long mutants; a head holding direct tests prices every unit at them, since each unit runs them first."""
     tests, durations, missing = function_tests(results)
     splits = {}
     for function in sorted({function_name(name) for name in names} & tests.keys()):

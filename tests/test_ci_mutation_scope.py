@@ -345,7 +345,7 @@ def test_blocks_moved_from_two_files_over_a_removed_line_grade_only_the_line_aft
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {8}}
 
 
-def test_a_move_into_a_non_ascii_name_is_skipped_and_a_name_git_quotes_stays_graded(tmp_path):
+def test_a_move_into_a_non_ascii_name_is_skipped_and_a_file_git_quotes_is_graded_in_full(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 
     git, commit = _repo(tmp_path)
