@@ -182,11 +182,11 @@ def call(function: Callable, *args, **kwargs) -> Any:
         return function(*args, **kwargs)
 
 
-def within(budget_s: float, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+def within(budget_s: float, function: Callable[..., Any], *args: Any) -> Any:
     """Run ``function`` as a timed step whose record reads late when it overruns ``budget_s``."""
     keep()
     with step(named(function), budget_s=budget_s):
-        return function(*args, **kwargs)
+        return function(*args)
 
 
 def timed(function: Callable, *args, **kwargs) -> Any:

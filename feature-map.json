@@ -40,6 +40,7 @@
       "tests": [
         "tests/swarm/test_tick_records.py::test_step_history_is_bounded_and_keeps_the_journal",
         "tests/swarm/test_tick_records.py::test_tick_pass_is_recorded_even_when_a_step_raises",
+        "tests/swarm/test_tick_records.py::test_budgeted_step_record_reads_late_past_its_budget_and_not_failed",
         "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps"
       ]
     },
