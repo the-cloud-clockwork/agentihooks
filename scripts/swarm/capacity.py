@@ -554,16 +554,26 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
     master = config.lanes.get("master")
     if master is None or master.get("agent") == "codex":
         return seats
-    pinned = {("claude", master["account"])} if master.get("account") else set()
+    declared = master.get("account", "")
     if any(
         agent.lane == "master"
         and agent.state != "finished"
-        and ((agent.harness, agent.account) not in warned or (agent.harness, agent.account) in pinned)
+        and ((agent.harness, agent.account) not in warned or _pinned(config.slug, agent, declared))
         for agent in agents
     ):
         return seats
     reserved = pick(seats, lambda seat: seat.harness == "claude" and seat.kind == SUBSCRIPTION)
     return [replace(seat, cap=seat.cap - 1) if seat == reserved else seat for seat in seats]
+
+
+def _pinned(slug: str, agent: Any, declared: str) -> bool:
+    """A live master whose successor the front door route forces back onto the declared master account."""
+    from scripts import front_door_route
+    from scripts.swarm_v2 import masters
+
+    if not declared or (agent.harness, agent.account) != ("claude", declared):
+        return False
+    return bool(front_door_route.check(agent.profile, masters.title(slug, agent.seat), [], agent.harness))
 
 
 def declared_master(environ: dict) -> str:

@@ -979,13 +979,14 @@ def test_master_reservation_preserves_api_capacity():
 
 
 @pytest.mark.parametrize(
-    ("declared", "expected"),
-    [("warned", 3), ("", 2), ("open", 2)],
+    ("declared", "profile", "expected"),
+    [("warned", "master", 3), ("", "master", 2), ("open", "master", 2), ("warned", "planner", 2)],
 )
-def test_a_warned_master_pinned_to_its_declared_account_holds_no_seat(declared, expected):
+def test_a_warned_master_pinned_to_its_declared_account_holds_no_seat(declared, profile, expected):
     lanes = {"master": {"agent": "claude", "account": declared}}
     config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes=lanes)
-    agents = [AgentRecord("master", "master", "master", harness="claude", account="warned", state="working")]
+    master = AgentRecord("master", "master", "master", harness="claude", account="warned", state="working")
+    agents = [replace(master, profile=profile)]
     observed = [account("open"), account("warned", sessions=1)]
     decision = capacity.calculate(config, observed, agents, warned={("claude", "warned"): "week"})
     assert decision["effective"] == {"eng": expected, "ci": 0, "plan": 0}
@@ -1006,8 +1007,8 @@ def test_runtime_capacity_reads_the_declared_master_account(tmp_path, monkeypatc
         scaling="manual",
         lanes={"master": {"agent": "claude"}, "eng": {"agent": "claude"}},
     )
-    agents = [AgentRecord("previous", "master", "master", harness="claude", account="warned", state="working")]
-    decision = runtime.quota_capacity(config, agents, 123)
+    previous = AgentRecord("previous", "master", "master", harness="claude", account="warned", state="working")
+    decision = runtime.quota_capacity(config, [replace(previous, profile="master")], 123)
     assert decision["effective"]["eng"] == expected
 
 
