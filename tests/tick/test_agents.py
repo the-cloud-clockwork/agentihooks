@@ -179,5 +179,5 @@ def test_a_raising_call_is_recorded_failed_and_the_next_step_still_runs() -> Non
 def test_the_tick_returns_the_actions_its_group_steps_wrote(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(registry, "registry", registry.Registry())
     registry.register(CallStep("probe", "agents", 0, lambda tick, get: [f"saw {get('slug')} at {get('now_ms')}"]))
-    assert tick_module.run_group("agents", {"slug": "sw", "now_ms": 3}) == ["saw sw at 3"]
-    assert tick_module.run_group("masters", {"slug": "sw"}) == []
+    assert tick_module.run_group("agents", slug="sw", now_ms=3) == ["saw sw at 3"]
+    assert tick_module.run_group("masters", slug="sw") == []

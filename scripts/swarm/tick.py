@@ -11,7 +11,6 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -216,9 +215,9 @@ class _PassView:
         return self._state.get(key) if domain == steps.PASS else None
 
 
-def run_group(name: str, state: Mapping[str, object] | None = None) -> list[str]:
+def run_group(name: str, **state: object) -> list[str]:
     """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
-    return steps.actions(engine.run_group(name, Context(_PassView(dict(state or {})), Deadline.after(GROUP_BUDGET_S))))
+    return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
 
 
 def step_config_load(slug: str, store: RedisStore, box: dict[str, Any]) -> list[str]:
@@ -352,21 +351,21 @@ def step_verify(
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     box: dict[str, Any] = {}
     passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
-    actions = run_group("start", passing)
+    actions = run_group("start", **passing)
     observe_steps.raise_held(box)
     if "finished" in box:
         return actions
     store.redis.delete(store.key(slug, SPAWN_HOLD))
-    actions += run_group("observe", passing)
+    actions += run_group("observe", **passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
-    actions += run_group("agents", {**passing, "config": config, "rows": rows})
+    actions += run_group("agents", **passing, config=config, rows=rows)
     actions.extend(master_steps.run_masters(locals()))
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += run_group("tasks", {**passing, "config": config, "rows": rows})
+    actions += run_group("tasks", **passing, config=config, rows=rows)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
@@ -400,7 +399,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
                 store.redis.delete(due)
         actions.extend(master_steps.run_dispatch(locals()))
     actions.extend(master_steps.run_watch(locals()))
-    actions += run_group("close", {**passing, "config": config, "rows": rows})
+    actions += run_group("close", **passing, config=config, rows=rows)
     return (
         actions
         + skip_refused(_settle, slug, config, store, ledger, rows, doc)
