@@ -212,7 +212,7 @@ def test_a_step_made_300_seconds_slower_breaks_the_budget(monkeypatch: pytest.Mo
     report = load(monkeypatch, SLOWDOWN_S)
     assert report["calls"]["planted"] == 1
     assert baseline <= budget() < report["pass_p95_s"]
-    assert report["pass_p95_s"] - baseline >= SLOWDOWN_S
+    assert budget() - baseline < SLOWDOWN_S
 
 
 @pytest.mark.feature("swarm-tick-pass-budget")
