@@ -1,4 +1,4 @@
-"""The host steps run the tick wrapper's relay, probes, health, commands, refresh, intent and reboot calls in today's order."""
+"""The host steps run the tick wrapper's relay, probes, health, commands, phases, refresh, intent and reboot calls in today's order."""
 
 from types import SimpleNamespace
 from typing import Any
@@ -7,6 +7,7 @@ import pytest
 
 from scripts.inbox import relay
 from scripts.swarm import command_runner, incidents, ledger_probe, ledger_watchdog, outage, reboot, refresh_job, timing
+from scripts.swarm.health import urgent_hold
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -53,8 +54,17 @@ def _cli(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespace
         calls.append(("intent", *args))
         return ("view", "checked")
 
+    def phase_steps(*args: Any) -> list[str]:
+        calls.append(("phases", *args))
+        return ["phase ticked"]
+
     return SimpleNamespace(
-        now_ms=lambda: 7, skip_refused=skip_refused, _intent_pass=intent_pass, relay=relay, refresh_job=refresh_job
+        now_ms=lambda: 7,
+        skip_refused=skip_refused,
+        _intent_pass=intent_pass,
+        _phase_steps=phase_steps,
+        relay=relay,
+        refresh_job=refresh_job,
     )
 
 
@@ -88,6 +98,8 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("ledger watchdog", "wrapper health", 20),
         ("ledger probe", "wrapper health", 30),
         ("command runner", "wrapper commands", 10),
+        ("urgent hold", "wrapper phases", 10),
+        ("planning and phase pass", "wrapper phases", 20),
         ("refresh job", "wrapper refresh", 10),
         ("intent check", "wrapper intent", 10),
         ("reboot pass", "wrapper reboot", 10),
@@ -122,6 +134,18 @@ def test_the_command_runner_consumes_the_commands(monkeypatch: pytest.MonkeyPatc
     calls: list[tuple[Any, ...]] = []
     assert _run("wrapper commands", calls, _pass(), monkeypatch) == ["ran 1"]
     assert calls == [("call", command_runner.consume, STORE, "sw")]
+
+
+def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    state = _pass(inbox="inbox", doc="doc")
+    assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked"]
+    assert calls == [
+        ("call", urgent_hold.observe, STORE, "sw", "doc", 7),
+        ("phases", "inbox", STORE, "sw", "doc", "ledger"),
+    ]
 
 
 def test_the_refresh_job_starts_only_on_a_scheduled_tick(monkeypatch: pytest.MonkeyPatch) -> None:

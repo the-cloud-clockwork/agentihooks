@@ -1,4 +1,4 @@
-"""The host steps of the tick wrapper: relay, launch slots, probes, host health, commands, refresh, intent and reboot."""
+"""The host steps of the tick wrapper: relay, launch slots, probes, host health, commands, phases, refresh, intent and reboot."""
 
 from collections.abc import Callable
 from importlib import import_module
@@ -71,6 +71,16 @@ def _refresh_job(cli: Any, get: Get) -> None:
         timing.call(cli.refresh_job.start, get("store"), get("slug"))  # pyright: ignore[reportUnknownMemberType]
 
 
+def _urgent_hold(cli: Any, get: Get) -> None:
+    from scripts.swarm.health import urgent_hold
+
+    timing.call(urgent_hold.observe, get("store"), get("slug"), get("doc"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
+
+
+def _phase_passes(cli: Any, get: Get) -> Any:
+    return cli._phase_steps(get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"))
+
+
 def _intent_check(cli: Any, get: Get) -> None:
     get("box")["judged"] = cli._intent_pass(
         get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"), get("config")
@@ -89,6 +99,8 @@ STEPS = (
     CallStep("ledger watchdog", "wrapper health", 20, held(_ledger_watchdog)),
     CallStep("ledger probe", "wrapper health", 30, held(_ledger_probe)),
     CallStep("command runner", "wrapper commands", 10, held(_command_runner)),
+    CallStep("urgent hold", "wrapper phases", 10, held(_urgent_hold)),
+    CallStep("planning and phase pass", "wrapper phases", 20, held(_phase_passes)),
     CallStep("refresh job", "wrapper refresh", 10, held(_refresh_job)),
     CallStep("intent check", "wrapper intent", 10, held(_intent_check)),
     CallStep("reboot pass", "wrapper reboot", 10, held(_reboot_pass)),
