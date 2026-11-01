@@ -108,9 +108,11 @@ class FakeSourceControl:
     calls: list[Call] = field(default_factory=list)
     merge_queue: bool = False
 
-    def _queued(self, operation: str, answer: Any) -> Any:
-        """Return the supplied answer, or Unsupported for a queue operation when the fake has no queue."""
-        return answer if operation in self.answers or self.merge_queue else Unsupported(operation)
+    def _queued(self, operation: str, answer: Any, default: Any) -> Any:
+        """Return the supplied answer, else the queue default, or Unsupported when the fake has no queue."""
+        if operation in self.answers:
+            return answer
+        return default if self.merge_queue else Unsupported(operation)
 
     def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
         return _record(self, "change", (reference,), deadline)
@@ -122,13 +124,14 @@ class FakeSourceControl:
         return _record(self, "runs", (reference,), deadline) or ()
 
     def enqueue(self, reference: ChangeRef, *, deadline: Deadline) -> QueueEntry | Unsupported:
-        return self._queued("enqueue", _record(self, "enqueue", (reference,), deadline))
+        answer = _record(self, "enqueue", (reference,), deadline)
+        return self._queued("enqueue", answer, QueueEntry(reference, 1))
 
     def merge(self, reference: ChangeRef, *, deadline: Deadline) -> Merged:
         return _record(self, "merge", (reference,), deadline)
 
     def queue_health(self, *, deadline: Deadline) -> QueueHealth | Unsupported:
-        return self._queued("queue_health", _record(self, "queue_health", (), deadline))
+        return self._queued("queue_health", _record(self, "queue_health", (), deadline), QueueHealth(0, ()))
 
     def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
         return _record(self, "tags", (), deadline) or ()

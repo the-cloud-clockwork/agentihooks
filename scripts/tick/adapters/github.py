@@ -46,6 +46,9 @@ _QUEUE = """query($owner: String!, $name: String!, $base: String!) {
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
 
+_PAGE = 100
+_MAX_PAGES = 10
+
 
 def _live(deadline: Deadline) -> float:
     """Return the seconds left on the deadline, refusing an expired one before any external call."""
@@ -60,7 +63,7 @@ class GitHubSourceControl:
 
     repository: str
     root: Path
-    base: str = "dev"
+    base: str
     git: Git = subprocess.run
 
     def _api(self, args: list[str], deadline: Deadline) -> Any:
@@ -70,6 +73,16 @@ class GitHubSourceControl:
             CALLER, ["api", *args], cwd=self.root, timeout=timeout, capture_output=True, text=True, check=True
         )
         return json.loads(result.stdout)
+
+    def _pages(self, path: str, key: str, deadline: Deadline) -> list[Any]:
+        """Read every page of a listing until a short page, at most the page limit."""
+        rows: list[Any] = []
+        for page in range(1, _MAX_PAGES + 1):
+            batch = self._api([f"{path}per_page={_PAGE}&page={page}"], deadline)[key]
+            rows.extend(batch)
+            if len(batch) < _PAGE:
+                break
+        return rows
 
     def _graphql(self, query: str, variables: Mapping[str, str | int], deadline: Deadline) -> Any:
         """Run one GraphQL document with string and integer variables and return its data."""
@@ -96,18 +109,16 @@ class GitHubSourceControl:
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
         """Read the check runs on the change's current head."""
         head = self.change(reference, deadline=deadline).head
-        body = self._api([f"repos/{reference.repository}/commits/{head}/check-runs?per_page=100"], deadline)
-        return tuple(
-            CheckState(row["name"], row["status"], row["conclusion"], row["html_url"]) for row in body["check_runs"]
-        )
+        rows = self._pages(f"repos/{reference.repository}/commits/{head}/check-runs?", "check_runs", deadline)
+        return tuple(CheckState(row["name"], row["status"], row["conclusion"], row["html_url"]) for row in rows)
 
     def runs(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[Run, ...]:
         """Read the workflow runs on the change's current head."""
         head = self.change(reference, deadline=deadline).head
-        body = self._api([f"repos/{reference.repository}/actions/runs?head_sha={head}&per_page=100"], deadline)
+        rows = self._pages(f"repos/{reference.repository}/actions/runs?head_sha={head}&", "workflow_runs", deadline)
         return tuple(
             Run(row["id"], row["name"], row["head_sha"], row["status"], row["conclusion"], row["html_url"])
-            for row in body["workflow_runs"]
+            for row in rows
         )
 
     def enqueue(self, reference: ChangeRef, *, deadline: Deadline) -> QueueEntry | Unsupported:

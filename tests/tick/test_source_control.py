@@ -36,7 +36,7 @@ def _provider(
 ) -> tuple[github.GitHubSourceControl, Recorder]:
     recorder = Recorder(answers)
     monkeypatch.setattr(github.github_reads, "rest", recorder)
-    return github.GitHubSourceControl("owner/project", tmp_path), recorder
+    return github.GitHubSourceControl("owner/project", tmp_path, "dev"), recorder
 
 
 def _deadline() -> Deadline:
@@ -66,7 +66,39 @@ def test_fake_with_queue_returns_supplied_answers() -> None:
     assert provider.enqueue(REFERENCE, deadline=deadline) is entry
     assert provider.queue_health(deadline=deadline) is health
     assert provider.capabilities(deadline=deadline) == port.Capabilities(merge_queue=True)
-    assert fakes.FakeSourceControl(merge_queue=True).enqueue(REFERENCE, deadline=deadline) is None
+    queued = fakes.FakeSourceControl(merge_queue=True)
+    assert queued.enqueue(REFERENCE, deadline=deadline) == port.QueueEntry(REFERENCE, 1)
+    assert queued.queue_health(deadline=deadline) == port.QueueHealth(0, ())
+
+
+def test_fake_without_queue_returns_supplied_answers() -> None:
+    entry = port.QueueEntry(REFERENCE, 4)
+    provider = fakes.FakeSourceControl({"enqueue": entry})
+    deadline = Deadline.after(10, clock=lambda: 0.0)
+
+    assert provider.enqueue(REFERENCE, deadline=deadline) is entry
+    assert provider.queue_health(deadline=deadline) == Unsupported("queue_health")
+
+
+@pytest.mark.parametrize(
+    "operation,args,answer",
+    [
+        ("change", (REFERENCE,), port.ChangeState(REFERENCE, "open", "head", "dev", False, "https://x/7")),
+        ("merge", (REFERENCE,), port.Merged(REFERENCE, "sha")),
+        ("comment", (REFERENCE, "body"), port.Comment(REFERENCE, "https://x/c")),
+    ],
+)
+def test_fake_change_merge_and_comment_record_and_answer(
+    operation: str, args: tuple[object, ...], answer: object
+) -> None:
+    provider = fakes.FakeSourceControl({operation: answer})
+    deadline = Deadline.after(10, clock=lambda: 0.0)
+
+    assert getattr(provider, operation)(*args, deadline=deadline) is answer
+    assert provider.calls == [fakes.Call(operation, args, deadline)]
+    with pytest.raises(TimeoutError):
+        getattr(provider, operation)(*args, deadline=Deadline(0, clock=lambda: 0.0))
+    assert len(provider.calls) == 1
 
 
 def test_fake_reads_default_to_empty() -> None:
@@ -140,7 +172,7 @@ def test_github_checks_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tm
         port.CheckState("lint", "completed", "success", "https://c/1"),
         port.CheckState("tests", "in_progress", None, "https://c/2"),
     )
-    assert recorder.calls[1][1] == ["api", "repos/owner/project/commits/head/check-runs?per_page=100"]
+    assert recorder.calls[1][1] == ["api", "repos/owner/project/commits/head/check-runs?per_page=100&page=1"]
 
 
 def test_github_runs_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -157,7 +189,28 @@ def test_github_runs_read_the_current_head(monkeypatch: pytest.MonkeyPatch, tmp_
     assert provider.runs(REFERENCE, deadline=_deadline()) == (
         port.Run(19, "Tests", "head", "completed", "failure", "https://r/19"),
     )
-    assert recorder.calls[1][1] == ["api", "repos/owner/project/actions/runs?head_sha=head&per_page=100"]
+    assert recorder.calls[1][1] == ["api", "repos/owner/project/actions/runs?head_sha=head&per_page=100&page=1"]
+
+
+def test_github_checks_follow_full_pages(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    row = {"name": "lint", "status": "completed", "conclusion": "success", "html_url": "https://c/1"}
+    provider, recorder = _provider(monkeypatch, tmp_path, [PULL, {"check_runs": [row] * 100}, {"check_runs": [row]}])
+
+    assert len(provider.checks(REFERENCE, deadline=_deadline())) == 101
+    assert [call[1][1] for call in recorder.calls[1:]] == [
+        "repos/owner/project/commits/head/check-runs?per_page=100&page=1",
+        "repos/owner/project/commits/head/check-runs?per_page=100&page=2",
+    ]
+
+
+def test_github_runs_stop_at_the_page_limit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    row = {"id": 1, "name": "T", "head_sha": "head", "status": "s", "conclusion": None, "html_url": "u"}
+    pages: list[object] = [{"workflow_runs": [row] * 100} for _ in range(10)]
+    provider, recorder = _provider(monkeypatch, tmp_path, [PULL, *pages])
+
+    assert len(provider.runs(REFERENCE, deadline=_deadline())) == 1000
+    assert len(recorder.calls) == 11
+    assert recorder.calls[-1][1][1].endswith("&page=10")
 
 
 def test_github_enqueue_pins_the_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -231,16 +284,16 @@ def test_github_tags_read_the_git_remote(tmp_path: Path) -> None:
         output = "a1\trefs/tags/v1.0.0\nb2\trefs/tags/v1.0.0^{}\n\nc3\trefs/tags/v1.1.0\n"
         return subprocess.CompletedProcess(command, 0, output, "")
 
-    provider = github.GitHubSourceControl("owner/project", tmp_path, git=git)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=git)
 
     assert provider.tags(deadline=_deadline()) == (port.Tag("v1.0.0", "a1"), port.Tag("v1.1.0", "c3"))
     assert seen == [(["git", "ls-remote", "--tags", "origin"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})]
 
 
 def test_github_defaults() -> None:
-    provider = github.GitHubSourceControl("owner/project", Path("."))
+    provider = github.GitHubSourceControl("owner/project", Path("."), "main")
 
-    assert provider.base == "dev"
+    assert provider.base == "main"
     assert provider.git is subprocess.run
     assert github.CALLER == "tick.source_control"
 
@@ -266,7 +319,7 @@ def test_github_expired_deadline_prevents_external_reads(
         pytest.fail("expired deadline reached the provider")
 
     monkeypatch.setattr(github.github_reads, "rest", refuse)
-    provider = github.GitHubSourceControl("owner/project", tmp_path, git=refuse)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=refuse)
 
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         getattr(provider, operation)(*args, deadline=Deadline(0, clock=lambda: 0.0))
