@@ -166,12 +166,14 @@ item = port.send("eng-1@rig-grade-swarm", "wake", deadline=Deadline.after(2.0))
 |---|---|---|
 | `read(address)` | `store.inbox(address)` | The address's items |
 | `send(address, body)` | `store.send(sender, address, body)` | The new item |
-| `close(item_id)` | `store.close(item_id, sender, "done")` | The closed item |
+| `close(item_id, outcome, detail="")` | `store.close(item_id, sender, outcome, detail)` | The closed item |
 
-`send` passes no `ref`, `fyi`, `task` or `item_id`. `close` closes as `done` with the adapter's sender as closer and
-no outcome detail. The store accepts that only for an item sent with `fyi`; any other item raises
-`InboxError("done needs an outcome naming where the work went")`, and closing an already closed item raises
-`InboxError("message <id> is closed: <reason>")`. The sender must also act for the item's address.
+`send` passes no `ref`, `fyi`, `task` or `item_id`. `close` takes an outcome, one of `done`, `handoff`, `blocked` or
+`cancel`, and its detail, and closes with the adapter's sender as closer. `handoff` needs the address the work went to
+and `blocked` needs what it is blocked on. A bare `done` is accepted only for an item sent with `fyi`; any other item
+raises `InboxError("done needs an outcome naming where the work went")`, and closing an already closed item raises
+`InboxError("message <id> is closed: <reason>")`. The sender must also act for the item's address. `FakeInbox`
+refuses an unknown outcome, a missing detail and a bare `done` on an item not listed in its `information` set.
 
 ## Llm adapter
 
@@ -536,7 +538,7 @@ and call the port from the step.
 | `TypeError: tools require a Deadline keyword argument` | A restricted port was called without `deadline=`. | Pass the step's `Deadline` by keyword. |
 | `KeyError: 'unknown metrics table: <name>'` | `emit` named a table the adapter was not built with. | Add the `Table` to the `tables` mapping. |
 | `BackendFailure: <model>: timeout` from `classify` | The decisions API did not answer within `deadline.remaining`. | Raise the deadline, or build `ApiLlm` with a model that answers faster. |
-| `InboxError: done needs an outcome naming where the work went` from `inbox.close` | The item was not sent with `fyi`, and the adapter closes without an outcome. | Close the item with `agentihooks msg close <id> done <where the work went>` or answer it with `agentihooks msg reply <id> <text>`. |
+| `InboxError: done needs an outcome naming where the work went` from `inbox.close` | The item was not sent with `fyi`, and the step closed it as `done` with no detail. | Pass the detail naming where the work went, or close with `handoff`, `blocked` or `cancel`. |
 | `Outcome(..., Status.UNAVAILABLE, "", detail="no agent named <handle>")` from `runtime.inspect` or `runtime.stop` | The `agents` lookup found no record for that name. | Check the name against the swarm's agent records; the router was not called. |
 | `TypeError` from `runtime.launch` | The request mapping lacks one of `config`, `lane`, `name`, `task`, or carries another key. | Pass exactly those four keys. |
 | `runtime.panes` returns `[]` | herdr answered without a `panes` list. | Run `herdr pane list` on the host and check the herdr server is up. |
