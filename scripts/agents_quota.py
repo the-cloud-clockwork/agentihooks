@@ -232,14 +232,6 @@ def duplicate_rows(environ: Mapping[str, str], sessions: dict[str, int]) -> list
     ]
 
 
-def _refusal_at(account: "codex_router.CodexAccount", environ: Mapping[str, str], now: float) -> str:
-    try:
-        codex_router.credential_kind(account, environ)
-    except codex_router.RoutingError as exc:
-        return str(exc)
-    return codex_router.expiry_refusal(account, environ, now)
-
-
 def _refused_state(account: "codex_router.CodexAccount", environ: Mapping[str, str], now: float) -> str:
     if not codex_router.expiring(account, environ, now):
         return REFUSED
@@ -253,7 +245,7 @@ def refused_rows(environ: Mapping[str, str], sessions: dict[str, int], now: floa
     repeated = codex_router.duplicates(tokens, environ)
     rows = []
     for account in tokens:
-        reason = _refusal_at(account, environ, now)
+        reason = codex_router.refusal(account, environ, now)
         if account.name in repeated or not reason:
             continue
         state = _refused_state(account, environ, now)

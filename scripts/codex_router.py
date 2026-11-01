@@ -147,12 +147,12 @@ def credential(account: CodexAccount, environ: Mapping[str, str]) -> CodexAccoun
     return replace(account, bearer=True) if credential_kind(account, environ) == OAUTH_KIND else account
 
 
-def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
+def refusal(account: CodexAccount, environ: Mapping[str, str], now: float | None = None) -> str:
     try:
         credential_kind(account, environ)
     except RoutingError as exc:
         return str(exc)
-    return expiry_refusal(account, environ, time.time())
+    return expiry_refusal(account, environ, time.time() if now is None else now)
 
 
 def expiry_refusal(account: CodexAccount, environ: Mapping[str, str], now: float) -> str:

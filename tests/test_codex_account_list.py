@@ -1,11 +1,13 @@
 import base64
 import json
+import time
 
 from scripts import agents_quota, codex_router
 from scripts import claude_quota_balancer as balancer
 from scripts.codex_quota import CodexQuota
 from scripts.hive import daemon
 from scripts.swarm import capacity
+from tests.codex_fakes import DAY, jwt
 
 KEPT = "nestor_coltatgmail_com"
 
@@ -83,14 +85,11 @@ def test_the_page_quota_table_shows_a_duplicate_as_its_own_row_with_a_duplicate_
 
 
 def test_balance_lists_every_refused_token_account_with_its_state_and_login_command(tmp_path, monkeypatch):
-    import time
-
     from hooks.context import account_sessions
-    from tests.codex_fakes import DAY, jwt
 
     now = time.time()
 
-    def token(account_id, exp):
+    def token(account_id: str, exp: float) -> str:
         return jwt({"exp": int(exp), codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": account_id}})
 
     environ = {
@@ -123,8 +122,6 @@ def test_balance_lists_every_refused_token_account_with_its_state_and_login_comm
 
 
 def test_a_refused_token_account_replaces_the_row_the_table_lists_for_it(tmp_path):
-    from tests.codex_fakes import DAY, jwt
-
     expired = jwt({"exp": 100 - 4 * DAY, codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": "acct-3"}})
     environ = {**_environ(tmp_path), "AH_CX_TOKEN_old": expired}
     claude = agents_quota.QuotaRow("claude", "old", "OPEN", 1, None, None, None, "")

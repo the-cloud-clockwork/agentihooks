@@ -217,8 +217,7 @@ def _logins(root: Path) -> list[str]:
     return sorted(path.name for path in root.iterdir() if (path / "auth.json").is_file()) if root.is_dir() else []
 
 
-def _local_accounts(force: str) -> list[Path]:
-    root = codex_login.homes()
+def _local_accounts(root: Path, force: str) -> list[Path]:
     return [root / name for name in _select(_logins(root), force)]
 
 
@@ -259,11 +258,11 @@ def _refresh_local(run: Run, home: Path) -> Outcome | None:
 
 
 def run_local(run: Run) -> int:
-    homes = _local_accounts(run.force)
-    if run.force and not homes:
-        print(term_colors.red(NO_LOCAL_ACCOUNT.format(slug=run.force, root=codex_login.homes())))
-        return 1
     root = codex_login.homes()
+    homes = _local_accounts(root, run.force)
+    if run.force and not homes:
+        print(term_colors.red(NO_LOCAL_ACCOUNT.format(slug=run.force, root=root)))
+        return 1
     _unrenewable(run, _logins(root), NO_LOGIN.format(root=root))
     outcomes = [outcome for home in homes if (outcome := _refresh_local(run, home)) is not None]
     if run.bao is None and any(outcome.saved for outcome in outcomes):
