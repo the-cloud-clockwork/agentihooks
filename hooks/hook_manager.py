@@ -782,6 +782,7 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
 
     run = budget.run
     run("secrets", _prompt_secrets, payload)
+    run("seat_notes", seat_notes.inject)
     typed = bool(run("operator_words", _operator_words, payload))
     run("operator_mode", _operator_mode, payload, typed)
     run("master_coding", _master_coding, payload, typed)
@@ -807,7 +808,6 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
         run("broadcasts", _prompt_broadcasts, session_id)
     run("refocus", _inject_refocus, session_id, "prompt")
     run("ledger_decision", _inject_ledger_decision, payload)
-    run("seat_notes", seat_notes.inject)
 
 
 def _prompt_quota_usage(session_id: str) -> None:
