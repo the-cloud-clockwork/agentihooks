@@ -167,7 +167,7 @@ def test_github_enqueue_pins_the_head(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     assert provider.enqueue(REFERENCE, deadline=_deadline()) == port.QueueEntry(REFERENCE, 3)
     read, write = recorder.calls[0][1], recorder.calls[1][1]
-    assert read[:3] == ["api", "graphql", "-f"]
+    assert read[:4] == ["api", "graphql", "-f", f"query={github._PULL}"]
     assert read[4:] == ["-f", "owner=owner", "-f", "name=project", "-F", "number=7", "-f", "base=dev"]
     assert write[4:] == ["-f", "id=P", "-f", "head=head"]
     assert write[3] == f"query={github._ENQUEUE}"

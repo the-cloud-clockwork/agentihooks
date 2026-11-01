@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm import github_reads
 from scripts.tick.deadline import Deadline
@@ -69,7 +69,7 @@ class GitHubSourceControl:
         result = github_reads.rest(
             CALLER, ["api", *args], cwd=self.root, timeout=timeout, capture_output=True, text=True, check=True
         )
-        return json.loads(cast(str, result.stdout))
+        return json.loads(result.stdout)
 
     def _graphql(self, query: str, variables: Mapping[str, str | int], deadline: Deadline) -> Any:
         """Run one GraphQL document with string and integer variables and return its data."""
@@ -147,8 +147,8 @@ class GitHubSourceControl:
             text=True,
             check=True,
         )
-        rows = [line.split("\t") for line in result.stdout.splitlines() if line]
-        return tuple(Tag(ref.removeprefix("refs/tags/"), sha) for sha, ref in rows if not ref.endswith("^{}"))
+        rows = [line.partition("\t") for line in result.stdout.splitlines() if line]
+        return tuple(Tag(ref.removeprefix("refs/tags/"), sha) for sha, _, ref in rows if not ref.endswith("^{}"))
 
     def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment:
         """Post a comment on the change."""

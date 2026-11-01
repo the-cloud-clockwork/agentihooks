@@ -1,6 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools, Unsupported
@@ -49,7 +49,7 @@ class FakePort(Protocol):
     calls: list[Call]
 
 
-def _record(port: FakePort, operation: str, args: tuple[object, ...], deadline: Deadline) -> object:
+def _record(port: FakePort, operation: str, args: tuple[object, ...], deadline: Deadline) -> Any:
     if deadline.expired:
         raise TimeoutError("tool deadline expired")
     port.calls.append(Call(operation, args, deadline))
@@ -108,41 +108,37 @@ class FakeSourceControl:
     calls: list[Call] = field(default_factory=list)
     merge_queue: bool = False
 
-    def _queued(self, operation: str, answer: object) -> object:
+    def _queued(self, operation: str, answer: Any) -> Any:
         """Return the supplied answer, or Unsupported for a queue operation when the fake has no queue."""
         return answer if operation in self.answers or self.merge_queue else Unsupported(operation)
 
     def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
-        return cast(ChangeState, _record(self, "change", (reference,), deadline))
+        return _record(self, "change", (reference,), deadline)
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
-        return cast(tuple[CheckState, ...], _record(self, "checks", (reference,), deadline) or ())
+        return _record(self, "checks", (reference,), deadline) or ()
 
     def runs(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[Run, ...]:
-        return cast(tuple[Run, ...], _record(self, "runs", (reference,), deadline) or ())
+        return _record(self, "runs", (reference,), deadline) or ()
 
     def enqueue(self, reference: ChangeRef, *, deadline: Deadline) -> QueueEntry | Unsupported:
-        return cast(
-            "QueueEntry | Unsupported", self._queued("enqueue", _record(self, "enqueue", (reference,), deadline))
-        )
+        return self._queued("enqueue", _record(self, "enqueue", (reference,), deadline))
 
     def merge(self, reference: ChangeRef, *, deadline: Deadline) -> Merged:
-        return cast(Merged, _record(self, "merge", (reference,), deadline))
+        return _record(self, "merge", (reference,), deadline)
 
     def queue_health(self, *, deadline: Deadline) -> QueueHealth | Unsupported:
-        return cast(
-            "QueueHealth | Unsupported", self._queued("queue_health", _record(self, "queue_health", (), deadline))
-        )
+        return self._queued("queue_health", _record(self, "queue_health", (), deadline))
 
     def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
-        return cast(tuple[Tag, ...], _record(self, "tags", (), deadline) or ())
+        return _record(self, "tags", (), deadline) or ()
 
     def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment:
-        return cast(Comment, _record(self, "comment", (reference, body), deadline))
+        return _record(self, "comment", (reference, body), deadline)
 
     def capabilities(self, *, deadline: Deadline) -> Capabilities:
         answer = _record(self, "capabilities", (), deadline)
-        return cast(Capabilities, answer) if answer is not None else Capabilities(merge_queue=self.merge_queue)
+        return answer if answer is not None else Capabilities(merge_queue=self.merge_queue)
 
 
 @dataclass
