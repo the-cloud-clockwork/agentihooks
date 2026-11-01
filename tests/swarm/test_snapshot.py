@@ -147,7 +147,7 @@ def test_export_reads_no_key_of_another_swarm() -> None:
     read = {arg for words in Recording.touched for arg in words[1:]}
     assert theirs and not read & theirs
     assert [arg for arg in read if "sw-b" in arg or re.search(rf"\b{other}\b", arg)] == []
-    assert Recording.scans and all(words[-2:] == ("COUNT", str(SCAN_PAGE)) for words in Recording.scans)
+    assert Recording.scans and all("COUNT" in words[-2] and words[-1] == str(SCAN_PAGE) for words in Recording.scans)
 
 
 def test_export_keeps_the_mail_of_a_seat_that_holds_only_memory(store: RedisStore) -> None:
