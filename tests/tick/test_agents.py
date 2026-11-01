@@ -10,7 +10,7 @@ from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
-from scripts.tick.steps import ACTIONS, BUDGET_S, LANE, PASS, CallStep, actions, agents
+from scripts.tick.steps import PASS, CallStep, actions, actions_of, agents
 
 pytestmark = pytest.mark.unit
 
@@ -98,14 +98,14 @@ def test_the_agents_group_runs_its_calls_with_the_pass_state(monkeypatch: pytest
 def test_the_orphans_step_runs_outside_the_events_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _fakes(monkeypatch)
     step = engine.group_steps("tasks")[0]
-    assert step.run(_ctx(_state())) == Result((Write(ACTIONS, "orphans", ["orphan"]),))
+    assert step.run(_ctx(_state())) == Result((Write(actions_of("orphans"), "orphans", ["orphan"]),))
     assert seen == [("orphans", ("sw", "store", "ledger", {"t1": {}}))]
 
 
 def test_the_orphans_step_is_quiet_under_the_events_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _fakes(monkeypatch)
     step = engine.group_steps("tasks")[0]
-    assert step.run(_ctx(_state(tick_module.EVENTS_ENGINE))) == Result((Write(ACTIONS, "orphans", []),))
+    assert step.run(_ctx(_state(tick_module.EVENTS_ENGINE))) == Result((Write(actions_of("orphans"), "orphans", []),))
     assert seen == []
 
 
@@ -124,8 +124,17 @@ def test_a_call_step_is_placed_and_bounded_as_registered() -> None:
     step = CallStep("probe", "agents", 5, lambda tick, get: None)
     assert (step.name, step.group, step.order) == ("probe", "agents", 5)
     assert (step.lane, step.budget_s, step.interval_s) == (Lane("tick"), 600.0, 0.0)
-    assert (step.needs, step.writes) == (frozenset(), frozenset())
-    assert (LANE, BUDGET_S, PASS, ACTIONS) == (Lane("tick"), 600.0, Domain("pass"), Domain("actions"))
+    assert (step.needs, step.writes) == (frozenset(), frozenset({Domain("actions:probe")}))
+    assert (PASS, actions_of("probe")) == (Domain("pass"), Domain("actions:probe"))
+
+
+def test_the_registered_agent_steps_declare_writers_the_registry_accepts() -> None:
+    fresh = registry.Registry()
+    for step in agents.STEPS:
+        fresh.register(step)
+    assert {domain for step in agents.STEPS for domain in step.writes} == {
+        actions_of(step.name) for step in agents.STEPS
+    }
 
 
 def test_a_call_step_reads_the_pass_state_and_the_tick_module() -> None:
@@ -136,17 +145,34 @@ def test_a_call_step_reads_the_pass_state_and_the_tick_module() -> None:
         return ["one", "two"]
 
     result = CallStep("probe", "agents", 0, call).run(_ctx(_state()))
-    assert result == Result((Write(ACTIONS, "probe", ["one", "two"]),))
+    assert result == Result((Write(actions_of("probe"), "probe", ["one", "two"]),))
     assert seen == [(tick_module, "sw")]
 
 
 def test_actions_keeps_only_written_actions_in_step_order() -> None:
     records = (
-        StepRecord("a", 0.0, 1.0, result=Result((Write(ACTIONS, "a", ["x"]), Write(Domain("other"), "a", ["no"])))),
+        StepRecord(
+            "a", 0.0, 1.0, result=Result((Write(actions_of("a"), "a", ["x"]), Write(Domain("other"), "a", ["no"])))
+        ),
         StepRecord("b", 0.0, 1.0, error="boom"),
-        StepRecord("c", 0.0, 1.0, result=Result((Write(ACTIONS, "c", ["y", "z"]),))),
+        StepRecord(
+            "c", 0.0, 1.0, result=Result((Write(actions_of("c"), "c", ["y", "z"]), Write(actions_of("a"), "c", ["no"])))
+        ),
     )
     assert actions(records) == ["x", "y", "z"]
+
+
+def test_a_raising_call_is_recorded_failed_and_the_next_step_still_runs() -> None:
+    def boom(tick: Any, get: Any) -> list[str]:
+        raise RuntimeError("reap broke")
+
+    pool = (CallStep("first", "agents", 0, boom), CallStep("second", "agents", 1, lambda tick, get: ["after"]))
+    records = engine.run_group("agents", _ctx(_state()), pool)
+    assert [(record.name, record.outcome, record.error) for record in records] == [
+        ("first", engine.FAILED, "builtins.RuntimeError"),
+        ("second", engine.OK, ""),
+    ]
+    assert actions(records) == ["after"]
 
 
 def test_the_tick_returns_the_actions_its_group_steps_wrote(monkeypatch: pytest.MonkeyPatch) -> None:

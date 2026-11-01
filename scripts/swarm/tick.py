@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any, Protocol
 
+import scripts.tick.steps.agents  # noqa: F401
 from hooks.context import context_recycle
 from scripts.doctor import priming
 from scripts.gates import Who, modes
@@ -99,7 +100,6 @@ from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import agents as agent_steps  # noqa: F401
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60

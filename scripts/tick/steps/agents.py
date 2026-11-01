@@ -6,8 +6,6 @@ from typing import Any
 from scripts.tick import registry
 from scripts.tick.steps import CallStep
 
-__all__ = ["STEPS"]
-
 Get = Callable[[str], Any]
 
 
