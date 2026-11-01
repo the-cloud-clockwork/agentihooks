@@ -1989,7 +1989,15 @@ def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> No
 
 
 @pytest.mark.parametrize(
-    "error", [subprocess.CalledProcessError(1, []), subprocess.TimeoutExpired([], 20), ValueError("x"), KeyError("x")]
+    "error",
+    [
+        subprocess.CalledProcessError(1, []),
+        subprocess.TimeoutExpired([], 20),
+        ValueError("x"),
+        KeyError("x"),
+        TimeoutError("tool deadline expired"),
+        OSError("x"),
+    ],
 )
 def test_an_unreadable_pull_request_gives_no_branch(error: Exception) -> None:
     def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
