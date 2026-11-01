@@ -4342,6 +4342,12 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 
 ## The minute tick
 
+Registered steps have measured budgets and declared intervals. A step still
+running at its budget is recorded late and the pass continues; its worker
+keeps running. See [Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals)
+for timing configuration, overlap limits and the conditional forty second
+spawn prerequisite bound.
+
 `agentihooks swarm <id> tick-report --passes 100` reports the latest retained
 passes with per step count, median, p95 and CPU share, plus pass p95 and the
 idle gaps between consecutive passes. CPU share uses the sum of own and reaped
