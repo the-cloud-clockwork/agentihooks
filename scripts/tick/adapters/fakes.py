@@ -161,6 +161,9 @@ class FakeSourceControl:
     def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]:
         return _record(self, "latest_runs", (), deadline)
 
+    def merged_at(self, commit: str, *, deadline: Deadline) -> str | None:
+        return _record(self, "merged_at", (commit,), deadline)
+
     def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
         return _record(self, "cancel_run", (run_id,), deadline)
 

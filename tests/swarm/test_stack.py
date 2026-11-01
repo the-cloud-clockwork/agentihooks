@@ -550,6 +550,22 @@ def test_repository_source_control_is_the_github_port_of_the_origin(
         stack.repository_source_control()
 
 
+def test_origin_source_control_is_the_github_port_of_a_checkout_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    calls: list[list[str]] = []
+
+    def origin(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="git@github.com:O/r.git\n", stderr="")
+
+    monkeypatch.setattr(stack, "shell", origin)
+    assert stack.origin_source_control(tmp_path) == GitHubSourceControl("o/r", tmp_path, "dev")
+    assert calls == [["git", "-C", str(tmp_path), "remote", "get-url", "origin"]]
+
+
 def test_a_port_refusal_reports_the_provider_output_else_the_exception_text() -> None:
     assert stack.refusal(subprocess.CalledProcessError(1, [], stderr=" no such issue\n")) == "no such issue"
     assert stack.refusal(subprocess.CalledProcessError(1, [])) == ""

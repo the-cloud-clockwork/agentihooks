@@ -7,14 +7,14 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from scripts.tick.adapters.github import command
+from scripts.swarm import stack
+from scripts.tick.deadline import Deadline
 
 REPO = Path(__file__).resolve().parents[2]
 PROC = Path("/proc")
 SAMPLE_S = 0.5
 GIT_TIMEOUT_S = 5
 GH_TIMEOUT_S = 10
-MERGED_JQ = 'map(.merged_at | values) | first // ""'
 NO_DEV = {"newest": None, "merged_minutes": None}
 
 
@@ -106,16 +106,11 @@ def newest_on_dev(repo: Path = REPO, now: float | None = None) -> dict:
 
 
 def merged_at(repo: Path, sha: str) -> float | None:
+    """Return when the change carrying a commit merged, read through the port of the checkout's origin, or None."""
     try:
-        found = subprocess.run(
-            command(["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/pulls", "--jq", MERGED_JQ]),
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            timeout=GH_TIMEOUT_S,
-        )
-        return datetime.fromisoformat(found.stdout.strip()).timestamp() if found.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+        stamp = stack.origin_source_control(repo).merged_at(sha, deadline=Deadline.after(GH_TIMEOUT_S))
+        return datetime.fromisoformat(stamp).timestamp() if stamp else None
+    except stack.PORT_ERRORS:
         return None
 
 
