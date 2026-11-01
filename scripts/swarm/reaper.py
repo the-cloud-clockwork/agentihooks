@@ -88,14 +88,14 @@ def _split(found: list[Process], launch: Process | None, table: dict[int, Proces
 
 
 def _table(table: dict[int, Process] | None, wanted: list[int]) -> dict[int, Process]:
-    """The given table, else the pass snapshot, else a fresh scan; a wanted process the snapshot predates rescans."""
+    """The given table, else the pass snapshot, else a fresh scan; a live wanted process the snapshot lacks rescans."""
     if table is not None:
         return table
     shared = PASS.get()
     if shared is None:
         return processes()
     table = shared.scan(deadline=Deadline.after(SCAN_S))
-    return table if all(pid in table for pid in wanted) else processes()
+    return table if all(pid in table or _process(pid, PROC) is None for pid in wanted) else processes()
 
 
 def scanning_pass(function: Callable[P, R]) -> Callable[P, R]:

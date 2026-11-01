@@ -218,7 +218,24 @@ def test_outside_a_pass_every_selection_scans(monkeypatch: pytest.MonkeyPatch) -
     assert scans == [1, 1]
 
 
-def test_a_process_newer_than_the_pass_snapshot_rescans(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_exited_process_missing_from_the_snapshot_keeps_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    scans: list[int] = []
+    ended: list[reaper.Targets] = []
+    monkeypatch.setattr(reaper, "processes", lambda: scans.append(1) or {70: _process(70, 70)})
+    monkeypatch.setattr(reaper, "_process", lambda pid, proc: None)
+    monkeypatch.setattr(reaper, "end", lambda found: ended.append(found) or reaper.Outcome(()))
+
+    @reaper.scanning_pass
+    def tick_pass() -> None:
+        reaper.reap([70, 71])
+        reaper.reap([72])
+
+    tick_pass()
+    assert scans == [1]
+    assert ended == [reaper.Targets(frozenset([70]), frozenset()), reaper.Targets()]
+
+
+def test_a_live_process_newer_than_the_pass_snapshot_rescans(monkeypatch: pytest.MonkeyPatch) -> None:
     tables = [{50: _process(50, 50)}, {50: _process(50, 50), 51: _process(51, 51)}]
     scans: list[int] = []
     ended: list[reaper.Targets] = []
@@ -228,6 +245,7 @@ def test_a_process_newer_than_the_pass_snapshot_rescans(monkeypatch: pytest.Monk
         return tables[len(scans) - 1]
 
     monkeypatch.setattr(reaper, "processes", scan)
+    monkeypatch.setattr(reaper, "_process", lambda pid, proc: tables[1].get(pid))
     monkeypatch.setattr(reaper, "carries", lambda process, name: True)
     monkeypatch.setattr(reaper, "end", lambda found: ended.append(found) or reaper.Outcome(()))
 
@@ -241,7 +259,7 @@ def test_a_process_newer_than_the_pass_snapshot_rescans(monkeypatch: pytest.Monk
     assert ended == [reaper.Targets(frozenset([50]), frozenset()), reaper.Targets(frozenset([51]), frozenset())]
 
 
-def test_the_tick_entry_runs_inside_one_scan_pass() -> None:
+def test_the_tick_entry_carries_the_scan_pass_wrapper() -> None:
     from scripts.swarm import tick
 
     assert tick.tick.__wrapped__.__name__ == "tick"
