@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 from types import SimpleNamespace
@@ -249,3 +250,30 @@ def test_timed_returns_the_result_of_its_call(capsys):
         ("started", "builtins.divmod", None),
         ("finished", "builtins.divmod", "success"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("ended", "failure", "outcome", "failed"),
+    [(12.5, None, "success", []), (12.6, None, "late", []), (12.6, ValueError, "error", ["budgeted"])],
+)
+def test_budgeted_step_reads_late_only_on_a_successful_overrun(
+    monkeypatch: pytest.MonkeyPatch,
+    ended: float,
+    failure: type[Exception] | None,
+    outcome: str,
+    failed: list[str],
+) -> None:
+    output = Output()
+    monkeypatch.setattr(timing.sys, "stderr", output)
+    monkeypatch.setattr(timing, "time", SimpleNamespace(monotonic=iter([10.0, ended]).__next__))
+    current = {"pass_id": "p", "failed_steps": []}
+    swarm, passing = timing.SWARM.set("sw"), timing.PASS.set(current)
+    try:
+        with contextlib.suppress(ValueError), timing.step("budgeted", budget_s=2.5):
+            if failure is not None:
+                raise failure("private")
+    finally:
+        timing.PASS.reset(passing)
+        timing.SWARM.reset(swarm)
+    record = json.loads(output.getvalue().splitlines()[-1])
+    assert (record["outcome"], record["budget_s"], current["failed_steps"]) == (outcome, 2.5, failed)

@@ -121,6 +121,18 @@ def test_failed_record_carries_wall_time() -> None:
     )
 
 
+class StepFault(Exception):
+    """A step failure defined outside the builtins module."""
+
+
+def test_failed_record_names_the_exception_module() -> None:
+    def fail(ctx: Context) -> Result:
+        raise StepFault
+
+    record = engine.run_step(FakeStep("fail", 1, fail), context(Clock()))
+    assert record.error == f"{__name__}.StepFault"
+
+
 def test_each_step_gets_its_own_budget_deadline_capped_by_the_group() -> None:
     clock = Clock()
     roomy = FakeStep("roomy", 1, done, budget_s=5.0)
