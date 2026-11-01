@@ -282,7 +282,7 @@ def test_the_notice_pass_still_judges_a_repository_whose_neighbour_failed_to_rea
     away = "https://github.com/x/y/pull/1"
     elsewhere = red_elsewhere()
 
-    def reader(repo):
+    def reader(repo: str) -> list[OpenChange]:
         if repo == "o/r":
             raise OSError("no auth")
         return elsewhere

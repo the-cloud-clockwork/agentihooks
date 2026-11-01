@@ -425,6 +425,13 @@ def test_github_open_changes_reads_each_open_pull_request_check_rollup(
     ]
 
 
+def test_github_open_changes_reads_one_page_when_no_next_page(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider, recorder = _provider(monkeypatch, tmp_path, [_open_page(["u0"], [], None)])
+
+    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()),)
+    assert len(recorder.calls) == 1
+
+
 def test_github_open_changes_stops_after_two_hundred_pull_requests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
