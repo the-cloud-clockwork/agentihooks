@@ -43,7 +43,8 @@ def calculate(
     host_room: int | None,
     demand: dict[str, int],
     previous: Decision | None = None,
-    now_ms: int = 0,
+    *,
+    now_ms: int,
 ) -> Decision:
     seats = sum(free_seats.values())
     target = min(50, sum(live.values()) + (seats if host_room is None else min(seats, host_room)))

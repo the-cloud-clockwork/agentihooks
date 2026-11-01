@@ -56,7 +56,6 @@ def due(store: Any, slug: str, kind: str, name: str, now_ms: int, counted: int, 
     return reached(now_ms - (anchored(now_ms, counted) if found is None else found), limit_ms)
 
 
-def hold(store: Any, slug: str, kind: str, name: str, now_ms: int, counted: int) -> None:
-    """Freeze event ``kind`` at ``counted`` passes, so time spent held never counts toward its limit."""
-    if counted:
-        store.redis.set(_key(store, slug, kind, name), anchored(now_ms, counted - 1), ex=DAY_S)
+def hold(store: Any, slug: str, kind: str, name: str) -> None:
+    """Drop the start of event ``kind`` so the next pass anchors to its stored count and held time never counts."""
+    store.redis.delete(_key(store, slug, kind, name))

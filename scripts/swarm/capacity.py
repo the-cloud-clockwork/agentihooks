@@ -463,7 +463,7 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
     demand = inputs.demand or dict.fromkeys(LANES, 0)
     free = _placeable(_open(inputs.observations, inputs.warned))
     decision = autoscale.calculate(
-        _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, inputs.now_ms
+        _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
     )
     caps = decision["ceilings"]
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])

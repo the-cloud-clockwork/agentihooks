@@ -936,7 +936,8 @@ def _watch_idle(
         title = observed.prompt_title or "Waiting on input"
         same = agent.input_prompt == title
         timing.timed(input_wait.mark, store, slug, agent.name, now_ms, same)
-        ticks = elapsed.passes(now_ms - (timing.timed(input_wait.since, store, slug, agent.name) or now_ms))
+        began = timing.timed(input_wait.since, store, slug, agent.name)
+        ticks = elapsed.passes(now_ms - (now_ms if began is None else began))
         waiting = replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0)
         timing.timed(store.put_agent, slug, waiting)
         return (
@@ -957,7 +958,8 @@ def _watch_idle(
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
     nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == MASTER or (held and not exhausted):
-        timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks)
+        if agent.idle_ticks:
+            timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name)
         timing.timed(store.put_agent, slug, agent)
         return nudged
     state = idle_state.verdict(
@@ -974,7 +976,8 @@ def _watch_idle(
         or timing.timed(ledger_probe.holding, store, slug)
         or timing.timed(automated_gc.owned, slug, agent)
     ):
-        timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks)
+        if agent.idle_ticks:
+            timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name)
         timing.timed(store.put_agent, slug, agent)
         return nudged
     since = timing.timed(elapsed.start, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks)

@@ -61,8 +61,8 @@ def test_an_open_outage_holds_the_idle_count_and_counting_resumes_where_it_stopp
     for n in range(20):
         tick("sw", store, ledger, runtime, now_ms=10 * MINUTE + n * MINUTE)
     assert idle_ticks(store) == [IDLE_NUDGE_TICKS - 1] and runtime.nudged == []
-    outage.observe("sw", "redis", [], 30 * MINUTE)
-    tick("sw", store, ledger, runtime, now_ms=30 * MINUTE)
+    outage.observe("sw", "redis", [], 40 * MINUTE)
+    tick("sw", store, ledger, runtime, now_ms=40 * MINUTE)
     assert idle_ticks(store) == [IDLE_NUDGE_TICKS] and runtime.nudged == [NAME]
 
 

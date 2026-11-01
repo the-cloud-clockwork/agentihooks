@@ -42,14 +42,12 @@ def test_start_anchors_a_count_older_code_kept_without_a_start(store):
     assert elapsed.read(store, "sw", elapsed.IDLE_SINCE, IDLER) == 7 * MINUTE
 
 
-def test_hold_freezes_the_count_and_a_zero_count_writes_nothing(store):
-    elapsed.hold(store, "sw", elapsed.IDLE_SINCE, IDLER, 30 * MINUTE, 0)
+def test_hold_drops_the_start_so_the_next_pass_anchors_to_the_count(store):
+    elapsed.start(store, "sw", elapsed.IDLE_SINCE, IDLER, 5 * MINUTE, 0)
+    elapsed.hold(store, "sw", elapsed.IDLE_SINCE, IDLER)
     assert elapsed.read(store, "sw", elapsed.IDLE_SINCE, IDLER) is None
-    elapsed.hold(store, "sw", elapsed.IDLE_SINCE, IDLER, 30 * MINUTE, 2)
-    assert elapsed.read(store, "sw", elapsed.IDLE_SINCE, IDLER) == 29 * MINUTE
-    assert store.redis.ttl(store.key("sw", elapsed.IDLE_SINCE, IDLER)) == elapsed.DAY_S
-    since = elapsed.start(store, "sw", elapsed.IDLE_SINCE, IDLER, 31 * MINUTE, 2)
-    assert elapsed.passes(31 * MINUTE - since) == 3
+    since = elapsed.start(store, "sw", elapsed.IDLE_SINCE, IDLER, 40 * MINUTE, 2)
+    assert elapsed.passes(40 * MINUTE - since) == 3
 
 
 def test_due_reads_the_stored_start_or_anchors_the_count(store):
