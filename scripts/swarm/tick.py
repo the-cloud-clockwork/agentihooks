@@ -33,8 +33,8 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     apply_wait,
-    bottleneck_remedy,
-    claim_hold,
+    bottleneck_remedy,  # noqa: F401
+    claim_hold,  # noqa: F401
     claim_order,
     content_refusal,
     continuation,
@@ -42,12 +42,12 @@ from scripts.swarm import (
     dead_resume,
     deliberate_exit,
     dev_red,
-    difficulty,
+    difficulty,  # noqa: F401
     dispatcher,
     failed_panes,
     fleet_red,
     freeze,
-    grouping,
+    grouping,  # noqa: F401
     input_wait,
     launch_check,
     ledger_events,
@@ -61,7 +61,7 @@ from scripts.swarm import (
     master_start,
     outage,
     pane_evidence,
-    panic,
+    panic,  # noqa: F401
     preempt,
     prerequisite_wait,
     profile_first,
@@ -96,6 +96,8 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import masters as master_steps
 from scripts.tick.steps import observe as observe_steps
+from scripts.tick.steps import place
+from scripts.tick.steps import tasks as task_steps
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60
@@ -359,23 +361,21 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     actions += run_group("observe", **passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
-    actions += run_group("agents", **passing, config=config, rows=rows)
+    passing |= {"rows": rows, "doc": doc, "due": due}
+    actions += run_group("agents", **passing, config=config)
     actions.extend(master_steps.run_masters(locals()))
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += run_group("tasks", **passing, config=config, rows=rows)
+    actions += run_group("tasks", **passing, config=config)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
     actions += skip_refused(fleet_red.notice_pass, slug, store, ledger, rows, now_ms)
-    actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
-    actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
-    actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
-    actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
-    actions += skip_refused(dispatcher.group, slug, config, store, ledger, doc, now_ms)
+    actions += run_group(task_steps.TASK_PASSES, **passing, config=config)
+    task_steps.raise_held(box)
     from scripts.swarm import quota_notice
 
     with PLACING:
@@ -383,28 +383,17 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(lost_runner.sweep, slug, config, store, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
-        actions += skip_refused(_collect_acks, slug, config, store, ledger, runtime, doc, now_ms)
+        actions += run_group(place.ACKS, **passing, config=config, sleeping=sleeping)
+        task_steps.raise_held(box)
         if not sleeping:
-            actions += skip_refused(_codex_hook_order)
             actions.extend(master_steps.run_seats(locals()))
-            actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
-            actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
-            if config.state == "running" and config.engine != EVENTS_ENGINE and panic.state(store) is None:
-                placement = partial(preempt.probe, runtime)
-                seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order, placement)
-                actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
-            if config.state == "running" and readiness.tick_places(config.engine, rows) and panic.state(store) is None:
-                with _placement_pass(runtime):
-                    actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
-                store.redis.delete(due)
+            actions += run_group(place.PLACEMENT, **passing, config=config)
+            task_steps.raise_held(box)
         actions.extend(master_steps.run_dispatch(locals()))
     actions.extend(master_steps.run_watch(locals()))
-    actions += run_group("close", **passing, config=config, rows=rows)
-    return (
-        actions
-        + skip_refused(_settle, slug, config, store, ledger, rows, doc)
-        + skip_refused(_close_space, slug, config, store, runtime)
-    )
+    actions += run_group(task_steps.CLOSE, **passing, config=config)
+    task_steps.raise_held(box)
+    return actions
 
 
 def skip_refused(function, *args):

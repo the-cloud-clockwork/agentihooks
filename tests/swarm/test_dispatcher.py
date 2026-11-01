@@ -1112,12 +1112,13 @@ def test_the_tick_runs_the_dispatcher_steps(monkeypatch):
     import inspect
 
     from scripts.swarm import tick
-    from scripts.tick.steps import report
+    from scripts.tick import engine
+    from scripts.tick.steps import place, report, tasks
 
-    source = inspect.getsource(tick.tick)
+    source = inspect.getsource(tick.tick) + inspect.getsource(tasks) + inspect.getsource(place)
     assert "grouping.group_pass" not in source and "dispatcher.group" in source
-    placing = source[source.index("with PLACING:") :]
-    assert placing.index("dispatcher.rank_pass") < placing.index("_spawn,")
+    placing = [step.name for step in engine.group_steps(place.PLACEMENT)]
+    assert placing.index("rank pass") < placing.index("spawn")
     steps = inspect.getsource(report)
     assert "priority_sweep.priority_pass" not in steps and "dispatcher.priorities" in steps
 
