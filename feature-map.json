@@ -144,6 +144,8 @@
         "tests/tick/test_source_control.py::test_github_merged_at_reads_the_first_merged_change_carrying_a_commit",
         "tests/tick/test_source_control.py::test_github_open_changes_reads_each_open_pull_request_check_rollup",
         "tests/tick/test_source_control.py::test_github_workflow_runs_read_every_page_of_one_workflow_since_a_time",
+        "tests/tick/test_source_control.py::test_github_download_reads_raw_bytes_under_the_named_reader",
+        "tests/tick/test_source_control.py::test_github_download_outside_a_named_reader_counts_as_the_port",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
       ]
     },
