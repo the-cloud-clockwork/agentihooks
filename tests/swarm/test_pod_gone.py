@@ -127,7 +127,7 @@ class Ledger:
         self.updated = (slug, task, fields)
 
 
-def test_stop_now_drops_a_kubernetes_agent_whose_pod_is_gone(store) -> None:
+def test_stop_now_drops_a_kubernetes_agent_whose_pod_is_gone(store: RedisStore) -> None:
     store.put_agent("sw", GONE)
     runtime, _ = _runtime(absent=True)
     ledger = Ledger()
@@ -139,7 +139,7 @@ def test_stop_now_drops_a_kubernetes_agent_whose_pod_is_gone(store) -> None:
     assert "sw" not in store.slugs()
 
 
-def test_stop_now_keeps_a_kubernetes_agent_whose_pod_is_listed(store) -> None:
+def test_stop_now_keeps_a_kubernetes_agent_whose_pod_is_listed(store: RedisStore) -> None:
     store.put_agent("sw", GONE)
     runtime, _ = _runtime(absent=False)
     config, left = cli.stop_now(store, "sw", runtime, Ledger())

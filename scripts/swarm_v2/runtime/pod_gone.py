@@ -1,4 +1,6 @@
-"""Whether kubectl confirms that no pod carries an execution's label: any failure, timeout or listed pod is unconfirmed."""
+"""Whether kubectl confirms that no pod carries an execution's label.
+
+Any failure, timeout or listed pod leaves the pod unconfirmed."""
 
 import json
 import subprocess
@@ -7,7 +9,7 @@ from collections.abc import Callable
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL
 
 TIMEOUT_SECONDS = 10
-Runner = Callable[..., subprocess.CompletedProcess]
+Runner = Callable[..., subprocess.CompletedProcess[bytes]]
 
 
 def absent(execution_id: str, run: Runner = subprocess.run) -> bool:
