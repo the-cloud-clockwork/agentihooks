@@ -43,8 +43,6 @@
 
     grader="$RUNNER_TEMP/grader"
 
-    grep -qs ''add_parser("units")'' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"
-
     PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade units .mutation-reports "$(jq length <<< "$PLANNED")" . "$BASES"
 
     '
