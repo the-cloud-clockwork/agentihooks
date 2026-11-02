@@ -84,16 +84,25 @@ def test_the_admitted_set_is_computed_once_per_ledger_view(monkeypatch: pytest.M
     calls: list[str] = []
     real = freeze.ancestry
     monkeypatch.setattr(freeze, "ancestry", lambda row, graph: calls.append(row["id"]) or real(row, graph))
+    graph: dict[str, Any] = {}
     found = doc(record("tasks/hot", "focus"), tasks=[task("hot", phase="p2")])
-    assert freeze.admitted(found, {}) == freeze.admitted(found, {}) == {"hot"}
+    assert freeze.admitted(found, graph) == freeze.admitted(found, graph) == {"hot"}
     assert calls == ["hot"]
-    found["tasks"] = [task("hot", phase="p2", state="done")]
-    assert freeze.admitted(found, {}) is None
+    found["tasks"][0]["state"] = "done"
+    assert freeze.admitted(found, graph) is None
     found["freezes"] = [record("tasks/other", "focus")]
     found["tasks"] = [task("other")]
+    assert freeze.admitted(found, graph) == {"other"}
+    assert freeze.admitted({**found}, graph) == {"other"}
     assert freeze.admitted(found, {}) == {"other"}
-    assert freeze.admitted({**found}, {}) == {"other"}
-    assert calls == ["hot", "other", "other"]
+    assert calls == ["hot", "other", "other", "other"]
+
+
+def test_the_tasks_of_a_phase_the_focused_phase_waits_on_join_the_focus() -> None:
+    phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}, {"id": "p3", "depends_on": ["p2"]}]
+    rows = [task("early", phase="p1"), task("middle", phase="p2"), task("late", phase="p3"), task("other", phase="p4")]
+    found = {**doc(record("tasks/late", "focus"), tasks=rows), "phases": phases}
+    assert freeze.admitted(found, hierarchy.project(found)[0]) == {"late", "middle", "early"}
 
 
 def test_the_focus_queue_order_sets_the_claim_order(store: RedisStore) -> None:

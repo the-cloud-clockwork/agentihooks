@@ -1,5 +1,6 @@
 """Whether a freeze or a focus on the ledger holds an open task back from a claim, and the drain notice naming them."""
 
+import operator
 import sys
 from collections.abc import Iterable
 from typing import Any
@@ -66,11 +67,13 @@ _ADMITTED: list[Any] = []
 
 def admitted(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     """The open focused tasks and every task they wait on, once per ledger view; None while no focus has open work."""
-    key = (doc, doc.get("tasks"), doc.get("freezes"))
-    if _ADMITTED and all(was is now for was, now in zip(_ADMITTED[0], key, strict=True)):
-        return _ADMITTED[1]
+    tasks: list[dict[str, Any]] = doc.get("tasks") or []
+    key = (doc, tasks, doc.get("freezes"), graph)
+    states = [task.get("state") for task in tasks]
+    if _ADMITTED and _ADMITTED[1] == states and all(map(operator.is_, _ADMITTED[0], key)):
+        return _ADMITTED[2]
     found = _admit(doc, graph)
-    _ADMITTED[:] = [key, found]
+    _ADMITTED[:] = [key, states, found]
     return found
 
 
@@ -79,6 +82,11 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     tasks: list[dict[str, Any]] = doc.get("tasks") or []
     focus: list[str] = [r["target"] for r in records if r["verb"] == "focus"]
     rows = {task["id"]: task for task in tasks}
+    phases: list[dict[str, Any]] = doc.get("phases") or []
+    waits: dict[str, list[str]] = {p["id"]: p.get("depends_on") or [] for p in phases}
+    members: dict[str, list[str]] = {}
+    for task in tasks:
+        members.setdefault(task.get("phase") or "", []).append(task["id"])
     queue = [task["id"] for task in tasks if focus and _open_focus(task, records, focus, graph)]
     seen: set[str] = set()
     while queue:
@@ -87,6 +95,7 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
             seen.add(task_id)
             row = rows.get(task_id) or {}
             queue += [*(row.get("depends_on") or []), *(row.get("parked_on") or [])]
+            queue += [member for phase in waits.get(row.get("phase") or "", []) for member in members.get(phase, [])]
     return frozenset(seen) if seen else None
 
 
