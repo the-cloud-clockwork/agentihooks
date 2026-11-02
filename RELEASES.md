@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.595 · 2026-11-02
+
+### 2026-11-02 · 93312a65d28c · #9292 · @agenticore-app
+
+**Run tick guards on every tick pull request through the required gate**
+
+Tick equivalence now runs as a required check on every pull request touching the tick engine, its steps, the registry, swarm tick modules, tick scenarios, the equivalence script, or the load test, instead of only on manual dispatch. It executes inside the writer lock job, so a failure there automatically turns the existing required gate red without touching the protected grader itself. This closes the gap that let a tick-breaking pull request merge with no equivalence run at all, as proven by a planted fault that now correctly fails the gate while a clean head stays green.
+
+### 2026-11-02 · fc16740309a9 · #9388 · @nestorcolt
+
+**Read the merge queue through the GitHub adapter and shrink the source control allowlist to the adapter**
+
+This change finishes moving the merge queue's GitHub calls behind the source control adapter: graphql queries now run through the adapter's `graph` tool and REST calls through its `download` tool, both billed to the reader via `github_reads.calling`, with the old `_RunGraph` helper removed in favor of passing the adapter directly. The Semgrep allowlist for direct GitHub access now covers only the adapter and its cached reader, locking in the boundary so no other code can call GitHub directly, with a test pinning that allowlist.
+
 ## v2.17.594 · 2026-11-02
 
 ### 2026-11-02 · 970ac9011870 · #9463 · @nestorcolt
