@@ -34,7 +34,10 @@ def _family(model):
 
 def same(expected: str, actual: str) -> bool:
     """Whether two model names name one model, a launch alias such as opus matching any model of its family."""
-    return expected in (actual, _family(actual)) or actual == _family(expected)
+    alias = re.compile(r"\[.*\]$")
+    return (
+        expected == actual or alias.sub("", expected) == _family(actual) or alias.sub("", actual) == _family(expected)
+    )
 
 
 def apply(agent, reported):

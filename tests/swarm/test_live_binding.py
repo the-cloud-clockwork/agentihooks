@@ -142,6 +142,8 @@ def test_missing_process_is_a_named_failure(mounted):
         ("claude-opus-4-6", "opus", False),
         ("opus", "claude-opus-4-6", False),
         ("claude-opus-4-6", "claude-opus-4-6", False),
+        ("claude-opus-4-6[1m]", "opus[1m]", False),
+        ("opus[1m]", "claude-opus-4-6", False),
         ("claude-opus-4-5", "claude-opus-4-6", True),
         ("claude-opus-4-6", "sonnet", True),
         ("sonnet", "claude-opus-4-6", True),
