@@ -8,7 +8,7 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import registry, steps, view
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Result, Write
-from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, actions_of
+from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actions_of
 
 __all__ = [
     "CLOSE",
@@ -44,6 +44,8 @@ def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
             return []
         try:
             return call(tick, get)
+        except Left:
+            return []
         except (Exception, SystemExit) as exc:
             box[RAISED] = exc
             return []
@@ -101,8 +103,8 @@ def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
     def apply(write: Write) -> None:
         expected = cast(dict[str, Any], write.expected or {})
-        task = read(write.key) or {}
-        moved = sorted(key for key, value in expected.items() if task.get(key, "") != value)
+        task = read(write.key)
+        moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
         if moved:
             raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
         try:
@@ -122,9 +124,12 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
 
 
 def _fresh_task(task_id: str) -> dict[str, Any] | None:
-    """Return the task as the held ledger view has it after the pass's latest write, or nothing without a view."""
+    """Return the task as the held ledger view has it after the pass's latest write, empty when the view lacks it.
+
+    Without a held view there is nothing to compare against, so the result is ``None`` and the write goes through.
+    """
     held = view.current()
-    return None if held is None else cast(dict[str, Any] | None, held.read("tasks", task_id))
+    return None if held is None else cast(dict[str, Any], held.read("tasks", task_id) or {})
 
 
 def _grouping_release(tick: Any, get: Get) -> Any:
@@ -149,8 +154,8 @@ def group_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | 
 
     def apply(write: Write) -> None:
         expected = cast(dict[str, Any], write.expected or {})
-        task = read(write.key) or {}
-        if list(task.get("group_members") or []) != expected.get("group_members", []):
+        task = read(write.key)
+        if task is not None and list(task.get("group_members") or []) != expected.get("group_members", []):
             raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
         try:
             ledger.ungroup_tasks(slug, write.key)

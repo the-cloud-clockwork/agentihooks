@@ -156,12 +156,14 @@ def test_a_ledger_client_write_marks_the_held_view_stale(monkeypatch: pytest.Mon
 @pytest.mark.feature("swarm-tick-no-shared-rows")
 def test_the_pass_hands_steps_rows_no_step_can_assign_into(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import tick
+    from scripts.tick.steps import observe
 
     doc = {"tasks": [{"id": "t1", "state": "open"}]}
     monkeypatch.setattr(tick.freeze, "watched", lambda slug, store, ledger, state: state)
     box: dict[str, Any] = {}
     assert (
-        tick.step_ledger_state("sw", cast(Any, SimpleNamespace()), SimpleNamespace(state=lambda slug: doc), box) == []
+        observe.step_ledger_state("sw", cast(Any, SimpleNamespace()), SimpleNamespace(state=lambda slug: doc), box)
+        == []
     )
     rows = box["rows"]
     assert type(rows) is MappingProxyType

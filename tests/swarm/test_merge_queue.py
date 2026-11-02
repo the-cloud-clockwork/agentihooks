@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm import cli, ledger_events, merge_queue, queue_exit, waits
 from scripts.swarm.store import MASTER, SwarmError
+from tests.swarm.graph_port import view as port_view
 
 URL = "https://github.com/o/r/pull/7"
 OPEN = {
@@ -232,7 +233,7 @@ def test_queue_checks_the_app_required_by_repository_policy(source, state, expec
             }
         )
     reader, _ = runner(response)
-    assert READ_PULL(URL, reader, required_checks={"CI Validate": 15368}) == ledger_events.PullRequest(
+    assert port_view(URL, reader, required_checks={"CI Validate": 15368}) == ledger_events.PullRequest(
         "OPEN",
         None,
         None,
@@ -367,7 +368,7 @@ def test_required_check_view_preserves_results_and_check_names(checks, expected,
     commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
     commit["statusCheckRollup"]["contexts"]["nodes"] = checks
     run, _ = runner(response)
-    assert READ_PULL(URL, run, required_checks=dict.fromkeys(expected)) == ledger_events.PullRequest(
+    assert port_view(URL, run, required_checks=dict.fromkeys(expected)) == ledger_events.PullRequest(
         "OPEN", None, None, red, resolved=resolved, failed=failed, head="abc"
     )
 

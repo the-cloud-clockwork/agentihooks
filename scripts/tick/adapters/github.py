@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -314,3 +315,33 @@ class GitHubSourceControl:
             f"?event={event}&status={conclusion}&exclude_pull_requests=true&created=>={since}&"
         )
         return tuple(_workflow_run(row) for row in self._pages(path, "workflow_runs", deadline))
+
+    def download(self, path: str, *, deadline: Deadline) -> bytes:
+        """Read one API resource as raw bytes under the reader the caller names, refusing a failed read."""
+        result = github_reads.rest(
+            github_reads.CALLER.get(CALLER),
+            ["api", path],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=_live(deadline),
+            capture_output=True,
+        )
+        result.check_returncode()
+        return result.stdout
+
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any:
+        """Run one GraphQL document under the reader the caller names and return its whole body, errors included."""
+        flags = [word for name, value in variables.items() for word in ("-f", f"{name}={value}")]
+        caller = github_reads.CALLER.get(CALLER)
+        github_reads.charge(caller, "graphql", time.time())
+        result = github_reads.rest(
+            caller,
+            ["api", "graphql", "-f", f"query={document}", *flags],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=_live(deadline),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return json.loads(result.stdout)

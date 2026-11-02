@@ -193,6 +193,7 @@ from scripts.tick import view as ledger_view
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
+from scripts.tick.steps import Left, PassBox
 from scripts.tick.steps import host as host_steps
 
 SETTABLE = {
@@ -274,7 +275,7 @@ def _publish_tick_status(
 def _phase_steps(inbox, store, slug, doc, ledger):
     actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
     if actions:
-        doc = timing.call(ledger.state, slug)
+        doc = timing.call(ledger_client.pass_state, ledger, slug)
     ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
     actions += ticked
     if ticked:
@@ -283,7 +284,7 @@ def _phase_steps(inbox, store, slug, doc, ledger):
             inbox,
             store,
             slug,
-            timing.call(ledger.state, slug),
+            timing.call(ledger_client.pass_state, ledger, slug),
             ledger,
             store.config(slug),
         )
@@ -298,6 +299,13 @@ def _bin_stop(store, slug, ledger, runtime):
     ]
 
 
+def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
+    """Hold the pass's ledger view until beating closes, started with one delta read when the client reads it."""
+    beating.enter_context(ledger_view.holding())
+    if ledger_view.reads(ledger):
+        ledger_view.start(slug, ledger.service)
+
+
 def _stopped_tick(store, slug, ledger, runtime, held):
     from scripts.swarm import command_runner, controller
 
@@ -307,7 +315,7 @@ def _stopped_tick(store, slug, ledger, runtime, held):
     controls = timing.call(command_runner.consume, store, slug)
     if timing.call(ledger.binned, slug):
         return controls + _bin_stop(store, slug, ledger, runtime), {}
-    doc = timing.call(ledger.state, slug)
+    doc = timing.call(ledger_client.pass_state, ledger, slug)
     store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
     return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
@@ -374,16 +382,16 @@ def run_tick(
         timing.keep()
         run_group("before")
         if store.config(slug).state == "stopped":
+            _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
-        box: dict[str, Any] = {}
+        box: dict[str, Any] = PassBox()
         passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         run_group("wrapper probes", **passing)
         host_steps.raise_held(box)
         if "stop" in box:
             return box["stop"]
-        if ledger_view.reads(ledger):
-            ledger_view.start(slug, ledger.service)
+        _hold_view(beating, slug, ledger)
         runtime = controller.FencedRuntime(
             store,
             slug,
@@ -403,7 +411,7 @@ def run_tick(
                 return _bin_stop(store, slug, ledger, runtime)
             inbox = InboxStore(store.redis)
             try:
-                doc = timing.call(ledger.state, slug)
+                doc = timing.call(ledger_client.pass_state, ledger, slug)
             except LedgerGone as exc:
                 first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
                 return (
@@ -414,8 +422,8 @@ def run_tick(
             host_steps.raise_held(box)
             run_group("wrapper refresh", **passing, scheduled=scheduled)
             host_steps.raise_held(box)
-            doc, config = timing.call(ledger.state, slug), store.config(slug)
-            judging: dict[str, Any] = {}
+            doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
+            judging: dict[str, Any] = PassBox()
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
                 judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
@@ -430,24 +438,26 @@ def run_tick(
             run_group("wrapper relay", **passing, inbox=inbox)
             host_steps.raise_held(box)
             agents = box["agents"]
-            doc, config = timing.call(ledger.state, slug), store.config(slug)
+            doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
             run_group("wrapper view", **passing, inbox=inbox, doc=doc, view=view)
             host_steps.raise_held(box)
-            view = box["view"]
+            view = box.get("view", view)
             rows = {t["id"]: t for t in doc["tasks"]}
             passing |= {"inbox": inbox, "doc": doc, "config": config, "view": view, "rows": rows, "agents": agents}
             actions += run_group("wrapper events", **passing)
             host_steps.raise_held(box)
             actions += run_group("wrapper metrics", **passing, count=len(actions))
             host_steps.raise_held(box)
-            doc = timing.call(ledger.state, slug)
+            doc = timing.call(ledger_client.pass_state, ledger, slug)
             run_group("after", **(passing | {"doc": doc}))
             host_steps.raise_held(box)
             started = box["started"]
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
+    except Left:
+        return []
     finally:
         try:
-            published: dict[str, Any] = {}
+            published: dict[str, Any] = PassBox()
             run_group(
                 "wrapper status", store=store, slug=slug, doc=doc, view=view, box=published, failure=sys.exception()
             )
@@ -537,7 +547,7 @@ def _end_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     ):
         return []
     ledger = ledger or LedgerClient()
-    doc = ledger.state(slug)
+    doc = ledger_client.pass_state(ledger, slug)
     inbox = InboxStore(store.redis)
     view = ledger_events.tick_view(inbox, store, slug, doc)
     lease.require(store, slug, held)

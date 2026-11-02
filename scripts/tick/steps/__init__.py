@@ -68,3 +68,15 @@ def _step_actions(record: StepRecord) -> list[str]:
         f"dropped write {write.domain} {write.key} of step {record.name}: {why}; the next pass recomputes it"
         for write, why in zip(record.dropped, record.conflicts, strict=True)
     ]
+
+
+class Left(KeyError):
+    """A pass value no step stored, because its writer was held or left running past its budget."""
+
+
+class PassBox(dict[str, Any]):
+    """The pass box: reading a value no step stored raises ``Left`` instead of a plain ``KeyError``."""
+
+    def __missing__(self, key: str) -> Any:
+        """Raise ``Left`` naming the value no step stored."""
+        raise Left(key)

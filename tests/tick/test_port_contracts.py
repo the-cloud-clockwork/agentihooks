@@ -52,6 +52,8 @@ CASES = [
     ("source_control", "merged_at", ("value",), False),
     ("source_control", "open_changes", (), False),
     ("source_control", "workflow_runs", ("value", "value", "value", "value"), False),
+    ("source_control", "download", ("value",), False),
+    ("source_control", "graph", ("value", {}), False),
     ("runtime", "inspect", ("value",), False),
     ("runtime", "launch", ({},), True),
     ("runtime", "stop", ("value",), True),
