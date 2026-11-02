@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.593 · 2026-11-02
+
+### 2026-11-02 · 2a6326b9f65f · #9465 · @nestorcolt
+
+**Document execution registry and hive scope on records**
+
+This PR documents the execution registry and hive scope work already shipped in #9279: it explains how execution now reads through the records port on both layouts, how hive placement reads use a hashed `hosts` projection gated by `SWARM_HOST_PROJECTION_ENABLED`, and how a jittered retry handles fencing conflicts. New pages cover testing and troubleshooting, the fencing-records reference lists the records port callers and the retry row, and the reference index gains three entries, giving operators a clear record of the behavior that cut hive scope read latency from 20ms to under 5ms median.
+
 ## v2.17.591 · 2026-11-02
 
 ### 2026-11-02 · dff7ec2ddcd3 · #9416 · @agenticore-app
