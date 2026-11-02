@@ -64,13 +64,13 @@ def write(tree: Path) -> None:
 
 
 def grade(base: dict[str, int] | None, head: dict[str, int], recorded: dict[str, int] | None) -> list[str]:
-    """Errors for files reading the whole ledger more often than the base allows and for a stale allowlist;
-    a base without an allowlist allows what the head records."""
-    allowed = recorded or {} if base is None else base
+    """Reject a missing base allowlist, reads above the base allowance and a head record that differs from its measurement."""
+    if base is None:
+        return [f"{ALLOWLIST} is missing from the base"]
     errors = [
-        f"{name} reads the whole ledger state {count} times; the base allowlist allows {allowed.get(name, 0)}"
+        f"{name} reads the whole ledger state {count} times; the base allowlist allows {base.get(name, 0)}"
         for name, count in sorted(head.items())
-        if count > allowed.get(name, 0)
+        if count > base.get(name, 0)
     ]
     if recorded != head:
         errors.append(f"{ALLOWLIST} differs from the head's measurement; run python -m scripts.no_whole_ledger --write")
