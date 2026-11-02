@@ -60,12 +60,14 @@ PAGINATION = {
         "state": {"enum": ["done"]},
         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "q": {"type": "string", "maxLength": 200},
+        "targets": {"type": "string", "minLength": 1, "maxLength": 500},
     },
 }
 
+WORKTREE_HEADER = "X-Ledger-Worktree"
 FIELDS = {
-    "add": "thread text by long attachments to reply_to outcome notice",
-    "edit": "thread text by",
+    "add": "thread text by long attachments to reply_to outcome notice worktree",
+    "edit": "thread text by worktree",
     "delete": "thread by",
     "clear": "thread",
     "sync": "",
@@ -75,8 +77,8 @@ FIELDS = {
     "ack": "by rev",
     "claim": "by item status",
     "set": "by path value status",
-    "add_item": "by list text needs_operator hive task not_duplicate",
-    "retext": "by item text",
+    "add_item": "by list text needs_operator hive task not_duplicate worktree",
+    "retext": "by item text worktree",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",
     "priority": "by item text",

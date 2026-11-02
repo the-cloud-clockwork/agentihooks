@@ -60,6 +60,8 @@ class World:
         }
 
     def command(self, agent, operation_id):
+        from scripts.swarm import fencing
+
         operation = {
             "operation_id": operation_id,
             "execution_id": agent.execution_id,
@@ -70,7 +72,7 @@ class World:
             "target": {},
             "phase": "accepted",
         }
-        self.store.redis.hset(self.store.key(SLUG, "runtime-operations"), operation_id, json.dumps(operation))
+        fencing.write(self.store, SLUG, lambda doc: doc["operations"].update({operation_id: operation}))
 
     def put(self, execution_id, token, body):
         return self.api.route("PUT", f"/v2/executions/{execution_id}/heartbeat", f"Bearer {token}", body)

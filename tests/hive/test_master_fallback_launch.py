@@ -377,6 +377,55 @@ def test_the_front_door_master_is_ordered_on_the_hive_master_login_account(setup
     assert (selected.account.name, selected.route_kind, selected.account.cap) == expected
 
 
+@pytest.mark.parametrize("status", ["revoked", "rejected", "allowed", "error"])
+@pytest.mark.parametrize("front", [True, False])
+def test_master_placement_skips_a_private_login_rejected_by_the_probe(setup, monkeypatch, status, front):
+    from dataclasses import replace
+
+    from scripts import claude_quota_balancer as balancer
+    from scripts.hive import launch
+
+    task = {**master(setup), "seat": "master@fixture" if front else "master-2@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, id="fallback", master_login={}, excluded=[], ui="yes")
+    result = replace(balancer.revoked_result("login", 100), provider_status=status)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert isinstance(selected, launch.Selection)
+    if front and status not in ("revoked", "rejected"):
+        assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "login", "master-login")
+    else:
+        assert (selected.hive, selected.account.name, selected.route_kind) == ("fallback", "account", "subscription")
+
+
+def test_master_waits_when_its_only_private_login_probe_is_revoked(setup, monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+    from scripts.hive import placement
+
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, excluded=[], ui="yes", master_login={"claude": "work-login"})
+    result = balancer.revoked_result("work_login", 100)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
+    assert setup.launcher.select(setup.config, "master", task) == placement.Wait("no live hive takes master")
+
+
+@pytest.mark.parametrize("login", [{}, {"claude": ""}])
+def test_a_rejected_account_does_not_remove_a_hive_without_a_private_login(setup, monkeypatch, login):
+    from scripts import claude_quota_balancer as balancer
+    from scripts.hive import launch
+
+    task = {**master(setup), "seat": "master@fixture"}
+    hives = setup.launcher.hives()
+    hives[0]["master_login"] = login
+    monkeypatch.setattr(setup.launcher, "hives", lambda: hives)
+    result = balancer.revoked_result("XXXX", 100)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert isinstance(selected, launch.Selection)
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "account", "subscription")
+
+
 def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
     from scripts.swarm.capacity import Account
 

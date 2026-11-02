@@ -1,5 +1,6 @@
 import builtins
 import json
+import os
 import time
 
 import pytest
@@ -8,7 +9,7 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import affinity, capacity, launch_check, master_launch, master_start, runtime
 from scripts.swarm import tick as tick_module
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import Placed, SpawnError
 from tests.swarm.test_capacity import account
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -433,13 +434,14 @@ def test_a_finished_front_door_still_running_keeps_its_seat(up, monkeypatch, cap
     assert printed(capsys)["seat"] == "master-2@sw"
 
 
-@pytest.mark.parametrize("live", [True, False])
-def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypatch, capsys, live):
+@pytest.mark.feature("operator-dead-starting-front-door")
+def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     store, _, rt = up
     front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
     store.put_agent("sw", front)
-    if live:
-        rt.live.add(front.name)
+    rt.live.add(front.name)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
     assert (
@@ -447,6 +449,21 @@ def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monk
         in capsys.readouterr().err
     )
     assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
+
+
+@pytest.mark.feature("operator-dead-starting-front-door")
+def test_a_dead_starting_front_door_is_finished_and_replaced(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    assert printed(capsys)["seat"] == "master@sw"
+    assert next(a for a in store.agents("sw") if a.name == front.name).state == "finished"
+    assert len(rt.masters) == 1
+    assert {a.seat for a in masters(store) if a.state != "finished"} == {"master@sw"}
 
 
 def test_a_live_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypatch, capsys):
@@ -463,12 +480,15 @@ def test_a_live_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypa
     assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
 
 
-def test_a_starting_front_door_with_a_free_counted_seat_gets_its_master_in_that_seat(up, monkeypatch, capsys):
+def test_a_starting_front_door_with_a_free_counted_seat_gets_its_master_in_that_seat(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.swarm_v2 import masters as master_seats
 
     store, _, rt = up
     front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
     store.put_agent("sw", front)
+    rt.live.add(front.name)
     master_seats.MasterSeats(store.redis).set_count("sw", 2)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
@@ -1004,3 +1024,45 @@ def test_a_new_master_free_to_pick_its_harness_refuses_naming_every_warned_accou
     ):
         direct(store, rt, master_launch.NEW)
     assert routes == []
+
+
+@pytest.mark.parametrize(("token", "kept"), [("operator-token", False), (None, True)])
+def test_master_up_on_the_ledger_host_writes_through_the_local_ledger(monkeypatch, token, kept):
+    from types import SimpleNamespace
+
+    from scripts.swarm import cli
+    from scripts.swarm_ledger import hosted_probe, storage
+
+    monkeypatch.setattr(storage, "default", lambda: SimpleNamespace(token={"s1": token}.get))
+    environ = {hosted_probe.HOSTED_ENV: "https://hosted.example"}
+    cli.on_ledger_host("s1", environ)
+    assert (hosted_probe.HOSTED_ENV in environ) is kept
+
+
+def test_master_up_without_a_hosted_address_leaves_the_environment_alone(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import cli
+    from scripts.swarm_ledger import hosted_probe, storage
+
+    monkeypatch.setattr(storage, "default", lambda: SimpleNamespace(token={"s1": "operator-token"}.get))
+    environ = {"OTHER": "kept"}
+    cli.on_ledger_host("s1", environ)
+    assert environ == {"OTHER": "kept"}
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, "https://hosted.example")
+    cli.on_ledger_host("s1")
+    assert hosted_probe.HOSTED_ENV not in os.environ
+
+
+def test_master_up_checks_the_ledger_host_for_its_own_swarm(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import cli
+
+    seen = []
+    monkeypatch.setattr(cli, "on_ledger_host", seen.append)
+    monkeypatch.setattr(cli, "HerdrRuntime", object)
+    monkeypatch.setattr(cli, "routed", lambda **_: (_ for _ in ()).throw(RuntimeError("stop")))
+    with pytest.raises(RuntimeError, match="stop"):
+        cli.cmd_master(None, SimpleNamespace(action="up", slug="s1"))
+    assert seen == ["s1"]

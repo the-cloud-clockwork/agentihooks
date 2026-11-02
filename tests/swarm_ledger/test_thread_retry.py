@@ -35,14 +35,14 @@ def test_a_thread_recovers_after_the_first_redis_connect_fails_on_name_resolutio
 ):
     connects, slept = [], []
 
-    def blocking_client():
+    def timer(*args, **kwargs):
         connects.append(1)
         if len(connects) == 1:
             raise UNRESOLVED
         raise Stop
 
     monkeypatch.setattr(ledger_server, "SCHEDULER_UNAVAILABLE", threading.Event())
-    monkeypatch.setattr(process_timer, "blocking_client", blocking_client)
+    monkeypatch.setattr(process_timer, "Timer", timer)
     with pytest.raises(Stop):
         ledger_server.retrying(getattr(ledger_server, loop), sleep=slept.append)()
     assert connects == [1, 1]

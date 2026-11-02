@@ -2,6 +2,8 @@ import json
 import re
 import subprocess
 
+import pytest
+
 from tests.swarm_ledger.ledger_page import page_source
 
 NOW = 1_800_000_000_000
@@ -43,6 +45,7 @@ def run_js(names, expr):
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
 
+@pytest.mark.feature("ledger-quota-panel")
 def test_each_quota_row_shows_the_balance_state_and_routing_left_even_when_the_tick_decided_otherwise():
     sw = {
         "quota_capacity": DECISION,
@@ -68,6 +71,7 @@ def test_each_quota_row_shows_the_balance_state_and_routing_left_even_when_the_t
     ]
 
 
+@pytest.mark.feature("ledger-quota-panel")
 def test_an_unknown_routing_reading_shows_a_dash():
     out = run_js(
         ["percent", "accountState"],

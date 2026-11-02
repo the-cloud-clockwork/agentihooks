@@ -145,9 +145,12 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     assert download["with"] == {
         "name": "dev-durations",
         "path": "~/dev-durations",
+        "verify": "python3 -c 'import json, sys; from pathlib import Path;"
+        " [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' ~/dev-durations/.test_durations*",
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
+    assert download["continue-on-error"] is True
     assert steps.index(download) < steps.index(adopt)
 
 

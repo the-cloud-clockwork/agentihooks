@@ -132,6 +132,22 @@ def _pod(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     return limits
 
 
+def _first(measured: dict, pending: int) -> list[tuple[int, str, str]]:
+    held = _held(pending)
+    limits = []
+    for free, size, prefix in (("available_mb", "total_mb", ""), ("pod_available_mb", "pod_total_mb", "pod ")):
+        if all(name in measured for name in (free, size)):
+            available, total = measured[free], measured[size]
+            used = 100 - available * 100 // total
+            shown = f"{prefix}{available} of {total} MB available, {used} percent used"
+            if available * 100 <= (100 - HOST_PERCENT) * total:
+                limits.append((0, RAM, f"{shown}, at or above the {HOST_PERCENT} percent line"))
+            else:
+                fits = max(1, _ram_room(available, total, 0)) - pending
+                limits.append((fits, RAM, f"{shown}, {AGENT_MB} MB per agent{held}, fits {{}} more {LINE}"))
+    return limits or [(0, MISSING, "no memory reading")]
+
+
 def _swarm(measured: dict, agents: int, max_agents: int | None) -> list[tuple[int, str, str]]:
     cpus, total = measured["cpus"], measured["total_mb"]
     cpu = int(SWARM_PERCENT * cpus / (100 * AGENT_CPU)) - agents
@@ -147,14 +163,18 @@ def _swarm(measured: dict, agents: int, max_agents: int | None) -> list[tuple[in
 
 
 def room(
-    measured: dict | None, swarm_agents: int | None = None, pending: int = 0, max_agents: int | None = None
+    measured: dict | None,
+    swarm_agents: int | None = None,
+    pending: int = 0,
+    max_agents: int | None = None,
+    first: bool = False,
 ) -> Room:
     if measured is None or any(field not in measured for field in CORE_FIELDS):
         return Room(0, MISSING, NO_READING)
     free, floor = measured.get("disk_free_gb"), measured.get("disk_floor_gb")
     if free is not None and floor is not None and free < floor:
         return Room(0, DISK, f"{free} GB free on the agent home, below the {floor} GB worktree floor")
-    limits = _host(measured, pending) + _pod(measured, pending)
+    limits = _first(measured, pending) if first else _host(measured, pending) + _pod(measured, pending)
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
         limits += _swarm(measured, swarm_agents, max_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])

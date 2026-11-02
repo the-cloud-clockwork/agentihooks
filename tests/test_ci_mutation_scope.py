@@ -292,6 +292,148 @@ def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
 
 
+STEP = (
+    "def step(items):\n"
+    "    total = sum(item.weight for item in items)\n"
+    "    limit = max(total, len(items) + 10)\n"
+    "    return [item.name for item in items if item.weight <= limit]\n"
+)
+
+
+def test_lines_moved_unchanged_into_another_file_are_not_graded_and_its_new_glue_is(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    pinned = commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    git("add", "hooks/old.py")
+    commit("new name.py", f"def run(items):\n    return len(step(items)) + 1\n\n\n{STEP}")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new name.py": {1, 2}}
+
+
+def test_a_block_moved_reindented_into_a_class_grades_only_the_edited_signature_and_new_glue(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    pinned = commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    git("add", "hooks/old.py")
+    moved = STEP.replace("\n    ", "\n        ").replace("(items)", "(self, items)", 1)
+    commit("new.py", f"class Runner:\n    {moved}")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {1, 2}}
+
+
+def test_blocks_moved_from_two_files_over_a_removed_line_grade_only_the_line_after_them(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    other = (
+        "def other(rows):\n"
+        "    counted = {row.key: row.value for row in rows if row.value}\n"
+        "    return sorted(counted.items(), key=lambda pair: pair[1])\n"
+    )
+    git, commit = _repo(tmp_path)
+    commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    commit("other.py", f"def keep():\n    return 1\n\n\n{other}")
+    pinned = commit("new.py", "VALUE = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    (tmp_path / "hooks" / "other.py").write_text("def keep():\n    return 1\n")
+    git("add", "hooks/old.py", "hooks/other.py")
+    commit("new.py", f"{STEP}{other}VALUE = 2\n")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {8}}
+
+
+def test_moves_into_a_non_ascii_name_and_a_name_git_quotes_are_skipped_and_their_new_lines_graded(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    other = (
+        "def other(rows):\n"
+        "    counted = {row.key: row.value for row in rows if row.value}\n"
+        "    return sorted(counted.items(), key=lambda pair: pair[1])\n"
+    )
+    git, commit = _repo(tmp_path)
+    commit("old.py", STEP)
+    pinned = commit("other.py", other)
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("")
+    (tmp_path / "hooks" / "other.py").write_text("")
+    (tmp_path / "hooks" / 'quo"te.py').write_text(f"VALUE = 1\n{other}")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ñame.py").write_text(STEP)
+    git("add", "hooks/old.py", "hooks/other.py", 'hooks/quo"te.py', "scripts/ñame.py")
+    git("commit", "-q", "-m", "move")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {'hooks/quo"te.py': {1}}
+
+
+@pytest.mark.parametrize(
+    ("head", "expected"),
+    [
+        ("def f(a):\n    return a + 1\n", {}),
+        ("def f(a: int) -> int:\n    return a + 1  # one\n", {}),
+        ('def f(a):\n    """Add one."""\n    return a + 1  # one\n', {}),
+        ("def f(a):\n    return a + 2\n", {"hooks/own.py": {2}}),
+        ("def f(a: int) -> int:\n    return a - 1  # one\n", {"hooks/own.py": {1, 2}}),
+    ],
+)
+def test_a_change_leaving_the_bare_syntax_tree_unchanged_selects_no_line(tmp_path, head, expected):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    base = commit("own.py", "def f(a):\n    return a + 1  # one\n")
+    commit("own.py", head)
+    assert discover_changes(tmp_path, base, "HEAD") == expected
+
+
+@pytest.mark.parametrize(
+    ("base", "head", "expected"),
+    [
+        ("class C:\n    a = 1\n", 'class C:\n    """C."""\n    a = 1\n', {}),
+        (
+            "async def f(a, *b, **c):\n    return a\n",
+            'async def f(a: int, *b: int, **c: int) -> int:\n    """F."""\n    return a\n',
+            {},
+        ),
+        ("a: int = 1\n", "a: float = 1\n", {"hooks/own.py": {1}}),
+        ("@cache\ndef f(a):\n    return a\n", "@cache\ndef f(a: int) -> int:\n    return a\n", {"hooks/own.py": {2}}),
+        (
+            "def f():\n    @cache\n    def g(a):\n        return a\n",
+            "def f():\n    @cache\n    def g(a: int):\n        return a\n",
+            {"hooks/own.py": {3}},
+        ),
+    ],
+)
+def test_runtime_read_annotations_stay_graded_while_docstrings_and_plain_signatures_do_not(
+    tmp_path, base, head, expected
+):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    first = commit("own.py", base)
+    commit("own.py", head)
+    assert discover_changes(tmp_path, first, "HEAD") == expected
+
+
+def test_a_bare_tree_is_the_tree_of_the_source_written_without_signature_annotations():
+    import ast
+
+    from scripts.ci_mutation.scope import bare_tree
+
+    plain = ast.dump(ast.parse("def f(a):\n    return a\n"))
+    assert bare_tree(b'def f(a: int) -> int:\n    """F."""\n    return a\n') == plain
+
+
+def test_a_new_docstring_module_selects_no_line_and_an_annotated_assignment_still_does(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    base = commit("own.py", "class Own:\n    a = 1\n")
+    commit("notes.py", '"""Notes."""\n')
+    commit("own.py", 'class Own:\n    """Own."""\n\n    a: int = 1\n')
+    assert discover_changes(tmp_path, base, "HEAD") == {"hooks/own.py": {2, 3, 4}}
+
+
 def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_from_current_dev(tmp_path):
     import yaml
 

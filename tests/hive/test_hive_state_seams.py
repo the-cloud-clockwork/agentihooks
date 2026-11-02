@@ -353,14 +353,211 @@ def test_a_refresh_that_loses_its_member_midway_leaves_it_unindexed(on_redis, cl
     assert grant["id"] not in hive_state.index(client)
 
 
-def test_agent_tokens_accumulate_on_a_member_record_without_agents(bus, client):
-    hive_state.amend(auth._store(client), "member.m1", lambda _: {"name": "n", "ledger": "d"})
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_agent_tokens_leave_the_member_record_and_revision_unchanged(backend, request, client):
+    request.getfixturevalue(backend)
+    store = auth._store(client)
+    legacy = "hive.m1.legacy"
+    original = {"name": "n", "ledger": "d", "agents": {auth._digest(legacy): ["alpha", "engineer@old"]}}
+    hive_state.amend(store, "member.m1", lambda _: original)
+    hive_state.amend(store, "ledger.d", lambda _: "m1")
+    before = store.get("member.m1")
 
     first = auth.issue_agent(client, "m1", "alpha", "engineer@1")
     second = auth.issue_agent(client, "m1", "alpha", "engineer@2")
 
-    assert auth.member(client, "m1") == {
-        "name": "n",
-        "ledger": "d",
-        "agents": {auth._digest(first): ["alpha", "engineer@1"], auth._digest(second): ["alpha", "engineer@2"]},
-    }
+    assert first != second
+    assert store.get("member.m1") == before
+    assert auth.member(client, "m1") == original
+    for token, name in ((first, "engineer@1"), (second, "engineer@2")):
+        assert hive_state.read(store, f"agent.m1.{auth._digest(token)}") == {"ledger": "d", "scope": ["alpha", name]}
+        assert auth.agent_member(client, token, "alpha", name) == "m1"
+        assert auth.agent_member(client, token, "other", name) is None
+        assert auth.agent_member(client, token, "alpha", "someone@else") is None
+    assert auth.agent_member(client, legacy, "alpha", "engineer@old") == "m1"
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+@pytest.mark.parametrize("mapping", [None, "another"])
+def test_agent_issuance_refuses_an_absent_or_changed_ledger_mapping(backend, request, client, mapping, monkeypatch):
+    request.getfixturevalue(backend)
+    store = auth._store(client)
+    hive_state.amend(store, "member.m1", lambda _: {"name": "n", "ledger": "d"})
+    hive_state.amend(store, "ledger.d", lambda _: mapping)
+    before = store.get("member.m1")
+
+    def no_token():
+        raise AssertionError("revoked membership must be refused before creating a token")
+
+    monkeypatch.setattr(auth.secrets, "token_urlsafe", no_token)
+    with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
+        auth.issue_agent(client, "m1", "alpha", "engineer@1")
+
+    assert store.get("member.m1") == before
+
+
+def test_legacy_member_issuance_preserves_the_legacy_record(on_redis, client):
+    client.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "old", "ledger": "d"})
+    client.set(f"{auth.PREFIX}:ledger:d", "m1")
+    before = client.hgetall(f"{auth.PREFIX}:member:m1")
+
+    token = auth.issue_agent(client, "m1", "alpha", "engineer@1")
+
+    assert client.hgetall(f"{auth.PREFIX}:member:m1") == before
+    assert auth._store(client).get("member.m1") is None
+    assert auth.agent_member(client, token, "alpha", "engineer@1") == "m1"
+    auth.revoke(client, "m1")
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+    assert auth.member(client, "m1") is None
+    assert auth._store(client).get("ledger.d").value == b""
+    assert auth._store(client).get("member.m1").value == b""
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_revocation_during_independent_issuance_refuses_the_token(backend, request, client, monkeypatch, when):
+    request.getfixturevalue(backend)
+    store = auth._store(client)
+    hive_state.amend(store, "member.m1", lambda _: {"name": "n", "ledger": "d", "agents": {}})
+    hive_state.amend(store, "ledger.d", lambda _: "m1")
+    monkeypatch.setattr(auth.secrets, "token_urlsafe", lambda: "independent")
+    token = "hive.m1.independent"
+    key = f"agent.m1.{auth._digest(token)}"
+    amend = hive_state.amend
+    raced = []
+
+    def concurrent_record(target, record, change, *args):
+        if record == key and not raced:
+            raced.append(record)
+            if when == "before":
+                amend(store, "ledger.d", lambda _: None)
+            result = amend(target, record, change, *args)
+            if when == "after":
+                amend(store, "ledger.d", lambda _: None)
+            return result
+        return amend(target, record, change, *args)
+
+    monkeypatch.setattr(hive_state, "amend", concurrent_record)
+    with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
+        auth.issue_agent(client, "m1", "alpha", "engineer@1")
+
+    assert raced == [key]
+    assert hive_state.read(store, key) is None
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_an_independent_token_authenticates_without_loading_the_member(backend, request, client, monkeypatch):
+    request.getfixturevalue(backend)
+    token = "hive.m1.independent"
+    store = auth._store(client)
+    hive_state.amend(store, "ledger.d", lambda _: "m1")
+    hive_state.amend(
+        store, f"agent.m1.{auth._digest(token)}", lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]}
+    )
+
+    def no_member(*args):
+        raise AssertionError("independent tokens must not read the growing member map")
+
+    monkeypatch.setattr(auth, "member", no_member)
+    assert auth.agent_member(client, token, "alpha", "engineer@1") == "m1"
+    assert auth.agent_member(client, token, "other", "engineer@1") is None
+    assert auth.agent_member(client, token, "alpha", "engineer@2") is None
+    hive_state.amend(store, "ledger.d", lambda _: None)
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_an_independent_token_cannot_use_another_members_ledger_mapping(backend, request, client):
+    request.getfixturevalue(backend)
+    token = "hive.m1.independent"
+    store = auth._store(client)
+    hive_state.amend(store, "ledger.d", lambda _: "m2")
+    hive_state.amend(
+        store, f"agent.m1.{auth._digest(token)}", lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]}
+    )
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_repeated_issuance_loads_the_member_record_once(backend, request, client, monkeypatch):
+    request.getfixturevalue(backend)
+    monkeypatch.setattr(auth, "_LEDGER_OF", {})
+    store = auth._store(client)
+    hive_state.amend(store, "member.m-once", lambda _: {"name": "n", "ledger": "d-once", "agents": {}})
+    hive_state.amend(store, "ledger.d-once", lambda _: "m-once")
+    reads = []
+    read = hive_state.read
+
+    def counted(target, key, *args):
+        reads.append(key)
+        return read(target, key, *args)
+
+    monkeypatch.setattr(hive_state, "read", counted)
+    tokens = [auth.issue_agent(client, "m-once", "alpha", f"engineer@{n}") for n in range(3)]
+
+    assert len(set(tokens)) == 3
+    assert reads.count("member.m-once") == 1
+    for n, token in enumerate(tokens):
+        assert auth.agent_member(client, token, "alpha", f"engineer@{n}") == "m-once"
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_issuance_after_a_cached_lookup_refuses_a_revoked_or_remapped_member(backend, request, client, monkeypatch):
+    request.getfixturevalue(backend)
+    monkeypatch.setattr(auth, "_LEDGER_OF", {})
+    store = auth._store(client)
+    hive_state.amend(store, "member.m-gone", lambda _: {"name": "n", "ledger": "d-gone", "agents": {}})
+    hive_state.amend(store, "ledger.d-gone", lambda _: "m-gone")
+    auth.issue_agent(client, "m-gone", "alpha", "engineer@1")
+    load = auth.member
+
+    def no_member(*args):
+        raise AssertionError("a cached member must issue without loading its record")
+
+    monkeypatch.setattr(auth, "member", no_member)
+    token = auth.issue_agent(client, "m-gone", "alpha", "engineer@2")
+    assert auth.agent_member(client, token, "alpha", "engineer@2") == "m-gone"
+    monkeypatch.setattr(auth, "member", load)
+
+    hive_state.amend(store, "member.m-gone", lambda _: {"name": "n", "ledger": "d-new", "agents": {}})
+    hive_state.amend(store, "ledger.d-new", lambda _: "m-gone")
+    hive_state.amend(store, "ledger.d-gone", lambda _: None)
+    token = auth.issue_agent(client, "m-gone", "alpha", "engineer@3")
+    assert auth.agent_member(client, token, "alpha", "engineer@3") == "m-gone"
+    assert auth._LEDGER_OF["m-gone"] == "d-new"
+
+    hive_state.amend(store, "member.m-gone", lambda _: None)
+    hive_state.amend(store, "ledger.d-new", lambda _: None)
+    with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
+        auth.issue_agent(client, "m-gone", "alpha", "engineer@4")
+
+
+@pytest.mark.parametrize("backend", ["bus", "on_redis"])
+def test_a_cleared_mapping_refuses_a_cached_member(backend, request, client, monkeypatch):
+    request.getfixturevalue(backend)
+    monkeypatch.setattr(auth, "_LEDGER_OF", {})
+    store = auth._store(client)
+    hive_state.amend(store, "member.m-cut", lambda _: {"name": "n", "ledger": "d-cut", "agents": {}})
+    hive_state.amend(store, "ledger.d-cut", lambda _: "m-cut")
+    auth.issue_agent(client, "m-cut", "alpha", "engineer@1")
+    assert auth._LEDGER_OF["m-cut"] == "d-cut"
+    hive_state.amend(store, "ledger.d-cut", lambda _: None)
+
+    def no_token():
+        raise AssertionError("a member whose mapping is cleared must be refused before creating a token")
+
+    monkeypatch.setattr(auth.secrets, "token_urlsafe", no_token)
+    with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
+        auth.issue_agent(client, "m-cut", "alpha", "engineer@2")
+
+
+def test_an_independent_token_reads_a_legacy_redis_ledger_mapping(on_redis, client):
+    token = "hive.m1.independent"
+    client.set(f"{auth.PREFIX}:ledger:d", "m1")
+    hive_state.amend(
+        auth._store(client),
+        f"agent.m1.{auth._digest(token)}",
+        lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]},
+    )
+    assert auth.agent_member(client, token, "alpha", "engineer@1") == "m1"

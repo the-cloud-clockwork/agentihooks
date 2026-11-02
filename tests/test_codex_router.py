@@ -486,8 +486,19 @@ def test_an_unreadable_codex_routing_setting_closes_only_the_api_side(monkeypatc
     monkeypatch.setattr(place, "policy", unreadable)
     assert router.select(_accounts(), {"alpha": _quota(10.0)}, {}, NOW, environ=API_ENV)[0].name == "alpha"
     assert capsys.readouterr().err == "[codex] api side closed: routing settings are unreadable: KeyError\n"
-    with pytest.raises(router.RoutingError):
+    nows = []
+    closure = place.closure
+
+    def record(source, harness, environ, now):
+        nows.append(now)
+        return closure(source, harness, environ, now)
+
+    monkeypatch.setattr(place, "closure", record)
+    with pytest.raises(router.RoutingError) as raised:
         router.select(_accounts(), {}, {}, NOW, environ=API_ENV)
+    assert str(raised.value).startswith("no signed in Codex account has a fresh reading")
+    assert str(raised.value).endswith("; api side closed: routing settings are unreadable: KeyError")
+    assert nows == [NOW]
 
 
 API_ENV = {**ENV, "CODEX_API_KEY": "key"}

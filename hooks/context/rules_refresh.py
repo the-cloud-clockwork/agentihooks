@@ -23,7 +23,7 @@ from pathlib import Path
 from hooks.common import inject_context, log
 from scripts.claude_config import claude_home
 
-MAX_AGE_SECONDS = 24 * 3600  # 24h — markers older than this are GCed
+MAX_AGE_SECONDS = 24 * 3600
 
 
 def home_profile(home: Path) -> str | None:
@@ -92,12 +92,13 @@ def _delete_marker(profile: str) -> None:
 
 
 def _is_expired(marker: dict) -> bool:
+    """Return True for a marker past MAX_AGE_SECONDS; a malformed marker counts as expired."""
     try:
         ts = datetime.strptime(marker["ts"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
         age = (datetime.now(UTC) - ts).total_seconds()
         return age > MAX_AGE_SECONDS
     except (KeyError, ValueError):
-        return True  # malformed marker — treat as expired
+        return True
 
 
 def _collect_pending_sessions() -> list[str]:
@@ -198,7 +199,6 @@ def maybe_inject(session_id: str) -> None:
                 },
             )
 
-        # Consume: remove this session from pending
         pending = [s for s in pending if s != session_id]
         if not pending:
             _delete_marker(profile)

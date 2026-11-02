@@ -41,6 +41,7 @@ class ResumingRuntime(FakeRuntime):
 
 
 @pytest.mark.parametrize("lane", ["master", "eng"])
+@pytest.mark.feature("swarm-dead-resume")
 def test_dead_agent_with_room_resumes_its_conversation_and_seat(store, monkeypatch, lane):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
     tick_module.tick("sw", store, ledger, runtime, 1)
@@ -166,6 +167,7 @@ def test_confirmed_dead_process_reaches_resume_before_binding_retirement(store, 
     assert agent.pane_id not in runtime.closed
 
 
+@pytest.mark.feature("swarm-dead-resume")
 def test_lost_agent_cannot_reopen_a_successors_claim(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
     tick_module.tick("sw", store, ledger, runtime, 1)
@@ -611,6 +613,7 @@ def test_reap_reports_every_lost_engineer_in_the_pass(store):
     assert len(engineers) == 2
 
 
+@pytest.mark.feature("swarm-dead-resume")
 def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(store, monkeypatch):
     from scripts.swarm import deliberate_exit
 

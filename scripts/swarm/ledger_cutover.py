@@ -3,7 +3,7 @@ import os
 from collections.abc import Mapping
 
 from scripts.gates import Who
-from scripts.swarm import lease
+from scripts.swarm import fencing, lease
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_route
 from scripts.swarm_ledger.api import client
@@ -48,9 +48,9 @@ def acknowledge(store: RedisStore, slug: str, who: Who, environ: Mapping[str, st
 
     with store.redis.pipeline() as pipe:
         try:
-            pipe.watch(store.key(slug, "config"), store.key(slug, "executions"))
+            pipe.watch(store.key(slug, "config"))
             settings = pipe.hgetall(store.key(slug, "config"))
-            current = json.loads(pipe.hget(store.key(slug, "executions"), agent.execution_id) or "null")
+            current = fencing.read(store, slug)["executions"].get(agent.execution_id)
             if (
                 settings.get("pending_api_url") != config.pending_api_url
                 or int(settings.get("ledger_staged_at") or 0) != config.ledger_staged_at
@@ -103,10 +103,15 @@ def settings(store: RedisStore, slug: str, changes: dict) -> SwarmConfig:
 
 def _activation_keys(store: RedisStore, slug: str) -> dict[str, str]:
     return {
-        **{store.key(slug, part): "hgetall" for part in ("config", "agents", "executions", "desired-routes", READY)},
+        **{store.key(slug, part): "hgetall" for part in ("config", "agents", "desired-routes", READY)},
         masters.MasterSeats(store.redis).key(slug): "hgetall",
-        **{store.key(slug, part): "get" for part in ("tick-lock", "control-owner", "control-epoch")},
+        store.key(slug, "tick-lock"): "get",
     }
+
+
+def _cohort(store: RedisStore, slug: str) -> tuple:
+    doc = fencing.read(store, slug)
+    return doc["executions"], doc["lease"], doc["legacy_owner"], doc["epoch"]
 
 
 def _activate(store: RedisStore, slug: str, address: str) -> None:
@@ -121,7 +126,7 @@ def _activate(store: RedisStore, slug: str, address: str) -> None:
     with store.redis.pipeline() as batch:
         for key, reader in keys.items():
             getattr(batch, reader)(key)
-        before = batch.execute()
+        before = (batch.execute(), _cohort(store, slug))
     if not readiness(store, slug)["ready"]:
         raise SwarmError("the ledger successors are not ready")
     moved = None
@@ -129,7 +134,7 @@ def _activate(store: RedisStore, slug: str, address: str) -> None:
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(*keys)
-                if [getattr(pipe, reader)(key) for key, reader in keys.items()] != before:
+                if ([getattr(pipe, reader)(key) for key, reader in keys.items()], _cohort(store, slug)) != before:
                     raise SwarmError("the ledger activation cohort changed")
                 config = RedisStore(pipe).config(slug)
                 if config.state != "paused":
@@ -137,16 +142,13 @@ def _activate(store: RedisStore, slug: str, address: str) -> None:
                 if pipe.exists(store.key(slug, "tick-lock")):
                     raise SwarmError("the swarm tick is still running")
                 owner = commands.hive_id()
-                raw = pipe.get(store.key(slug, "control-owner"))
-                held = lease.Lease(**json.loads(raw)) if raw and raw.startswith("{") else None
-                if raw and (held is None or held.owner != owner):
+                _, recorded, legacy, epoch = before[1]
+                if legacy or (recorded and recorded["owner"] != owner):
                     raise SwarmError("the source controller ownership changed")
-                epoch = int(pipe.get(store.key(slug, "control-epoch")) or 0)
                 with ledger_route.scoped(slug, address):
                     target = lease.current(store, slug)
                     moved = lease.transfer(store, slug, owner, epoch, target.epoch if target else 0)
                 pipe.multi()
-                pipe.delete(store.key(slug, "control-owner"))
                 pipe.hset(
                     store.key(slug, "config"),
                     mapping={"api_url": address, "pending_api_url": "", "ledger_staged_at": 0},
@@ -158,3 +160,4 @@ def _activate(store: RedisStore, slug: str, address: str) -> None:
                     with ledger_route.scoped(slug, address):
                         lease.release(store, slug, moved)
                 raise SwarmError("the ledger activation changed before commit") from exc
+    fencing.write(store, slug, lambda doc: doc.update(lease=None))

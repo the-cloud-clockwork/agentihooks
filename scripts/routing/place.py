@@ -60,6 +60,16 @@ def api_side(source: "SlotSource", harness: str, environ: Mapping[str, str], now
     return [replace(slot, cap=rules.cap) for slot in found], rules.weight
 
 
+def closure(source: "SlotSource", harness: str, environ: Mapping[str, str], now: float) -> list[str]:
+    if not source.slots(environ, now):
+        return []
+    try:
+        policy(harness, environ)
+    except SettingsError as exc:
+        return [f"api side closed: {exc}"]
+    return []
+
+
 def place(api: Sequence[Slot], pool: Sequence[Slot], weight: int, pool_live: int) -> Slot | None:
     open_pool = [slot for slot in pool if slot.free]
     api_live = sum(slot.sessions for slot in api)

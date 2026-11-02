@@ -5,6 +5,9 @@
 /scripts/ci_mutation/ @nestorcolt
 /scripts/ci_budget/rate_limit.py @nestorcolt
 /scripts/ci_*.py @nestorcolt
+/scripts/feature_map.py @nestorcolt
+/scripts/feature_checks/ @nestorcolt
+/feature-map.json @nestorcolt
 /scripts/ci_reuse_job.yml @nestorcolt
 /scripts/ci_gate_summary_steps.yml @nestorcolt
 /scripts/release_changelog.py @nestorcolt
@@ -12,9 +15,19 @@
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt
+/scripts/type_gate.py @nestorcolt
+/tests/test_type_gate.py @nestorcolt
+/scripts/no_comments.py @nestorcolt
+/tests/COMMENT_FREE_PATHS.json @nestorcolt
+/tests/test_no_comments.py @nestorcolt
+/scripts/no_whole_ledger.py @nestorcolt
+/tests/WHOLE_LEDGER_ALLOWLIST.json @nestorcolt
+/tests/test_no_whole_ledger.py @nestorcolt
 /scripts/dead_code.py @nestorcolt
 /scripts/swallowed_exceptions.py @nestorcolt
 /scripts/locked_tests.py @nestorcolt
+/scripts/design_rules.py @nestorcolt
+/scripts/threshold_pins.py @nestorcolt
 /scripts/check_* @nestorcolt
 /scripts/github_access.sh @nestorcolt
 /scripts/swarm_ledger/artifact_sanity.py @nestorcolt
@@ -69,6 +82,7 @@
 /tests/DEAD_CODE_ALLOWLIST.json @nestorcolt
 /tests/test_swallowed_exceptions.py @nestorcolt
 /tests/test_locked_tests.py @nestorcolt
+/tests/test_design_rules.py @nestorcolt
 /mutation-cleared.txt @nestorcolt
 /mutation-clearances/ @nestorcolt
 /delivery.yaml @nestorcolt

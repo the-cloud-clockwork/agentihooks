@@ -74,7 +74,7 @@ def fleet_held(store: RedisStore, now: int) -> dict[str, int]:
     """Per account, the slots a local process table cannot see: every live reservation and every occupancy whose
     registry record runs outside the local backend."""
     held: dict[str, int] = {}
-    for key in store.redis.scan_iter(match=account_key("*")):
+    for key in store.redis.scan_iter(match=account_key("*"), count=10000):
         for slot in map(decode, store.redis.hvals(key)):
             if slot.state == OCCUPIED:
                 record = live_record(store, store.redis, slot)
@@ -84,6 +84,16 @@ def fleet_held(store: RedisStore, now: int) -> dict[str, int]:
             if remote:
                 held[slot.account] = held.get(slot.account, 0) + 1
     return held
+
+
+def fleet_held_now() -> dict[str, int]:
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    if redis is None:
+        return {}
+    store = RedisStore(redis)
+    return fleet_held(store, lease.now_ms(store))
 
 
 class AccountCapacity:

@@ -47,6 +47,7 @@ def answer(n, item, by=MASTER, text="Use the queue."):
     return {"op": "answer", "id": f"an-{n}", "by": by, "item": item, "text": text}
 
 
+@pytest.mark.feature("ledger-answer")
 def test_the_master_answers_as_itself_and_the_priority_clears():
     question = make_ledger()
     state, _ = core.sync(SLUG)
@@ -68,6 +69,7 @@ def test_the_master_answers_as_itself_and_the_priority_clears():
     assert question not in [p["item"] for p in state["priorities"]]
 
 
+@pytest.mark.feature("ledger-answer")
 def test_a_worker_answer_is_refused_and_the_priority_stays():
     question = make_ledger()
     state, rejected = core.sync(SLUG, ops=[answer(1, question, by=WORKER)])
@@ -154,6 +156,7 @@ def _cli(monkeypatch, autonomy, by, item):
 
 
 @pytest.mark.parametrize("autonomy", [DELEGATE, FULL])
+@pytest.mark.feature("ledger-answer")
 def test_cli_master_answers_at_delegate_and_full(monkeypatch, capsys, autonomy):
     question = make_ledger()
     _cli(monkeypatch, autonomy, MASTER, question)
@@ -164,6 +167,7 @@ def test_cli_master_answers_at_delegate_and_full(monkeypatch, capsys, autonomy):
 
 
 @pytest.mark.parametrize("autonomy", [MANUAL, ASSIST, ""])
+@pytest.mark.feature("ledger-answer")
 def test_cli_refuses_below_delegate_autonomy(monkeypatch, autonomy):
     question = make_ledger()
     with pytest.raises(SystemExit) as refused:

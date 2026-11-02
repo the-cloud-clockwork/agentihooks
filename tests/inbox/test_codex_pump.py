@@ -997,27 +997,31 @@ def test_a_stale_pump_stops_without_reconnecting_or_changing_its_transport(rig):
 
 
 def test_admission_retries_when_publication_is_reserved_after_its_seat_read(rig, monkeypatch):
+    from scripts.swarm import fencing
+
     swarm = rig.bindings.store
     registry = ExecutionRegistry(swarm)
-    original, raced = registry._admit, []
+    original, raced = registry.check_uid, []
 
-    def admit(pipe, *args):
+    def check_uid(slug, agent, doc=None):
         if not raced:
             raced.append(True)
 
             def publish():
+                fencing.write(swarm, slug, lambda other: other.update(leader_changes=other["leader_changes"] + 1))
                 try:
-                    original(pipe, *args)
+                    original(slug, agent, doc)
                 finally:
                     assert swarm.execution_occupants(SLUG)[f"eng-1@{SLUG}"].execution_id == EXECUTION
 
             rig.pump.binding.transport.publish(publish)
         else:
-            original(pipe, *args)
+            original(slug, agent, doc)
 
-    monkeypatch.setattr(registry, "_admit", admit)
+    monkeypatch.setattr(registry, "check_uid", check_uid)
     candidate = AgentRecord(swarm.next_name(SLUG, "eng"), "eng", "task", seat=f"eng-1@{SLUG}")
     assert registry.start(SLUG, candidate, EXECUTION).generation == 2
+    assert raced == [True]
 
 
 @pytest.mark.parametrize("reason", ["handoff", "quota"])

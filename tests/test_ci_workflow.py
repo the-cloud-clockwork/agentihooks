@@ -369,6 +369,16 @@ def _unit_step_index(predicate) -> tuple[int, dict]:
     return index, steps[index]
 
 
+_TEST_ENV_KEY = "./.github/actions/test-env-key"
+
+
+def _test_env_key_step() -> dict:
+    """Return the one step of the shared action that names the test environment key."""
+    action = yaml.safe_load((_ROOT / ".github/actions/test-env-key/action.yml").read_text())
+    (step,) = action["runs"]["steps"]
+    return step
+
+
 def test_unit_installs_extras_with_uv_and_no_uv_cache():
     uv_index, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
@@ -383,19 +393,40 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     ]
 
 
-def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
+def test_unit_restores_one_venv_per_interpreter_and_dependency_files() -> None:
     _, cache = _unit_step_index(lambda s: s.get("id") == "venv")
     _, python = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/setup-python"))
-    key = cache["with"]["key"]
     assert cache["with"]["path"] == "~/venv"
+    assert cache["with"]["key"] == "${{ steps.day.outputs.key }}"
+    _, day = _unit_step_index(lambda s: s.get("id") == "day")
+    assert day["uses"] == _TEST_ENV_KEY
+    assert day["with"] == {"python-version": f"${{{{ steps.{python['id']}.outputs.python-version }}}}"}
+    step = _test_env_key_step()
+    key = step["env"]["KEY_PREFIX"] + step["env"]["KEY_INPUTS"]
     assert "${{ runner.os }}" in key
-    assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
+    assert "${{ inputs.python-version }}" in key
     assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
     assert "${{ hashFiles('.github/test-requirements.lock') }}" in key
-    _, day = _unit_step_index(lambda s: s.get("id") == "day")
-    assert day["run"] == 'echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"'
-    assert "${{ steps.day.outputs.date }}" in key
-    assert "matrix.shard" not in key
+    assert step["run"].splitlines() == [
+        "date=$(date -u +%F)",
+        'echo "key=$KEY_PREFIX-$date-$KEY_INPUTS" >> "$GITHUB_OUTPUT"',
+    ]
+
+
+def test_records_name_the_test_environment_when_the_wheelhouse_skips_its_restore() -> None:
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    jobs = workflow["jobs"]
+    assert jobs["unit"]["env"]["UNIT_WHEELHOUSE"] == "${{ github.event_name == 'pull_request' && '1' || '' }}"
+    assert jobs["unit-selected"]["env"]["UNIT_WHEELHOUSE"] == "1"
+    environments = [
+        value
+        for job in (jobs["test-count"], jobs["unit"], jobs["unit-selected"])
+        for step in job.get("steps", [])
+        for name, value in step.get("env", {}).items()
+        if name in ("ENVIRONMENT", "TEST_COUNT_ENVIRONMENT")
+    ]
+    assert environments
+    assert set(environments) == {"${{ steps.day.outputs.key }}"}
 
 
 def test_a_restored_venv_skips_uv_and_the_install():
@@ -481,32 +512,62 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
     assert excludes == ["opentelemetry-exporter-otlp-proto-grpc"]
 
 
-def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
+def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs() -> None:
     workflow = _workflow()
     assert (_ROOT / ".github/test-constraints.txt").read_text().splitlines() == [
         "playwright==1.63.0",
         "pytest<9.2",
         "--constraint test-requirements.lock",
     ]
+    assert "${{ hashFiles('.github/test-constraints.txt') }}" in _test_env_key_step()["env"]["KEY_INPUTS"]
     for job in ("test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
-        assert "${{ hashFiles('.github/test-constraints.txt') }}" in cache["with"]["key"]
+        day = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "day")
+        assert cache["with"]["key"] == "${{ steps.day.outputs.key }}"
+        assert day["uses"] == _TEST_ENV_KEY
 
 
-def test_every_job_sharing_the_test_environment_installs_the_baked_browser_version():
+def test_every_job_sharing_the_test_environment_installs_the_baked_browser_version() -> None:
     sharing, unpinned = [], []
     for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
         for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items():
-            keys = [str((step.get("with") or {}).get("key", "")) for step in job.get("steps", [])]
-            if any(key.startswith("venv-") for key in keys):
+            if any(step.get("uses") == _TEST_ENV_KEY for step in job.get("steps", [])):
                 sharing.append(f"{path.name}:{name}")
                 if (job.get("env") or {}).get(
                     "UV_CONSTRAINT"
                 ) != "${{ github.workspace }}/.github/test-constraints.txt":
                     unpinned.append(f"{path.name}:{name}")
     assert "count-record.yml:count-record" in sharing
+    assert "test.yml:unit" in sharing
     assert unpinned == []
+
+
+def test_every_test_environment_key_comes_from_the_shared_action() -> None:
+    keyed, stray = set(), []
+    for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text()
+        if "venv-${{" in text:
+            stray.append(path.name)
+        for name, job in (yaml.safe_load(text)["jobs"] or {}).items():
+            steps = job.get("steps", [])
+            caches = [step for step in steps if (step.get("with") or {}).get("path") == "~/venv"]
+            if not caches:
+                continue
+            day = next((step for step in steps if step.get("id") == "day"), None)
+            python = next((step for step in steps if step.get("uses", "").startswith("actions/setup-python")), None)
+            assert day and python, f"{path.name}:{name}"
+            assert day.get("uses") == _TEST_ENV_KEY, f"{path.name}:{name}"
+            assert day["with"] == {"python-version": f"${{{{ steps.{python['id']}.outputs.python-version }}}}"}
+            for cache in caches:
+                saves = cache["uses"].startswith("actions/cache/save")
+                assert steps.index(day) < steps.index(cache), f"{path.name}:{name}"
+                assert cache["with"]["key"] == (
+                    "${{ steps.venv.outputs.cache-primary-key }}" if saves else "${{ steps.day.outputs.key }}"
+                ), f"{path.name}:{name}"
+            keyed.add(path.name)
+    assert {"count-record.yml", "test.yml"} <= keyed
+    assert stray == []
 
 
 def test_queue_browser_setup_cannot_enter_the_downloading_action():
@@ -522,7 +583,7 @@ def test_queue_browser_setup_cannot_enter_the_downloading_action():
     assert offline["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
 
 
-def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
+def test_only_a_dev_push_saves_the_test_environment_after_installing_it() -> None:
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     callers = {
         name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
@@ -533,14 +594,19 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
         assert "count-record" not in jobs
         jobs["count-record"] = recorder
         callers["count-record"] = recorder["steps"]
-    assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-rerun", "unit-selected"]
+    expected = {"count-record", "split", "test-count", "unit", "unit-rerun", "unit-selected"}
+    assert set(callers) == expected | ({"type-gate"} if "type-gate" in jobs else set())
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"
         saves = [
             step for step in steps if step.get("uses") == "actions/cache/save@v4" and step["with"]["path"] == "~/venv"
         ]
-        guards = {"unit-selected": "github.event_name == 'pull_request'", "test-count": "github.event_name != 'push'"}
+        guards = {
+            "unit-selected": "github.event_name == 'pull_request'",
+            "test-count": "github.event_name != 'push'",
+            "type-gate": "github.event_name != 'push'",
+        }
         if name in guards:
             assert guards[name] in jobs[name]["if"]
             assert saves == []
@@ -711,7 +777,7 @@ def _mutation_workflow():
 
 
 def test_mutation_job_installs_chromium_before_mutating():
-    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
+    steps = _mutation_workflow()["jobs"]["mutation-shard"]["steps"]
     names = [s.get("name") for s in steps]
     install = _browser_install(steps)
     assert install["name"] == "Install the browser that page tests drive"
@@ -721,14 +787,14 @@ def test_mutation_job_installs_chromium_before_mutating():
 
 
 def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
-    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
+    steps = _mutation_workflow()["jobs"]["mutation-shard"]["steps"]
     names = [step.get("name") for step in steps]
     assert "Select mutation tests before browser setup" not in names
     install = names.index("Install the browser that page tests drive")
     assert steps[install]["if"] == "needs.mutation-plan.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
     assert steps[install]["timeout-minutes"] == 6
-    job = _mutation_workflow()["jobs"]["mutation"]
+    job = _mutation_workflow()["jobs"]["mutation-shard"]
     assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
     selection = next(step for step in steps if step.get("name") == "Download planned mutation test selection")
     assert selection["with"]["name"] == "mutation-selection"
@@ -740,7 +806,7 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
 
 
 def test_mutation_browser_dependencies_use_the_responsive_mirror():
-    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
+    steps = _mutation_workflow()["jobs"]["mutation-shard"]["steps"]
     setup = _browser_setup_steps(steps)
     mirror = next(step for step in setup if step.get("name") == "Use the Ubuntu archive for browser dependencies")
     install = _browser_install(setup)
@@ -1138,7 +1204,7 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
 def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
     jobs = _workflow()["jobs"]
     job = jobs["shard-check"]
-    assert set(job["needs"]) == {"split", "select", "reuse", "admission"}
+    assert set(job["needs"]) == {"split", "select", "reuse", "admission", "unit", "unit-lost", "unit-rerun"}
     stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     mint = next(step for step in job["steps"] if step.get("id") == "app-token")
@@ -1161,6 +1227,15 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
     assert "REUSED" in check
     assert job["timeout-minutes"] == "${{ github.event_name == 'merge_group' && 42 || 60 }}"
     assert job["permissions"] == {"contents": "read"}
+
+
+def test_queue_verifier_and_shard_check_wait_for_the_units_instead_of_holding_a_runner() -> None:
+    jobs = _workflow()["jobs"]
+    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], deferred=True)
+    condition = jobs["shard-check"]["if"]
+    assert "(needs.unit-lost.result == 'success' || needs.unit-lost.result == 'skipped')" in condition
+    assert "(needs.unit-rerun.result == 'success' || needs.unit-rerun.result == 'skipped')" in condition
+    assert jobs["queue-fail-fast"]["if"].startswith("${{ !cancelled() ")
 
 
 def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue_runs():
@@ -1754,6 +1829,7 @@ def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the durations this run splits on")
     assert download["with"] == {
         "name": upload["with"]["name"],
+        "verify": '[[ "$(sha256sum .test_durations | cut -d \' \' -f 1)" == "$(< durations.sha256)" ]]',
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
@@ -1921,13 +1997,46 @@ def test_credential_parameters_have_readable_timing_identifiers():
     ]
 
 
+def test_tests_mutation_refines_shards_and_merges_split_units():
+    jobs = _mutation_workflow()["jobs"]
+    refine, shard, merged = jobs["mutation-refine"], jobs["mutation-shard"], jobs["mutation"]
+    assert refine["needs"] == ["mutation-plan", "mutation-stats", "admission"]
+    assert "needs.mutation-plan.outputs.stats_parts != '[0]'" in refine["if"]
+    assert "needs.mutation-plan.outputs.forwarded != 'true'" in refine["if"]
+    assert refine["outputs"]["shards"] == "${{ steps.refine.outputs.shards }}"
+    steps = {step.get("name"): step for step in refine["steps"]}
+    run = steps["Refine mutation shards from measured statistics"]
+    assert run["run"] == 'python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats'
+    assert run["env"]["MUTATION_SHARD_CPU_QUOTA"] == "3"
+    upload = steps["Upload the measured mutation plan"]
+    assert upload["with"]["name"] == "mutation-measured-plan"
+    assert upload["with"]["path"] == ".mutation-stats/plan.json"
+    assert shard["strategy"]["matrix"]["shard"] == (
+        "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+    )
+    assert "needs.mutation-refine.result == 'success'" in shard["if"]
+    names = [step.get("name") for step in shard["steps"]]
+    plan = shard["steps"][names.index("Download the measured mutation plan")]
+    assert plan["with"]["name"] == "mutation-measured-plan"
+    assert plan["with"]["path"] == ".mutation-stats"
+    assert names.index("Download the measured mutation plan") < names.index("Mutate changed Python files")
+    assert merged["needs"] == ["mutation-plan", "mutation-stats", "mutation-refine", "mutation-shard", "admission"]
+    assert "strategy" not in merged
+    steps = {step.get("name"): step for step in merged["steps"]}
+    assert steps["Download every mutation shard report"]["with"]["pattern"] == "mutation-report-*"
+    assert "--prefix mutation-report- --shards" in steps["Merge the shard reports"]["run"]
+    assert steps["Merge the shard reports"]["env"]["SHARDS"] == (
+        "${{ needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards }}"
+    )
+    finish = steps["Fail when a shard did not finish"]
+    assert "needs.mutation-shard.result != 'success'" in finish["if"]
+    assert "exit 1" in finish["run"]
+
+
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
-    job = spec["jobs"]["mutation"]
-    assert job["needs"] in (
-        ["mutation-plan", "mutation-stats"],
-        ["mutation-plan", "mutation-stats", "admission"],
-    )
+    job = spec["jobs"]["mutation-shard"]
+    assert job["needs"] == ["mutation-plan", "mutation-stats", "mutation-refine", "admission"]
     assert job["timeout-minutes"] == 26
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
@@ -1949,9 +2058,84 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     )
 
 
+GRADER_FALLBACK = (
+    '[[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }\n'
+    '[[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"'
+)
+
+
+def test_the_protected_grader_holds_the_planned_mutation_bases() -> None:
+    steps = _mutation_workflow()["jobs"]["mutation-plan"]["steps"]
+    names = [step.get("name") for step in steps]
+    dispatch = steps[names.index("Check out the protected mutation grader")]
+    held = steps[names.index("Hold the planned mutation bases to the protected grader")]
+    assert dispatch["if"] == "github.event_name == 'workflow_dispatch' && steps.reuse.outputs.reused != 'true'"
+    assert dispatch["env"] == {"GRADER": "${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}"}
+    assert held["if"] == "steps.reuse.outputs.reused != 'true'"
+    assert held["env"] == {
+        "BASE": "${{ inputs.base || 'origin/dev' }}",
+        "BASES": "${{ steps.plan.outputs.bases }}",
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+    }
+    assert held["run"] == (
+        f'grader="$RUNNER_TEMP/grader"\n{GRADER_FALLBACK}\n'
+        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade bases . "$BASE" "$BASES"\n'
+    )
+    order = [
+        "Check out the protected grader",
+        "Size mutation shards from stored timings",
+        dispatch["name"],
+        held["name"],
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    assert names.index(held["name"]) < names.index("Grade the empty change set")
+
+
+@pytest.mark.parametrize(
+    ("job", "mutate", "upload", "guard"),
+    [
+        (
+            "mutation-shard",
+            "Mutate changed Python files",
+            "Upload complete mutation evidence",
+            "needs.mutation-plan.outputs.forwarded != 'true'",
+        ),
+        (
+            "mutation-stats",
+            "Mutate the only shard in the statistics job",
+            "Upload complete inline mutation evidence",
+            "needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]'"
+            " && needs.mutation-plan.outputs.forwarded != 'true'",
+        ),
+    ],
+)
+def test_mutation_shards_grade_their_rows_with_the_protected_grader(
+    job: str, mutate: str, upload: str, guard: str
+) -> None:
+    steps = _mutation_workflow()["jobs"][job]["steps"]
+    names = [step.get("name") for step in steps]
+    checkout = steps[names.index("Check out the protected mutation grader")]
+    grade = steps[names.index("Grade the shard report from the protected grader")]
+    assert checkout["env"] == {
+        "GRADER": "${{ github.event.pull_request.base.sha || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
+    }
+    assert checkout["run"] == (
+        'git fetch --no-tags origin "$GRADER"\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
+    )
+    assert checkout["if"] == guard
+    assert grade["if"] == steps[names.index(upload)]["if"]
+    assert grade["env"] == {"BASES": "${{ needs.mutation-plan.outputs.bases }}"}
+    assert grade["run"] == (
+        'grader="$RUNNER_TEMP/grader"\n'
+        f"{GRADER_FALLBACK}\n"
+        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"\n'
+    )
+    assert names.index(checkout["name"]) < names.index(mutate) < names.index(grade["name"]) < names.index(upload)
+
+
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     jobs = _mutation_workflow()["jobs"]
-    plan, mutation = jobs["mutation-plan"], jobs["mutation"]
+    plan, mutation = jobs["mutation-plan"], jobs["mutation-shard"]
     assert plan.get("needs", []) in ([], ["admission"])
     assert (plan["if"], mutation["if"]) in (
         (
@@ -1960,7 +2144,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         ),
         (
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') }}",
         ),
     )
     assert (
@@ -1968,7 +2152,10 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     )
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["if"] == "steps.reuse.outputs.reused != 'true'"
-    assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE" --repository "$GITHUB_REPOSITORY"'
+    assert step["run"] == (
+        'python -I "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py" mutation-plan -- '
+        "python -m scripts.ci_mutation." + 'plan --base "$BASE" --repository "$GITHUB_REPOSITORY"'
+    )
     assert step["env"] == {
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
@@ -1999,7 +2186,9 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
     assert mutation["strategy"] == {
         "fail-fast": False,
-        "matrix": {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"},
+        "matrix": {
+            "shard": "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+        },
     }
     for name in ("Mutate changed Python files", "Mutate dispatched Python files"):
         run = next(step for step in mutation["steps"] if step.get("name") == name)
@@ -2014,7 +2203,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
 
 def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     jobs = _mutation_workflow()["jobs"]
-    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
+    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation-shard"]
     assert (
         plan["outputs"]["stats_parts"]
         == "${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}"
@@ -2027,7 +2216,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         ),
         (
             "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.forwarded != 'true' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') }}",
         ),
     )
     assert stats["strategy"] == {
@@ -2039,16 +2228,29 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         "Download the shared mutation stats",
         "Download the reused preflight report",
         "Download every part's test stats cache",
+        "Download the measured mutation plan",
     )
     setup = [
         step
         for step in setup
         if not str(step.get("name", "")).startswith(
-            (*downloads, "Cap the merged test stats", "Check for merged test stats")
+            (
+                *downloads,
+                "Cap the merged test stats",
+                "Check for merged test stats",
+                "Check out the protected mutation grader",
+                "Grade the shard report from the protected grader",
+            )
         )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
+        and step.get("name") != "Restore latest dev durations"
     ]
-    stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
+    stats_steps = [
+        step
+        for step in stats["steps"]
+        if step.get("with", {}).get("path") != ".mutation-stats-cache"
+        and step.get("name") != "Restore latest dev durations"
+    ]
     assert stats_steps[: len(setup)] == setup
     collect = stats_steps[len(setup)]
     cache_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") == ".mutation-stats-cache"]
@@ -2171,7 +2373,7 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
     assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
     first = f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
-    mutation = jobs["mutation"]["steps"]
+    mutation = jobs["mutation-shard"]["steps"]
     mutation_names = [step.get("name") for step in mutation]
     base = mutation[mutation_names.index("Restore compatible test stats")]
     assert base["uses"] == "actions/cache/restore@v4"
@@ -2267,7 +2469,7 @@ def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pin
 
 def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_protected_grader():
     jobs = _mutation_workflow()["jobs"]
-    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
+    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation-shard"]
     assert plan["outputs"]["reused"] == "${{ steps.reuse.outputs.reused || 'false' }}"
     names = [step.get("name") for step in plan["steps"]]
     grader = plan["steps"][names.index("Check out the protected grader")]
@@ -2293,7 +2495,12 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'",
     )
     assert empty["env"] == {"BASES": "${{ steps.plan.outputs.bases }}"}
-    assert empty["run"] == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080'
+    assert empty["run"] == (
+        'python -m scripts.ci_mutation --bases "$BASES" --budget 1080\n'
+        'grader="$RUNNER_TEMP/grader"\n'
+        f"{GRADER_FALLBACK}\n"
+        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"\n'
+    )
     upload = plan["steps"][names.index("Forward the reused or empty mutation report")]
     assert upload["if"] == "always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')"
     assert upload["with"]["name"] == "mutation-report-0"
@@ -2311,6 +2518,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "failure() && steps.browser.outcome == 'failure'",
         "failure()",
         f"github.event_name == 'pull_request' && {skipped}",
+        f"github.event_name == 'pull_request' && {skipped} && needs.mutation-plan.outputs.durations != ''",
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
@@ -2321,6 +2529,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         " && steps.merged-stats.outputs.found == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
+        "needs.mutation-refine.result == 'success'",
     )
     for job in (stats, mutation):
         guarded = {step.get("id") for step in job["steps"] if step["if"] == skipped or step["if"] in unguarded}
@@ -2346,7 +2555,13 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         for name, job in jobs.items()
         if name.startswith("mutation") and any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
     }
-    assert {"mutation-plan", "mutation-stats", "mutation"} == set(local)
+    assert {"mutation-plan", "mutation-stats", "mutation-refine", "mutation-shard", "mutation"} == set(local)
+    for name in ("mutation-refine", "mutation"):
+        steps = jobs[name]["steps"]
+        names = [step.get("name") for step in steps]
+        take = steps[names.index("Take the upload action from the workflow revision")]
+        assert {step["uses"] for step in local[name]} == {"./.workflow-revision/.github/actions/retry-upload"}
+        assert all(steps.index(take) < steps.index(step) for step in local[name])
     plan = jobs["mutation-plan"]["steps"]
     take = next(step for step in plan if step.get("name") == "Take the upload action from the workflow revision")
     assert take["run"].splitlines() == [
@@ -2356,7 +2571,7 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
     ]
     assert {step["uses"] for step in local["mutation-plan"]} == {"./.workflow-revision/.github/actions/retry-upload"}
     assert all(plan.index(take) < plan.index(step) for step in local["mutation-plan"])
-    for name in ("mutation-stats", "mutation"):
+    for name in ("mutation-stats", "mutation-shard"):
         steps = jobs[name]["steps"]
         names = [step.get("name") for step in steps]
         take = steps[names.index("Take the local actions from the workflow revision")]
@@ -2418,6 +2633,7 @@ def test_antoncore_app_rest_retains_all_checker_inputs_when_git_is_refused(tmp_p
         "k8s/values-overlays/agentihooks-swarm-nats/values.yaml": "values",
         "k8s/values-overlays/agentihooks-swarm-nats/users.yaml": "users",
         "k8s/values-overlays/agentihooks-swarm-nats/trust.yaml": "trust",
+        "k8s/charts/arc-runners-oss/values-oss-batch.yaml": "batch",
     }
     for path, value in {**inputs, "unselected.txt": "excluded"}.items():
         target = source / path

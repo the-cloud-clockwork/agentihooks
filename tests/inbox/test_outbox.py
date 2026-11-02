@@ -69,6 +69,7 @@ def records():
     return [json.loads(line) for line in outbox.path().read_text().splitlines()] if outbox.path().exists() else []
 
 
+@pytest.mark.feature("inbox-outbox-replay")
 def test_sends_during_a_refused_connection_arrive_once_in_send_order_when_redis_returns(outage, monkeypatch, capsys):
     outage.down = True
     for text in ("first", "second", "third"):
@@ -103,6 +104,7 @@ def test_sends_failing_mid_pipeline_arrive_exactly_once_in_send_order(outage, ca
     assert outage.texts("bob") == ["one", "two", "three"]
 
 
+@pytest.mark.feature("inbox-outbox-replay")
 def test_a_send_waits_behind_queued_records_while_they_cannot_replay(outage, capsys):
     outage.failures = ["before", "before"]
     assert run("send", "bob", "one") == 0
@@ -115,6 +117,7 @@ def test_a_send_waits_behind_queued_records_while_they_cannot_replay(outage, cap
     assert outage.texts("bob") == ["one", "two"]
 
 
+@pytest.mark.feature("inbox-outbox-set-aside")
 def test_a_corrupt_record_is_reported_and_skipped_never_replayed_twice(outage, capsys):
     outage.down = True
     for text in ("before", "broken", "after"):
@@ -142,6 +145,7 @@ def test_a_corrupt_record_is_reported_and_skipped_never_replayed_twice(outage, c
     assert outage.texts("bob") == ["before", "after"]
 
 
+@pytest.mark.feature("inbox-outbox-set-aside")
 def test_a_record_redis_refuses_on_replay_is_reported_and_set_aside(outage, capsys):
     outage.down = True
     assert run("close", "nosuchitem", "cancel") == 0
@@ -157,6 +161,7 @@ def test_a_record_redis_refuses_on_replay_is_reported_and_set_aside(outage, caps
     assert json.loads(outbox.skipped_path().read_text()) == {"reason": "no message nosuchitem", "line": refused}
 
 
+@pytest.mark.feature("inbox-outbox-replay")
 def test_replies_and_closes_made_while_redis_is_down_replay_once(outage, monkeypatch, capsys):
     store = InboxStore(outage.redis)
     asked = store.send("alice", "bob", "can you review")
@@ -263,6 +268,7 @@ def test_a_send_with_a_given_id_refuses_a_second_write(outage):
     assert len(store.history("fixedid")) == 1
 
 
+@pytest.mark.feature("inbox-outbox-limits")
 def test_a_full_outbox_refuses_loudly_and_keeps_the_oldest_record(outage, monkeypatch, capsys):
     outage.down = True
     assert run("send", "bob", "oldest") == 0
@@ -279,6 +285,7 @@ def test_a_full_outbox_refuses_loudly_and_keeps_the_oldest_record(outage, monkey
     assert [record["args"]["text"] for record in records()] == ["oldest", "newer"]
 
 
+@pytest.mark.feature("inbox-outbox-limits")
 def test_the_outbox_warning_stays_quiet_below_its_threshold(outage, monkeypatch, capsys):
     outage.down = True
     monkeypatch.setenv(outbox.WARN_ENV, "100000")
@@ -286,6 +293,7 @@ def test_the_outbox_warning_stays_quiet_below_its_threshold(outage, monkeypatch,
     assert "outbox holds" not in capsys.readouterr().err
 
 
+@pytest.mark.feature("inbox-outbox-limits")
 def test_bounds_default_and_read_the_environment():
     assert outbox.bounds({}) == (outbox.DEFAULT_MAX_BYTES, outbox.DEFAULT_WARN_BYTES)
     assert outbox.bounds({outbox.MAX_ENV: "50", outbox.WARN_ENV: "40"}) == (50, 40)
@@ -325,6 +333,7 @@ def test_a_refused_send_is_not_queued(outage, capsys):
     assert records() == []
 
 
+@pytest.mark.feature("inbox-outbox-flush")
 def test_the_inbox_hook_flushes_the_outbox_before_delivering(outage, monkeypatch):
     from hooks.context import inbox_delivery
 
@@ -337,6 +346,7 @@ def test_the_inbox_hook_flushes_the_outbox_before_delivering(outage, monkeypatch
     assert records() == []
 
 
+@pytest.mark.feature("inbox-outbox-flush")
 def test_the_tick_flushes_the_outbox_first(outage, monkeypatch):
     from scripts.swarm import cli as swarm_cli
     from scripts.swarm.store import RedisStore

@@ -117,6 +117,20 @@ def test_a_member_knows_its_own_agents_without_reading_member_records(redis, swa
     assert scope.host(redis, "fixture", other) == ""
 
 
+def test_one_pass_reads_the_member_records_once_per_redis_client(redis, swarm, monkeypatch):
+    from scripts.hive import auth, scope
+
+    reads = []
+    monkeypatch.setattr(auth, "members", lambda client: reads.append(client) or {"m1": {}})
+    placed = place(swarm, "m1")
+
+    with scope.one_pass():
+        assert [scope.host(redis, "fixture", placed) for _ in range(3)] == ["m1"] * 3
+    assert reads == [redis]
+    assert scope.host(redis, "fixture", placed) == "m1"
+    assert reads == [redis, redis]
+
+
 def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm, monkeypatch):
     from scripts.swarm import idle, waits
 
@@ -162,10 +176,15 @@ def test_members_of_an_empty_index_opens_no_pipeline(redis, monkeypatch):
 
 
 def relaunch(redis, store, name, hive, generation):
-    key = store.key("fixture", "executions")
-    row = next(json.loads(raw) for raw in redis.hvals(key) if json.loads(raw)["name"] == name)
-    row.update(execution_id=f"exe-{hive}-{generation}", generation=generation, hive=hive)
-    redis.hset(key, row["execution_id"], json.dumps(row))
+    from scripts.swarm import fencing
+
+    def change(doc):
+        execution_id, row = next((eid, row) for eid, row in doc["executions"].items() if row["name"] == name)
+        updated = {**row, "execution_id": f"exe-{hive}-{generation}", "generation": generation, "hive": hive}
+        del doc["executions"][execution_id]
+        doc["executions"][updated["execution_id"]] = updated
+
+    fencing.write(store, "fixture", change)
 
 
 def test_host_reads_one_agents_latest_placement_without_the_agent_list(redis, swarm, monkeypatch):

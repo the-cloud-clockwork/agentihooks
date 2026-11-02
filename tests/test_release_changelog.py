@@ -232,6 +232,7 @@ def test_ask_model_posts_chat_completion_with_the_key_reference():
             auth=request.get_header("Authorization"),
             access=request.get_header("Cf-access-client-id"),
             type=request.get_header("Content-type"),
+            agent=request.get_header("User-agent"),
             body=json.loads(request.data),
             timeout=timeout,
         )
@@ -242,6 +243,7 @@ def test_ask_model_posts_chat_completion_with_the_key_reference():
     assert seen["auth"] == "Bearer k1"
     assert seen["access"] == "a1"
     assert seen["type"] == "application/json"
+    assert seen["agent"] == "agentihooks-changelog"
     assert seen["timeout"] == rc.TIMEOUT_S
     assert seen["body"] == {"model": "sonnet", "messages": rc.prompt(_change()), "max_tokens": 400}
 
@@ -391,7 +393,7 @@ def test_main_explain_writes_the_section_for_a_tag(repo, monkeypatch, tmp_path):
         f"## v1.0.2 · 2026-10-28\n\n### 2026-10-27 · {graded[:12]} · #5 · @dev\n\n"
         f"**Add the changelog**\n\n{_words(22)}\n"
     )
-    assert asked == [(rc.DEFAULT_URL + "/v1/chat/completions", "Bearer k2", "id2", "s2", rc.DEFAULT_MODEL)]
+    assert asked == [(rc.DEFAULT_URL + "/v1/chat/completions", "Bearer k2", "id2", "s2", "claude-sonnet-5-worker-000")]
 
 
 def test_main_explain_refuses_a_tag_that_is_not_a_stable_release(repo, monkeypatch, tmp_path):

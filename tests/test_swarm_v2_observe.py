@@ -410,10 +410,10 @@ class Contended:
     def __getattr__(self, name):
         return getattr(self.pipe, name)
 
-    def execute(self):
+    def execute(self) -> list[object]:
         from redis.exceptions import WatchError
 
-        if self.failures:
+        if self.pipe.watching and self.failures:
             self.failures.pop()
             raise WatchError("changed")
         return self.pipe.execute()

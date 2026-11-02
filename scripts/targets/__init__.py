@@ -48,6 +48,8 @@ def resolve_target(
     when more than one is on record. *installed* carries that instead.
     Invalid *cli_value*/env values still hard-exit; an invalid *stored* value
     just loses its prompt-default role.
+
+    Interactive typo: warn and fall back rather than killing the whole init. Flag/env values below still fail hard.
     """
     candidate = (cli_value or "").strip()
     if not candidate:
@@ -62,8 +64,6 @@ def resolve_target(
             options = "/".join(SUPPORTED_TARGETS)
             candidate = input(f"Target ({options}) [{prompt_default}]: ").strip() or prompt_default
             if candidate.lower() not in SUPPORTED_TARGETS:
-                # Interactive typo: warn and fall back rather than killing the
-                # whole init. Flag/env values below still fail hard.
                 print(f"  [WARN] Unknown target '{candidate}' — using '{DEFAULT_TARGET}'.")
                 candidate = DEFAULT_TARGET
         else:
@@ -121,6 +121,7 @@ class TargetAdapter(Protocol):
         profile_chain: list[str],
         bundle_dir: Path | None,
         user_dir: Path | None = None,
+        shared_dir: Path | None = None,
     ) -> None:
         """Assemble and write the persona/system-prompt file for this target."""
         ...

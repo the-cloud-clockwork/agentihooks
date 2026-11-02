@@ -30,6 +30,13 @@ LANE = (
     "((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c')"
 )
 GROUP = "${{ " + LANE + " }}"
+TESTS_GROUPS = tuple(
+    "${{ github.event_name == 'workflow_dispatch' && "
+    + LANE
+    + promotion
+    + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
+    for promotion in ("", " || github.event_name == 'push' && " + LANE.replace("hosted-lane", "promotion-dev"))
+)
 PATH_FILTERS = ("paths", "paths-ignore")
 
 
@@ -138,10 +145,22 @@ def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -
 def dedicated_chart_group(name: str, block: object, job: dict, trusted: dict) -> bool:
     return (
         trusted.get("name") == "Helm chart release"
-        and events(trusted) == [{"release": {"types": ["published"]}}]
-        and name in {"publish", "kind"}
+        and events(trusted) == [{"workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}}]
+        and name in {"package", "kind", "publish"}
         and job == (trusted.get("jobs") or {}).get(name)
         and block == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
+    )
+
+
+def flake_history_group(name: str, block: object, job: dict, trusted: dict) -> bool:
+    baseline = (trusted.get("jobs") or {}).get(name)
+    return (
+        trusted.get("name") == "Tests"
+        and name == "flake-budget"
+        and isinstance(baseline, dict)
+        and {key: value for key, value in job.items() if key != "concurrency"}
+        == {key: value for key, value in baseline.items() if key != "concurrency"}
+        and block == {"group": "flake-history", "queue": "max", "cancel-in-progress": False}
     )
 
 
@@ -174,21 +193,22 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         block = job.get("concurrency", workflow.get("concurrency"))
         base_job = (trusted.get("jobs") or {}).get(name, {})
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
-        if dedicated_chart_group(name, block, job, trusted):
+        if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
             continue
         if per_run_mutation_group(name, block, job, trusted):
             continue
         if (
             trusted.get("name") == "Tests"
             and name in (trusted.get("jobs") or {})
-            and block
-            == {
-                "group": "${{ github.event_name == 'workflow_dispatch' && "
-                + LANE
-                + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}",
-                "queue": "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}",
-                "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
-            }
+            and any(
+                block
+                == {
+                    "group": group,
+                    "queue": "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}",
+                    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+                }
+                for group in TESTS_GROUPS
+            )
         ):
             continue
         if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:

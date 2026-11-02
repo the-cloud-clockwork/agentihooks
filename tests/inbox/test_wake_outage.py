@@ -13,6 +13,7 @@ def outages(tmp_path, monkeypatch):
     monkeypatch.setattr(outage, "HOME", tmp_path)
 
 
+@pytest.mark.feature("inbox-outage-hold")
 def test_the_ladder_pauses_for_an_outage_and_resumes_where_it_stopped(inbox):
     item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
     herdr, ledger, start = FakeHerdr({"p1": "idle"}), FakeLedger(), sent_at(item)
@@ -28,6 +29,7 @@ def test_the_ladder_pauses_for_an_outage_and_resumes_where_it_stopped(inbox):
     assert events(inbox, item.id) == ["woken", "woken"]
 
 
+@pytest.mark.feature("inbox-outage-hold")
 def test_escalation_to_the_master_and_operator_waits_out_the_outage(inbox):
     item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
     herdr, ledger, start = FakeHerdr({"p1": "working"}), FakeLedger(), sent_at(item)

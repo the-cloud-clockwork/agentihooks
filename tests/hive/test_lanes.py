@@ -31,6 +31,10 @@ class Hub:
         self.seen.append(("reopen", slug, request))
         return True
 
+    def failed(self, slug, request):
+        self.seen.append(("failed", slug, request))
+        return True
+
 
 @pytest.fixture
 def hub():
@@ -82,6 +86,25 @@ def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
     lanes.LaneTasks(hub.bus, "hive-a", Mock()).reopen(offer(lane="plan"))
     assert hub.hub.seen == [
         ("reopen", "rig", {"op": "reopen", "hive": "hive-a", "task": "t1", "lane": "plan", "generation": 2})
+    ]
+
+
+def test_a_launch_failed_on_a_harness_is_reported_to_the_hub(hub):
+    lanes.LaneTasks(hub.bus, "hive-a", Mock()).failed(offer(), "codex", "launch failed")
+    assert hub.hub.seen == [
+        (
+            "failed",
+            "rig",
+            {
+                "op": "failed",
+                "hive": "hive-a",
+                "task": "t1",
+                "lane": "eng",
+                "generation": 2,
+                "harness": "codex",
+                "reason": "launch failed",
+            },
+        )
     ]
 
 

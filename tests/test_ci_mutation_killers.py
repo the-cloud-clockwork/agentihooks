@@ -23,6 +23,41 @@ def test_a_function_without_a_recorded_kill_keeps_the_duration_order(tmp_path):
     assert memory.order("scripts.a.x_f__mutmut_1", TESTS) == TESTS
 
 
+def test_tests_covering_the_changed_lines_run_before_faster_fallback_tests(tmp_path):
+    memory = killers.KillMemory(tmp_path / "killers", {"scripts.a.": ["tests/test_c.py::slow"]})
+    assert memory.order("scripts.b.x_f__mutmut_1", TESTS) == TESTS
+    tests = [*TESTS, "tests/test_c.py::slow_too"]
+    assert memory.order("scripts.a.x_f__mutmut_1", tests) == [
+        "tests/test_c.py::slow",
+        "tests/test_a.py::fast",
+        "tests/test_b.py::middle",
+        "tests/test_c.py::slow_too",
+    ]
+    parametrized = ["tests/test_a.py::fast", "tests/test_c.py::slow[2]", "tests/test_c.py::slow[1]"]
+    assert memory.order("scripts.a.x_f__mutmut_1", parametrized) == [
+        "tests/test_c.py::slow[2]",
+        "tests/test_c.py::slow[1]",
+        "tests/test_a.py::fast",
+    ]
+    memory.mutant = "scripts.a.x_f__mutmut_1"
+    memory.pytest_runtest_logreport(_report("tests/test_b.py::middle"))
+    assert memory.order("scripts.a.x_f__mutmut_2", TESTS) == [
+        "tests/test_b.py::middle",
+        "tests/test_c.py::slow",
+        "tests/test_a.py::fast",
+    ]
+
+
+def test_a_test_file_named_as_direct_runs_every_one_of_its_tests_first(tmp_path):
+    memory = killers.KillMemory(tmp_path, {"scripts.a.": ["tests/test_a.py"]})
+    tests = ["tests/test_tick.py::test_fast", "tests/test_a.py::test_b[1]", "tests/test_ab.py::test_c"]
+    assert memory.order("scripts.a.x_f__mutmut_1", tests) == [tests[1], tests[0], tests[2]]
+    assert killers.is_direct("tests/test_a.py::test_b[1]", ["tests/test_a.py::test_b"])
+    assert not killers.is_direct("tests/test_a.py::test_bc", ["tests/test_a.py::test_b"])
+    assert not killers.is_direct("tests/test_ab.py::test_c", ["tests/test_a.py"])
+    assert killers.is_direct("tests/test_a.py::TestA::test_b", ["tests/test_a.py"])
+
+
 def test_the_test_that_killed_a_mutant_runs_first_for_every_later_mutant_of_its_function(tmp_path):
     memory = killers.KillMemory(tmp_path / "killers")
     memory.mutant = "scripts.a.x_f__mutmut_1"
@@ -109,7 +144,11 @@ def test_a_memory_that_prepared_no_mutant_keeps_the_collected_order(tmp_path):
 def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     selection_file = tmp_path / "selection.json"
-    selection_file.write_text(json.dumps({"scripts/a.py": {"lines": [2], "tests": ["tests/test_a.py"]}}))
+    selection_file.write_text(
+        json.dumps(
+            {"scripts/a.py": {"lines": [2], "tests": ["tests/test_a.py"], "direct": ["tests/test_b.py::middle"]}}
+        )
+    )
     runs = []
 
     class PytestRunner:
@@ -141,10 +180,89 @@ def test_the_selection_runner_orders_by_kills_and_records_them_only_for_mutants(
         monkeypatch.setitem(sys.modules, name, sys.modules[name])
     selection.run_selected(selection_file, (0, 1))
     assert runs == [
-        (TESTS, 1),
-        (["tests/test_c.py::slow", "tests/test_a.py::fast", "tests/test_b.py::middle"], 1),
+        (["tests/test_b.py::middle", "tests/test_a.py::fast", "tests/test_c.py::slow"], 1),
+        (["tests/test_c.py::slow", "tests/test_b.py::middle", "tests/test_a.py::fast"], 1),
         (["tests/test_x.py::t"], 0),
     ]
     assert (tmp_path / "killers" / _digest("scripts.a.x_f")).read_text() == "tests/test_c.py::slow"
     assert not list((tmp_path / "killers").glob(f"*.{os.getpid()}"))
     assert Path.cwd() == tmp_path
+
+
+def test_completed_mutant_cost_survives_a_kill_and_cache_reload(tmp_path, monkeypatch):
+    memory = killers.KillMemory(tmp_path / "killers")
+    mutant = "scripts.a.x_f__mutmut_1"
+    memory.prepare(mutant, TESTS)
+    ticks = iter([10.0, 13.5])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+
+    def execute(runner, params, **kwargs):
+        memory.pytest_runtest_logreport(_report(TESTS[0]))
+        return 1
+
+    assert memory.wrap(execute)(object(), TESTS) == 1
+    restored = killers.KillMemory(memory.folder)
+    assert len(list(memory.folder.glob("*.cost"))) == 1
+    assert restored.cost(mutant, reversed(TESTS)) == 3.5
+    assert restored.killer(mutant) == TESTS[0]
+    assert restored.cost(mutant, TESTS[:1]) is None
+    assert restored.cost("scripts.a.x_f__mutmut_2", TESTS) is None
+    assert not list(memory.folder.glob(f"*.{os.getpid()}"))
+
+
+def test_only_completed_mutant_tests_record_cost(tmp_path, monkeypatch):
+    import pytest
+
+    memory = killers.KillMemory(tmp_path / "missing" / "killers")
+    ticks = iter(range(20))
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    for status in [0, 1, 2, 3, 4, 5]:
+        mutant = f"scripts.a.x_f__mutmut_{status}"
+        memory.prepare(mutant, TESTS)
+        assert memory.wrap(lambda *args, **kwargs: status)(object(), TESTS) == status
+        assert memory.cost(mutant, TESTS) == (1.0 if status in [0, 1] else None)
+    memory.prepare(None, TESTS)
+    assert memory.wrap(lambda *args, **kwargs: 1)(object(), TESTS) == 1
+
+    def failed(*args, **kwargs):
+        raise RuntimeError("runner failed")
+
+    mutant = "scripts.a.x_f__mutmut_99"
+    memory.prepare(mutant, TESTS)
+    with pytest.raises(RuntimeError, match="runner failed"):
+        memory.wrap(failed)(object(), TESTS)
+    assert memory.cost(mutant, TESTS) is None
+
+
+def test_kept_splits_survive_a_cache_reload_and_answer_only_for_the_same_tests(tmp_path):
+    memory = killers.KillMemory(tmp_path / "missing" / "killers")
+    split = {"head": ["fast"], "slices": [["b", "a"], ["c"]], "costs": [9.0, 9.0]}
+    memory.keep_splits({"scripts.a.x_f": split})
+    restored = killers.KillMemory(memory.folder)
+    assert len(list(memory.folder.glob("*.split"))) == 1
+    assert restored.split("scripts.a.x_f", ["c", "a", "fast", "b"]) == {"head": ["fast"], "slices": [["a", "b"], ["c"]]}
+    assert restored.split("scripts.a.x_f", ["a", "b", "c"]) is None
+    assert restored.split("scripts.a.x_f", ["a", "b", "c", "fast", "d"]) is None
+    assert restored.split("scripts.a.x_g", ["a", "b", "c", "fast"]) is None
+    assert restored.killer("scripts.a.x_f__mutmut_1") is None
+    assert not list(memory.folder.glob(f"*.{os.getpid()}"))
+
+
+def test_a_torn_cached_record_reads_as_missing(tmp_path, monkeypatch):
+    memory = killers.KillMemory(tmp_path / "killers")
+    mutant = "scripts.a.x_f__mutmut_1"
+    ticks = iter([10.0, 12.0])
+    monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
+    memory.prepare(mutant, TESTS)
+    assert memory.wrap(lambda *args, **kwargs: 0)(object(), TESTS) == 0
+    memory.keep_splits({"scripts.a.x_f": {"head": TESTS[:1], "slices": [TESTS[1:]], "costs": [1.0]}})
+    assert memory.cost(mutant, TESTS) == 2.0
+    assert memory.split("scripts.a.x_f", TESTS) is not None
+    for path in [*memory.folder.glob("*.cost"), *memory.folder.glob("*.split")]:
+        path.write_text(path.read_text() + "1}")
+    assert memory.cost(mutant, TESTS) is None
+    assert memory.split("scripts.a.x_f", TESTS) is None
+    for path in [*memory.folder.glob("*.cost"), *memory.folder.glob("*.split")]:
+        path.write_bytes(b'{"seconds": "\xe2\x82')
+    assert memory.cost(mutant, TESTS) is None
+    assert memory.split("scripts.a.x_f", TESTS) is None

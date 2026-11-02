@@ -403,7 +403,7 @@ def test_controller_ledger_operations_carry_epoch(monkeypatch):
 
     import fakeredis
 
-    from scripts.swarm import controller, lease, ledger_client
+    from scripts.swarm import lease, ledger_client
     from scripts.swarm.store import RedisStore
 
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -412,16 +412,48 @@ def test_controller_ledger_operations_carry_epoch(monkeypatch):
     transport = SimpleNamespace(call=lambda slug, ops, service: calls.append(ops) or {})
     monkeypatch.setattr(ledger_client, "_ledger", lambda: transport)
     client = LedgerClient()
-    controller.FencedLedger(saved, SLUG, held, client).say(SLUG, "Fenced write", by="swarm")
+    with lease.held_pass(saved, SLUG, held):
+        client.say(SLUG, "Fenced write", by="swarm")
     assert calls[0][0]["controller_epoch"] == 1
     client.say(SLUG, "Ordinary write", by="swarm")
     assert "controller_epoch" not in calls[1][0]
 
 
+def test_controller_lifecycle_actions_carry_the_epoch_of_their_ledger(monkeypatch):
+    from types import SimpleNamespace
+
+    import fakeredis
+
+    from scripts.swarm import lease, ledger_client
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_ledger import ledger_link
+    from scripts.swarm_ledger.api import client as api_client
+
+    saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = lease.acquire(saved, SLUG, "home")
+    assert held is not None
+    sent = []
+    transport = SimpleNamespace(base=lambda slug: f"http://ledger/{slug}", credentials=lambda slug, service: {})
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: transport)
+    monkeypatch.setattr(ledger_link, "remote", lambda slug: slug == SLUG)
+    monkeypatch.setattr(
+        api_client.ResourceClient,
+        "request",
+        lambda self, slug, path, payload: sent.append((slug, path, payload)) or {"data": "binned"},
+    )
+    with lease.held_pass(saved, SLUG, held):
+        assert LedgerClient().binned(SLUG) == "binned"
+    assert LedgerClient().binned(SLUG) == "binned"
+    assert sent == [
+        (SLUG, "lifecycle/actions", {"action": "binned", "controller_epoch": held.epoch}),
+        (SLUG, "lifecycle/actions", {"action": "binned"}),
+    ]
+
+
 def test_takeover_before_repository_write_refuses_stale_controller(crew, monkeypatch):
     import fakeredis
 
-    from scripts.swarm import controller, lease
+    from scripts.swarm import lease
     from scripts.swarm.ledger_client import LedgerRefused
     from scripts.swarm.store import RedisStore
 
@@ -436,8 +468,8 @@ def test_takeover_before_repository_write_refuses_stale_controller(crew, monkeyp
         return apply(*args, **kwargs)
 
     monkeypatch.setattr(server.repository, "apply_ops", takeover)
-    with pytest.raises(LedgerRefused) as error:
-        controller.FencedLedger(saved, SLUG, held, LedgerClient()).say(SLUG, "Stale controller write", by="swarm")
+    with pytest.raises(LedgerRefused) as error, lease.held_pass(saved, SLUG, held):
+        LedgerClient().say(SLUG, "Stale controller write", by="swarm")
     assert "the controller lease is stale" in str(error.value)
     assert all(row["text"] != "Stale controller write" for row in LedgerClient().chat(SLUG))
 

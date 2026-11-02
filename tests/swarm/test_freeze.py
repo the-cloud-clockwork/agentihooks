@@ -38,6 +38,7 @@ def held(row, *freezes, fix_phase=""):
     "target",
     ["plans/a", "phases/p1", "slices/a.first", "tasks/t1", "lane:eng", "kind:troubleshoot"],
 )
+@pytest.mark.feature("swarm-freeze")
 def test_a_task_under_a_frozen_node_or_matching_a_frozen_selector_is_held(target):
     row = task(slice="slices/a.first", kind="troubleshoot")
     assert held(row, record(target))
@@ -63,6 +64,7 @@ def test_a_direct_freeze_holds_an_urgent_task_and_a_doctor_fix():
 
 
 @pytest.mark.parametrize("target", ["plans/b", "phases/p2", "lane:ci", "kind:research"])
+@pytest.mark.feature("swarm-focus")
 def test_a_focus_elsewhere_holds_a_normal_task(target):
     assert held(task(), record(target, "focus"))
 
@@ -73,6 +75,7 @@ def test_a_task_inside_any_focus_is_free(target):
     assert not held(row, record("plans/b", "focus"), record(target, "focus"))
 
 
+@pytest.mark.feature("swarm-focus")
 def test_an_urgent_task_and_a_doctor_fix_pass_a_focus():
     assert not held(task(rank="urgent"), record("plans/b", "focus"))
     assert not held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"), fix_phase=loop.FIX_PHASE)
@@ -273,6 +276,7 @@ def test_a_focused_plan_elsewhere_still_claims_an_urgent_task_and_a_normal_one(s
     assert ledger.rows["normal"]["state"] != "open"
 
 
+@pytest.mark.feature("swarm-freeze")
 def test_a_claimed_task_under_a_new_freeze_keeps_its_agent(store):
     ledger, runtime = FrozenLedger([{"id": "t1", "phase": "p1"}]), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -315,6 +319,7 @@ def test_a_frozen_task_is_never_ready_but_an_unfocused_and_a_focused_task_both_a
     assert {t["id"] for t in ready["eng"]} == {"hot", "plain"}
 
 
+@pytest.mark.feature("swarm-freeze")
 def test_only_held_work_drains_with_a_notice_naming_the_freezes_and_unfreezing_runs_again(store):
     ledger = FrozenLedger([{"id": "t1", "phase": "p1"}], record("plans/a"), record("lane:ci", "focus"))
     runtime = FakeRuntime()

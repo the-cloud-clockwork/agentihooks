@@ -131,7 +131,7 @@ def test_launch_budget_changes_only_for_a_native_claude_master(agent, route):
 
     from scripts import master_login_chain as chain
 
-    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10)
+    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10, launch_until=None)
     native = agent in ("", "claude") and route == "master-login"
     assert init_agent._launch_seconds(args) == (chain.BUDGET.launch if native else init_agent.LAUNCH_DEADLINE_S)
     assert args.route_timeout == (chain.BUDGET.route if native else 10)
@@ -1280,8 +1280,35 @@ def test_the_channel_warning_is_answered_in_the_agents_pane(monkeypatch, seen, s
 
     calls = []
     monkeypatch.setattr(init_agent.herdr_host, "answer", lambda *args: calls.append(args) or seen)
-    assert init_agent._answer_channel_warning("w1:p2", {"K": "v"}) == said
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: 0.0)
+    launch = init_agent.LaunchDeadline(270.0)
+    assert init_agent._answer_channel_warning("w1:p2", {"K": "v"}, launch) == said
     assert calls == [("w1:p2", channel.WARNING, {"K": "v"}, init_agent.CHANNEL_WARNING_MS)]
+
+
+@pytest.mark.parametrize(("ends", "ms"), [(35.5, 25500), (10.0, 0), (7.0, 0)])
+def test_the_channel_warning_wait_ends_with_the_launch_deadline(monkeypatch, ends, ms):
+    calls = []
+    monkeypatch.setattr(init_agent.herdr_host, "answer", lambda *args: calls.append(args[3]) or False)
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: 10.0)
+    launch = init_agent.LaunchDeadline(270.0)
+    launch.ends = ends
+    assert init_agent._answer_channel_warning("w1:p2", {}, launch) == "unseen"
+    assert calls == [ms]
+
+
+def test_the_start_wait_ends_with_the_launch_deadline(tmp_path, monkeypatch, capsys):
+    now = [0.0]
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("claude", "explicit"))
+    monkeypatch.setattr(init_agent.claude_trust, "ensure_trusted", lambda *a: ("trusted", ""))
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(init_agent.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(init_agent.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    monkeypatch.setattr(init_agent, "_start_herdr", lambda *a: [])
+    argv = ["--host", "herdr", "--agent", "claude", "--dir", str(tmp_path), "--start-timeout", "30"]
+    argv += ["--launch-until", "1004000"]
+    assert init_agent.main(argv, {"XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 2
+    assert now[0] == 4.0
 
 
 @pytest.mark.parametrize(

@@ -1,8 +1,7 @@
-import json
 from collections.abc import Callable, Iterable
 from uuid import uuid4
 
-from scripts.swarm import lease
+from scripts.swarm import fencing, lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.herdr.upkeep import Attempt, Upkeep
 from scripts.swarm_v2.kubernetes.terminal import HostKeys
@@ -155,7 +154,7 @@ class Controller:
         for pod in plan.delete:
             self._delete_orphan(pod)
         self._authority()
-        self.store.redis.hset(self.store.key(self.slug, "controller-orphans"), mapping=plan.counts())
+        lease.fenced(self.store, self.slug, self.held, lambda doc: doc["orphans"].update(plan.counts()))
         return plan
 
     def _delete_orphan(self, pod: Pod) -> None:
@@ -213,15 +212,15 @@ class Controller:
 
     def intents(self) -> list[dict]:
         self._authorize()
-        return [json.loads(raw) for raw in self.store.redis.hvals(self.store.key(self.slug, "controller-intents"))]
+        return list(fencing.read(self.store, self.slug)["intents"].values())
 
     def controller_leader_changes_total(self) -> int:
         self._authorize()
-        return int(self.store.redis.get(self.store.key(self.slug, "controller-leader-changes")) or 0)
+        return fencing.read(self.store, self.slug)["leader_changes"]
 
     def controller_orphans_by_class(self) -> dict[str, int]:
         self._authorize()
-        counts = self.store.redis.hgetall(self.store.key(self.slug, "controller-orphans"))
+        counts = fencing.read(self.store, self.slug)["orphans"]
         return {name: int(counts.get(name, 0)) for name in CLASSES}
 
     def spawn_refusals(self) -> dict[str, dict]:

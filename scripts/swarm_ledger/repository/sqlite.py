@@ -3,8 +3,11 @@ import re
 import secrets
 import sqlite3
 import threading
-from contextlib import contextmanager, suppress
+import weakref
+from collections.abc import Callable
+from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
@@ -387,6 +390,17 @@ class Snapshot:
         return None if row is None else row[0]
 
 
+def release_reader(held: dict, connection: sqlite3.Connection) -> None:
+    held.pop(connection, None)
+    connection.close()
+
+
+def close_all(held: dict) -> None:
+    """Close a released store's held reader connections."""
+    for closing in list(held.values()):
+        closing()
+
+
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
@@ -401,6 +415,8 @@ class SQLiteLedgerRepository:
         self._loads = {}
         self._guard = threading.Lock()
         self._readers = threading.local()
+        self._held = {}
+        weakref.finalize(self, close_all, self._held)
 
     @property
     def domain(self):
@@ -435,10 +451,10 @@ class SQLiteLedgerRepository:
         finally:
             connection.close()
 
-    def _open(self) -> tuple:
+    def _open(self, **options) -> tuple:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(path, timeout=30)
+        connection = sqlite3.connect(path, timeout=30, **options)
         try:
             connection.execute("PRAGMA foreign_keys=ON")
             if path not in self._ready:
@@ -449,13 +465,15 @@ class SQLiteLedgerRepository:
             raise
         return path, connection
 
-    @contextmanager
     def _reader(self):
         held = getattr(self._readers, "held", None)
         if held is None or held[0] != self.path:
-            held = self._readers.held = self._open()
+            if held is not None:
+                self._held[held[1]]()
+            held = self._readers.held = self._open(check_same_thread=False)
+            self._held[held[1]] = weakref.finalize(threading.current_thread(), release_reader, self._held, held[1])
         held[1].set_trace_callback(self.trace)
-        yield held[1]
+        return nullcontext(held[1])
 
     def _set_up(self, connection, path: Path) -> None:
         with self._guard:
@@ -482,7 +500,7 @@ class SQLiteLedgerRepository:
             return cached
         with self._guard:
             loading = self._loads.setdefault(self._key(slug), threading.Lock())
-        with loading:
+        with request_metrics.locked(loading):
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
@@ -573,9 +591,12 @@ class SQLiteLedgerRepository:
                     heap.release()
         return entry.views[view]
 
-    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
-        """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
-        change after generation since, else view(fragments) of the stored ledger, built as encoded_view builds."""
+    def export_since(
+        self, slug: str, since: int, view: Callable[..., Any], changes: Callable[..., Any], parts: tuple[str, ...] = ()
+    ) -> tuple[int, str | bytes]:
+        """(generation, text) of the stored ledger: changes(state, paths, parts) when the database recorded every
+        row change after generation since, else view(fragments, parts) of the stored ledger, built once per part
+        set as encoded_view builds."""
         self._adopt(slug)
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
@@ -585,15 +606,16 @@ class SQLiteLedgerRepository:
                 if 0 < since <= entry.generation
                 else None
             )
-        text = None if paths is None else changes(entry.state, paths)
+        text = None if paths is None else changes(entry.state, paths, parts)
         if text is not None:
             return entry.generation, text
-        if view not in entry.views:
+        key = (view, parts)
+        if key not in entry.views:
             with VIEW_BUILD:
-                if view not in entry.views:
-                    entry.views[view] = view(entry.fragments)
+                if key not in entry.views:
+                    entry.views[key] = view(entry.fragments, parts)
                     heap.release()
-        return entry.generation, entry.views[view]
+        return entry.generation, entry.views[key]
 
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
@@ -645,9 +667,9 @@ class SQLiteLedgerRepository:
         from . import mutation
 
         self._adopt(slug)
-        with request_metrics.locked(self.domain.LOCK), self.connect() as connection:
+        with request_metrics.locked(self.domain.LOCK.ledger(slug)), self.connect() as connection:
             with connection:
-                request_metrics.begin(connection, BEGIN_IMMEDIATE)
+                request_metrics.begin_ledger(connection, slug, BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
                 state = entry.for_write()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
@@ -657,7 +679,7 @@ class SQLiteLedgerRepository:
             self._remember(slug, written)
         return (written.mutable() if copy_state else written.state), rejected
 
-    def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         meta, previous = state["_meta"], entry.state["_meta"]
         meta["task_revision"] = (
             meta["rev"]
@@ -766,14 +788,6 @@ class SQLiteLedgerRepository:
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
             return hierarchy.read(connection, slug, read, node)
-
-    def events_since(self, slug: str, revision: int) -> list:
-        self._adopt(slug)
-        with self.connect() as connection:
-            connection.execute(BEGIN)
-            if connection.execute(STORED, (slug,)).fetchone() is None:
-                raise Missing(slug)
-            return read_events(connection, slug, revision)
 
     def summaries(self, connection=None) -> list:
         """Every stored ledger's summary with its bin facts, newest write first."""

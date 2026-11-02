@@ -6,38 +6,16 @@ Invokes Lambda functions with JSON payloads, supporting both synchronous
 
 Environment Variables:
     LAMBDA_FUNCTION_NAME: Lambda function ARN or name (required)
-    LAMBDA_INVOCATION_TYPE: InvocationType (default: RequestResponse)
-                            - RequestResponse: Synchronous, wait for response
-                            - Event: Asynchronous, fire and forget
+    LAMBDA_INVOCATION_TYPE: RequestResponse waits for the response (default),
+                            Event fires and forgets
     AWS_REGION: AWS region (optional, uses default chain)
     IS_EVALUATION: Skip invocation in evaluation mode (default: false)
 
 Usage:
-    # Python import
-    from hooks.integrations.lambda_invoke import invoke
-
-    # Synchronous invocation
-    result = invoke({"event": "completion", "status": "success"})
-
-    # Asynchronous invocation
-    result = invoke({"session_id": "uuid-123"}, async_invoke=True)
-
-    # With state enrichment
-    result = invoke(
-        {"session_id": "uuid-123", "transcript_path": "/path"},
-        enrich_from_state=True
-    )
-
-    # CLI - Check configuration
-    /app/hooks/integrations/lambda_invoke.py check [--json]
-
-    # CLI - As hook (reads from stdin)
-    /app/hooks/integrations/lambda_invoke.py hook < stop_event.json
-    /app/hooks/integrations/lambda_invoke.py hook --demo
-
-    # CLI - Direct invocation
-    /app/hooks/integrations/lambda_invoke.py invoke '{"key": "value"}'
-    /app/hooks/integrations/lambda_invoke.py invoke '{"key": "value"}' --async
+    invoke({"session_id": "uuid-123"}, async_invoke=True, enrich_from_state=True)
+    lambda_invoke.py check [--json]
+    lambda_invoke.py hook [--demo] < stop_event.json
+    lambda_invoke.py invoke '{"key": "value"}' [--async]
 """
 
 import json
@@ -47,9 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# Add parent directories to path for direct script execution
 _script_dir = Path(__file__).resolve().parent
-_app_dir = _script_dir.parent.parent  # /app
+_app_dir = _script_dir.parent.parent
 if str(_app_dir) not in sys.path:
     sys.path.insert(0, str(_app_dir))
 
@@ -62,10 +39,6 @@ except ImportError:
 
 from hooks.common import get_correlation_id, log
 from hooks.integrations.base import IntegrationBase, IntegrationRegistry
-
-# =============================================================================
-# INTEGRATION DEFINITION
-# =============================================================================
 
 
 @IntegrationRegistry.register
@@ -83,16 +56,7 @@ class LambdaIntegration(IntegrationBase):
     }
 
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
 DEFAULT_STATE_FILE = Path.home() / "conversation_map.json"
-
-
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
 
 
 @dataclass
@@ -107,13 +71,10 @@ class LambdaResult:
     error: Optional[str] = None
 
 
-# =============================================================================
-# STATE MANAGEMENT
-# =============================================================================
-
-
 def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, Any]:
     """Load state data for a session from conversation_map.json.
+
+    A legacy state stored as a plain string is converted to a dict.
 
     Uses correlation ID (external UUID) for lookup since the API stores state
     under the external UUID, which may differ from Claude's session ID.
@@ -131,13 +92,11 @@ def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, 
         if not state_path.exists():
             return {}
 
-        # Use correlation ID (external UUID) for lookup
         correlation_id = get_correlation_id(session_id)
 
         mappings = json.loads(state_path.read_text())
         state = mappings.get(correlation_id, {})
 
-        # Handle legacy format (string only) - convert to dict
         if isinstance(state, str):
             return {"conversation_id": state, "wait": False}
 
@@ -146,11 +105,6 @@ def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, 
     except Exception as e:
         log("Failed to load state", {"session_id": session_id, "error": str(e)})
         return {}
-
-
-# =============================================================================
-# LAMBDA CLIENT
-# =============================================================================
 
 
 class LambdaClient:
@@ -179,7 +133,6 @@ class LambdaClient:
         self._state_file = state_file or DEFAULT_STATE_FILE
         self._lambda_client = None
 
-        # Check if we should skip (evaluation mode)
         self._is_evaluation = os.getenv("IS_EVALUATION", "false").lower() == "true"
 
     @classmethod
@@ -216,7 +169,6 @@ class LambdaClient:
 
     def should_skip(self) -> bool:
         """Check if invocation should be skipped."""
-        # Skip if no function name configured
         if not self._function_name:
             log(
                 "Lambda invoke skipped: LAMBDA_FUNCTION_NAME not configured",
@@ -224,7 +176,6 @@ class LambdaClient:
             )
             return True
 
-        # Skip if evaluation mode
         if self._skip_evaluation and self._is_evaluation:
             log(
                 "Lambda invoke skipped: IS_EVALUATION=true",
@@ -242,6 +193,13 @@ class LambdaClient:
     ) -> LambdaResult:
         """Invoke a Lambda function with the given payload.
 
+        State fields fill gaps in the payload and payload keys win. A state with
+        wait true skips the call, because the caller takes a synchronous
+        response. Status 200 or 202 is success; a FunctionError in a sync
+        response makes the call a failure carrying the function's error.
+        Failures are logged and returned, never raised, because hooks must never
+        crash the parent process.
+
         Args:
             payload: Event data to send to Lambda
             async_invoke: If True, use Event invocation type (fire and forget)
@@ -251,7 +209,6 @@ class LambdaClient:
         Returns:
             LambdaResult with success status and response info
         """
-        # Check if we should skip invocation
         if self.should_skip():
             return LambdaResult(
                 success=True,
@@ -259,14 +216,12 @@ class LambdaClient:
             )
 
         try:
-            # Enrich with state if requested
             enriched_payload = payload.copy()
 
             if enrich_from_state and "session_id" in payload:
                 session_id = payload["session_id"]
                 state = load_state(session_id, self._state_file)
 
-                # Check if wait=true (skip Lambda for synchronous responses)
                 if state.get("wait", False):
                     log(
                         "Skipping Lambda invoke",
@@ -280,7 +235,6 @@ class LambdaClient:
                         function_name=self._function_name,
                     )
 
-                # Merge state into payload (payload overrides state)
                 enriched_payload = {**state, **payload}
 
                 log(
@@ -291,7 +245,6 @@ class LambdaClient:
                     },
                 )
 
-            # Determine invocation type
             invocation_type = "Event" if async_invoke else self._invocation_type
 
             log(
@@ -303,7 +256,6 @@ class LambdaClient:
                 },
             )
 
-            # Invoke Lambda
             response = self.lambda_client.invoke(
                 FunctionName=self._function_name,
                 InvocationType=invocation_type,
@@ -311,9 +263,8 @@ class LambdaClient:
             )
 
             status_code = response.get("StatusCode", 0)
-            success = status_code in (200, 202)  # 200 for sync, 202 for async
+            success = status_code in (200, 202)
 
-            # Parse response payload for sync invocations
             response_payload = None
             error = None
 
@@ -322,10 +273,9 @@ class LambdaClient:
                 if response_data:
                     try:
                         response_payload = json.loads(response_data.read())
-                    except Exception:  # NOSONAR — hooks must never crash the parent process
+                    except Exception:  # NOSONAR
                         pass
 
-                # Check for function error
                 if "FunctionError" in response:
                     success = False
                     error = response.get("FunctionError")
@@ -352,7 +302,6 @@ class LambdaClient:
             )
 
         except Exception as e:
-            # Silent failure - log but don't raise
             error_msg = str(e)
             log(
                 "Lambda invoke failed",
@@ -367,11 +316,6 @@ class LambdaClient:
                 function_name=self._function_name,
                 error=error_msg,
             )
-
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
 
 
 def invoke(
@@ -413,11 +357,6 @@ def invoke(
     return client.invoke(payload, async_invoke=async_invoke, enrich_from_state=enrich_from_state)
 
 
-# =============================================================================
-# TRANSCRIPT HELPER
-# =============================================================================
-
-
 def get_last_assistant_response(transcript_path: str) -> Optional[str]:
     """Extract the last assistant response from transcript JSONL."""
     try:
@@ -443,13 +382,12 @@ def get_last_assistant_response(transcript_path: str) -> Optional[str]:
         return None
 
 
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
-
-
 def main():
-    """CLI entry point for Lambda operations."""
+    """CLI entry point for Lambda operations.
+
+    Hook mode prints a missing configuration warning to stdout, where Claude Code
+    shows it, and exits 0 on any failure, so a hook never breaks Claude Code.
+    """
     if len(sys.argv) < 2:
         print("Usage: /app/hooks/integrations/lambda_invoke.py <command> [args]")
         print("")
@@ -487,49 +425,41 @@ def main():
     command = sys.argv[1]
 
     if command == "check":
-        # Check configuration status
         integration = LambdaIntegration()
         as_json = "--json" in sys.argv
         integration.print_status(as_json=as_json)
         sys.exit(0 if integration.is_configured else 1)
 
     elif command == "hook":
-        # Hook mode: Read from stdin, invoke Lambda
         try:
-            # Check for demo flag (testing mode)
             if "--demo" in sys.argv:
                 log("[DEMO] Lambda hook triggered - Lambda integration ready")
                 sys.exit(0)
 
-            # Early validation - fail loudly if not configured
             integration = LambdaIntegration()
             if not integration.is_configured:
                 missing = integration.get_missing_required()
                 error_msg = f"Lambda hook SKIPPED - missing env vars: {missing}"
                 log(error_msg, {"integration": "lambda", "missing": missing})
-                # Print to STDOUT so Claude Code shows it
                 print(f"\n{'=' * 60}")
                 print(f"[LAMBDA] ERROR: {error_msg}")
                 print(f"{'=' * 60}\n")
-                sys.exit(0)  # Exit cleanly but warn
+                sys.exit(0)
 
             payload = json.load(sys.stdin)
 
-            # Extract last assistant response from transcript
             transcript_path = payload.get("transcript_path", "")
             if transcript_path:
                 last_response = get_last_assistant_response(transcript_path)
                 if last_response:
                     payload["last_response"] = last_response
 
-            # Add integration identifier
             payload["integration"] = "lambda"
 
-            # Invoke with state enrichment (async by default for hooks)
             invoke(payload, async_invoke=True, enrich_from_state=True)
             sys.exit(0)
         except Exception:
-            sys.exit(0)  # Silent failure for hooks
+            sys.exit(0)
 
     elif command == "invoke":
         if len(sys.argv) < 3:

@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from scripts.swarm_ledger import ledger_closed, ports
@@ -61,6 +62,8 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
     query = pagination(handler.path)
     if ("state" in query or "offset" in query or "q" in query) and path not in ledger_closed.COLLECTIONS:
         raise APIError(400, "schema_invalid", resources.DONE_ONLY)
+    if "targets" in query and (path != "tasks" or query.keys() & {"state", "offset", "q", "cursor", "limit"}):
+        raise APIError(400, "schema_invalid", "Only a plain tasks read takes targets")
     if path == "events" and handler.headers.get("Accept") == "text/event-stream":
         return events(handler, services, slug)
     if path == "swarm/models":
@@ -201,7 +204,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if path in ("export", "swarm/export"):
         return export(handler, services, slug, path, payload)
     if path == "operations":
-        return mutations.apply(services, slug, principal, payload)
+        return mutations.apply(services, slug, principal, payload, mutations.writer(handler.headers))
     if path == "architecture/actions":
         from . import architecture
 
@@ -212,10 +215,11 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
-def export(handler: object, services: Services, slug: str, path: str, payload: dict) -> dict | None:
+def export(handler: object, services: Services, slug: str, path: str, payload: dict[str, Any]) -> dict | None:
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
-        generation, body = services.repository.export_since(slug, payload["since"], export_text, export_changes)
+        parts = tuple(sorted(payload.get("parts", ())))
+        generation, body = services.repository.export_since(slug, payload["since"], export_text, export_changes, parts)
         body = body if isinstance(body, bytes) else body.encode()
         return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
     schemas.validate({"type": "object", "maxProperties": 0}, payload)
@@ -229,7 +233,15 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
 
 SINCE_SCHEMA = {
     "type": "object",
-    "properties": {"since": {"type": "integer", "minimum": 0}},
+    "properties": {
+        "since": {"type": "integer", "minimum": 0},
+        "parts": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": True,
+            "items": {"enum": ["tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview"]},
+        },
+    },
     "required": ["since"],
     "additionalProperties": False,
 }
@@ -237,16 +249,18 @@ HIDDEN_META = ("seeds", "api_operations")
 HIDDEN_PATHS = [[key] for key in HIDDEN_META]
 
 
-def export_text(fragments: Fragment) -> bytes:
+def export_text(fragments: Fragment, parts: tuple[str, ...] = ()) -> bytes:
+    """The export of the stored ledger, only its top level parts named in parts when there are any."""
     meta = members({key: part for key, part in fragments.parts["_meta"].parts.items() if key not in HIDDEN_META})
     body = b",".join(
         encode(key).encode() + b":" + (meta if key == "_meta" else exported(part))
         for key, part in fragments.parts.items()
+        if not parts or key in parts
     )
     return b'{"data":{' + body + b"}}"
 
 
-def change_unit(path: str) -> tuple | None:
+def change_unit(path: str) -> tuple[str, ...] | None:
     parts = json.loads(path)
     if parts[:1] != ["_meta"]:
         return tuple(encode(part) for part in parts[:2])
@@ -259,11 +273,14 @@ def identities(items: list) -> list:
     return [encode(parts[-1]) for _, parts, *_ in children(items, [], None)]
 
 
-def export_changes(state: dict, paths: set) -> str | None:
+def export_changes(state: dict[str, Any], paths: set[str], parts: tuple[str, ...] = ()) -> str | None:
     """The export items whose rows changed: dictionary entries set or dropped, and for each list holding a
-    changed item its item identities in order with every changed item."""
+    changed item its item identities in order with every changed item; only the top level parts named in
+    parts when there are any."""
     view = {**state, "_meta": {key: item for key, item in state["_meta"].items() if key not in HIDDEN_META}}
     units = {unit for unit in map(change_unit, paths) if unit is not None} | {(encode("_meta"), encode("events"))}
+    named = {encode(part) for part in parts}
+    units = {unit for unit in units if not named or not unit or unit[0] in named}
     if () in units:
         return None
     kept = [unit for unit in units if not any(unit[:depth] in units for depth in range(1, len(unit)))]

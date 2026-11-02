@@ -289,6 +289,59 @@ def test_the_health_detector_judges_only_what_the_current_health_pass_reports(mo
     assert seen[-1] == (store, "bare", "config of bare", [], [])
 
 
+@pytest.mark.parametrize("at", [1000, 301000])
+def test_health_reuses_fresh_published_findings_without_recomputing(monkeypatch, at):
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(
+        store.key("s", "published"), json.dumps({"status": {"last_tick": 1000, "findings": [{"id": "current"}]}})
+    )
+    monkeypatch.setattr(detect.status, "now_ms", lambda: at)
+    assert detect.reported(store, object(), "s") == {"current"}
+    store.redis.set(store.key("s", "published"), json.dumps({"status": {"last_tick": 1000, "findings": []}}))
+    assert detect.reported(store, object(), "s") == set()
+
+
+def test_health_recomputes_when_the_published_findings_are_stale(monkeypatch):
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(
+        store.key("s", "published"), json.dumps({"status": {"last_tick": 1000, "findings": [{"id": "stale"}]}})
+    )
+    monkeypatch.setattr(detect.status, "now_ms", lambda: 301001)
+    ledger = type("Ledger", (), {"state": lambda self, slug: {}})()
+    monkeypatch.setattr(store, "config", lambda slug: None)
+    monkeypatch.setattr(detect.status, "findings", lambda *args: [{"id": "current"}])
+    assert detect.reported(store, ledger, "s") == {"current"}
+
+
+@pytest.mark.parametrize("at, expected", [(0, {"published"}), (300001, {"live"})])
+def test_health_without_a_published_tick_uses_the_epoch(monkeypatch, at, expected):
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(store.key("s", "published"), json.dumps({"status": {"findings": [{"id": "published"}]}}))
+    monkeypatch.setattr(detect.status, "now_ms", lambda: at)
+    ledger = type("Ledger", (), {"state": lambda self, slug: {}})()
+    monkeypatch.setattr(store, "config", lambda slug: None)
+    monkeypatch.setattr(detect.status, "findings", lambda *args: [{"id": "live"}])
+    assert detect.reported(store, ledger, "s") == expected
+
+
 def _canonical(call):
     import json
 

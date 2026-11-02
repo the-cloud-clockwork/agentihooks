@@ -335,7 +335,8 @@ def _state(
 ) -> tuple[str, float | None]:
     if provider_status == "rejected":
         return "BLOCKED", 0.0
-    windows = [five_hour, seven_day, *([fable] if fable is not None else [])]
+    reported = [five_hour] if five_hour.used is not None else []
+    windows = [*reported, seven_day, *([fable] if fable is not None else [])]
     usages = [window.used for window in windows if window.used is not None]
     if len(usages) != len(windows):
         return "UNKNOWN", None
@@ -797,7 +798,9 @@ def select_credential(
     timestamp = time.time() if now is None else now
     api, weight = _api_side(active_env, live, excluded, timestamp)
     if not credentials and not api:
-        raise RoutingError(f"no non-empty {TOKEN_PREFIX}* variables found")
+        raise RoutingError(
+            "; ".join([f"no non-empty {TOKEN_PREFIX}* variables found", *_closed(active_env, live, timestamp)])
+        )
     options = {
         "include_fable": include_fable,
         "refresh": refresh,
@@ -819,7 +822,8 @@ def select_credential(
         seat = session_bands.pick(other for other in seats if other.account not in reserve) or seat
     if seat is None:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
-        raise RoutingError(f"no Claude account has a free session under its quota band{outside}", results)
+        no_seat = f"no Claude account has a free session under its quota band{outside}"
+        raise RoutingError("; ".join([no_seat, *_closed(active_env, live, timestamp)]), results)
     if seat.kind == API:
         return RouteDecision(None, None, source, seat.sessions, seat.cap, kind=API)
     by_account = {credential.account: credential for credential in credentials}
@@ -855,6 +859,10 @@ def _api_side(
     if API_ACCOUNT in excluded:
         return [], 0
     return place.api_side(claude_api.ClaudeApiSource(sessions), HARNESS, environ, now)
+
+
+def _closed(environ: Mapping[str, str], sessions: Mapping[str, int], now: float) -> list[str]:
+    return place.closure(claude_api.ClaudeApiSource(sessions), HARNESS, environ, now)
 
 
 def forced(environ: Mapping[str, str], route: str) -> RouteDecision:

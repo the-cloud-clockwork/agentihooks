@@ -97,9 +97,15 @@ def test_each_registry_write_holds_the_lock_of_its_own_swarm(store, monkeypatch,
             entered.set()
             assert release.wait(5)
 
-    monkeypatch.setattr(execution.ExecutionRegistry, f"_{operation}", held)
+    probe = "_update" if operation == "put" else f"_{operation}"
+    monkeypatch.setattr(execution.ExecutionRegistry, probe, held)
     write = getattr(store.execution_registry, operation)
-    extra = ("record", "previous") if operation in ("start", "set_pane") else ("record",)
+    if operation == "put":
+        extra = (AgentRecord("probe", "eng", "task", seat="eng-1@fixture", started_at=123, execution_id="exe-probe"),)
+    elif operation in ("start", "set_pane"):
+        extra = ("record", "previous")
+    else:
+        extra = ("record",)
     first = threading.Thread(target=write, args=("fixture", *extra))
     second = threading.Thread(target=write, args=(slug, *extra))
     first.start()

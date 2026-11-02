@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm import live_binding
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 
 EVENTS = (
     "SessionStart",
@@ -134,6 +134,31 @@ def test_missing_process_is_a_named_failure(mounted):
     agent, proc, _ = mounted
     assert live_binding.read(agent, 99, proc) == {"process": False}
     assert live_binding.compare(agent, {"process": False}) == {"process": {"expected": True, "actual": False}}
+
+
+@pytest.mark.parametrize(
+    ("expected", "observed", "differs"),
+    [
+        ("claude-opus-4-6", "opus", False),
+        ("opus", "claude-opus-4-6", False),
+        ("claude-opus-4-6", "claude-opus-4-6", False),
+        ("claude-opus-4-6[1m]", "opus[1m]", False),
+        ("opus[1m]", "claude-opus-4-6", False),
+        ("claude-opus-4-5", "claude-opus-4-6", True),
+        ("claude-opus-4-6", "sonnet", True),
+        ("sonnet", "claude-opus-4-6", True),
+    ],
+)
+def test_a_launch_alias_matches_the_full_model_id_both_ways(
+    mounted: tuple[AgentRecord, Path, Path], expected: str, observed: str, differs: bool
+) -> None:
+    agent, proc, _ = mounted
+    assigned = replace(
+        agent, profile_decision={"validation": {**agent.profile_decision["validation"], "model": expected}}
+    )
+    facts = {**live_binding.read(agent, 42, proc), "model": observed}
+    differences = live_binding.compare(assigned, facts)
+    assert differences == ({"model": {"expected": expected, "actual": observed}} if differs else {})
 
 
 def test_model_and_effort_require_native_flags(mounted):
@@ -1349,3 +1374,109 @@ def test_a_kept_master_does_not_skip_later_agents(ticking):
     }
     tick("sw", store, ledger, runtime, 200)
     assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), later.name))["at"] == 200
+
+
+HIVE_HOME = "/home/worker/.agentihooks/profiles/.homes/engineer/abc/claude"
+
+
+def _hosted(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: bool = True
+) -> AgentRecord:
+    from scripts.hive import join_report
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    hosted = store.start_execution(
+        "sw",
+        replace(
+            agent,
+            profile="engineer",
+            harness="claude",
+            hive="stable",
+            runtime_target={"host_id": "stable"},
+            profile_decision={},
+        ),
+        "",
+    )
+    if report:
+        checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
+        context = {"home": HIVE_HOME, "profile": "engineer", "harness": "claude"}
+        join_report.start(store.redis, "sw", hosted, "session", checks, context, 150)
+    return hosted
+
+
+def _hive_facts(agent: AgentRecord) -> dict:
+    return {**live_binding.assignment(agent), "home": HIVE_HOME, "hooks": True}
+
+
+def test_hosted_agent_takes_the_home_its_hive_join_report_names(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    hosted = _hosted(store, old, monkeypatch, tmp_path)
+    assert live_binding.assignment(hosted)["home"] == str(
+        tmp_path / ".agentihooks" / "profiles" / "engineer" / "claude"
+    )
+    filled = live_binding.hosted_home(store, hosted)
+    assert filled.profile_decision == {"validation": {"home": HIVE_HOME}}
+    assert live_binding.assignment(filled)["home"] == HIVE_HOME
+    assert live_binding.hosted_home(store, filled) == filled
+    runtime.bindings = lambda agents: {a.name: _hive_facts(a) for a in agents}
+    tick("sw", store, ledger, runtime, 200)
+    assert hosted.name not in runtime.killed
+    kept = next(a for a in store.agents("sw") if a.name == hosted.name)
+    assert kept.profile_decision["validation"]["home"] == HIVE_HOME
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), hosted.name))
+    assert (report["state"], report["differences"]) == ("matching", {})
+
+
+def test_hosted_home_keeps_a_validated_home_and_other_validation_fields(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    hosted = _hosted(store, next(a for a in store.agents("sw") if a.lane == "eng"), monkeypatch, tmp_path)
+    validated = replace(hosted, profile_decision={"validation": {"home": "/validated/claude", "pid": 7}})
+    assert live_binding.hosted_home(store, validated) == validated
+    partial = replace(hosted, profile_decision={"validation": {"pid": 7}})
+    assert live_binding.hosted_home(store, partial).profile_decision == {"validation": {"pid": 7, "home": HIVE_HOME}}
+
+
+def test_hosted_agent_without_a_join_report_is_never_retired_on_its_home(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    hosted = _hosted(store, old, monkeypatch, tmp_path, report=False)
+    assert live_binding.hosted_home(store, hosted) == hosted
+    assert live_binding.compare(hosted, _hive_facts(hosted)) == {}
+    runtime.bindings = lambda agents: {a.name: _hive_facts(a) for a in agents}
+    tick("sw", store, ledger, runtime, 200)
+    assert hosted.name not in runtime.killed
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), hosted.name))
+    assert (report["state"], report["differences"]) == ("matching", {})
+
+
+def test_local_agent_without_validation_still_expects_the_profile_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    agent = AgentRecord("old", "eng", "one", harness="claude", profile="engineer", runtime_backend="local")
+    facts = {**live_binding.assignment(agent), "home": HIVE_HOME, "hooks": True}
+    assert live_binding.compare(agent, facts) == {
+        "home": {"expected": str(tmp_path / ".agentihooks" / "profiles" / "engineer" / "claude"), "actual": HIVE_HOME}
+    }
+    assert live_binding.unknown(agent, facts) == []

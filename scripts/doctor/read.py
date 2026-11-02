@@ -192,8 +192,12 @@ def handoffs(store, inbox, home, slug, items=None):
     waiting = ":".join((PREFIX, slug, "handoff", ""))
     for key in sorted(store.redis.scan_iter(match=waiting + "*", count=BATCH)):
         task = key[len(waiting) :]
-        seat = store.handoff_seat(slug, task)
-        author = (store.handoff_envelope(slug, task) or {}).get("agent", "")
-        handoff = {"seat": seat, "task": task, "from": author, "to": "", "at": 0, "document": store.handoff(slug, task)}
+        document, seat, raw = store.redis.mget(
+            [key, store.key(slug, "handoff-seat", task), store.key(slug, "handoff-envelope", task)]
+        )
+        if not document:
+            continue
+        author = (json.loads(raw) if raw else {}).get("agent", "")
+        handoff = {"seat": seat or "", "task": task, "from": author, "to": "", "at": 0, "document": document}
         found.append(_record(store, handoff, sent))
     return found

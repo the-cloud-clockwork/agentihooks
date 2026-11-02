@@ -15,6 +15,7 @@ def overview(request, monkeypatch):
 
 
 @pytest.mark.parametrize("overview", [words(300)], indirect=True, ids=["300 words"])
+@pytest.mark.feature("ledger-overview")
 def test_a_long_overview_shows_its_first_two_hundred_words_and_an_ellipsis(overview, page):  # noqa: F811
     tab, _ = page
     assert tab.locator("#overview").text_content() == words(200) + "…"
@@ -30,6 +31,7 @@ def test_an_overview_under_two_hundred_words_shows_unchanged(overview, page):  #
     assert tab.locator("#overview").text_content() == overview
 
 
+@pytest.mark.feature("ledger-overview")
 def test_the_pen_edits_the_overview_and_saves_it_with_ctrl_enter(page):  # noqa: F811
     tab, sent = page
     assert tab.locator("#overview-form").is_hidden()

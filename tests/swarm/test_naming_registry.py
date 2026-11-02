@@ -1,6 +1,7 @@
 import pytest
 
-from scripts.swarm import naming
+from scripts.events.redis_state import RedisStateStore
+from scripts.swarm import name_state, naming
 
 pytestmark = pytest.mark.unit
 
@@ -32,6 +33,9 @@ class _Aliases:
             raise self.failure
         return None
 
+    def hget(self, key, field):
+        return self.get(key)
+
 
 def test_a_registered_slug_is_absent_without_a_registry(monkeypatch):
     from hooks import _redis
@@ -47,7 +51,10 @@ def test_a_registered_slug_reads_the_alias_then_the_swarm(monkeypatch):
     monkeypatch.setattr(_redis, "get_redis", lambda: client)
     monkeypatch.setattr(naming.NameRegistry, "slug_of", lambda self, name: f"{name} in demo")
     assert naming.registered_slug("master@abcdef-0001") == "master@abcdef-0001 in demo"
-    assert client.reads == [naming.NameRegistry.key("alias", "master@abcdef-0001")]
+    assert client.reads == [
+        RedisStateStore(client, name_state.BUCKET).watch_key,
+        naming.NameRegistry.key("alias", "master@abcdef-0001"),
+    ]
 
 
 def test_a_registered_slug_raises_a_failed_alias_read(monkeypatch):

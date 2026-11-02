@@ -60,7 +60,7 @@ def test_publish_preserves_stream_and_counts_its_exact_wire_header():
 def test_requests_and_replies_report_the_refused_subject_before_sending():
     opened = object.__new__(nats.NatsBus)
     opened._loop = SimpleNamespace(run=asyncio.run)
-    opened._nc = SimpleNamespace(max_payload=10, subscribe=AsyncMock(), request=AsyncMock())
+    opened._nc = SimpleNamespace(max_payload=10, subscribe=AsyncMock(), flush=AsyncMock(), request=AsyncMock())
     with pytest.raises(ValueError, match="request.subject: payload 11 exceeds server limit 10"):
         opened.request("request.subject", b"x" * 11, 100)
     opened._nc.request.assert_not_awaited()
@@ -70,6 +70,18 @@ def test_requests_and_replies_report_the_refused_subject_before_sending():
     with pytest.raises(ValueError, match="reply.subject: payload 11 exceeds server limit 10"):
         asyncio.run(callback(message))
     message.respond.assert_not_awaited()
+
+
+def test_serve_returns_only_after_the_server_holds_the_subscription():
+    calls = []
+    opened = object.__new__(nats.NatsBus)
+    opened._loop = SimpleNamespace(run=asyncio.run)
+    opened._nc = SimpleNamespace(
+        subscribe=AsyncMock(side_effect=lambda *args, **kwargs: calls.append("subscribe")),
+        flush=AsyncMock(side_effect=lambda *args, **kwargs: calls.append("flush")),
+    )
+    opened.serve("service", "workers", lambda subject, data: b"")
+    assert calls == ["subscribe", "flush"]
 
 
 def test_scoped_page_write_refusal_and_missing_page_are_reported():

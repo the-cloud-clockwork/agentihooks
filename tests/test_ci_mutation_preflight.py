@@ -212,7 +212,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
         "fail-fast": False,
         "matrix": {"part": "${{ fromJSON(needs.plan.outputs.stats_parts) }}"},
     }
-    assert jobs["mutation-shard"]["needs"] == ["plan", "stats", "refine"]
+    assert jobs["mutation-shard"]["needs"] == ["plan", "stats", "refine", "probe"]
     assert jobs["mutation-shard"]["strategy"] == {
         "fail-fast": False,
         "matrix": {"shard": "${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}"},
@@ -220,7 +220,8 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     assert jobs["mutation-shard"]["if"] == (
         "${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0'"
         " && needs.stats.result == 'success' && (needs.refine.result == 'success'"
-        " || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]') }}"
+        " || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]')"
+        " && (needs.probe.result == 'success' || needs.probe.result == 'skipped') }}"
     )
 
 
@@ -280,10 +281,42 @@ def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
     assert "needs.refine.outputs.shards || needs.stats.outputs.shards" in shards
 
 
+def test_split_mutants_run_their_early_tests_once_before_the_shards_share_the_result():
+    jobs = _workflow()["jobs"]
+    assert jobs["refine"]["outputs"]["probe"] == "${{ steps.refine.outputs.probe }}"
+    probe = jobs["probe"]
+    assert probe["needs"] == ["plan", "stats", "refine"]
+    assert probe["if"].endswith("&& (needs.refine.outputs.probe || needs.stats.outputs.probe) == 'true' }}")
+    assert probe["strategy"]["matrix"] == jobs["mutation-shard"]["strategy"]["matrix"]
+    steps, names = _steps(probe)
+    run = steps[names.index("Run each mutant's early tests once for every shard")]
+    assert run["run"] == (
+        'python -m scripts.ci_mutation.probe --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+        " --stats .mutation-stats"
+    )
+    assert names.index("Download the measured mutation plan") < names.index(run["name"])
+    assert steps[-1]["with"]["name"] == "mutation-probe-${{ matrix.shard }}"
+    shard = jobs["mutation-shard"]
+    assert "probe" in shard["needs"]
+    assert shard["if"].endswith("&& (needs.probe.result == 'success' || needs.probe.result == 'skipped') }}")
+    shard_steps, shard_names = _steps(shard)
+    download = shard_steps[shard_names.index("Download the early mutation results")]
+    merge = shard_steps[shard_names.index("Validate every early result and charge its elapsed time")]
+    assert download["if"] == merge["if"] == "needs.probe.result == 'success'"
+    assert download["with"] == {"pattern": "mutation-probe-*", "path": ".mutation-stats", "merge-multiple": True}
+    assert merge["run"] == "python -m scripts.ci_mutation.probe --stats .mutation-stats --merge"
+    plan = shard_names.index("Download the measured mutation plan")
+    assert plan < shard_names.index(download["name"]) < shard_names.index(merge["name"])
+    assert shard_names.index(merge["name"]) < shard_names.index("Mutate changed Python files")
+
+
 def test_a_single_stats_part_refines_inside_the_statistics_worker():
     jobs = _workflow()["jobs"]
     stats = jobs["stats"]
-    assert stats["outputs"] == {"shards": "${{ steps.refine.outputs.shards }}"}
+    assert stats["outputs"] == {
+        "shards": "${{ steps.refine.outputs.shards }}",
+        "probe": "${{ steps.refine.outputs.probe }}",
+    }
     steps, names = _steps(stats)
     refine_steps, refine_names = _steps(jobs["refine"])
     single = "strategy.job-total == 1"
@@ -539,7 +572,10 @@ def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
 def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded():
     tests = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     assert "name" not in tests["mutation"]
-    assert tests["mutation"]["strategy"]["matrix"] == {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"}
+    assert "strategy" not in tests["mutation"]
+    assert tests["mutation-shard"]["strategy"]["matrix"] == {
+        "shard": "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+    }
     assert "name" not in _workflow()["jobs"]["mutation"]
     assert "strategy" not in _workflow()["jobs"]["mutation"]
     assert "strategy" in _workflow()["jobs"]["mutation-shard"]
@@ -641,7 +677,7 @@ def test_touched_tests_keep_one_xdist_group_on_one_worker(tmp_path):
     assert len(set(workers)) == 1, (workers, output)
 
 
-@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation"])
+@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation-shard"])
 def test_protected_mutation_jobs_install_with_no_branch_lock(tmp_path, job):
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     steps, names = _steps(workflow["jobs"][job])
@@ -670,7 +706,7 @@ export -f uv
     assert "Trusted dependency lock resolved without a branch lock" in result.stdout
 
 
-@pytest.mark.parametrize("job", ["mutation-stats", "mutation"])
+@pytest.mark.parametrize("job", ["mutation-stats", "mutation-shard"])
 def test_mutation_jobs_keep_the_head_lock_when_the_head_has_one(tmp_path, job):
     steps, names = _steps(yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job])
     install = steps[names.index("Install dependencies")]["run"]

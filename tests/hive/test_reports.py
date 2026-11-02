@@ -957,9 +957,13 @@ def test_finished_removed_hive_workers_settle_after_an_absence_lease(remote, han
 
 
 @pytest.mark.parametrize("protection", ["indexed", "heartbeat", "report", "working", "local", "unreadable"])
-def test_removed_hive_retirement_requires_expired_host_evidence(remote, protection, monkeypatch):
+def test_removed_hive_retirement_requires_expired_host_evidence(
+    remote: SimpleNamespace, protection: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import asdict
+
     from scripts.hive import registry
-    from scripts.swarm import tick
+    from scripts.swarm import fencing, tick
 
     remote.agent = replace(remote.agent, state="finished")
     remote.store.put_agent("fixture", remote.agent)
@@ -974,8 +978,12 @@ def test_removed_hive_retirement_requires_expired_host_evidence(remote, protecti
     elif protection == "report":
         _publish(remote)
     elif protection == "working":
-        remote.agent = replace(remote.agent, state="working")
-        remote.store.put_agent("fixture", remote.agent)
+        working = replace(remote.agent, state="working")
+        fencing.write(
+            remote.store, "fixture", lambda doc: doc["executions"].update({working.execution_id: asdict(working)})
+        )
+        remote.store.project_agent("fixture", working, remote.agent)
+        remote.agent = working
         rows["task"] = {"state": "claimed", "claimed_by": remote.agent.name}
     elif protection == "local":
         monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
@@ -986,6 +994,23 @@ def test_removed_hive_retirement_requires_expired_host_evidence(remote, protecti
 
     assert len(remote.store.agents("fixture")) == 1
     ledger.update_task.assert_not_called()
+
+
+def test_a_hive_agent_finished_during_its_reap_stays_finished(remote, monkeypatch):
+    from scripts.swarm import tick
+
+    _publish(remote)
+    observe = remote.runtime.observe
+
+    def finish_then_observe(agent):
+        monkeypatch.setattr(remote.runtime, "observe", observe)
+        remote.store.put_agent("fixture", replace(agent, state="finished"))
+        return observe(agent)
+
+    monkeypatch.setattr(remote.runtime, "observe", finish_then_observe)
+    rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
+    tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, NOW)
+    assert [a.state for a in remote.store.agents("fixture")] == ["finished"]
 
 
 @pytest.mark.parametrize("signal", ["index", "heartbeat", "report"])

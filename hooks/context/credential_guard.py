@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 """Credential-read guard — blocks a read whose OUTPUT would be a secret value.
 
-Runs on every target (it was Claude-only when wired through the settings
-``hooks`` array, and Claude's ``permissions.deny`` is a Claude key too).
+Runs on every target. Reading IS the exposure: a value that reaches the transcript is
+published and has to be rotated, so the guard blocks the read rather than redacting the
+output. It covers what ``permissions.deny`` provably cannot: shell sourcing, environment
+dumps, interpreter reads, container/remote reads, value-rendering platform commands, and
+emitting a secret-named variable.
 
-Reading IS the exposure: a value that reaches the transcript is published and
-has to be rotated, not deleted. The guard therefore blocks the read rather than
-redacting the output. It covers what ``permissions.deny`` provably cannot:
-shell sourcing, environment dumps, interpreter reads, container/remote reads,
-value-rendering platform commands, and emitting a secret-named variable.
+Decisions are operand-aware: a sensitive path blocks only when a reader consumes it — as a
+positional operand, a ``<`` redirect target, an option value, a ``git`` revision path, or
+inside an interpreter one-liner. Naming the file (``find -name .env``) is not a read.
+A recursive search over a tree holding a credential file gets exclusions injected under
+``allow_rewrite``; otherwise the guard blocks. Shell rc names stay out of the exclusions:
+the harness reads an option value as a file operand and would trip its deny rule.
 
-Decisions are operand-aware: a sensitive path blocks only when a reader
-actually consumes it — as a positional operand, a ``<`` redirect target, an
-option value, a ``git`` revision path, or inside an interpreter one-liner.
-Naming the file (``find -name .env``, ``grep '\\.env' src.py``) is not a read.
-
-A recursive search (``grep -r``, ``rg``) over a tree that holds a credential
-file would print its lines. Under ``allow_rewrite`` the guard returns the same
-command with exclusions injected; otherwise it walks the tree and blocks when a
-credential file is present.
-
-``evaluate(payload, ...)`` returns a ``Verdict``; ``decide(payload)`` is the
-block-only view used by the standalone launcher and the test table. Both read
-``tool_name``/``tool_input``, which hooks.targets.normalizer already fills for
-codex and copilot. The module has no intra-package imports so it also runs by
+``evaluate(payload, ...)`` returns a ``Verdict``; ``decide(payload)`` is the block-only view
+used by the standalone launcher. The module has no intra-package imports so it also runs by
 file path as the bundle's second, independent PreToolUse process.
 """
 
@@ -34,8 +26,6 @@ import re
 import shlex
 import sys
 from typing import NamedTuple
-
-# --- what counts as sensitive -------------------------------------------------
 
 SAFE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".tpl")
 
@@ -56,8 +46,8 @@ CREDENTIAL_FILES = {".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass"
 KIND_DOTENV = "dotenv"
 KIND_SHELLRC = "shellrc"
 KIND_CREDENTIAL = "credential"
-KIND_ENVIRONMENT = "environment"  # a live value, not a file on disk
-KIND_RECURSIVE = "recursive"  # a tree that holds one of the above
+KIND_ENVIRONMENT = "environment"
+KIND_RECURSIVE = "recursive"
 
 
 def sensitive_kind(token):
@@ -81,7 +71,6 @@ def sensitive_kind(token):
     return None
 
 
-# One representative basename per rule in sensitive_kind, for glob matching.
 SENSITIVE_EXEMPLARS = (".env", ".env.local", "stack.env", "credentials") + tuple(SHELL_RC) + tuple(CREDENTIAL_FILES)
 
 GLOB_CHARS = re.compile(r"[*?\[]")
@@ -106,7 +95,6 @@ SHELL_WORD_BREAK = re.compile(r"[\s;|&()<>]+")
 CD_OPERAND = re.compile(r"\b(?:cd|pushd)(?:\s+-\S*)*\s+(\S+)")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
 
-# --- bash lexing --------------------------------------------------------------
 
 READER_VERBS = {
     "cat",
@@ -169,17 +157,14 @@ FIND_NAME_FLAGS = {
     "-ilname",
 }
 FIND_EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}
-# Options whose value names what to SKIP; the value is never a read.
 EXCLUSION_OPTS = re.compile(r"^--?(?:exclude|exclude-dir|exclude-from|glob|iglob|ignore|ignore-file|g)$")
 GIT_VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 ACCESS_ENV = r"(?:(?:agentihooks\s+access|-m\s+scripts\.access_env)\s+env\b|access_env\.(?:main|values)\s*\()"
 
-# grep/rg flags that emit counts or filenames rather than matching lines
 NON_CONTENT_GREP = re.compile(r"(?:^|\s)-[A-Za-z]*[clLq]")
 RECURSIVE_GREP_FLAG = re.compile(r"(?:^|\s)(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive|--dereference-recursive)(?=\s|$)")
 NO_IGNORE_FLAG = re.compile(r"(?:^|\s)(?:-[A-Za-z]*u[A-Za-z]*|--no-ignore\S*)(?=\s|$)")
 
-# A sensitive path can hide inside a larger token — python3 -c "open('.env')".
 SENSITIVE_FRAGMENT = re.compile(
     r"[\w./~-]*(?:"
     r"\.env(?:\.[\w-]+)*"
@@ -288,18 +273,11 @@ def verb_of(tokens):
     return tokens[i].split("/")[-1] if i < len(tokens) else ""
 
 
-# --- message construction -----------------------------------------------------
-
 PREAMBLE = (
     "A value read here enters the transcript, which is indexed and permanent — "
     "an exposed credential has to be rotated, not deleted."
 )
 
-# Shell rc basenames stay OUT of the injected exclusions. The harness parses an
-# option value as a file operand (2.1.259), so `--exclude=.bashrc` matches the
-# Read(~/.bashrc) deny rule and prompts on every recursive search. Those paths
-# are already fail-closed in permissions.deny, and a home-wide recursion is
-# blocked outright rather than rewritten.
 EXCLUDE_BASENAMES = [".env", ".env.*", "*.env"] + sorted(CREDENTIAL_FILES)
 GREP_EXCLUDES = " ".join("--exclude=" + shlex.quote(b) for b in EXCLUDE_BASENAMES)
 RG_EXCLUDES = " ".join("-g " + shlex.quote("!" + b) for b in EXCLUDE_BASENAMES)
@@ -382,9 +360,6 @@ def read_block(target, kind):
     return Verdict(block=block("reading {} via shell".format(target), kind, target if kind == KIND_DOTENV else None))
 
 
-# --- per-tool decisions -------------------------------------------------------
-
-
 def decide_read(tool_input, ctx=None):
     path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
     kind = sensitive_kind(path)
@@ -419,7 +394,6 @@ def counts_only(stage):
         if tok == "--":
             return False
         if tok.startswith("--"):
-            # A long option may take the next word as its argument.
             skip = "=" not in tok
             continue
         if not tok.startswith("-"):
@@ -565,15 +539,12 @@ def gh_token_verdict(command):
     return None
 
 
-# --- operand-aware reader detection ------------------------------------------
-
-
 class Context:
     def __init__(self, cwd="", recursive=False, allow_rewrite=False):
         self.cwd = cwd
         self.recursive = recursive
         self.allow_rewrite = allow_rewrite
-        self.find_filters = None  # name filters of the last find stage in this pipeline
+        self.find_filters = None
 
     def resolve(self, path):
         path = os.path.expanduser(path.strip().strip("'\""))
@@ -811,7 +782,7 @@ def stage_verdict(stage_text, ctx):
     if verb not in READER_VERBS:
         return ALLOW
     if verb in GREP_FAMILY and NON_CONTENT_GREP.search(stage_text):
-        return ALLOW  # -c/-l/-q emit counts or filenames, not content
+        return ALLOW
 
     operands = operands_of(toks, verb, pattern_first=verb in GREP_FAMILY)
     tok, kind = first_sensitive(operands)
@@ -933,14 +904,12 @@ def near_credential(tool_input):
     return bool(SENSITIVE_FRAGMENT.search(json.dumps(tool_input, default=str)))
 
 
-# --- standalone entry point ---------------------------------------------------
-
-
 def enabled():
     return os.environ.get("CREDENTIAL_GUARD_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
+    """Run the guard on a stdin payload; an internal error allows the call unless a credential path is in play."""
     if not enabled():
         return 0
     raw = sys.stdin.read()
@@ -949,7 +918,7 @@ def main(argv=None):
         if not isinstance(payload, dict):
             return 0
         reason = decide(payload)
-    except Exception as exc:  # NOSONAR — a guard bug must not brick a session, unless a credential is in play
+    except Exception as exc:  # NOSONAR
         if SENSITIVE_FRAGMENT.search(raw):
             print(
                 "BLOCKED: credential guard internal error near a credential path — refusing ({}).".format(exc),

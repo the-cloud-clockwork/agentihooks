@@ -55,6 +55,7 @@ def publication(ledger_dir, tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.feature("master-artifacts")
 def test_joined_master_publishes_requested_markdown_without_claims(publication, monkeypatch, capsys, harness):
     slug, path, _ = publication
     monkeypatch.setenv("AGENTIHOOKS_TARGET", harness)
@@ -95,6 +96,7 @@ def test_page_server_accepts_requested_master_artifact(publication, task):
 
 
 @pytest.mark.parametrize("request_id", [None, "missing", "agent-request_id", "deleted-request_id"])
+@pytest.mark.feature("master-artifacts")
 def test_master_requires_operator_request(publication, request_id):
     slug, path, _ = publication
     core.sync(
@@ -144,6 +146,7 @@ def test_master_marker_needs_joined_master_identity_and_role(publication, monkey
     assert ledger.resource(slug, "artifacts", collection=True) == []
 
 
+@pytest.mark.feature("master-artifacts")
 def test_unjoined_master_cannot_publish(publication):
     slug, path, _ = publication
     file = ledger.upload_artifact(
@@ -274,6 +277,7 @@ def test_claimed_worker_keeps_requested_artifact_behavior(publication, monkeypat
 
 
 @pytest.mark.parametrize("task", ["master", ""])
+@pytest.mark.feature("master-artifacts")
 def test_page_server_accepts_a_master_plan_without_operator_request(publication, task):
     slug, path, _ = publication
     file = ledger.upload_artifact(slug, MASTER, str(path), {"task": task, "title": "Plan", "plan": True})

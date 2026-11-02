@@ -86,5 +86,5 @@ export function stored(key, fallback) {
 }
 
 export function store(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage blocked: the state lasts until reload */ }
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
 }

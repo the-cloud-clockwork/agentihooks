@@ -245,7 +245,7 @@ class EntryLedger(PageLedger):
         self.commented.append((entry, text, by))
 
 
-def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(store):
+def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(store: RedisStore) -> None:
     store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="pm", seat="master@sw"))
     store.seats.occupy("master@sw", "sw-master-1", 1)
     box = InboxStore(store.redis)
@@ -256,7 +256,7 @@ def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(
     assert delivery.relay_to_page(box, "sw", store.agents("sw"), EntryLedger(refuse=True)) == 0
     assert box.get(first.id).state == "cancelled"
     reopened = box.get(asked.id)
-    assert reopened.state == "read" and asked.id in [item.id for item in box.open_items("sw-master-1")]
+    assert reopened.state == "read" and asked.id in [item.id for item in box.open_items("master@sw")]
     reason = (
         "reopened: the answer was refused by the ledger page: ledger sw refused: comment refused: clock time '18:45'"
     )
@@ -279,7 +279,9 @@ def test_a_refused_message_without_an_entry_reopens_nothing(store):
     assert box.get(asked.id).state == "done"
 
 
-def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens_the_item(store, monkeypatch):
+def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens_the_item(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.inbox.store import Contended
 
     store.seats.occupy("master@sw", "sw-master-1", 1)
@@ -289,17 +291,17 @@ def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens
     answer = box.reply(asked.id, "sw-master-1", "done at 18:45")
     reopen = box.reopen
 
-    def contended(*args):
+    def contended(*args: object) -> None:
         raise Contended("message op-1 changed meanwhile; run the command again")
 
     monkeypatch.setattr(box, "reopen", contended)
     assert delivery.post(box, box.get(answer.id), lambda: False) is False
     assert (box.get(answer.id).state, box.get(asked.id).state) == ("pending", "done")
-    assert box.pending_items("sw-master-1") == []
+    assert box.pending_items("master@sw") == []
     monkeypatch.setattr(box, "reopen", reopen)
     assert delivery.post(box, box.get(answer.id), lambda: False) is False
     assert (box.get(answer.id).state, box.get(asked.id).state) == ("cancelled", "read")
-    [notice] = box.pending_items("sw-master-1")
+    [notice] = box.pending_items("master@sw")
     assert notice.text == delivery.REFUSED.format(id=answer.id, reason="the swarm notice was dropped")
 
 

@@ -4,6 +4,8 @@ import re
 import subprocess
 from collections.abc import Callable
 
+from scripts.swarm import timing
+
 FIELD = "after_release"
 SOURCE = "release"
 ALERT = "The release tag lookup for {repo} failed: {why}. Tasks {tasks} stay held for a newer release until it works."
@@ -61,7 +63,7 @@ def checker(repo: str) -> Callable[[dict], bool]:
         if not floor:
             return True
         if known is None:
-            known = tags(repo)
+            known = timing.timed(tags, repo)
         return newer(known, floor)
 
     return released

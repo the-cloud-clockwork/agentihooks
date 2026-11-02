@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -25,7 +26,8 @@ def actions(monkeypatch):
 
     def api(args, **kwargs):
         state["asked"].append(args)
-        assert kwargs == {"capture_output": True, "timeout": 20}
+        assert 0 < kwargs.pop("timeout") <= 20
+        assert kwargs == {"capture_output": True, "cwd": Path.cwd()}
         if args == ["gh", "api", JOBS]:
             out = json.dumps(state["jobs"]).encode() if state["jobs_code"] == 0 else b""
             return subprocess.CompletedProcess(args, state["jobs_code"], out, b"HTTP 502: Bad Gateway")
@@ -78,6 +80,7 @@ def test_a_run_still_going_keeps_the_wait(tick, actions, status):  # noqa: F811
         ("cancelled", f"checks on {RUN}, cancelled; dispatch the run again and wait on the new one"),
     ],
 )
+@pytest.mark.feature("swarm-run-wait")
 def test_the_tick_ends_a_run_wait_with_its_conclusion(tick, actions, conclusion, outcome):  # noqa: F811
     actions["run"] = {"status": "completed", "conclusion": conclusion}
     hold_run(tick)
@@ -107,6 +110,7 @@ def job(name, conclusion):
     return {"name": name, "status": "completed", "conclusion": conclusion}
 
 
+@pytest.mark.feature("swarm-run-wait")
 def test_a_red_run_names_its_failed_jobs_and_ends_the_wait(tick, actions):  # noqa: F811
     actions["run"] = {"status": "completed", "conclusion": "failure"}
     actions["jobs"] = {
@@ -376,14 +380,14 @@ def test_the_wait_command_refuses_a_run_outside_the_install(monkeypatch):
 def test_the_wait_pass_rechecks_ownership_after_reading_github(tick, monkeypatch):  # noqa: F811
     from types import SimpleNamespace
 
-    from scripts.swarm import lease
+    from scripts.swarm import fencing, lease
     from scripts.swarm.store import SwarmError
 
     hold_run(tick)
     before = idle.wait(tick.store.redis, "sw", ME)
 
     def changed_owner(*args):
-        tick.store.redis.delete(tick.store.key("sw", "control-owner"))
+        fencing.write(tick.store, "sw", lambda doc: doc.update(lease=None))
         lease.acquire(tick.store, "sw", "another-controller")
         return lambda url: None
 

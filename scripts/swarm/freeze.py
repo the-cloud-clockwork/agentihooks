@@ -1,10 +1,12 @@
 """Whether a freeze or a focus on the ledger holds an open task back from a claim, and the drain notice naming them."""
 
 from collections.abc import Iterable
+from typing import Any
 
 from scripts.doctor import loop, priming
 from scripts.swarm import notice_text
-from scripts.swarm.store import SwarmConfig, SwarmError
+from scripts.swarm.ledger_client import pass_state
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -36,15 +38,16 @@ def outside_watched(task: dict, doc: dict, fix_phase: str) -> bool:
     return bool(doc.get(WATCHED)) and not exempt(task, fix_phase)
 
 
-def watched(slug: str, store, ledger, doc: dict) -> dict:
+def watched(slug: str, store: RedisStore, ledger: Any, doc: dict[str, Any]) -> dict[str, Any]:
     peer = store.peer(slug) if fix_phase(store.config(slug)) else ""
     if not peer:
         return doc
     try:
-        peer_doc = ledger.state(peer)
+        peer_doc = pass_state(ledger, peer)
     except SwarmError:
         return doc
-    focus = [r["target"] for r in peer_doc.get("freezes") or [] if r["verb"] == "focus"]
+    freezes: list[dict[str, Any]] = peer_doc.get("freezes") or []
+    focus = [r["target"] for r in freezes if r["verb"] == "focus"]
     return {**doc, WATCHED: [f"the focus on {_named(peer_doc, target)} in the watched swarm" for target in focus]}
 
 

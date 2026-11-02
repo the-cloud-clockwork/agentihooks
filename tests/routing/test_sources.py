@@ -51,6 +51,7 @@ def test_the_claude_token_source_offers_a_subscription_slot_per_routable_account
     assert source.slots(environ, NOW) == [
         Slot("claude", "a", 6, 0, NOW + 600, kind="subscription"),
         Slot("claude", "b", 4, 1, NOW + 600, kind="subscription"),
+        Slot("claude", "c", 6, 0, NOW + 600, kind="subscription"),
     ]
     assert calls == [
         (["AH_CC_TOKEN_a", "AH_CC_TOKEN_b", "AH_CC_TOKEN_d"], {"refresh": True, "environ": environ, "now": NOW})

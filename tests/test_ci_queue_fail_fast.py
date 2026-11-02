@@ -147,7 +147,7 @@ def test_stage_budget_needs_every_graded_job_so_its_completion_means_all_settled
     assert _gate_needs(jobs) - {"stage-budget", "queue-fail-fast"} <= set(jobs["stage-budget"]["needs"])
 
 
-def test_every_merge_queue_job_but_the_watcher_is_graded():
+def test_every_merge_queue_job_but_the_watcher_is_graded() -> None:
     jobs = _jobs()
     push_only = {
         job_id
@@ -164,6 +164,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         "flake-budget",
         "coverage-baseline",
         "coverage-ratchet",
+        "dep-manifest",
         "stage-budget",
         "kind-due",
         "worker-image",
@@ -171,6 +172,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         "brain-smoke",
         "writer-lock",
         "ledger-load",
+        "feature-suite",
         "hierarchy-cpu",
     }
     if (_ROOT / ".github/workflows/count-record.yml").exists():
@@ -178,7 +180,9 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
     if "install-smoke" in jobs:
         expected.add("install-smoke")
     assert push_only == expected
-    assert queued <= _gate_needs(jobs)
+    wiring = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    declared = {key.removeprefix("test.yml/") for key in wiring["not_gates"] if key.startswith("test.yml/")}
+    assert queued - declared <= _gate_needs(jobs)
 
 
 def test_the_watcher_budget_covers_its_work_outside_the_queue():

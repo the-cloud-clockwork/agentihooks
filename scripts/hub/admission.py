@@ -4,6 +4,7 @@ or occupy a seat, and a remote hive makes no service ledger reads."""
 import json
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window
@@ -34,7 +35,7 @@ class Admission:
     def _key(self, slug: str, request: dict) -> str:
         return self.store.key(slug, ADMITTED, request["task"], str(request["generation"]))
 
-    def admit(self, slug: str, request: dict) -> dict | None:
+    def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
@@ -45,17 +46,25 @@ class Admission:
         view = self.source.snapshot(slug)
         if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
             return None
+        if not self._placeable(view.rows[task_id], request["hive"]):
+            print(f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused", file=sys.stderr)
+            return None
         from scripts.swarm import tick
 
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
             print(f"hub: events claim cap swarm={slug} task={task_id}: {reason}", file=sys.stderr)
             return None
-        return self._claim(slug, request, view.rows[task_id])
+        return self._claim(slug, request, view.rows)
 
-    def _claim(self, slug: str, request: dict, row: dict) -> dict | None:
+    def _placeable(self, row: dict[str, Any], hive: str) -> bool:
+        """A workstation task, a task pinned to another hive or one needing what the hive lacks is never admitted."""
+        return readiness.placeable(row, hive, readiness.declared(self.store, hive))
+
+    def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
         from scripts.swarm import tick
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
+        row = rows[task_id]
         name = self.store.next_name(slug, lane, now)
         if not self.store.claim(slug, task_id, name, tick.LEASE_MS):
             return None
@@ -74,14 +83,25 @@ class Admission:
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
         task = tick.primed(self.store, slug, seat, {**row, **live})
+        task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {"execution_id": agent.execution_id, "execution_generation": agent.generation}
+        avoid = self.store.failed_harness(slug, task_id)
         admitted = {
             "hive": request["hive"],
             "name": name,
-            "task": {**task, **identity},
+            "task": {**task, **identity, **({"avoid_harness": avoid} if avoid else {})},
         }
         self.store.redis.set(self._key(slug, request), json.dumps(admitted), px=ADMITTED_MS)
         return admitted
+
+    def _stack_base(self, slug: str, task: dict, rows: dict) -> list[dict]:
+        """The hub holds no checkout, so a stored repository origin stands in for the checkout's own."""
+        from scripts.swarm import stack, tick
+
+        config = self.store.config(slug)
+        if config.repo_origin:
+            return tick._stack_base(task, rows, config.repo_origin, stack.repo_key)
+        return tick._stack_base(task, rows, config.repo)
 
     def _mark(self, slug: str, request: dict, row: dict, name: str) -> dict | None:
         """The ledger row once claimed by name; its claim generation is one past the offer's."""
@@ -120,5 +140,19 @@ class Admission:
         self.store.redis.delete(key)
         return True
 
+    def failed(self, slug: str, request: dict) -> bool:
+        key = self._key(slug, request)
+        held = self.store.redis.get(key)
+        admitted = json.loads(held) if held else None
+        if not admitted or admitted["hive"] != request["hive"]:
+            return False
+        task_id, harness, reason = request["task"], request["harness"], request["reason"]
+        self.store.note_launch_failure(slug, task_id, reason, harness)
+        if harness:
+            admitted["task"]["avoid_harness"] = harness
+            self.store.redis.set(key, json.dumps(admitted), keepttl=True)
+            print(f"hub: events steering swarm={slug} task={task_id} avoid={harness}: {reason}", file=sys.stderr)
+        return True
 
-OPERATIONS = ("admit", "reopen")
+
+OPERATIONS = ("admit", "reopen", "failed")

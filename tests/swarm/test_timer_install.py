@@ -4,6 +4,7 @@ from argparse import Namespace
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import cli, timer
 from scripts.swarm.store import SwarmError
 
@@ -556,7 +557,7 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     ]
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
-    assert [argv[2] for argv, _ in calls] == ["enable"] * 4
+    assert [argv[2] for argv, _ in calls] == ["enable"] * 5
 
 
 def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_any_delivery(tmp_path, monkeypatch):
@@ -603,7 +604,7 @@ def test_schedule_registers_the_tick_and_starts_the_scheduler_runner(monkeypatch
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     monkeypatch.setenv("SCHEDULE_MARKER", "kept")
     monkeypatch.setattr(store, "redis_client", lambda: "redis")
-    monkeypatch.setattr(scheduled_tick, "ensure", lambda scheduler: seen.append(("tick", scheduler.redis)))
+    monkeypatch.setattr(scheduled_tick, "ensure", lambda scheduler: seen.append(("tick", scheduler.state.redis)))
     monkeypatch.setattr(
         service,
         "ensure_running",
@@ -739,9 +740,9 @@ def test_undelivered_reads_this_machine_against_the_installed_root(monkeypatch):
     monkeypatch.setattr(store, "redis_client", lambda: redis)
     monkeypatch.setattr(time, "time", lambda: 1_000.0)
     assert real_undelivered() == NONE_YET
-    scheduled_tick.record(Scheduler(redis), "/installed", 900.0)
+    scheduled_tick.record(Scheduler(RedisStateStore(redis, "scheduler")), "/installed", 900.0)
     assert real_undelivered() == ""
-    scheduled_tick.record(Scheduler(redis), "/main", 900.0)
+    scheduled_tick.record(Scheduler(RedisStateStore(redis, "scheduler")), "/main", 900.0)
     assert real_undelivered() == (
         "the last swarm tick was delivered by a scheduler running /main, not the installed /installed"
     )
@@ -864,6 +865,43 @@ def test_guard_says_when_a_drained_supervisor_holds_on_and_recycles_it_on_a_late
     )
 
 
+def test_guard_recycles_a_supervisor_off_the_installed_code_only_between_tick_passes(tmp_path, monkeypatch, capsys):
+    from scripts.scheduler.service import machine_lock
+    from scripts.swarm import scheduled_tick
+
+    order = []
+    _supervisor(monkeypatch, {**CURRENT, "revision": "older"}, order)
+    with machine_lock(scheduled_tick.LOCK, environ=timer._scheduler_env()):
+        assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["supervise"]
+    assert capsys.readouterr().err == ""
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert order == ["supervise", "drain 4242", "supervise"]
+    assert capsys.readouterr().err.startswith("recycling the scheduler supervisor: ")
+
+
+def test_only_a_holder_of_the_tick_lock_file_counts_as_a_running_tick(tmp_path, monkeypatch):
+    from scripts.scheduler.service import runtime_dir
+    from scripts.swarm import scheduled_tick
+
+    lock = runtime_dir() / f"{scheduled_tick.LOCK}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("")
+    inode = lock.stat().st_ino
+    monkeypatch.setattr(timer.os, "major", lambda dev: 0x1A)
+    monkeypatch.setattr(timer.os, "minor", lambda dev: 0x2B)
+    table = tmp_path / "locks"
+    monkeypatch.setattr(timer, "LOCKS_FILE", table)
+    table.write_text(
+        f"1: FLOCK  ADVISORY  WRITE 4242 1b:2b:{inode} 0 EOF\n1: -> FLOCK  ADVISORY  WRITE 4243 1a:2b:{inode} 0 EOF\n"
+    )
+    assert timer._ticking() is False
+    table.write_text(f"2: FLOCK  ADVISORY  WRITE 4242 1a:2b:{inode} 0 EOF\n")
+    assert timer._ticking() is True
+    table.unlink()
+    assert timer._ticking() is False
+
+
 def _delivering(monkeypatch):
     import fakeredis
 
@@ -872,7 +910,7 @@ def _delivering(monkeypatch):
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(store, "redis_client", lambda: redis)
-    return Scheduler(redis)
+    return Scheduler(RedisStateStore(redis, "scheduler"))
 
 
 def _kept_units(unit_dir):
@@ -977,3 +1015,33 @@ def test_a_foreign_supervisor_is_recycled_and_the_timer_and_finding_clear_on_its
     assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
     assert ensured == [2, 4]
     assert order == ["drain 4242", "supervise", "supervise", "supervise"]
+
+
+def test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_that_start_it(monkeypatch):
+    monkeypatch.setattr(timer.sys, "executable", "/installed/bin/python")
+    text = timer.units("/installed/bin/agentihooks")["agentihooks-scheduler.service"]
+    assert text == (
+        "[Unit]\nDescription=agentihooks scheduler, apart from the units that start it\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=AGENTIHOOKS_SCHEDULER_UNIT=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        'ExecStart="/installed/bin/python" -m scripts.scheduler.service supervise\n'
+        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2\nKillMode=process\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+
+
+def test_ensure_writes_and_enables_the_scheduler_unit(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer.sys, "executable", "/installed/bin/python")
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=run)
+    assert (tmp_path / "agentihooks-scheduler.service").read_text() == timer.units("/installed/bin/agentihooks")[
+        "agentihooks-scheduler.service"
+    ]
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-scheduler.service"] in calls

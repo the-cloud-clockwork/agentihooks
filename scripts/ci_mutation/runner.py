@@ -8,11 +8,14 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import tomlkit
 
 from scripts.ci_mutation.clearances import load_clearances
+from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
+from scripts.ci_mutation.probe import mark_probe_results, probe_elapsed, probe_results
 from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -246,6 +249,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "profiles",
         "docs",
         ".github",
+        ".semgrep",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -287,6 +291,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "profiles/",
             "docs/",
             ".github/",
+            ".semgrep/",
             "evidence/",
             "observability/",
             "docker/swarm-node/",
@@ -306,11 +311,15 @@ def seed_measured_shard(stats: SharedStats, key: str, work: Path) -> str:
     plan_path = stats.folder.parent / "plan.json"
     if plan_path.is_file():
         plan = json.loads(plan_path.read_text())
+        probe_results(plan)
         if plan["head"] != stats.head or key not in plan["keys"]:
             return "measured mutation plan stale for this commit or selection"
         shutil.copy(plan_path, work / "shard-plan.json")
     if (killers := stats.folder.parent / "killers").is_dir():
         shutil.copytree(killers, work / "killers")
+    if plan_path.is_file() and plan.get("splits"):
+        # Kept beside the killers, the slices reach the next run's plan through the cache.
+        KillMemory(work / "killers").keep_splits(plan["splits"])
     return ""
 
 
@@ -325,8 +334,15 @@ def mutate_files(
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
     prepare_workspace(root, work, list(selected), tests)
     selection = work / "changed-lines.json"
+    direct_path = root / ".mutation-direct.json"
+    direct = json.loads(direct_path.read_text()) if direct_path.is_file() else {}
     selection.write_text(
-        json.dumps({path: {"lines": sorted(lines), "tests": chosen} for path, (lines, chosen) in selected.items()})
+        json.dumps(
+            {
+                path: {"lines": sorted(lines), "tests": chosen, "direct": direct.get(path, [])}
+                for path, (lines, chosen) in selected.items()
+            }
+        )
     )
     log = work / "run.log"
     shard_args = [str(part) for part in shard]
@@ -369,7 +385,7 @@ def mutate_files(
         return {}, "over budget"
     if status != 0:
         return {}, f"report failed with exit {status}; see {work / 'report.log'}"
-    return json.loads(result_path.read_text()), ""
+    return mark_probe_results(work, json.loads(result_path.read_text())), ""
 
 
 def record_shard_measurement(
@@ -406,11 +422,18 @@ def record_shard_measurement(
 
 
 def grade_shard_rows(
-    report: dict, path: str, rows: list[dict], lines: set[int], cleared: dict, split: set[str]
-) -> dict:
+    report: dict[str, Any],
+    path: str,
+    rows: list[dict],
+    lines: set[int],
+    cleared: dict,
+    split: set[str],
+) -> dict[str, Any]:
     if units := [row for row in rows if row["name"] in split]:
         report.setdefault("units", []).append({"path": path, "lines": sorted(lines), "rows": units})
-    return evaluate(path, [row for row in rows if row["name"] not in split], lines, cleared)
+    graded = [row for row in rows if row["name"] not in split]
+    report.setdefault("graded", []).append({"path": path, "lines": sorted(lines), "rows": graded})
+    return evaluate(path, graded, lines, cleared)
 
 
 def split_plan_names(stats: SharedStats | None) -> set[str]:
@@ -428,7 +451,7 @@ def run_gate(
     stats: SharedStats | None = None,
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
-    started = time.monotonic()
+    started = time.monotonic() - probe_elapsed(stats)
     deadline = started + budget
     cleared = load_clearances(root)
     selection_path = root / ".mutation-selection.json"

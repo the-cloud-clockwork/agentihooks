@@ -61,6 +61,18 @@ def decode(raw: str) -> TransportRecord:
     return TransportRecord(**row)
 
 
+def transport_records() -> list[str] | None:
+    """Every swarm's raw transport records; None while no store is configured."""
+    from hooks._redis import get_redis
+    from scripts.swarm.store import RedisStore
+
+    redis = get_redis()
+    if redis is None:
+        return None
+    store = RedisStore(redis)
+    return [raw for slug in store.slugs() for raw in redis.hvals(store.key(slug, RECORDS))]
+
+
 class BindingStore:
     def __init__(self, store: "RedisStore") -> None:
         self.store = store

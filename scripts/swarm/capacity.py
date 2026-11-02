@@ -2,15 +2,16 @@ import json
 import sys
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
-from scripts.swarm import autoscale, freeze, host_budget
+from scripts.swarm import autoscale, freeze, host_budget, master_pin
 from scripts.swarm.keyspace import ROOT
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
@@ -462,13 +463,17 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
     }
     demand = inputs.demand or dict.fromkeys(LANES, 0)
     free = _placeable(_open(inputs.observations, inputs.warned))
-    decision = autoscale.calculate(_busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous)
+    decision = autoscale.calculate(
+        _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
+    )
     caps = decision["ceilings"]
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
     return scaled, {**decision, "host": host}
 
 
-def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:
+def ready_work(
+    slug: str, store: RedisStore, doc: dict[str, Any]
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     from scripts.swarm import dispatcher
     from scripts.swarm.tick import ready_in_order
 
@@ -481,7 +486,7 @@ def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleIn
     from scripts.swarm import quota_handoff
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
     observations = accounts(environ, now_ms / 1000, refresh=False)
     thresholds = quota_handoff.Thresholds.from_env(environ)
     warned = {
@@ -549,8 +554,10 @@ def _without_work(lanes: list[str]) -> str:
 
 def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list, warned: dict) -> list:
     seats = offered(observations, warned)
-    master = config.lanes.get("master")
+    master = master_pin.lane(config)
     if master is None or master.get("agent") == "codex":
+        return seats
+    if master_pin.pinned(master, observations, agents, config.slug):
         return seats
     if any(
         agent.lane == "master" and agent.state != "finished" and (agent.harness, agent.account) not in warned
@@ -626,7 +633,9 @@ def _prepared(store, slug: str, task: dict) -> dict:
     }
 
 
-def _placement_ready(store, slug: str, ready: dict, now_ms: int) -> tuple[dict, list[str]]:
+def placement_ready(
+    store: RedisStore, slug: str, ready: dict[str, list[dict[str, Any]]], now_ms: int
+) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     from scripts.hive import placement_waits
 
     refused = placement_waits.read(store, slug)
@@ -649,8 +658,8 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     from scripts.swarm.ledger_client import LedgerRefused
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
-    ready, skipped = _placement_ready(store, slug, ready, now_ms)
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
+    ready, skipped = placement_ready(store, slug, ready, now_ms)
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None
     if hasattr(runtime, "quota_requirements"):

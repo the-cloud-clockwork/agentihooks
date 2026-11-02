@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.inbox import exits
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, idle, outage
 from scripts.swarm.health.findings import MINUTE_MS
 from scripts.swarm.ledger_events import Mail
@@ -152,9 +152,8 @@ def _end(watch, mail, agent, minutes, mark):
     watch.store.mark_restart(watch.slug, tid, CAUSE)
     watch.store.release(watch.slug, tid, agent.name)
     watch.store.drop_agent(watch.slug, agent.name)
-    asked = mail.inbox.find(mark["ask"], KEY)
-    if asked and asked.state not in CLOSED:
-        mail.inbox.close(mark["ask"], SENDER, DONE, ASK_CLOSED)
+    if mail.inbox.find(mark["ask"], KEY):
+        mail.inbox.settle(mark["ask"], SENDER, DONE, ASK_CLOSED)
     exits.settle(mail.inbox, agent.name, agent.seat, STOPPED)
     said = {"slug": watch.slug, "agent": agent.name, "minutes": minutes, "task": tid, "grace": GRACE_MINUTES}
     watch.ledger.comment(watch.slug, tid, COMMENT.format(**said), by=SENDER)

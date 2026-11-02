@@ -23,6 +23,7 @@ FIELDS = {
 GATED = ("delegate", "full")
 SERVICE = ("swarm", "ledger")
 BEFORE_CRITIC = 2
+CRITIC_CAPACITY_RUN = "critic unavailable: account session capacity"
 MAX_TEXT = 8000
 PRIORITY_WORDS = 14
 ATTEMPT, CRITIC, ESCALATE, ESCALATED = "attempt", "critic", "escalate", "escalated"
@@ -55,7 +56,7 @@ def next_step(rec: dict) -> str:
     before = [a for a in rec["attempts"] if not a.get("after_critic")]
     if rec["critic"] is None:
         return ATTEMPT if len(before) < BEFORE_CRITIC else CRITIC
-    if len(before) == len(rec["attempts"]):
+    if len(before) == len(rec["attempts"]) and rec["critic"].get("run") != CRITIC_CAPACITY_RUN:
         return ATTEMPT
     return ESCALATE if rec["escalation"] is None else ESCALATED
 

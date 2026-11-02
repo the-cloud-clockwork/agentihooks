@@ -135,6 +135,15 @@ def check_outcome(op):
         )
 
 
+def worktree(op, carries):
+    if "worktree" not in op or not carries:
+        return None
+    folder = op["worktree"]
+    if not isinstance(folder, str) or not folder.startswith("/"):
+        raise ValueError("worktree must be the writer's absolute folder path")
+    return folder
+
+
 def refused(text, kind, where, ctx):
     found = problems(text, kind)
     if found:

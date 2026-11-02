@@ -81,6 +81,7 @@ def test_only_claimable_unclaimed_urgent_tasks_raise_a_finding(store):
     assert rows["phase"]["why"] == "its phase later is waiting on an earlier phase"
 
 
+@pytest.mark.feature("swarm-claim-dependencies")
 def test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits(store):
     from scripts.swarm.health import urgent_hold
 

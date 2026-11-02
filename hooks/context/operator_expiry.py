@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from redis import Redis
+    from scripts.events.bus import StateStore
 
 from hooks.context import operator_mode
 from scripts.scheduler import Scheduler
@@ -23,15 +23,13 @@ def state_lock(session_id: str) -> Iterator[None]:
 
 
 def cancel(session_id: str, state: dict) -> None:
-    from scripts.swarm.store import redis_client
-
     previous = state.pop("timer_id", None)
     operator_mode._save(session_id, state)
     if previous:
-        Scheduler(redis_client()).get(previous).cancel()
+        Scheduler().get(previous).cancel()
 
 
-def expire(event: dict, delivery_id: str, redis: "Redis") -> None:
+def expire(event: dict, delivery_id: str, store: "StateStore") -> None:
     session_id = event["owner"]
     with state_lock(session_id):
         state = operator_mode._load(session_id)

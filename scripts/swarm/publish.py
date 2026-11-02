@@ -34,7 +34,7 @@ def git(root: Path, *args: str) -> str:
 
 
 def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
-    task = next((row for row in ledger.tasks(slug) if row.get("id") == agent.task), {})
+    task = ledger.task(slug, agent.task) or {}
     if task.get("claimed_by") != agent.name or task.get("state") not in ("claimed", "pr"):
         raise SwarmError("publication requires this agent's claimed task")
     if task.get("branch"):
@@ -109,6 +109,13 @@ def local_repository(value: str, repo: str) -> Path:
 
 def mapped_branch(repo: Path, task: dict) -> str | None:
     branches = task.get("repository_branches", {})
+    if (
+        task.get("pr_url")
+        and len({value for key, value in branches.items() if repository_name(key) == repository_name(str(repo))}) > 1
+    ):
+        head = publish_queue.open_head(git(repo, "remote", "get-url", "origin"), task["pr_url"])
+        if head:
+            return head
     branch = branches.get(str(repo))
     if branch is None:
         branch = next(
@@ -192,13 +199,13 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     return record
 
 
-def merged_record(repo: Path, task: dict) -> bool:
+def merged_record(repo: Path, task: dict[str, str]) -> bool:
     if not task.get("branch") or not task.get("pr_url"):
         return False
     if stack.repo_key(task["pr_url"].split("/pull/")[0]) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
         return False
-    pull = json.loads(execute(["gh", "pr", "view", task["pr_url"], "--json", "state,headRefName"], Path(repo)))
-    return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
+    pull = stack.change(task["pr_url"], f"cannot read pull request {task['pr_url']}")
+    return pull.merged and pull.head_branch == task["branch"]
 
 
 def open_pull_head(root: Path, task: dict, branch: str, remote: str) -> str:
@@ -349,7 +356,7 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
         delivered = publish_queue.open_head(remote, task.get("pr_url", ""))
         if delivered == recorded and descends(root, recorded):
             return recorded
-        if not delivered and cut_from(root, recorded) and settled(root, task):
+        if not delivered and cut_from(root, recorded) and settled(task):
             return branch
         raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
     return branch
@@ -371,11 +378,11 @@ def drop_repository(task: dict, repository: Path) -> dict:
     }
 
 
-def settled(root: Path, task: dict) -> bool:
-    url = task.get("pr_url")
+def settled(task: dict[str, object]) -> bool:
+    url = str(task.get("pr_url") or "")
     if not url:
         return True
-    return json.loads(execute(["gh", "pr", "view", url, "--json", "state"], root))["state"] in ("CLOSED", "MERGED")
+    return stack.change(url, f"cannot read pull request {url}").state == "closed"
 
 
 def gate_python(repo: Path) -> str:

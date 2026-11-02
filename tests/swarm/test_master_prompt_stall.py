@@ -9,7 +9,7 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import master_prompt_stall, master_retire, master_stall
 from scripts.swarm.pane import PaneObservation, interrupted_prompt
-from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_tick import store as store
@@ -79,7 +79,9 @@ def rows(slug="sw"):
 
 
 @pytest.mark.parametrize("pane", [QUESTION, INTERRUPTED], ids=["question", "interrupted"])
-def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(store, pane):
+def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(
+    store: RedisStore, pane: PaneObservation
+) -> None:
     agent, runtime = master(store, pane)
     operator_says(store, START)
     assert run(store, runtime, START) == []
@@ -89,7 +91,9 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     assert run(store, runtime, START + 10 * MINUTE) == [
         f"asked {agent.name} for a handoff before retiring it: {reason}"
     ]
-    assert [i.ref for i in InboxStore(store.redis).pending_items(agent.name)] == [master_retire.REF]
+    assert [i.ref for i in InboxStore(store.redis).pending_items(agent.seat) if i.ref == master_retire.REF] == [
+        master_retire.REF
+    ]
     assert run(store, runtime, START + 14 * MINUTE) == [
         f"waiting on {agent.name}'s handoff before retiring it: {reason}"
     ]
@@ -100,7 +104,9 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     handoff = store.handoff("sw", MASTER)
     assert f"master of sw; {agent.name} sat 15 minutes on {held} while operator items waited" in handoff
     assert handoff.endswith("<!-- handoff complete -->\n")
-    assert store.handoff_envelope("sw", MASTER)["reason"] == "recycle"
+    envelope = store.handoff_envelope("sw", MASTER)
+    assert envelope is not None
+    assert envelope["reason"] == "recycle"
     [row] = transfers.list_transfers(store, "sw")
     assert (row["reason"], row["predecessor"]) == (master_stall.STALLED, agent.name)
     recycled = master_prompt_stall.REASON.format(prompt=held, minutes=15)
@@ -110,13 +116,15 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(st
     ]
 
 
-def test_recycle_comes_at_fifteen_minutes_whatever_the_handoff_wait(store, monkeypatch):
+def test_recycle_comes_at_fifteen_minutes_whatever_the_handoff_wait(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv(master_retire.MINUTES, "30")
     agent, runtime = master(store, PaneObservation("waiting"))
     operator_says(store, START)
     run(store, runtime, START)
     run(store, runtime, START + 10 * MINUTE)
-    [ask] = InboxStore(store.redis).pending_items(agent.name)
+    [ask] = [item for item in InboxStore(store.redis).pending_items(agent.seat) if item.ref == master_retire.REF]
     assert run(store, runtime, START + 15 * MINUTE) == [
         f"recycled master {agent.name} in its seat after 15 minutes held on the prompt waiting on input"
         " with operator items waiting"
@@ -186,12 +194,12 @@ def test_master_off_the_prompt_stays_and_restarts_the_count(store, pane):
     assert run(store, runtime, START + 41 * MINUTE)[0].startswith(f"asked {agent.name}")
 
 
-def test_leaving_the_prompt_after_the_ask_withdraws_it(store):
+def test_leaving_the_prompt_after_the_ask_withdraws_it(store: RedisStore) -> None:
     agent, runtime = master(store)
     operator_says(store, START)
     run(store, runtime, START)
     run(store, runtime, START + 10 * MINUTE)
-    [ask] = InboxStore(store.redis).pending_items(agent.name)
+    [ask] = [item for item in InboxStore(store.redis).pending_items(agent.seat) if item.ref == master_retire.REF]
     runtime.panes[agent.name] = PaneObservation("working")
     assert run(store, runtime, START + 16 * MINUTE) == []
     assert master_retire.reason(store, "sw", agent.name) == ""

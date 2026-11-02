@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
+from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
@@ -27,7 +28,7 @@ class LaneTasks:
     def __init__(self, bus, hive: str, configs: Callable[[str], object]):
         self.bus, self.hive, self.configs = bus, hive, configs
 
-    def _ask(self, op: str, event: Envelope):
+    def _ask(self, op: str, event: Envelope, **fields):
         ask = account_slots.asker(self.bus.for_swarm(event.swarm), event.swarm, self.hive)
         request = {
             "op": op,
@@ -35,6 +36,7 @@ class LaneTasks:
             "task": event.key,
             "lane": event.data["lane"],
             "generation": event.version,
+            **fields,
         }
         return ask(request)
 
@@ -50,10 +52,19 @@ class LaneTasks:
     def reopen(self, event: Envelope) -> None:
         self._ask("reopen", event)
 
+    def failed(self, event: Envelope, harness: str, reason: str) -> None:
+        self._ask("failed", event, harness=harness, reason=reason)
+
 
 def lanes(excluded: str | None) -> tuple[str, ...]:
     left_out = excluded.split(",") if excluded else ()
     return tuple(lane for lane in LANES if lane not in left_out)
+
+
+def fit(store: Any, hive: str) -> Callable[[Envelope], bool]:
+    """Offers this hive may not take stay in the queue; its declared capabilities are read only for needs."""
+    capabilities = readiness.declared(store, hive)
+    return lambda event: readiness.fits(event, hive, capabilities)
 
 
 def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> list[Spoke]:
@@ -63,7 +74,8 @@ def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> 
         for lane in taken:
             if (slug, lane) not in held:
                 tasks = LaneTasks(bus, hive, store.config)
-                held[slug, lane] = Spoke(SpokeConfig(config, lane, hive), bus, runtime, tasks, view=lambda: None)
+                spoke_config = SpokeConfig(config, lane, hive, fit=fit(store, hive))
+                held[slug, lane] = Spoke(spoke_config, bus, runtime, tasks, view=lambda: None)
                 queue = readiness.queue_name(slug, lane)
                 print(f"hive spoke for swarm {slug} lane {lane} takes {queue}", file=sys.stderr)
             current.append(held[slug, lane])

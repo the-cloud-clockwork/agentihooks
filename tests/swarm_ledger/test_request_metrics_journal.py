@@ -84,8 +84,22 @@ def test_reader_groups_window_write_records_by_route(now):
             "route": OPERATIONS,
             "count": 2,
             "records": [
-                {"ended": START + 1800.0, "wall_seconds": 1.5, "cpu_seconds": 0.5, "lock_wait_seconds": 0.25},
-                {"ended": START + 1820.0, "wall_seconds": 3.0, "cpu_seconds": 1.25, "lock_wait_seconds": 1.0},
+                {
+                    "ended": START + 1800.0,
+                    "wall_seconds": 1.5,
+                    "cpu_seconds": 0.5,
+                    "lock_wait_seconds": 0.25,
+                    "client_wait_seconds": 0.0,
+                    "postgres_wait_seconds": 0.0,
+                },
+                {
+                    "ended": START + 1820.0,
+                    "wall_seconds": 3.0,
+                    "cpu_seconds": 1.25,
+                    "lock_wait_seconds": 1.0,
+                    "client_wait_seconds": 0.0,
+                    "postgres_wait_seconds": 0.0,
+                },
             ],
         },
         {
@@ -93,7 +107,14 @@ def test_reader_groups_window_write_records_by_route(now):
             "route": TASKS,
             "count": 1,
             "records": [
-                {"ended": START + 1810.0, "wall_seconds": 2.0, "cpu_seconds": 0.75, "lock_wait_seconds": 0.5},
+                {
+                    "ended": START + 1810.0,
+                    "wall_seconds": 2.0,
+                    "cpu_seconds": 0.75,
+                    "lock_wait_seconds": 0.5,
+                    "client_wait_seconds": 0.0,
+                    "postgres_wait_seconds": 0.0,
+                },
             ],
         },
     ]
@@ -127,6 +148,8 @@ def test_clean_reload_keeps_every_record_readable(tmp_path, monkeypatch, now):
         "wall_seconds": 1.78,
         "cpu_seconds": 0.5,
         "lock_wait_seconds": 0.75,
+        "client_wait_seconds": 0.0,
+        "postgres_wait_seconds": 0.0,
     }
 
 

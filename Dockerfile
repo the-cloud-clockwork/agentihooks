@@ -26,6 +26,9 @@ COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/sw
 COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
 RUN python /opt/swarm-node/worker_image.py install --tool herdr --architecture "$TARGETARCH"
 
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
+RUN apt-get update && apt-get install -y --no-install-recommends gh
+
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -49,6 +52,8 @@ RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home 
 COPY --link=true --from=dependencies /opt/venv /opt/venv
 COPY --link=true --from=build /opt/package/ /opt/venv/
 COPY --link=true --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
+COPY --link=true --from=gh /usr/bin/gh /usr/bin/gh
+COPY --link=true --chmod=0755 deploy/worker/gh /usr/local/bin/gh
 COPY --link=true media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
 COPY --link=true docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
 COPY --link=true docs/swarm-v2/architecture.json /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/architecture.json

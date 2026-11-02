@@ -96,6 +96,39 @@ def test_a_scoped_invite_joins_with_a_scoped_bus_credential(invitation, monkeypa
     assert Path(saved["AGENTIHOOKS_BUS_CREDENTIALS"]).read_text() == "fixture nats credentials\n"
 
 
+def test_a_scoped_invite_refuses_a_kept_unscoped_bus_credential_when_the_hive_grants_none(
+    invitation, monkeypatch, capsys
+):
+    invite, home = invitation
+    with invite.open("a") as stream:
+        stream.write("AGENTIHOOKS_BUS_SCOPED=1\n")
+    home.mkdir()
+    (home / auth.NATS_CREDS_FILE).write_text("kept unscoped credentials\n")
+    saved = home / auth.ENV_FILE
+    saved.write_text("AGENTIHOOKS_HIVE_ID=fixture-member\n")
+    monkeypatch.setattr(cli, "_post", lambda *args: {"id": "fixture-member", "redis_url": "redis://r/0"})
+    assert cli.main(["join", str(invite)]) == 1
+    assert saved.read_text() == "AGENTIHOOKS_HIVE_ID=fixture-member\n"
+    assert "unscoped bus credential" in capsys.readouterr().err
+
+
+def test_a_join_without_a_granted_credential_keeps_the_scoped_one_it_saved(invitation, monkeypatch):
+    invite, home = invitation
+    with invite.open("a") as stream:
+        stream.write("AGENTIHOOKS_BUS_SCOPED=1\n")
+    home.mkdir()
+    (home / auth.NATS_CREDS_FILE).write_text("kept scoped credentials\n")
+    (home / auth.ENV_FILE).write_text(
+        "AGENTIHOOKS_HIVE_ID=fixture-member\nAGENTIHOOKS_BUS_SCOPED=1\nAGENTIHOOKS_BUS_SWARMS=demo,other\n"
+    )
+    monkeypatch.setattr(cli, "_post", lambda *args: {"id": "fixture-member", "redis_url": "redis://r/0"})
+    assert cli.main(["join", str(invite)]) == 0
+    saved = dotenv_values(home / auth.ENV_FILE)
+    assert Path(saved["AGENTIHOOKS_BUS_CREDENTIALS"]).read_text() == "kept scoped credentials\n"
+    assert saved["AGENTIHOOKS_BUS_SCOPED"] == "1"
+    assert saved["AGENTIHOOKS_BUS_SWARMS"] == "demo,other"
+
+
 def test_join_refuses_an_unscoped_bus_credential_and_keeps_the_current_membership(invitation, monkeypatch, capsys):
     invite, home = invitation
     with invite.open("a") as stream:

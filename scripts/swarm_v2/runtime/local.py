@@ -29,8 +29,8 @@ ENDED_NAMESPACE = "its process ended with a previous boot"
 
 def _failed(operation: str, exc: SpawnError) -> Outcome:
     status = Status.AMBIGUOUS if isinstance(exc.__cause__, subprocess.TimeoutExpired) else Status(exc.status)
-    value = {"pane_id": exc.pane_id} if exc.pane_id else None
-    return Outcome(operation, status, LOCAL, value, detail=str(exc))
+    value = {key: found for key, found in (("pane_id", exc.pane_id), ("harness", exc.harness)) if found}
+    return Outcome(operation, status, LOCAL, value or None, detail=str(exc))
 
 
 class LocalHerdrRuntime:

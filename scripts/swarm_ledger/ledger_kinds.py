@@ -8,9 +8,20 @@ WORKFLOW_FIELDS = ("workflow", "case")
 WORKFLOW_PROOF = {"workflow": "passed", "verdict": "pass"}
 CONTRACT_KEYS = ("must", "check", "judge")
 CONTRACT_TIMES = ("after_at",)
-CONTRACT_FLAGS = ("push", "after")
+CONTRACT_FLAGS = ("push", "after", "feature")
 FLAG_VALUES = ("yes", "no")
-PROOF_KEYS = ("command", "output", "root_cause", "evidence", "fix", "filed", "finding", "slice", *WORKFLOW_PROOF)
+PROOF_KEYS = (
+    "command",
+    "output",
+    "root_cause",
+    "evidence",
+    "fix",
+    "filed",
+    "finding",
+    "slice",
+    "feature",
+    *WORKFLOW_PROOF,
+)
 LINK_RE = re.compile(r"^https?://[^\s]+$")
 NEEDS = {
     "plan": ("slice",),

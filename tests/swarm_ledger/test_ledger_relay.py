@@ -190,6 +190,7 @@ def _cli(monkeypatch, item, quote, by="master@a1-1"):
     ledger.cmd_relay(ledger.build_parser().parse_args(argv))
 
 
+@pytest.mark.feature("ledger-relay")
 def test_cli_relays_words_the_operator_said_in_the_pane(monkeypatch, capsys):
     state = make_ledger()
     question = f"questions/{state['questions'][0]['id']}"
@@ -219,6 +220,7 @@ def test_cli_relays_a_quote_typed_in_a_taken_master_pane_without_swarm_env(monke
     assert state["questions"][0]["answers"][-1]["quote"] == "Use the queue"
 
 
+@pytest.mark.feature("ledger-relay")
 def test_cli_refuses_words_the_operator_never_said(monkeypatch):
     state = make_ledger()
     question = f"questions/{state['questions'][0]['id']}"
@@ -243,6 +245,7 @@ def test_a_long_quote_with_dashes_from_a_masters_prompt_history_of_yesterday_is_
     assert state["questions"][0]["answers"][-1]["quote"] == SPOKEN
 
 
+@pytest.mark.feature("ledger-relay")
 def test_a_planners_words_count_and_an_engineers_or_another_swarms_do_not():
     operator_words.record("planner@abc123-0005", "slice the filters phase", now=time.time() - 3 * DAY)
     operator_words.record("engineer@abc123-0006", "merge the filters work")

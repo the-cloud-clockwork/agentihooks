@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from scripts.swarm import commands
+from scripts.swarm import commands, fencing
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_v2.herdr import visibility
 from scripts.swarm_v2.herdr.visibility import View
@@ -28,6 +28,7 @@ def seeded(slug: str, data: dict) -> RedisStore:
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(slug, ".", 0, 0, state="running"))
+    fencing.read(store, slug)
     commands.publish(store, slug, data["status"], {})
     visibility.publish(store, slug, [View(**row) for row in data["terminal_views_published_after_the_heartbeat"]])
     return store

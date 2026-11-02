@@ -273,6 +273,21 @@ def test_needs_may_be_a_single_job_name():
     assert _check({"test.yml": workflow}, {"not_gates": _declared("test.yml/lint")}) == []
 
 
+def test_a_feature_suite_must_be_a_need_of_both_promotion_jobs() -> None:
+    push_only = "github.event_name == 'push'"
+    workflow = _gate_workflow(
+        **{
+            "feature-suite": {"if": push_only},
+            "promotion-ready": {"if": push_only, "needs": "feature-suite"},
+        }
+    )
+    config = {"not_gates": {"test.yml/lint": _entry(expires="2000-01-01")}}
+    problems = _check({"test.yml": workflow}, config)
+    assert "test.yml/lint expired on 2000-01-01." in problems
+    assert "test.yml/feature-suite is not a need of promote." in problems
+    assert "test.yml/feature-suite is not a need of promotion-ready." not in problems
+
+
 def test_load_reads_both_yaml_extensions_and_empty_files(tmp_path):
     folder = tmp_path / ".github/workflows"
     folder.mkdir(parents=True)

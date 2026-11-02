@@ -10,6 +10,7 @@ import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, fields, replace
+from typing import Any
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
@@ -18,6 +19,8 @@ from scripts.swarm.naming import NameRegistry
 PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
+# The swarm Redis over TLS closes connections mid pipeline on reads of a thousand item rows or more.
+ROW_BATCH = 500
 STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
 REDELIVER_ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
 DEFAULT_REDELIVER_S = 300
@@ -27,6 +30,7 @@ REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 REDELIVERER = "inbox"
 RECLAIMED = "returned to the master pool: its master is gone"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
+OPEN = tuple(state for state in STATES if state not in CLOSED)
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
 NEEDS_DETAIL = {"handoff": "the address the work went to", "blocked": "what it is blocked on"}
 OPERATOR = "operator"
@@ -47,6 +51,10 @@ class Unreachable(InboxError):
 
 
 class Contended(InboxError):
+    pass
+
+
+class Gone(InboxError):
     pass
 
 
@@ -102,7 +110,7 @@ def replied(answer_id):
     return f"replied with message {answer_id}"
 
 
-def close_reason(kind, detail=""):
+def close_reason(kind: str, detail: str = "") -> tuple[str, str]:
     detail = detail.strip()
     if kind not in CLOSE_KINDS:
         raise InboxError(f"closing needs a reason: one of {', '.join(CLOSE_KINDS)}")
@@ -177,18 +185,21 @@ class InboxStore:
             "",
         )
 
-    def send(self, sender, address, text, ref="", fyi=False, task="", item_id=""):
+    def send(
+        self, sender: str, address: str, text: str, ref: str = "", fyi: bool = False, task: str = "", item_id: str = ""
+    ) -> Item:
         """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
         work, so a bare close names no outcome; a given item_id refuses a second write of that item."""
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         from scripts.hive import scope
 
-        sender, address = self.names.resolve(sender), self.names.resolve(address)
+        requested = self.names.resolve(address)
+        sender, address = self.names.resolve(sender), self.seats.recipient(requested)
         home = self.home(address)
         if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
-            return routed.send(sender, address, text, ref, fyi, task, item_id)
+            return routed.send(sender, requested, text, ref, fyi, task, item_id)
         at = now_ms()
         item = Item(
             item_id or new_item_id(),
@@ -204,7 +215,7 @@ class InboxStore:
             task=task,
         )
         key = self.key("item", item.id)
-        masters = self.pool.masters_for(sender, address) if home == self.world else []
+        masters = self.pool.masters_for(sender, requested) if home == self.world else []
         with self.redis.pipeline() as pipe:
             if item_id:
                 pipe.watch(key)
@@ -247,8 +258,14 @@ class InboxStore:
             return None
         return _parsed(raw)
 
-    def inbox(self, address):
-        return sorted(self._listed(self.redis.zrange(self.key("address", address), 0, -1), address), key=_order)
+    def inbox(self, address: str) -> list[Item]:
+        item_ids = []
+        while True:
+            start = len(item_ids)
+            page = self.redis.zrange(self.key("address", address), start, start + ROW_BATCH - 1)
+            item_ids.extend(page)
+            if len(page) < ROW_BATCH:
+                return sorted(self._listed(item_ids, address), key=_order)
 
     def open_items(self, address: str) -> list[Item]:
         items = self._listed(self._open_ids(address), address)
@@ -292,13 +309,10 @@ class InboxStore:
                 continue
         return [item.id for item in self.inbox(address) if item.state not in CLOSED]
 
-    def _index_open(self, address):
+    def _index_open(self, address: str) -> list[str]:
         with self.redis.pipeline() as pipe:
-            pipe.watch(self.key("address", address))
-            ids = pipe.zrange(self.key("address", address), 0, -1)
-            if ids:
-                pipe.watch(*(self.key("item", item_id) for item_id in ids))
-            items, gone = _present(ids, [pipe.hgetall(self.key("item", item_id)) for item_id in ids])
+            ids, rows = self._watched_rows(pipe, address)
+            items, gone = _present(ids, rows)
             opened = {item.id: item.created_at for item in items if item.state not in CLOSED}
             pipe.multi()
             self._stage_drop(pipe, address, gone)
@@ -310,6 +324,22 @@ class InboxStore:
             pipe.execute()
         self._report_gone(address, gone)
         return list(opened)
+
+    def _watched_rows(self, pipe: Any, address: str) -> tuple[list[str], list[dict[str, str]]]:
+        """Every id the address index lists and its row, read in pages of ROW_BATCH with each page's item keys
+        watched on pipe before its rows are read."""
+        index = self.key("address", address)
+        pipe.watch(index)
+        ids: list[str] = []
+        rows: list[dict[str, str]] = []
+        while True:
+            page = pipe.zrange(index, len(ids), len(ids) + ROW_BATCH - 1)
+            if page:
+                pipe.watch(*(self.key("item", item_id) for item_id in page))
+                rows.extend(self._batch(page))
+            ids.extend(page)
+            if len(page) < ROW_BATCH:
+                return ids, rows
 
     def _listed(self, item_ids, address):
         return self._listed_at(dict.fromkeys(item_ids, address))
@@ -343,6 +373,22 @@ class InboxStore:
         self._report_gone(address, gone)
 
     def _rows(self, item_ids):
+        item_ids = list(item_ids)
+        return [
+            row
+            for start in range(0, len(item_ids), ROW_BATCH)
+            for row in self._batch(item_ids[start : start + ROW_BATCH])
+        ]
+
+    def _batch(self, item_ids):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        try:
+            return self._read_batch(item_ids)
+        except RedisConnectionError:
+            return self._read_batch(item_ids)
+
+    def _read_batch(self, item_ids):
         with self.redis.pipeline(transaction=False) as pipe:
             for item_id in item_ids:
                 pipe.hgetall(self.key("item", item_id))
@@ -390,9 +436,9 @@ class InboxStore:
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(self.names.key("alias", original))
+                    pipe.watch(*self.names.watched("alias", original))
                     me = self.names.resolve(original, pipe)
-                    pipe.watch(self.names.key("aliases-of", me))
+                    pipe.watch(*self.names.watched("aliases-of", me))
                     addresses = [me, *self.names.aliases(me, pipe)]
                     seat = self.seats.seat_of(me, pipe)
                     pipe.multi()
@@ -429,20 +475,15 @@ class InboxStore:
             rows = pipe.execute()
         return {item_id: [json.loads(entry) for entry in row] for item_id, row in zip(item_ids, rows)}
 
-    def keys_for(self, belongs):
-        """The keys of every address belongs() accepts, its items and their histories, and those
-        addresses' memberships in the shared waiting and indexed sets."""
-        prefix = self.key("address", "")
-        seen = {key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")}
-        seen.update(self.redis.smembers(self.key("open-indexed")))
-        size_prefix = self.key("open-size", "")
-        seen.update(key[len(size_prefix) :] for key in self.redis.scan_iter(match=size_prefix + "*"))
-        addresses = sorted(a for a in seen if belongs(a))
+    def keys_at(self, addresses: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+        """The keys of the given addresses, their items and their histories, and those addresses' memberships in
+        the shared waiting, indexed and wake sets, read by name with no scan."""
         keys, wake_ids = [], []
-        waiting_wakes = self.redis.smembers(self.key("wake-outbox"))
+        wake = self.key("wake-outbox")
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
-            wake_ids.extend(item_id for item_id in ids if item_id in waiting_wakes)
+            waiting = self.redis.smismember(wake, ids) if ids else []
+            wake_ids.extend(item_id for item_id, held in zip(ids, waiting) if held)
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
             keys += [key for key in (self.key("entry", item_id) for item_id in ids) if self.redis.exists(key)]
@@ -451,13 +492,15 @@ class InboxStore:
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
             for shared in ("waiting", "indexed", "open-indexed")
         }
-        members[self.key("wake-outbox")] = wake_ids
+        members[wake] = wake_ids
         return keys, {key: found for key, found in members.items() if found}
 
     def read(self, item_id, reader):
         return self._move(item_id, reader, lambda item: (item.address,), "read", "")
 
-    def close(self, item_id, closer, kind, detail=""):
+    def close(
+        self, item_id: str, closer: str, kind: str, detail: str = "", only_from: tuple[str, ...] | None = None
+    ) -> Item | None:
         state, reason = close_reason(kind, detail)
         return self._move(
             item_id,
@@ -465,7 +508,15 @@ class InboxStore:
             lambda item: (item.address, item.sender, master_of(item.address, NameRegistry(self.redis))),
             state,
             reason,
+            only_from,
         )
+
+    def settle(self, item_id: str, closer: str, kind: str, detail: str = "") -> Item | None:
+        """None once another path closed the item or its record is gone."""
+        try:
+            return self.close(item_id, closer, kind, detail, OPEN)
+        except Gone:
+            return None
 
     def withdraw(
         self, item_id: str, by: str, reason: str, expected_address: str = "", expected_receiver: str | None = ""
@@ -969,13 +1020,10 @@ class InboxStore:
                 continue
         return [item.id for item in self.inbox(address) if item.state == "pending"]
 
-    def _try_back_fill(self, address):
+    def _try_back_fill(self, address: str) -> list[str]:
         with self.redis.pipeline() as pipe:
-            pipe.watch(self.key("address", address))
-            ids = pipe.zrange(self.key("address", address), 0, -1)
-            if ids:
-                pipe.watch(*(self.key("item", item_id) for item_id in ids))
-            items, gone = _present(ids, [pipe.hgetall(self.key("item", item_id)) for item_id in ids])
+            ids, rows = self._watched_rows(pipe, address)
+            items, gone = _present(ids, rows)
             pooled = self.pool.waiting(pipe, address)
             pending = {item.id: item.created_at for item in items if item.state == "pending" and item.id not in pooled}
             pipe.multi()
@@ -1109,7 +1157,7 @@ def _present(item_ids, rows):
 
 def _item(raw, item_id):
     if not raw:
-        raise InboxError(f"no message {item_id}")
+        raise Gone(f"no message {item_id}")
     return _parsed(raw)
 
 

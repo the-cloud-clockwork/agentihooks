@@ -29,9 +29,10 @@ to the prepush gate. CI runs the whole suite, not `-m unit`.
 
 `dev` integrates worktree pull requests. Green promotion checks let CI promote
 the graded head to `main`, tag a release and publish versioned and `:release`
-images. CI alone opens and merges promotion pull requests; agents never create
-or merge pull requests into `main`, `master` or `v1`. Red promotion checks hold
-the release while `dev` keeps merging.
+images. CI opens and merges promotion pull requests. An agent creates a pull
+request into `main`, `master` or `v1` only with the operator's PR phrase in its
+session; merging into them stays with the operator or CI. Red promotion checks
+hold the release while `dev` keeps merging.
 
 "Do the release dance" authorizes only publication of that release to PyPI:
 

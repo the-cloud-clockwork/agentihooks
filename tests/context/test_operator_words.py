@@ -475,6 +475,9 @@ class _FakeRedis:
     def __init__(self, get=lambda key: None):
         self.get = get
 
+    def hget(self, key, field):
+        return None
+
 
 def _legacy_words(tmp_path, monkeypatch, slug_of, redis=None):
     import json

@@ -359,17 +359,19 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
 def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, monkeypatch, mode):
     from collections import defaultdict
 
-    from scripts.ci_mutation.selection import run_selected
+    from scripts.ci_mutation.selection import run_selected, split_files
+    from scripts.ci_mutation.stats import split_key
 
     monkeypatch.setenv("CI", "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("os.sched_getaffinity", lambda pid: {0, 1})
     selection = tmp_path / "lines.json"
     selection.write_text(json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}))
+    files = ["tests/test_c.py", "tests/test_a.py", "tests/test_b.py"]
     data = SimpleNamespace(exit_code_by_key={} if mode == "empty" else {"m": None}, load=lambda: None)
     config = SimpleNamespace(
         source_paths=[Path("scripts/")],
-        pytest_add_cli_args_test_selection=["tests/test_c.py", "tests/test_a.py", "tests/test_b.py"],
+        pytest_add_cli_args_test_selection=list(files),
     )
     engine = SimpleNamespace(tests_by_mangled_function_name=defaultdict(set), duration_by_test={}, stats_time=None)
     result = {
@@ -433,6 +435,7 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
             "part": 1,
             "parts": 3,
             "results": [] if mode == "empty" else [result],
+            "split": "" if mode == "empty" else split_key(split_files(tmp_path, files, 3)),
         }
         assert saved == []
         raise SystemExit(7)
@@ -529,6 +532,32 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
         lambda: SimpleNamespace(do_not_mutate_patterns=[r"count \+ 1"], source_paths=[], max_stack_depth=-1),
     )
     assert mutation_counts("scripts/sample.py", source, {9, 14}) == (0, ["cached"])
+
+
+def test_changed_module_constants_and_dataclass_fields_beside_a_decorated_class_select_without_error(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = (
+        "import dataclasses\n"
+        "\n"
+        'FIRST, LAST = "first", "last"\n'
+        "\n"
+        "@dataclasses.dataclass(frozen=True)\n"
+        "class Spill:\n"
+        "    hive: str\n"
+        "    room: int = 1\n"
+        "\n"
+        "    def record(self):\n"
+        "        return self.room + 1\n"
+    )
+    generated, names = selected_mutants("scripts/sample.py", source, {3, 8, 11})
+    compile(generated, "scripts/sample.py", "exec")
+    assert names and all(name.startswith("xǁSpillǁrecord__mutmut_") for name in names)
 
 
 def test_property_cached_property_static_and_class_method_bodies_are_graded_and_their_mutants_run(monkeypatch):
@@ -841,7 +870,7 @@ def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_b
 
 @pytest.mark.parametrize("total", [1, 2, 3, 6])
 def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist_group(tmp_path, total):
-    from scripts.ci_mutation.selection import part_files
+    from scripts.ci_mutation.selection import split_files
 
     (tmp_path / "tests").mkdir()
     files = [f"tests/test_{name}.py" for name in "abcdef"]
@@ -851,17 +880,17 @@ def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist
     (tmp_path / ".test_durations").write_text(
         json.dumps({f"tests/test_{name}.py::t": value for name, value in seconds.items()} | {"tests/x.py::t": 50})
     )
-    parts = [part_files(tmp_path, list(reversed(files)), (index, total)) for index in range(total)]
+    parts = split_files(tmp_path, list(reversed(files)), total)
     assert sorted(path for part in parts for path in part) == files
     assert all(part == sorted(part) for part in parts)
     loads = [sum(seconds[path[11]] for path in part) for part in parts]
     expected = {1: [27], 2: [14, 13], 3: [9, 9, 9], 6: [9, 7, 5, 3, 2, 1]}[total]
     assert loads == expected
-    assert part_files(tmp_path, files[:1], (2, 3)) == []
+    assert split_files(tmp_path, files[:1], 3)[2] == []
 
 
 def test_statistics_split_reads_each_duration_a_bounded_number_of_times():
-    from scripts.ci_mutation.selection import split_parts
+    from scripts.ci_mutation.selection import partition
 
     class Counted(dict):
         reads = 0
@@ -871,7 +900,7 @@ def test_statistics_split_reads_each_duration_a_bounded_number_of_times():
             return super().__getitem__(key)
 
     seconds = Counted({f"tests/test_x.py::test_{index}": float(index % 7) for index in range(400)})
-    split_parts(list(seconds), seconds, (0, 4))
+    partition(list(seconds), seconds, 4)
     assert seconds.reads <= 2 * len(seconds)
 
 
@@ -1020,7 +1049,7 @@ def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(
 
 
 def test_statistics_parts_partition_every_test_when_each_part_restores_a_different_cache(tmp_path, monkeypatch):
-    from scripts.ci_mutation.selection import part_files
+    from scripts.ci_mutation.selection import split_files
 
     tests = [f"tests/test_sample.py::test_{name}" for name in "abc"]
     (tmp_path / ".test_durations").write_text(json.dumps(dict(zip(tests, [3, 2, 1]))))
@@ -1031,8 +1060,26 @@ def test_statistics_parts_partition_every_test_when_each_part_restores_a_differe
     parts = []
     for index, cache in enumerate(caches):
         monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
-        parts.append(part_files(tmp_path, tests, (index, 2)))
+        parts.append(split_files(tmp_path, tests, 2)[index])
     assert parts == [[tests[0]], tests[1:]]
+
+
+def test_statistics_parts_split_on_other_timings_carry_another_split_key(tmp_path):
+    from scripts.ci_mutation.selection import split_files
+    from scripts.ci_mutation.stats import split_key
+
+    tests = [f"tests/test_github_reads.py::test_{name}" for name in "abcdefgh"]
+    first, second = tmp_path / "first", tmp_path / "second"
+    for root, seconds in ((first, range(8)), (second, reversed(range(8)))):
+        root.mkdir()
+        (root / ".test_durations").write_text(json.dumps(dict(zip(tests, seconds))))
+    one, other = split_files(first, tests, 3), split_files(second, tests, 3)
+    assert sorted(test for part in one for test in part) == tests
+    assert sorted(test for part in other for test in part) == tests
+    mixed = [one[0], other[1], one[2]]
+    assert sorted(test for part in mixed for test in part) != tests
+    assert split_key(one) != split_key(other)
+    assert split_key(one) == split_key(split_files(first, list(reversed(tests)), 3))
 
 
 def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options(tmp_path, monkeypatch):

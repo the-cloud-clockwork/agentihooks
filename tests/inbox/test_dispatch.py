@@ -896,7 +896,14 @@ def test_reserve_and_commit_watch_the_seat_of_a_seat_item(store, watched):
 def test_a_seen_mark_watches_the_alias_and_the_resolved_owner(store, watched):
     store.redis.set(NameRegistry.key("alias", "old-name"), "bob")
     assert SeenMarks(store.redis).mark("old-name", "sw:3:c1") is True
-    assert set(watched) == {NameRegistry.key("alias", "old-name"), owner_key("bob")}
+    assert set(watched) == {*NameRegistry(store.redis).watched("alias", "old-name"), owner_key("bob")}
+
+
+def test_a_mailbox_read_watches_the_alias_and_the_owner_alias_list(store, watched):
+    store.redis.set(NameRegistry.key("alias", "old-name"), "bob")
+    store.mailbox("old-name")
+    names = NameRegistry(store.redis)
+    assert {*names.watched("alias", "old-name"), *names.watched("aliases-of", "bob")} <= set(watched)
 
 
 def test_a_seen_mark_expires(store):

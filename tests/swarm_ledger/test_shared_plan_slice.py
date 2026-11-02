@@ -92,12 +92,14 @@ def task(doc, task_id):
 
 
 class TestRefusal:
+    @pytest.mark.feature("plan-shared-slice")
     def test_adding_a_task_on_a_slice_another_open_task_holds_is_refused(self, published):  # noqa: F811
         assert add(published, "a", plan_slice="first")[1] == []
         state, rejected = add(published, "b", plan_slice="first")
         assert (rejected, state["_meta"]["warnings"]) == (["add-b"], [SHARED])
         assert not any(t["id"] == "b" for t in state["tasks"])
 
+    @pytest.mark.feature("plan-shared-slice")
     def test_setting_a_task_onto_a_slice_another_open_task_holds_is_refused(self, published):  # noqa: F811
         from scripts.swarm_ledger import ledger_core as core
 
@@ -198,6 +200,7 @@ class TestIntent:
 
 
 class TestPlanRead:
+    @pytest.mark.feature("plan-shared-slice")
     def test_plan_read_prints_the_task_row_as_scope_and_the_shared_slice_as_context(self, table):
         assert plan_read.read(table, "tables", "t1", None) == (
             "Scope: plan lines 3-9 are shared with tasks t2, t3; "

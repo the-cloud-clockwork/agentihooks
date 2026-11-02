@@ -12,7 +12,7 @@ from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.hive import admission, execution_events, headroom, presence
 from scripts.swarm import readiness
-from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest
+from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
 
 class Tasks(Protocol):
@@ -22,6 +22,8 @@ class Tasks(Protocol):
 
     def reopen(self, event: Envelope) -> None: ...
 
+    def failed(self, event: Envelope, harness: str, reason: str) -> None: ...
+
 
 @dataclass(frozen=True)
 class SpokeConfig:
@@ -29,6 +31,7 @@ class SpokeConfig:
     lane: str
     hive: str
     policy: QueuePolicy = QueuePolicy()
+    fit: Callable[[Envelope], bool] = readiness.anywhere
 
 
 def claim_key(event: Envelope) -> str:
@@ -84,7 +87,7 @@ class Spoke:
             return recovered or "held"
         try:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-            delivery = readiness.take(queue, self.view, timeout_ms)
+            delivery = readiness.take(queue, self.view, timeout_ms, self.config.fit)
         except Exception:
             return self._failed()
         if delivery is None:
@@ -238,6 +241,9 @@ class Spoke:
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
+            if outcome.status is not Status.UNAVAILABLE:
+                harness = outcome.value.get("harness", "") if isinstance(outcome.value, dict) else ""
+                self.tasks.failed(event, harness, outcome.detail)
             raise RuntimeError(f"spawn {outcome.status}: {outcome.detail}")
         placed = outcome.value
         started = Envelope(

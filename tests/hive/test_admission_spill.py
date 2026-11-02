@@ -132,3 +132,199 @@ def test_prompt_failure_releases_the_admission_selected_after_spill(setup, monke
     with pytest.raises(RuntimeError, match="prompt failed"):
         launcher.spawn(request_for(setup))
     assert admission.pending(setup.store.redis, "spare") == 0
+
+
+def _load(launched, hive_id, **fields):
+    key = headroom.key(hive_id)
+    store = launched.store
+    store.redis.set(key, json.dumps({**json.loads(store.redis.get(key)), **fields}))
+
+
+def test_the_first_ranked_hive_takes_a_launch_under_cpu_load_below_the_memory_line(setup, capsys):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    _load(setup, "remote", cpus=1, load5=2.0)
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    assert setup.launcher.spawn(request).status is Status.PENDING
+    order = setup.launcher.orders_for(request.task["id"])
+    assert order.hive == "remote"
+    assert "placement_spill" not in setup.store.execution_registry.get("fixture", order.execution_id).profile_decision
+    assert "hive_placement_spill" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("in_pass", [False, True])
+def test_a_spill_past_the_first_ranked_hive_records_its_memory_refusal(setup, capsys, in_pass):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    _load(setup, "remote", available_mb=20_000)
+    launcher = setup.launcher
+    launcher.placement_cache = {} if in_pass else None
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    assert launcher.spawn(request).status is Status.PENDING
+    order = launcher.orders_for(request.task["id"])
+    assert order.hive == "spare"
+    refused = "ram: 20000 of 100000 MB available, 80 percent used, at or above the 80 percent line"
+    spill = {"preferred": "remote", "refusal": refused}
+    assert (
+        setup.store.execution_registry.get("fixture", order.execution_id).profile_decision["placement_spill"] == spill
+    )
+    logged = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert logged == [
+        {
+            "event": "hive_placement_spill",
+            "slug": "fixture",
+            "task": "task",
+            "name": request.name,
+            "hive": "spare",
+            **spill,
+        }
+    ]
+
+
+def test_a_reservation_refused_on_the_first_ranked_hive_records_it_on_the_spill(setup, monkeypatch, capsys):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    launcher = setup.launcher
+    reserve = launcher.reserve_room
+    refused = "no hive for eng has room: remote ram: full"
+    monkeypatch.setattr(
+        launcher,
+        "reserve_room",
+        lambda request, selected: refused if selected.hive == "remote" else reserve(request, selected),
+    )
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    assert launcher.spawn(request).status is Status.PENDING
+    order = launcher.orders_for(request.task["id"])
+    assert order.hive == "spare"
+    spill = {"preferred": "remote", "refusal": refused}
+    assert (
+        setup.store.execution_registry.get("fixture", order.execution_id).profile_decision["placement_spill"] == spill
+    )
+    events = [json.loads(line)["event"] for line in capsys.readouterr().err.splitlines()]
+    assert events == ["hive_admission_refused", "hive_placement_spill"]
+
+
+def test_a_second_launch_in_one_pass_spills_with_the_placed_count(setup):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    _load(setup, "remote", available_mb=20_000 + admission.AGENT_MB)
+    launcher = setup.launcher
+    launcher.placement_cache = {}
+    assert launcher.select(setup.config, "eng", {"id": "first"}).hive == "remote"
+    second = launcher.select(setup.config, "eng", {"id": "second"})
+    assert second.hive == "spare"
+    assert second.spill.record() == {
+        "preferred": "remote",
+        "refusal": "placement: 1 launches placed on it this pass took its room",
+    }
+
+
+@pytest.mark.parametrize(
+    ("fields", "refusal"),
+    [
+        ({"draining": "yes"}, "it is draining"),
+        ({"excluded": ["master", "engineer"]}, "it excludes eng"),
+        ({"excluded": ["master", "eng"]}, "it excludes eng"),
+    ],
+    ids=["draining", "excluding profile", "excluding lane"],
+)
+def test_a_launch_past_an_unhosted_first_ranked_hive_records_why(setup, fields, refusal):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1}, **fields)
+    write_hive(setup, id="spare")
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    assert selected.hive == "spare"
+    assert selected.spill.record() == {"preferred": "remote", "refusal": refusal}
+
+
+def test_a_reservation_refused_on_the_first_ranked_hive_names_its_memory_line(setup):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    _load(setup, "remote", cpus=1, load5=2.0, available_mb=20_000 + admission.AGENT_MB)
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    assert (selected.hive, selected.first) == ("remote", True)
+    assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
+    assert setup.launcher.reserve_room(request, selected) == (
+        "no hive for eng has room: remote ram: 20700 of 100000 MB available, 80 percent used, "
+        "700 MB per agent with 1 pending launches, fits 0 more under the 80 percent line"
+    )
+
+
+def test_an_acknowledged_execution_keeps_its_placement_spill(setup):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.hive import orders, placement
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {"id": "task", "seat": "eng@fixture", "controller_epoch": setup.held.epoch}
+    request = SpawnRequest(setup.config, "eng", setup.store.next_name(setup.config.slug, "eng"), task)
+    spill = placement.Spill("worker", "it is draining")
+    selected = replace(setup.launcher.select(setup.config, "eng", task), spill=spill)
+    admitted = setup.launcher.admit(request, selected)
+    order = orders.LaunchOrder(
+        setup.config.slug,
+        admitted.execution_id,
+        admitted.generation,
+        "engineer",
+        "eng",
+        "task",
+        "account",
+        "claude",
+        "subscription",
+        "prompt",
+        setup.held.epoch,
+        lease.now_ms(setup.store) + 60000,
+        hive="remote",
+    )
+    ack = orders.Ack("live", {"host_id": "remote"}, execution={"profile_decision": {"validation": {"pid": 12}}})
+    acked = setup.launcher.record(admitted, order, ack)
+    assert acked.profile_decision == {"validation": {"pid": 12}, "placement_spill": spill.record()}
+
+
+def test_a_refused_first_ranked_hive_takes_no_further_launch_in_the_pass(setup, monkeypatch):  # noqa: F811
+    write_hive(setup, prefer={"eng": 1})
+    write_hive(setup, id="spare")
+    launcher = setup.launcher
+    launcher.placement_cache = {}
+    reserve = launcher.reserve_room
+    monkeypatch.setattr(
+        launcher,
+        "reserve_room",
+        lambda request, selected: "remote ram: full" if selected.hive == "remote" else reserve(request, selected),
+    )
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    assert launcher.spawn(request).status is Status.PENDING
+    assert launcher.orders_for(request.task["id"]).hive == "spare"
+    assert launcher.select(setup.config, "eng", {"id": "next"}).hive == "spare"
+
+
+def test_the_hive_listing_counts_pending_launches_against_the_first_room(setup):  # noqa: F811
+    from scripts.hive import launch, placement
+
+    write_hive(setup, prefer={"eng": 1})
+    _load(setup, "remote", available_mb=20_000 + admission.AGENT_MB)
+    assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
+    listed = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "remote")
+    assert (listed[placement.FIRST_ROOM], listed[placement.FIRST_REFUSAL]) == (
+        0,
+        "ram: 20700 of 100000 MB available, 80 percent used, 700 MB per agent with 1 pending launches, "
+        "fits 0 more under the 80 percent line",
+    )
+
+
+def test_a_local_slot_cap_limits_the_first_room_and_keeps_first_mode():
+    from scripts.hive import launch, placement
+
+    hive = {"room": 5, "refusal": "", placement.FIRST_ROOM: 6, placement.FIRST_REFUSAL: ""}
+    assert launch._local_capped(hive, 2, 4) == {**hive, "room": 2, placement.FIRST_ROOM: 2}
+    full = launch._local_capped(hive, 4, 4)
+    assert (full[placement.FIRST_ROOM], full[placement.FIRST_REFUSAL]) == (
+        0,
+        "max agents: 4 of 4 agents on the hive, fits 0 more",
+    )
+    assert launch._local_capped({"room": 1, "refusal": ""}, 0, 4) == {"room": 1, "refusal": ""}

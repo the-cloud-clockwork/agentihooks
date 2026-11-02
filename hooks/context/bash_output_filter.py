@@ -22,10 +22,6 @@ from hooks.config import (
     BASH_FILTER_TEST_MAX_FAILURES,
 )
 
-# ---------------------------------------------------------------------------
-# Truncation helpers
-# ---------------------------------------------------------------------------
-
 
 def truncate_docker_logs(output: str, max_lines: int = BASH_FILTER_MAX_LINES) -> str:
     """Keep the last *max_lines* lines; prepend truncation notice."""
@@ -41,7 +37,6 @@ def truncate_test_output(output: str, max_failures: int = BASH_FILTER_TEST_MAX_F
     """Strip PASSED lines; keep summary block + first *max_failures* FAILED blocks."""
     lines = output.splitlines()
 
-    # Identify summary block (last section after a blank line or "==" separator)
     summary_start = 0
     for i in range(len(lines) - 1, -1, -1):
         if re.match(r"^[=\-]{5,}", lines[i]) or (lines[i].strip() == "" and i > len(lines) - 20):
@@ -51,10 +46,8 @@ def truncate_test_output(output: str, max_failures: int = BASH_FILTER_TEST_MAX_F
     summary_lines = lines[summary_start:]
     body_lines = lines[:summary_start]
 
-    # Remove PASSED lines from body
     filtered_body = [l for l in body_lines if not re.search(r"\bPASSED\b", l)]
 
-    # Extract FAILED blocks (split on "FAILED " or "FAIL " markers)
     failure_blocks: list[list[str]] = []
     current_block: list[str] = []
     in_failure = False
@@ -94,9 +87,7 @@ def truncate_test_output(output: str, max_failures: int = BASH_FILTER_TEST_MAX_F
 
 def truncate_git_log(output: str, max_commits: int = BASH_FILTER_GIT_MAX_COMMITS) -> str:
     """Keep first *max_commits* commits (split on 'commit ' boundaries)."""
-    # Split on commit SHA boundaries
     parts = re.split(r"(?=^commit [0-9a-f]{7,40})", output, flags=re.MULTILINE)
-    # Filter empty leading parts
     parts = [p for p in parts if p.strip()]
 
     if len(parts) <= max_commits:
@@ -114,11 +105,6 @@ def truncate_generic(output: str, max_chars: int = BASH_FILTER_MAX_CHARS) -> str
     trimmed = output[:max_chars]
     notice = f"\n[...truncated {len(output) - max_chars} chars...]"
     return trimmed + notice
-
-
-# ---------------------------------------------------------------------------
-# Output type detection
-# ---------------------------------------------------------------------------
 
 
 _TEST_COMMAND = re.compile(r"\b(pytest|jest|vitest|cargo test|go test|(npm|yarn|pnpm)( run)? test)\b")
@@ -142,11 +128,6 @@ def _detect_output_type(command: str) -> str:
         return "build_output"
 
     return "generic"
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def filter_bash_output(
@@ -180,7 +161,7 @@ def filter_bash_output(
         lines = tool_output.splitlines()
         if len(lines) <= BASH_FILTER_MAX_LINES:
             return None
-        return truncate_docker_logs(tool_output)  # same behaviour: keep last N lines
+        return truncate_docker_logs(tool_output)
 
     if output_type == "git_log":
         parts = re.split(r"(?=^commit [0-9a-f]{7,40})", tool_output, flags=re.MULTILINE)

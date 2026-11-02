@@ -6,6 +6,7 @@ import pytest
 from scripts.swarm import stack
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
+from tests.swarm.ledger_items import LedgerItems
 
 
 def check_update_guards(if_state, if_match):
@@ -23,7 +24,7 @@ def check_update_guards(if_state, if_match):
         ledger_tasks.check_guards(guard)
 
 
-class FakeLedger:
+class FakeLedger(LedgerItems):
     def __init__(self, tasks):
         self.rows = {
             t["id"]: {"state": "open", "claimed_by": "", "out_of_scope": False, "lane": "eng", **t} for t in tasks
@@ -1004,6 +1005,7 @@ def _slow_launches(monkeypatch, runtime, seconds):
 
     from scripts.swarm import tick as tick_module
 
+    monkeypatch.setattr(tick_module, "SPAWN_BUDGET_S", 20)
     clock = [0.0]
     monkeypatch.setattr(tick_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     spawn = runtime.spawn
@@ -1017,11 +1019,11 @@ def _slow_launches(monkeypatch, runtime, seconds):
 
 
 def test_a_launch_that_spends_the_budget_leaves_the_next_task_for_the_next_pass(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _slow_launches(monkeypatch, runtime, 20)
     from scripts.swarm.tick import SPAWN_BUDGET_S
 
     assert SPAWN_BUDGET_S == 20
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    _slow_launches(monkeypatch, runtime, 20)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
     assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
@@ -1355,7 +1357,7 @@ def test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened(st
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert runtime.nudged == []
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
 
@@ -1554,11 +1556,11 @@ def test_each_idle_tick_is_recorded_in_the_gate_log_with_its_time_and_task(store
     assert log.recent("sw") == []
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    tick("sw", store, ledger, runtime, now_ms=3_000)
+    tick("sw", store, ledger, runtime, now_ms=62_000)
     rows = [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"], r["at"]) for r in log.recent("sw")]
     assert rows == [
         ("idle-ticks", "count", "engineer@a1b2c3-0001", "t1", "idle tick 1", 2_000),
-        ("idle-ticks", "count", "engineer@a1b2c3-0001", "t1", "idle tick 2", 3_000),
+        ("idle-ticks", "count", "engineer@a1b2c3-0001", "t1", "idle tick 2", 62_000),
     ]
 
 
@@ -1576,7 +1578,7 @@ def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store, state):
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert runtime.killed == ["engineer@a1b2c3-0001"]
     assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
 
@@ -1586,9 +1588,9 @@ def test_a_busy_turn_resets_the_idle_count(store):
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    for status in ["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1):
+    for n, status in enumerate(["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1)):
         runtime.statuses["engineer@a1b2c3-0001"] = status
-        tick("sw", store, ledger, runtime, now_ms=2_000)
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert workers(store)[0].idle_ticks == IDLE_NUDGE_TICKS - 1
 
 
@@ -1691,15 +1693,15 @@ def test_a_retire_failing_three_ticks_is_a_health_finding(store):
     runtime.stuck.add(first.name)
     runtime.refusals[first.name] = {"process": 4242, "refusal": "signal to 4242 refused: Operation not permitted"}
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    tick("sw", store, ledger, runtime, now_ms=3_000)
+    tick("sw", store, ledger, runtime, now_ms=62_000)
     assert retire_watch.findings(store, "sw") == []
-    tick("sw", store, ledger, runtime, now_ms=4_000)
-    assert [(r["since"], r["at"]) for r in retire_watch.rows(store, "sw")] == [(2_000, 4_000)]
+    tick("sw", store, ledger, runtime, now_ms=122_000)
+    assert [(r["since"], r["at"]) for r in retire_watch.rows(store, "sw")] == [(2_000, 122_000)]
     (found,) = retire_watch.findings(store, "sw")
     assert found.id == f"retire-failed/{first.name}"
     assert found.evidence == ("process 4242", "refusal: signal to 4242 refused: Operation not permitted")
     runtime.stuck.clear()
-    tick("sw", store, ledger, runtime, now_ms=5_000)
+    tick("sw", store, ledger, runtime, now_ms=182_000)
     assert retire_watch.findings(store, "sw") == []
 
 

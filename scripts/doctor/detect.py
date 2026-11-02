@@ -47,6 +47,10 @@ def open_pulls(tasks):
 
 
 def reported(store, ledger, slug):
+    published = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
+    current = published.get("status", {})
+    if "findings" in current and 0 <= status.now_ms() - current.get("last_tick", 0) <= HOUR_MS // 12:
+        return {finding["id"] for finding in current["findings"]}
     state = ledger.state(slug)
     tasks, events = state.get("tasks", []), state.get("_meta", {}).get("events", [])
     return {f["id"] for f in status.findings(store, slug, store.config(slug), tasks, events)}

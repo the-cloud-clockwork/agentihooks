@@ -42,14 +42,22 @@ def _output(text: str) -> tuple[str, ...]:
     return tuple(f"output: {line}" for line in lines if line)[-OUTPUT_LINES:]
 
 
+def _source(entry: dict) -> tuple[str, ...]:
+    lines = [f"operator words: {entry['operator_words']}"] if "operator_words" in entry else []
+    if "ordered_at" in entry:
+        lines.append(f"ordered {entry['ordered_at']} in {entry['ledger_item']}")
+    elif "ledger_item" in entry:
+        lines.append(f"from {entry['ledger_item']}")
+    return tuple(lines)
+
+
 def _finding(entry: dict, ended: str, output: str) -> Finding:
     return Finding(
         KIND,
         entry["id"],
         f"feature {entry['id']} regressed: {entry['behaviour']}",
         (
-            f"operator words: {entry['operator_words']}",
-            f"ordered {entry['ordered_at']} in {entry['ledger_item']}",
+            *_source(entry),
             f"live check {' '.join(entry['live_check'])} {ended}",
             *_output(output),
         ),
@@ -61,7 +69,7 @@ def _finding(entry: dict, ended: str, output: str) -> Finding:
 def findings(path: Path | None = None) -> list[Finding]:
     path = path or MAP
     found = []
-    for entry in entries(path):
+    for entry in (entry for entry in entries(path) if "live_check" in entry):
         ended, output = run(entry["live_check"], path.parent)
         if ended:
             found.append(_finding(entry, ended, output))

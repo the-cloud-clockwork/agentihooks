@@ -190,7 +190,7 @@ class TestOnlyTheCommandsOwnOperands:
 
 
 class TestPRBaseGuard:
-    """Only CI creates promotion pull requests into protected branches."""
+    """PR creation needs an explicit base; only dev is open without the operator's PR phrase."""
 
     def _check(self, command: str):
         from hooks.context.branch_guard import check_branch_guard
@@ -218,10 +218,6 @@ class TestPRBaseGuard:
         s1, s2, s3 = self._signal_patches()
         with s1, s2, s3:
             self._check(command)  # should not raise
-
-    @pytest.mark.parametrize("base", ["main", "master", "v1"])
-    def test_protected_pr_base_blocked_with_signal(self, base):
-        self._assert_blocked_with_signal(f"gh pr create --base {base} --fill")
 
     def test_pr_bare_create_blocked(self):
         # a bare create defaults to the repo default branch (main)
@@ -263,6 +259,79 @@ class TestPRBaseGuard:
         ):
             self._check('gh pr create --base dev --body "never use --base main"')
             self._check('gh issue comment 5 --body "gh pr create --base main needs a signal"')
+
+
+class TestProtectedPrBase:
+    """A PR into main, master or v1 needs the operator's PR phrase, even under bypass."""
+
+    _SID = "test-protected-pr"
+
+    @pytest.fixture(autouse=True)
+    def _no_redis(self):
+        from unittest.mock import patch
+
+        with patch("hooks.context.branch_guard.get_redis", return_value=None):
+            yield
+
+    def _check(self, command: str):
+        from hooks.context.branch_guard import check_branch_guard
+
+        check_branch_guard({"tool_input": {"command": command}, "session_id": self._SID})
+
+    def _blocked(self, command: str) -> str:
+        from hooks.hook_manager import BlockAction
+
+        with pytest.raises(BlockAction) as blocked:
+            self._check(command)
+        return str(blocked.value)
+
+    @staticmethod
+    def _needs_phrase(base: str) -> str:
+        return (
+            f"BLOCKED: a PR into '{base}' needs the operator's PR phrase in this session.\n"
+            "The operator includes 'open a pr', 'create a pr', 'make a pr' or 'pr please' in a message; "
+            "bypass mode does not replace it.\n"
+            f"Merging into '{base}' stays with the operator or CI."
+        )
+
+    @pytest.mark.parametrize("base", ["main", "master", "v1"])
+    def test_signal_allows_and_counts(self, base):
+        from hooks.context import branch_guard
+
+        branch_guard.set_pr_signal(self._SID)
+        self._check(f"gh pr create --base {base} --fill")
+        assert branch_guard._get_pr_counter(self._SID) == 1
+
+    @pytest.mark.parametrize("base", ["main", "master", "v1"])
+    def test_no_signal_blocked(self, base):
+        assert self._blocked(f"gh pr create --base {base} --fill") == self._needs_phrase(base)
+
+    @pytest.mark.parametrize("base", ["main", "master", "v1"])
+    def test_bypass_without_signal_blocked(self, base):
+        from hooks.context.controls_toggle import set_controls_disabled
+
+        set_controls_disabled(self._SID)
+        assert self._blocked(f"gh pr create --base {base} --fill") == self._needs_phrase(base)
+
+    @pytest.mark.parametrize("base", ["main", "master", "v1"])
+    def test_counter_limit_holds_under_bypass(self, base):
+        from hooks.context import branch_guard
+        from hooks.context.controls_toggle import set_controls_disabled
+
+        branch_guard.set_pr_signal(self._SID)
+        set_controls_disabled(self._SID)
+        for _ in range(branch_guard._PR_SIGNAL_MAX_COUNT):
+            self._check(f"gh pr create --base {base} --fill")
+        assert self._blocked(f"gh pr create --base {base} --fill") == (
+            f"BLOCKED: PR creation limit reached ({branch_guard._PR_SIGNAL_MAX_COUNT} PRs this session).\n"
+            "Include a PR phrase in your next message to re-authorize and reset the counter."
+        )
+
+    def test_dev_needs_no_signal_and_leaves_the_counter(self):
+        from hooks.context import branch_guard
+
+        self._check("gh pr create --base dev --fill")
+        assert branch_guard._get_pr_counter(self._SID) == 0
 
 
 class TestPrSignalResetsCounter:

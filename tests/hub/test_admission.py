@@ -89,7 +89,7 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     [agent] = rig.store.agents(SLUG)
     assert (agent.name, agent.lane, agent.task, agent.seat, agent.hive) == (name, "eng", "t1", "eng-1@sw", "hive-a")
     assert (agent.state, agent.started_at) == ("starting", 7_000)
-    assert rig.store.redis.hget(rig.store.names.key("name", name), "spawned_at") == "7000"
+    assert rig.store.names.entry(name)["spawned_at"] == 7_000
     [occupied] = rig.store.redis.lrange(f"{rig.store.seats.key('eng-1@sw')}:history", -1, -1)
     assert json.loads(occupied)["at"] == 7_000
     from scripts.swarm import tick
@@ -124,6 +124,38 @@ def test_a_task_with_a_pull_request_is_admitted_back_into_pr(rig):
 def test_a_task_returns_to_the_seat_its_handoff_names(rig):
     rig.store.put_handoff(SLUG, "t1", "carry on", seat="eng-3@sw")
     assert rig.admitter.admit(SLUG, ask())["task"]["seat"] == "eng-3@sw"
+
+
+def test_a_task_whose_dependencies_are_done_is_admitted_with_an_empty_stack_base(rig):
+    assert rig.admitter.admit(SLUG, ask())["task"]["stack_base"] == []
+
+
+@pytest.mark.parametrize(
+    "branch_repo, stacked",
+    [
+        ("https://github.com/acme/app.git", {"task": "t2", "branch": "feat-two"}),
+        (
+            "https://github.com/acme/other",
+            {"task": "t2", "branch": "feat-two", "repo": "https://github.com/acme/other"},
+        ),
+    ],
+)
+def test_a_task_on_an_open_dependency_stacks_on_its_branch_by_the_stored_origin(rig, branch_repo, stacked):
+    rig.store.update(SLUG, repo_origin="github.com/acme/app")
+    rig.rows["t2"].update(state="pr", branch="feat-two", branch_repo=branch_repo)
+    rig.rows["t1"]["depends_on"] = ["t2"]
+
+    assert rig.admitter.admit(SLUG, ask())["task"]["stack_base"] == [stacked]
+
+
+def test_a_swarm_without_a_stored_origin_compares_with_its_checkout_origin(rig, monkeypatch):
+    from scripts.swarm import stack
+
+    monkeypatch.setattr(stack, "origin_key", lambda repo: {"/repo": "github.com/acme/app"}.get(repo, ""))
+    rig.rows["t2"].update(state="pr", branch="feat-two", branch_repo="git@github.com:acme/app.git")
+    rig.rows["t1"]["depends_on"] = ["t2"]
+
+    assert rig.admitter.admit(SLUG, ask())["task"]["stack_base"] == [{"task": "t2", "branch": "feat-two"}]
 
 
 def test_the_claim_is_guarded_on_the_claimant_the_offer_saw(rig):
@@ -224,6 +256,57 @@ def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):
         {"claimed_by": name},
     )
     assert rig.admitter.reopen(SLUG, ask()) is False
+
+
+def test_an_admission_carries_no_avoided_harness_until_a_launch_fails_on_one(rig):
+    assert "avoid_harness" not in rig.admitter.admit(SLUG, ask())["task"]
+
+
+def test_a_task_whose_last_launch_failed_on_a_harness_is_admitted_steered_off_it(rig):
+    rig.store.note_launch_failure(SLUG, "t1", "launch failed", "codex")
+    assert rig.admitter.admit(SLUG, ask())["task"]["avoid_harness"] == "codex"
+
+
+def test_a_failed_launch_records_its_harness_and_steers_the_redelivered_offer(rig, capsys):
+    first = rig.admitter.admit(SLUG, ask())
+    held = rig.store.key(SLUG, "spoke-admission", "t1", "0")
+    capsys.readouterr()
+
+    assert rig.admitter.failed(SLUG, ask(harness="codex", reason="launch failed")) is True
+
+    assert rig.store.failed_harness(SLUG, "t1") == "codex"
+    assert rig.store.launch_failure(SLUG, "t1") == "launch failed"
+    again = rig.admitter.admit(SLUG, ask())
+    assert again == {**first, "task": {**first["task"], "avoid_harness": "codex"}}
+    assert admission.ADMITTED_MS - 5_000 < rig.store.redis.pttl(held) <= admission.ADMITTED_MS
+    assert capsys.readouterr() == ("", f"hub: events steering swarm={SLUG} task=t1 avoid=codex: launch failed\n")
+
+
+def test_a_failed_launch_naming_no_harness_records_the_failure_and_steers_nothing(rig, capsys):
+    first = rig.admitter.admit(SLUG, ask())
+    capsys.readouterr()
+
+    assert rig.admitter.failed(SLUG, ask(harness="", reason="launch failed")) is True
+
+    assert rig.store.launch_failure(SLUG, "t1") == "launch failed"
+    assert rig.store.failed_harness(SLUG, "t1") == ""
+    assert rig.admitter.admit(SLUG, ask()) == first
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("fields", [{"hive": "hive-b"}, {"generation": 1}])
+def test_a_failure_report_without_its_admission_records_nothing(rig, fields):
+    first = rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.failed(SLUG, ask(harness="codex", reason="launch failed", **fields)) is False
+
+    assert rig.store.failed_harness(SLUG, "t1") == ""
+    assert rig.store.launch_failure(SLUG, "t1") == ""
+    assert rig.admitter.admit(SLUG, ask()) == first
+
+
+def test_the_slot_service_routes_failure_reports_to_admission():
+    assert admission.OPERATIONS == ("admit", "reopen", "failed")
 
 
 def test_the_slot_service_answers_admission_for_the_swarm_and_hive_of_its_subject():

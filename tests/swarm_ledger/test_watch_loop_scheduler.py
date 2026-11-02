@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import process_timer, service
+from scripts.scheduler.core import Scheduler
 from scripts.swarm_ledger import ledger_server
 
 pytestmark = pytest.mark.unit
@@ -24,7 +26,8 @@ def unwritable_cache(monkeypatch):
     monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6379/0")
     for name in ("AGENTIHOOKS_DEPLOYMENT", "AGENTIHOOKS_HIVE_ID"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(process_timer, "blocking_client", lambda: fakeredis.FakeRedis(decode_responses=True))
+    state = RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler")
+    monkeypatch.setattr(process_timer, "Scheduler", lambda _state=None: Scheduler(state))
     monkeypatch.setattr(ledger_server, "SCHEDULER_UNAVAILABLE", threading.Event())
 
 

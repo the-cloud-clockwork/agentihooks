@@ -41,7 +41,7 @@ def _settle_world(inbox, name, seat, exit_text):
         if item.state in CLOSED:
             continue
         if ended := _life_notice_end(item, name, exit_text):
-            inbox.close(item.id, BY, "done", ended)
+            inbox.settle(item.id, BY, "done", ended)
         elif successor:
             inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
         elif seat and _task_continues(inbox, item, seat):
@@ -78,7 +78,7 @@ def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: st
         exit_text = f"left its seat and task {item.task}"
         goes_on = False
     if ended := _life_notice_end(item, name, exit_text):
-        inbox.close(item.id, BY, "done", ended)
+        inbox.settle(item.id, BY, "done", ended)
     elif goes_on:
         inbox.redirect(item.id, BY, held, f"{name} {exit_text}; back to {held} for its next occupant", held, name)
     elif (
@@ -289,7 +289,7 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
                     if push_stop.is_notice(item)
                     else _life_notice_end(item, owner, outcome.get("reason", "left its seat"))
                 )
-            inbox.close(item.id, BY, "done", reason)
+            inbox.settle(item.id, BY, "done", reason)
 
 
 def _settle_left_behind(inbox: "InboxStore", item, seat: str, active: set) -> None:

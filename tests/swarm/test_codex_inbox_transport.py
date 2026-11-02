@@ -80,12 +80,16 @@ def test_the_transport_stays_off_the_agent_projection_and_comes_back_from_the_ex
 
 
 def test_an_execution_recorded_before_the_transport_field_reads_back_with_no_transport(env):  # noqa: F811
+    from scripts.swarm import fencing
+
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     agent = AgentRecord(store.next_name("sw", "eng"), "eng", "task", seat="eng-1@sw", transport=APP_SERVER_TRANSPORT)
     admitted = store.start_execution("sw", agent)
-    executions = store.key("sw", "executions")
-    row = json.loads(store.redis.hget(executions, admitted.execution_id))
-    del row["transport"]
-    store.redis.hset(executions, admitted.execution_id, json.dumps(row))
+
+    def drop_transport(doc):
+        row = doc["executions"][admitted.execution_id]
+        del row["transport"]
+
+    fencing.write(store, "sw", drop_transport)
     assert [found.transport for found in execution.ExecutionRegistry(store).agents("sw")] == [""]

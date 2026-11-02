@@ -35,7 +35,7 @@
     },
     "leaked": [],
     "protected_changed": [
-      "control-owner"
+      "lease-cache"
     ],
     "refusals": {
       "forged_resume": "unrecognized_report",

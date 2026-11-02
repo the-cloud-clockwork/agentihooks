@@ -21,6 +21,7 @@ def notices(store):
     return [item for item in InboxStore(store.redis).inbox("master@sw") if "Hive telemetry" in item.text]
 
 
+@pytest.mark.feature("swarm-claim-hold")
 def test_tick_tells_the_master_once_when_a_verification_hold_has_no_window_for_over_an_hour(held):
     store, ledger, runtime = held
     tick("sw", store, ledger, runtime, 3_600_001)
@@ -112,6 +113,7 @@ def test_a_document_without_stamps_times_the_hold_from_observation(held, metadat
         {"notified": True},
     ],
 )
+@pytest.mark.feature("swarm-claim-hold")
 def test_a_skipped_hold_does_not_hide_the_eligible_task_behind_it(held, earlier):
     from scripts.swarm import claim_hold
 

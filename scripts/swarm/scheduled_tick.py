@@ -17,7 +17,7 @@ from scripts.scheduler.core import Scheduler
 from scripts.scheduler.service import AlreadyRunning, machine_lock, runtime_dir
 
 if TYPE_CHECKING:
-    from redis import Redis
+    from scripts.events.bus import StateStore
 
 OWNER = "agentihooks swarm tick"
 EXPRESSION = "* * * * *"
@@ -33,22 +33,17 @@ LOCK = "swarm-tick"
 HELD_FD = "AGENTIHOOKS_SWARM_TICK_LOCK_FD"
 
 
-def open_scheduler() -> Scheduler:
-    from scripts.swarm.store import redis_client
-
-    return Scheduler(redis_client())
-
-
 def ensure(scheduler: Scheduler) -> str:
-    redis, key = scheduler.redis, scheduler.key("swarm-tick")
-    with redis.lock(scheduler.key("swarm-tick-lock"), timeout=30, blocking_timeout=30):
-        entry_id = redis.get(key)
+    from scripts.scheduler.lease import held
+
+    with held(scheduler.state, scheduler.name("swarm-tick-lock"), 30):
+        entry_id = scheduler.read("swarm-tick")
         if entry_id and _live(scheduler, entry_id):
             return entry_id
         entry = scheduler.cron(owner=OWNER, payload="swarm tick", expression=EXPRESSION)
         entry.timeout.connect(fire)
         entry.start()
-        redis.set(key, entry.id)
+        scheduler.put("swarm-tick", entry.id)
         return entry.id
 
 
@@ -62,10 +57,10 @@ def _live(scheduler: Scheduler, entry_id: str) -> bool:
 def cancel(scheduler: Scheduler) -> None:
     for entry in scheduler.owned(OWNER):
         entry.cancel()
-    scheduler.redis.delete(scheduler.key("swarm-tick"))
+    scheduler.put("swarm-tick", "")
 
 
-def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
+def fire(event: dict, delivery_id: str, state: "StateStore") -> None:
     directory = runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "swarm-tick.log").open("ab") as log:
@@ -80,11 +75,11 @@ def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
 
 
 def record(scheduler: Scheduler, root: Path | str, at: float) -> None:
-    scheduler.redis.set(scheduler.key(DELIVERED), json.dumps({"root": str(root), "at": at}))
+    scheduler.put(DELIVERED, json.dumps({"root": str(root), "at": at}))
 
 
 def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
-    raw = scheduler.redis.get(scheduler.key(DELIVERED))
+    raw = scheduler.read(DELIVERED)
     if not raw:
         return "no scheduler has delivered a swarm tick yet"
     try:
@@ -102,7 +97,7 @@ def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
 
 def delivered_at(scheduler: Scheduler) -> float:
     try:
-        return float(json.loads(scheduler.redis.get(scheduler.key(DELIVERED)))["at"])
+        return float(json.loads(scheduler.read(DELIVERED))["at"])
     except (ValueError, KeyError, TypeError):
         return 0.0
 
@@ -164,19 +159,16 @@ def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen) -> int:
             code = _finish(popen(command(timer.entry_point()), env=env, pass_fds=(fd,)))
     except AlreadyRunning:
         return 0
-    if not code:
-        _delivered(time.time())
+    _delivered(time.time())
     return code
 
 
 def _delivered(at: float) -> None:
-    from redis.exceptions import RedisError
-
-    from scripts.swarm.store import redis_client
+    from scripts.events import state
 
     try:
-        record(Scheduler(redis_client()), ROOT, at)
-    except RedisError as exc:
+        record(Scheduler(), ROOT, at)
+    except state.unavailable() as exc:
         print(f"the swarm tick delivery could not be recorded: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
@@ -193,7 +185,12 @@ def restart(
     schedule: Callable[[], bool] | None = None,
     wait: Callable[[float], None] = time.sleep,
 ) -> str:
-    """The supervisor runs the code it started from, so a restart from the installed watcher replaces stale code."""
+    """The supervisor runs the code it started from, so a restart from the installed watcher replaces stale code.
+
+    A tick in flight proves the scheduler delivers, so the restart leaves it to finish its pass.
+    """
+    if _held(LOCK):
+        return "left the scheduler alone: a swarm tick is still running"
     if _held("supervisor"):
         kill(int((runtime_dir() / "supervisor.lock").read_text()), signal.SIGTERM)
         for _ in range(STOP_S):

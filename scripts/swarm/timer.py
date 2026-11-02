@@ -17,12 +17,14 @@ PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 TICK_WATCH = "agentihooks-tick-watch"
 SPOKE = "agentihooks-spoke"
+SCHEDULER = "agentihooks-scheduler"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
 DRAIN_S = 30
 KILL_WAIT_S = 10
 STOP_TIMEOUT_S = 120
 CGROUP_FILE = Path("/proc/self/cgroup")
+LOCKS_FILE = Path("/proc/locks")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
@@ -67,7 +69,18 @@ def units(binary):
         "Restart=always\nRestartSec=5\nNotifyAccess=main\nWatchdogSec=600\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
+    scheduler = (
+        "[Unit]\nDescription=agentihooks scheduler, apart from the units that start it\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=AGENTIHOOKS_SCHEDULER_UNIT=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{sys.executable}" -m scripts.scheduler.service supervise\n'
+        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2\nKillMode=process\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
     return {
+        f"{SCHEDULER}.service": scheduler,
         f"{WAITS}.service": wait_service,
         f"{WAITS}.timer": wait_timer,
         f"{WAKER}.service": waker,
@@ -246,12 +259,13 @@ def _off_installed(held):
     return ""
 
 
-def recycle():
+def recycle() -> None:
+    """Drain a supervisor off the installed code, only between swarm tick passes so a recycle never splits one."""
     from scripts.scheduler import service
 
     env = _scheduler_env()
     held = service.holder(env)
-    if held is None or not (why := _off_installed(held)):
+    if held is None or not (why := _off_installed(held)) or _ticking():
         return
     print(f"recycling the scheduler supervisor: {why}", file=sys.stderr)
     if not service.drain(held["pid"], env):
@@ -261,25 +275,44 @@ def recycle():
         )
 
 
+def _ticking() -> bool:
+    """True while a swarm tick pass holds the tick lock, read from the kernel lock table so the probe never takes it."""
+    import re
+
+    from scripts.scheduler.service import runtime_dir
+    from scripts.swarm.scheduled_tick import LOCK
+
+    try:
+        stat = (runtime_dir() / f"{LOCK}.lock").stat()
+        table = LOCKS_FILE.read_text()
+    except OSError:
+        return False
+    holders = re.findall(r"^\d+:\s+FLOCK\s+\S+\s+\S+\s+\d+\s+([0-9a-f]+):([0-9a-f]+):(\d+)\s", table, re.MULTILINE)
+    held = (os.major(stat.st_dev), os.minor(stat.st_dev), stat.st_ino)
+    return any((int(major, 16), int(minor, 16), int(inode)) == held for major, minor, inode in holders)
+
+
 def _proven():
+    from scripts.events import state
     from scripts.scheduler import service
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import store_errors
 
     started = (service.holder(_scheduler_env()) or {}).get("started")
     try:
-        return started is not None and scheduled_tick.delivered_at(scheduled_tick.open_scheduler()) >= started
-    except store_errors():
+        return started is not None and scheduled_tick.delivered_at(Scheduler()) >= started
+    except state.unavailable():
         return False
 
 
 def schedule():
+    from scripts.events import state
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import store_errors
 
     try:
-        scheduled_tick.ensure(scheduled_tick.open_scheduler())
-    except store_errors() as exc:
+        scheduled_tick.ensure(Scheduler())
+    except state.unavailable() as exc:
         print(f"the scheduled swarm tick could not be registered: {type(exc).__name__}: {exc}", file=sys.stderr)
         return False
     supervise()
@@ -287,27 +320,29 @@ def schedule():
 
 
 def unschedule():
+    from scripts.events import state
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import store_errors
 
     try:
-        scheduled_tick.cancel(scheduled_tick.open_scheduler())
-    except store_errors() as exc:
+        scheduled_tick.cancel(Scheduler())
+    except state.unavailable() as exc:
         print(f"the scheduled swarm tick could not be cancelled: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def undelivered():
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
 
-    return scheduled_tick.undelivered(scheduled_tick.open_scheduler(), _roots()[1], time.time())
+    return scheduled_tick.undelivered(Scheduler(), _roots()[1], time.time())
 
 
 def _kept():
-    from scripts.swarm.store import store_errors
+    from scripts.events import state
 
     try:
         return undelivered()
-    except store_errors() as exc:
+    except state.unavailable() as exc:
         return f"the swarm tick delivery could not be read: {type(exc).__name__}: {exc}"
 
 
