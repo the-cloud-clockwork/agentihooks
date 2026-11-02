@@ -206,3 +206,33 @@ def test_a_launched_at_time_is_the_launch_a_ledger_write_must_follow():
     assert master_start.seated(lead, {lead.name}, ledger_doc(lead.name, 9)) is True
     assert master_start.seated(replace(lead, state="working"), {lead.name}, {}) is True
     assert master_start.seated(replace(lead, state="suspect"), {lead.name}, ledger_doc(lead.name, 9)) is False
+
+
+def test_a_ledger_with_no_meta_or_no_events_records_no_write():
+    from scripts.swarm import master_start
+    from scripts.swarm.store import MASTER, AgentRecord
+
+    lead = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting")
+
+    assert master_start.wrote_ledger(lead, {}) is False
+    assert master_start.wrote_ledger(lead, {"_meta": {}}) is False
+
+
+def test_an_event_without_a_time_counts_from_the_epoch():
+    from scripts.swarm import master_start
+    from scripts.swarm.store import MASTER, AgentRecord
+
+    lead = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting")
+
+    assert master_start.wrote_ledger(lead, {"_meta": {"events": [{"by": lead.name}]}}) is True
+
+
+def test_the_night_watch_cleanup_leaves_a_suspect_lead_to_the_forced_launch():
+    from scripts.swarm.store import MASTER, AgentRecord
+    from tests.swarm.test_tick_master import direct
+
+    swarm, runtime = direct(AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="suspect", seat="master@sw"))
+    runtime.live.clear()
+
+    assert tick_master.finish_dead_starting(swarm, "sw", runtime, 300_001) == []
+    assert [a.state for a in swarm.agents("sw")] == ["suspect"]

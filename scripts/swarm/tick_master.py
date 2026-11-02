@@ -19,6 +19,7 @@ FORCED = "master down {minutes} minutes, forced a master launch"
 NO_HOOK = "the forced master launch reported no hook within two minutes"
 NO_LAUNCH = "no master launched"
 SUSPECT = "suspect"
+STARTING = "starting"
 PROMPT = (
     "PROMOTED: swarm {slug} has had no live master for {minutes} minutes and the forced master launch failed: "
     "{reason}. The exact launch error: {error}. This replaces any master down notice you were sent. You stay {name} "
@@ -152,19 +153,20 @@ def _forced(store, slug, state, now_ms, launched):
 
 
 def _finish_dead(store: RedisStore, slug: str, runtime: Any, now_ms: int) -> list[str]:
-    """A suspect lead has not answered through the whole down window, so the forced launch may replace it."""
-    return _finish(store, slug, runtime, now_ms, suspect=True)
+    """A suspect lead has not answered through the whole down window, and a dead starting lead never will, so the
+    forced launch may replace either."""
+    return _finish(store, slug, runtime, now_ms, (SUSPECT, STARTING))
 
 
 def finish_dead_starting(store: RedisStore, slug: str, runtime: Any, now_ms: int) -> list[str]:
     """A starting lead with no live process past its start deadline never reports, so any relaunch may replace it."""
-    return _finish(store, slug, runtime, now_ms, suspect=False)
+    return _finish(store, slug, runtime, now_ms, (STARTING,))
 
 
-def _finish(store: RedisStore, slug: str, runtime: Any, now_ms: int, suspect: bool) -> list[str]:
+def _finish(store: RedisStore, slug: str, runtime: Any, now_ms: int, states: tuple[str, ...]) -> list[str]:
     actions, live = [], runtime.live_names()
     for lead in _masters(store, slug):
-        if (suspect and lead.state == SUSPECT) or master_start.dead(lead, live, now_ms):
+        if lead.state in states and (lead.state == SUSPECT or master_start.dead(lead, live, now_ms)):
             store.put_agent(slug, replace(lead, state="finished"))
             actions.append(f"finished dead lead {lead.name} ({lead.state})")
     return actions
