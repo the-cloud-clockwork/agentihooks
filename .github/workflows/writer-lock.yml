@@ -61,6 +61,8 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           TICK_INPUTS: >-
             scripts/tick/* scripts/swarm/tick*.py scripts/swarm/scheduled_tick.py
+            scripts/swarm/store.py scripts/swarm/lease.py scripts/swarm/ledger_client.py scripts/swarm/health/*
+            tests/swarm/test_tick.py tests/swarm/test_delivery.py
             tests/swarm/tick_scenarios/* tests/swarm/tick_equivalence.sh tests/swarm/test_tick_load.py
             .github/workflows/tick-equivalence.yml .github/workflows/writer-lock.yml
         run: |

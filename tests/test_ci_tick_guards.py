@@ -31,8 +31,14 @@ def workflow(name: str) -> dict:
         ("tests/swarm/test_tick_load.py", "true"),
         (".github/workflows/tick-equivalence.yml", "true"),
         ("README.md", "false"),
-        ("scripts/swarm/store.py", "false"),
-        ("tests/swarm/test_tick.py", "false"),
+        ("scripts/swarm/store.py", "true"),
+        ("scripts/swarm/lease.py", "true"),
+        ("scripts/swarm/ledger_client.py", "true"),
+        ("scripts/swarm/health/checks.py", "true"),
+        ("tests/swarm/test_tick.py", "true"),
+        ("tests/swarm/test_delivery.py", "true"),
+        ("scripts/swarm/cli.py", "false"),
+        ("tests/swarm/test_store.py", "false"),
     ],
 )
 def test_tick_guard_selection(path: str, expected: str, tmp_path: Path) -> None:
