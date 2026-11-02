@@ -227,6 +227,26 @@ def test_a_live_starting_front_door_that_never_wrote_the_ledger_leaves_the_seat_
     assert kinds(store) == ["empty master seat"]
 
 
+def test_an_enforced_respawn_first_finishes_a_dead_starting_front_door(store):
+    enforce(store)
+    rig = Rig()
+    dead = AgentRecord("boss", "master", "master", started_at=NOW, state="starting", seat="master@sw")
+    store.put_agent(SLUG, dead)
+    actions = until(store, rig, NOW, NOW + 10 * MINUTE)
+    assert "finished dead lead boss (starting)" in actions
+    assert actions.index("finished dead lead boss (starting)") < actions.index("respawned the master")
+    assert [a.state for a in store.agents(SLUG)] == ["finished"]
+
+
+def test_a_respawn_keeps_a_starting_front_door_inside_its_deadline(store):
+    enforce(store)
+    rig = Rig()
+    store.put_agent(SLUG, AgentRecord("boss", "master", "master", started_at=NOW + 9 * MINUTE, state="starting"))
+    actions = until(store, rig, NOW, NOW + 10 * MINUTE)
+    assert "finished dead lead boss (starting)" not in actions
+    assert [a.state for a in store.agents(SLUG)] == ["starting"]
+
+
 def held_master(store, runtime):
     boss = AgentRecord("boss", "master", "master", state="working", seat="master@sw")
     store.put_agent(SLUG, boss)

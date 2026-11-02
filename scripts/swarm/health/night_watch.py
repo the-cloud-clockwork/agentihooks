@@ -159,7 +159,8 @@ def _seat(watch, state):
         episode["respawned"] = watch.now_ms
         state["respawns"] = [*recent, watch.now_ms]
         if _allows(watch, "respawn", reason):
-            actions = watch.respawn() or [f"front door respawn refused: {why}"]
+            finished = tick_master.finish_dead_starting(watch.store, watch.slug, watch.runtime, watch.now_ms)
+            actions = finished + (watch.respawn() or [f"front door respawn refused: {why}"])
         else:
             actions = [LOGGED.format(action=f"respawn the front door master, {reason}")]
     return actions + _alert(watch, episode, SEAT, SEAT_ALERT.format(slug=watch.slug, minutes=minutes, why=why))
