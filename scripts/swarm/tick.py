@@ -42,7 +42,6 @@ from scripts.swarm import (
     control_notifications,
     dead_resume,
     deliberate_exit,
-    dev_red,
     difficulty,  # noqa: F401
     dispatcher,
     elapsed,
@@ -56,7 +55,6 @@ from scripts.swarm import (
     ledger_probe,
     lifetime,
     live_binding,
-    lost_runner,
     master_move,
     master_questions,
     master_retire,
@@ -65,9 +63,7 @@ from scripts.swarm import (
     pane_evidence,
     panic,  # noqa: F401
     preempt,
-    prerequisite_wait,
     profile_first,
-    promotion_watch,
     readiness,
     reaper,
     release_wait,
@@ -80,7 +76,6 @@ from scripts.swarm import (
     stack,
     stale_nudge,
     successor_retry,
-    time_left,
     timing,
 )
 from scripts.swarm import idle as idle_state
@@ -369,24 +364,16 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     actions += run_group("agents", **passing, config=config)
     actions.extend(master_steps.run_masters(locals()))
     sleeping = lifetime.sleeping(slug, store, rows)
-    if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
-        config = store.update(slug, state="running")
-        actions.append("new tasks, running again")
+    actions += run_group(task_steps.DRAINED, **passing, config=config, sleeping=sleeping)
+    task_steps.raise_held(box)
+    config = box["config"]
     actions += run_group("tasks", **passing, config=config)
-    actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
-    actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
-    actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
-    actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
-    actions += skip_refused(fleet_red.notice_pass, slug, store, ledger, rows, now_ms)
+    actions += run_group(task_steps.REOPENS, **passing, config=config)
     actions += run_group(task_steps.TASK_PASSES, **passing, config=config)
     task_steps.raise_held(box)
-    from scripts.swarm import quota_notice
-
     with PLACING:
         run_group("place")
-        actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
-        actions += skip_refused(lost_runner.sweep, slug, config, store, now_ms)
-        actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
+        actions += run_group(place.NOTICES, **passing, config=config)
         actions += run_group(place.ACKS, **passing, config=config, sleeping=sleeping)
         task_steps.raise_held(box)
         if not sleeping:
