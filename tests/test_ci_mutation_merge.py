@@ -126,6 +126,7 @@ def test_main_fails_and_names_a_green_shard_report_without_its_measurement(tmp_p
     assert merge.main([str(shards), "--shards", "3", "--output", str(out)]) == 1
     assert json.loads((out / "report.json").read_text())["failed"] is True
     assert "mutation shards unmeasured or graded fewer mutants than they own: 0, 2" in capsys.readouterr().out
+    assert merge.short_shards({0: {"shard": {"expected": 1, "graded": 1}}}) == []
 
 
 def test_main_fails_and_names_the_missing_shard_when_a_report_is_absent(tmp_path, capsys):
