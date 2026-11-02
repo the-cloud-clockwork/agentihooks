@@ -141,7 +141,7 @@ def test_an_event_is_never_delivered_past_the_attempt_cap(channel, harness):
     assert channel.take() == []
 
 
-def test_an_exhausted_delivery_is_retained_once_in_the_dead_stream(channel, harness):
+def test_an_exhausted_delivery_is_retained_once_in_the_dead_stream(channel: Channel, harness: Harness) -> None:
     original = event()
     channel.offer(original)
     for attempt in (1, 2, 3):
@@ -150,11 +150,10 @@ def test_an_exhausted_delivery_is_retained_once_in_the_dead_stream(channel, harn
         harness.advance(harness.policy.ack_wait_ms + harness.margin_ms)
     dead = harness.bus.dead.consumer("dead-reader", "dead.>")
     letters = []
-    for _ in range(40):
+    deadline = time.monotonic() + 6 * harness.policy.ack_wait_ms / 1000
+    while not letters and time.monotonic() < deadline:
         assert channel.take() == []
         letters = dead.fetch(10, harness.poll_ms)
-        if letters:
-            break
     assert len(letters) == 1
     letter = letters[0].event
     assert letter.type == "dead_lettered"
