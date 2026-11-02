@@ -95,6 +95,7 @@ def beat(redis: "Redis", local_id: str) -> None:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+    registry.finished(redis, local_id, int(time.time() * 1000))
 
 
 def poll_orders(consumer: "Consumer", apply: Callable[[], None] | None = None) -> None:

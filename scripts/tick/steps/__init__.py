@@ -59,3 +59,15 @@ def actions(records: Iterable[StepRecord]) -> list[str]:
         if write.domain == actions_of(record.name)
         for action in cast(list[str], write.value)
     ]
+
+
+class Left(KeyError):
+    """A pass value no step stored, because its writer was held or left running past its budget."""
+
+
+class PassBox(dict[str, Any]):
+    """The pass box: reading a value no step stored raises ``Left`` instead of a plain ``KeyError``."""
+
+    def __missing__(self, key: str) -> Any:
+        """Raise ``Left`` naming the value no step stored."""
+        raise Left(key)

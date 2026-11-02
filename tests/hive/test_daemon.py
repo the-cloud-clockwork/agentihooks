@@ -73,6 +73,7 @@ def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch
     assert record["name"] == "Worker"
     assert record["max_agents"] == 8
     assert record["heartbeat_at"] == 123456
+    assert record["beat_at"] == 123456
     for field in ("slots", "interactive", "repos"):
         assert record[field] == report[field]
     for field in ("sessions", "quota"):
@@ -1038,7 +1039,9 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         },
     )
     daemon.beat(redis, "machine")
-    assert registry.show(redis, "machine") == {
+    record = registry.show(redis, "machine")
+    assert record is not None
+    assert record == {
         "id": "machine",
         "name": "machine",
         "ui": "no",
@@ -1053,7 +1056,8 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "master_login_enabled": "no",
         "repos": [],
         "capabilities": [],
-        "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
+        "heartbeat_at": record["heartbeat_at"],
+        "beat_at": record["beat_at"],
         "version": "",
     }
     assert redis.smembers(registry.INDEX) == {"machine"}
