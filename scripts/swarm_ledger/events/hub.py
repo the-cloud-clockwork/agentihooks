@@ -42,14 +42,14 @@ class Hub:
         self.retained = retained
         self.clock = time.monotonic if clock is None else clock
         self.changed = threading.Condition()
-        self.channels = {}
+        self.channels: dict[str, Channel] = {}
         self.closing = False
 
     @staticmethod
-    def cursor(channel, seq):
+    def cursor(channel: Channel, seq: int) -> str:
         return f"{channel.epoch}.{seq}"
 
-    def position(self, slug, cursor):
+    def position(self, slug: str, cursor: str) -> int:
         """The seq a cursor names; Expired unless it came from this channel's life and its events are still kept."""
         channel = self.channels.get(slug)
         if channel is None or not cursor.startswith(f"{channel.epoch}."):
@@ -63,20 +63,20 @@ class Hub:
             raise Expired
         return seq
 
-    def has(self, slug):
+    def has(self, slug: str) -> bool:
         with self.changed:
             return slug in self.channels
 
-    def watched(self):
+    def watched(self) -> list[str]:
         with self.changed:
             return [slug for slug, channel in self.channels.items() if channel.subscribers]
 
-    def resource(self, slug, name):
+    def resource(self, slug: str, name: str) -> Any | None:
         with self.changed:
             channel = self.channels.get(slug)
             return channel.resources.get(name) if channel else None
 
-    def open(self, slug, load, cursor=None):
+    def open(self, slug: str, load: Callable[[], dict[str, Any]], cursor: str | None = None) -> tuple[int, list[Any]]:
         """Subscribe and answer (seq, first events): a snapshot without a cursor, the retained events after one."""
         with self.changed:
             if cursor is not None:
@@ -95,22 +95,23 @@ class Hub:
                     channel.resources.setdefault(name, copy.deepcopy(value))
         with self.changed:
             if cursor is not None:
+                assert seq is not None
                 return seq, [entry for entry in channel.log if entry[0] > seq]
             return self.snapshot(slug)
 
-    def snapshot(self, slug: str) -> tuple[int, list]:
+    def snapshot(self, slug: str) -> tuple[int, list[Any]]:
         with self.changed:
             channel = self.channels[slug]
             return channel.seq, [(channel.seq, self.cursor(channel, channel.seq), "snapshot", dict(channel.resources))]
 
-    def close(self, slug):
+    def close(self, slug: str) -> None:
         with self.changed:
             channel = self.channels.get(slug)
             if channel:
                 channel.subscribers -= 1
                 channel.idle_since = self.clock()
 
-    def publish(self, slug, name, value):
+    def publish(self, slug: str, name: str, value: Any) -> bool:
         """Record value as the latest copy of a resource and log the patch from the previous copy."""
         return self._publish(slug, name, value, False)
 
@@ -118,7 +119,7 @@ class Hub:
         """The finite JSON generation and all its descendants must remain immutable."""
         return self._publish(slug, name, value, True)
 
-    def _publish(self, slug, name, value, shared):
+    def _publish(self, slug: str, name: str, value: Any, shared: bool) -> bool:
         with self.changed:
             channel = self.channels.get(slug)
             if channel is None:

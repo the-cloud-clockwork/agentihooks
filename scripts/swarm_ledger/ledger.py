@@ -110,7 +110,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from scripts.swarm_ledger import ledger_route
 
@@ -341,10 +341,7 @@ def remote_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> d
     return answer
 
 
-T = TypeVar("T")
-
-
-def retried(read: Callable[[], T], attempts: int) -> T:
+def retried[T](read: Callable[[], T], attempts: int) -> T:
     for attempt in itertools.count(1):
         try:
             return read()
@@ -369,9 +366,7 @@ def op(kind: str, args: argparse.Namespace, /, **fields: Any) -> dict[str, Any]:
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": args.name, **fields}
 
 
-def refused(
-    state: dict[str, Any], ops: Sequence[dict[str, Any]] = (), fallback: str = "", lead: str = ""
-) -> None:
+def refused(state: dict[str, Any], ops: Sequence[dict[str, Any]] = (), fallback: str = "", lead: str = "") -> None:
     if rejected := state.get("rejected"):
         warnings = state.get("_meta", {}).get("warnings", [])
         reasons = [

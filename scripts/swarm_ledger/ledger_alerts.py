@@ -151,9 +151,7 @@ def expired(alert: dict[str, Any], at: int) -> bool:
     )
 
 
-def raise_warning(
-    doc: dict[str, Any], ctx: "ledger_core.Context", warning: tuple[Any, ...], before: list[str]
-) -> None:
+def raise_warning(doc: dict[str, Any], ctx: "ledger_core.Context", warning: tuple[Any, ...], before: list[str]) -> None:
     source, text, *owner = warning
     writer, target_item = owner if owner else (None, None)
     rows = doc["alerts"]
@@ -175,9 +173,7 @@ def raise_warning(
         alert.update(writer=writer, item=target_item, last_refused_at=ctx.at)
 
 
-def new_alert(
-    doc: dict[str, Any], ctx: "ledger_core.Context", source: str, text: str, target: str
-) -> dict[str, Any]:
+def new_alert(doc: dict[str, Any], ctx: "ledger_core.Context", source: str, text: str, target: str) -> dict[str, Any]:
     rows = doc["alerts"]
     alert = {
         "id": f"al-{ctx.rev}-{len(rows)}",
@@ -193,9 +189,7 @@ def new_alert(
     return alert
 
 
-def derive(
-    doc: dict[str, Any], ctx: "ledger_core.Context", raised: list[tuple[Any, ...]], before: list[str]
-) -> None:
+def derive(doc: dict[str, Any], ctx: "ledger_core.Context", raised: list[tuple[Any, ...]], before: list[str]) -> None:
     rows = doc.setdefault("alerts", [])
     for warning in raised:
         raise_warning(doc, ctx, warning, before)

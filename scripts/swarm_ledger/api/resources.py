@@ -152,7 +152,14 @@ def value(doc: dict[str, Any], path: str) -> Any:
         rows = cast(list[Any], doc.get(name, []))
         if len(parts) == 1:
             return rows
-        item = next((cast(Any, row) for row in rows if isinstance(row, dict) and row.get("id") == parts[1]), None)
+        item = next(
+            (
+                cast(Any, row)
+                for row in rows
+                if isinstance(row, dict) and cast(dict[str, Any], row).get("id") == parts[1]
+            ),
+            None,
+        )
         if item is not None and len(parts) == 2:
             return item
         if item is not None and len(parts) == 3 and parts[2] in THREADS.get(name, ()):
@@ -178,7 +185,8 @@ def page(
     revisions: list[str | None] | None = None,
     hash_page: bool = False,
 ) -> dict[str, Any]:
-    from .schemas import PAGINATION, validate as _validate
+    from .schemas import PAGINATION
+    from .schemas import validate as _validate
 
     validate = cast(Callable[[dict[str, Any], object], None], _validate)
     validate(PAGINATION, query)
@@ -236,7 +244,8 @@ def swarm_read(status: dict[str, Any] | None, path: str, query: dict[str, Any]) 
 
 
 def hierarchy_read(repository: Any, slug: str, path: str, query: dict[str, Any]) -> dict[str, Any]:
-    from ..repository.hierarchy import KINDS, READS, text as _text
+    from ..repository.hierarchy import KINDS, READS
+    from ..repository.hierarchy import text as _text
 
     text = cast(Callable[[object], bool], _text)
     name, _, node = path.removeprefix("hierarchy").removeprefix("/").partition("/")
@@ -254,8 +263,7 @@ def hierarchy_read(repository: Any, slug: str, path: str, query: dict[str, Any])
         if isinstance(item, dict) and text(item.get("id"))
     }
     data = [
-        {**row, "state": node_state(row["kind"], items.get(row["node"], cast(dict[str, Any], {})), doc)}
-        for row in rows
+        {**row, "state": node_state(row["kind"], items.get(row["node"], cast(dict[str, Any], {})), doc)} for row in rows
     ]
     return page(data, revision(data), query)
 
