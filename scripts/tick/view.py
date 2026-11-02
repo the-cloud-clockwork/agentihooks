@@ -9,7 +9,7 @@ import hashlib
 import os
 import sys
 import urllib.error
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -210,7 +210,7 @@ def document(slug: str) -> dict[str, Any] | None:
 
 
 @contextmanager
-def holding() -> Iterator[None]:
+def holding() -> Generator[None]:
     """Hold no view on entry and drop whatever view the block started on exit."""
     current, refresh, kept = CURRENT.set(None), REFRESH.set(None), HELD.set(None)
     try:

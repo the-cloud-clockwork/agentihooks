@@ -90,3 +90,24 @@ def test_a_pass_holding_a_view_makes_no_whole_ledger_read(env: tuple, monkeypatc
     assert whole == []
     assert refreshes
     assert view.REFRESH.get() is None
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_stopped_pass_reads_its_ledger_through_the_view(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    doc, whole, started = ledger.state("sw"), [], []
+    ledger.service = True
+    monkeypatch.setattr(ledger, "state", lambda slug: whole.append(slug) or doc, raising=False)
+
+    def start(slug: str, service: bool = False) -> None:
+        started.append((slug, service))
+        view.REFRESH.set((slug, lambda: view.LedgerView(1, doc)))
+
+    monkeypatch.setattr(view, "reads", lambda client: client is ledger)
+    monkeypatch.setattr(view, "start", start)
+    store.update("sw", state="stopped")
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert started == [("sw", True)]
+    assert whole == []
+    assert view.REFRESH.get() is None

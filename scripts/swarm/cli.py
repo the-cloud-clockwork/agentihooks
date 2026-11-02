@@ -192,6 +192,7 @@ from scripts.tick import view as ledger_view
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
+from scripts.tick.steps import Left, PassBox
 from scripts.tick.steps import host as host_steps
 
 SETTABLE = {
@@ -297,6 +298,13 @@ def _bin_stop(store, slug, ledger, runtime):
     ]
 
 
+def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
+    """Hold the pass's ledger view until beating closes, started with one delta read when the client reads it."""
+    beating.enter_context(ledger_view.holding())
+    if ledger_view.reads(ledger):
+        ledger_view.start(slug, ledger.service)
+
+
 def _stopped_tick(store, slug, ledger, runtime, held):
     from scripts.swarm import command_runner, controller
 
@@ -367,17 +375,16 @@ def run_tick(
         timing.keep()
         run_group("before")
         if store.config(slug).state == "stopped":
+            _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
-        box: dict[str, Any] = {}
+        box: dict[str, Any] = PassBox()
         passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         run_group("wrapper probes", **passing)
         host_steps.raise_held(box)
         if "stop" in box:
             return box["stop"]
-        beating.enter_context(ledger_view.holding())
-        if ledger_view.reads(ledger):
-            ledger_view.start(slug, ledger.service)
+        _hold_view(beating, slug, ledger)
         runtime = controller.FencedRuntime(
             store,
             slug,
@@ -409,7 +416,7 @@ def run_tick(
             run_group("wrapper refresh", **passing, scheduled=scheduled)
             host_steps.raise_held(box)
             doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
-            judging: dict[str, Any] = {}
+            judging: dict[str, Any] = PassBox()
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
                 judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
@@ -439,9 +446,11 @@ def run_tick(
             host_steps.raise_held(box)
             started = box["started"]
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
+    except Left:
+        return []
     finally:
         try:
-            published: dict[str, Any] = {}
+            published: dict[str, Any] = PassBox()
             run_group(
                 "wrapper status", store=store, slug=slug, doc=doc, view=view, box=published, failure=sys.exception()
             )

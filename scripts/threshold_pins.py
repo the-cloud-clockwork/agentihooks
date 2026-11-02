@@ -30,6 +30,7 @@ SHRINK_ONLY = (
     "tests/SIZE_ALLOWLIST.json",
     "tests/SWALLOWED_EXCEPTIONS_ALLOWLIST.json",
     "tests/TYPE_BASELINE.json",
+    "tests/WHOLE_LEDGER_ALLOWLIST.json",
 )
 # Each of these moves only with its own gate's evidence, which that gate checks against the base.
 GRADED_BY = (

@@ -8,12 +8,11 @@ import zipfile
 import zlib
 from datetime import datetime, timezone
 
-from scripts import gh_audit
 from scripts.ci_mutation.merge import merge_reports
-from scripts.swarm import github_reads
+from scripts.swarm import github_reads, stack
 from scripts.swarm.lost_runner import home as _backoff_home
 from scripts.swarm.store import SwarmError
-from scripts.tick.adapters.github import command
+from scripts.tick.deadline import Deadline
 
 RUN_URL = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)")
 SHARD_REPORT = re.compile(r"mutation-preflight-shard-([0-9]+)")
@@ -25,6 +24,7 @@ UNREADABLE = (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeErr
 BACKOFF = (2, 4)
 JOB_FAILURES = ("failure", "timed_out", "cancelled")
 SECONDARY_BACKOFF_S = 60
+READ_SECONDS = 20
 
 
 class Unreachable(ValueError):
@@ -67,21 +67,20 @@ def _api(endpoint, binary=False, caller="mutation_wait"):
     if backing_off():
         raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(_held_until())}")
     try:
-        with gh_audit.uncharged():
-            done = subprocess.run(command(["api", endpoint]), capture_output=True, timeout=20)
-    except (OSError, subprocess.SubprocessError) as error:
-        raise Unreachable(f"gh api {endpoint}: {error}") from error
-    github_reads.charge(caller, endpoint, _now())
-    if done.returncode:
-        stderr = (done.stderr or b"").decode(errors="replace").strip()
+        with github_reads.calling(caller):
+            body = stack.login_source_control().download(endpoint, deadline=Deadline.after(READ_SECONDS))
+    except subprocess.CalledProcessError as error:
+        stderr = (error.stderr or b"").decode(errors="replace").strip()
         if rate_limited(stderr):
             until = hold(endpoint)
-            raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(until)}")
-        raise Unreachable(f"gh api {endpoint}: {stderr or f'exited {done.returncode}'}")
+            raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(until)}") from error
+        raise Unreachable(f"gh api {endpoint}: {stderr or f'exited {error.returncode}'}") from error
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Unreachable(f"gh api {endpoint}: {error}") from error
     if binary:
-        return done.stdout
+        return body
     try:
-        return json.loads(done.stdout)
+        return json.loads(body)
     except ValueError as error:
         raise Unreachable(f"gh api {endpoint}: {error}") from error
 
@@ -109,13 +108,10 @@ def _held_until():
 
 def _core_reset(now):
     try:
-        done = subprocess.run(command(["api", "rate_limit"]), capture_output=True, timeout=20)
-        core = json.loads(done.stdout)["resources"]["core"]
-        if not done.returncode and core["remaining"] == 0 and core["reset"] > now:
-            return core["reset"]
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-        pass
-    return now + SECONDARY_BACKOFF_S
+        core = stack.login_source_control().rate_limit(deadline=Deadline.after(READ_SECONDS))
+    except (*stack.PORT_ERRORS, TypeError):
+        return now + SECONDARY_BACKOFF_S
+    return core.reset if core.remaining == 0 and core.reset > now else now + SECONDARY_BACKOFF_S
 
 
 def hold(endpoint):

@@ -125,8 +125,8 @@ def test_master_wake_skips_a_stopped_or_stopping_swarm() -> None:
 def test_tick_master_hands_the_master_start_to_its_call() -> None:
     state = _pass()
     calls, found = _call("tick master", state)
-    function, *args, start = calls[0]
-    assert (function, args) == (tick_master.run, ["sw", state["config"], "store", "ledger", "runtime", 7])
+    function, *args, start, doc = calls[0]
+    assert (function, args, doc) == (tick_master.run, ["sw", "store", "ledger", "runtime", 7], "doc")
     assert start() == ("master", "sw", state["config"], "store", "runtime", 7)
     assert found == ["ran 1"]
 
