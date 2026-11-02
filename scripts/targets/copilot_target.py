@@ -95,8 +95,9 @@ _SKILL_DESCRIPTION_MAX = 1024
 def oversized_skill_descriptions(skills_dir: Path) -> list[tuple[str, int]]:
     """(skill name, description length) for every skill copilot will refuse.
 
-    Copilot refuses a SKILL.md whose description exceeds _SKILL_DESCRIPTION_MAX and drops the skill with a load error; claude and codex
-    have no equivalent limit, so an over-long description is invisible until a copilot session reports it.
+    Copilot refuses a SKILL.md whose description exceeds _SKILL_DESCRIPTION_MAX and drops the skill with a load
+    error; claude and codex have no equivalent limit, so an over-long description is invisible until a copilot
+    session reports it.
     """
     import yaml
 
@@ -158,32 +159,29 @@ _OAUTH_URL_SINK = f'mkdir -p "$HOME/.copilot" && printf "%s\\n" "$1" >> "{_OAUTH
 
 class CopilotAdapter:
     """
-    COPILOT_HOOK_EVENTS: the subset of Copilot's 17-event HookType enum that hook_manager dispatches, spelled exactly as the enum in the
-    shipped schemas/api.schema.json.
-
-    Copilot's loader accepts the Claude-style PascalCase aliases too — verified against 1.0.80, where a config carrying
-    all twelve PascalCase names drew no complaint while a bogus name in the same file was named in "Ignoring unknown
-    hook event(s)". The enum spellings are used anyway: they are the ones with direct schema evidence, and acceptance by
-    the loader is not by itself proof that an alias reaches the same handler.
+    COPILOT_HOOK_EVENTS: the subset of Copilot's 17-event HookType enum that hook_manager dispatches, spelled
+    exactly as the enum in the shipped schemas/api.schema.json. The loader also accepts Claude-style PascalCase
+    aliases, but only the enum spellings have direct schema evidence, and loader acceptance does not prove an alias
+    reaches the same handler.
 
     Two of these are NOT case variants — `agentStop` and `userPromptSubmitted` are different tokens from Claude's `Stop`
     and `UserPromptSubmit`, so lowercasing a Claude event name would silently produce an event that does not exist.
     hooks.targets.normalizer maps both spellings back to the dispatch vocabulary.
 
-    _HOOK_TIMEOUT_SECONDS: a hook that outlives this budget is killed. Copilot fails OPEN on timeout — on every event, PreToolUse included — so
-    a slow hook silently stops guarding rather than blocking the session. Generous enough that only a genuinely hung
-    process hits it.
+    _HOOK_TIMEOUT_SECONDS: a hook that outlives this budget is killed. Copilot fails OPEN on timeout — on every
+    event, PreToolUse included — so a slow hook silently stops guarding rather than blocking the session. Generous
+    enough that only a genuinely hung process hits it.
 
-    Field name is `timeoutSeconds`: `timeoutSec` (what the public hooks reference documents) appears ZERO times in the
-    shipped 1.0.80 package, while `timeoutSeconds` appears in both app.js and the native engine. The loader tolerates
-    unrecognized keys silently, so a wrong spelling would not error — it would just leave the default in force.
+    The field name is `timeoutSeconds`, the spelling the shipped app.js and native engine read; the `timeoutSec` of
+    the public hooks reference is not read. The loader tolerates unrecognized keys silently, so a wrong spelling would
+    not error — it would just leave the default in force.
 
     _TOOL_NAMES: Claude tool names → Copilot runtime tool names, for custom-agent frontmatter.
 
     _AGENT_BODY_MAX: Copilot caps a custom agent body at 30,000 characters.
 
-    _WSL_BROWSER_CANDIDATES: reach a Windows browser, which holds the sessions the distro's own browser does not. Tried in order; the first
-    that resolves wins.
+    _WSL_BROWSER_CANDIDATES: reach a Windows browser, which holds the sessions the distro's own browser does not.
+    Tried in order; the first that resolves wins.
 
     `explorer.exe` is deliberately absent. It is the obvious choice and it is wrong: spawned with a Linux working
     directory — Copilot's normal condition — it ignores the URL and opens a File Explorer window on Documents. Every
@@ -387,7 +385,7 @@ class CopilotAdapter:
 
         Managed-key discipline: record what we wrote so a later change can update it, while a value the operator hand-
         edited since our last write is left alone. The record lives in a sidecar file — copilot warns about unknown top-
-        level settings keys on every launch, so an in-file `agentihooks` key is per-launch noise (observed v1.0.80).
+        level settings keys on every launch, so an in-file `agentihooks` key is per-launch noise.
 
         `current == value`: the on-disk value already equals what we would write, so it is ours (or an operator edit
         identical to ours — indistinguishable and immaterial). Recording it heals a lost/deleted sidecar; without it, a
@@ -445,9 +443,8 @@ class CopilotAdapter:
         The hooks DIRECTORY, not an inline `hooks` key in settings.json. Copilot merges both sources, so writing to both
         fires every hook twice.
 
-        Copilot's hook stdin is the event's input object alone — no hookEventName/hookType field (observed live,
-        v1.0.80: a dispatched sessionEnd carried only reason/sessionId/timestamp/cwd). The registration is the event's
-        identity, so each entry passes its event name as argv[1]; the wrapper exports it as AGENTIHOOKS_COPILOT_EVENT
+        Copilot's hook stdin is the event's input object alone — no hookEventName/hookType field. The registration is
+        the event's identity, so each entry passes its event name as argv[1]; the wrapper exports it as AGENTIHOOKS_COPILOT_EVENT
         for the normalizer. Commands run via /bin/sh, so the argument survives the spawn.
 
         Preserve foreign entries the operator added to OUR file; other files under hooks/ are never read or rewritten.

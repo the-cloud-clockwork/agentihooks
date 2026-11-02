@@ -312,8 +312,8 @@ class CodexAdapter:
     """
     CODEX_HOOK_EVENTS: events supported by both codex hooks.json and our hook_manager dispatch.
 
-    _NO_CONTEXT_EVENTS: events codex refuses additionalContext on — it warns per handler when the key is set on one of them ("this event
-    cannot emit additionalContext").
+    _NO_CONTEXT_EVENTS: events codex refuses additionalContext on — it warns per handler when the key is set on one
+    of them ("this event cannot emit additionalContext").
     """
 
     name = "codex"
@@ -542,8 +542,8 @@ class CodexAdapter:
         shared_dir: Path | None = None,
     ) -> None:
         """
-        Codex caps the combined instruction doc (project_doc_max_bytes, default 32 KiB). v0.147.0 loaded a 415 KB global
-        AGENTS.md in full, but the ceiling is raised defensively anyway — a silently truncated persona is the worst
+        Codex caps the combined instruction doc (project_doc_max_bytes, default 32 KiB). The ceiling is raised so
+        the global AGENTS.md always loads whole — a silently truncated persona is the worst
         failure mode this file can have.
         """
         _i = _install_module()
