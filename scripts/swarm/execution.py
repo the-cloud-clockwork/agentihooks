@@ -92,6 +92,14 @@ class ExecutionRegistry:
 
         return lease.fenced(self.store, slug, lease.EPOCH.get(), archived if history else change)
 
+    def _project(self, slug: str, names: tuple[str, ...], *args: Any, **kwargs: Any) -> None:
+        """Projects a committed placement; a failed projection drops its hosts so readers use the registry."""
+        try:
+            self.store.project_agent(slug, *args, **kwargs)
+        except BaseException:
+            self.store.forget_hosts(slug, *names)
+            raise
+
     def records(self, slug: str) -> list[AgentRecord]:
         loaded = fencing.records(self.store, slug).sections(slug, ("executions", "archive"))
         return records_of({section: {key: row.value for key, row in rows.items()} for section, rows in loaded.items()})
@@ -218,12 +226,11 @@ class ExecutionRegistry:
                     "generation": current.generation,
                     "controller_epoch": epoch,
                 }
-            self.store.forget_hosts(slug, current.name, *((previous.name,) if previous else ()))
             return current, previous
 
         current, previous = self._fenced(slug, admit, history=True)
         removed = previous.name if previous and previous.name != current.name else ""
-        self.store.project_agent(slug, current, removed=removed)
+        self._project(slug, (current.name, *((previous.name,) if previous else ())), current, removed=removed)
         return current
 
     def check_uid(self, slug: str, agent: AgentRecord, doc: dict) -> None:
@@ -256,13 +263,11 @@ class ExecutionRegistry:
             self.check_uid(slug, written, doc)
             if written != current:
                 doc["executions"][written.execution_id] = asdict(written)
-            if written.hive != current.hive:
-                self.store.forget_hosts(slug, written.name)
             return written, current
 
         written, current = self._fenced(slug, change)
         if written != current:
-            self.store.project_agent(slug, written, current)
+            self._project(slug, (written.name,), written, current)
 
     def set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
         with _writes(slug):
