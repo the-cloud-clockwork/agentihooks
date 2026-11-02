@@ -136,6 +136,27 @@ def test_missing_process_is_a_named_failure(mounted):
     assert live_binding.compare(agent, {"process": False}) == {"process": {"expected": True, "actual": False}}
 
 
+@pytest.mark.parametrize(
+    ("expected", "observed", "differs"),
+    [
+        ("claude-opus-4-6", "opus", False),
+        ("opus", "claude-opus-4-6", False),
+        ("claude-opus-4-6", "claude-opus-4-6", False),
+        ("claude-opus-4-5", "claude-opus-4-6", True),
+        ("claude-opus-4-6", "sonnet", True),
+        ("sonnet", "claude-opus-4-6", True),
+    ],
+)
+def test_a_launch_alias_matches_the_full_model_id_both_ways(
+    mounted: tuple[AgentRecord, Path, Path], expected: str, observed: str, differs: bool
+) -> None:
+    agent, proc, _ = mounted
+    assigned = replace(agent, profile_decision={"validation": {**agent.profile_decision["validation"], "model": expected}})
+    facts = {**live_binding.read(agent, 42, proc), "model": observed}
+    differences = live_binding.compare(assigned, facts)
+    assert differences == ({"model": {"expected": expected, "actual": observed}} if differs else {})
+
+
 def test_model_and_effort_require_native_flags(mounted):
     agent, proc, _ = mounted
     root = proc / "42"
