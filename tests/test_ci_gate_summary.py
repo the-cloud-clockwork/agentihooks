@@ -88,7 +88,7 @@ def test_test_summary_never_delays_required_grading():
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     gate = jobs["gate-required"]
     assert gate["steps"][1:] in ([], split_units([])), (
-        "Required grading must not check out or download summary artifacts"
+        "Required grading adds only the reviewed split unit steps, never summary artifacts"
     )
     assert gate["steps"][0]["name"] == "Require every gate to succeed"
     summary = jobs["test-summary"]
