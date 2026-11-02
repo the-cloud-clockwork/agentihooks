@@ -2,9 +2,14 @@
 
 import re
 import shlex
+from collections.abc import Callable, Generator
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, cast
 
 from scripts.gates.base import Decision
+
+if TYPE_CHECKING:
+    from scripts.gates.base import Call, Who
 
 PINNED_CLIS = frozenset({"ledger", "swarm", "msg"})
 PINNED_VARS = frozenset({"AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM"})
@@ -20,26 +25,26 @@ WRAPPERS = frozenset({"env", "command", "exec", "sudo", "nohup", "time", "nice",
 OPTION_ARGS = frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-n", "-k", "-s", "--signal"})
 
 
-def _canonical(name):
-    from scripts.swarm.naming import resolve_name
+def _canonical(name: str) -> str:
+    import scripts.swarm.naming
 
-    return resolve_name(name)
+    return cast(Callable[[str], str], scripts.swarm.naming.resolve_name)(name)
 
 
-def refusal(name, who):
+def refusal(name: str, who: "Who") -> str:
     if not (name and who.pinned) or _canonical(name) == _canonical(who.name):
         return ""
     return f"this session is {who.name} in swarm {who.swarm} and cannot act as {name}: run the command with --as {who.name}"
 
 
-def rewrite_refusal(who):
+def rewrite_refusal(who: "Who") -> str:
     return (
         f"this session is {who.name} in swarm {who.swarm}: a command that changes AGENTIHOOKS_AGENT_NAME or "
         "AGENTIHOOKS_SWARM cannot run agentihooks ledger, swarm or msg. Run it without the change."
     )
 
 
-def _tokens(text):
+def _tokens(text: str) -> list[str]:
     lexer = shlex.shlex(text, posix=True, punctuation_chars="".join(CONTROL))
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
@@ -49,12 +54,13 @@ def _tokens(text):
         return text.split()
 
 
-def _nests(current, token):
+def _nests(current: list[str], token: str) -> bool:
     return " " in token and bool(current) and (current[-1] == "-c" or PurePosixPath(current[0]).name == "eval")
 
 
-def simple_commands(text):
-    commands, current = [], []
+def simple_commands(text: str) -> list[list[str]]:
+    commands: list[list[str]] = []
+    current: list[str] = []
     for token in _tokens(text):
         if token and CONTROL.issuperset(token):
             commands.append(current)
@@ -67,7 +73,7 @@ def simple_commands(text):
     return [words for words in commands if words]
 
 
-def program_index(words):
+def program_index(words: list[str]) -> int | None:
     for index, word in enumerate(words):
         if (
             ANY_ASSIGNMENT.match(word)
@@ -81,7 +87,7 @@ def program_index(words):
     return None
 
 
-def _pinned_args(words):
+def _pinned_args(words: list[str]) -> list[str] | None:
     index = program_index(words)
     if index is None or PurePosixPath(words[index]).name != "agentihooks":
         return None
@@ -89,14 +95,14 @@ def _pinned_args(words):
     return rest[1:] if rest and rest[0] in PINNED_CLIS else None
 
 
-def _as_names(args):
+def _as_names(args: list[str]) -> "Generator[str, None, None]":
     for index, arg in enumerate(args):
         flag, eq, value = arg.partition("=")
         if flag in AS_FLAGS:
             yield value if eq else (args[index + 1] if index + 1 < len(args) else "")
 
 
-def _rewrites(words):
+def _rewrites(words: list[str]) -> bool:
     program = PurePosixPath(words[0]).name
     for index, word in enumerate(words):
         if ASSIGNMENT.match(word):
@@ -112,13 +118,13 @@ def _rewrites(words):
 
 
 class PinnedIdentity:
-    name = "identity"
-    default_mode = "enforce"
+    name: str = "identity"
+    default_mode: str = "enforce"
 
-    def matches(self, call):
+    def matches(self, call: "Call") -> bool:
         return call.tool == "Bash" and "agentihooks" in call.command
 
-    def decide(self, call, who, state):
+    def decide(self, call: "Call", who: "Who", state: object) -> Decision:
         if not who.pinned:
             return Decision()
         commands = simple_commands(call.command)

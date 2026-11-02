@@ -8,11 +8,16 @@ approval_policy never and asks for nothing, so these classes are the whole set.
 
 import posixpath
 import re
+from collections.abc import Callable, Generator
 from itertools import dropwhile
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, cast
 
 from scripts.gates.base import Decision
 from scripts.gates.identity import program_index, simple_commands
+
+if TYPE_CHECKING:
+    from scripts.gates.base import Call, Who
 
 REMOVERS = frozenset({"rm", "rmdir"})
 DIRECTORY_CHANGERS = frozenset({"cd", "pushd", "popd"})
@@ -28,7 +33,7 @@ SUBSTITUTION = re.compile(r"\$\(|`[^`]*`")
 SUBSTITUTION_CAP = 64
 
 
-def refusal(why):
+def refusal(why: str) -> str:
     return (
         f"The harness stops this rm for a yes or no that nobody in a swarm answers: {why}. Remove a scratch folder "
         "with agentihooks scratch rm <dir>; otherwise name each file or directory by its absolute path, with no glob, "
@@ -36,7 +41,7 @@ def refusal(why):
     )
 
 
-def script_refusal(program):
+def script_refusal(program: str) -> str:
     return (
         "The harness stops this shell -c script for a yes or no that nobody in a swarm answers: it runs the command "
         f"'{program}', a variable or command output the harness reads as an rm it cannot check. Name each program in "
@@ -44,7 +49,7 @@ def script_refusal(program):
     )
 
 
-def inline_scripts(text):
+def inline_scripts(text: str) -> "Generator[str, None, None]":
     for words in simple_commands(text):
         index = program_index(words)
         if index is None or PurePosixPath(words[index]).name not in SHELLS:
@@ -62,7 +67,7 @@ def inline_scripts(text):
                 next(rest)
 
 
-def variable_programs(script):
+def variable_programs(script: str) -> "Generator[str, None, None]":
     for words in simple_commands(script):
         rest = list(dropwhile(KEYWORDS.__contains__, words))
         index = program_index(rest)
@@ -70,7 +75,7 @@ def variable_programs(script):
             yield rest[index]
 
 
-def removals(text):
+def removals(text: str) -> "Generator[tuple[list[str], bool], None, None]":
     """Each rm or rmdir's arguments, and whether a cd came before it in the same command."""
     moved = False
     for words in simple_commands(text):
@@ -83,8 +88,9 @@ def removals(text):
         moved = moved or name in DIRECTORY_CHANGERS
 
 
-def targets(args):
-    found, words, options = [], iter(args), True
+def targets(args: list[str]) -> list[str]:
+    found: list[str] = []
+    words, options = iter(args), True
     for word in words:
         if REDIRECT_OPERATOR.match(word):
             next(words, None)
@@ -96,21 +102,21 @@ def targets(args):
 
 
 class PromptGuard:
-    name = "prompts"
-    default_mode = "enforce"
+    name: str = "prompts"
+    default_mode: str = "enforce"
 
-    def __init__(self, home=None):
+    def __init__(self, home: str | None = None) -> None:
         self.home = str(Path.home()) if home is None else home
 
-    def matches(self, call):
+    def matches(self, call: "Call") -> bool:
         return call.tool == "Bash" and any(mark in call.command for mark in ("rm", "$", "`"))
 
-    def decide(self, call, who, state):
+    def decide(self, call: "Call", who: "Who", state: object) -> Decision:
         if not who.pinned:
             return Decision()
-        from hooks.context.credential_guard import strip_heredocs
+        import hooks.context.credential_guard
 
-        text = strip_heredocs(call.command)
+        text = cast(Callable[[str], str], hooks.context.credential_guard.strip_heredocs)(call.command)
         found = list(removals(text))
         if found and (count := len(SUBSTITUTION.findall(text))) > SUBSTITUTION_CAP:
             return Decision.deny(refusal(f"the command holds {count} command substitutions, too many to read"))
@@ -122,7 +128,7 @@ class PromptGuard:
             return Decision.deny(script_refusal(program))
         return Decision()
 
-    def hazard(self, target, cwd, moved):
+    def hazard(self, target: str, cwd: str, moved: bool) -> str:
         if RUNTIME_VALUE.search(target):
             return f"the target '{target}' is a variable or command output known only when it runs"
         if GLOB.search(target):
@@ -136,7 +142,7 @@ class PromptGuard:
             )
         return ""
 
-    def protected(self, target, cwd):
+    def protected(self, target: str, cwd: str) -> bool:
         if set(target) == {"\\"}:
             return True
         path = self.home + target[1:] if target.startswith("~") else target

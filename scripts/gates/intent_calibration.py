@@ -4,14 +4,17 @@ prints the measurement."""
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from hooks.classifier import corpus, definitions, evaluation
 from scripts.gates import intent
 
 
-def side(cases, outcomes):
-    scored = evaluation.score(cases, list(outcomes))
+def side(cases: tuple[corpus.Case, ...], outcomes: tuple[evaluation.Outcome, ...]) -> dict[str, Any]:
+    score = cast(Callable[[tuple[corpus.Case, ...], list[evaluation.Outcome]], dict[str, Any]], evaluation.score)
+    scored = score(cases, list(outcomes))
     return {
         "samples": scored["samples"],
         "wrong": scored["wrong"],
@@ -20,8 +23,9 @@ def side(cases, outcomes):
     }
 
 
-def measure(cases: tuple[corpus.Case, ...], definition: definitions.Definition | None = None) -> dict:
-    definition = definitions.load(intent.PURPOSE) if definition is None else definition
+def measure(cases: tuple[corpus.Case, ...], definition: definitions.Definition | None = None) -> dict[str, Any]:
+    load = cast(Callable[[str], definitions.Definition], definitions.load)
+    definition = load(intent.PURPOSE) if definition is None else definition
     before = side(cases, evaluation.baseline(cases))
     after = side(cases, evaluation.replay(definition, cases))
     held = set(before["controls_rejected"]) <= set(after["controls_rejected"])
@@ -34,9 +38,10 @@ def measure(cases: tuple[corpus.Case, ...], definition: definitions.Definition |
     }
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    definition = definitions.load(intent.PURPOSE)
+    load = cast(Callable[[str], definitions.Definition], definitions.load)
+    definition = load(intent.PURPOSE)
     path = Path(args[0]) if args else corpus.path_for(intent.PURPOSE)
     print(json.dumps(measure(corpus.load(definition, path)), indent=1))
     return 0

@@ -12,13 +12,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
+import scripts.gates.build
 from scripts.gates.base import Decision
-from scripts.gates.build import EDIT_TOOLS, SERENA, SERENA_EDITS, _patch_targets
+from scripts.gates.build import EDIT_TOOLS, SERENA, SERENA_EDITS
 from scripts.gates.log import safe_name
+
+if TYPE_CHECKING:
+    from scripts.gates.base import Call, Who
 
 NAME = "placement"
 PACKAGE = "agentihooks package"
@@ -29,10 +33,10 @@ ENFORCEMENTS = "enforcements.json"
 SHOWN = 3
 
 
-def editable_source(dist=None):
+def editable_source(dist: metadata.Distribution | None = None) -> Path | None:
     try:
         raw = (dist or metadata.distribution("agentihooks")).read_text("direct_url.json")
-        url = json.loads(raw) if raw else {}
+        url = cast(dict[str, Any], json.loads(raw)) if raw else {}
     except (metadata.PackageNotFoundError, OSError, ValueError):
         return None
     location = urlparse(str(url.get("url")))
@@ -41,36 +45,38 @@ def editable_source(dist=None):
     return None
 
 
-def linked_bundle():
-    from hooks.context.profile_chain import bundle_path, read_state
+def linked_bundle() -> Path | None:
+    import hooks.context.profile_chain
 
-    return bundle_path(read_state())
+    state = cast(Callable[[], dict[str, Any]], hooks.context.profile_chain.read_state)()
+    return cast(Callable[[dict[str, Any]], "Path | None"], hooks.context.profile_chain.bundle_path)(state)
 
 
-def answers_home():
+def answers_home() -> Path:
     from hooks.config import AGENTIHOOKS_HOME
 
     return AGENTIHOOKS_HOME / "placement"
 
 
-def _answers_path(session, home):
+def _answers_path(session: str, home: str | Path | None) -> Path:
     return Path(home or answers_home()) / f"{safe_name(session)}.json"
 
 
-def answered(session, home=None):
+def answered(session: str, home: str | Path | None = None) -> set[str]:
     try:
         return set(json.loads(_answers_path(session, home).read_text()))
     except (OSError, ValueError, TypeError):
         return set()
 
 
-def heard(payload, home=None):
+def heard(payload: dict[str, Any], home: str | Path | None = None) -> bool:
     """Record the destinations an AskUserQuestion answer names for its session; True when it named one."""
     session = payload.get("session_id")
     response = payload.get("tool_response")
     if payload.get("tool_name") != "AskUserQuestion" or not (session and isinstance(response, dict)):
         return False
-    said = [str(value).lower() for value in (response.get("answers") or {}).values()]
+    response = cast(dict[str, Any], response)
+    said = [str(value).lower() for value in cast(dict[str, Any], response.get("answers") or {}).values()]
     chosen = {kind for kind in (PACKAGE, BUNDLE) for words in said if kind in words}
     if not chosen:
         return False
@@ -80,7 +86,7 @@ def heard(payload, home=None):
     return True
 
 
-def _repo(path):
+def _repo(path: Path) -> tuple[Path, Path] | None:
     """(top level, git common dir) of the repository holding path, or None outside one."""
     where = next(p for p in (path, *path.parents) if p.is_dir())
     out = subprocess.run(
@@ -94,12 +100,12 @@ def _repo(path):
     return Path(lines[0]), Path(lines[1]).resolve()
 
 
-def placed(relative):
+def placed(relative: Path) -> bool:
     parts = relative.parts
     return parts[-1] == ENFORCEMENTS or bool(FOLDERS.intersection(parts[:-1]))
 
 
-def refusal(missing, paths):
+def refusal(missing: list[str], paths: list[str]) -> str:
     shown = ", ".join(paths[:SHOWN])
     return (
         f"placement: agentihooks is installed editable and this write lands in the {' and the '.join(missing)} "
@@ -114,36 +120,37 @@ def refusal(missing, paths):
 class PlacementGate:
     name: ClassVar[str] = NAME
     default_mode: ClassVar[str] = "enforce"
-    source: Callable = editable_source
-    bundle: Callable = linked_bundle
+    source: Callable[[], Path | None] = editable_source
+    bundle: Callable[[], Path | None] = linked_bundle
     home: Path | None = None
 
-    def matches(self, call):
+    def matches(self, call: "Call") -> bool:
         if call.tool.startswith(SERENA):
             return call.tool[len(SERENA) :] in SERENA_EDITS
         return call.tool in EDIT_TOOLS
 
-    def targets(self, call):
+    def targets(self, call: "Call") -> list[Path]:
         if call.tool.startswith(SERENA):
             scope = call.tool_input.get("relative_path")
             return [] if not scope or call.tool_input.get("dry_run") else [Path(call.cwd) / scope]
-        return [Path(call.cwd) / named for named in filter(None, _patch_targets(call, EDIT_TOOLS[call.tool]))]
+        patch_targets = cast(Callable[["Call", str], list[str | None]], getattr(scripts.gates.build, "_patch_targets"))
+        return [Path(call.cwd) / named for named in filter(None, patch_targets(call, EDIT_TOOLS[call.tool]))]
 
-    def destinations(self, call, source):
+    def destinations(self, call: "Call", source: Path) -> dict[str, list[str]]:
         """Each destination this call writes into a placement folder of, with the repo-relative paths."""
-        kinds = {}
+        kinds: dict[Path, str] = {}
         for kind, root in ((PACKAGE, source), (BUNDLE, self.bundle())):
             found = _repo(Path(root)) if root else None
             if found:
                 kinds[found[1]] = kind
-        landing = {}
+        landing: dict[str, list[str]] = {}
         for path in map(Path.resolve, self.targets(call)):
             found = _repo(path)
             if found and found[1] in kinds and placed(path.relative_to(found[0])):
                 landing.setdefault(kinds[found[1]], []).append(path.relative_to(found[0]).as_posix())
         return landing
 
-    def decide(self, call, who, state):
+    def decide(self, call: "Call", who: "Who", state: object) -> Decision:
         source = self.source()
         if source is None:
             return Decision()

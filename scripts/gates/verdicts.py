@@ -3,18 +3,22 @@
 import json
 import os
 import time
+from pathlib import Path
+from typing import Any, cast
 
 from scripts.gates.log import gates_dir, safe_name
 
 
 class Verdicts:
-    def __init__(self, slug, gate, home=None):
+    def __init__(self, slug: str, gate: str, home: str | Path | None = None) -> None:
         self.slug, self.gate, self.home = slug, gate, home
 
-    def path(self, subject):
+    def path(self, subject: str) -> Path:
         return gates_dir(self.slug, self.home) / safe_name(self.gate) / safe_name(subject)
 
-    def write(self, subject, verdict, reason, now_ms=None, **fields):
+    def write(
+        self, subject: str, verdict: str, reason: str, now_ms: int | None = None, **fields: Any
+    ) -> dict[str, Any]:
         record = {
             "verdict": verdict,
             "reason": reason,
@@ -28,12 +32,12 @@ class Verdicts:
         os.replace(staged, path)
         return record
 
-    def read(self, subject):
+    def read(self, subject: str) -> dict[str, Any] | None:
         try:
             record = json.loads(self.path(subject).read_text())
         except (OSError, ValueError):
             return None
-        return record if isinstance(record, dict) else None
+        return cast(dict[str, Any], record) if isinstance(record, dict) else None
 
-    def clear(self, subject):
+    def clear(self, subject: str) -> None:
         self.path(subject).unlink(missing_ok=True)

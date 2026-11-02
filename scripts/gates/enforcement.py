@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import cast
 
 from scripts.gates import log, modes
 from scripts.gates.base import Who
@@ -11,7 +12,7 @@ class Enforcement:
     default_mode: str = "observe"
 
     def allows(self, store: RedisStore, who: Who, action: str, reason: str, now_ms: int | None = None) -> bool:
-        chosen = modes.configured(self, store.config(who.swarm).gates)
+        chosen = modes.configured(self, cast(dict[str, str], store.config(who.swarm).gates))
         if chosen == "off":
             return False
         kind = "deny" if chosen == "enforce" else "observe"

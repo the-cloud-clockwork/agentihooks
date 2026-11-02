@@ -4,14 +4,18 @@ The tick raises the flag as the verdict file gates/quiet/<agent>, which a bash s
 stands every call is refused except the ledger, swarm and msg commands, until `swarm <slug> progress` clears it.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 from scripts.gates import log
-from scripts.gates.base import Decision, Who
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.identity import _pinned_args, simple_commands
 from scripts.gates.progress import Progress
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger import ledger_workspace
 
 NAME = "quiet"
@@ -23,14 +27,14 @@ HELD = frozenset({"claimed", "pr"})
 GONE = frozenset({"finished", "awaiting-decision"})
 
 
-def written_at(slug, task_id):
+def written_at(slug: str, task_id: str) -> int:
     try:
         return int((ledger_workspace.folder(slug, task_id) / "progress.md").stat().st_mtime * 1000)
     except (OSError, ValueError):
         return 0
 
 
-def last_signal(redis, slug, agent):
+def last_signal(redis: Any, slug: str, agent: AgentRecord) -> int:
     from scripts.swarm import idle
 
     return max(
@@ -41,14 +45,14 @@ def last_signal(redis, slug, agent):
     )
 
 
-def declared_wait(redis, slug, name, now_ms):
+def declared_wait(redis: Any, slug: str, name: str, now_ms: int) -> bool:
     from scripts.swarm import idle
 
     held = idle.wait(redis, slug, name)
     return bool(held and held["until"] > now_ms and idle.named(held))
 
 
-def holding(agent, rows):
+def holding(agent: AgentRecord, rows: dict[str, dict[str, Any]]) -> bool:
     task = rows.get(agent.task, {})
     return (
         agent.lane in WORKERS
@@ -58,10 +62,12 @@ def holding(agent, rows):
     )
 
 
-def quiet_minutes(redis, slug, agents, rows, now_ms):
+def quiet_minutes(
+    redis: Any, slug: str, agents: Iterable[AgentRecord], rows: dict[str, dict[str, Any]], now_ms: int
+) -> dict[str, int]:
     """Minutes each worker holding its claim has gone without a progress signal; a declared wait is never quiet and
     its end restarts the clock, and an agent with no signal at all, not even a start time, is not measured."""
-    found = {}
+    found: dict[str, int] = {}
     for agent in agents:
         if not holding(agent, rows) or declared_wait(redis, slug, agent.name, now_ms):
             continue
@@ -71,20 +77,22 @@ def quiet_minutes(redis, slug, agents, rows, now_ms):
     return found
 
 
-def refusal(slug, task_id, minutes):
+def refusal(slug: str, task_id: str, minutes: int) -> str:
     return (
         f"quiet for {minutes} minutes on task {task_id}: run agentihooks swarm {slug} progress --doing <what> "
         "--ends-when <what> to say what you are doing and when it ends"
     )
 
 
-def _flagged(slug, home):
+def _flagged(slug: str, home: str | Path | None) -> set[str]:
     folder = log.gates_dir(slug, home) / NAME
     return {path.name for path in folder.iterdir() if not path.name.startswith(".")} if folder.is_dir() else set()
 
 
-def quiet_pass(store, slug, rows, now_ms, home=None):
-    agents, flags, actions = {a.name: a for a in store.agents(slug)}, Verdicts(slug, NAME, home), []
+def quiet_pass(
+    store: Any, slug: str, rows: dict[str, dict[str, Any]], now_ms: int, home: str | Path | None = None
+) -> list[str]:
+    agents, flags, actions = {a.name: a for a in store.agents(slug)}, Verdicts(slug, NAME, home), list[str]()
     quiet = quiet_minutes(store.redis, slug, agents.values(), rows, now_ms)
     standing = {name for name, minutes in quiet.items() if minutes >= QUIET_MINUTES}
     for name in sorted(standing):
@@ -111,7 +119,15 @@ class Status:
         return f"Doing {self.doing}. Done when {self.ends_when}."
 
 
-def report(store, ledger, slug, agent, status, now_ms, home=None):
+def report(
+    store: Any,
+    ledger: Any,
+    slug: str,
+    agent: AgentRecord,
+    status: "Status",
+    now_ms: int,
+    home: str | Path | None = None,
+) -> str:
     line = status.line
     Progress(store.redis, slug).outcome(agent.name, STATUS, now_ms)
     ledger.comment(slug, agent.task, line, agent.name)
@@ -123,7 +139,7 @@ def report(store, ledger, slug, agent, status, now_ms, home=None):
     return line
 
 
-def allowed(call):
+def allowed(call: Call) -> bool:
     commands = simple_commands(call.command) if call.tool == "Bash" else []
     return bool(commands) and all(_pinned_args(words) is not None for words in commands)
 
@@ -132,10 +148,10 @@ class QuietClaim:
     name = NAME
     default_mode = "enforce"
 
-    def matches(self, call):
+    def matches(self, call: Call) -> bool:
         return bool(call.tool)
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: Verdicts) -> Decision:
         if not who.pinned:
             return Decision()
         flag = state.read(who.name)

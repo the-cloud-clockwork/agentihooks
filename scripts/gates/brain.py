@@ -7,8 +7,10 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.build import EDIT_TOOLS, SERENA, SERENA_EDITS
 
 PURPOSE = "task"
@@ -29,14 +31,22 @@ REFUSAL = (
 )
 
 
-def task_row(ledger_dir, slug, task):
-    from scripts.swarm_ledger.storage import read_ledger
+def task_row(ledger_dir: str, slug: str, task: str) -> dict[str, Any]:
+    import scripts.swarm_ledger.storage
 
-    doc = read_ledger(ledger_dir, slug, f"tasks/{task}") or {}
-    return next((t for t in doc.get("tasks", []) if t.get("id") == task), {})
+    doc = (
+        cast(
+            Callable[[str, str, str], dict[str, Any] | None],
+            scripts.swarm_ledger.storage.read_ledger,
+        )(ledger_dir, slug, f"tasks/{task}")
+        or {}
+    )
+    tasks = cast(list[dict[str, Any]], doc.get("tasks", []))
+    empty: dict[str, Any] = {}
+    return next((t for t in tasks if t.get("id") == task), empty)
 
 
-def bind(task, row, brain):
+def bind(task: str, row: dict[str, Any], brain: str) -> dict[str, Any]:
     spec = json.dumps({name: row.get(name, "") for name in SPEC}, sort_keys=True)
     return {
         "purpose": PURPOSE,
@@ -47,7 +57,7 @@ def bind(task, row, brain):
     }
 
 
-def check(receipt, current, now):
+def check(receipt: dict[str, Any] | None, current: dict[str, Any], now: float) -> str:
     if not receipt:
         return NO_RECEIPT
     if receipt.get("purpose") != PURPOSE:
@@ -69,22 +79,32 @@ class BrainGate:
     name = "brain"
     default_mode = "observe"
 
-    def __init__(self, environ=None, receipts=None, clock=time.time):
+    def __init__(
+        self,
+        environ: dict[str, str] | None = None,
+        receipts: Callable[[str], dict[str, Any] | None] | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
         self.environ = environ
         self.receipts = receipts
         self.clock = clock
 
-    def matches(self, call):
+    def matches(self, call: Call) -> bool:
         if call.tool in EDIT_TOOLS:
             return True
         return call.tool.startswith(SERENA) and call.tool[len(SERENA) :] in SERENA_EDITS
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: object) -> Decision:
         if not (who.swarm and who.task):
             return Decision()
         from hooks.context import task_context
 
-        current = task_context.binding(who.swarm, who.task, os.environ if self.environ is None else self.environ)
-        receipt = (self.receipts or task_context.consultation)(call.session)
+        current = cast(
+            Callable[[str, str, Mapping[str, str]], dict[str, Any] | None],
+            task_context.binding,
+        )(who.swarm, who.task, os.environ if self.environ is None else self.environ)
+        receipt = (self.receipts or cast(Callable[[str], dict[str, Any] | None], task_context.consultation))(
+            call.session
+        )
         reason = check(receipt, current, self.clock()) if current else UNREADABLE
         return Decision.deny(REFUSAL.format(reason=reason, task=who.task)) if reason else Decision()

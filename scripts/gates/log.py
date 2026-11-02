@@ -4,27 +4,32 @@ import json
 import math
 import re
 import time
+from collections.abc import Generator
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from scripts.gates.base import Who
 
 TAIL_BYTES = 65536
 DECISIONS = ("deny", "observe", "lift", "fail-open")
 UNSAFE = re.compile(r"[^A-Za-z0-9@_-]")
 
 
-def safe_name(text):
+def safe_name(text: str) -> str:
     return UNSAFE.sub("_", text) or "_"
 
 
-def swarm_home():
+def swarm_home() -> Path:
     return Path.home() / ".agentihooks" / "swarm"
 
 
-def gates_dir(slug, home=None):
+def gates_dir(slug: str, home: str | Path | None = None) -> Path:
     return Path(home or swarm_home()) / safe_name(slug) / "gates"
 
 
-def gate_log_path(slug, home=None):
+def gate_log_path(slug: str, home: str | Path | None = None) -> Path:
     return gates_dir(slug, home) / "log.jsonl"
 
 
@@ -39,19 +44,27 @@ class Row:
     reason: str
 
     @classmethod
-    def of(cls, gate, kind, who, tool="", reason="", now_ms=None):
+    def of(
+        cls,
+        gate: str,
+        kind: str,
+        who: "Who",
+        tool: str = "",
+        reason: str = "",
+        now_ms: int | None = None,
+    ) -> "Row":
         at = int(time.time() * 1000) if now_ms is None else now_ms
         return cls(at=at, gate=gate, kind=kind, agent=who.name, task=who.task, tool=tool, reason=reason)
 
 
-def append(slug, row, home=None):
+def append(slug: str, row: Row, home: str | Path | None = None) -> None:
     path = gate_log_path(slug, home)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as out:
         out.write(json.dumps(asdict(row)) + "\n")
 
 
-def recent(slug, limit=20, home=None):
+def recent(slug: str, limit: int | None = 20, home: str | Path | None = None) -> list[dict[str, Any]]:
     try:
         with gate_log_path(slug, home).open("rb") as source:
             start = max(0, source.seek(0, 2) - TAIL_BYTES)
@@ -63,8 +76,8 @@ def recent(slug, limit=20, home=None):
     return rows if limit is None else rows[-limit:]
 
 
-def since(slug, since_ms, home=None):
-    chunks = []
+def since(slug: str, since_ms: int, home: str | Path | None = None) -> list[dict[str, Any]]:
+    chunks: list[bytes] = []
     try:
         with gate_log_path(slug, home).open("rb") as source:
             for stop in range(source.seek(0, 2), 0, -TAIL_BYTES):
@@ -80,16 +93,16 @@ def since(slug, since_ms, home=None):
     return [row for row in _parse(data.splitlines()) if (at := _at(row)) is not None and at >= since_ms]
 
 
-def _newest(lines):
+def _newest(lines: list[bytes]) -> float:
     return max((at for row in _parse(lines) if (at := _at(row)) is not None), default=math.inf)
 
 
-def _at(row):
+def _at(row: dict[str, Any]) -> int | float | None:
     at = row.get("at")
     return at if isinstance(at, (int, float)) and not isinstance(at, bool) else None
 
 
-def _parse(lines):
+def _parse(lines: list[bytes]) -> "Generator[dict[str, Any], Any, None]":
     for line in lines:
         try:
             row = json.loads(line)
@@ -99,5 +112,5 @@ def _parse(lines):
             yield row
 
 
-def decisions(slug, limit=20, home=None):
+def decisions(slug: str, limit: int = 20, home: str | Path | None = None) -> list[dict[str, Any]]:
     return [row for row in recent(slug, None, home) if row.get("kind") in DECISIONS][-limit:]

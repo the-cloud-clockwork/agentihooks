@@ -7,9 +7,16 @@ import json
 import re
 import time
 import uuid
+from collections.abc import Callable, Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.gates import log
 from scripts.gates.log import safe_name
+
+if TYPE_CHECKING:
+    from scripts.gates.base import Who
+    from scripts.swarm.store import RedisStore
 
 LIFT_SECONDS = 3600
 SERVER_GATES = frozenset({"talk"})
@@ -18,40 +25,40 @@ HEAD_REASON = "the operator lifted it for this task until its pull request head 
 SIGNAL = re.compile(r"\blift\s+(?:the\s+)?([a-z][a-z0-9-]*)\s+gate\b", re.IGNORECASE)
 
 
-def requested(prompt):
+def requested(prompt: str) -> set[str]:
     return {match.group(1).lower() for match in SIGNAL.finditer(prompt)}
 
 
-def lift_path(slug, session_id, gate, home=None):
+def lift_path(slug: str, session_id: str, gate: str, home: str | Path | None = None) -> Path:
     return log.gates_dir(slug, home) / "lifts" / safe_name(session_id) / safe_name(gate)
 
 
-def arm(slug, session_id, gate, home=None, now=None):
+def arm(slug: str, session_id: str, gate: str, home: str | Path | None = None, now: float | None = None) -> None:
     path = lift_path(slug, session_id, gate, home)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"at": time.time() if now is None else now}))
 
 
-def lifted(slug, session_id, gate, home=None, now=None):
+def lifted(slug: str, session_id: str, gate: str, home: str | Path | None = None, now: float | None = None) -> bool:
     if not (slug and session_id):
         return False
     return _fresh(lift_path(slug, session_id, gate, home), now)
 
 
-def _shared(home):
+def _shared(home: str | Path | None) -> "RedisStore | None":
     import redis
 
     from scripts.swarm.store import SwarmError, connect
 
     try:
-        return connect()
+        return cast(Callable[[], "RedisStore"], connect)()
     except (redis.RedisError, SwarmError):
         if home is None:
             raise
         return None
 
 
-def _load(slug, scope, subject, gate, home):
+def _load(slug: str, scope: str, subject: str, gate: str, home: str | Path | None) -> dict[str, Any]:
     import redis
 
     from scripts.swarm.store import SwarmError
@@ -59,7 +66,7 @@ def _load(slug, scope, subject, gate, home):
     try:
         store = _shared(home)
         if store is not None:
-            return store.gate_lift(slug, scope, subject, gate)
+            return cast(Callable[[str, str, str, str], dict[str, Any]], store.gate_lift)(slug, scope, subject, gate)
     except (redis.RedisError, SwarmError, ValueError):
         return {}
     path = (
@@ -68,10 +75,12 @@ def _load(slug, scope, subject, gate, home):
     return _record(path)
 
 
-def _save(slug, scope, subject, gate, record, home):
+def _save(slug: str, scope: str, subject: str, gate: str, record: dict[str, Any], home: str | Path | None) -> None:
     store = _shared(home)
     if store is not None:
-        store.put_gate_lift(slug, scope, subject, gate, record)
+        cast(Callable[[str, str, str, str, dict[str, Any]], None], store.put_gate_lift)(
+            slug, scope, subject, gate, record
+        )
         return
     path = (
         agent_lift_path(slug, subject, gate, home) if scope == "agents" else task_lift_path(slug, subject, gate, home)
@@ -80,25 +89,27 @@ def _save(slug, scope, subject, gate, record, home):
     path.write_text(json.dumps(record))
 
 
-def agent_lift_path(slug, agent, gate, home=None):
+def agent_lift_path(slug: str, agent: str, gate: str, home: str | Path | None = None) -> Path:
     return log.gates_dir(slug, home) / "lifts" / "agents" / safe_name(agent) / safe_name(gate)
 
 
-def agent_lifted(slug, agent, gate, home=None, now=None):
+def agent_lifted(slug: str, agent: str, gate: str, home: str | Path | None = None, now: float | None = None) -> bool:
     if not (slug and agent):
         return False
     return _alive(_load(slug, "agents", agent, gate, home), now)
 
 
-def task_lifts_dir(slug, task, home=None):
+def task_lifts_dir(slug: str, task: str, home: str | Path | None = None) -> Path:
     return log.gates_dir(slug, home) / "lifts" / "tasks" / safe_name(task)
 
 
-def task_lift_path(slug, task, gate, home=None):
+def task_lift_path(slug: str, task: str, gate: str, home: str | Path | None = None) -> Path:
     return task_lifts_dir(slug, task, home) / safe_name(gate)
 
 
-def task_lifted(slug, task, gate, home=None, now=None, command=""):
+def task_lifted(
+    slug: str, task: str, gate: str, home: str | Path | None = None, now: float | None = None, command: str = ""
+) -> bool:
     if not (slug and task):
         return False
     record = _load(slug, "tasks", task, gate, home)
@@ -107,8 +118,9 @@ def task_lifted(slug, task, gate, home=None, now=None, command=""):
     from scripts.gates.identity import simple_commands
     from scripts.gates.intent import _merge_target, _same_pull, pr_head, production_unchanged
 
-    targets = filter(None, map(_merge_target, simple_commands(command)))
-    if not all(_same_pull(target, record["url"]) for target in targets):
+    commands = cast(Callable[[str], list[list[str]]], simple_commands)(command)
+    targets = filter(None, (cast(Callable[[list[str]], "str | None"], _merge_target)(words) for words in commands))
+    if not all(cast(Callable[[str, str], bool], _same_pull)(target, record["url"]) for target in targets):
         return False
     if not record.get("head"):
         return False
@@ -116,11 +128,11 @@ def task_lifted(slug, task, gate, home=None, now=None, command=""):
     return head == record["head"] or (bool(head) and production_unchanged(record["url"], record["head"], head))
 
 
-def head_lifted(slug, task, gate, home=None):
+def head_lifted(slug: str, task: str, gate: str, home: str | Path | None = None) -> bool:
     return bool(_load(slug, "tasks", task, gate, home).get("url")) and task_lifted(slug, task, gate, home)
 
 
-def drop_task(slug, task, home=None, store=None):
+def drop_task(slug: str, task: str, home: str | Path | None = None, store: "RedisStore | None" = None) -> None:
     store = _shared(home) if store is None else store
     if store is not None:
         store.drop_task_lifts(slug, task)
@@ -128,13 +140,19 @@ def drop_task(slug, task, home=None, store=None):
         path.unlink()
 
 
-def held(slug, agent, task, gate, home=None, command=""):
+def held(slug: str, agent: str, task: str, gate: str, home: str | Path | None = None, command: str = "") -> bool:
     if task and gate not in SERVER_GATES:
         return task_lifted(slug, task, gate, home, command=command)
     return agent_lifted(slug, agent, gate, home)
 
 
-def lift_agent(who, gate, home=None, now=None, pull=None):
+def lift_agent(
+    who: "Who",
+    gate: str,
+    home: str | Path | None = None,
+    now: float | None = None,
+    pull: dict[str, Any] | None = None,
+) -> None:
     at = time.time() if now is None else now
     _save(who.swarm, "agents", who.name, gate, {"at": at}, home)
     if who.swarm and who.task and gate not in SERVER_GATES:
@@ -143,49 +161,56 @@ def lift_agent(who, gate, home=None, now=None, pull=None):
     log.append(who.swarm, log.Row.of(gate, "lift", who, reason=reason), home)
 
 
-def active(rows, now_ms):
+def active(rows: list[dict[str, Any]], now_ms: int) -> dict[str, list[dict[str, Any]]]:
     since = now_ms - LIFT_SECONDS * 1000
-    gates = {}
+    gates: dict[tuple[str, str | None], bool] = {}
     for row in rows:
         if row.get("kind") in ("deny", "lift") and row.get("agent") and row.get("at", 0) > since:
             key = (row["agent"], row.get("gate"))
             gates[key] = row["kind"] == "lift"
-    by_agent = {}
+    by_agent: dict[str, list[dict[str, Any]]] = {}
     for (agent, gate), was_lifted in sorted(gates.items()):
         by_agent.setdefault(agent, []).append({"gate": gate, "lifted": was_lifted})
     return by_agent
 
 
-def current(slug, now_ms, home=None):
+def current(slug: str, now_ms: int, home: str | Path | None = None) -> dict[str, list[dict[str, Any]]]:
     return active(log.since(slug, now_ms - LIFT_SECONDS * 1000, home), now_ms)
 
 
-def _fresh(path, now):
+def _fresh(path: Path, now: float | None) -> bool:
     return _alive(_record(path), now)
 
 
-def _record(path):
+def _record(path: Path) -> dict[str, Any]:
     try:
         record = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
-    return record if isinstance(record, dict) else {}
+    return cast(dict[str, Any], record) if isinstance(record, dict) else {}
 
 
-def _alive(record, now):
+def _alive(record: dict[str, Any], now: float | None) -> bool:
     at = record.get("at")
     if not isinstance(at, (int, float)):
         return False
     return (time.time() if now is None else now) - at < LIFT_SECONDS
 
 
-def post(slug):
+def post(slug: str) -> Callable[[dict[str, Any]], Any]:
     from scripts.swarm.ledger_client import _ledger
 
-    return lambda op: _ledger().request(slug, [op])
+    return lambda op: cast(Callable[[], Any], _ledger)().request(slug, [op])
 
 
-def arm_from_prompt(prompt, session_id, who, known, home=None, send=None):
+def arm_from_prompt(
+    prompt: str,
+    session_id: str,
+    who: "Who",
+    known: Iterable[str],
+    home: str | Path | None = None,
+    send: Callable[[dict[str, Any]], Any] | None = None,
+) -> list[str]:
     if not (who.pinned and session_id):
         return []
     armed = sorted(requested(prompt) & (set(known) | SERVER_GATES))

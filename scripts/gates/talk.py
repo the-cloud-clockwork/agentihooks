@@ -4,6 +4,10 @@ Every route to a ledger write lands in the server, so the gate wraps the server'
 The mode is the swarm config's gates entry (enforce, observe, off), observe until the operator changes it.
 """
 
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, cast
+
 from scripts.gates import log
 from scripts.gates.base import Who
 from scripts.gates.lift import LIFT_SECONDS, agent_lifted
@@ -18,21 +22,21 @@ TALK_THREADS = ("chat",)
 OUTCOME_FIELDS = (("state", "task {}"), ("pr_url", "pull request recorded"), ("proof", "proof recorded"))
 
 
-def talk_op(op):
+def talk_op(op: dict[str, Any]) -> bool:
     if op.get("op") == "add_item":
         return op.get("list") == "followups"
     thread = str(op.get("thread"))
     return op.get("op") in ("add", "edit") and "by" in op and (thread in TALK_THREADS or thread.endswith("/comments"))
 
 
-def outcome_op(op):
+def outcome_op(op: dict[str, Any]) -> str:
     fields = op.get("fields") if op.get("op") == "task_update" else None
     if not isinstance(fields, dict):
         return ""
-    return next((text.format(fields[key]) for key, text in OUTCOME_FIELDS if key in fields), "")
+    return next((text.format(cast(dict[str, Any], fields)[key]) for key, text in OUTCOME_FIELDS if key in fields), "")
 
 
-def refusal(by, count, slug):
+def refusal(by: str, count: int, slug: str) -> str:
     return (
         f"{REFUSED}: {by} made {count} talk writes since its last outcome, the budget is {BUDGET}. "
         f"Record an outcome first: push the commit, or run agentihooks swarm {slug} pr <url>. "
@@ -40,7 +44,7 @@ def refusal(by, count, slug):
     )
 
 
-def lifted(meta, by, now_ms):
+def lifted(meta: dict[str, Any], by: str, now_ms: int) -> bool:
     since = now_ms - LIFT_SECONDS * 1000
     return any(
         e.get("kind") == LIFTED and e.get("by") == by and e.get("gate") == NAME and e["at"] >= since
@@ -48,29 +52,29 @@ def lifted(meta, by, now_ms):
     )
 
 
-def owes(meta, by, tasks):
+def owes(meta: dict[str, Any], by: str, tasks: list[dict[str, Any]]) -> bool:
     import ledger_gate
 
     return bool(ledger_gate.unhandled_for(meta, by, tasks))
 
 
-def mode_of(config):
+def mode_of(config: Any) -> str:
     chosen = config.gates.get(NAME)
     return chosen if chosen in ("enforce", "off") else DEFAULT_MODE
 
 
-def _connect():
+def _connect() -> Any:
     from scripts.swarm.store import redis_client
 
     return redis_client()
 
 
 class Budget:
-    def __init__(self, slug, connect=_connect, home=None):
+    def __init__(self, slug: str, connect: Callable[[], Any] = _connect, home: str | Path | None = None) -> None:
         self.slug, self.connect, self.home = slug, connect, home
-        self._redis = None
+        self._redis: Any = None
 
-    def apply(self, doc, op, ctx, apply):
+    def apply(self, doc: dict[str, Any], op: dict[str, Any], ctx: Any, apply: Callable[..., bool]) -> bool:
         from scripts.swarm.naming import lane_of, resolve_name
 
         by = resolve_name(str(op.get("by")))
@@ -111,17 +115,17 @@ class Budget:
             progress.talk(by)
         return done
 
-    def _exempt(self, doc, by, ctx):
+    def _exempt(self, doc: dict[str, Any], by: str, ctx: Any) -> bool:
         from scripts.swarm.naming import NameRegistry
 
         return (
             owes(ctx.meta, by, doc["tasks"])
             or lifted(ctx.meta, by, ctx.at)
             or agent_lifted(self.slug, by, NAME, self.home, ctx.at / 1000)
-            or bool(NameRegistry(self._redis).entry(by).get("operator"))
+            or bool(cast(dict[str, Any], NameRegistry(self._redis).entry(by)).get("operator"))
         )
 
-    def _marks(self):
+    def _marks(self) -> tuple[str, Any] | None:
         from scripts.gates.progress import Progress
         from scripts.swarm.store import RedisStore, SwarmError
 
@@ -134,5 +138,5 @@ class Budget:
         return None if mode == "off" else (mode, Progress(self._redis, self.slug))
 
 
-def _held(doc, by):
+def _held(doc: dict[str, Any], by: str) -> str:
     return next((t["id"] for t in doc["tasks"] if t.get("claimed_by") == by and t.get("state") != "done"), "")
