@@ -46,8 +46,15 @@ def merge_reports(reports: list[dict], cleared: dict | None = None) -> dict:
         **({"shards": measurements} if measurements else {}),
         "files": list(files.values()),
         "not_mutated": list(not_mutated.values()),
-        "failed": any(report["failed"] for report in reports) or any(entry["failures"] for entry in graded),
+        "failed": any(report["failed"] for report in reports)
+        or any(entry["failures"] for entry in graded)
+        or bool(short_shards(measurements)),
     }
+
+
+def short_shards(measurements: list[dict]) -> list[int]:
+    """Return the index of every shard that graded fewer mutants than it owns."""
+    return [measurement["index"] for measurement in measurements if measurement["graded"] < measurement["expected"]]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Merged {args.shards - len(missing)} of {args.shards} mutation shard reports")
     if missing:
         print(f"missing mutation shard reports: {', '.join(missing)}")
+    if short := short_shards(merged.get("shards", [])):
+        print(f"mutation shards graded fewer mutants than they own: {', '.join(map(str, short))}")
     for entry in merge_units(reports, cleared):
         if entry["failures"]:
             print(survivor_text(entry))
