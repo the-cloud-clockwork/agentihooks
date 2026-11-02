@@ -3903,7 +3903,11 @@ jobs:
         if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
         env:
           BASES: ${{ steps.plan.outputs.bases }}
-        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080
+        run: |
+          python -m scripts.ci_mutation --bases "$BASES" --budget 1080
+          grader="$RUNNER_TEMP/grader"
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json . "$BASES"
 
       - name: Forward the reused or empty mutation report
         if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
@@ -4104,10 +4108,12 @@ jobs:
       # Until dev carries the regrader, the head's copy grades.
       - name: Grade the shard report from the protected grader
         if: always() && steps.mutate.outcome != 'skipped'
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
         run: |
           grader="$RUNNER_TEMP/grader"
           [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
-          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json .
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json . "$BASES"
 
       - name: Upload complete inline mutation evidence
         if: always() && steps.mutate.outcome != 'skipped'
@@ -4327,10 +4333,12 @@ jobs:
       # Until dev carries the regrader, the head's copy grades.
       - name: Grade the shard report from the protected grader
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
         run: |
           grader="$RUNNER_TEMP/grader"
           [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
-          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json .
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json . "$BASES"
 
       - name: Upload complete mutation evidence
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'
