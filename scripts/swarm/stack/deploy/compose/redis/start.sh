@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Hive members are added at runtime and saved by ACL SAVE; the template users are rebuilt on every start.
-# The default user stays off yet holds every command, because Redis replays each MULTI/EXEC in the AOF as that user.
 set -euo pipefail
 
 hash="$(printf '%s' "$SWARM_REDIS_PASSWORD" | sha256sum | cut -d' ' -f1)"
