@@ -41,8 +41,14 @@ READER = GitHubSourceControl("", Path(), "dev")
 
 
 def _port(run: Callable[..., Any]) -> GitHubSourceControl:
-    """The GitHub adapter reading through one gh runner from the working folder."""
-    return replace(READER, gh=run)
+    """The GitHub adapter calling one gh runner with text output and a whole second timeout."""
+
+    def gh(argv: list[str], **options: Any) -> subprocess.CompletedProcess[Any]:
+        """Run one adapter gh call through the caller's runner and return its completed process."""
+        done = run(argv, capture_output=True, text=True, timeout=round(options["timeout"]))
+        return subprocess.CompletedProcess(argv, done.returncode, done.stdout, done.stderr)
+
+    return replace(READER, gh=gh)
 
 
 def _failure(exc: subprocess.CalledProcessError) -> str:

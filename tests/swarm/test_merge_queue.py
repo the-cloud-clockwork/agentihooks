@@ -1,6 +1,5 @@
 import json
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -746,9 +745,7 @@ def test_a_rest_read_runs_the_adapter_download_tool_from_the_working_folder() ->
         return subprocess.CompletedProcess(command, 0, b'{"id": 5}', b"")
 
     assert merge_queue.rest("repos/o/r/actions/runs/5", run) == {"id": 5}
-    timeout = calls[0][1].pop("timeout")
-    assert isinstance(timeout, float) and 19 < timeout <= 20
-    assert calls == [(["gh", "api", "repos/o/r/actions/runs/5"], {"cwd": Path(), "capture_output": True})]
+    assert calls == [(["gh", "api", "repos/o/r/actions/runs/5"], {"capture_output": True, "text": True, "timeout": 20})]
 
 
 def test_a_failed_rest_read_reports_its_byte_error_text() -> None:
