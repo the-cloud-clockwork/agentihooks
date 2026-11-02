@@ -1,6 +1,7 @@
 """Task kinds and their proof contracts: what a task of each kind must carry before it can be marked done."""
 
 import re
+from typing import Any
 
 KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan", "workflow")
 BRANCHED = ("code", "ci")
@@ -33,11 +34,11 @@ NEEDS = {
 }
 
 
-def kind(task):
+def kind(task: dict[str, Any]) -> str:
     return task.get("kind") or "code"
 
 
-def after(task):
+def after(task: dict[str, Any]) -> bool:
     return kind(task) in BRANCHED and (task.get("contract") or {}).get("after") == "yes"
 
 
