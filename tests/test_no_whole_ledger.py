@@ -133,7 +133,7 @@ def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         no_whole_ledger.main([])
     assert raised.value.code == 2
-    assert "grading needs --base" in capsys.readouterr().err
+    assert capsys.readouterr().err.splitlines()[-1].endswith(": error: grading needs --base")
 
 
 def test_write_records_one_space_indented_sorted_json(tmp_path: Path) -> None:
