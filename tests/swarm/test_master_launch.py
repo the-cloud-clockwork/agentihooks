@@ -9,7 +9,7 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import affinity, capacity, launch_check, master_launch, master_start, runtime
 from scripts.swarm import tick as tick_module
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import Placed, SpawnError
 from tests.swarm.test_capacity import account
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -434,13 +434,13 @@ def test_a_finished_front_door_still_running_keeps_its_seat(up, monkeypatch, cap
     assert printed(capsys)["seat"] == "master-2@sw"
 
 
-@pytest.mark.parametrize("live", [True, False])
-def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypatch, capsys, live):
+def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     store, _, rt = up
     front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
     store.put_agent("sw", front)
-    if live:
-        rt.live.add(front.name)
+    rt.live.add(front.name)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
     assert (
@@ -448,6 +448,21 @@ def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monk
         in capsys.readouterr().err
     )
     assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
+
+
+def test_a_dead_starting_front_door_is_finished_and_replaced(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    assert printed(capsys)["seat"] == "master@sw"
+    assert store.agents("sw")[0].name == front.name
+    assert store.agents("sw")[0].state == "finished"
+    assert len(rt.masters) == 1
+    assert {a.seat for a in masters(store) if a.state != "finished"} == {"master@sw"}
 
 
 def test_a_live_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypatch, capsys):
