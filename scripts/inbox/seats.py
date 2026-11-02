@@ -8,7 +8,7 @@ Each swarm keeps one culture text that every occupant of every seat reads.
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm import naming
 from scripts.swarm.keyspace import ROOT
@@ -33,28 +33,28 @@ class Occupancy:
     generation: int
 
 
-def seat_address(slug, seat):
+def seat_address(slug: str, seat: str) -> str:
     return f"{seat}@{slug}"
 
 
-def is_seat(address):
-    return "@" in address and naming.parse(address) is None
+def is_seat(address: str) -> bool:
+    return "@" in address and cast(Any, naming.parse(address)) is None
 
 
-def of_swarm(address, slug, names=None):
+def of_swarm(address: str, slug: str, names: Any = None) -> bool:
     """A seat of the swarm, or the name the swarm gave one of its agents; names (the registry) resolves a name's code."""
     if is_seat(address):
         return address.endswith(f"@{slug}")
-    if naming.legacy_slug(address) == slug:
+    if cast(str, naming.legacy_slug(address)) == slug:
         return True
-    return names is not None and names.slug_of(address) == slug
+    return names is not None and bool(names.slug_of(address) == slug)
 
 
-def master_of(address, names=None):
+def master_of(address: str, names: Any = None) -> str:
     """The master seat of the swarm a seat or a swarm agent's name belongs to, '' for any other address."""
     if is_seat(address):
         return seat_address(address.split("@", 1)[1], "master")
-    slug = names.slug_of(address) if names is not None else naming.legacy_slug(address)
+    slug = names.slug_of(address) if names is not None else cast(str, naming.legacy_slug(address))
     return seat_address(slug, "master") if slug else ""
 
 
@@ -62,10 +62,10 @@ class SeatRegistry:
     def __init__(self, redis: Any) -> None:
         self.redis = redis
 
-    def key(self, address):
+    def key(self, address: str) -> str:
         return f"{PREFIX}:{address}"
 
-    def occupy(self, address, occupant, at):
+    def occupy(self, address: str, occupant: str, at: float) -> int:
         from redis.exceptions import WatchError
 
         key = self.key(address)
@@ -84,11 +84,11 @@ class SeatRegistry:
                     continue
         raise SeatError(f"seat {address} kept changing; {occupant} could not take it")
 
-    def watch(self, pipe, address):
+    def watch(self, pipe: Any, address: str) -> Occupancy:
         pipe.watch(self.key(address))
         return _occupancy(pipe.hgetall(self.key(address)))
 
-    def occupant(self, address):
+    def occupant(self, address: str) -> Occupancy:
         return _occupancy(self.redis.hgetall(self.key(address)))
 
     def seat_of(self, name: str, reader: Any = None) -> str:
@@ -121,10 +121,10 @@ class SeatRegistry:
         seated = [(name, seat) for name, seat in zip(named, seats[len(old) :]) if seat]
         return legacy + seated
 
-    def _known_seats(self, names):
+    def _known_seats(self, names: list[str]) -> list[str]:
         return [seat or "" for seat in self.redis.mget([f"{PREFIX}-of:{name}" for name in names])] if names else []
 
-    def exits(self, names: list[str]) -> dict[str, dict[str, str]]:
+    def exits(self, names: list[str]) -> dict[str, dict[str, Any]]:
         raw = self.redis.mget([f"{PREFIX}-of:{name}:exit" for name in names]) if names else []
         return {name: json.loads(value or "{}") for name, value in zip(names, raw)}
 
@@ -137,17 +137,17 @@ class SeatRegistry:
         replace = bool(earlier) and earlier.get("generation") != generation
         self.redis.set(f"{PREFIX}-of:{name}:exit", json.dumps(record), nx=not replace)
 
-    def exit_of(self, name: str) -> dict[str, str]:
+    def exit_of(self, name: str) -> dict[str, Any]:
         return json.loads(self.redis.get(f"{PREFIX}-of:{name}:exit") or "{}")
 
     def left(self, name: str, seat: str) -> bool:
         """name exited while holding seat's current occupancy, so it takes no more of its mail."""
         return self.exit_of(name).get("generation") == self.occupant(seat).generation
 
-    def history(self, address):
+    def history(self, address: str) -> list[dict[str, Any]]:
         return [json.loads(entry) for entry in self.redis.lrange(f"{self.key(address)}:history", 0, -1)]
 
-    def note(self, address, event, detail, at):
+    def note(self, address: str, event: str, detail: str, at: float) -> None:
         """An event on the seat's history that leaves its occupant and generation unchanged."""
         seat = self.occupant(address)
         entry = {"generation": seat.generation, "occupant": seat.occupant, "at": at, "event": event, "detail": detail}
@@ -163,28 +163,28 @@ class SeatRegistry:
 
 
 class SeatMemory:
-    def __init__(self, redis):
+    def __init__(self, redis: Any) -> None:
         self.redis = redis
 
-    def key(self, address, kind):
+    def key(self, address: str, kind: str) -> str:
         return f"{PREFIX}:{address}:{kind}"
 
-    def add_recap(self, address, occupant, task, text, at):
+    def add_recap(self, address: str, occupant: str, task: str, text: str, at: float) -> None:
         entry = {"occupant": occupant, "task": task, "text": text, "at": at}
         self.redis.rpush(self.key(address, "recaps"), json.dumps(entry))
 
-    def recaps(self, address):
+    def recaps(self, address: str) -> list[dict[str, Any]]:
         return [json.loads(entry) for entry in reversed(self.redis.lrange(self.key(address, "recaps"), 0, -1))]
 
-    def learn(self, address, occupant, text, at, maturity=DEFAULT_MATURITY):
+    def learn(self, address: str, occupant: str, text: str, at: float, maturity: str = DEFAULT_MATURITY) -> None:
         _known(maturity)
         entry = {"occupant": occupant, "text": text, "at": at, "maturity": maturity}
         self.redis.rpush(self.key(address, "learned"), json.dumps(entry))
 
-    def learned(self, address):
+    def learned(self, address: str) -> list[dict[str, Any]]:
         return [_entry(raw) for raw in self.redis.lrange(self.key(address, "learned"), 0, -1)]
 
-    def promote(self, address, number, maturity, by, reason, at):
+    def promote(self, address: str, number: int, maturity: str, by: str, reason: str, at: float) -> dict[str, Any]:
         """Raise learned note `number` (1 based) on the seat to a higher maturity, keeping who and why."""
         _known(maturity)
         key = self.key(address, "learned")
@@ -201,7 +201,7 @@ class SeatMemory:
         self.redis.lset(key, number - 1, json.dumps(entry))
         return entry
 
-    def retire(self, address, number, by, reason, at):
+    def retire(self, address: str, number: int, by: str, reason: str, at: float) -> dict[str, Any]:
         """Retire learned note `number` (1 based) so no later occupant reads it; its number stays taken."""
         key = self.key(address, "learned")
         raw = self.redis.lindex(key, number - 1) if number > 0 else None
@@ -220,27 +220,27 @@ class SeatMemory:
 class SwarmCulture:
     """One shared text per swarm, kept apart from the swarm's own keys so it outlives a swarm remove."""
 
-    def __init__(self, redis):
+    def __init__(self, redis: Any) -> None:
         self.redis = redis
 
-    def key(self, slug):
+    def key(self, slug: str) -> str:
         return f"{CULTURE_PREFIX}:{slug}"
 
-    def set(self, slug, text):
+    def set(self, slug: str, text: str) -> None:
         self.redis.set(self.key(slug), text)
 
-    def get(self, slug):
+    def get(self, slug: str) -> str:
         return self.redis.get(self.key(slug)) or ""
 
 
-def _known(maturity):
+def _known(maturity: str) -> None:
     if maturity not in MATURITIES:
         raise SeatError(f"maturity is one of {', '.join(MATURITIES)}, not {maturity}")
 
 
-def _entry(raw):
+def _entry(raw: Any) -> dict[str, Any]:
     return {"maturity": DEFAULT_MATURITY, **json.loads(raw)}
 
 
-def _occupancy(raw):
+def _occupancy(raw: dict[str, Any]) -> Occupancy:
     return Occupancy(raw.get("occupant", ""), int(raw.get("generation", 0)))

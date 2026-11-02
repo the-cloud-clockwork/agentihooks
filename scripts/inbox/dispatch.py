@@ -7,38 +7,39 @@ import hashlib
 import json
 import uuid
 from dataclasses import replace
+from typing import Any
 
 from scripts.inbox.receipts import Delivery, DispatchError, Receipts, check_owner, delivery_fields, transact
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import close_reason, now_ms, owner_key, owner_ttl_s
+from scripts.inbox.store import InboxStore, Item, close_reason, now_ms, owner_key, owner_ttl_s
 
 SHOWN = "its ref was already accepted or shown"
 
 
-def digest(item) -> str:
+def digest(item: Item) -> str:
     payload = {name: getattr(item, name) for name in ("id", "sender", "address", "text", "ref", "task")}
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 class Dispatcher:
-    def __init__(self, store):
+    def __init__(self, store: InboxStore) -> None:
         self.store = store
-        self.redis = store.redis
+        self.redis: Any = store.redis
         self.receipts = Receipts(store)
 
-    def key(self, *parts):
+    def key(self, *parts: str) -> str:
         return self.store.key(*parts)
 
-    def owner_key(self, recipient):
+    def owner_key(self, recipient: str) -> str:
         return owner_key(self.store.names.resolve(recipient), self.store.world)
 
-    def owner(self, recipient):
+    def owner(self, recipient: str) -> str:
         return self.redis.get(self.owner_key(recipient)) or ""
 
-    def own(self, recipient, owner, takeover=False, ttl_s=None):
+    def own(self, recipient: str, owner: str, takeover: bool = False, ttl_s: int | None = None) -> None:
         recipient, key = self.store.names.resolve(recipient), self.owner_key(recipient)
 
-        def claim(pipe):
+        def claim(pipe: Any) -> None:
             held = pipe.get(key)
             if held and held != owner and not takeover:
                 raise DispatchError(f"{recipient} is delivered by {held}; take over to replace it")
@@ -47,11 +48,11 @@ class Dispatcher:
 
         transact(self.redis, claim, [key])
 
-    def renew(self, recipient, owner, ttl_s=None):
+    def renew(self, recipient: str, owner: str, ttl_s: int | None = None) -> bool:
         """Extend owner's hold on recipient; False when it no longer holds it, which a running pump must treat as lost."""
         key = self.owner_key(recipient)
 
-        def extend(pipe):
+        def extend(pipe: Any) -> bool:
             if pipe.get(key) != owner:
                 return False
             pipe.multi()
@@ -60,10 +61,10 @@ class Dispatcher:
 
         return transact(self.redis, extend, [key])
 
-    def release(self, recipient, owner):
+    def release(self, recipient: str, owner: str) -> bool:
         recipient, key = self.store.names.resolve(recipient), self.owner_key(recipient)
 
-        def drop(pipe):
+        def drop(pipe: Any) -> bool:
             held = pipe.get(key)
             if held == owner and pipe.scard(self.key("deliveries", recipient)):
                 raise DispatchError(f"{recipient} still has open deliveries; accept or reject them before releasing")
@@ -75,13 +76,13 @@ class Dispatcher:
 
         return transact(self.redis, drop, [key, self.key("deliveries", recipient)])
 
-    def reserve(self, recipient, owner):
+    def reserve(self, recipient: str, owner: str) -> list[Delivery]:
         """Reserve each pending item in inbox order; an item whose ref was accepted or shown closes as shown."""
         recipient = self.store.names.resolve(recipient)
         items = self.store.pending_mail(recipient)
         return transact(self.redis, lambda pipe: self._reserve(pipe, recipient, owner, items))
 
-    def _reserve(self, pipe, recipient, owner, items):
+    def _reserve(self, pipe: Any, recipient: str, owner: str, items: list[Item]) -> list[Delivery]:
         check_owner(pipe, recipient, owner, self.store.world)
         plan = self._plan(pipe, recipient, items)
         pipe.multi()
@@ -106,9 +107,10 @@ class Dispatcher:
             reserved.append(delivery)
         return reserved
 
-    def _plan(self, pipe, recipient, items):
+    def _plan(self, pipe: Any, recipient: str, items: list[Item]) -> list[tuple[Item, str, bool]]:
         """(item, free or shown, last pending) for each item still pending for recipient and not reserved."""
-        plan, taken = [], set()
+        plan: list[tuple[Item, str, bool]] = []
+        taken: set[str] = set()
         for listed in items:
             pipe.watch(self.key("item", listed.id), self.key("reservation", listed.id))
             item = self.store.get(listed.id)
@@ -124,7 +126,7 @@ class Dispatcher:
             plan.append((item, state, state == "shown" and self.store.last_pending(pipe, item)))
         return plan
 
-    def _ref_state(self, pipe, recipient, ref, taken, *, replayed=False):
+    def _ref_state(self, pipe: Any, recipient: str, ref: str, taken: set[str], *, replayed: bool = False) -> str:
         """free, held by an open delivery, or shown: seen, or held by an accepted one."""
         if not ref:
             return "free"

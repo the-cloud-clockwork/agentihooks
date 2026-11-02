@@ -9,12 +9,16 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, fields, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
+
+if TYPE_CHECKING:
+    from scripts.inbox.pool import MasterPool
 
 PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
@@ -58,7 +62,7 @@ class Gone(InboxError):
     pass
 
 
-def new_item_id():
+def new_item_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
@@ -79,34 +83,34 @@ class Item:
     delivery_session: str = ""
 
 
-def now_ms():
+def now_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
-def prefix(world):
+def prefix(world: str) -> str:
     from scripts.hive import scope
 
     return f"{scope.root(world)}:inbox"
 
 
-def owner_key(recipient, world=None):
+def owner_key(recipient: str, world: str | None = None) -> str:
     """world is the inbox's hive member; None takes this process's own."""
     from scripts.hive import scope
 
     return f"{prefix(scope.member() if world is None else world)}:owner:{recipient}"
 
 
-def owner_ttl_s(environ=None):
+def owner_ttl_s(environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
     return max(1, int(env.get(OWNER_TTL_ENV) or DEFAULT_OWNER_TTL_S))
 
 
-def redelivery_ms(environ=None):
+def redelivery_ms(environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
     return int(env.get(REDELIVER_ENV) or DEFAULT_REDELIVER_S) * 1000
 
 
-def replied(answer_id):
+def replied(answer_id: str) -> str:
     return f"replied with message {answer_id}"
 
 
@@ -124,7 +128,14 @@ def close_reason(kind: str, detail: str = "") -> tuple[str, str]:
 
 
 class InboxStore:
-    def __init__(self, redis, *, persist=None, session_id="", world=None):
+    def __init__(
+        self,
+        redis: Any,
+        *,
+        persist: Callable[[Any], None] | None = None,
+        session_id: str = "",
+        world: str | None = None,
+    ) -> None:
         """world is the hive member whose keys hold this inbox, '' for the controller's; it defaults to this process's
         own member."""
         from scripts.hive import scope
@@ -139,10 +150,10 @@ class InboxStore:
         self.world = scope.member() if world is None else world
         self.prefix = prefix(self.world)
 
-    def key(self, *parts):
+    def key(self, *parts: str) -> str:
         return ":".join((self.prefix, *parts))
 
-    def home(self, address):
+    def home(self, address: str) -> str:
         """The hive member whose keys hold address's inbox: the member that runs it or its seat's occupant."""
         from scripts.hive import scope
 
@@ -162,7 +173,7 @@ class InboxStore:
         return [self, *(InboxStore(self.redis, persist=self.persist, world=m) for m in scope.members(self.redis))]
 
     @functools.cached_property
-    def pool(self):
+    def pool(self) -> "MasterPool":
         from scripts.inbox.pool import MasterPool
 
         return MasterPool(self)
@@ -247,10 +258,10 @@ class InboxStore:
             bus.publish(item, self.names)
         return item
 
-    def get(self, item_id):
+    def get(self, item_id: str) -> Item:
         return _item(self.redis.hgetall(self.key("item", item_id)), item_id)
 
-    def find(self, item_id, by):
+    def find(self, item_id: str, by: str) -> Item | None:
         """The item a tick pass stored the id of, or None once its record is gone; by names the pass in the log."""
         raw = self.redis.hgetall(self.key("item", item_id))
         if not raw:
@@ -293,7 +304,7 @@ class InboxStore:
             if not opened and (total == 0 or _index_current(indexed, size, total))
         }
 
-    def _open_ids(self, address):
+    def _open_ids(self, address: str) -> list[str]:
         from redis.exceptions import WatchError
 
         if _index_current(
@@ -341,23 +352,23 @@ class InboxStore:
             if len(page) < ROW_BATCH:
                 return ids, rows
 
-    def _listed(self, item_ids, address):
+    def _listed(self, item_ids: list[str], address: str) -> list[Item]:
         return self._listed_at(dict.fromkeys(item_ids, address))
 
-    def _listed_at(self, owners):
+    def _listed_at(self, owners: dict[str, str]) -> list[Item]:
         """The items the indexes list, by id to the address whose index lists it; an id whose record is gone is
         dropped from every index of that address."""
         if not owners:
             return []
         items, gone = _present(list(owners), self._rows(owners))
-        dangling = {}
+        dangling: dict[str, list[str]] = {}
         for item_id in gone:
             dangling.setdefault(owners[item_id], []).append(item_id)
         for address, ids in dangling.items():
             self.drop_gone(address, ids)
         return items
 
-    def listed_in(self, index, item_ids):
+    def listed_in(self, index: str, item_ids: list[str]) -> list[Item]:
         """The items an index outside the address indexes lists; an id whose record is gone is dropped from it."""
         items, gone = _present(item_ids, self._rows(item_ids))
         if gone:
@@ -365,14 +376,14 @@ class InboxStore:
         _report_dropped(index, gone)
         return items
 
-    def drop_gone(self, address, gone):
+    def drop_gone(self, address: str, gone: list[str]) -> None:
         """Drop ids whose record is gone from every index of address."""
         with self.redis.pipeline() as pipe:
             self._stage_drop(pipe, address, gone)
             pipe.execute()
         self._report_gone(address, gone)
 
-    def _rows(self, item_ids):
+    def _rows(self, item_ids: Iterable[str]) -> list[dict[str, str]]:
         item_ids = list(item_ids)
         return [
             row
@@ -380,7 +391,7 @@ class InboxStore:
             for row in self._batch(item_ids[start : start + ROW_BATCH])
         ]
 
-    def _batch(self, item_ids):
+    def _batch(self, item_ids: list[str]) -> list[dict[str, str]]:
         from redis.exceptions import ConnectionError as RedisConnectionError
 
         try:
@@ -388,23 +399,23 @@ class InboxStore:
         except RedisConnectionError:
             return self._read_batch(item_ids)
 
-    def _read_batch(self, item_ids):
+    def _read_batch(self, item_ids: list[str]) -> list[dict[str, str]]:
         with self.redis.pipeline(transaction=False) as pipe:
             for item_id in item_ids:
                 pipe.hgetall(self.key("item", item_id))
             return pipe.execute()
 
-    def _stage_drop(self, pipe, address, gone):
+    def _stage_drop(self, pipe: Any, address: str, gone: list[str]) -> None:
         if not gone:
             return
         for kind in ("address", "open", "pending"):
             pipe.zrem(self.key(kind, address), *gone)
         pipe.decrby(self.key("open-size", address), len(gone))
 
-    def _report_gone(self, address, gone):
+    def _report_gone(self, address: str, gone: list[str]) -> None:
         _report_dropped(self.key("address", address), gone)
 
-    def mailbox(self, me):
+    def mailbox(self, me: str) -> list[Item]:
         return self._with_seat(me, self.inbox)
 
     def unsettled(self, receiver: str, before: int) -> list[Item]:
@@ -414,7 +425,7 @@ class InboxStore:
             if not item.fyi and item.state in ("read", "confirmed") and item.updated_at <= before
         ]
 
-    def _due_open(self, address, before):
+    def _due_open(self, address: str, before: int) -> list[Item]:
         with self.redis.pipeline() as pipe:
             pipe.sismember(self.key("open-indexed"), address)
             pipe.get(self.key("open-size", address))
@@ -426,10 +437,10 @@ class InboxStore:
             ids = self.redis.zrangebyscore(self.key("open", address), "-inf", before)
         return self._listed(ids, address)
 
-    def pending_mail(self, me):
+    def pending_mail(self, me: str) -> list[Item]:
         return self._with_seat(me, self.pending_items)
 
-    def _with_seat(self, me, read):
+    def _with_seat(self, me: str, read: Callable[[str], list[Item]]) -> list[Item]:
         from redis.exceptions import WatchError
 
         original = me
@@ -454,7 +465,7 @@ class InboxStore:
         items = [item for address in addresses for item in read(address)]
         return sorted({item.id: item for item in items}.values(), key=_order)
 
-    def acts_for(self, by, address, pipe=None):
+    def acts_for(self, by: str, address: str, pipe: Any = None) -> bool:
         by, address = self.names.resolve(by, pipe), self.names.resolve(address, pipe)
         if by == address:
             return True
@@ -463,10 +474,10 @@ class InboxStore:
         held = self.seats.watch(pipe, address) if pipe is not None else self.seats.occupant(address)
         return self.names.resolve(held.occupant, pipe) == by
 
-    def history(self, item_id):
+    def history(self, item_id: str) -> list[dict[str, Any]]:
         return [json.loads(entry) for entry in self.redis.lrange(self.key("history", item_id), 0, -1)]
 
-    def histories(self, item_ids: list[str]) -> dict[str, list[dict]]:
+    def histories(self, item_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         if not item_ids:
             return {}
         with self.redis.pipeline(transaction=False) as pipe:

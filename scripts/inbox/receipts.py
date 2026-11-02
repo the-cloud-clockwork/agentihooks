@@ -1,9 +1,11 @@
 """The journal of a recipient's reserved deliveries: submission, acceptance on evidence, commit and recovery."""
 
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, fields, replace
+from typing import Any
 
 from scripts.inbox.seen import TTL_S, SeenMarks
-from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key
+from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, InboxStore, now_ms, owner_key
 
 OPEN = ("reserved", "submitting", "unknown")
 RELEASED = "released on recovery before submission"
@@ -33,7 +35,7 @@ class Delivery:
     committed: bool = False
 
 
-def transact(redis, body, keys=()):
+def transact(redis: Any, body: Callable[[Any], Any], keys: Sequence[str] = ()) -> Any:
     """body watches what it reads and calls multi before it stages writes; a concurrent change reruns it."""
     from redis.exceptions import WatchError
 
@@ -50,7 +52,7 @@ def transact(redis, body, keys=()):
     raise InboxContention("the inbox changed meanwhile; run it again")
 
 
-def check_owner(pipe, recipient, owner, world):
+def check_owner(pipe: Any, recipient: str, owner: str, world: str) -> None:
     key = owner_key(recipient, world)
     pipe.watch(key)
     held = pipe.get(key)
@@ -59,21 +61,21 @@ def check_owner(pipe, recipient, owner, world):
 
 
 class Receipts:
-    def __init__(self, store):
+    def __init__(self, store: InboxStore) -> None:
         self.store = store
-        self.redis = store.redis
-        self.authority = None
+        self.redis: Any = store.redis
+        self.authority: Callable[[Any], None] | None = None
 
-    def key(self, *parts):
+    def key(self, *parts: str) -> str:
         return self.store.key(*parts)
 
-    def get(self, delivery_id):
+    def get(self, delivery_id: str) -> Delivery:
         return _delivery(self.redis.hgetall(self.key("delivery", delivery_id)), delivery_id)
 
-    def submitting(self, delivery_id, owner):
+    def submitting(self, delivery_id: str, owner: str) -> Delivery:
         return transact(self.redis, lambda pipe: self._submit(pipe, delivery_id, owner))
 
-    def _submit(self, pipe, delivery_id, owner):
+    def _submit(self, pipe: Any, delivery_id: str, owner: str) -> Delivery:
         delivery = self._open(pipe, delivery_id, owner, ("reserved",))
         pipe.watch(self.key("item", delivery.item))
         item = self.store.get(delivery.item)
@@ -83,7 +85,7 @@ class Receipts:
             )
         return self._advance(pipe, delivery_id, owner, ("reserved",), "submitting")
 
-    def accept(self, delivery_id, owner, evidence):
+    def accept(self, delivery_id: str, owner: str, evidence: str) -> Delivery:
         if evidence != self.get(delivery_id).digest:
             return self.reject(delivery_id, owner, MISMATCH)
         transact(
@@ -91,20 +93,20 @@ class Receipts:
         )
         return self._commit(delivery_id, owner)
 
-    def reject(self, delivery_id, owner, reason):
-        def close(pipe):
+    def reject(self, delivery_id: str, owner: str, reason: str) -> Delivery:
+        def close(pipe: Any) -> Delivery:
             delivery = self._open(pipe, delivery_id, owner, OPEN)
             pipe.multi()
             return self._stage_close(pipe, delivery, "rejected", reason)
 
         return transact(self.redis, close)
 
-    def recover(self, recipient, owner):
+    def recover(self, recipient: str, owner: str) -> list[Delivery]:
         recipient = self.store.names.resolve(recipient)
         held = self.redis.get(owner_key(recipient, self.store.world))
         if held != owner:
             raise DispatchError(f"{owner} does not deliver for {recipient}; {held or 'nobody'} does")
-        recovered = []
+        recovered: list[Delivery] = []
         for delivery_id in sorted(self.redis.smembers(self.key("deliveries", recipient))):
             state = self.get(delivery_id).state
             if state == "reserved":
@@ -119,10 +121,10 @@ class Receipts:
                 recovered.append(self.get(delivery_id))
         return recovered
 
-    def _commit(self, delivery_id, owner):
+    def _commit(self, delivery_id: str, owner: str) -> Delivery:
         return transact(self.redis, lambda pipe: self._try_commit(pipe, delivery_id, owner))
 
-    def _try_commit(self, pipe, delivery_id, owner):
+    def _try_commit(self, pipe: Any, delivery_id: str, owner: str) -> Delivery:
         delivery = self._open(pipe, delivery_id, owner, ("accepted",))
         pipe.watch(self.key("item", delivery.item))
         item = self.store.get(delivery.item)
@@ -140,14 +142,14 @@ class Receipts:
             pipe.expire(SeenMarks.key(delivery.recipient), TTL_S)
         return self._stage_close(pipe, delivery, "accepted", "", committed=True)
 
-    def _advance(self, pipe, delivery_id, owner, before, state):
+    def _advance(self, pipe: Any, delivery_id: str, owner: str, before: tuple[str, ...], state: str) -> Delivery:
         delivery = self._open(pipe, delivery_id, owner, before)
         moved = replace(delivery, state=state, owner=owner, at=now_ms())
         pipe.multi()
         pipe.hset(self.key("delivery", delivery_id), mapping=delivery_fields(moved))
         return moved
 
-    def _open(self, pipe, delivery_id, owner, before):
+    def _open(self, pipe: Any, delivery_id: str, owner: str, before: tuple[str, ...]) -> Delivery:
         if self.authority is not None:
             self.authority(pipe)
         key = self.key("delivery", delivery_id)
@@ -158,7 +160,7 @@ class Receipts:
             raise DispatchError(f"delivery {delivery_id} is {delivery.state}")
         return delivery
 
-    def _stage_close(self, pipe, delivery, state, reason, committed=False):
+    def _stage_close(self, pipe: Any, delivery: Delivery, state: str, reason: str, committed: bool = False) -> Delivery:
         closed = replace(delivery, state=state, reason=reason, at=now_ms(), committed=committed)
         pipe.hset(self.key("delivery", delivery.id), mapping=delivery_fields(closed))
         pipe.delete(self.key("reservation", delivery.item))
@@ -168,11 +170,11 @@ class Receipts:
         return closed
 
 
-def delivery_fields(delivery):
+def delivery_fields(delivery: Delivery) -> dict[str, str]:
     return {name: str(value) for name, value in asdict(delivery).items()}
 
 
-def _delivery(raw, delivery_id):
+def _delivery(raw: dict[str, str], delivery_id: str) -> Delivery:
     if not raw:
         raise DispatchError(f"no delivery {delivery_id}")
     known = {field.name for field in fields(Delivery)}
