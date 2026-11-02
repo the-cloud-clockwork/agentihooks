@@ -76,9 +76,15 @@ publishes a copy of the swarm's `executions` alone, and these reads take that co
 | `ExecutionRegistry.hive` | `scripts.hive.scope.host`, and through it `scope.readings` for every agent the controller checks | current executions |
 | `ExecutionRegistry.agents` | `RedisStore.agents`, the agent roster | current executions |
 | `ExecutionRegistry.occupants` | `RedisStore.execution_occupants` | current executions |
-| `ExecutionRegistry.records`, `managed`, `archive` and the fenced writes | seat history, cleanup, admission | the whole document, archive included |
+| `ExecutionRegistry.managed` | cleanup | the `by-name` lookup, then the archive when the name has no current execution |
+| `ExecutionRegistry.records`, `archive` and the fenced writes | seat history, cleanup, admission | the whole document, archive included |
 
-Full history and fenced write authority are unchanged: the document stays authoritative, the copy is only read.
+Since [pull request 9279](https://github.com/the-cloud-clockwork/agentihooks/pull/9279) these reads go through the
+records port, `fencing.records(store, slug)`, described in [Fencing records](../reference/fencing-records.md#the-records-port).
+On a swarm still on the document layout the port takes the published copy for any read limited to `executions` and
+`by-name`, and the whole document otherwise; the document stays authoritative and the copy is only read. A migrated
+swarm keeps its authority in the per record keys. See
+[Execution reads through the records port](#execution-reads-through-the-records-port) for each read on both layouts.
 
 ### How the copy stays consistent
 
@@ -173,3 +179,144 @@ refused write leaves the copy unchanged, and that an older writer stops every co
 publishes its own. `tests/swarm/test_fencing_reads.py` checks that routing, roster and occupant reads transfer under
 10,000 bytes per Redis reply with one or two hundred archived executions, that the archive is still read whole by
 `fencing.read`, and that a document rewritten without a copy is read through the fallback with its new hive.
+
+## Execution reads through the records port
+
+Since [pull request 9279](https://github.com/the-cloud-clockwork/agentihooks/pull/9279), `ExecutionRegistry` reads
+current and archived executions through `fencing.records(store, slug)` instead of loading the fencing document. The
+port returns the per record Redis adapter for a swarm migrated with `python -m scripts.swarm.records_migration`, and
+the whole document adapter, `fencing.WholeDocumentRecords`, for every other swarm. See
+[Fencing records](../reference/fencing-records.md) for both layouts.
+
+| Read | Records layout | Document layout |
+|---|---|---|
+| `ExecutionRegistry.hive(slug, name)` | One `by-name` field for the execution id, then one `executions` field | The published copy twice, once per lookup |
+| `ExecutionRegistry.get(slug, execution_id)` | One `executions` field, then one `archive` field when the first is absent | The published copy, then the whole document with the archive when the id is not current |
+| `ExecutionRegistry.managed(slug, name)` | One `by-name` field; the `archive` section only when the name has no current execution | The published copy, then the whole document with the archive |
+| `ExecutionRegistry.occupants(slug)` | The `executions` hash | The published copy |
+| `ExecutionRegistry.records(slug)` | The `executions` and `archive` hashes | The whole document with the archive |
+| `fencing.read_executions(store, slug)`, used by `ExecutionRegistry.agents` | The `executions` hash | The published copy |
+
+- `ExecutionRegistry.hive` still returns `""` for a name not in the swarm's agent list, and reads the `hive` of the
+  execution the `by-name` index names, the one with the highest generation.
+- `WholeDocumentRecords.sections` takes the published copy only when every requested section is `executions` or
+  `by-name`, and only with the Redis state backend. When the copy is missing or behind the bucket revision, it reads
+  the whole document as described in [How the copy stays consistent](#how-the-copy-stays-consistent). The `by-name`
+  section is computed from the executions it read.
+- `ExecutionRegistry.get` still refuses an unknown id with `unknown execution identity; display labels cannot identify
+  attempts` and counts it in `execution_identity_conflicts_total`.
+
+On a migrated swarm every fenced `ExecutionRegistry` write (`start`, `update`, `set_pane`, `archive` and
+`end_orphan`) commits one batch of per record writes through `fencing.write`, each expecting the revision it read. A
+conflict retries as in [Retries after a fencing conflict](#retries-after-a-fencing-conflict).
+
+Nothing is configured for these reads and writes.
+
+## Hive placement reads
+
+`scripts.hive.scope.host(redis, slug, name)` names the joined hive member that runs an agent, so `scope.readings`
+can find that agent's session readings below the member's key. The controller calls it for every agent it checks
+while hives are joined.
+
+### The host projection
+
+Every agent projection write also writes the agent's hive into a separate hash, one field per agent name:
+
+| Key | Type | Holds |
+|---|---|---|
+| `agentihooks:swarm:<slug>:hosts` | hash | Agent name to the hive member id from its record, `""` for an agent not on a hive |
+
+`AGENTIHOOKS_SWARM_KEY_PREFIX` replaces `agentihooks`. The writes share the transaction that writes the
+`agents` projection hash:
+
+- `RedisStore.project_agent` sets the agent's field. A rename deletes only the old name's field and sets the new one.
+- `RedisStore.drop_agent` and the retirement path that ends an agent delete its field with its `agents` field.
+- The hive member Redis user may write the key: `swarm:*:hosts` is in `scripts.hive.auth.WORKER_KEYS`.
+- Swarm snapshots export and restore the key with the other per swarm hashes.
+
+### Turning the one field read on
+
+`SWARM_HOST_PROJECTION_ENABLED` chooses the read:
+
+| Value | `scope.host` reads |
+|---|---|
+| unset, or anything other than `true` (default) | `ExecutionRegistry.hive`, as in [the table above](#execution-reads-through-the-records-port) |
+| `true` | One `HGET` of the agent's `hosts` field; `ExecutionRegistry.hive` only when the field is absent |
+
+The joined member list comes from the hive index and member records. Inside `scope.one_pass()`, as in the
+controller's pass, they are read once per pass, so each `scope.host` call with the flag on costs one `HGET`. Outside a
+pass every call reads them again.
+
+In both cases a member that is not among the joined members answers `""`, and a hive member process recognises only
+itself.
+
+The flag is off by default because a writer on older code updates execution records and the `agents` hash without
+touching `hosts`, which leaves a field naming a hive the agent has left. Enable it only after:
+
+1. Every controller, tick and hive member process runs a release that carries pull request 9279.
+2. Every existing hive member Redis user is granted again, so its access list carries `swarm:*:hosts`. A user granted
+   before the change cannot write the key, and its projection writes fail.
+
+Set the flag through the deployment's git configuration, never by hand on a running pod or service. To go back, unset
+it; the execution registry read needs no state from the projection.
+
+### Checking a host field
+
+Read only:
+
+```bash
+P="${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}:swarm"
+SLUG=rig-grade-swarm
+URL="$AGENTIHOOKS_SWARM_REDIS_URL"
+redis-cli -u "$URL" HLEN "$P:$SLUG:hosts"
+redis-cli -u "$URL" HLEN "$P:$SLUG:agents"
+redis-cli -u "$URL" HGET "$P:$SLUG:hosts" "<agent name>"
+```
+
+The two lengths match when every projected agent has a host field. A field missing for a live agent is filled by that
+agent's next projection write; with the flag on, the lookup falls back to the execution registry until then. Never
+write the key by hand.
+
+### Measuring the placement reads
+
+The routing read is the `scripts.hive.scope.readings` step of the tick report; the journal command in
+[Measuring tick passes](#measuring-tick-passes) prints its call count, total and median wall time. The source task's
+target is a median under five milliseconds on the workstation, against twenty milliseconds over 29,508 calls before
+the change. Pull request 9279 does not record that observation; it needs the deployed workstation with the flag on.
+
+## Retries after a fencing conflict
+
+A fenced write that loses to a concurrent write reads again and reruns its change, up to 16 attempts
+(`fencing.ATTEMPTS`):
+
+- On the records layout, `RevisionConflict` from the fenced batch.
+- On the document layout, `StateConflict` from the state bucket update.
+
+Before each remaining attempt the writer sleeps a random interval between 1 and 32 milliseconds
+(`uniform(0.001, 0.032)` from `random`), so writers that collided do not retry in step. No sleep follows the last attempt.
+After 16 conflicts the write raises `SwarmError("the swarm fencing state kept changing; nothing was committed")`, as
+before. A stale lease raises at once with no sleep. The wait adds at most about half a second to a write that uses
+every attempt. Nothing is configured.
+
+### Tests for these changes
+
+| Test | Checks |
+|---|---|
+| `tests/hive/test_member_scope.py::test_host_hash_hit_uses_one_field_read` | With the flag on, `scope.host` makes one `HGET` of the `hosts` field and never calls `ExecutionRegistry.hive` |
+| `tests/hive/test_member_scope.py::test_host_hash_miss_keeps_legacy_lookup` | A missing `hosts` hash falls back to the execution registry |
+| `tests/hive/test_member_scope.py::test_removing_an_agent_removes_its_host` | `drop_agent` deletes the field and the lookup answers `""` |
+| `tests/hive/test_member_scope.py::test_host_projection_stays_untrusted_until_every_writer_upgrades` | With the flag off, a stale field left by an older writer does not decide the answer |
+| `tests/hive/test_member_scope.py::test_renaming_an_agent_removes_only_its_old_host_projection` | A rename removes the old field and leaves other agents' fields |
+| `tests/swarm/test_execution_concurrency.py::test_fencing_retries_sleep_only_before_remaining_attempts` | A conflict sleeps only while attempts remain, within the 1 to 32 millisecond bounds |
+| `tests/swarm/test_fencing_reads.py::test_execution_and_name_sections_share_the_lightweight_projection` | Reads of `executions` and `by-name` take the published copy, not the whole document |
+
+`tests/swarm/conftest.py` checks the bounds of every jittered sleep in the swarm tests.
+
+### Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A hive member's projection writes fail with a Redis permission error naming `…:hosts` | Its Redis user was granted before pull request 9279 | Grant the member again so its access list carries `swarm:*:hosts` |
+| With the flag on, a controller reads an agent's session readings below the wrong member | A process on older code moved the agent without updating `hosts` | Unset `SWARM_HOST_PROJECTION_ENABLED` through git configuration, upgrade that process, then enable it again |
+| `scope.readings` median stays near its old value with the flag on | The `hosts` field is missing for most agents, so lookups fall back | Compare `HLEN` of `hosts` and `agents` as above |
+| `the swarm fencing state kept changing; nothing was committed` | Sixteen conflicting attempts, as in [Fencing records](../reference/fencing-records.md#troubleshooting) | The next pass retries; find the scanning change in the tick journal |
