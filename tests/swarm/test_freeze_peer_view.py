@@ -77,3 +77,44 @@ def test_peer_changes_use_a_retained_view_and_restore_the_swarm_view(
         assert view.CURRENT.get() is own_view
         assert view.REFRESH.get() is own_refresh
     assert own == {"tasks": []}
+
+
+@pytest.mark.parametrize("status", [400, 404, 503])
+def test_a_refused_peer_view_preserves_the_swarm_view(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    import urllib.error
+    from email.message import Message
+
+    client = ledger_client.LedgerClient(service=True)
+    store = SimpleNamespace(
+        config=lambda slug: SimpleNamespace(template=freeze.priming.TEMPLATE),
+        peer=lambda slug: "watched",
+    )
+    endpoint = SimpleNamespace(
+        base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4
+    )
+    whole: list[str] = []
+
+    def changes(self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...]) -> dict[str, Any]:
+        raise urllib.error.HTTPError("http://ledger", status, "refused", Message(), None)
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: endpoint)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", changes)
+    monkeypatch.setattr(client, "state", lambda slug: whole.append(slug) or {"freezes": []})
+    own: dict[str, Any] = {"tasks": []}
+    own_view = view.LedgerView(8, own)
+    own_refresh = ("doctor", lambda: own_view)
+    with view.holding():
+        view.CURRENT.set(own_view)
+        view.REFRESH.set(own_refresh)
+        actual = freeze.watched("doctor", cast(Any, store), client, own)
+        if status == 400:
+            assert actual == {"tasks": [], freeze.WATCHED: []}
+            assert whole == ["watched"]
+        else:
+            assert actual is own
+            assert whole == []
+        assert view.CURRENT.get() is own_view
+        assert view.REFRESH.get() is own_refresh

@@ -1,5 +1,6 @@
 """Whether a freeze or a focus on the ledger holds an open task back from a claim, and the drain notice naming them."""
 
+import urllib.error
 from collections.abc import Iterable
 from typing import Any
 
@@ -39,12 +40,17 @@ def outside_watched(task: dict, doc: dict, fix_phase: str) -> bool:
 
 
 def watched(slug: str, store: RedisStore, ledger: Any, doc: dict[str, Any]) -> dict[str, Any]:
+    from scripts.tick import view
+
     peer = store.peer(slug) if fix_phase(store.config(slug)) else ""
     if not peer:
         return doc
     try:
-        peer_doc = pass_state(ledger, peer)
-    except SwarmError:
+        with view.holding():
+            if view.reads(ledger):
+                view.start(peer, ledger.service)
+            peer_doc = pass_state(ledger, peer)
+    except (SwarmError, urllib.error.HTTPError):
         return doc
     focus = [r["target"] for r in peer_doc.get("freezes") or [] if r["verb"] == "focus"]
     return {**doc, WATCHED: [f"the focus on {_named(peer_doc, target)} in the watched swarm" for target in focus]}
