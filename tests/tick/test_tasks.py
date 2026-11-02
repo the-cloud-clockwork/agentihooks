@@ -6,7 +6,16 @@ from typing import Any
 import pytest
 
 import scripts.swarm.cli  # noqa: F401
-from scripts.swarm import claim_hold, difficulty, grouping
+from scripts.swarm import (
+    claim_hold,
+    dev_red,
+    difficulty,
+    fleet_red,
+    grouping,
+    prerequisite_wait,
+    promotion_watch,
+    release_wait,
+)
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -76,7 +85,9 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
         "dispatcher group",
     ]
     assert [step.name for step in engine.group_steps(tasks.CLOSE)][-2:] == ["settle", "close space"]
-    assert [step.group for step in tasks.STEPS] == [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
+    assert [step.group for step in tasks.STEPS] == (
+        [tasks.DRAINED] + [tasks.REOPENS] * 5 + [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
+    )
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
         assert step in registered
@@ -94,6 +105,41 @@ def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest
         (grouping.release_pass, "sw", "store", "ledger", "doc"),
         ("dispatcher group", "sw", "config", "store", "ledger", "doc", 7),
     ]
+
+
+def test_the_reopen_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    found = _run(tasks.REOPENS, _tick(calls), _pass(), monkeypatch)
+    assert found == ["ran 1", "ran 2", "ran 3", "ran 4", "ran 5"]
+    assert calls == [
+        (dev_red.reopen_pass, "sw", "config", "store", "ledger", "rows"),
+        (prerequisite_wait.reopen_pass, "sw", "store", "ledger", "rows"),
+        (promotion_watch.refresh, "sw", "config", "store", "ledger", "doc", 7),
+        (release_wait.alert_pass, "sw", "config", "ledger", "doc"),
+        (fleet_red.notice_pass, "sw", "store", "ledger", "rows", 7),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sleeping", "state", "claimable", "expected"),
+    [
+        (False, "drained", True, ["new tasks, running again"]),
+        (True, "drained", True, []),
+        (False, "running", True, []),
+        (False, "drained", False, []),
+    ],
+)
+def test_a_drained_swarm_with_claimable_work_runs_again(
+    monkeypatch: pytest.MonkeyPatch, sleeping: bool, state: str, claimable: bool, expected: list[str]
+) -> None:
+    updates: list[tuple[str, str]] = []
+    store = SimpleNamespace(update=lambda slug, state: updates.append((slug, state)) or "resumed")
+    tick = SimpleNamespace(LANES=("eng", "ci"), _claimable=lambda slug, store, rows, doc, lane: claimable)
+    box: dict[str, Any] = {"config": "old"}
+    state_of = {**_pass(box), "store": store, "config": SimpleNamespace(state=state), "sleeping": sleeping}
+    assert _run(tasks.DRAINED, tick, state_of, monkeypatch) == expected
+    assert box["config"] == ("resumed" if expected else "old")
+    assert updates == ([("sw", "running")] if expected else [])
 
 
 def test_settle_then_close_space_close_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:

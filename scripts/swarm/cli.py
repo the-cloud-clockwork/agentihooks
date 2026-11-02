@@ -57,7 +57,6 @@ import re
 import signal
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
@@ -240,8 +239,6 @@ GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60
-# The scheduled tick holder stops a pass at scheduled_tick.TIMEOUT_S; leave an extra tick room to finish.
-EXTRA_TICKS_UNTIL = 420
 # Every swarm ticks in a thread of one process; at the default 5 ms a CPU heavy swarm stalls the others' round trips
 TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
@@ -488,33 +485,6 @@ def _tick_one(store, slug):
         timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
 
-class _Firsts:
-    def __init__(self, count):
-        self.left, self.lock, self.settled = count, threading.Lock(), threading.Event()
-
-    def done(self):
-        with self.lock:
-            self.left -= 1
-            if not self.left:
-                self.settled.set()
-
-
-def _tick_while_others_run(store: RedisStore, slug: str, firsts: _Firsts, until: float) -> None:
-    """An extra pass starts only when this swarm's longest pass so far still ends by the extra pass cutoff."""
-    started = time.monotonic()
-    try:
-        _tick_one(store, slug)
-    finally:
-        firsts.done()
-    longest = time.monotonic() - started
-    while not firsts.settled.wait(max(0.0, started + TICK_SECONDS - time.monotonic())):
-        started = time.monotonic()
-        if started + longest > until or tick_stop.STOP.is_set():
-            return
-        _tick_one(store, slug)
-        longest = max(longest, time.monotonic() - started)
-
-
 def _reconcile_services():
     try:
         installed = timer.reconcile(timer.entry_point())
@@ -630,13 +600,7 @@ def _tick_host(store, started):
 
         documentation_session.schedule_retry()
         if slugs:
-            firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
-            if tick_stop.run(
-                slugs,
-                lambda slug: _tick_while_others_run(store, slug, firsts, until),
-                firsts.settled.set,
-                time.monotonic() - started,
-            ):
+            if tick_stop.run(slugs, lambda slug: _tick_one(store, slug), time.monotonic() - started):
                 return
         from scripts import herdr_gc
 
