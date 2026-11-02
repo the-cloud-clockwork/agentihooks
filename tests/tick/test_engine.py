@@ -281,6 +281,37 @@ def test_pass_budget_retries_notification_with_the_same_identity(delivered: bool
         assert inbox.return_value.send.call_count == 2
 
 
+@pytest.mark.parametrize("error", ["permission", "connection"])
+def test_pass_budget_treats_a_refused_history_read_as_no_measurement(error: str) -> None:
+    import json
+
+    import fakeredis
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm.store import RedisStore
+
+    refusal = {
+        "permission": NoPermissionError("User swarm-controller has no permissions to run the 'xrevrange' command"),
+        "connection": RedisConnectionError("connection reset"),
+    }[error]
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    for _ in range(10):
+        store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 1000.0})})
+    with (
+        mock.patch("scripts.inbox.store.InboxStore") as inbox,
+        mock.patch.object(store.redis, "xrevrange", side_effect=refusal) as read,
+    ):
+        assert engine.update_pass_budget(store, "sw") == ""
+        assert engine.pass_budget_hold(store, "sw") == ""
+        read.assert_called_once()
+        held = json.dumps({"text": "holding spawns: earlier", "notice": "n", "notified": True})
+        store.redis.set(store.key("sw", engine.PASS_BUDGET_HOLD), held)
+        assert engine.update_pass_budget(store, "sw") == "holding spawns: earlier"
+        assert store.redis.get(store.key("sw", engine.PASS_BUDGET_HOLD)) == held
+        inbox.assert_not_called()
+
+
 def test_budget_notice_adapter_preserves_delivery_identity() -> None:
     from scripts.inbox.store import DuplicateItem
 
