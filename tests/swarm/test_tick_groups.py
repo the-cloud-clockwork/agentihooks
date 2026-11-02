@@ -225,9 +225,7 @@ def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
         running = engine._RUNNING.get("snapshot job")
         if running is not None:
             running.join(30.0)
-    names = [name for name, _ in seen]
-    assert "after" not in names
-    assert names[-2:] == ["wrapper metrics", "wrapper status"]
+    assert [name for name, _ in seen][-3:] == ["wrapper metrics", "after", "wrapper status"]
 
 
 def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(
