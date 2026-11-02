@@ -78,5 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     return int(bool(problems))
 
 
+def plant_probe(value: int) -> int:
+    """Return one more than value, for the mutation driver plant proof."""
+    return value + 1
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
