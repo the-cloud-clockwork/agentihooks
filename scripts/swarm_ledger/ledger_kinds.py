@@ -39,25 +39,26 @@ def kind(task: dict[str, Any]) -> str:
 
 
 def after(task: dict[str, Any]) -> bool:
-    return kind(task) in BRANCHED and (task.get("contract") or {}).get("after") == "yes"
+    contract: dict[str, Any] = task.get("contract") or {}
+    return kind(task) in BRANCHED and contract.get("after") == "yes"
 
 
-def read_only(task):
+def read_only(task: dict[str, Any]) -> bool:
     return kind(task) not in BRANCHED
 
 
-def check(fields):
+def check(fields: dict[str, Any]) -> None:
     if fields.get("kind", "code") not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     for key, allowed in (("contract", CONTRACT_KEYS + CONTRACT_TIMES + CONTRACT_FLAGS), ("proof", PROOF_KEYS)):
-        value = fields.get(key, {})
+        value: dict[str, Any] = fields.get(key, {})
         if (
             not isinstance(value, dict)
             or set(value) - set(allowed)
             or not all(isinstance(v, str) for v in value.values())
         ):
             raise ValueError(f"{key} must be an object of strings with keys among {allowed}")
-    at = fields.get("contract", {}).get("after_at")
+    at: str | None = fields.get("contract", {}).get("after_at")
     if at and (not at.isascii() or not at.isdigit()):
         raise ValueError("contract after_at must be Unix milliseconds or empty")
     for flag in CONTRACT_FLAGS:
@@ -66,8 +67,8 @@ def check(fields):
     check_workflow(fields)
 
 
-def check_workflow(fields):
-    named = {key: fields[key] for key in WORKFLOW_FIELDS if key in fields}
+def check_workflow(fields: dict[str, Any]) -> None:
+    named: dict[str, Any] = {key: fields[key] for key in WORKFLOW_FIELDS if key in fields}
     if not all(isinstance(value, str) for value in named.values()):
         raise ValueError(f"{' and '.join(WORKFLOW_FIELDS)} must be strings")
     workflow = fields.get("kind") == "workflow"
@@ -77,9 +78,9 @@ def check_workflow(fields):
         raise ValueError("workflow tasks use the eng lane")
 
 
-def unmet(task):
+def unmet(task: dict[str, Any]) -> list[str]:
     """The proof fields a task still lacks before it may be marked done; empty when its contract is met."""
-    proof = task.get("proof") or {}
+    proof: dict[str, Any] = task.get("proof") or {}
     needs = ("command", "output") if after(task) else NEEDS.get(kind(task), ())
     missing = [key for key in needs if not str(proof.get(key, "")).strip()]
     if kind(task) == "troubleshoot" and not any(str(proof.get(k, "")).strip() for k in ("fix", "filed")):
