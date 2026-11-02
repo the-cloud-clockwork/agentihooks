@@ -538,12 +538,13 @@ def test_restore_transport_uses_json_a_canonical_url_and_a_bounded_deadline(pend
     opening = urllib.request.urlopen
     sent = []
 
-    def checked(request, timeout):
+    def checked(request, timeout, context):
         sent.append(request.full_url)
         assert request.full_url == pending.url
         assert request.get_method() == "POST"
         assert request.get_header("Content-type") == "application/json"
         assert timeout == 10
+        assert context is None
         return opening(request, timeout=timeout)
 
     monkeypatch.setattr(urllib.request, "urlopen", checked)
@@ -551,7 +552,7 @@ def test_restore_transport_uses_json_a_canonical_url_and_a_bounded_deadline(pend
     assert result["mode"] == "fresh"
     assert sent == [pending.url]
     pending.world.store.update(slug, api_url="https://controller.example/X")
-    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: pytest.fail(request.full_url))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout, context: pytest.fail(request.full_url))
     with pytest.raises(pytest.fail.Exception, match="controller.example/X/v1/"):
         decide(pending.world.store, slug, pending.old, "fresh", Who())
 
