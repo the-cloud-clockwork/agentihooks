@@ -218,7 +218,60 @@ def summary_steps() -> list[dict]:
 
 def split_units(steps: list[dict]) -> list[dict]:
     """Return the gate steps followed by the reviewed steps that grade every shard's split mutation units."""
-    return [*steps, *yaml.safe_load(Path(__file__).with_name("ci_gate_units_steps.yml").read_text())]
+    download = {"pattern": "mutation-report-*", "path": ".mutation-reports"}
+    retry = "steps.download-every-shards-mutation-report.outcome == 'failure'"
+    ran = "needs.mutation.result == 'success'"
+    return [
+        *steps,
+        {
+            "name": "Turn off automatic git maintenance",
+            "run": 'echo "GIT_CONFIG_COUNT=1" >> "$GITHUB_ENV"\n'
+            'echo "GIT_CONFIG_KEY_0=maintenance.auto" >> "$GITHUB_ENV"\n'
+            'echo "GIT_CONFIG_VALUE_0=false" >> "$GITHUB_ENV"\n',
+        },
+        {
+            "uses": "actions/checkout@v4",
+            "if": ran,
+            "with": {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"},
+        },
+        {
+            "name": "Download every shard's mutation report",
+            "if": ran,
+            "id": "download-every-shards-mutation-report",
+            "continue-on-error": True,
+            "uses": "actions/download-artifact@v4",
+            "with": dict(download),
+        },
+        {
+            "name": "Download every shard's mutation report, wait before attempt 2",
+            "if": retry,
+            "shell": "bash",
+            "run": "echo \"::warning::Download every shard's mutation report failed, as an artifact service outage "
+            'does; retrying it once in 30 seconds."\n'
+            "sleep 30\n",
+        },
+        {
+            "name": "Download every shard's mutation report, attempt 2",
+            "if": retry,
+            "uses": "actions/download-artifact@v4",
+            "with": dict(download),
+        },
+        {
+            "name": "Grade the split mutation units from the protected grader",
+            "if": ran,
+            "env": {
+                "BASES": "${{ needs.mutation-plan.outputs.bases }}",
+                "GRADER": "${{ github.event.pull_request.base.sha || (inputs.base == 'origin/dev' && 'dev' || "
+                "inputs.base) }}",
+                "PLANNED": "${{ needs.mutation-plan.outputs.shards }}",
+            },
+            "run": 'git fetch --no-tags origin "$GRADER"\n'
+            'git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
+            'grader="$RUNNER_TEMP/grader"\n'
+            'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade units .mutation-reports '
+            '"$(jq length <<< "$PLANNED")" . "$BASES"\n',
+        },
+    ]
 
 
 def pipefail_summary(steps: list[dict]) -> list[dict]:
