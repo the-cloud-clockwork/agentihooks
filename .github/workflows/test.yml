@@ -706,7 +706,19 @@ jobs:
           cd "$RUNNER_TEMP/grader"
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/selection"
-          "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 20 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+          measure=()
+          [[ -f "$RUNNER_TEMP/grader/.github/scripts/peak_memory.py" ]] && measure=("$RUNNER_TEMP/provenance-python/bin/python" -I "$RUNNER_TEMP/grader/.github/scripts/peak_memory.py" select --)
+          "${measure[@]}" "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 20 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+
+      - name: Upload the select step peak memory
+        if: always() && github.event_name == 'pull_request'
+        uses: ./.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: peak-memory-select
+          path: ${{ runner.temp }}/peak-memory/select.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Job outputs are protected, so each leg reads its files from this artifact.
       - name: Upload the selected legs
@@ -2750,6 +2762,14 @@ jobs:
             exit 1
           fi
 
+      - name: Hold whole ledger state reads in the swarm and tick packages
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/no_whole_ledger.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.no_whole_ledger --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       - name: Reject new Python comments and preserve comment free files
         if: ${{ !cancelled() }}
         run: |
@@ -3871,7 +3891,38 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           MUTATION_SHARD_CPU_QUOTA: "3"
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+        run: python -I "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py" mutation-plan -- python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+
+      - name: Upload the mutation-plan step peak memory
+        if: always() && github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: peak-memory-mutation-plan
+          path: ${{ runner.temp }}/peak-memory/mutation-plan.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Check out the protected mutation grader
+        if: github.event_name == 'workflow_dispatch' && steps.reuse.outputs.reused != 'true'
+        env:
+          GRADER: ${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
+      # The protected copy holds the planned bases, so a pull request cannot narrow the lines it is graded on.
+      - name: Hold the planned mutation bases to the protected grader
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          BASE: ${{ inputs.base || 'origin/dev' }}
+          BASES: ${{ steps.plan.outputs.bases }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          grader="$RUNNER_TEMP/grader"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade bases . "$BASE" "$BASES"
 
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
       - name: Check the planned selection contract
@@ -3903,7 +3954,12 @@ jobs:
         if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
         env:
           BASES: ${{ steps.plan.outputs.bases }}
-        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080
+        run: |
+          python -m scripts.ci_mutation --bases "$BASES" --budget 1080
+          grader="$RUNNER_TEMP/grader"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
       - name: Forward the reused or empty mutation report
         if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
@@ -3928,6 +3984,9 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
     steps:
       - uses: actions/checkout@v4
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -4083,6 +4142,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # The protected copy grades the shard's rows, so a pull request cannot loosen how its own survivors grade.
+      - name: Check out the protected mutation grader
+        if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          GRADER: ${{ github.event.pull_request.base.sha || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
       - name: Mutate the only shard in the statistics job
         id: mutate
         if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
@@ -4090,6 +4158,18 @@ jobs:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats
+
+      # Clearance files come from the pull request, since each survivor's clearance lands with its change.
+      # Until dev carries the regrader, the head's copy grades.
+      - name: Grade the shard report from the protected grader
+        if: always() && steps.mutate.outcome != 'skipped'
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
+        run: |
+          grader="$RUNNER_TEMP/grader"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
       - name: Upload complete inline mutation evidence
         if: always() && steps.mutate.outcome != 'skipped'
@@ -4101,17 +4181,118 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  mutation:
+  mutation-refine:
     needs: [mutation-plan, mutation-stats, admission]
-    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.stats_parts != '[0]' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    outputs:
+      shards: ${{ steps.refine.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Take the helper scripts from the workflow revision
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
+
+      - name: Take the upload action from the workflow revision
+        run: |
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
+
+      - name: Install dependencies
+        run: |
+          locked=.
+          [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
+          bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$locked/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Download planned mutation test selection
+        if: needs.mutation-plan.outputs.selection == 'true'
+        id: download-refine-planned-mutation-test-selection
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &mutation-refine-download-planned-mutation-test-selection
+          name: mutation-selection
+
+      - name: Download planned mutation test selection, wait before attempt 2
+        if: steps.download-refine-planned-mutation-test-selection.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download planned mutation test selection failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download planned mutation test selection, attempt 2
+        if: steps.download-refine-planned-mutation-test-selection.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-refine-download-planned-mutation-test-selection
+
+      - name: Download the shared mutation stats
+        id: download-refine-shared-mutation-stats
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &mutation-refine-download-the-shared-mutation-stats
+          pattern: mutation-stats-*
+          path: .mutation-stats
+          merge-multiple: true
+
+      - name: Download the shared mutation stats, wait before attempt 2
+        if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the shared mutation stats failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the shared mutation stats, attempt 2
+        if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-refine-download-the-shared-mutation-stats
+
+      - name: Refine mutation shards from measured statistics
+        id: refine
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
+          PYTHONUNBUFFERED: "1"
+        run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
+
+      - name: Upload the measured mutation plan
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          name: mutation-measured-plan
+          path: .mutation-stats/plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  mutation-shard:
+    needs: [mutation-plan, mutation-stats, mutation-refine, admission]
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.mutation-plan.outputs.shards) }}
+        shard: ${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
     steps:
       - uses: actions/checkout@v4
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -4278,6 +4459,36 @@ jobs:
         uses: actions/download-artifact@v4
         with: *mutation-download-the-shared-mutation-stats
 
+      - name: Download the measured mutation plan
+        if: needs.mutation-refine.result == 'success'
+        id: download-the-measured-mutation-plan
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &mutation-download-the-measured-mutation-plan
+          name: mutation-measured-plan
+          path: .mutation-stats
+
+      - name: Download the measured mutation plan, wait before attempt 2
+        if: steps.download-the-measured-mutation-plan.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the measured mutation plan failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the measured mutation plan, attempt 2
+        if: steps.download-the-measured-mutation-plan.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-download-the-measured-mutation-plan
+
+      # The protected copy grades the shard's rows, so a pull request cannot loosen how its own survivors grade.
+      - name: Check out the protected mutation grader
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          GRADER: ${{ github.event.pull_request.base.sha || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
       - name: Mutate changed Python files
         if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
         env:
@@ -4296,6 +4507,18 @@ jobs:
           SHARDS: ${{ strategy.job-total }}
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
+      # Clearance files come from the pull request, since each survivor's clearance lands with its change.
+      # Until dev carries the regrader, the head's copy grades.
+      - name: Grade the shard report from the protected grader
+        if: always() && needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
+        run: |
+          grader="$RUNNER_TEMP/grader"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
+
       - name: Upload complete mutation evidence
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'
         uses: ./.workflow-revision/.github/actions/retry-upload
@@ -4305,3 +4528,74 @@ jobs:
           path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
           include-hidden-files: true
           retention-days: 7
+
+  mutation:
+    needs: [mutation-plan, mutation-stats, mutation-refine, mutation-shard, admission]
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Take the upload action from the workflow revision
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
+
+      - name: Download every mutation shard report
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        id: download-every-mutation-shard-report
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &mutation-download-every-mutation-shard-report
+          pattern: mutation-report-*
+          path: .mutation-shards
+
+      - name: Download every mutation shard report, wait before attempt 2
+        if: steps.download-every-mutation-shard-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download every mutation shard report failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+          rm -rf .mutation-shards
+
+      - name: Download every mutation shard report, attempt 2
+        if: steps.download-every-mutation-shard-report.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-download-every-mutation-shard-report
+
+      - name: Merge the shard reports
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          SHARDS: ${{ needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards }}
+        run: python -m scripts.ci_mutation.merge .mutation-shards --prefix mutation-report- --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate
+
+      - name: Upload the merged mutation report
+        if: always() && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: mutation-report
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Fail when a shard did not finish
+        if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-shard.result != 'success'
+        env:
+          REFINE: ${{ needs.mutation-refine.result }}
+          RESULT: ${{ needs.mutation-shard.result }}
+        run: |
+          echo "::error::Mutation refinement ended $REFINE and a mutation shard ended $RESULT; the merged report is incomplete."
+          exit 1

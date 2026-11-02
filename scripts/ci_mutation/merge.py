@@ -66,8 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("folder", type=Path)
     parser.add_argument("--shards", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--prefix", default="mutation-preflight-shard-")
     args = parser.parse_args(argv)
-    found = {shard: args.folder / f"mutation-preflight-shard-{shard}" / "report.json" for shard in range(args.shards)}
+    found = {shard: args.folder / f"{args.prefix}{shard}" / "report.json" for shard in range(args.shards)}
     present = {shard: json.loads(path.read_text()) for shard, path in found.items() if path.is_file()}
     missing = [str(shard) for shard in found if shard not in present]
     short = short_shards(present)

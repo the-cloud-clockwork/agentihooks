@@ -129,7 +129,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert adopt["env"] == ADOPT_ENV
 
 
-@pytest.mark.parametrize("name", ["mutation-plan", "mutation"])
+@pytest.mark.parametrize("name", ["mutation-plan", "mutation-shard"])
 def test_mutation_jobs_adopt_dev_durations_before_the_sandbox_copies_the_record(name):
     steps = _workflow("test.yml")["jobs"][name]["steps"]
     names = [step.get("name") for step in steps]
