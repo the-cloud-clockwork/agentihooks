@@ -302,7 +302,7 @@ def touch(client: Any, hive_id: str, now_ms: int) -> None:
         client.pexpire(f"{key(hive_id)}:sessions", LIVE_MS)
 
 
-def finished(client: object, hive_id: str, now_ms: int) -> None:
+def finished(client: Any, hive_id: str, now_ms: int) -> None:
     """Records the end of a whole daemon beat, which the headroom heartbeat never refreshes."""
 
     def stamp(stored: dict[str, Any] | None) -> object:
