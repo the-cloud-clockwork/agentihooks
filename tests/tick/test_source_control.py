@@ -375,6 +375,25 @@ def test_github_calls_run_through_subprocess_run_as_it_stands_at_call_time(
 
 
 @pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_quota_read_leaves_the_charged_read_count_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    bodies = [{"resources": {"core": {"used": 1, "remaining": 2, "reset": 3}}}, {"state": "open"}]
+
+    def run(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, json.dumps(bodies.pop(0)), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    assert provider.rate_limit(deadline=_deadline()) == port.RateLimit(1, 2, 3)
+    assert github.github_reads.counts(0, float("inf")) == {}
+    assert provider.issue_state(REFERENCE, deadline=_deadline()) == "open"
+    assert github.github_reads.counts(0, float("inf")) == {github.CALLER: 1}
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
 @pytest.mark.parametrize(
     "rows,expected",
     [
