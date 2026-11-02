@@ -743,7 +743,7 @@ class TestBundleClaudeMdPrepend:
         import inspect
 
         src = inspect.getsource(install._install_claude_persona)
-        chain = src.split("Chain mode", 1)[1].split("--- 5a.", 1)[0]
+        chain = src.split("claude_md_parts: list[str]", 1)[1].split("_prepend_bundle_claude_md(bundle_dir", 1)[0]
         assert "already up to date" in chain
         assert "\n                    return\n" not in chain
         assert "up_to_date" in chain
