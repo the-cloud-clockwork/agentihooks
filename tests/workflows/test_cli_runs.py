@@ -48,7 +48,9 @@ def test_run_persists_two_stages_and_selected_harness(setup_run, monkeypatch, ca
     assert all(call.args[2] == root / "sample" for call in launch.call_args_list)
 
 
-def test_run_routes_filtered_stages_through_the_judge(setup_run, monkeypatch, capsys):
+def test_run_routes_filtered_stages_through_the_judge(
+    setup_run: tuple, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root, case, _ = setup_run
     document = json.loads(json.dumps(DOCUMENT))
     document["stages"]["check"]["filters"] = ["judge-blind"]
@@ -59,7 +61,7 @@ def test_run_routes_filtered_stages_through_the_judge(setup_run, monkeypatch, ca
     profiles = Mock(return_value=profile)
     judges = Mock(return_value=judge)
     monkeypatch.setattr(cli, "HeadlessProfile", profiles)
-    monkeypatch.setattr(cli, "Judge", judges, raising=False)
+    monkeypatch.setattr(cli, "Judge", judges)
 
     assert cli.main(["run", "pair", "--case", str(case), "--run-id", "judged", "--harness", "codex"]) == 0
 

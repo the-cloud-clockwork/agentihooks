@@ -1,8 +1,10 @@
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired
 from threading import Barrier
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -93,16 +95,18 @@ def test_repeated_launches_preserve_existing_artifacts(tmp_path):
     )
 
 
-def judge_stage():
+def judge_stage() -> Stage:
     return Stage("verdict", "judge", "low", "medium", 1, ("scout", "build"), ("judge-blind",), 1, None, {})
 
 
-def evidence(identifier):
+def evidence(identifier: str) -> dict[str, str]:
     return {"id": identifier, "claim": "c", "source": "docs/a.md", "excerpt": "e", "retrieved_at": "now"}
 
 
-def judged(returncode, record=None, stdout="", stderr=""):
-    def execute(command, **kwargs):
+def judged(
+    returncode: int, record: dict | None = None, stdout: str = "", stderr: str = ""
+) -> Callable[..., CompletedProcess]:
+    def execute(command: list[str], **kwargs: Any) -> CompletedProcess:
         if record is not None:
             Path(command[command.index("--out") + 1]).write_text(json.dumps(record))
         return CompletedProcess(command, returncode, stdout, stderr)
@@ -110,7 +114,7 @@ def judged(returncode, record=None, stdout="", stderr=""):
     return execute
 
 
-def test_judge_runs_the_judge_command_and_returns_its_verdict(tmp_path):
+def test_judge_runs_the_judge_command_and_returns_its_verdict(tmp_path: Path) -> None:
     record = {"verdict": "enhance", "notes": [{"point": "p", "missing": "m"}]}
     inputs = {
         "case": '{"intent": "i", "points": ["p"]}',
@@ -148,7 +152,7 @@ def test_judge_runs_the_judge_command_and_returns_its_verdict(tmp_path):
 
 
 @pytest.mark.parametrize("returncode", [1, 2, 3])
-def test_judge_failure_retries_with_the_command_output(tmp_path, returncode):
+def test_judge_failure_retries_with_the_command_output(tmp_path: Path, returncode: int) -> None:
     execute = judged(returncode, stdout="sent back", stderr="judge: refused")
     with patch("scripts.workflows.launchers.subprocess.run", side_effect=execute):
         result = Judge().launch(judge_stage(), {"case": "{}"}, tmp_path)
@@ -157,7 +161,7 @@ def test_judge_failure_retries_with_the_command_output(tmp_path, returncode):
     assert not (tmp_path / "verdict.json").exists()
 
 
-def test_judge_timeout_retries(tmp_path):
+def test_judge_timeout_retries(tmp_path: Path) -> None:
     timeout = TimeoutExpired(["agentihooks", "judge"], 900)
     with patch("scripts.workflows.launchers.subprocess.run", side_effect=timeout) as run:
         result = Judge().launch(judge_stage(), {"case": "{}"}, tmp_path)
@@ -168,7 +172,7 @@ def test_judge_timeout_retries(tmp_path):
     assert command[command.index("--harness") + 1] == "auto"
 
 
-def test_routed_sends_filtered_stages_to_the_judge_only(tmp_path):
+def test_routed_sends_filtered_stages_to_the_judge_only(tmp_path: Path) -> None:
     profile = Mock(launch=Mock(return_value=StageResult("pass", ["built"])))
     judge = Mock(launch=Mock(return_value=StageResult("retry", {"verdict": "retry"})))
     routed = Routed(profile, judge)
@@ -180,7 +184,7 @@ def test_routed_sends_filtered_stages_to_the_judge_only(tmp_path):
     profile.launch.assert_called_once_with(stage(), {"case": "b"}, tmp_path)
 
 
-def test_headless_profile_refuses_a_filtered_stage(tmp_path):
+def test_headless_profile_refuses_a_filtered_stage(tmp_path: Path) -> None:
     with patch("scripts.workflows.launchers.run_profile") as run, pytest.raises(ValueError) as refused:
         HeadlessProfile().launch(judge_stage(), {"case": "a"}, tmp_path)
 
