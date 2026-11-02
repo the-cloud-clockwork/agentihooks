@@ -1191,3 +1191,59 @@ def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(
     head = rig.commit()
     assert rig.stop().allowed
     assert rig.remote_head() == head
+
+
+RUNNING_URL = "https://github.com/o/r/pull/7"
+
+
+def running_pull(**changes: object) -> object:
+    from scripts.swarm.ledger_events import PullRequest
+
+    fields = {"state": "OPEN", "merged_at": None, "pushed_at": 1, "red": False, "running": True, "started": True}
+    return PullRequest(**{**fields, **changes})
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+def test_running_checks_let_unpushed_work_stop_without_a_push_and_name_the_checks(
+    rig: SimpleNamespace, dirty: bool
+) -> None:
+    rig.ledger.task["pr_url"] = RUNNING_URL
+    rig.commit()
+    if dirty:
+        (rig.tree / "new").write_text("new\n")
+    seen: list[str] = []
+    rig.gate._github = lambda url: seen.append(url) or running_pull()
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (
+        True,
+        f"Checks still run on {RUNNING_URL} and none is red, so the stop hook did not push: a push now cancels them. "
+        f"Wait with agentihooks swarm {SLUG} wait --on checks {RUNNING_URL}, then push once they resolve.",
+    )
+    assert seen == [RUNNING_URL]
+    assert rig.remote_head() == ""
+    assert rig.inbox() == []
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"running": False},
+        {"red": True},
+        {"state": "MERGED"},
+        {"queued": True},
+        {"started": False},
+    ],
+)
+def test_resolved_red_closed_queued_or_unstarted_checks_still_demand_the_push(
+    rig: SimpleNamespace, changes: dict[str, object]
+) -> None:
+    refuse_the_push(rig)
+    rig.gate._github = lambda url: running_pull(**changes)
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_running_checks_on_a_pull_request_in_another_repo_still_demand_the_push(rig: SimpleNamespace) -> None:
+    refuse_the_push(rig)
+    rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
+    rig.gate._github = lambda url: running_pull()
+    assert rig.stop().reason == TEMPLATE
