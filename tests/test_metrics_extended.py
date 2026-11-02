@@ -8,11 +8,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-# =============================================================================
-# Timer
-# =============================================================================
-
-
 class TestTimerExtended:
     """Extended Timer tests."""
 
@@ -53,13 +48,15 @@ class TestTimerExtended:
         assert t.elapsed_ms == 0.0
 
     def test_running_timer_elapsed(self):
-        """elapsed_ms returns current time while timer is still running."""
+        """elapsed_ms returns current time while timer is still running.
+
+        Don't stop — should still report elapsed time.
+        """
         from hooks.observability.metrics import Timer
 
         t = Timer()
         t.start()
         time.sleep(0.01)
-        # Don't stop — should still report elapsed time
         assert t.elapsed_ms > 0
 
     def test_start_returns_self(self):
@@ -83,11 +80,6 @@ class TestTimerExtended:
         t = Timer()
         result = t.reset()
         assert result is t
-
-
-# =============================================================================
-# MetricsCollector — record() and measure()
-# =============================================================================
 
 
 class TestMetricsCollectorExtended:
@@ -202,11 +194,6 @@ class TestMetricsCollectorExtended:
         assert len(d["metrics"]) == 1
 
 
-# =============================================================================
-# MetricsSummary
-# =============================================================================
-
-
 class TestMetricsSummary:
     """Test MetricsSummary statistics."""
 
@@ -279,15 +266,11 @@ class TestMetricsSummary:
         assert s.metadata_counts["env"]["dev"] == 1
 
 
-# =============================================================================
-# save() and load()
-# =============================================================================
-
-
 class TestSaveLoad:
     """Test save/load JSON persistence."""
 
     def test_save_and_load(self, tmp_path):
+        """Load."""
         from hooks.observability.metrics import MetricsCollector
 
         c = MetricsCollector("test_save")
@@ -302,7 +285,6 @@ class TestSaveLoad:
         assert data["name"] == "test_save"
         assert len(data["metrics"]) == 2
 
-        # Load
         loaded = MetricsCollector.load(str(filepath))
         assert loaded.name == "test_save"
         assert len(loaded.metrics) == 2
@@ -317,11 +299,6 @@ class TestSaveLoad:
         filepath = tmp_path / "deep" / "nested" / "metrics.json"
         c.save(str(filepath))
         assert filepath.exists()
-
-
-# =============================================================================
-# ResultAccumulator extended
-# =============================================================================
 
 
 class TestResultAccumulatorExtended:
@@ -404,11 +381,6 @@ class TestResultAccumulatorExtended:
         assert acc.elapsed_s > 0
 
 
-# =============================================================================
-# Metric dataclass
-# =============================================================================
-
-
 class TestMetricDataclass:
     """Test the Metric dataclass."""
 
@@ -435,11 +407,6 @@ class TestMetricDataclass:
         assert m.success is True
         assert m.error is None
         assert m.metadata == {}
-
-
-# =============================================================================
-# timed decorator
-# =============================================================================
 
 
 class TestTimedDecorator:

@@ -44,9 +44,6 @@ def _fake_program(directory: Path, name: str, output: str) -> Path:
     return program
 
 
-# T-SV2-FND-05-A
-
-
 def test_a_every_live_resolver_points_inside_the_test_directory(tmp_path):
     for label, path in (
         ("claude home", claude_home()),
@@ -189,9 +186,6 @@ def test_a_herdr_is_absent_by_default_and_the_swarm_session_does_not_leak_in():
     assert herdr_host.server_running(dict(os.environ)) is False
     inherited = sorted(n for n in os.environ if n.startswith("AGENTIHOOKS_"))
     assert inherited == ["AGENTIHOOKS_SWARM_KEY_PREFIX", "AGENTIHOOKS_SWARM_REDIS_URL"]
-
-
-# T-SV2-FND-05-B
 
 
 def test_b_a_symlink_trap_to_a_live_home_aborts_and_counts(tmp_path, rejections):
@@ -375,9 +369,6 @@ def test_b_the_guards_are_inert_outside_a_test(monkeypatch, tmp_path_factory):
     real = _fake_program(tmp_path_factory.mktemp("live-bin"), "herdr", "LIVE")
     monkeypatch.setattr(swarm_v2_isolation, "FIXTURE_ROOT", None)
     assert subprocess.run([str(real)], capture_output=True, text=True).stdout == "LIVE\n"
-
-
-# T-SV2-FND-05-C
 
 
 def test_c_an_interrupted_run_leaves_its_lock_and_the_next_run_takes_its_own(tmp_path, rejections):

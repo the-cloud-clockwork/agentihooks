@@ -2,6 +2,10 @@
 
 Imported by the root conftest before any test module, so the live roots are read from the environment the run
 started with, before any fixture redirects it.
+
+TOKENS: Every word of a shell command is checked, so a live program named as an argument there is refused too.
+
+SPAWN_EVENTS: os.spawn* raises no audit event, so a program started through it is not seen.
 """
 
 import os
@@ -53,9 +57,7 @@ LIVE_PROGRAMS = frozenset({"kubectl", "helm", "argocd", "herdr"})
 SHELLS = frozenset({"sh", "bash", "dash", "zsh"})
 WRAPPERS = frozenset({"env", "timeout", "nohup", "nice", "sudo", "exec", "command", "xargs", "stdbuf", "setsid"})
 SHELL_COMMAND_FLAG = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
-# Every word of a shell command is checked, so a live program named as an argument there is refused too.
 TOKENS = re.compile(r"[\s;&|()`{}!<>\"'\\$=]+|:-?")
-# os.spawn* raises no audit event, so a program started through it is not seen.
 SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.exec", "os.system"})
 
 REJECTIONS: Counter = Counter()

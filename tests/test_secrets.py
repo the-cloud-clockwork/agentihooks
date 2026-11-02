@@ -217,11 +217,19 @@ class TestScanModes:
         assert "stripe_key" not in hits
 
     def test_scan_strict_detects_jwt(self):
-        """mode='strict' catches JWT tokens."""
-        # Build a realistic JWT-shaped string
-        header = "eyJhbGciOiJIUzI1NiJ9"  # nosecret
-        payload = "eyJzdWIiOiIxMjM0NTY3ODkwIn0"  # nosecret
-        sig = "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"  # nosecret
+        """mode='strict' catches JWT tokens.
+
+        Build a realistic JWT-shaped string.
+
+        Ret.
+
+        Ret.
+
+        Ret.
+        """
+        header = "eyJhbGciOiJIUzI1NiJ9"  # nosec
+        payload = "eyJzdWIiOiIxMjM0NTY3ODkwIn0"  # nosec
+        sig = "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"  # nosec
         jwt = f"{header}.{payload}.{sig}"
         from hooks.secrets import scan
 
@@ -229,10 +237,17 @@ class TestScanModes:
         assert "jwt_token" in hits
 
     def test_scan_standard_misses_jwt(self):
-        """mode='standard' does NOT catch JWT tokens."""
-        header = "eyJhbGciOiJIUzI1NiJ9"  # nosecret
-        payload = "eyJzdWIiOiIxMjM0NTY3ODkwIn0"  # nosecret
-        sig = "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"  # nosecret
+        """mode='standard' does NOT catch JWT tokens.
+
+        Ret.
+
+        Ret.
+
+        Ret.
+        """
+        header = "eyJhbGciOiJIUzI1NiJ9"  # nosec
+        payload = "eyJzdWIiOiIxMjM0NTY3ODkwIn0"  # nosec
+        sig = "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"  # nosec
         jwt = f"{header}.{payload}.{sig}"
         from hooks.secrets import scan
 

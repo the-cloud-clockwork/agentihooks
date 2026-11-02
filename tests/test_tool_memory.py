@@ -20,12 +20,16 @@ class TestToolMemory:
         assert callable(scan_transcript)
 
     def test_record_error_creates_entry(self, tmp_path):
-        """record_error() stores error data."""
+        """record_error() stores error data.
+
+        Record_error takes a payload dict.
+
+        Verify it wrote an entry.
+        """
         mem_file = tmp_path / "tool_memory.ndjson"
         with patch("hooks.tool_memory.MEMORY_PATH", mem_file):
             from hooks.tool_memory import record_error
 
-            # record_error takes a payload dict
             payload = {
                 "tool_name": "Write",
                 "tool_input": {"file_path": "/tmp/test.txt"},
@@ -33,7 +37,6 @@ class TestToolMemory:
                 "session_id": "test-session",
             }
             record_error(payload)
-            # Verify it wrote an entry
             assert mem_file.exists()
             lines = mem_file.read_text().strip().split("\n")
             assert len(lines) == 1

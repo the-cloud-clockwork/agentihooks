@@ -1,4 +1,7 @@
-"""Tests for hooks.common module."""
+"""Tests for hooks.common module.
+
+File should not be created (This is a best-effort check)
+"""
 
 import json
 import os
@@ -13,7 +16,12 @@ class TestLog:
     """Test the log() function."""
 
     def test_log_writes_to_file(self, tmp_log_file):
-        """log() writes a message to the log file."""
+        """log() writes a message to the log file.
+
+        The log function appends to file; check it was created.
+
+        Log may use different path logic.
+        """
         with patch.dict(
             os.environ,
             {
@@ -29,8 +37,7 @@ class TestLog:
             from hooks.common import log
 
             log("test message")
-            # The log function appends to file; check it was created
-            assert tmp_log_file.exists() or True  # log may use different path logic
+            assert tmp_log_file.exists() or True
 
     def test_log_disabled(self, tmp_log_file):
         """log() does nothing when logging is disabled."""
@@ -49,8 +56,6 @@ class TestLog:
             from hooks.common import log
 
             log("should not appear")
-            # File should not be created
-            # (This is a best-effort check)
 
 
 class TestOutputJson:
@@ -70,13 +75,16 @@ class TestGetCorrelationId:
     """Test correlation ID generation."""
 
     def test_correlation_id_format(self):
-        """get_correlation_id() returns a valid string."""
+        """get_correlation_id() returns a valid string.
+
+        With no env vars set and no fallback, returns empty string.
+
+        When called with a fallback, returns that fallback.
+        """
         from hooks.common import get_correlation_id
 
-        # With no env vars set and no fallback, returns empty string
         cid = get_correlation_id()
         assert isinstance(cid, str)
-        # When called with a fallback, returns that fallback
         cid = get_correlation_id("fallback-session-id")
         assert cid == "fallback-session-id"
 

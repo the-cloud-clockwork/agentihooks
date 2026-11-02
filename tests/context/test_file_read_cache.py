@@ -42,7 +42,10 @@ class TestFileReadCache:
             assert was_file_read("session-xyz", str(f)) is False
 
     def test_mtime_change_allows_reread(self, tmp_path):
-        """After marking, modifying file mtime → was_file_read returns False."""
+        """After marking, modifying file mtime → was_file_read returns False.
+
+        Modify mtime by 2 seconds into the future.
+        """
         from hooks.context.file_read_cache import mark_file_read, was_file_read
 
         f = tmp_path / "modified.py"
@@ -53,7 +56,6 @@ class TestFileReadCache:
             mark_file_read(session_id, str(f))
             assert was_file_read(session_id, str(f)) is True
 
-            # Modify mtime by 2 seconds into the future
             old_mtime = os.stat(str(f)).st_mtime
             os.utime(str(f), (old_mtime + 2, old_mtime + 2))
 
@@ -126,7 +128,10 @@ class TestFileReadCache:
                 check_and_block_redundant_read(payload)
 
     def test_check_and_block_allows_first_read(self, tmp_path):
-        """check_and_block_redundant_read does not raise on first read."""
+        """check_and_block_redundant_read does not raise on first read.
+
+        Should not raise.
+        """
         from hooks.context.file_read_cache import check_and_block_redundant_read
 
         f = tmp_path / "first_read.py"
@@ -135,7 +140,6 @@ class TestFileReadCache:
         payload = {"session_id": session_id, "tool_input": {"file_path": str(f)}}
 
         with patch("hooks.context.file_read_cache.get_redis", return_value=None):
-            # Should not raise
             check_and_block_redundant_read(payload)
 
 

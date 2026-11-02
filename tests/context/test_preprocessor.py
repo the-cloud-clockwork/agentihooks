@@ -4,18 +4,14 @@ from unittest.mock import patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Protection mask
-# ---------------------------------------------------------------------------
-
 
 class TestProtectionMask:
     def test_code_fence_protected(self):
+        """The fenced block span should be in the mask."""
         from hooks.context.preprocessor import _build_protection_mask
 
         text = "before ```kubectl delete pod``` after"
         mask = _build_protection_mask(text)
-        # The fenced block span should be in the mask
         assert any(text[s:e] == "```kubectl delete pod```" for s, e in mask)
 
     def test_inline_code_protected(self):
@@ -84,11 +80,6 @@ class TestProtectionMask:
         assert "only" in spans_text
 
 
-# ---------------------------------------------------------------------------
-# Level 1: Markdown stripping
-# ---------------------------------------------------------------------------
-
-
 class TestLevel1MarkdownStripping:
     def test_headers_simplified(self):
         from hooks.context.preprocessor import preprocess
@@ -136,22 +127,20 @@ class TestLevel1MarkdownStripping:
         assert "bar" in result
 
 
-# ---------------------------------------------------------------------------
-# Level 2: Filler words and abbreviations
-# ---------------------------------------------------------------------------
-
-
 class TestLevel2FillerAndAbbrev:
     def test_filler_words_removed(self):
+        """ "is", "to", "the" (mid-sentence) should be removed; "The" at start may survive.
+
+        "database" abbreviated.
+        """
         from hooks.context.preprocessor import preprocess
 
         text = "The system is configured to use the Redis database"
         result = preprocess(text, level=2)
-        # "is", "to", "the" (mid-sentence) should be removed; "The" at start may survive
         assert " is " not in result
         assert " to " not in result
         assert "Redis" in result
-        assert "db" in result  # "database" abbreviated
+        assert "db" in result
 
     def test_abbreviations_applied(self):
         from hooks.context.preprocessor import preprocess
@@ -163,49 +152,46 @@ class TestLevel2FillerAndAbbrev:
         assert "prod" in result
 
     def test_abbreviations_longest_match_first(self):
+        """ "authentication" should match before "auth" if both exist."""
         from hooks.context.preprocessor import preprocess
 
-        # "authentication" should match before "auth" if both exist
         text = "authentication is required"
         result = preprocess(text, level=2)
         assert "auth" in result
         assert "authentication" not in result
 
 
-# ---------------------------------------------------------------------------
-# Level 3: Disemvoweling
-# ---------------------------------------------------------------------------
-
-
 class TestLevel3Disemvoweling:
     def test_long_words_disemvoweled(self):
+        """Words should be shorter."""
         from hooks.context.preprocessor import preprocess
 
         text = "collaborative instruction protection"
         result = preprocess(text, level=3)
-        # Words should be shorter
         assert len(result) < len(text)
 
     def test_short_words_preserved(self):
+        """Ensure L2 doesn't crash on short words.
+
+        "good" is only 4 chars, below threshold.
+        """
         from hooks.context.preprocessor import preprocess
 
         text = "the code is good"
-        preprocess(text, level=2)  # ensure L2 doesn't crash on short words
+        preprocess(text, level=2)
         result_l3 = preprocess(text, level=3)
-        assert "good" in result_l3 or "gd" in result_l3  # "good" is only 4 chars, below threshold
+        assert "good" in result_l3 or "gd" in result_l3
 
     def test_exclusion_words_preserved(self):
+        """ "error", "order", "issue" are in exclusion set.
+
+        Should NOT be mangled.
+        """
         from hooks.context.preprocessor import preprocess
 
         text = "there was an error in the order of the issue"
         result = preprocess(text, level=3)
-        # "error", "order", "issue" are in exclusion set
-        assert "error" in result or "errr" not in result  # should NOT be mangled
-
-
-# ---------------------------------------------------------------------------
-# Safety invariants — parametrized
-# ---------------------------------------------------------------------------
+        assert "error" in result or "errr" not in result
 
 
 SAFETY_INPUTS = [
@@ -232,11 +218,6 @@ class TestSafetyInvariants:
                 assert token in result, (
                     f"Level {level} destroyed protected token {token!r} in text {text!r} -> {result!r}"
                 )
-
-
-# ---------------------------------------------------------------------------
-# Full pipeline
-# ---------------------------------------------------------------------------
 
 
 REAL_RULE_SAMPLE = """## Operator Delegation Map
@@ -295,11 +276,6 @@ class TestFullPipeline:
         assert "delete" in result
 
 
-# ---------------------------------------------------------------------------
-# Compression ratio
-# ---------------------------------------------------------------------------
-
-
 class TestCompressionRatio:
     def test_ratio_calculation(self):
         from hooks.context.preprocessor import compression_ratio
@@ -313,11 +289,6 @@ class TestCompressionRatio:
         assert compression_ratio("", "") == 1.0
 
 
-# ---------------------------------------------------------------------------
-# Edge cases
-# ---------------------------------------------------------------------------
-
-
 class TestEdgeCases:
     def test_empty_input(self):
         from hooks.context.preprocessor import preprocess
@@ -325,11 +296,11 @@ class TestEdgeCases:
         assert preprocess("", level=3) == ""
 
     def test_all_code_block(self):
+        """Entire input is protected — should be mostly unchanged."""
         from hooks.context.preprocessor import preprocess
 
         text = "```\nkubectl apply -f deploy.yaml\nkubectl rollout status\n```"
         result = preprocess(text, level=3)
-        # Entire input is protected — should be mostly unchanged
         assert "kubectl apply" in result
         assert "kubectl rollout" in result
 
@@ -342,18 +313,13 @@ class TestEdgeCases:
             assert token in result
 
     def test_exception_returns_original(self):
+        """Passing a weird type shouldn't crash — should return input."""
         from hooks.context.preprocessor import preprocess
 
-        # Passing a weird type shouldn't crash — should return input
         text = "normal text"
         with patch("hooks.context.preprocessor._build_protection_mask", side_effect=RuntimeError("boom")):
             result = preprocess(text, level=2)
         assert result == text
-
-
-# ---------------------------------------------------------------------------
-# Config integration
-# ---------------------------------------------------------------------------
 
 
 class TestConfigIntegration:
@@ -375,13 +341,9 @@ class TestConfigIntegration:
             assert get_level_from_config() == expected
 
 
-# ---------------------------------------------------------------------------
-# Global compression scope (inject_context integration)
-# ---------------------------------------------------------------------------
-
-
 class TestGlobalCompressionScope:
     def test_inject_context_compresses_when_scope_all(self, capsys):
+        """ "kubernetes" should be abbreviated to "k8s", "database" to "db"."""
         with (
             patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "all"),
             patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"),
@@ -391,7 +353,6 @@ class TestGlobalCompressionScope:
             inject_context("The system is configured to use the kubernetes database", also_log=False)
 
         captured = capsys.readouterr().out
-        # "kubernetes" should be abbreviated to "k8s", "database" to "db"
         assert "k8s" in captured
         assert "db" in captured
 
@@ -409,6 +370,7 @@ class TestGlobalCompressionScope:
         assert "database" in captured
 
     def test_inject_context_skip_compression_flag(self, capsys):
+        """Not compressed because skip=True."""
         with (
             patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "all"),
             patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"),
@@ -418,9 +380,10 @@ class TestGlobalCompressionScope:
             inject_context("The kubernetes database", also_log=False, skip_compression=True)
 
         captured = capsys.readouterr().out
-        assert "kubernetes" in captured  # not compressed because skip=True
+        assert "kubernetes" in captured
 
     def test_inject_banner_passes_skip_compression(self, capsys):
+        """Not compressed."""
         with (
             patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "all"),
             patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"),
@@ -430,4 +393,4 @@ class TestGlobalCompressionScope:
             inject_banner("TEST", "kubernetes database", also_log=False, skip_compression=True)
 
         captured = capsys.readouterr().out
-        assert "kubernetes" in captured  # not compressed
+        assert "kubernetes" in captured

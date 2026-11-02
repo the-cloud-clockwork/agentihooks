@@ -63,14 +63,16 @@ def homes(tmp_path, monkeypatch):
 
 
 def test_the_brain_env_alone_wires_the_adapter(homes):
-    """No agentihooks brain config at all — the kernel's file is enough."""
+    """No agentihooks brain config at all — the kernel's file is enough.
+
+    BRAIN_URL resolving is what flips both defaults on.
+    """
     _, brain, load = homes
     _write_env(brain / ".env", {_TOKEN: "t1", _URL: "http://127.0.0.1:8103"})
 
     config = load()
     assert config.BRAIN_URL == "http://127.0.0.1:8103"
     assert config.BRAIN_HTTP_TOKEN == "t1"
-    # BRAIN_URL resolving is what flips both defaults on.
     assert config.BRAIN_ENABLED is True
     assert config.BRAIN_WRITER_ENABLED is True
 

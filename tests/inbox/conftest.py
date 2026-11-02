@@ -9,7 +9,7 @@ _setitimer = signal.setitimer
 
 @pytest.fixture
 def mcp_sdk():
-    # An alarm inside the cold SDK import drops mcp.server but keeps mcp.server.stdio for the rest of the worker.
+    """An alarm inside the cold SDK import drops mcp.server but keeps mcp.server.stdio for the rest of the worker."""
     import anyio._backends._asyncio  # noqa: F401
     import fakeredis  # noqa: F401
     import mcp.server.lowlevel  # noqa: F401
@@ -33,7 +33,7 @@ def recovery_deadline(mcp_sdk, monkeypatch):
     running = [0, 0.0]
 
     def paused(*args, **kwargs):
-        # A cold import is not recovery work, and an alarm inside one leaves a module half loaded.
+        """A cold import is not recovery work, and an alarm inside one leaves a module half loaded."""
         with lock:
             running[0] += 1
             if running[0] == 1:

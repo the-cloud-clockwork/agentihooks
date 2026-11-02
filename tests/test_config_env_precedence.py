@@ -48,6 +48,7 @@ def test_later_file_beats_earlier_file(env_home):
 
 
 def test_process_env_beats_every_file(env_home, monkeypatch):
+    """...and a forced reload must not quietly hand the files a second chance."""
     home, load = env_home
     (home / ".env").write_text("SOME_KEY=from-main\n")
     (home / "zz-extra.env").write_text("SOME_KEY=from-companion\n")
@@ -55,7 +56,6 @@ def test_process_env_beats_every_file(env_home, monkeypatch):
 
     config = load()
     assert os.environ["SOME_KEY"] == "from-process"
-    # ...and a forced reload must not quietly hand the files a second chance.
     config.reload_brain_env(force=True)
     assert os.environ["SOME_KEY"] == "from-process"
 

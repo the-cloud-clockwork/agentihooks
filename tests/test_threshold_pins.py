@@ -32,7 +32,10 @@ def _tree(root: Path, files: dict[str, str]) -> Path:
 
 @pytest.fixture(scope="module")
 def committed(tmp_path_factory) -> Path:
-    # Mutation runs rewrite this module's source in place, so the repository checks read the commit.
+    """Mutation runs rewrite this module's source in place, so the repository checks read the commit.
+
+    Do not git add here: hashing every file exceeds the shard timeout.
+    """
     root = tmp_path_factory.mktemp("committed")
     archive = subprocess.run(["git", "-C", str(_ROOT), "archive", "HEAD"], capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
@@ -44,7 +47,6 @@ def committed(tmp_path_factory) -> Path:
         text=True,
     ).stdout.splitlines()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
-    # Do not git add here: hashing every file exceeds the shard timeout.
     (root / ".git/objects/info/alternates").write_text(f"{common_dir}/objects\n")
     subprocess.run(["git", "-C", str(root), "read-tree", tree], check=True)
     return root

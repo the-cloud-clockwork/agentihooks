@@ -1,3 +1,7 @@
+"""DETECT_TEST_POLLUTION: `python -m detect_test_pollution` hands its pytest children `-p __main__` instead of its own
+plugin.
+"""
+
 import argparse
 import json
 import subprocess
@@ -9,7 +13,6 @@ from pathlib import Path
 _ROOT = Path(__file__).parent.parent
 MAX_TRACED = 4
 GITHUB_TITLE_LIMIT = 256
-# `python -m detect_test_pollution` hands its pytest children `-p __main__` instead of its own plugin.
 DETECT_TEST_POLLUTION = Path(sysconfig.get_path("scripts")) / "detect-test-pollution"
 POLLUTER = "-> the polluting test is: "
 NOTES = {

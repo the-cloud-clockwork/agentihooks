@@ -111,6 +111,7 @@ def _violations(signer: nats_grant.Signer, credentials: str, act, refused: bool 
     from scripts.events.nats import auth_options
 
     async def run() -> list[str]:
+        """Nats-py writes the flush PING ahead of buffered commands, so the -ERR can follow its PONG."""
         seen, violated = [], asyncio.Event()
 
         async def error_cb(exc):
@@ -124,7 +125,6 @@ def _violations(signer: nats_grant.Signer, credentials: str, act, refused: bool 
             await act(nc)
             await nc.flush()
             if refused:
-                # nats-py writes the flush PING ahead of buffered commands, so the -ERR can follow its PONG.
                 await asyncio.wait_for(violated.wait(), 5)
         finally:
             await nc.close()

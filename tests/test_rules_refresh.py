@@ -185,6 +185,7 @@ class TestPayloadCollection:
         assert "# Just claude" in payload
 
     def test_claude_local_md_is_included(self, tmp_path):
+        """Local override should come after CLAUDE.md and rules/ (precedence: last wins)"""
         rules_dir = tmp_path / "rules"
         rules_dir.mkdir()
         (rules_dir / "rule.md").write_text("# Regular rule")
@@ -197,7 +198,6 @@ class TestPayloadCollection:
         assert "# Global profile" in payload
         assert "# Regular rule" in payload
         assert "# Local override — Skynet mode" in payload
-        # Local override should come after CLAUDE.md and rules/ (precedence: last wins)
         assert payload.index("# Global profile") < payload.index("# Local override")
 
     def test_missing_claude_local_md_is_tolerated(self, tmp_path):

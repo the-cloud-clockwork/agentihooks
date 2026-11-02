@@ -21,9 +21,8 @@ class TestBranchGuard:
             self._check(command)
 
     def _assert_allowed(self, command: str):
-        self._check(command)  # should not raise
-
-    # --- Blocked commands ---
+        """Should not raise."""
+        self._check(command)
 
     def test_push_main(self):
         self._assert_blocked("git push origin main")
@@ -67,8 +66,6 @@ class TestBranchGuard:
     def test_gh_pr_merge(self):
         self._assert_allowed("gh pr merge 123")
 
-    # --- Allowed commands ---
-
     def test_push_head_allowed(self):
         self._assert_allowed("git push origin HEAD")
 
@@ -100,7 +97,8 @@ class TestBranchGuard:
         self._assert_allowed("git status")
 
     def test_diff(self):
-        self._assert_allowed("git diff main")  # reading, not writing
+        """Reading, not writing."""
+        self._assert_allowed("git diff main")
 
     def test_log_main(self):
         self._assert_allowed("git log main..HEAD")
@@ -215,12 +213,13 @@ class TestPRBaseGuard:
             self._check(command)
 
     def _assert_allowed_with_signal(self, command: str):
+        """Should not raise."""
         s1, s2, s3 = self._signal_patches()
         with s1, s2, s3:
-            self._check(command)  # should not raise
+            self._check(command)
 
     def test_pr_bare_create_blocked(self):
-        # a bare create defaults to the repo default branch (main)
+        """A bare create defaults to the repo default branch (main)"""
         self._assert_blocked_with_signal("gh pr create --fill")
 
     def test_pr_base_dev_allowed(self):
@@ -340,6 +339,10 @@ class TestPrSignalResetsCounter:
     error message promises this reset — set_pr_signal must deliver it."""
 
     def test_set_pr_signal_clears_counter(self, tmp_path):
+        """Exhaust the counter the same way real PR creations do.
+
+        Operator re-signal must reset it.
+        """
         from unittest.mock import patch
 
         from hooks.context import branch_guard
@@ -349,11 +352,9 @@ class TestPrSignalResetsCounter:
             patch("hooks.context.branch_guard.AGENTIHOOKS_HOME", tmp_path),
         ):
             sid = "test-pr-reset"
-            # Exhaust the counter the same way real PR creations do
             for _ in range(3):
                 branch_guard.increment_pr_counter(sid)
             assert branch_guard._get_pr_counter(sid) == 3
-            # Operator re-signal must reset it
             branch_guard.set_pr_signal(sid)
             assert branch_guard._get_pr_counter(sid) == 0
 

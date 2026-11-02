@@ -1,4 +1,7 @@
-"""Tests for hooks.memory.store module."""
+"""Tests for hooks.memory.store module.
+
+File fallback should work without Redis Just verify no crash on basic operations.
+"""
 
 from time import time
 
@@ -47,8 +50,6 @@ class TestMemoryStore:
 
         with patch_env(HOME=str(tmp_path)):
             MemoryStore()
-            # File fallback should work without Redis
-            # Just verify no crash on basic operations
 
 
 def patch_env(**kwargs):
