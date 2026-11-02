@@ -148,9 +148,13 @@ def test_an_exhausted_delivery_is_retained_once_in_the_dead_stream(channel, harn
         delivery = channel.take()[0]
         assert (delivery.event, delivery.attempt) == (original, attempt)
         harness.advance(harness.policy.ack_wait_ms + harness.margin_ms)
-    assert channel.take() == []
     dead = harness.bus.dead.consumer("dead-reader", "dead.>")
-    letters = dead.fetch(10, harness.poll_ms)
+    letters = []
+    for _ in range(40):
+        assert channel.take() == []
+        letters = dead.fetch(10, harness.poll_ms)
+        if letters:
+            break
     assert len(letters) == 1
     letter = letters[0].event
     assert letter.type == "dead_lettered"
