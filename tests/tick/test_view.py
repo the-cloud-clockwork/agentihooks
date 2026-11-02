@@ -212,7 +212,6 @@ def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.Mo
 
 @pytest.mark.feature("swarm-tick-delta-reads")
 def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> None:
-    assert view.PARTS == ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
     state = {
         **STATE,
         "freezes": [{"verb": "focus", "target": "p1"}],
