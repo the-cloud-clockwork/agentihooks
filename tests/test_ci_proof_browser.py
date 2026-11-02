@@ -27,12 +27,12 @@ def test_proof_dependencies_use_the_baked_playwright_constraint():
 def test_proof_dependencies_install_offline_into_the_baked_venv(
     tmp_path: Path, baked: bool, offline_code: int, expected: list[str]
 ) -> None:
-    """Prefer the runner's baked venv offline and fall back to a PyPI install into the system interpreter."""
+    """Build the editable wheel once into the runner's baked venv offline and fall back to a PyPI install."""
     install = next(step for step in _job()["steps"] if step.get("name") == "Install dependencies")
     venv = tmp_path / "venv"
     if baked:
         (venv / "bin").mkdir(parents=True)
-        (venv / "bin/python").write_text("#!/usr/bin/env bash\n")
+        (venv / "bin/python").write_text('#!/usr/bin/env bash\ntouch "$3/agentihooks-0.editable-py3-none-any.whl"\n')
         (venv / "bin/python").chmod(0o755)
     tools = tmp_path / "tools"
     tools.mkdir()
@@ -43,6 +43,8 @@ def test_proof_dependencies_install_offline_into_the_baked_venv(
     calls = tmp_path / "calls"
     github_path = tmp_path / "github_path"
     github_path.touch()
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
     result = subprocess.run(
         ["bash", "-e", "-c", install["run"]],
         cwd=ROOT,
@@ -54,6 +56,7 @@ def test_proof_dependencies_install_offline_into_the_baked_venv(
             "CALLS": str(calls),
             "OFFLINE_CODE": str(offline_code),
             "GITHUB_PATH": str(github_path),
+            "RUNNER_TEMP": str(runner_temp),
         },
         capture_output=True,
         text=True,
@@ -62,7 +65,8 @@ def test_proof_dependencies_install_offline_into_the_baked_venv(
     lines = calls.read_text().splitlines()
     assert [next(flag for flag in ("--offline", "--system") if flag in line) for line in lines] == expected
     assert all("--constraint .github/test-requirements.lock" in line for line in lines)
-    assert all("-e .[dev,all]" in line for line in lines)
+    wheel = f"agentihooks[dev,all] @ file://{runner_temp}/editable/agentihooks-0.editable-py3-none-any.whl"
+    assert [wheel in line if "--offline" in line else "-e .[dev,all]" in line for line in lines] == [True] * len(lines)
     hit = expected == ["--offline"]
     assert github_path.read_text() == (f"{venv}/bin\n" if hit else "")
     assert ("Baked venv hit" if hit else "Baked venv miss") in result.stdout

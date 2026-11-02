@@ -306,7 +306,12 @@ jobs:
           BAKED_VENV: /opt/agentihooks-venv
           WHEELHOUSE: /opt/wheelhouse
         run: |
-          if [[ -x "$BAKED_VENV/bin/python" ]] && uv pip install --offline --no-index --no-build-isolation --find-links "$WHEELHOUSE" --python "$BAKED_VENV/bin/python" --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'; then
+          editable="$RUNNER_TEMP/editable"
+          mkdir -p "$editable"
+          if [[ -x "$BAKED_VENV/bin/python" ]] \
+            && "$BAKED_VENV/bin/python" -c 'import sys; from setuptools import build_meta; build_meta.build_editable(sys.argv[1])' "$editable" >&2 \
+            && wheels=("$editable"/agentihooks-*.whl) && [[ -f "${wheels[0]}" ]] \
+            && uv pip install --offline --no-index --find-links "$WHEELHOUSE" --python "$BAKED_VENV/bin/python" --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt "agentihooks[dev,all] @ file://${wheels[0]}"; then
             echo "$BAKED_VENV/bin" >> "$GITHUB_PATH"
             echo "::notice title=Baked venv hit::The runner venv served the install offline"
           else
