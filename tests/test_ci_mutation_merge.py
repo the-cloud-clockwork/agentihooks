@@ -58,11 +58,36 @@ def test_merged_report_sums_counts_and_keeps_every_shard_row_per_file():
 def test_merge_preserves_every_measured_shard_and_accepts_legacy_reports():
     measurements = [
         {"index": 0, "expected": 4, "graded": 4, "complete": True},
-        {"index": 1, "expected": 3, "graded": 2, "complete": False},
+        {"index": 1, "expected": 3, "graded": 3, "complete": True},
     ]
     reports = [{"files": [], "not_mutated": [], "failed": False, "shard": measurement} for measurement in measurements]
     reports.append({"files": [], "not_mutated": [], "failed": False})
     assert merge.merge_reports(reports) == {"files": [], "not_mutated": [], "failed": False, "shards": measurements}
+
+
+def test_merge_fails_when_a_green_shard_graded_fewer_mutants_than_it_owns():
+    measurements = [
+        {"index": 0, "expected": 4, "graded": 4, "complete": True},
+        {"index": 1, "expected": 3, "graded": 2, "complete": False},
+    ]
+    reports = [{"files": [], "not_mutated": [], "failed": False, "shard": measurement} for measurement in measurements]
+    assert merge.merge_reports(reports)["failed"] is True
+    assert merge.short_shards(measurements) == [1]
+
+
+def test_main_fails_and_names_a_short_shard_while_a_complete_run_stays_green(tmp_path, capsys):
+    shards = tmp_path / "shards"
+    for shard, graded in ((0, 2), (1, 1)):
+        measurement = {"index": shard, "expected": 2, "graded": graded}
+        _write(shards, shard, {"files": [], "not_mutated": [], "failed": False, "shard": measurement})
+    assert merge.main([str(shards), "--shards", "2", "--output", str(tmp_path / "gate")]) == 1
+    assert "mutation shards graded fewer mutants than they own: 1" in capsys.readouterr().out
+    complete = tmp_path / "complete"
+    for shard in (0, 1):
+        measurement = {"index": shard, "expected": 2, "graded": 2}
+        _write(complete, shard, {"files": [], "not_mutated": [], "failed": False, "shard": measurement})
+    assert merge.main([str(complete), "--shards", "2", "--output", str(tmp_path / "green")]) == 0
+    assert "graded fewer mutants" not in capsys.readouterr().out
 
 
 def test_merged_report_is_green_only_when_every_shard_is_green():
