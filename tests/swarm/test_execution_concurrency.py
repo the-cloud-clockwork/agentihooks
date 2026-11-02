@@ -162,3 +162,29 @@ def test_fencing_retries_sleep_only_before_remaining_attempts(
     assert len(calls) == min(failures + 1, fencing.ATTEMPTS)
     assert bounds == [(0.001, 0.032)] * expected
     assert pauses == [0.032] * expected
+
+
+def test_real_retry_jitter_varies_within_its_bound(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.events.bus import StateConflict
+    from scripts.swarm import fencing
+
+    target = type(fencing._states(store))
+    original = target.update
+    failures = fencing.ATTEMPTS - 1
+    calls: list[None] = []
+    pauses: list[float] = []
+
+    def conflict(*args: object, **kwargs: object) -> object:
+        calls.append(None)
+        if len(calls) % fencing.ATTEMPTS:
+            raise StateConflict("conflict")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(target, "update", conflict)
+    monkeypatch.setattr(fencing.time, "sleep", pauses.append)
+    for owner in ("a", "b", "c", "d"):
+        fencing.write(store, "fixture", lambda doc, owner=owner: doc.update(legacy_owner=owner))
+    assert fencing.read(store, "fixture")["legacy_owner"] == "d"
+    assert len(pauses) == 4 * failures
+    assert len(set(pauses)) > 1
+    assert all(0.001 <= pause <= 0.032 for pause in pauses)
