@@ -6,7 +6,7 @@ from inspect import signature
 from typing import Any
 
 from scripts.tick import registry
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, Left, PassBox
 
 RAISED = "raised"
 PASS_KEYS = ("slug", "store", "ledger", "runtime", "now_ms", "box")
@@ -18,8 +18,10 @@ def _run(pick: Callable[[Any], Callable[..., Any]], tick: Any, get: Callable[[st
     if RAISED in box:
         return []
     try:
-        call, values = pick(tick), {**{key: get(key) for key in PASS_KEYS}, **box}
+        call, values = pick(tick), PassBox({**{key: get(key) for key in PASS_KEYS}, **box})
         return call(**{name: values[name] for name in signature(call).parameters})
+    except Left:
+        return []
     except (Exception, SystemExit) as exc:
         box[RAISED] = exc
         return []
