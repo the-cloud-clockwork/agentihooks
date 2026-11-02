@@ -2,6 +2,7 @@ import base64
 import json
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -730,7 +731,9 @@ def fixer(**extra: str) -> dict[str, str]:
     return {"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open", **extra}
 
 
-def test_a_fixer_whose_merged_pull_request_changed_a_mapped_test_closes_on_green(store, tmp_path, monkeypatch):
+def test_a_fixer_whose_merged_pull_request_changed_a_mapped_test_closes_on_green(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     calls, ledger = [], Ledger([fixer(pr_url=PR_URL)])
     actions = refresh(store, ledger, gh([GREEN], calls=calls, files=({"filename": "scripts/x.py"}, MAPPED_CHANGE)))
@@ -772,8 +775,8 @@ def test_a_fixer_whose_merged_pull_request_changed_a_mapped_test_closes_on_green
     ],
 )
 def test_a_fixer_whose_pull_request_added_no_mapped_test_stays_open_with_its_pinning_task(
-    store, extra, files, merged_at
-):
+    store: RedisStore, extra: dict[str, str], files: tuple[dict, ...], merged_at: str | None
+) -> None:
     ledger = Ledger([fixer(**extra)])
     actions = refresh(store, ledger, gh([GREEN], files=files, merged_at=merged_at))
     assert ledger.tasks[0]["state"] == "open"
@@ -801,13 +804,13 @@ def test_a_fixer_whose_pull_request_added_no_mapped_test_stays_open_with_its_pin
     assert actions == ["filed pin-promo-900-0 to pin a test for promo-900-0, dev push run 901 passed"]
 
 
-def test_a_pinning_task_for_a_title_the_ledger_would_refuse_gets_a_plain_title(store):
+def test_a_pinning_task_for_a_title_the_ledger_would_refuse_gets_a_plain_title(store: RedisStore) -> None:
     ledger = Ledger([fixer(title="Promotion red: check docs.md")])
     refresh(store, ledger, gh([GREEN]))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Pin a test for a promotion red"]
 
 
-def test_a_pinned_fixer_closes_on_a_later_green_once_its_pinning_task_is_done(store):
+def test_a_pinned_fixer_closes_on_a_later_green_once_its_pinning_task_is_done(store: RedisStore) -> None:
     ledger = Ledger([fixer()])
     refresh(store, ledger, gh([GREEN]))
     assert refresh(store, ledger, gh([{**GREEN, "id": 902}]), NOW * 2) == []
@@ -818,7 +821,7 @@ def test_a_pinned_fixer_closes_on_a_later_green_once_its_pinning_task_is_done(st
     assert actions == ["closed promo-900-0, dev push run 903 passed"]
 
 
-def test_every_fixer_without_a_mapped_test_gets_its_own_pinning_task(store):
+def test_every_fixer_without_a_mapped_test_gets_its_own_pinning_task(store: RedisStore) -> None:
     second = fixer(id="promo-900-1", title="Promotion red: lint")
     ledger = Ledger([fixer(), second])
     actions = refresh(store, ledger, gh([GREEN]))
@@ -829,7 +832,7 @@ def test_every_fixer_without_a_mapped_test_gets_its_own_pinning_task(store):
     ]
 
 
-def test_an_unread_fixer_does_not_hold_the_next_fixer_from_closing(store):
+def test_an_unread_fixer_does_not_hold_the_next_fixer_from_closing(store: RedisStore) -> None:
     answer = gh([GREEN])
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
@@ -842,7 +845,9 @@ def test_an_unread_fixer_does_not_hold_the_next_fixer_from_closing(store):
     assert [t["state"] for t in ledger.tasks] == ["open", "done"]
 
 
-def test_a_former_owner_fixer_reads_its_pull_request_in_the_watched_repo(store, monkeypatch):
+def test_a_former_owner_fixer_reads_its_pull_request_in_the_watched_repo(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls, former, ledger = [], Ledger([fixer(pr_url=PR_URL)]), Ledger()
     ledger.state = lambda slug: former.doc()
     ledger.update_task, ledger.comment = former.update_task, former.comment
@@ -853,7 +858,7 @@ def test_a_former_owner_fixer_reads_its_pull_request_in_the_watched_repo(store, 
     assert pulls == ["/repo", "/repo", "/repo"]
 
 
-def test_an_unread_pull_request_leaves_the_fixer_for_the_next_green(store):
+def test_an_unread_pull_request_leaves_the_fixer_for_the_next_green(store: RedisStore) -> None:
     answer = gh([GREEN])
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
