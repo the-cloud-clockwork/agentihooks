@@ -774,7 +774,7 @@ class RedisStore:
     def set_peer(self, slug, peer):
         self.redis.set(self.key(slug, "peer"), peer)
 
-    def peer(self, slug):
+    def peer(self, slug: str) -> str:
         return self.redis.get(self.key(slug, "peer")) or ""
 
     def clear_peer(self, slug):

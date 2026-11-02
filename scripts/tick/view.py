@@ -30,7 +30,7 @@ __all__ = [
     "view_file",
 ]
 
-PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview", "plans", "slices")
 
 Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
@@ -58,8 +58,9 @@ REFRESH: ContextVar[tuple[str, Callable[[], LedgerView]] | None] = ContextVar("t
 
 
 def view_file(base: str, slug: str, directory: Path) -> Path:
-    """The file holding the view of ledger ``slug`` on the server at ``base``."""
-    return directory / "ledger-views" / f"{hashlib.sha256(f'{base} {slug}'.encode()).hexdigest()[:32]}.json"
+    """The file holding the requested parts of ledger ``slug`` on the server at ``base``."""
+    identity = f"{base} {slug} {PARTS}"
+    return directory / "ledger-views" / f"{hashlib.sha256(identity.encode()).hexdigest()[:32]}.json"
 
 
 def refreshed(path: Path, reader: Reader) -> LedgerView:
