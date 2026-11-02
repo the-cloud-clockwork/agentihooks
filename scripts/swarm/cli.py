@@ -59,7 +59,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from contextvars import copy_context
@@ -189,7 +189,9 @@ from scripts.swarm_ledger import (
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 from scripts.tick import view as ledger_view
-from scripts.tick.adapters.github import command
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.steps import host as host_steps
 
 SETTABLE = {
@@ -256,10 +258,11 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-def _publish_tick_status(store, slug, doc, view=None):
+def _publish_tick_status(
+    store: Any, slug: str, doc: Any, view: Any = None, failure: BaseException | None = None
+) -> None:
     from scripts.swarm import command_runner
 
-    failure = sys.exception()
     try:
         timing.call(command_runner.publish, store, slug, doc, view)
     except Exception:
@@ -270,7 +273,7 @@ def _publish_tick_status(store, slug, doc, view=None):
 def _phase_steps(inbox, store, slug, doc, ledger):
     actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
     if actions:
-        doc = timing.call(ledger.state, slug)
+        doc = timing.call(ledger_client.pass_state, ledger, slug)
     ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
     actions += ticked
     if ticked:
@@ -279,7 +282,7 @@ def _phase_steps(inbox, store, slug, doc, ledger):
             inbox,
             store,
             slug,
-            timing.call(ledger.state, slug),
+            timing.call(ledger_client.pass_state, ledger, slug),
             ledger,
             store.config(slug),
         )
@@ -303,7 +306,7 @@ def _stopped_tick(store, slug, ledger, runtime, held):
     controls = timing.call(command_runner.consume, store, slug)
     if timing.call(ledger.binned, slug):
         return controls + _bin_stop(store, slug, ledger, runtime), {}
-    doc = timing.call(ledger.state, slug)
+    doc = timing.call(ledger_client.pass_state, ledger, slug)
     store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
     return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
@@ -372,6 +375,7 @@ def run_tick(
         host_steps.raise_held(box)
         if "stop" in box:
             return box["stop"]
+        beating.enter_context(ledger_view.holding())
         if ledger_view.reads(ledger):
             ledger_view.start(slug, ledger.service)
         runtime = controller.FencedRuntime(
@@ -393,7 +397,7 @@ def run_tick(
                 return _bin_stop(store, slug, ledger, runtime)
             inbox = InboxStore(store.redis)
             try:
-                doc = timing.call(ledger.state, slug)
+                doc = timing.call(ledger_client.pass_state, ledger, slug)
             except LedgerGone as exc:
                 first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
                 return (
@@ -404,7 +408,7 @@ def run_tick(
             host_steps.raise_held(box)
             run_group("wrapper refresh", **passing, scheduled=scheduled)
             host_steps.raise_held(box)
-            doc, config = timing.call(ledger.state, slug), store.config(slug)
+            doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
             judging: dict[str, Any] = {}
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
@@ -420,7 +424,7 @@ def run_tick(
             run_group("wrapper relay", **passing, inbox=inbox)
             host_steps.raise_held(box)
             agents = box["agents"]
-            doc, config = timing.call(ledger.state, slug), store.config(slug)
+            doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
             run_group("wrapper view", **passing, inbox=inbox, doc=doc, view=view)
             host_steps.raise_held(box)
             view = box["view"]
@@ -430,7 +434,7 @@ def run_tick(
             host_steps.raise_held(box)
             actions += run_group("wrapper metrics", **passing, count=len(actions))
             host_steps.raise_held(box)
-            doc = timing.call(ledger.state, slug)
+            doc = timing.call(ledger_client.pass_state, ledger, slug)
             run_group("after", **(passing | {"doc": doc}))
             host_steps.raise_held(box)
             started = box["started"]
@@ -438,7 +442,9 @@ def run_tick(
     finally:
         try:
             published: dict[str, Any] = {}
-            run_group("wrapper status", store=store, slug=slug, doc=doc, view=view, box=published)
+            run_group(
+                "wrapper status", store=store, slug=slug, doc=doc, view=view, box=published, failure=sys.exception()
+            )
             host_steps.raise_held(published)
         finally:
             beating.close()
@@ -525,7 +531,7 @@ def _end_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     ):
         return []
     ledger = ledger or LedgerClient()
-    doc = ledger.state(slug)
+    doc = ledger_client.pass_state(ledger, slug)
     inbox = InboxStore(store.redis)
     view = ledger_events.tick_view(inbox, store, slug, doc)
     lease.require(store, slug, held)
@@ -1666,23 +1672,20 @@ def _tracks(run, recorded):
     return done.returncode == 0 and done.stdout.strip() == f"origin/{recorded}"
 
 
-PULL_HEAD = "headRefName,headRepository,headRepositoryOwner"
+PULL_SECONDS = 20
 
 
-def pull_branch(url, run=subprocess.run):
+def pull_branch(
+    url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control
+) -> tuple[str, str]:
+    """Read a pull request's head branch and the url of the repository holding it, both empty when unreadable."""
     try:
-        done = run(command(["pr", "view", url, "--json", PULL_HEAD]), capture_output=True, text=True, timeout=20)
-        found = json.loads(done.stdout) if done.returncode == 0 else {}
-        return found["headRefName"], _head_repo(url, found)
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        provider, reference = ports(url)
+        change = provider.change(reference, deadline=Deadline.after(PULL_SECONDS))
+    except stack.PORT_ERRORS:
         return "", ""
-
-
-def _head_repo(url, found):
-    owner, repo = found.get("headRepositoryOwner") or {}, found.get("headRepository") or {}
-    if not (owner.get("login") and repo.get("name")):
-        return ""
-    return f"{url.split('/pull/')[0].rsplit('/', 2)[0]}/{owner['login']}/{repo['name']}"
+    host = url.split("/pull/")[0].rsplit("/", 2)[0]
+    return change.head_branch, f"{host}/{change.head_repository}" if change.head_repository else ""
 
 
 def origin_repo(run=subprocess.run):

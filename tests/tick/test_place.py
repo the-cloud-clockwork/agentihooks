@@ -6,6 +6,7 @@ from typing import Any, Iterator
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline

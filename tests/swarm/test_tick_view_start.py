@@ -60,3 +60,33 @@ def test_a_pass_with_a_ledger_client_stand_in_reads_no_view(env: tuple, monkeypa
     with pytest.raises(RuntimeError, match="^fenced$"):
         cli.run_tick(store, "sw", StandIn(), rt, FakeHerdr({}))
     assert started == []
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_pass_holding_a_view_makes_no_whole_ledger_read(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    doc, whole, refreshes = ledger.state("sw"), [], []
+    ledger.service = True
+    monkeypatch.setattr(ledger, "state", lambda slug: whole.append(slug) or doc, raising=False)
+
+    def item(slug: str, path: str) -> dict | None:
+        name, _, item_id = path.partition("/")
+        return next((entry for entry in doc.get(name) or [] if entry.get("id") == item_id), None)
+
+    monkeypatch.setattr(ledger, "item", item, raising=False)
+
+    def refresh() -> view.LedgerView:
+        refreshes.append(len(refreshes))
+        return view.LedgerView(len(refreshes), doc)
+
+    def start(slug: str, service: bool = False) -> None:
+        view.REFRESH.set((slug, refresh))
+
+    monkeypatch.setattr(view, "reads", lambda client: client is ledger)
+    monkeypatch.setattr(view, "start", start)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert whole == []
+    assert refreshes
+    assert view.REFRESH.get() is None

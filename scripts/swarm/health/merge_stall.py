@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import time
 from collections import Counter
@@ -14,6 +15,7 @@ HOUR_MS = 3_600_000
 CACHE_MS = 300_000
 RUNS = 10
 STREAK = 3
+REMOTE = re.compile(r"[a-z][a-z0-9+.-]*://|[\w-]+(\.[\w-]+)+/", re.IGNORECASE)
 FAILED = frozenset({"failure", "timed_out", "action_required", "startup_failure"})
 QUERY = """
 query($owner:String!,$name:String!,$cursor:String){
@@ -38,7 +40,7 @@ def request(repo: str, args: list[str]) -> dict:
             "swarm.merge_stall",
             args,
             subprocess.run,
-            cwd=repo,
+            cwd=None if REMOTE.match(repo) else repo,
             capture_output=True,
             text=True,
             timeout=min(20, remaining),

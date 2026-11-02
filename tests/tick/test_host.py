@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.inbox import relay
 from scripts.swarm import (
     command_runner,

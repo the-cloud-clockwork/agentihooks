@@ -10,6 +10,7 @@ from scripts.tick.ports.source_control import (
     CheckState,
     Comment,
     Merged,
+    OpenChange,
     QueueEntry,
     QueueHealth,
     RateLimit,
@@ -86,6 +87,8 @@ class SourceControl(Protocol):
     def cancel_run(self, run_id: int, *, deadline: Deadline) -> None: ...
 
     def merged_at(self, commit: str, *, deadline: Deadline) -> str | None: ...
+
+    def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]: ...
 
 
 @runtime_checkable

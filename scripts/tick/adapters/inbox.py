@@ -1,7 +1,7 @@
 """Inbox port adapter: the tick's inbox tools over the durable inbox store, each call admitted only while its deadline holds."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.tick.deadline import Deadline
 
@@ -15,6 +15,15 @@ def check(deadline: Deadline) -> None:
     """Refuse a tool call whose deadline has already passed."""
     if deadline.expired:
         raise TimeoutError("tool deadline expired")
+
+
+def notify_pass_budget(redis: Any, slug: str, text: str, notice: str) -> None:
+    from scripts.inbox.store import DuplicateItem, InboxStore
+
+    try:
+        InboxStore(redis).send("swarm", f"master@{slug}", text, fyi=True, item_id=notice)
+    except DuplicateItem:
+        pass
 
 
 @dataclass(frozen=True)

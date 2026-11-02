@@ -993,3 +993,26 @@ def test_a_move_gives_way_when_a_records_batch_lands_under_its_watch(store: Any)
     assert port.move("sw", (), plan) is None
     assert port.record("sw", "grants", "h") is None
     assert port.record("sw", "grants", "g") is not None
+
+
+def test_an_import_that_loses_the_create_race_reads_the_winner(store: Any) -> None:
+    from scripts.events.bus import StateConflict
+    from scripts.swarm import fencing
+
+    class Racing:
+        def __init__(self) -> None:
+            self.reads: list[str] = []
+            self.created: list[str] = []
+
+        def get(self, slug: str) -> Any:
+            self.reads.append(slug)
+            return None if len(self.reads) == 1 else "winner"
+
+        def create(self, slug: str, value: bytes) -> None:
+            self.created.append(slug)
+            raise StateConflict("fixture contention")
+
+    racing = Racing()
+    assert fencing._entry(racing, store, "sw") == "winner"
+    assert racing.reads == ["sw", "sw"]
+    assert racing.created == ["sw"]

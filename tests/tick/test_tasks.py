@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import claim_hold, difficulty, grouping
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline

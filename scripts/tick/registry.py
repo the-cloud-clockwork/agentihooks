@@ -88,7 +88,7 @@ def waves() -> tuple[tuple[Step, ...], ...]:
 
 
 def latest_start(name: str, steps: list[Step]) -> float:
-    """Return how many seconds into the pass step ``name`` starts at the latest when every step it needs ends by its budget."""
+    """Return the latest start of step ``name`` in seconds when every step it needs ends by its budget."""
     by_name = {step.name: step for step in steps}
     starts: dict[str, float] = {}
     for wave in _dependency_waves(steps):
