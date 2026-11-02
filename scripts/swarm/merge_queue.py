@@ -8,6 +8,7 @@ from typing import Any, cast
 from scripts import gh_audit
 from scripts.swarm import github_reads, ledger_events, mutation_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
+from scripts.tick import pool
 from scripts.tick.adapters.github import command
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
@@ -42,7 +43,8 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
     for name, value in variables.items():
         argv += ["-f", f"{name}={value}"]
     try:
-        done = run(argv, capture_output=True, text=True, timeout=20)
+        with pool.limit("github"):
+            done = run(argv, capture_output=True, text=True, timeout=20)
         if done.returncode:
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
         response = json.loads(done.stdout)

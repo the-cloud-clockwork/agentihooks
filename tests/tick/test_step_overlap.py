@@ -19,11 +19,11 @@ class View:
 class BlockingStep:
     name: str
     budget_s: float = 0.1
-    order: int = 10
     group: str = "placement"
     lane: Lane = Lane("tick")
     interval_s: float = 60.0
     needs: frozenset[str] = frozenset()
+    reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
     release: Event = field(default_factory=Event)
     ended: Event = field(default_factory=Event)
