@@ -1224,12 +1224,6 @@ WALL_CLOCK_SPLITS = {
     "tests/hive/test_cli.py": [
         ("test_a_stalled_tls_client_is_dropped_after_the_request_timeout", "test_a_stalled_tls_client_is_dropped")
     ],
-    "tests/swarm/test_cli.py": [
-        (
-            "test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs",
-            "test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs",
-        )
-    ],
     "tests/gates/test_push_stop_executor.py": [
         (
             "test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition",
