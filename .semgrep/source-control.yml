@@ -15,5 +15,4 @@ rules:
         - "*.test.py"
       exclude:
         - "/scripts/swarm/github_reads.py"
-        - "/scripts/swarm/merge_queue.py"
         - "/scripts/tick/adapters/github.py"

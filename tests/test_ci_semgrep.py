@@ -127,6 +127,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert "/scripts/swarm/ci_speed.py" not in allowed
     assert "/scripts/swarm/mutation_wait.py" not in allowed
     assert "/scripts/swarm/ledger_events.py" not in allowed
+    assert allowed == ["/scripts/swarm/github_reads.py", "/scripts/tick/adapters/github.py"]
 
 
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
