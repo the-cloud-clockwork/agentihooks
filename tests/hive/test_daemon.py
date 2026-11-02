@@ -941,6 +941,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "repos": [],
         "capabilities": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
+        "beat_at": registry.show(redis, "machine")["beat_at"],
         "version": "",
     }
     assert redis.smembers(registry.INDEX) == {"machine"}
