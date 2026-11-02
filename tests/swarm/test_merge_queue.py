@@ -4,8 +4,8 @@ import subprocess
 import pytest
 
 from scripts.swarm import cli, ledger_events, merge_queue, queue_exit, waits
-from tests.swarm.graph_port import view as port_view
 from scripts.swarm.store import MASTER, SwarmError
+from tests.swarm.graph_port import view as port_view
 
 URL = "https://github.com/o/r/pull/7"
 OPEN = {
