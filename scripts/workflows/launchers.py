@@ -2,8 +2,10 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from tempfile import mkdtemp
+from typing import Any
 
 from scripts.headless.profile_run import ProfileRun, execute, run_profile
 from scripts.headless.request import TIMEOUT_S
@@ -28,17 +30,16 @@ class Scout:
     harness: str = "auto"
     timeout: float = TIMEOUT_S
 
-    def launch(self, stage: Stage, inputs: dict, run_dir: Path) -> StageResult:
+    def launch(self, stage: Stage, inputs: dict[str, Any], run_dir: Path) -> StageResult:
         """Run the headless scout once per count and pass when every run wrote its evidence set."""
         attempt = attempt_folder(stage, run_dir)
-        question = json.dumps(inputs)
         folders = [attempt / str(index) for index in range(stage.count)]
         with ThreadPoolExecutor(max_workers=stage.count) as pool:
-            outputs = list(pool.map(lambda folder: self.scout(stage, question, folder), folders))
+            outputs = list(pool.map(partial(self.scout, stage, json.dumps(inputs)), folders))
         outcome = "pass" if all(output is not None for output in outputs) else "retry"
         return StageResult(outcome, outputs)
 
-    def scout(self, stage: Stage, question: str, folder: Path) -> dict | None:
+    def scout(self, stage: Stage, question: str, folder: Path) -> dict[str, Any] | None:
         """Run one scout into the folder and return its evidence set, or None when it failed."""
         folder.mkdir(parents=True)
         out = folder / EVIDENCE
@@ -56,7 +57,7 @@ class HeadlessProfile:
     harness: str = "auto"
     timeout: float = TIMEOUT_S
 
-    def launch(self, stage: Stage, inputs: dict, run_dir: Path) -> StageResult:
+    def launch(self, stage: Stage, inputs: dict[str, Any], run_dir: Path) -> StageResult:
         if stage.profile == SCOUTER:
             return Scout(self.harness, self.timeout).launch(stage, inputs, run_dir)
         attempt = attempt_folder(stage, run_dir)
