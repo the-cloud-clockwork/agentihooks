@@ -903,7 +903,7 @@ class InboxStore:
     def confirm_shown(self, receiver: str, before: int) -> list[Item]:
         """Confirm every item delivered to receiver before this hook event began: the session lived past it."""
         receiver = self.names.resolve(receiver)
-        confirmed = []
+        confirmed: list[Item] = []
         if not self.session_id:
             return confirmed
         for item_id in self.redis.zrangebyscore(self.key("delivered"), "-inf", before - 1):
@@ -923,10 +923,10 @@ class InboxStore:
                 confirmed.append(item)
         return confirmed
 
-    def _delivered_to(self, item_id):
+    def _delivered_to(self, item_id: str) -> str:
         return next((e["by"] for e in reversed(self.history(item_id)) if e.get("state") == "delivered"), "")
 
-    def redeliver(self, now, window):
+    def redeliver(self, now: int, window: int) -> list[Item]:
         """Return each item delivered at least window ms ago and never confirmed to pending, for the next claim."""
         cutoff = now - window
         with self.redis.pipeline() as pipe:
@@ -939,7 +939,7 @@ class InboxStore:
         self.pool.distribute_all()
         return moved
 
-    def _build_delivered(self, since):
+    def _build_delivered(self, since: int) -> None:
         """Index the items a store without the delivered index left delivered after since; older ones stay as they are."""
         prefix = self.key("item", "")
         for key in self.redis.scan_iter(match=prefix + "*"):
@@ -948,7 +948,7 @@ class InboxStore:
                 self.redis.zadd(self.key("delivered"), {key[len(prefix) :]: int(updated_at)})
         self.redis.set(self.key("delivered", "built"), 1)
 
-    def requeue(self, item_id, by, reason, before=None):
+    def requeue(self, item_id: str, by: str, reason: str, before: int | None = None) -> Item | None:
         """Return a delivered item to pending; None once it moved on, or was delivered again after before."""
         from redis.exceptions import WatchError
 
@@ -959,7 +959,7 @@ class InboxStore:
                 continue
         raise InboxError(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_requeue(self, item_id, by, reason, before):
+    def _try_requeue(self, item_id: str, by: str, reason: str, before: int | None) -> Item | None:
         key = self.key("item", item_id)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)

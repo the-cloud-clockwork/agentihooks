@@ -17,7 +17,7 @@ LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
 MOVING_SEAT = re.compile(r"((eng|ci|plan)-\d+|dispatcher)@.+")
 
 
-def settle(inbox, name, seat, exit_text, worlds=None):
+def settle(inbox: "InboxStore", name: str, seat: str, exit_text: str, worlds: "_WorldPass | None" = None) -> None:
     """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
     for one while none is spawned yet. worlds is the sweep's pass, which skips a world whose Redis stops answering."""
     inbox.seats.record_exit(name, seat, exit_text)
@@ -29,7 +29,7 @@ def settle(inbox, name, seat, exit_text, worlds=None):
         worlds.run(world, lambda w: _settle_world(w, name, seat, exit_text))
 
 
-def _settle_world(inbox, name, seat, exit_text):
+def _settle_world(inbox: "InboxStore", name: str, seat: str, exit_text: str) -> None:
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 

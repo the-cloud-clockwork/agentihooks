@@ -8,7 +8,7 @@ Each swarm keeps one culture text that every occupant of every seat reads.
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm import naming
 from scripts.swarm.keyspace import ROOT
@@ -38,14 +38,14 @@ def seat_address(slug: str, seat: str) -> str:
 
 
 def is_seat(address: str) -> bool:
-    return "@" in address and cast(Any, naming.parse)(address) is None
+    return "@" in address and naming.parse(address) is None
 
 
 def of_swarm(address: str, slug: str, names: Any = None) -> bool:
     """A seat of the swarm, or the name the swarm gave one of its agents; names (the registry) resolves a name's code."""
     if is_seat(address):
         return address.endswith(f"@{slug}")
-    if cast(Any, naming.legacy_slug)(address) == slug:
+    if naming.legacy_slug(address) == slug:
         return True
     return names is not None and bool(names.slug_of(address) == slug)
 
@@ -54,7 +54,7 @@ def master_of(address: str, names: Any = None) -> str:
     """The master seat of the swarm a seat or a swarm agent's name belongs to, '' for any other address."""
     if is_seat(address):
         return seat_address(address.split("@", 1)[1], "master")
-    slug = names.slug_of(address) if names is not None else cast(Any, naming.legacy_slug)(address)
+    slug = names.slug_of(address) if names is not None else naming.legacy_slug(address)
     return seat_address(slug, "master") if slug else ""
 
 
@@ -114,7 +114,7 @@ class SeatRegistry:
     def agent_seats(self, slug: str) -> list[tuple[str, str]]:
         prefix = f"{PREFIX}-of:"
         legacy = self.redis.scan_iter(match=f"{prefix}{slug}-*", count=SCAN_PAGE)
-        old = [name for key in legacy if cast(str, naming.legacy_slug(name := key[len(prefix) :])) == slug]
+        old = [name for key in legacy if naming.legacy_slug(name := key[len(prefix) :]) == slug]
         named: list[str] = [row["name"] for row in naming.NameRegistry(self.redis).names(slug)]
         seats = self._known_seats(old + named)
         legacy = list(zip(old, seats[: len(old)]))
