@@ -1,14 +1,4 @@
-"""agentihooks trace: the directives a session received and the layer behind each."""
-
-import argparse
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-from hooks.context import injection_trace, quarantine, trace_sweep
-
-USAGE = """agentihooks trace: the directives a session received and the layer behind each.
+"""agentihooks trace: the directives a session received and the layer behind each.
 
 agentihooks trace [SESSION]                                   time, layer, source, locator, text per directive
 agentihooks trace [SESSION] --wrong SOURCE --repo PATH --reason TEXT [--quote PASSAGE]
@@ -38,6 +28,14 @@ it came from, the repo, path and blob of a rule or doctrine file, or the seat
 and note number of a recap or learned note.
 """
 
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from hooks.context import injection_trace, quarantine, trace_sweep
+
 
 def _print_corrections(rows):
     if not rows:
@@ -51,7 +49,7 @@ def _print_corrections(rows):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog="agentihooks trace", description=USAGE, formatter_class=argparse.RawDescriptionHelpFormatter
+        prog="agentihooks trace", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("session", nargs="?", default=os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
     parser.add_argument("--wrong", metavar="SOURCE")

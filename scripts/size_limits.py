@@ -20,6 +20,7 @@ _SETTINGS = (
     f"target-version='py{sys.version_info.major}{sys.version_info.minor}'",
 )
 _MEASURED = re.compile(r"\((\d+) > \d+\)")
+# -I keeps a ruff module in the graded tree from shadowing the real one.
 _RUFF = (sys.executable, "-I", "-m", "ruff")
 
 
@@ -28,7 +29,6 @@ class GradeError(Exception):
 
 
 def _ruff_version() -> str:
-    """_RUFF: -I keeps a ruff module in the graded tree from shadowing the real one."""
     return subprocess.run([*_RUFF, "--version"], capture_output=True, text=True).stdout.strip().removeprefix("ruff ")
 
 

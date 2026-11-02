@@ -1,11 +1,10 @@
-"""gh 2.x renames the home gh folder into $XDG_CONFIG_HOME/gh when that folder is missing and GH_CONFIG_DIR is unset."""
-
 import contextlib
 import shlex
 from collections.abc import MutableMapping
 from pathlib import Path
 
 KEY = "GH_CONFIG_DIR"
+# gh 2.x renames the home gh folder into $XDG_CONFIG_HOME/gh when that folder is missing and GH_CONFIG_DIR is unset.
 SHELL_PIN = (
     'if [ -n "${XDG_CONFIG_HOME:-}" ] && [ "$XDG_CONFIG_HOME" != "$HOME/.config" ]; then '
     'export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$HOME/.config/gh}"; fi\n'

@@ -19,6 +19,7 @@ def _render(call: str) -> str:
 
 RENDER_MEMBER = _render(f"nats_grant.member_claims({MEMBER_KEY!r})")
 RENDER_CONTROLLER = _render("nats_grant.controller_claims()")
+# The shared swarm-hive password user cannot carry a per member reply prefix, so its _INBOX.> stands for this one.
 MEMBER_INBOX = f"_INBOX.{MEMBER_KEY}.>"
 SHARED_INBOX = "_INBOX.>"
 HIVE_VALUES = "k8s/values-overlays/agentihooks-swarm-nats/values.yaml"
@@ -28,6 +29,7 @@ HIVE_USER = "swarm-hive"
 CONTROLLER_USER = "swarm-controller"
 LEDGER_USER = "swarm-ledger"
 LEDGER_SOURCE = "scripts/ci_hive_nats_grants.py"
+# The ledger signs in with the antoncore users file credential, so its grant lives here rather than in nats_grant.
 LEDGER_BUCKETS = ("inbox",)
 LEDGER_PUBLISH = (
     "swarm.>",
@@ -69,9 +71,6 @@ def _rendered(agentihooks: str, script: str, function: str) -> dict[str, dict[st
 
 
 def member_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
-    """MEMBER_INBOX: The shared swarm-hive password user cannot carry a per member reply prefix, so its _INBOX.> stands for
-    this one.
-    """
     grants = _rendered(agentihooks, RENDER_MEMBER, "member_claims")
     subscribe = grants["subscribe"]
     subscribe["allow"] = frozenset(
@@ -85,9 +84,6 @@ def controller_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
 
 
 def ledger_grants() -> dict[str, dict[str, frozenset[str]]]:
-    """LEDGER_BUCKETS: The ledger signs in with the antoncore users file credential, so its grant lives here rather than in
-    nats_grant.
-    """
     return {"publish": _direction(list(LEDGER_PUBLISH)), "subscribe": _direction(list(LEDGER_SUBSCRIBE))}
 
 

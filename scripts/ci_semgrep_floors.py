@@ -7,6 +7,7 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
+# The workflow runs the base branch copy of this script from outside the checkout, so the tree is the working directory.
 ROOT = Path.cwd()
 RULES = ROOT / ".semgrep-guards"
 FLOORS = RULES / "floors.json"
@@ -14,9 +15,6 @@ TARGET = "hooks"
 
 
 def _semgrep(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
-    """ROOT: The workflow runs the base branch copy of this script from outside the checkout, so the tree is the working
-    directory.
-    """
     return subprocess.run(
         ["semgrep", "scan", "--metrics", "off", *args], capture_output=True, text=True, cwd=cwd or ROOT
     )
@@ -57,7 +55,7 @@ def _fixtures(rule: Path) -> tuple[Path, Path]:
 
 
 def fixture_test(rule_files: list[Path]) -> tuple[set[str], set[str]]:
-    """The repository ignores the guard folder, so a fresh copy with an empty ignore file grades every fixture."""
+    # The repository ignores the guard folder, so a fresh copy with an empty ignore file grades every fixture.
     with tempfile.TemporaryDirectory() as folder:
         copy = Path(folder) / "rules"
         copy.mkdir()

@@ -32,6 +32,7 @@ SHRINK_ONLY = (
     "tests/TYPE_BASELINE.json",
     "tests/WHOLE_LEDGER_ALLOWLIST.json",
 )
+# Each of these moves only with its own gate's evidence, which that gate checks against the base.
 GRADED_BY = (
     (".semgrep-guards/floors.json", "scripts.ci_semgrep_floors"),
     ("tests/LOCKED_MANIFEST.json", "scripts.locked_tests"),
@@ -154,7 +155,6 @@ def shrunk(base: object, head: object, where: str) -> list[str]:
 def allowlist_errors(
     base: Path, head: Path, allowlists: tuple[str, ...] = SHRINK_ONLY, graded: tuple[tuple[str, str], ...] = GRADED_BY
 ) -> tuple[list[str], int]:
-    """GRADED_BY: Each of these moves only with its own gate's evidence, which that gate checks against the base."""
     errors, compared = [], 0
     graded_paths = {path for path, _ in graded}
     for path in allowlists:

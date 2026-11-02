@@ -149,7 +149,7 @@ def _cases(context: list[ast.AST], constants: dict[str, ast.AST]) -> int:
 
 
 def _functions(body: list[ast.stmt], prefix: str, inherited: list[ast.AST]):
-    """Module and class statements carry pytestmark and stored marks, so they disable every test below them."""
+    # Module and class statements carry pytestmark and stored marks, so they disable every test below them.
     context = [*inherited, *(node for node in body if not isinstance(node, DEFINITIONS))]
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -254,7 +254,6 @@ def unlocking_configs(tree: Path, modules: tuple[str, ...] = LOCKED) -> list[str
 
 
 def grade(base: dict, recorded: dict, head: dict) -> list[str]:
-    """A base manifest written before texts were pinned grades by counts only."""
     errors = [
         f"The locked test {key} is skipped, xfailed or returns early."
         for key, found in sorted(head.items())
@@ -269,6 +268,7 @@ def grade(base: dict, recorded: dict, head: dict) -> list[str]:
                 errors.append(f"The locked test {key} has {found[field]} {field}, the base locks {floor[field]}.")
             if key not in recorded or recorded[key][field] < floor[field]:
                 errors.append(f"The head {MANIFEST} drops or lowers the locked {field} of {key}.")
+        # A base manifest written before texts were pinned grades by counts only.
         if TEXTS in floor:
             if found is not None and Counter(floor[TEXTS]) - Counter(found[TEXTS]):
                 errors.append(f"The locked test {key} changes or drops an assertion the base locks.")
@@ -288,7 +288,6 @@ def grade(base: dict, recorded: dict, head: dict) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Only the pull request that introduces the manifest meets a base without one."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--base")
     parser.add_argument("--head", type=Path, default=Path.cwd())
@@ -305,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
             raise GradeError(f"the head has no {MANIFEST}")
         base = load(Path(args.base))
         if base is None:
+            # Only the pull request that introduces the manifest meets a base without one.
             print(f"::notice::The base has no {MANIFEST}; the head manifest locks itself.")
             base = recorded
         modules = named(base, recorded)

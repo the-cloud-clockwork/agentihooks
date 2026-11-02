@@ -8,6 +8,7 @@ import termios
 import time
 import tty
 
+# Remove this guard after herdr ships https://github.com/herdrdev/herdr/issues/5251.
 ESCAPE_WAIT_S = 1.0
 PASTE_END = b"\x1b[201~"
 FORWARDED = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
@@ -24,7 +25,6 @@ class InputFramer:
         return b"".join(self._consume(value) for value in data)
 
     def expire_escape(self) -> bytes:
-        """ESCAPE_WAIT_S: Remove this guard after herdr ships https://github.com/herdrdev/herdr/issues/5251."""
         if not self.paste and self.pending == b"\x1b" and time.monotonic() - self.escape_at >= ESCAPE_WAIT_S:
             self.pending.clear()
             return self.escape_key

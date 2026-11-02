@@ -9,6 +9,7 @@ from scripts.size_limits import _RUFF, RUFF_VERSION, GradeError, _ruff_version, 
 RULES = ("BLE001", "S110", "S112", "TRY203")
 SCOPE = ("hooks/", "scripts/gates/")
 ALLOWLIST = Path("tests/SWALLOWED_EXCEPTIONS_ALLOWLIST.json")
+# S110 and S112 skip a typed handler such as except ValueError unless told otherwise.
 _TYPED = "lint.flake8-bandit.check-typed-exception=true"
 
 
@@ -20,7 +21,6 @@ def _graded(tree: Path) -> list[Path]:
 
 
 def measure(tree: Path) -> dict[str, dict[str, int]]:
-    """_TYPED: S110 and S112 skip a typed handler such as except ValueError unless told otherwise."""
     tree = tree.resolve()
     flags = ("--isolated", "--ignore-noqa", "--exit-zero")
     command = [*_RUFF, "check", *flags, "--output-format", "json", "--select", ",".join(RULES), "--config", _TYPED]

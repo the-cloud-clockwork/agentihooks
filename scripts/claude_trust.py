@@ -37,7 +37,7 @@ def _trusted(data: dict, directory: Path) -> bool:
 
 
 def _scope(directory: Path):
-    """Claude does not count a trusted folder above the launch folder's git root."""
+    # Claude does not count a trusted folder above the launch folder's git root.
     for path in (directory, *directory.parents):
         yield path
         if (path / ".git").exists():
@@ -58,7 +58,7 @@ def _write(config: Path, data: dict) -> None:
 
 
 def _mark(config: Path, directory: Path, lock_timeout: float) -> bool:
-    """Claude Code guards this file with a proper-lockfile lock directory beside it."""
+    # Claude Code guards this file with a proper-lockfile lock directory beside it.
     lock = config.with_name(config.name + ".lock")
     deadline = time.monotonic() + lock_timeout
     while True:

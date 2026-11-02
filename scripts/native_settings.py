@@ -11,28 +11,31 @@ def native_settings(
     settings_profile: tuple[str, Path] | None,
     say: Callable[[str], None] | None = None,
 ) -> dict:
-    """Settings gain the bundle rung that MCP already had; without it a bundle can only express fleet-wide settings by
-    repeating them in every profile.
-    """
     _i = _install_module()
     say = say or _i._cprint
     raw_settings = _i._load_native_layer(_i.PROFILES_DIR / "_base" / _i._NATIVE_BASE_NAME[install_target])
     rendered: dict = _i.substitute_paths(raw_settings)
     rendered = _i.substitute_paths(rendered, "__PYTHON__", str(_i._detect_venv() or sys.executable))
 
+    # --- 1a. Bundle-global native overrides: root, shared, then user ---
+    # Settings gain the bundle rung that MCP already had; without it a bundle
+    # can only express fleet-wide settings by repeating them in every profile.
     for kind, bundle_root in _i._bundle_roots():
         label = f"Applied {_i._BUNDLE_LABELS[kind]} overrides: {{path}}"
         rendered = _apply_layer(rendered, install_target, bundle_root, label, say)
 
+    # --- 1b. Apply per-profile overrides (chained: each profile merges on top) ---
     for _, pdir in profile_dirs:
         rendered = _apply_layer(rendered, install_target, pdir, "Applied profile overrides: {path}", say)
 
+    # --- 1b2. Apply settings-profile overlay (settings.json + MCP only, not rules/CLAUDE.md) ---
     settings_profile_dir = settings_profile[1] if settings_profile else None
     if settings_profile:
         name = settings_profile[0]
         label = f"Applied settings-profile overlay: {name} ({_i._profile_source_label(name)})"
         rendered = _apply_layer(rendered, install_target, settings_profile_dir, label, say)
 
+    # --- 1c. Apply linked connectors (from last profile in chain) ---
     _apply_connectors(rendered, profile_dirs[-1][0], say)
 
     from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
@@ -43,14 +46,14 @@ def native_settings(
 
 
 def _apply_layer(rendered: dict, install_target: str, root: Path, label: str, say) -> dict:
-    """Resolve relative paths in hook commands against the layer's root (claude only — codex/copilot hooks are
-    adapter-written, never declared in their native settings files).
-    """
     _i = _install_module()
     path = _i._native_layer_path(root, install_target, _i._NATIVE_SETTINGS_NAME)
     if not path:
         return rendered
     layer = _i._load_native_layer(path)
+    # Resolve relative paths in hook commands against the layer's root
+    # (claude only — codex/copilot hooks are adapter-written, never
+    # declared in their native settings files).
     if install_target == "claude":
         layer = _i._resolve_profile_hook_paths(layer, root)
     say(label.replace("{path}", str(path)))

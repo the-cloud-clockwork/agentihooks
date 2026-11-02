@@ -174,11 +174,11 @@ def pull_after_exit(repo: str, number: int) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """unit-lost imports this module with the light runner's bare python3, which has no PyYAML."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
     parser.add_argument("--run-id", type=int, required=True)
     args = parser.parse_args(argv)
+    # unit-lost imports this module with the light runner's bare python3, which has no PyYAML.
     import yaml
 
     run = json.loads(_api(f"repos/{args.repo}/actions/runs/{args.run_id}"))

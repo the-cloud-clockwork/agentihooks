@@ -3,10 +3,6 @@
 GitHub bills artifact storage only for private and internal repositories, against one organisation limit. Later
 runs read the newest artifact of a name on a long lived or open pull request branch, from its newest run or its
 newest successful run, so both are kept at any age.
-
-DELETES_PER_MINUTE: A REST DELETE costs 5 of the 900 secondary rate limit points GitHub allows per minute.
-
-BUILD_RECORD: Docker build actions upload one record per build under a random name that no run reads back.
 """
 
 import argparse
@@ -23,8 +19,10 @@ LONG_LIVED = frozenset({"dev", "main", "master"})
 RUNS_PER_WORKFLOW = 3
 ATTEMPTS = 3
 WORKERS = 8
+# A REST DELETE costs 5 of the 900 secondary rate limit points GitHub allows per minute.
 DELETES_PER_MINUTE = 120
 MB = 1000**2
+# Docker build actions upload one record per build under a random name that no run reads back.
 BUILD_RECORD = ".dockerbuild"
 
 

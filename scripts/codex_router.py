@@ -3,8 +3,6 @@
 Token values only move from the environment into the child's CODEX_ACCESS_TOKEN, an ordinary ChatGPT
 token's account id claim into AGENTIHOOKS_CHATGPT_ACCOUNT_ID, and an api key stays in the child's
 environment under its own name; none is printed or written anywhere.
-
-NO_DAEMON: A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 """
 
 import base64
@@ -60,6 +58,7 @@ TOKEN_MIN_LIFE_H = 6.0
 EXPIRING = (
     "{env} expires in under {hours:g} h; the refresh authority renews it, else run agentihooks codex login {name}"
 )
+# A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
 BEARER_PROVIDER = "agentihooks-chatgpt"
@@ -725,7 +724,6 @@ def main(
     execvpe: Callable = os.execvpe,
     run: Callable = subprocess.run,
 ) -> int:
-    """Held until exec: the descriptor is close-on-exec, so the next launch counts this one as a live session."""
     active = dict(os.environ if environ is None else environ)
     own = _own_command(argv, active)
     if own is not None:
@@ -738,6 +736,7 @@ def main(
         print(f"agentihooks codex: warning: {warning}", file=sys.stderr)
     lock_path = Path(active.get("HOME", str(Path.home()))) / ".agentihooks" / "codex-route.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # Held until exec: the descriptor is close-on-exec, so the next launch counts this one as a live session.
     lock = lock_path.open("a+", encoding="utf-8")
     fcntl.flock(lock, fcntl.LOCK_EX)
     try:
