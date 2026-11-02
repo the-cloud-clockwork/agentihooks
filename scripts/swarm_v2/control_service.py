@@ -77,16 +77,17 @@ def launch_key(environ: Mapping[str, str]) -> LaunchKey:
 
 def published(environ: Mapping[str, str]) -> tuple[tuple[str, int, ssl.SSLContext] | None, str]:
     """Read the TLS listener the controller publishes beyond the cluster, and its public address."""
-    port, url = environ.get(TLS_PORT_ENV, ""), environ.get(PUBLIC_URL_ENV, "")
+    port = environ.get(TLS_PORT_ENV)
     if not port:
         return None, ""
     if not port.isdigit() or not 0 < int(port) <= MAX_PORT:
         raise ControlError(f"{TLS_PORT_ENV} must be a port number")
-    if not url.startswith("https://"):
-        raise ControlError(f"{TLS_PORT_ENV} needs {PUBLIC_URL_ENV}, an https address")
-    missing = [name for name in (TLS_CERT_ENV, TLS_KEY_ENV) if not environ.get(name)]
+    missing = [name for name in (PUBLIC_URL_ENV, TLS_CERT_ENV, TLS_KEY_ENV) if not environ.get(name)]
     if missing:
         raise ControlError(f"{TLS_PORT_ENV} needs {', '.join(missing)}")
+    url = environ[PUBLIC_URL_ENV]
+    if not url.startswith("https://"):
+        raise ControlError(f"{TLS_PORT_ENV} needs {PUBLIC_URL_ENV}, an https address")
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     context.load_cert_chain(environ[TLS_CERT_ENV], environ[TLS_KEY_ENV])
     return (HOST, int(port), context), url.rstrip("/")
@@ -141,7 +142,6 @@ class ControlService:
         self.server: ThreadingHTTPServer | None = None
         self.listen: tuple[str, int] | None = None
         self.secure: ThreadingHTTPServer | None = None
-        self.secure_thread: threading.Thread | None = None
         self.published: tuple[str, int, ssl.SSLContext] | None = None
         self.control_url = ""
         self.runtime = None
@@ -230,8 +230,7 @@ class ControlService:
     def serve_published(self, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
         """Serve the recovery endpoints over TLS for callers outside the cluster."""
         self.secure = serve_tls(RecoveryRoutes(self.recovery_api), host, port, context)
-        self.secure_thread = threading.Thread(target=self.secure.serve_forever, name=f"{THREAD}-tls", daemon=True)
-        self.secure_thread.start()
+        threading.Thread(target=self.secure.serve_forever, name=f"{THREAD}-tls", daemon=True).start()
         return self.secure
 
     def mount_ledger(self, folder: Path) -> None:
@@ -249,8 +248,7 @@ class ControlService:
                 self.server.shutdown()
             self.server.server_close()
         if self.secure is not None:
-            if self.secure_thread.is_alive():
-                self.secure.shutdown()
+            self.secure.shutdown()
             self.secure.server_close()
         if self.writer is not None:
             self.writer.release()

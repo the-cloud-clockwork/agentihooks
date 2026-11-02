@@ -1,5 +1,7 @@
 import json
+import socket
 import ssl
+import threading
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -616,6 +618,13 @@ def test_published_listener_needs_a_port_an_https_address_and_a_certificate(cert
     assert listen[:2] == ("0.0.0.0", 8781)
     assert listen[2].verify_mode == ssl.CERT_NONE
     assert url == "https://localhost:8781"
+    listen, url = published(published_environ(cert, port="65535", url="https://swarm.example/X/"))
+    assert (listen[1], url) == (65535, "https://swarm.example/X")
+    bare = {control_service.TLS_PORT_ENV: "8781"}
+    names = f"{control_service.PUBLIC_URL_ENV}, {control_service.TLS_CERT_ENV}, {control_service.TLS_KEY_ENV}"
+    with pytest.raises(ControlError) as unset:
+        published(bare)
+    assert str(unset.value) == f"{control_service.TLS_PORT_ENV} needs {names}"
     for port in ("x", "0", "65536"):
         with pytest.raises(ControlError, match=f"^{control_service.TLS_PORT_ENV} must be a port number$"):
             published(published_environ(cert, port=port))
@@ -646,23 +655,59 @@ def test_published_listener_serves_only_recovery_over_tls(pending: SimpleNamespa
     with pytest.raises(urllib.error.HTTPError) as refused:
         urllib.request.urlopen(health, timeout=5, context=trusted)
     assert refused.value.code == 404
+    assert json.loads(refused.value.read()) == {
+        "error_class": "invalid_request",
+        "operation_id": "unknown",
+        "retry": "new_request",
+        "message": "no such recovery endpoint",
+    }
+    threads = [thread for thread in threading.enumerate() if thread.name == "swarm-v2-api-tls"]
+    assert threads
+    assert all(thread.daemon for thread in threads)
     with pytest.raises(OSError):
         urllib.request.urlopen(base.replace("https", "http") + "/v2/health/live", timeout=5)
     pending.service.stop()
     assert pending.service.secure.socket.fileno() == -1
 
 
-def test_controller_publishes_its_public_address_beside_the_worker_address(pending: SimpleNamespace) -> None:
+def test_controller_publishes_its_public_address_beside_the_worker_address(
+    pending: SimpleNamespace, cert: tuple[str, str]
+) -> None:
+    from scripts.swarm_v2.control_service import published
+
     store, slug = pending.world.store, pending.recovery.slug
     pending.service.api_url = "http://controller.swarm.svc:8780"
-    pending.service.control_url = "https://swarm.example:8780"
     pending.service.listen = ("127.0.0.1", 0)
     pending.service._open()
+    assert (store.config(slug).control_url, pending.service.secure) == ("", None)
+    listen, _ = published(published_environ(cert, port="1"))
+    pending.service.published = ("127.0.0.1", 0, listen[2])
+    pending.service.control_url = "https://swarm.example:8780"
+    pending.service._open()
+    secure = pending.service.secure
+    assert secure is not None
     config = store.config(slug)
     assert (config.api_url, config.control_url) == ("http://controller.swarm.svc:8780", "https://swarm.example:8780")
     pending.service.control_url = "https://moved.example:8780"
     pending.service._open()
     assert store.config(slug).control_url == "https://moved.example:8780"
+    assert pending.service.secure is secure
+
+
+def test_published_listener_drops_a_caller_that_never_starts_tls(
+    pending: SimpleNamespace, cert: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_v2.api import server as api_server
+    from scripts.swarm_v2.control_service import published
+
+    monkeypatch.setattr(api_server, "HANDSHAKE_S", 0.2)
+    listen, _ = published(published_environ(cert, port="1"))
+    secure = pending.service.serve_published("127.0.0.1", 0, listen[2])
+    with socket.create_connection(("127.0.0.1", secure.server_port), timeout=5) as raw:
+        try:
+            assert raw.recv(1) == b""
+        except ConnectionResetError:
+            pass
 
 
 def test_restore_decision_prefers_the_published_address_and_trusts_the_ledger_ca(
