@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.584 · 2026-11-02
+
+### 2026-11-02 · b502e850eedc · #9345 · @nestorcolt
+
+**Steps read the pass ledger view; gate whole ledger state reads**
+
+This change makes tick steps and swarm helpers read a held per-pass snapshot of the ledger (freezes, priorities, follow ups, alerts, overview) instead of repeatedly pulling the whole ledger state, with `pass_state` falling back to a full read only when no view is held, so behavior outside a pass stays the same. A new `no_whole_ledger` check enforces this going forward, counting remaining whole-ledger reads against a shrink-only allowlist (currently 11 reads in 5 files, none in tick), reducing load and catching regressions early. One known gap remains: `freeze.watched` still reads a watched peer ledger whole, tracked as a follow-up.
+
 ## v2.17.582 · 2026-11-02
 
 ### 2026-11-02 · 5d07c35e2013 · #9385 · @agenticore-app
