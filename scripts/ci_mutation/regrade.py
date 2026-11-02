@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from scripts.ci_mutation.clearances import load_clearances  # pyright: ignore[reportUnknownVariableType]
 from scripts.ci_mutation.merge import merge_units  # pyright: ignore[reportUnknownVariableType]
@@ -21,14 +22,16 @@ from scripts.ci_mutation.scope import (
 GRADER = Path(__file__).resolve().parents[2]
 
 
-def regrade(report: dict, cleared: dict, changes: dict[str, set[int]]) -> dict:
+def regrade(report: dict[str, Any], cleared: dict[str, Any], changes: dict[str, set[int]]) -> dict[str, Any]:
     """Return the report with every changed file graded again from its recorded rows."""
-    graded = report.get("graded", [])
+    graded: list[dict[str, Any]] = report.get("graded", [])
     if sorted(entry["path"] for entry in graded) != sorted(file["path"] for file in report["files"]):
         raise ValueError("Mutation report rows do not cover exactly its graded files")
     if sorted(file["path"] for file in report["files"] + report["not_mutated"]) != sorted(changes):
         raise ValueError("Mutation report does not cover exactly the changed Python files")
-    files = [evaluate(entry["path"], entry["rows"], changes[entry["path"]], cleared) for entry in graded]
+    files: list[dict[str, Any]] = [
+        evaluate(entry["path"], entry["rows"], changes[entry["path"]], cleared) for entry in graded
+    ]
     return {**report, "files": files, "failed": bool(report["not_mutated"]) or any(file["failures"] for file in files)}
 
 
@@ -121,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "units":
         return grade_units(args.folder, args.shards, args.root, args.bases.split(","))
     changes = discover_changes(args.root, args.bases.split(","), "HEAD")
-    cleared = load_clearances(args.root)
+    cleared: dict[str, Any] = load_clearances(args.root)  # pyright: ignore[reportUnknownVariableType]
     report = json.loads(args.report.read_text())
     wanted = {entry["path"] for entry in report.get("graded", [])}
     rows = recollect(args.report.parent, wanted, (args.shard, args.shards))
