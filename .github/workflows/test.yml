@@ -3438,7 +3438,6 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
           grader="$RUNNER_TEMP/grader"
-          grep -qs 'add_parser("units")' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade units .mutation-reports "$(jq length <<< "$PLANNED")" . "$BASES"
 
   test-summary:
@@ -3937,7 +3936,6 @@ jobs:
         run: |
           grader="$RUNNER_TEMP/grader"
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          grep -qs 'add_parser("units")' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade bases . "$BASE" >> "$GITHUB_OUTPUT"
 
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
@@ -3974,7 +3972,6 @@ jobs:
           python -m scripts.ci_mutation --bases "$BASES" --budget 1080
           grader="$RUNNER_TEMP/grader"
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          grep -qs 'add_parser("units")' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
       - name: Forward the reused or empty mutation report
@@ -4184,7 +4181,6 @@ jobs:
         run: |
           grader="$RUNNER_TEMP/grader"
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          grep -qs 'add_parser("units")' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES" --stats .mutation-stats
 
       - name: Upload complete inline mutation evidence
@@ -4415,7 +4411,6 @@ jobs:
         run: |
           grader="$RUNNER_TEMP/grader"
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          grep -qs 'add_parser("units")' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES" --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
       - name: Upload complete mutation evidence

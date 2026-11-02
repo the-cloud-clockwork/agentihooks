@@ -2016,10 +2016,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     )
 
 
-GRADER_FALLBACK = (
-    '[[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }\n'
-    'grep -qs \'add_parser("units")\' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"'
-)
+GRADER_FALLBACK = '[[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }'
 
 
 def test_the_protected_grader_chooses_the_mutation_bases() -> None:
@@ -2116,7 +2113,6 @@ def test_the_gate_grades_split_units_from_every_shard_with_the_protected_grader(
     assert grade["run"] == (
         'git fetch --no-tags origin "$GRADER"\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
         'grader="$RUNNER_TEMP/grader"\n'
-        'grep -qs \'add_parser("units")\' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"\n'
         'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade units .mutation-reports'
         ' "$(jq length <<< "$PLANNED")" . "$BASES"\n'
     )
