@@ -38,7 +38,7 @@ class Matcher:
     token: str
     alternatives: tuple[Alternative, ...]
 
-    def matches(self, tool_name: str, tool_input: dict | None = None) -> bool:
+    def matches(self, tool_name: str, tool_input: dict[str, object] | None = None) -> bool:
         name = (tool_name or "").lower()
         heads: frozenset[str] | None = None
         for alt in self.alternatives:
@@ -62,7 +62,7 @@ def parse(token: str) -> Matcher:
     raw = (token or "").strip().lower()
     if not raw:
         raise ValueError("empty matcher")
-    alternatives = []
+    alternatives: list[Alternative] = []
     for part in raw.split("+"):
         if not part:
             raise ValueError(f"empty alternative in matcher {token!r}")
@@ -94,7 +94,7 @@ def command_heads(command: str) -> frozenset[str]:
     """Lowercased basenames of every simple command's program in *command*."""
     if not command.strip():
         return frozenset()
-    from hooks.context.credential_guard import strip_heredocs
+    from hooks.context.credential_guard import strip_heredocs  # pyright: ignore[reportUnknownVariableType]
 
     text = strip_heredocs(command)
     try:
@@ -145,9 +145,9 @@ def _is_control(tok: str, prev: str) -> bool:
 
 
 def _fallback_heads(text: str) -> frozenset[str]:
-    from hooks.context.credential_guard import split_commands, split_stages, tokens_of, verb_index
+    from hooks.context.credential_guard import split_commands, split_stages, tokens_of, verb_index  # pyright: ignore[reportUnknownVariableType]
 
-    heads = set()
+    heads: set[str] = set()
     for segment in split_commands(text):
         for stage in split_stages(segment):
             tokens = tokens_of(stage)

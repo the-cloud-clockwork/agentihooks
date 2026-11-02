@@ -25,7 +25,7 @@ import os
 import re
 
 from hooks._redis import get_redis, redis_key
-from hooks.common import log
+from hooks.common import log  # pyright: ignore[reportUnknownVariableType]
 
 CONTROLS_TYPE = "controls_disabled"
 from hooks.config import AGENTIHOOKS_HOME

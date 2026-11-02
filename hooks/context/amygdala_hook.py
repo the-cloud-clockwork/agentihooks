@@ -19,14 +19,14 @@ from hooks.context.broadcast import reconcile_channel_broadcasts
 _SIGNAL_PATH: str = os.getenv("AMYGDALA_SIGNAL_PATH", "")
 
 
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
+def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     """Minimal frontmatter parser (no PyYAML dep)."""
     if not text.startswith("---"):
         return {}, text
     parts = text.split("---", 2)
     if len(parts) < 3:
         return {}, text
-    fm = {}
+    fm: dict[str, str] = {}
     for line in parts[1].strip().splitlines():
         if ":" in line:
             key, _, val = line.partition(":")

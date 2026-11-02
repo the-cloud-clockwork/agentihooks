@@ -4,7 +4,7 @@ Reads DEFAULT_EFFORT and THINKING_BUDGET_TOKENS from config to generate
 an advisory message that helps control decode token spend.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 
 def get_thinking_guidance(default_effort: str, budget: int) -> str:
@@ -20,7 +20,7 @@ def get_thinking_guidance(default_effort: str, budget: int) -> str:
     if default_effort == "high" and budget <= 0:
         return ""
 
-    parts = []
+    parts: list[str] = []
 
     effort_guidance = {
         "low": (
@@ -46,7 +46,7 @@ def get_thinking_guidance(default_effort: str, budget: int) -> str:
     return " ".join(parts)
 
 
-def check_subagent_effort(tool_input: dict, default_effort: str) -> Optional[str]:
+def check_subagent_effort(tool_input: dict[str, Any], default_effort: str) -> Optional[str]:
     """Check if a spawned Agent uses unnecessarily expensive settings.
 
     Args:

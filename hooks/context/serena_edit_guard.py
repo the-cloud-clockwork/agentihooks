@@ -12,6 +12,7 @@ import re
 import shlex
 from itertools import takewhile
 from pathlib import Path
+from typing import Any
 
 from hooks.hook_manager import BlockAction
 from scripts.swarm import naming
@@ -82,7 +83,7 @@ def _block_foreign_delete(path: Path, root: Path) -> None:
     )
 
 
-def _check_files(tool_input: dict, cwd: Path) -> None:
+def _check_files(tool_input: dict[str, Any], cwd: Path) -> None:
     session = _checkout_root(cwd.resolve())
     deleted = _patch_deletions(tool_input, cwd)
     for raw in filter(None, tool_input.get("file_paths") or [tool_input.get("file_path")]):
@@ -96,7 +97,7 @@ def _check_files(tool_input: dict, cwd: Path) -> None:
             _block(path, root)
 
 
-def _patch_deletions(tool_input: dict, cwd: Path) -> set[Path]:
+def _patch_deletions(tool_input: dict[str, Any], cwd: Path) -> set[Path]:
     if not tool_input.get("file_paths"):
         return set()
     actions: dict[Path, set[str]] = {}
@@ -111,7 +112,7 @@ def _own_worktree(root: Path) -> bool:
     if (root.parent.parent.parent if tmp else root.parent.parent) != base:
         return False
     try:
-        return naming.is_worktree(root.name, os.environ, tmp=tmp)
+        return naming.is_worktree(root.name, os.environ, tmp=tmp)  # pyright: ignore[reportUnknownMemberType]
     except naming.NamingError:
         return False
 
@@ -139,7 +140,7 @@ def _tokens(text: str) -> list[str]:
 
 
 def _shell_delete_targets(command: str, base: Path) -> list[tuple[str, Path]]:
-    targets = []
+    targets: list[tuple[str, Path]] = []
     for match in _SHELL_DELETE.finditer(command):
         where = base / Path(_tokens(match.group(1))[0]).expanduser() if match.group(1) else base
         targets += [(token, where) for token in _tokens(match.group(2))]
@@ -159,13 +160,13 @@ def _check_shell_deletes(command: str, base: Path, session: Path | None) -> None
             _check_delete(path, Path(name), session)
 
 
-def check(payload: dict) -> None:
+def check(payload: dict[str, Any]) -> None:
     from hooks.config import SERENA_EDIT_GUARD_ENABLED
 
     if not SERENA_EDIT_GUARD_ENABLED:
         return
     tool_name = payload.get("tool_name", "")
-    tool_input = payload.get("tool_input") or {}
+    tool_input: dict[str, Any] = payload.get("tool_input") or {}
     cwd = Path(payload.get("cwd") or ".")
 
     if tool_name in _FILE_TOOLS:
@@ -174,7 +175,7 @@ def check(payload: dict) -> None:
 
     if tool_name != "Bash":
         return
-    command = tool_input.get("command", "")
+    command: str = tool_input.get("command", "")
     base = cwd
     for target in _CD.findall(command):
         base = base / Path(target.strip("'\"")).expanduser()

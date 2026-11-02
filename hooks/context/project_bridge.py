@@ -21,7 +21,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from hooks.common import inject_context, log
+from hooks.common import inject_context, log  # pyright: ignore[reportUnknownVariableType]
 from scripts.claude_config import claude_home
 
 _BANNER_HEADER = "RULES IMPORTANT!! (HARD FLOOR) !!"

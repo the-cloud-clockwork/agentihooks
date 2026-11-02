@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from hooks._redis import get_redis, redis_key
-from hooks.common import log
+from hooks.common import log  # pyright: ignore[reportUnknownVariableType]
 
 VOICE_TYPE = "voice_enabled"
 from hooks.config import AGENTIHOOKS_HOME

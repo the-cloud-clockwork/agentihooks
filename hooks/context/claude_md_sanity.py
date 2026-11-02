@@ -2,9 +2,10 @@
 
 import re
 from pathlib import Path
+from typing import Any
 
 from hooks._redis import SESSION_TTL, get_redis, redis_key
-from hooks.common import log
+from hooks.common import log  # pyright: ignore[reportUnknownVariableType]
 from hooks.config import AGENTIHOOKS_HOME, CLAUDE_MD_MAXLINES
 from hooks.hook_manager import BlockAction
 
@@ -85,16 +86,16 @@ def clear_session_max_lines(session_id: str) -> None:
         pass
 
 
-def check_claude_md_write(payload: dict) -> None:
+def check_claude_md_write(payload: dict[str, Any]) -> None:
     """Block Write/Edit operations that would push a CLAUDE.md file past the max line limit.
 
     Raises BlockAction if the resulting file would exceed CLAUDE_MD_MAXLINES.
     Silently returns for non-CLAUDE.md files.
     """
-    tool_name = payload.get("tool_name", "")
-    tool_input = payload.get("tool_input", {})
+    tool_name: str = payload.get("tool_name", "")
+    tool_input: dict[str, Any] = payload.get("tool_input", {})
 
-    file_path = tool_input.get("file_path", "")
+    file_path: str = tool_input.get("file_path", "")
     PROTECTED_NAMES = {"CLAUDE.md", "CLAUDE.local.md"}
     if not file_path or Path(file_path).name not in PROTECTED_NAMES:
         return
@@ -102,7 +103,7 @@ def check_claude_md_write(payload: dict) -> None:
     max_lines = get_max_lines(payload.get("session_id", ""))
 
     if tool_name == "Write":
-        content = tool_input.get("content", "")
+        content: str = tool_input.get("content", "")
         resulting_lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
 
         if resulting_lines > max_lines:
@@ -119,8 +120,8 @@ def check_claude_md_write(payload: dict) -> None:
             return
 
         current_content = disk_path.read_text(encoding="utf-8")
-        old_string = tool_input.get("old_string", "")
-        new_string = tool_input.get("new_string", "")
+        old_string: str = tool_input.get("old_string", "")
+        new_string: str = tool_input.get("new_string", "")
 
         if old_string and old_string in current_content:
             resulting_content = current_content.replace(old_string, new_string, 1)

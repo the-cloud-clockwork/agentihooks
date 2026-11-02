@@ -5,9 +5,13 @@ import os
 import subprocess
 import time
 from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, cast
 
 from hooks.context import worker_mode
-from scripts.swarm.claim_lost import lost
+from scripts.swarm.claim_lost import lost  # pyright: ignore[reportUnknownVariableType]
+
+if TYPE_CHECKING:
+    from scripts.swarm.ledger_client import LedgerClient
 
 WORKERS = frozenset({"eng", "ci"})
 STOP = (
@@ -20,28 +24,28 @@ READ_TIMEOUT = 2
 
 def check(
     environ: Mapping[str, str] | None = None,
-    ledger=None,
+    ledger: "LedgerClient | None" = None,
     now: float | None = None,
-    spawn: Callable | None = None,
+    spawn: Callable[..., Any] | None = None,
 ) -> str | None:
-    from scripts.hive import scope
-    from scripts.swarm_ledger import ledger_workspace
+    from scripts.hive import scope  # pyright: ignore[reportMissingTypeStubs]
+    from scripts.swarm_ledger import ledger_workspace  # pyright: ignore[reportMissingTypeStubs]
 
     env = os.environ if environ is None else environ
     slug, name, task = (env.get(k) for k in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK"))
-    if env.get("AGENTIHOOKS_SWARM_LANE") not in WORKERS or not (slug and name and task) or worker_mode.active(env):
+    if env.get("AGENTIHOOKS_SWARM_LANE") not in WORKERS or not (slug and name and task) or worker_mode.active(cast("dict[str, str]", env)):
         return None
     now = time.time() if now is None else now
-    folder = ledger_workspace.folder(slug, task)
+    folder = ledger_workspace.folder(slug, task)  # pyright: ignore[reportUnknownMemberType]
     folder.mkdir(parents=True, exist_ok=True)
     if ledger is None:
         from scripts.swarm.ledger_client import LedgerClient
 
         ledger = LedgerClient(read_timeout=READ_TIMEOUT)
-    row = ledger.task(slug, task)
+    row: dict[str, Any] | None = ledger.task(slug, task)  # pyright: ignore[reportUnknownMemberType]
     if not lost(name, row, bool(scope.member(env))):
         return None
-    owner = row.get("claimed_by") or "nobody"
+    owner: Any = cast("dict[str, Any]", row).get("claimed_by") or "nobody"
     at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     with (folder / "progress.md").open("a") as progress:
         progress.write(NOTE.format(at=at, name=name, owner=owner))

@@ -22,7 +22,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from hooks.common import log
+from hooks.common import log  # pyright: ignore[reportUnknownVariableType]
 
 
 def _git(args: list[str], cwd: str, timeout: int = 10) -> tuple[int, str, str]:

@@ -10,8 +10,9 @@ Runs as PreToolUse. Does not block — only announces.
 """
 
 import re
+from typing import Any
 
-from hooks.common import inject_context, log
+from hooks.common import inject_context, log  # pyright: ignore[reportUnknownVariableType]
 
 _INSTALL_PATTERNS = [
     (re.compile(r"\b(?:python[0-9.]*\s+-m\s+)?(?:uv\s+)?pip[0-9]*\s+install\b"), "pip"),
@@ -41,14 +42,14 @@ _SKIP_FLAGS = (
 )
 
 
-def check_dep_install(payload: dict) -> None:
+def check_dep_install(payload: dict[str, Any]) -> None:
     """Emit a banner when a Bash command installs a dependency.
 
     Never blocks. Purely informational — surfaces supply chain changes
     to the operator via additionalContext.
     """
-    tool_input = payload.get("tool_input", {}) or {}
-    command = tool_input.get("command", "") or ""
+    tool_input: dict[str, Any] = payload.get("tool_input", {}) or {}
+    command: str = tool_input.get("command", "") or ""
     if not command:
         return
 

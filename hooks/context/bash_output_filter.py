@@ -13,7 +13,7 @@ within limits (no unnecessary modification).
 """
 
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from hooks.config import (
     BASH_FILTER_GIT_MAX_COMMITS,
@@ -132,7 +132,7 @@ def _detect_output_type(command: str) -> str:
 
 def filter_bash_output(
     tool_name: str,
-    tool_input: dict,
+    tool_input: dict[str, Any],
     tool_output: str,
 ) -> Optional[str]:
     """Filter bash output; returns filtered string or None (no change needed).
@@ -147,7 +147,7 @@ def filter_bash_output(
     if not tool_output:
         return None
 
-    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""  # pyright: ignore[reportUnnecessaryIsInstance]
 
     output_type = _detect_output_type(command)
 
