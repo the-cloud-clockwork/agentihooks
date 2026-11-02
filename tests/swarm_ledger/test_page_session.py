@@ -4,10 +4,13 @@ import http.client
 import json
 import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from http.cookies import SimpleCookie
 from unittest.mock import patch
 
 import pytest
+from _pytest.monkeypatch import MonkeyPatch
 
 from scripts.auth import service as auth_service
 from scripts.auth import tokens
@@ -24,18 +27,20 @@ def origin(live: dict) -> dict:
     return {"Origin": f"http://{live['host']}"}
 
 
-def allowed(live: dict):
+def allowed(live: dict) -> AbstractContextManager:
     """Allow the live server's own origin."""
     return patch.object(server, "ALLOWED_ORIGINS", {f"http://{live['host']}"})
 
 
 def open_session(live: dict, **headers: str) -> tuple[int, SimpleCookie, bytes]:
     """POST the page session for SLUG and return the status, the cookies it set and the body."""
-    status, body, _, cookie = send_with_cookie(live, "POST", f"/api/{SLUG}/session", **origin(live), **headers)
+    status, body, _, cookie = send_with_cookie(live, "POST", f"/api/{SLUG}/session", **{**origin(live), **headers})
     return status, cookie, body
 
 
-def send_with_cookie(live: dict, method: str, path: str, body: bytes = b"", **headers: str):
+def send_with_cookie(
+    live: dict, method: str, path: str, body: bytes = b"", **headers: str
+) -> tuple[int, bytes, str, SimpleCookie]:
     """send, also returning the response's Set-Cookie header parsed."""
     conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
     try:
@@ -59,7 +64,7 @@ def write(live: dict, **headers: str) -> int:
     return status
 
 
-def test_no_served_ledger_page_carries_the_ledger_token(live):
+def test_no_served_ledger_page_carries_the_ledger_token(live: dict) -> None:
     status, body, _ = send(live, "GET", f"/{SLUG}")
 
     assert status == 200
@@ -68,7 +73,7 @@ def test_no_served_ledger_page_carries_the_ledger_token(live):
     assert live["admin"] not in server.page_for(SLUG)
 
 
-def test_a_session_cookie_alone_carries_operator_writes(live):
+def test_a_session_cookie_alone_carries_operator_writes(live: dict) -> None:
     with allowed(live):
         status, cookie, _ = open_session(live)
     name = f"ledger-session-{SLUG}"
@@ -81,7 +86,7 @@ def test_a_session_cookie_alone_carries_operator_writes(live):
     assert write(live, Cookie=f"ledger-session-other={cookie[name].value}") == 403
 
 
-def test_a_session_needs_an_allowed_origin(live):
+def test_a_session_needs_an_allowed_origin(live: dict) -> None:
     with allowed(live):
         status, cookie, _ = open_session(live, Origin="http://elsewhere.test")
 
@@ -90,7 +95,7 @@ def test_a_session_needs_an_allowed_origin(live):
 
 
 @pytest.fixture
-def auth(live, monkeypatch):
+def auth(live: dict, monkeypatch: MonkeyPatch) -> Iterator[dict]:
     """An auth service with a signing key, legacy credentials off, the ledger in edge mode."""
     httpd = auth_service.server(("127.0.0.1", 0))
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
@@ -108,7 +113,7 @@ def auth(live, monkeypatch):
         thread.join(timeout=2)
 
 
-def test_the_auth_service_issues_the_signed_operator_session(auth):
+def test_the_auth_service_issues_the_signed_operator_session(auth: dict) -> None:
     with allowed(auth):
         status, cookie, _ = open_session(auth, **{"Cf-Access-Jwt-Assertion": "operator-assertion"})
     name = f"ledger-session-{SLUG}"
@@ -119,7 +124,7 @@ def test_the_auth_service_issues_the_signed_operator_session(auth):
     assert write(auth, **{"Cf-Access-Jwt-Assertion": "operator-assertion"}) == 403
 
 
-def test_the_auth_service_refuses_a_session_without_the_operator(auth):
+def test_the_auth_service_refuses_a_session_without_the_operator(auth: dict) -> None:
     with allowed(auth):
         status, cookie, _ = open_session(auth, **{"Cf-Access-Jwt-Assertion": "someone"})
 

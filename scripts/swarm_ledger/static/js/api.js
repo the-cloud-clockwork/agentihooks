@@ -16,7 +16,7 @@ export function writeSwarm(body) {
 }
 
 export function readModels() {
-  return fetch(`${API_V1}/swarm/models`, { cache: "no-store", headers: {} });
+  return fetch(`${API_V1}/swarm/models`, { cache: "no-store" });
 }
 
 export function uploadImage(file) {
@@ -24,27 +24,27 @@ export function uploadImage(file) {
 }
 
 export function readMetadata() {
-  return fetch(API_V1, { cache: "no-store", headers: {} });
+  return fetch(API_V1, { cache: "no-store" });
 }
 
 export function readWorkspace(taskId) {
-  return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store", headers: {} });
+  return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store" });
 }
 
 export function readContextEvidence(task, ref) {
-  return fetch(`${API_V1}/swarm/context/${encodeURIComponent(task)}/${encodeURIComponent(ref)}`, { cache: "no-store", headers: {} });
+  return fetch(`${API_V1}/swarm/context/${encodeURIComponent(task)}/${encodeURIComponent(ref)}`, { cache: "no-store" });
 }
 
 export function readClosed(name, offset) {
-  return fetch(`${API_V1}/${name}?state=done&offset=${offset}&limit=10`, { cache: "no-store", headers: {} });
+  return fetch(`${API_V1}/${name}?state=done&offset=${offset}&limit=10`, { cache: "no-store" });
 }
 
 export function searchClosed(name, text, offset = 0) {
-  return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=${offset}&limit=50`, { cache: "no-store", headers: {} });
+  return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=${offset}&limit=50`, { cache: "no-store" });
 }
 
 export function readArchitecture() {
-  return fetch(`${API_V1}/architecture`, { cache: "no-store", headers: {} });
+  return fetch(`${API_V1}/architecture`, { cache: "no-store" });
 }
 
 export function writeArchitecture(body) {
@@ -105,15 +105,16 @@ export function writeBin(action, slug) {
 }
 
 export function openSession(slug = SLUG) {
-  return fetch(`${SESSION_ROOT}/${encodeURIComponent(slug)}/session`, { method: "POST", cache: "no-store" });
+  return fetch(`${SESSION_ROOT}/${encodeURIComponent(slug)}/session`, { method: "POST", cache: "no-store", signal: AbortSignal.timeout(5000) });
 }
 
 export async function keepSession() {
   try {
     const resp = await openSession();
-    const ttl = resp.ok ? (await resp.json()).expires_in : null;
+    if (!resp.ok) return setTimeout(keepSession, 30000);
+    const ttl = (await resp.json()).expires_in;
     if (ttl) setTimeout(keepSession, ttl * 800);
-  } catch (e) {
+  } catch {
     setTimeout(keepSession, 30000);
   }
 }

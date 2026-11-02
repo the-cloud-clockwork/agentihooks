@@ -34,6 +34,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler
@@ -233,7 +234,7 @@ def page_for(slug: str) -> str:
 
 
 SESSION_COOKIE = "ledger-session-"
-SESSION_TARGET = re.compile(r"/api/(?:v1/ledgers/)?([a-z0-9][a-z0-9-]*)")
+SESSION_TARGET = re.compile(r"/api/(?:v1/ledgers/)?(?!v1/)([a-z0-9][a-z0-9-]*)")
 
 
 def session_slug(path: str, headers: Mapping[str, str]) -> str:
@@ -243,8 +244,10 @@ def session_slug(path: str, headers: Mapping[str, str]) -> str:
 
 
 def session_credential(headers: http.client.HTTPMessage, path: str) -> None:
-    """Carry the page session cookie of the targeted ledger as the credential of a request that names none."""
+    """Carry the page session cookie of the targeted ledger as the credential of a same origin request naming none."""
     if headers.get("Authorization") or headers.get("X-Ledger-Token") or not headers.get("Cookie"):
+        return
+    if headers.get("Sec-Fetch-Site") not in (None, "same-origin"):
         return
     try:
         cookies = http.cookies.SimpleCookie(headers["Cookie"])
@@ -259,8 +262,9 @@ def session_credential(headers: http.client.HTTPMessage, path: str) -> None:
         headers["X-Ledger-Token"] = morsel.value
 
 
-def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[str, int] | None:
-    """Exchange the browser's operator assertion at the auth service for a signed token and its lifetime."""
+def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[int, str | None, int | None]:
+    """Exchange the browser's operator assertion at the auth service: 200 with its signed token and lifetime, 403 when
+    it refuses the operator, 503 when it cannot answer."""
     forwarded = {name: headers[name] for name in ("Cf-Access-Jwt-Assertion",) if headers.get(name)}
     request = urllib.request.Request(
         f"{url.rstrip('/')}/v1/ledgers/{slug}/token", data=b"", headers=forwarded, method="POST"
@@ -268,9 +272,11 @@ def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[str, 
     try:
         with urllib.request.urlopen(request, timeout=10) as reply:
             data = json.load(reply)["data"]
+    except urllib.error.HTTPError as refused:
+        return (403 if refused.code == 403 else 503), None, None
     except (OSError, ValueError, KeyError, TypeError):
-        return None
-    return data["token"], data["expires_in"]
+        return 503, None, None
+    return 200, data["token"], data["expires_in"]
 
 
 def page_session(slug: str, headers: Mapping[str, str]) -> tuple[int, str | None, int | None]:
@@ -281,8 +287,7 @@ def page_session(slug: str, headers: Mapping[str, str]) -> tuple[int, str | None
     """
     url = os.environ.get("AGENTIHOOKS_AUTH_URL")
     if url:
-        issued = auth_session(url, slug, headers)
-        return (403, None, None) if issued is None else (200, *issued)
+        return auth_session(url, slug, headers)
     if os.environ.get("SWARM_AUTH_MODE") == "edge" or not switch.legacy(os.environ):
         return 503, None, None
     return 200, repository.token(slug), None
