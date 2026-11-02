@@ -139,7 +139,7 @@ def test_a_running_swarm_loads_its_config_and_skips_the_stopped_branch() -> None
     state, box = _state(store)
     assert actions(engine.run_group("start", _ctx(state))) == []
     assert box == {"config": SimpleNamespace(slug="sw", state="running", engine="tick")}
-    branch: Any = tick_module.step_stopped_branch
+    branch: Any = observe.step_stopped_branch
     assert branch("sw", box["config"], store, None, None, 0, box) == []
 
 
@@ -148,7 +148,7 @@ def test_track_outages_returns_a_list_whatever_the_tracker_returns(
     monkeypatch: pytest.MonkeyPatch, tracked: list[str] | None, expected: list[str]
 ) -> None:
     monkeypatch.setattr(tick_module.resume, "track_outages", lambda *args: tracked)
-    track: Any = tick_module.step_track_outages
+    track: Any = observe.step_track_outages
     assert track("sw", None, None, {}, 0) == expected
 
 
