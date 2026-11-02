@@ -1,3 +1,4 @@
+import fcntl
 import os
 import subprocess
 import time
@@ -118,6 +119,22 @@ def test_a_build_keeps_only_the_most_recently_used_environments(tmp_path: Path) 
         built.append(type_env.key(root))
 
     assert _environments(home) == sorted(built[1:])
+
+
+def test_a_build_keeps_an_environment_whose_lock_another_run_holds(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    type_env.environment(root, home, _Uv())
+    held = home / type_env.key(root)
+    aged = time.time() - type_env.STALE_SECONDS - 60
+    os.utime(held / type_env.READY, (aged, aged))
+    (root / type_env.LOCK).write_text("moved\n")
+
+    with (home / f"{held.name}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        type_env.environment(root, home, _Uv())
+
+    assert _environments(home) == sorted([held.name, type_env.key(root)])
 
 
 def test_reuse_marks_the_environment_used(tmp_path: Path) -> None:
