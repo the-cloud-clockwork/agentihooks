@@ -135,14 +135,35 @@ def test_main_reads_tests_shard_reports_by_their_artifact_prefix(tmp_path, capsy
         path = shards / f"mutation-report-{shard}" / "report.json"
         path.parent.mkdir(parents=True)
         path.write_text(
-            json.dumps({"files": [_file("scripts/a.py", {"killed": 1})], "not_mutated": [], "failed": False})
+            json.dumps(
+                {
+                    "files": [_file("scripts/a.py", {"killed": 1})],
+                    "not_mutated": [],
+                    "failed": False,
+                    "shard": {"expected": 1, "graded": 1},
+                }
+            )
         )
-    _write(shards, 0, {"files": [_file("scripts/a.py", {"killed": 5})], "not_mutated": [], "failed": True})
+    _write(
+        shards,
+        0,
+        {
+            "files": [_file("scripts/a.py", {"killed": 5})],
+            "not_mutated": [],
+            "failed": True,
+            "shard": {"expected": 1, "graded": 1},
+        },
+    )
     out = tmp_path / "gate"
     argv = [str(shards), "--prefix", "mutation-report-", "--shards", "2", "--output", str(out)]
     assert merge.main(argv) == 0
     report = json.loads((out / "report.json").read_text())
-    assert report == {"files": [_file("scripts/a.py", {"killed": 2})], "not_mutated": [], "failed": False}
+    assert report == {
+        "shards": [{"expected": 1, "graded": 1}, {"expected": 1, "graded": 1}],
+        "files": [_file("scripts/a.py", {"killed": 2})],
+        "not_mutated": [],
+        "failed": False,
+    }
     assert "Merged 2 of 2 mutation shard reports" in capsys.readouterr().out
 
 
