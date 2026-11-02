@@ -684,7 +684,7 @@
   "scripts/swarm/publish_gate.py": 37,
   "scripts/swarm/publish_queue.py": 4,
   "scripts/swarm/queue_exit.py": 49,
-  "scripts/swarm/queue_priority.py": 217,
+  "scripts/swarm/queue_priority.py": 195,
   "scripts/swarm/queue_record.py": 75,
   "scripts/swarm/quota_handoff.py": 65,
   "scripts/swarm/quota_notice.py": 27,
