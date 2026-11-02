@@ -327,3 +327,18 @@ class GitHubSourceControl:
         )
         result.check_returncode()
         return result.stdout
+
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any:
+        """Run one GraphQL document under the reader the caller names and return its whole body, errors included."""
+        flags = [word for name, value in variables.items() for word in ("-f", f"{name}={value}")]
+        result = github_reads.rest(
+            github_reads.CALLER.get(CALLER),
+            ["api", "graphql", "-f", f"query={document}", *flags],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=_live(deadline),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return json.loads(result.stdout)

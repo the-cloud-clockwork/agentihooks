@@ -4,10 +4,11 @@ import json
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm import github_reads, ledger_events
 from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
 
 
 @dataclass(frozen=True)
@@ -30,9 +31,9 @@ class RunPort:
 
 def view(url: str, run: Callable[..., Any], required_checks: dict[str, int] | None = None) -> Any:
     """Read one pull request through the port double over ``run``."""
-    return ledger_events.view(url, RunPort(run), required_checks)
+    return ledger_events.view(url, cast(SourceControl, RunPort(run)), required_checks)
 
 
 def views(urls: list[str], run: Callable[..., Any], cache: object | None = None) -> Any:
     """Read pull requests in batches through the port double over ``run``."""
-    return ledger_events.views(urls, RunPort(run), cache)
+    return ledger_events.views(urls, cast(SourceControl, RunPort(run)), cache)
