@@ -2091,6 +2091,21 @@ def test_mutation_shards_grade_their_rows_with_the_protected_grader(
     assert names.index(checkout["name"]) < names.index(mutate) < names.index(grade["name"]) < names.index(upload)
 
 
+@pytest.mark.parametrize(
+    ("job", "mutate"),
+    [
+        ("mutation", "Mutate changed Python files"),
+        ("mutation", "Mutate dispatched Python files"),
+        ("mutation-stats", "Mutate the only shard in the statistics job"),
+    ],
+)
+def test_mutation_shards_drive_selection_from_the_protected_grader(job: str, mutate: str) -> None:
+    steps = _mutation_workflow()["jobs"][job]["steps"]
+    names = [step.get("name") for step in steps]
+    assert steps[names.index(mutate)]["env"]["MUTATION_GRADER"] == "${{ runner.temp }}/grader"
+    assert names.index("Check out the protected mutation grader") < names.index(mutate)
+
+
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     jobs = _mutation_workflow()["jobs"]
     plan, mutation = jobs["mutation-plan"], jobs["mutation"]

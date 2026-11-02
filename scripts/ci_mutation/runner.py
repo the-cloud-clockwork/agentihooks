@@ -40,6 +40,14 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
             return None
 
 
+def driver_command() -> list[str]:
+    """Return the selection driver command, from the protected grader checkout once it carries the launcher."""
+    launcher = Path(os.environ.get("MUTATION_GRADER", "")) / "scripts/ci_mutation/protected.py"
+    if os.environ.get("MUTATION_GRADER") and launcher.is_file():
+        return [sys.executable, "-P", str(launcher.resolve())]
+    return [sys.executable, "-m", "scripts.ci_mutation.selection"]
+
+
 def failing_tests(log: Path) -> list[str]:
     if not log.is_file():
         return []
@@ -359,7 +367,7 @@ def mutate_files(
             (work / "shared-stats.json").write_text(json.dumps(results))
             stats_args = ["reuse", str(work / "shared-stats.json")]
     status = run_process(
-        [sys.executable, "-m", "scripts.ci_mutation.selection", str(selection), *shard_args, *stats_args],
+        [*driver_command(), str(selection), *shard_args, *stats_args],
         work,
         deadline - time.monotonic(),
         log,

@@ -1,0 +1,92 @@
+"""Runs the mutation selection driver from a protected checkout under the separate package name mutation_grader.
+
+The runner starts this file by path with python -P, so it imports nothing from the pull request tree. Every module of
+the checkout's scripts package loads as mutation_grader, with its absolute scripts imports renamed and never from
+cached bytecode, so the mutated pull request tree that the tests import as scripts cannot replace any driver code.
+"""
+
+import ast
+import importlib.abc
+import importlib.machinery
+import importlib.util
+import os
+import runpy
+import sys
+from pathlib import Path
+from types import CodeType
+
+PACKAGE = "mutation_grader"
+DRIVER = f"{PACKAGE}.ci_mutation.selection"
+
+
+def renamed(tree: ast.Module) -> ast.Module:
+    """Return the tree with every absolute scripts import naming the protected package instead."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            node.module = protected_name(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name != protected_name(alias.name) and not alias.asname:
+                    raise ImportError(f"import {alias.name} needs an alias to load under {PACKAGE}")
+                alias.name = protected_name(alias.name)
+    return tree
+
+
+def protected_name(name: str) -> str:
+    """Return the protected package name for a scripts module name, and any other name unchanged."""
+    if name == "scripts" or name.startswith("scripts."):
+        return PACKAGE + name.removeprefix("scripts")
+    return name
+
+
+class ProtectedLoader(importlib.machinery.SourceFileLoader):
+    """Compiles a protected module from its source with its scripts imports renamed."""
+
+    def get_code(self, fullname: str) -> CodeType:
+        """Return the renamed module code, never reading the checkout's cached bytecode."""
+        tree = renamed(ast.parse(self.get_data(self.path), self.path))
+        return compile(tree, self.path, "exec", dont_inherit=True)
+
+
+class ProtectedFinder(importlib.abc.MetaPathFinder):
+    """Finds the protected package's modules in one checkout's scripts folder."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def find_spec(
+        self, fullname: str, path: object = None, target: object = None
+    ) -> importlib.machinery.ModuleSpec | None:
+        """Return the spec of a protected module from the checkout, or None for any other name."""
+        if fullname != PACKAGE and not fullname.startswith(f"{PACKAGE}."):
+            return None
+        location = self.root.joinpath("scripts", *fullname.split(".")[1:])
+        if (location / "__init__.py").is_file():
+            init = str(location / "__init__.py")
+            return importlib.util.spec_from_file_location(
+                fullname, init, loader=ProtectedLoader(fullname, init), submodule_search_locations=[str(location)]
+            )
+        source = location.with_suffix(".py")
+        if source.is_file():
+            return importlib.util.spec_from_file_location(
+                fullname, str(source), loader=ProtectedLoader(fullname, str(source))
+            )
+        return None
+
+
+def install(root: Path) -> ProtectedFinder:
+    """Put a finder for the checkout at root first on the import path and return it."""
+    finder = ProtectedFinder(root)
+    sys.meta_path.insert(0, finder)
+    return finder
+
+
+def main(root: Path = Path(__file__).resolve().parents[2]) -> None:
+    """Run the driver of the checkout at root, keeping the grader setting from the tests it runs."""
+    os.environ.pop("MUTATION_GRADER", None)
+    install(root)
+    runpy.run_module(DRIVER, run_name="__main__", alter_sys=True)
+
+
+if __name__ == "__main__":
+    main()
