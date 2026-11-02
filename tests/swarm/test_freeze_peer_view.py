@@ -1,3 +1,5 @@
+import urllib.error
+from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -92,8 +94,6 @@ def test_peer_changes_use_a_retained_view_and_restore_the_swarm_view(
 def test_a_refused_peer_view_preserves_the_swarm_view(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
-    import urllib.error
-    from email.message import Message
 
     client = ledger_client.LedgerClient(service=True)
     store = SimpleNamespace(
