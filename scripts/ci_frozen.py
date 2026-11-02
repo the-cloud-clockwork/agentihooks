@@ -12,7 +12,7 @@ def _git(root: Path, *args: str, data: bytes | None = None) -> bytes:
     return subprocess.run(["git", "-C", str(root), *args], input=data, check=True, capture_output=True).stdout
 
 
-def _workflow(registry: dict, workflow: str) -> None:
+def _workflow(registry: dict[str, list[str]], workflow: str) -> None:
     path = Path(workflow)
     if workflow not in registry or path.parent != Path(".github/workflows") or path.suffix not in {".yml", ".yaml"}:
         raise ValueError(f"Not a frozen workflow: {workflow}")

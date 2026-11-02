@@ -2,6 +2,9 @@ import pytest
 
 
 class Selection:
+    count: int
+    maximum: int
+
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.count = len(session.items)
         self.maximum = session.config.hook.pytest_xdist_auto_num_workers(config=session.config)

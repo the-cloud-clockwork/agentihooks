@@ -2,6 +2,7 @@ import argparse
 import json
 import re
 from pathlib import Path
+from typing import Any, cast
 
 ACTORS = ".github/workflows/trusted-actors.json"
 LOADER = "the-cloud-clockwork/agentihooks/.github/workflows/runner-trust.yml@dev"
@@ -21,7 +22,7 @@ GUARD = (
 )
 
 
-def loader_contract() -> dict:
+def loader_contract() -> dict[str, Any]:
     command = (
         "python3 -I -c 'import json; from pathlib import Path; "
         'p=json.loads(Path(".github/workflows/trusted-actors.json").read_text()); '
@@ -61,6 +62,7 @@ def loader_contract() -> dict:
 
 def validate_actors(actors: object) -> list[str]:
     if isinstance(actors, dict):
+        actors = cast(dict[str, Any], actors)
         if set(actors) != {"actors", "queue_actor"} or not isinstance(actors["actors"], list):
             raise ValueError("trusted actors policy requires actors and queue_actor")
         approved = validate_actors(actors["actors"])
@@ -68,6 +70,7 @@ def validate_actors(actors: object) -> list[str]:
         if not isinstance(queue, str) or not re.fullmatch(r"[A-Za-z0-9-]+\[bot\]", queue) or queue in approved:
             raise ValueError("trusted actors queue identity must be a distinct platform bot")
         return approved + [queue]
+    actors = cast(list[Any], actors)
     if (
         not isinstance(actors, list)
         or len(actors) != 3
@@ -83,8 +86,8 @@ def _compact(expression: str) -> str:
     return re.sub(r"'(?:''|[^'])*'|\s+", lambda match: match[0] if match[0].startswith("'") else "", expression)
 
 
-def _guarded(job: dict, jobs: dict) -> bool:
-    needs = job.get("needs", [])
+def _guarded(job: dict[str, Any], jobs: dict[str, Any]) -> bool:
+    needs: Any = job.get("needs", [])
     needs = [needs] if isinstance(needs, str) else needs
     loader = jobs.get("runner-trust", {})
     if "runner-trust" not in needs or loader != {"uses": LOADER}:
@@ -118,9 +121,9 @@ def _hosted(runner: object) -> bool:
     )
 
 
-def selector(policy: dict, pool: str, queue: bool = False, *, trusted_reruns: bool = False) -> str:
+def selector(policy: dict[str, Any], pool: str, queue: bool = False, *, trusted_reruns: bool = False) -> str:
     members = json.dumps(policy["actors"], separators=(",", ":"))
-    queue_actor = policy["queue_actor"]
+    queue_actor: str = policy["queue_actor"]
     condition = (
         "(github.event_name != 'pull_request_target' && "
         "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && "

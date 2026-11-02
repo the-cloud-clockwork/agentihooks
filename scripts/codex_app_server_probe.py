@@ -13,6 +13,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from websockets.sync.client import unix_connect
 
@@ -21,12 +22,12 @@ RESPONSE_TIMEOUT_S = 60
 
 
 class Client:
-    def __init__(self, socket_path: str, name: str):
+    def __init__(self, socket_path: str, name: str) -> None:
         self.name = name
         self.ws = unix_connect(socket_path, max_size=None)
         self.next_id = 1
-        self.responses: dict[int, dict] = {}
-        self.events: queue.Queue = queue.Queue()
+        self.responses: dict[int, dict[str, Any]] = {}
+        self.events: queue.Queue[dict[str, Any]] = queue.Queue()
         self.lock = threading.Lock()
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
@@ -36,7 +37,7 @@ class Client:
     def _read(self) -> None:
         try:
             for raw in self.ws:
-                msg = json.loads(raw)
+                msg: dict[str, Any] = json.loads(raw)
                 msg["_at"] = time.monotonic()
                 if "id" in msg and "method" not in msg:
                     with self.lock:
@@ -46,16 +47,16 @@ class Client:
         except Exception as exc:
             self.events.put({"method": "_closed", "error": type(exc).__name__})
 
-    def notify(self, method: str, params: dict | None = None) -> None:
+    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "method": method, **({"params": params} if params else {})}))
 
-    def send(self, method: str, params: dict) -> int:
+    def send(self, method: str, params: dict[str, Any]) -> int:
         rid = self.next_id
         self.next_id += 1
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}))
         return rid
 
-    def wait_response(self, rid: int, timeout: float | None = None) -> dict:
+    def wait_response(self, rid: int, timeout: float | None = None) -> dict[str, Any]:
         end = time.monotonic() + (RESPONSE_TIMEOUT_S if timeout is None else timeout)
         while time.monotonic() < end:
             with self.lock:
@@ -64,14 +65,16 @@ class Client:
             time.sleep(0.02)
         raise TimeoutError(f"{self.name}: no response to {rid}")
 
-    def request(self, method: str, params: dict, timeout: float | None = None) -> dict:
+    def request(self, method: str, params: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         return self.wait_response(self.send(method, params), timeout)
 
-    def answer(self, rid: int | str, result: dict) -> None:
+    def answer(self, rid: int | str, result: dict[str, Any]) -> None:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}))
 
-    def until(self, pred: Callable[[dict], bool], timeout: float = TURN_TIMEOUT_S) -> tuple[dict | None, list[dict]]:
-        seen = []
+    def until(
+        self, pred: Callable[[dict[str, Any]], bool], timeout: float = TURN_TIMEOUT_S
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        seen: list[dict[str, Any]] = []
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             try:
@@ -87,20 +90,20 @@ class Client:
         self.ws.close()
 
 
-def text(s: str) -> list[dict]:
+def text(s: str) -> list[dict[str, Any]]:
     return [{"type": "text", "text": s}]
 
 
-def method_is(name: str) -> Callable[[dict], bool]:
+def method_is(name: str) -> Callable[[dict[str, Any]], bool]:
     return lambda m: m.get("method") == name
 
 
-def is_approval_request(msg: dict) -> bool:
+def is_approval_request(msg: dict[str, Any]) -> bool:
     return "id" in msg and str(msg.get("method")).endswith("requestApproval")
 
 
-def agent_texts(seen: list[dict]) -> list[str]:
-    out = []
+def agent_texts(seen: list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
     for m in seen:
         if m.get("method") == "item/completed":
             item = m["params"].get("item", {})
@@ -109,13 +112,13 @@ def agent_texts(seen: list[dict]) -> list[str]:
     return out
 
 
-def start_thread(c: Client, repo: str, **extra) -> str:
+def start_thread(c: Client, repo: str, **extra: Any) -> str:
     params = {"cwd": repo, "approvalPolicy": "never", "sandbox": "read-only", **extra}
     r = c.request("thread/start", params)
     return r["result"]["thread"]["id"]
 
 
-def run_turn(c: Client, thread: str, prompt: str, **extra) -> dict:
+def run_turn(c: Client, thread: str, prompt: str, **extra: Any) -> dict[str, Any]:
     r = c.request("turn/start", {"threadId": thread, "input": text(prompt), **extra})
     if "error" in r:
         return {"start_error": r["error"]}
@@ -130,7 +133,7 @@ def run_turn(c: Client, thread: str, prompt: str, **extra) -> dict:
     }
 
 
-def conversation(sock: str, repo: str) -> dict:
+def conversation(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-conversation")
     thread = start_thread(c, repo)
     first = run_turn(c, thread, "Fixture one. Reply with exactly the word ALPHA and nothing else.")
@@ -164,7 +167,7 @@ SLOW_PROMPT = (
 )
 
 
-def steer(sock: str, repo: str) -> dict:
+def steer(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-steer")
     thread = start_thread(c, repo)
     r = c.request("turn/start", {"threadId": thread, "input": text(SLOW_PROMPT)})
@@ -216,7 +219,7 @@ APPROVAL_PROMPT = (
 )
 
 
-def approvals(sock: str, repo: str) -> dict:
+def approvals(sock: str, repo: str) -> dict[str, Any]:
     a = Client(sock, "probe-owner-a")
     thread = start_thread(a, repo, approvalPolicy="untrusted")
     b = Client(sock, "probe-viewer-b")
@@ -228,7 +231,7 @@ def approvals(sock: str, repo: str) -> dict:
     req_b, _ = b.until(is_approval_request, 10)
     owner, other = (a, b) if req_a else (b, a)
     req = req_a or req_b
-    result = {
+    result: dict[str, Any] = {
         "thread": thread,
         "viewer_resume_before_first_turn": early.get("error") or "ok",
         "viewer_resume": resumed.get("error") or "ok",
@@ -257,7 +260,7 @@ def approvals(sock: str, repo: str) -> dict:
     return result
 
 
-def late_approval(sock: str, repo: str) -> dict:
+def late_approval(sock: str, repo: str) -> dict[str, Any]:
     a = Client(sock, "probe-owner-a")
     thread = start_thread(a, repo, approvalPolicy="untrusted")
     a.request("turn/start", {"threadId": thread, "input": text(APPROVAL_PROMPT)})
@@ -271,7 +274,7 @@ def late_approval(sock: str, repo: str) -> dict:
     req_late, _ = late.until(is_approval_request, 10)
     turns = (read.get("result") or {}).get("thread", {}).get("turns") or [{}]
     resumed_turns = (resumed.get("result") or {}).get("thread", {}).get("turns") or [{}]
-    result = {
+    result: dict[str, Any] = {
         "late_resume_last_turn_status": resumed_turns[-1].get("status"),
         "thread": thread,
         "request_method": req_a.get("method") if req_a else None,
@@ -302,7 +305,7 @@ def late_approval(sock: str, repo: str) -> dict:
     return result
 
 
-def detach(sock: str, repo: str) -> dict:
+def detach(sock: str, repo: str) -> dict[str, Any]:
     a = Client(sock, "probe-bridge")
     thread = start_thread(a, repo)
     r = a.request("turn/start", {"threadId": thread, "input": text(SLOW_PROMPT.replace("CHARLIE", "GOLF"))})
@@ -336,7 +339,7 @@ def detach(sock: str, repo: str) -> dict:
     }
 
 
-def compaction(sock: str, repo: str) -> dict:
+def compaction(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-compact")
     thread = start_thread(c, repo)
     first = run_turn(c, thread, "Fixture nine. Reply INDIA.")

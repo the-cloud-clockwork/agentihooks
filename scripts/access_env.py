@@ -8,7 +8,8 @@ import os
 import shlex
 import sys
 from collections.abc import Callable, Mapping
-from urllib.request import urlopen
+from typing import Any, cast
+from urllib.request import Request, urlopen
 
 from scripts import openbao_kv
 
@@ -19,12 +20,13 @@ TIMEOUT_S = 3
 USAGE = "usage: agentihooks access env"
 
 
-def _opener(request, timeout):
+def _opener(request: Request | str, timeout: float) -> Any:
     return urlopen(request, timeout=min(timeout, TIMEOUT_S))
 
 
-def values(environ: Mapping[str, str], opener: Callable = _opener) -> dict[str, str]:
-    bao = openbao_kv.from_env(environ, opener)
+def values(environ: Mapping[str, str], opener: Callable[..., Any] = _opener) -> dict[str, str]:
+    from_env = cast(Callable[[Mapping[str, str], Callable[..., Any] | None], "openbao_kv.OpenBao | None"], openbao_kv.from_env)
+    bao = from_env(environ, opener)
     if bao is None:
         return {}
     try:
@@ -33,7 +35,7 @@ def values(environ: Mapping[str, str], opener: Callable = _opener) -> dict[str, 
         print(f"agentihooks access: {exc}", file=sys.stderr)
         return {}
     found = {name: record.get(name.replace("SWARM_", "CF_")) for name in NAMES}
-    return found if all(isinstance(value, str) and value for value in found.values()) else {}
+    return cast("dict[str, str]", found) if all(isinstance(value, str) and value for value in found.values()) else {}
 
 
 def main(argv: list[str]) -> int:

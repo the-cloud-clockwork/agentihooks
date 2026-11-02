@@ -2,9 +2,10 @@ import argparse
 import json
 import subprocess
 import time
+from typing import Any
 
 
-def _api(endpoint: str) -> dict:
+def _api(endpoint: str) -> dict[str, Any]:
     return json.loads(
         subprocess.run(["gh", "api", endpoint], check=True, capture_output=True, text=True, timeout=30).stdout
     )
@@ -13,15 +14,15 @@ def _api(endpoint: str) -> dict:
 def verify(repository: str, head: str, attempts: int = 36, interval: float = 5, event: str = "pull_request") -> str:
     problem = "Tests run is missing for this head."
     for attempt in range(attempts):
-        runs = _api(f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event={event}&per_page=1")[
-            "workflow_runs"
-        ]
-        matching = [run for run in runs if run["head_sha"] == head]
+        runs: list[dict[str, Any]] = _api(
+            f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event={event}&per_page=1"
+        )["workflow_runs"]
+        matching: list[dict[str, Any]] = [run for run in runs if run["head_sha"] == head]
         if matching:
-            run = matching[0]
+            run: dict[str, Any] = matching[0]
             if run["status"] == "completed" and run["conclusion"] != "success":
                 return f"Tests run {run['id']} ended with {run['conclusion']}."
-            jobs = _api(f"repos/{repository}/actions/runs/{run['id']}/jobs?filter=latest&per_page=1")
+            jobs: dict[str, Any] = _api(f"repos/{repository}/actions/runs/{run['id']}/jobs?filter=latest&per_page=1")
             if jobs["total_count"] > 0:
                 return ""
             problem = f"Tests run {run['id']} has no jobs."

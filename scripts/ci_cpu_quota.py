@@ -32,7 +32,7 @@ def quota_cpus(root: Path = CGROUP, proc_cgroup: Path = Path("/proc/self/cgroup"
         lines = proc_cgroup.read_text().splitlines()
     except OSError:
         lines = []
-    limits = []
+    limits: list[float | None] = []
     for line in lines:
         _, controllers, relative = line.split(":", 2)
         if controllers == "":
@@ -40,8 +40,8 @@ def quota_cpus(root: Path = CGROUP, proc_cgroup: Path = Path("/proc/self/cgroup"
         elif "cpu" in controllers.split(","):
             base = root / "cpu" if (root / "cpu").is_dir() else root / controllers
             limits += [_v1_limit(p) for p in _chain(base, relative)]
-    limits = [limit for limit in limits if limit is not None]
-    return min(limits) if limits else None
+    filtered: list[float] = [limit for limit in limits if limit is not None]
+    return min(filtered) if filtered else None
 
 
 def worker_count(cpus: int, quota: float | None) -> int:

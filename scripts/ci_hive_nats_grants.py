@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -47,7 +48,7 @@ LEDGER_SUBSCRIBE = ("swarm.>", "_INBOX.>")
 EVERYTHING = frozenset({">"})
 
 
-def _subjects(value) -> frozenset[str]:
+def _subjects(value: Any) -> frozenset[str]:
     if value is None:
         return frozenset()
     if isinstance(value, str):
@@ -55,7 +56,7 @@ def _subjects(value) -> frozenset[str]:
     return frozenset(value)
 
 
-def _direction(rules) -> dict[str, frozenset[str]]:
+def _direction(rules: Any) -> dict[str, frozenset[str]]:
     if not isinstance(rules, dict):
         rules = {"allow": rules}
     allow = _subjects(rules.get("allow"))
@@ -99,15 +100,17 @@ def user_grants(antoncore: Path, name: str) -> dict[str, dict[str, frozenset[str
         return None
     if user is None:
         raise ValueError(f"the {ACCOUNT} account has no {name} user")
-    permissions = user.get("permissions") or {}
+    permissions: dict[str, Any] = user.get("permissions") or {}
     return {
         "publish": _direction(permissions.get("publish")),
         "subscribe": _direction(permissions.get("subscribe")),
     }
 
 
-def differences(ours: dict, theirs: dict, credential: str, user: str) -> list[str]:
-    lines = []
+def differences(
+    ours: dict[str, dict[str, frozenset[str]]], theirs: dict[str, dict[str, frozenset[str]]], credential: str, user: str
+) -> list[str]:
+    lines: list[str] = []
     for direction in ("publish", "subscribe"):
         for rule in ("allow", "deny"):
             mine, other = ours[direction][rule], theirs[direction][rule]
