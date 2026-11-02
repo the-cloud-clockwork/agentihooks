@@ -429,7 +429,7 @@ def test_host_hash_hit_uses_one_field_read(redis: Any, swarm: Any, monkeypatch: 
     def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("host lookup scanned the execution registry")
 
-    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", "true")
+    monkeypatch.delenv("SWARM_HOST_PROJECTION_ENABLED", raising=False)
     monkeypatch.setattr(ExecutionRegistry, "hive", forbidden)
     with scope.one_pass():
         scope.joined(redis)
@@ -465,7 +465,7 @@ def test_host_projection_stays_untrusted_until_every_writer_upgrades(
     from scripts.hive import scope
     from scripts.swarm import fencing
 
-    monkeypatch.delenv("SWARM_HOST_PROJECTION_ENABLED", raising=False)
+    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", "false")
     join(redis, "m1")
     join(redis, "m2")
     name = place(swarm, "m1")
