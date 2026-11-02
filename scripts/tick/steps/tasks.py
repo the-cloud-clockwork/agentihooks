@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from scripts.tick import registry
-from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep
+from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, Left
 
 __all__ = ["CLOSE", "DRAINED", "RAISED", "REOPENS", "STEPS", "TASK_PASSES", "held", "raise_held"]
 
@@ -25,6 +25,8 @@ def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
             return []
         try:
             return call(tick, get)
+        except Left:
+            return []
         except (Exception, SystemExit) as exc:
             box[RAISED] = exc
             return []

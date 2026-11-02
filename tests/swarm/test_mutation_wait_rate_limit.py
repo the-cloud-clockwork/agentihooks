@@ -46,13 +46,20 @@ def github(monkeypatch, tmp_path):
 
     def api(args, **kwargs):
         assert args[:2] == ["gh", "api"]
-        assert kwargs.pop("text", False) == (args[2] in ("graphql", PULL))
-        assert kwargs == {"capture_output": True, "timeout": 20}
+        port = args[2] != PULL
+        assert kwargs.pop("text", False) == (args[2] in ("graphql", PULL, "rate_limit"))
+        check = kwargs.pop("check", False)
+        assert check == (args[2] in ("graphql", "rate_limit"))
+        assert kwargs.pop("cwd", None) == (Path.cwd() if port else None)
+        assert 0 < kwargs.pop("timeout") <= 20
+        assert kwargs == {"capture_output": True}
         endpoint = args[2]
         state.asked.append(endpoint)
         if endpoint == "rate_limit":
-            body = {"resources": {"core": state.core}}
+            body = {"resources": {"core": {"used": 5000 - state.core["remaining"], **state.core}}}
             return completed(args, 0, json.dumps(body), "")
+        if (state.limited or (state.jobs_limited and "/jobs?" in endpoint)) and check:
+            raise subprocess.CalledProcessError(1, args, "", LIMITED.decode())
         if state.limited or (state.jobs_limited and "/jobs?" in endpoint):
             return completed(args, 1, "", LIMITED.decode())
         if "/jobs?" in endpoint:
@@ -244,7 +251,7 @@ def test_pull_request_reads_back_off_until_the_quota_reset(github):
     github.limited = False
     github.now = RESET - 1
     assert pull_head(PR, subprocess.run) is None
-    assert pull_view(PR, subprocess.run) is None
+    assert pull_view(PR) is None
     assert github.asked == [PULL, "rate_limit"]
     github.now = RESET + 1
     assert pull_head(PR, subprocess.run) == "first"
@@ -262,7 +269,7 @@ def test_rest_reads_are_refused_locally_while_the_backoff_holds(github):
 
 
 def test_a_rate_limited_checks_view_holds_the_shared_backoff(github):
-    assert pull_view(PR, subprocess.run) is None
+    assert pull_view(PR) is None
     assert github.asked == ["graphql", "rate_limit"]
     lines = (github.home / "github-backoff.jsonl").read_text().splitlines()
     assert [json.loads(line) for line in lines] == [{"at": NOW, "endpoint": "graphql", "until": RESET}]

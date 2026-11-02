@@ -24,6 +24,7 @@ SLOW_S = 600.0
 HEADROOM = 1.5
 SPAWN_START_S = 40.0
 UNMEASURED_S = 10.0
+_LEDGER_READ_S = 1.748
 JUDGE = frozenset({"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"})
 SPAWN_NEEDS = JUDGE | {"orphans", "preempt"}
 
@@ -42,7 +43,7 @@ MEASURED: dict[str, Timing] = {
     "execution reconcile": Timing(0.442, CRITICAL_S),
     "master move fail over": Timing(0.261, CRITICAL_S),
     "recover master": Timing(0.245, CRITICAL_S),
-    "ledger state": Timing(1.748, CRITICAL_S),
+    "ledger state": Timing(_LEDGER_READ_S, CRITICAL_S),
     "automated cleanup": Timing(0.0, CRITICAL_S),
     "spawn due": Timing(21.812, CRITICAL_S),
     "exits sweep": Timing(6.067, CRITICAL_S),
@@ -109,7 +110,7 @@ MEASURED: dict[str, Timing] = {
     "tick call": Timing(107.841, CRITICAL_S),
     "outbox migration": Timing(0.006, CRITICAL_S),
     "page relay": Timing(0.987, CRITICAL_S),
-    "tick view": Timing(0.98, CRITICAL_S),
+    "tick view": Timing(_LEDGER_READ_S, CRITICAL_S),
     "ledger event pass": Timing(0.16, CRITICAL_S),
     "done recheck": Timing(0.088, CRITICAL_S),
     "progress checks": Timing(0.056, CRITICAL_S),

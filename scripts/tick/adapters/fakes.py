@@ -177,6 +177,12 @@ class FakeSourceControl:
     ) -> tuple[WorkflowRun, ...]:
         return _record(self, "workflow_runs", (workflow, event, conclusion, since), deadline)
 
+    def download(self, path: str, *, deadline: Deadline) -> bytes:
+        return _record(self, "download", (path,), deadline)
+
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any:
+        return _record(self, "graph", (document, variables), deadline)
+
 
 @dataclass
 class FakeRuntime:

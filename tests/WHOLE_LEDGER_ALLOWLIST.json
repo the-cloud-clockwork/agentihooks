@@ -1,16 +1,7 @@
 {
- "scripts/swarm/capacity.py": 2,
- "scripts/swarm/cli.py": 15,
- "scripts/swarm/freeze.py": 1,
- "scripts/swarm/health/spawn_stall.py": 1,
- "scripts/swarm/master_stall.py": 2,
- "scripts/swarm/metrics_ledger.py": 1,
- "scripts/swarm/plan_review.py": 2,
- "scripts/swarm/promotion_watch.py": 3,
+ "scripts/swarm/cli.py": 7,
+ "scripts/swarm/ledger_client.py": 1,
  "scripts/swarm/readiness.py": 1,
  "scripts/swarm/refresh_job.py": 1,
- "scripts/swarm/resume.py": 1,
- "scripts/swarm/stack.py": 2,
- "scripts/swarm/tick.py": 4,
  "scripts/swarm/trace_plan.py": 1
 }

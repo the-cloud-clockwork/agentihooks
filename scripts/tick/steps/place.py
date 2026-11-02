@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from functools import partial
+from types import MappingProxyType
 from typing import Any
 
 from scripts.tick import registry
@@ -18,9 +19,7 @@ PREEMPT_NEEDS = frozenset({"reap"})
 PLACED = frozenset({AGENTS, TASKS})
 
 
-def _spawn_args(get: Get) -> tuple[Any, ...]:
-    keys = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
-    return tuple(get(key) for key in keys)
+_SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
 
 
 def _quota_notice(tick: Any, get: Get) -> Any:
@@ -83,8 +82,11 @@ def _spawn(tick: Any, get: Get) -> Any:
         and tick.readiness.tick_places(config.engine, get("rows"))
         and tick.panic.state(store) is None
     ):
+        rows = dict(get("rows"))
+        args = tuple(rows if key == "rows" else get(key) for key in _SPAWN_KEYS)
         with tick._placement_pass(get("runtime")):
-            found = tick.skip_refused(tick._spawn, *_spawn_args(get))
+            found = tick.skip_refused(tick._spawn, *args)
+        get("box")["rows"] = MappingProxyType(rows)
         store.redis.delete(get("due"))
         return found
     return []

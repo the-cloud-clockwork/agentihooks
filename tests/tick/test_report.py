@@ -198,7 +198,7 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
         ("skip", bottleneck_status.refresh, "sw", store, 7),
         ("skip", wake.maintenance, "inbox", "sw", AGENTS, 7, ("window", True)),
         ("call", snapshot_job.start, store, "sw", 7, os.environ),
-        ("set", "sw/last-tick"),
+        ("set", "sw/last-tick", 7),
     ]
     assert box == {"found": ["f"], "started": ["ran 4"]}
 
