@@ -137,6 +137,47 @@ def test_a_build_keeps_an_environment_whose_lock_another_run_holds(tmp_path: Pat
     assert _environments(home) == sorted([held.name, type_env.key(root)])
 
 
+def test_a_held_environment_does_not_stop_the_prune_of_older_ones(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    aged = time.time() - type_env.STALE_SECONDS - 60
+    built = []
+    for number in range(2):
+        (root / type_env.LOCK).write_text(f"{number}\n")
+        type_env.environment(root, home, _Uv())
+        built.append(home / type_env.key(root))
+        os.utime(built[-1] / type_env.READY, (aged + number, aged + number))
+    (root / type_env.LOCK).write_text("moved\n")
+
+    with (home / f"{built[1].name}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        type_env.environment(root, home, _Uv())
+
+    assert _environments(home) == sorted([built[1].name, type_env.key(root)])
+
+
+def test_an_environment_removed_during_the_scan_does_not_stop_the_prune(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    type_env.environment(root, home, _Uv())
+    old = home / type_env.key(root)
+    aged = time.time() - type_env.STALE_SECONDS - 60
+    os.utime(old / type_env.READY, (aged, aged))
+    (root / type_env.LOCK).write_text("moved\n")
+    gone = home / "gone"
+    iterdir = Path.iterdir
+    is_dir = Path.is_dir
+    monkeypatch.setattr(Path, "iterdir", lambda self: iter([gone, *iterdir(self)]) if self == home else iterdir(self))
+    monkeypatch.setattr(Path, "is_dir", lambda self: self == gone or is_dir(self))
+
+    type_env.environment(root, home, _Uv())
+    monkeypatch.undo()
+
+    assert _environments(home) == [type_env.key(root)]
+
+
 def test_a_build_keeps_an_environment_used_exactly_at_the_cutoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

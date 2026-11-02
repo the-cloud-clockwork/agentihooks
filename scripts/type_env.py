@@ -34,7 +34,7 @@ def key(root: Path) -> str:
         path = root / name
         digest.update(f"\0{name}\0".encode())
         digest.update(path.read_bytes())
-    return digest.hexdigest()[:16]
+    return digest.hexdigest()
 
 
 def environment(
@@ -73,7 +73,7 @@ def environment(
             env={**os.environ, "UV_CONSTRAINT": str(root / CONSTRAINTS)},
             check=True,
         )
-        ready.write_text(key(root) + "\n")
+        ready.touch()
     _prune(home, target)
     return python
 
