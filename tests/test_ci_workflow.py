@@ -2127,8 +2127,8 @@ def test_mutation_shards_grade_their_rows_with_the_protected_grader(
 @pytest.mark.parametrize(
     ("job", "mutate"),
     [
-        ("mutation", "Mutate changed Python files"),
-        ("mutation", "Mutate dispatched Python files"),
+        ("mutation-shard", "Mutate changed Python files"),
+        ("mutation-shard", "Mutate dispatched Python files"),
         ("mutation-stats", "Mutate the only shard in the statistics job"),
         ("mutation-plan", "Grade the empty change set"),
     ],
