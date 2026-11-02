@@ -407,6 +407,7 @@ class _Recorder:
 def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch, typed):
     from hooks import config
     from hooks import hook_manager as hm
+    from hooks.context import seat_notes
 
     monkeypatch.setattr(config, "BROADCAST_ENABLED", True)
     payload = {"session_id": "s", "prompt": "p", "cwd": "/w"}
@@ -422,6 +423,7 @@ def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch, typed):
         ("prod_bypass", hm._prompt_prod_bypass, (payload, "s")),
         ("signals", hm._prompt_signals, (payload, "s", typed)),
         *([("gate_lifts", hm._arm_gate_lifts, (payload,))] if typed else []),
+        ("seat_notes", seat_notes.inject, ()),
         ("amygdala", hm._prompt_amygdala, ("s",)),
         ("confirm_inbox", hm._confirm_inbox, ("s",)),
         ("swarm_heartbeat", hm._swarm_heartbeat, ("working", "p")),
