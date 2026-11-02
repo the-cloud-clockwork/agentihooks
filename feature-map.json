@@ -95,12 +95,13 @@
         "tests/swarm/tick_scenarios/test_declared_edges.py::test_the_steps_on_each_edge_declare_what_they_read_and_write",
         "tests/swarm/tick_scenarios/test_declared_edges.py::test_a_reaped_or_orphaned_task_is_reopened_then_spawned_in_one_pass",
         "tests/swarm/tick_scenarios/test_declared_edges.py::test_a_drained_swarm_with_new_work_runs_again_before_the_spawn_check",
-        "tests/swarm/tick_scenarios/test_declared_edges.py::test_settle_runs_last_and_drains_only_a_pass_with_nothing_left_to_spawn"
+        "tests/swarm/tick_scenarios/test_declared_edges.py::test_settle_runs_last_and_drains_only_a_pass_with_nothing_left_to_spawn",
+        "tests/swarm/tick_scenarios/test_declared_edges.py::test_a_pass_that_spawned_work_ends_on_the_spawn_without_draining"
       ]
     },
     {
       "id": "swarm-tick-no-shared-rows",
-      "origin": "plan",
+      "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",
       "behaviour": "Tick steps share no mutable ledger state: the pass hands steps a read only rows mapping, spawn preparation and reaping work on their own copies, the ledger view is deep frozen under CI so a step changing it fails, and a ledger write marks the held view stale so the next step reads a fresh one.",
       "seam": "scripts.tick.view.LedgerView with scripts.tick.view.current and wrote, and the rows mapping scripts.tick.steps.observe.step_ledger_state puts in the pass box",
