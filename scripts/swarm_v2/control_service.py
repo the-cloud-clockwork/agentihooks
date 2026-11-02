@@ -1,5 +1,6 @@
 import json
 import os
+import ssl
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from functools import partial
@@ -15,7 +16,7 @@ from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
 from scripts.swarm_v2.api import artifacts, health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.recovery import RecoveryAPI
-from scripts.swarm_v2.api.server import Routes, serve
+from scripts.swarm_v2.api.server import RecoveryRoutes, Routes, serve, serve_tls
 from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.artifacts import remote
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
@@ -37,6 +38,10 @@ from scripts.swarm_v2.runtime.operations import OperationTransport
 KEY_ID_ENV = "AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID"
 KEY_FILE_ENV = "AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE"
 PORT_ENV = "AGENTIHOOKS_CONTROL_API_PORT"
+TLS_PORT_ENV = "AGENTIHOOKS_CONTROL_TLS_PORT"
+TLS_CERT_ENV = "AGENTIHOOKS_CONTROL_TLS_CERT"
+TLS_KEY_ENV = "AGENTIHOOKS_CONTROL_TLS_KEY"
+PUBLIC_URL_ENV = "AGENTIHOOKS_CONTROL_PUBLIC_URL"
 SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
 CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
 HOST = "0.0.0.0"
@@ -68,6 +73,23 @@ def launch_key(environ: Mapping[str, str]) -> LaunchKey:
         return LaunchKey(environ[KEY_ID_ENV], secret)
     except ValueError as error:
         raise ControlError(str(error)) from None
+
+
+def published(environ: Mapping[str, str]) -> tuple[tuple[str, int, ssl.SSLContext] | None, str]:
+    """Read the TLS listener the controller publishes beyond the cluster, and its public address."""
+    port, url = environ.get(TLS_PORT_ENV, ""), environ.get(PUBLIC_URL_ENV, "")
+    if not port:
+        return None, ""
+    if not port.isdigit() or not 0 < int(port) <= MAX_PORT:
+        raise ControlError(f"{TLS_PORT_ENV} must be a port number")
+    if not url.startswith("https://"):
+        raise ControlError(f"{TLS_PORT_ENV} needs {PUBLIC_URL_ENV}, an https address")
+    missing = [name for name in (TLS_CERT_ENV, TLS_KEY_ENV) if not environ.get(name)]
+    if missing:
+        raise ControlError(f"{TLS_PORT_ENV} needs {', '.join(missing)}")
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(environ[TLS_CERT_ENV], environ[TLS_KEY_ENV])
+    return (HOST, int(port), context), url.rstrip("/")
 
 
 def _heartbeat(agent: AgentRecord, raw: str | None) -> list[Signal]:
@@ -118,6 +140,9 @@ class ControlService:
         self.health_api = health.HealthAPI(self.health, self.grants, operator, health.deep_enabled())
         self.server: ThreadingHTTPServer | None = None
         self.listen: tuple[str, int] | None = None
+        self.secure: ThreadingHTTPServer | None = None
+        self.published: tuple[str, int, ssl.SSLContext] | None = None
+        self.control_url = ""
         self.runtime = None
         self.pods: Callable[[str], tuple[PodStatus, ...]] | None = None
         self.api_url = ""
@@ -186,9 +211,12 @@ class ControlService:
                 print(
                     f"controller: serves the control API for {slug}, which does not exist yet; waits for it", flush=True
                 )
+        if self.published is not None and self.secure is None:
+            self.serve_published(*self.published)
         if self.server is not None and self.api_url and slug in store.slugs():
-            if store.config(slug).api_url != self.api_url:
-                store.update(slug, api_url=self.api_url)
+            config = store.config(slug)
+            if config.api_url != self.api_url or config.control_url != self.control_url:
+                store.update(slug, api_url=self.api_url, control_url=self.control_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
         routes = Routes(self.executions, self.tasks_api, health=self.health_api, recovery=self.recovery_api)
@@ -197,6 +225,12 @@ class ControlService:
         self.thread = threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True)
         self.thread.start()
         return self.server
+
+    def serve_published(self, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
+        """Serve the recovery endpoints over TLS for callers outside the cluster."""
+        self.secure = serve_tls(RecoveryRoutes(self.recovery_api), host, port, context)
+        threading.Thread(target=self.secure.serve_forever, name=f"{THREAD}-tls", daemon=True).start()
+        return self.secure
 
     def mount_ledger(self, folder: Path) -> None:
         self.writer = ledger_writer.WriterLease(folder)
@@ -212,6 +246,9 @@ class ControlService:
             if self.thread.is_alive():
                 self.server.shutdown()
             self.server.server_close()
+        if self.secure is not None:
+            self.secure.shutdown()
+            self.secure.server_close()
         if self.writer is not None:
             self.writer.release()
         if self.controller.held is not None:
@@ -256,6 +293,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     )
     service.controller.terminals = anton_client(environ, slug, workers)
     service.listen = (HOST, int(port))
+    service.published, service.control_url = published(environ)
     if workers is not None:
         service.controller.jump = jump.routes(environ, workers.policy["namespace"])
         service.api_url = workers.terms.api_url

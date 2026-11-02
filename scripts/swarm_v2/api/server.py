@@ -1,5 +1,6 @@
 import json
 import re
+import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from scripts.swarm_v2.api.artifacts import MAX_REQUEST, ArtifactsAPI
@@ -14,6 +15,7 @@ from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.auth_context import GrantRefused
 
 MAX_BODY_BYTES = 65_536
+HANDSHAKE_S = 10
 LENGTH = "Content-Length"
 AUTHORIZATION = "Authorization"
 JSON_CONTENT = ("Content-Type", "application/json")
@@ -55,7 +57,7 @@ class Routes:
 
 
 class ExecutionsHandler(BaseHTTPRequestHandler):
-    api: ExecutionsAPI | Routes
+    api: "ExecutionsAPI | Routes | RecoveryRoutes"
 
     def do_GET(self) -> None:
         self.reply(*self.api.route("GET", self.path, str(self.headers.get(AUTHORIZATION)), None))
@@ -94,5 +96,33 @@ class ExecutionsHandler(BaseHTTPRequestHandler):
         return
 
 
+class RecoveryRoutes:
+    """Routes only the recovery endpoints, for the listener published beyond the cluster."""
+
+    def __init__(self, recovery: RecoveryAPI) -> None:
+        self.recovery = recovery
+
+    def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
+        if RECOVERY_PATH.fullmatch(path):
+            return self.recovery.route(method, path, authorization, body)
+        return 404, GrantRefused("invalid_request", "no such recovery endpoint").detail()
+
+
+class TLSHandler(ExecutionsHandler):
+    tls: ssl.SSLContext
+
+    def setup(self) -> None:
+        self.request.settimeout(HANDSHAKE_S)
+        self.request = self.tls.wrap_socket(self.request, server_side=True)
+        self.request.settimeout(None)
+        super().setup()
+
+
 def serve(api: ExecutionsAPI | Routes, host: str, port: int) -> ThreadingHTTPServer:
     return ThreadingHTTPServer((host, port), type(ExecutionsHandler.__name__, (ExecutionsHandler,), {"api": api}))
+
+
+def serve_tls(api: RecoveryRoutes, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
+    """Serve the given routes over TLS with the given server context."""
+    handler = type(TLSHandler.__name__, (TLSHandler,), {"api": api, "tls": context})
+    return ThreadingHTTPServer((host, port), handler)

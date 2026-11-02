@@ -136,6 +136,14 @@ controller:
       secretKey: signing-key
     # Peers beside the controller's own Pods, such as worker Pods; networkPolicy.ingressFrom never reaches the API.
     ingressFrom: []
+    # Recovery endpoints over TLS for callers outside the cluster, such as restore decisions from hives and the
+    # workstation; rendered once secretName names a tls.crt and tls.key secret. publicUrl is the https address
+    # those callers dial and ingressFrom admits them.
+    tls:
+      secretName: ""
+      port: 8781
+      publicUrl: ""
+      ingressFrom: []
     # {agent, task} of the swarm task proving a launch: the controller creates that proof swarm, and removes it once cleared.
     proof: {}
   # Kubernetes runtime settings, rendered once apiUrl is set and read while the API is on. The worker

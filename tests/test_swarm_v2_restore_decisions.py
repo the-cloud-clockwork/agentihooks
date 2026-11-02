@@ -1,4 +1,5 @@
 import json
+import ssl
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -561,3 +562,123 @@ def test_a_malformed_caller_is_rejected_before_the_credential_store(pending, mon
     monkeypatch.setattr(auth, "agent_member", unavailable)
     status, result = post(pending, pending.token, {"agent": 5, "choice": "fresh"})
     assert (status, result["error_class"]) == (401, "unauthenticated")
+
+
+@pytest.fixture
+def cert(tmp_path):
+    import subprocess
+
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=DNS:localhost",
+            "-keyout",
+            tmp_path / "key.pem",
+            "-out",
+            tmp_path / "cert.pem",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return str(tmp_path / "cert.pem"), str(tmp_path / "key.pem")
+
+
+def published_environ(cert, port="8781", url="https://localhost:8781/"):
+    from scripts.swarm_v2 import control_service
+
+    return {
+        control_service.TLS_PORT_ENV: port,
+        control_service.PUBLIC_URL_ENV: url,
+        control_service.TLS_CERT_ENV: cert[0],
+        control_service.TLS_KEY_ENV: cert[1],
+    }
+
+
+def test_published_listener_needs_a_port_an_https_address_and_a_certificate(cert):
+    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2.control_service import ControlError, published
+
+    assert published({}) == (None, "")
+    listen, url = published(published_environ(cert))
+    assert listen[:2] == ("0.0.0.0", 8781)
+    assert listen[2].verify_mode == ssl.CERT_NONE
+    assert url == "https://localhost:8781"
+    for port in ("x", "0", "65536"):
+        with pytest.raises(ControlError, match=f"^{control_service.TLS_PORT_ENV} must be a port number$"):
+            published(published_environ(cert, port=port))
+    with pytest.raises(ControlError, match="an https address$"):
+        published(published_environ(cert, url="http://localhost:8781"))
+    without = published_environ(cert)
+    del without[control_service.TLS_KEY_ENV]
+    with pytest.raises(ControlError, match=f"needs {control_service.TLS_KEY_ENV}$"):
+        published(without)
+
+
+def test_published_listener_serves_only_recovery_over_tls(pending, cert):
+    from scripts.swarm_v2.control_service import published
+
+    listen, _ = published(published_environ(cert, port="1"))
+    server = pending.service.serve_published("127.0.0.1", 0, listen[2])
+    base = f"https://localhost:{server.server_port}"
+    trusted = ssl.create_default_context(cafile=cert[0])
+    request = urllib.request.Request(
+        base + "/v1/" + pending.url.split("/v1/")[1],
+        json.dumps({"agent": "coordinator", "choice": "fresh"}).encode(),
+        {"Authorization": f"Bearer {pending.token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5, context=trusted) as response:
+        assert json.loads(response.read())["mode"] == "fresh"
+    health = urllib.request.Request(base + "/v2/health/live")
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(health, timeout=5, context=trusted)
+    assert refused.value.code == 404
+    with pytest.raises(OSError):
+        urllib.request.urlopen(base.replace("https", "http") + "/v2/health/live", timeout=5)
+    pending.service.stop()
+    assert pending.service.secure.socket.fileno() == -1
+
+
+def test_controller_publishes_its_public_address_beside_the_worker_address(pending):
+    store, slug = pending.world.store, pending.recovery.slug
+    pending.service.api_url = "http://controller.swarm.svc:8780"
+    pending.service.control_url = "https://swarm.example:8780"
+    pending.service.listen = ("127.0.0.1", 0)
+    pending.service._open()
+    config = store.config(slug)
+    assert (config.api_url, config.control_url) == ("http://controller.swarm.svc:8780", "https://swarm.example:8780")
+    pending.service.control_url = "https://moved.example:8780"
+    pending.service._open()
+    assert store.config(slug).control_url == "https://moved.example:8780"
+
+
+def test_restore_decision_prefers_the_published_address_and_trusts_the_ledger_ca(pending, cert, monkeypatch):
+    from scripts.gates import Who
+    from scripts.swarm_ledger import ledger_link
+    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2.control_service import published
+
+    slug = pending.recovery.slug
+    listen, _ = published(published_environ(cert, port="1"))
+    server = pending.service.serve_published("127.0.0.1", 0, listen[2])
+    monkeypatch.setenv(ledger_link.CA_FILE_ENV, cert[0])
+    monkeypatch.setattr(
+        control_service,
+        "page_credential",
+        lambda requested: "fixture operator credential" if requested == slug else None,
+    )
+    pending.world.store.update(
+        slug, api_url="http://127.0.0.1:1", control_url=f"https://localhost:{server.server_port}"
+    )
+    result = decide(pending.world.store, slug, pending.old, "fresh", Who())
+    assert result["mode"] == "fresh"
