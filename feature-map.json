@@ -195,6 +195,8 @@
         "tests/tick/test_source_control.py::test_github_workflow_runs_read_every_page_of_one_workflow_since_a_time",
         "tests/tick/test_source_control.py::test_github_download_reads_raw_bytes_under_the_named_reader",
         "tests/tick/test_source_control.py::test_github_download_outside_a_named_reader_counts_as_the_port",
+        "tests/tick/test_source_control.py::test_github_graph_returns_the_whole_body_under_the_named_reader",
+        "tests/tick/test_source_control.py::test_github_graph_outside_a_named_reader_counts_as_the_port",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
       ]
     },
@@ -1244,7 +1246,12 @@
         "tests/tick/test_view.py::test_a_full_read_at_the_stored_generation_replaces_a_view_that_does_not_fit",
         "tests/tick/test_view.py::test_an_unchanged_generation_leaves_the_stored_file",
         "tests/tick/test_view.py::test_start_reads_through_the_ledger_client_and_holds_the_view",
-        "tests/swarm/test_tick_view_start.py::test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read"
+        "tests/swarm/test_tick_view_start.py::test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read",
+        "tests/swarm_ledger/test_export_parts.py::test_the_tick_view_parts_are_accepted",
+        "tests/tick/test_view.py::test_the_view_holds_every_top_level_part_the_pass_reads",
+        "tests/tick/test_view.py::test_a_pass_holding_a_view_reads_each_document_through_one_delta_read",
+        "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
+        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
       ]
     }
   ],

@@ -41,7 +41,7 @@ def test_a_first_pass_reads_the_parts_in_full_and_stores_them(tmp_path: Path) ->
     path = tmp_path / "views" / "sw.json"
     reader = Reader({"generation": 7, "data": STATE})
     held = view.refreshed(path, reader)
-    assert reader.calls == [(0, ("tasks", "_meta", "phases"))]
+    assert reader.calls == [(0, view.PARTS)]
     assert (held.generation, held.tasks, held.meta, held.phases) == (7, STATE["tasks"], STATE["_meta"], STATE["phases"])
     assert api.read_export_file(path) == (7, STATE)
 
@@ -52,7 +52,7 @@ def test_a_later_pass_makes_one_delta_call_and_patches_the_stored_view(tmp_path:
     api.write_export_file(path, 7, STATE)
     reader = Reader(changed(9))
     held = view.refreshed(path, reader)
-    assert reader.calls == [(7, ("tasks", "_meta", "phases"))]
+    assert reader.calls == [(7, view.PARTS)]
     assert held.generation == 9
     assert held.meta == {"rev": 5, "events": []}
     assert api.read_export_file(path) == (9, {**STATE, "_meta": {"rev": 5, "events": []}})
@@ -64,7 +64,7 @@ def test_an_exceeded_change_window_replaces_the_stored_view(tmp_path: Path) -> N
     api.write_export_file(path, 7, {"tasks": [], "_meta": {}, "phases": []})
     reader = Reader({"generation": 900, "data": STATE})
     held = view.refreshed(path, reader)
-    assert reader.calls == [(7, ("tasks", "_meta", "phases"))]
+    assert reader.calls == [(7, view.PARTS)]
     assert (held.generation, held.tasks) == (900, STATE["tasks"])
     assert api.read_export_file(path) == (900, STATE)
 
@@ -161,6 +161,14 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     assert view.CURRENT.get() is held
     assert held.generation == 11
     assert api.read_export_file(view.view_file("http://ledger/sw", "sw", tmp_path)) == (11, STATE)
+    pair = view.REFRESH.get()
+    assert pair is not None
+    held_slug, refresh = pair
+    assert held_slug == "sw"
+    assert refresh().generation == 11
+    assert sent[-1][4] == 11
+    view.CURRENT.set(None)
+    view.REFRESH.set(None)
 
 
 def refusing(code: int) -> Callable[..., dict]:
@@ -200,3 +208,84 @@ def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.Mo
     with pytest.raises(urllib.error.HTTPError) as raised:
         view.start("sw", False)
     assert raised.value.code == 503
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> None:
+    assert view.PARTS == ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+    state = {
+        **STATE,
+        "freezes": [{"verb": "focus", "target": "p1"}],
+        "priorities": [{"item": "tasks/t1"}],
+        "followups": [{"id": "f1", "text": "Later"}],
+        "alerts": [{"id": "a1", "state": "open"}],
+        "overview": "Intent",
+    }
+    held = view.refreshed(tmp_path / "sw.json", Reader({"generation": 3, "data": state}))
+    assert held.document == state
+    assert (held.tasks, held.meta, held.phases) == (state["tasks"], state["_meta"], state["phases"])
+
+
+class Whole:
+    """A ledger that records each whole state read and answers it with its own document."""
+
+    def __init__(self, doc: dict) -> None:
+        self.doc, self.reads = doc, []
+
+    def state(self, slug: str) -> dict:
+        self.reads.append(slug)
+        return self.doc
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_pass_holding_a_view_reads_each_document_through_one_delta_read() -> None:
+    from scripts.swarm.ledger_client import pass_state
+
+    refreshes = []
+
+    def refresh() -> view.LedgerView:
+        refreshes.append(len(refreshes))
+        return view.LedgerView(7 + len(refreshes), {**STATE, "overview": f"read {len(refreshes)}"})
+
+    ledger = Whole({"tasks": []})
+    with view.holding():
+        view.REFRESH.set(("sw", refresh))
+        first, second = pass_state(ledger, "sw"), pass_state(ledger, "sw")
+        held = view.CURRENT.get()
+    assert (first["overview"], second["overview"]) == ("read 1", "read 2")
+    assert refreshes == [0, 1]
+    assert held is not None and held.generation == 9
+    assert ledger.reads == []
+
+
+def test_a_pass_reads_another_ledger_whole() -> None:
+    from scripts.swarm.ledger_client import pass_state
+
+    ledger = Whole({"tasks": [{"id": "peer"}]})
+    with view.holding():
+        view.REFRESH.set(("sw", lambda: pytest.fail("the view of sw refreshed for its peer")))
+        assert pass_state(ledger, "peer") == {"tasks": [{"id": "peer"}]}
+    assert ledger.reads == ["peer"]
+
+
+def test_without_a_held_view_the_ledger_is_read_whole() -> None:
+    from scripts.swarm.ledger_client import pass_state
+
+    ledger = Whole({"tasks": []})
+    assert view.document("sw") is None
+    assert pass_state(ledger, "sw") == {"tasks": []}
+    assert ledger.reads == ["sw"]
+
+
+def test_holding_drops_the_view_the_block_started() -> None:
+    outer = view.LedgerView(1, STATE)
+    outer_refresh = ("outer", lambda: outer)
+    view.CURRENT.set(outer)
+    view.REFRESH.set(outer_refresh)
+    with view.holding():
+        assert (view.CURRENT.get(), view.REFRESH.get()) == (None, None)
+        view.CURRENT.set(view.LedgerView(2, STATE))
+        view.REFRESH.set(("sw", lambda: view.LedgerView(3, STATE)))
+    assert (view.CURRENT.get(), view.REFRESH.get()) == (outer, outer_refresh)
+    view.CURRENT.set(None)
+    view.REFRESH.set(None)

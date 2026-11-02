@@ -83,7 +83,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm import idle as idle_state
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.ledger_client import LedgerRefused, pass_state
 from scripts.swarm.naming import lane_of, parse, seat_label
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
@@ -483,7 +483,7 @@ def _launch_checks(
     agents, canaries = [agent for agent, _ in confirmed], {agent.name: miss for agent, miss in confirmed}
     facts = runtime.bindings(agents)
     if any(launch_check.joined_at(agent, doc) is None for agent in agents):
-        doc = ledger.state(slug)
+        doc = pass_state(ledger, slug)
     for agent in agents:
         found = launch_check.misses(
             store,
