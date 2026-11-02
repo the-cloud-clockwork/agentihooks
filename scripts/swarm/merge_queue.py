@@ -82,10 +82,9 @@ class _RunGraph:
     def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any:
         """Run one GraphQL document through the runner and decode its body."""
         flags = [word for name, value in variables.items() for word in ("-f", f"{name}={value}")]
-        args = ["api", "graphql", "-f", f"query={document}", *flags]
-        options = {"capture_output": True, "text": True, "timeout": round(deadline.remaining)}
+        argv = command(["api", "graphql", "-f", f"query={document}", *flags])
         github_reads.charge(github_reads.CALLER.get(), "graphql", time.time())
-        done = github_reads.rest(github_reads.CALLER.get(), args, run=self.read, **options)
+        done = self.read(argv, capture_output=True, text=True, timeout=round(deadline.remaining))
         return json.loads(done.stdout)
 
 

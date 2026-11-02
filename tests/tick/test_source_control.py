@@ -608,6 +608,8 @@ def test_github_graph_returns_the_whole_body_under_the_named_reader(
     with github.github_reads.calling("swarm.checks"):
         assert provider.graph("{q}", {"url": "u", "id": "c"}, deadline=_deadline()) == body
     assert github.github_reads.counts(0, float("inf")) == {"swarm.checks": 1}
+    charged = (github.github_reads.home() / "charged.jsonl").read_text().splitlines()
+    assert [json.loads(row)["endpoint"] for row in charged] == ["graphql"]
     assert seen == [
         (
             "swarm.checks",

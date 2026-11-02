@@ -6,6 +6,7 @@ import pytest
 
 from scripts.swarm import github_reads, github_sampler, ledger_events, merge_queue
 from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.adapters.github import command
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import RateLimit
 
@@ -81,6 +82,28 @@ def test_required_check_rules_are_read_once_per_interval_across_pull_requests(gi
     assert asked == [RULES, "repos/org/repo/rules/branches/main"]
     assert seen == [{"Gate": None}] * 3
     assert [row["caller"] for row in charged()] == ["swarm.checks.rules"] * 2
+
+
+def test_the_required_view_graph_charges_graphql_and_runs_the_exact_query(github, monkeypatch):
+    seen = []
+
+    def read(argv, **options):
+        seen.append((argv, options))
+        return subprocess.CompletedProcess(argv, 0, '{"data": {"p0": 1}}', "")
+
+    monkeypatch.setattr(merge_queue.time, "time", lambda: 50.0)
+    with github_reads.calling("swarm.checks.view"):
+        body = merge_queue._RunGraph(read).graph("{q}", {"url": PR}, deadline=Deadline(10.0, lambda: 0.0))
+    assert body == {"data": {"p0": 1}}
+    assert seen == [
+        (
+            command(["api", "graphql", "-f", "query={q}", "-f", f"url={PR}"]),
+            {"capture_output": True, "text": True, "timeout": 10},
+        )
+    ]
+    assert [(row["caller"], row["endpoint"], row["at"]) for row in charged()] == [
+        ("swarm.checks.view", "graphql", 50.0)
+    ]
 
 
 def test_the_sampler_counts_used_calls_across_a_window_reset():
