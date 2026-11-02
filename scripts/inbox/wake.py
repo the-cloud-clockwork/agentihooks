@@ -5,6 +5,8 @@ then an alert on the ledger page, closed when the item closes. Every step is app
 count survives restarts.
 """
 
+from __future__ import annotations
+
 import uuid
 from dataclasses import dataclass, replace
 

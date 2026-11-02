@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Any
 
-    from scripts.inbox.store import InboxStore
-    from scripts.swarm.store import RedisStore
+    from scripts.inbox.store import InboxStore, Item
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 BY = "swarm"
 UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"

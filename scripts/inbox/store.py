@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, fields, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
@@ -489,8 +489,7 @@ class InboxStore:
     def keys_at(self, addresses: list[str]) -> tuple[list[str], dict[str, list[str]]]:
         """The keys of the given addresses, their items and their histories, and those addresses' memberships in
         the shared waiting, indexed and wake sets, read by name with no scan."""
-        keys: list[str] = []
-        wake_ids: list[str] = []
+        keys, wake_ids = cast(list[str], []), cast(list[str], [])
         wake = self.key("wake-outbox")
         for address in addresses:
             ids: list[str] = self.redis.zrange(self.key("address", address), 0, -1)
@@ -1216,14 +1215,18 @@ def _item(raw: dict[str, str], item_id: str) -> Item:
 
 def _parsed(raw: dict[str, str]) -> Item:
     known = {field.name for field in fields(Item)}
-    values: dict[str, Any] = {
-        **{key: value for key, value in raw.items() if key in known},
-        "created_at": int(raw["created_at"]),
-        "updated_at": int(raw["updated_at"]),
-        "sequence": int(raw.get("sequence", 0)),
-        "fyi": raw.get("fyi") == "True",
-    }
-    return Item(**values)
+    return Item(
+        **cast(
+            dict[str, Any],
+            {
+                **{key: value for key, value in raw.items() if key in known},
+                "created_at": int(raw["created_at"]),
+                "updated_at": int(raw["updated_at"]),
+                "sequence": int(raw.get("sequence", 0)),
+                "fyi": raw.get("fyi") == "True",
+            },
+        )
+    )
 
 
 def _entry(state: str, by: str, reason: str, at: int, session_id: str = "") -> str:

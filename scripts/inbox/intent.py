@@ -98,8 +98,9 @@ def routes(pool: MasterPool, slug: str, items: list[Item], live: list[str]) -> d
     """The master each item's intent matches, None for round robin; the estimated tokens sent add to the item's cache."""
     histories: dict[str, list[str]] = {seat: pool.redis.lrange(pool.key(slug, "recent", seat), 0, -1) for seat in live}
     histories = {seat: recent for seat, recent in histories.items() if recent}
-    verdicts: dict[tuple[str, str], float] = {}
-    asks: dict[tuple[str, str], tuple[DecisionRequest, str, str]] = {}
+    verdicts: dict[tuple[str, str], float]
+    asks: dict[tuple[str, str], tuple[DecisionRequest, str, str]]
+    verdicts, asks = {}, {}
     for item in items:
         cache = pool.key(slug, "intent", item.id)
         cached = pool.redis.hgetall(cache)
