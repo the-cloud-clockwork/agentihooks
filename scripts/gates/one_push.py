@@ -3,14 +3,21 @@ not push while that pull request's checks run unless one is already red, since a
 
 import os
 import re
+from collections.abc import Callable, Generator, Sequence
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any, cast
 
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.budget import Budget
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.push_stop import GITHUB_RE, count, git
 from scripts.gates.subagents import READERS, SubagentBudget
+from scripts.gates.verdicts import Verdicts
 from scripts.swarm.naming import lane_of
+
+if TYPE_CHECKING:
+    from scripts.swarm.ledger_client import LedgerClient
+    from scripts.swarm.ledger_events import PullRequest
 
 WORKERS = frozenset({"eng", "ci"})
 OPENS = (["pr", "create"], ["pr", "ready"])
@@ -27,7 +34,7 @@ ASSIGNED = re.compile(r"[A-Za-z_]\w*=.*")
 DECLARES = frozenset({"export", "declare", "typeset", "local", "readonly"})
 
 
-def _git_args(here, args):
+def _git_args(here: Path, args: list[str]) -> tuple[Path, list[str]]:
     while args and args[0].startswith("-"):
         for value in args[1:2] if args[0] == "-C" else ():
             here = here / Path(value).expanduser()
@@ -35,21 +42,21 @@ def _git_args(here, args):
     return here, args
 
 
-def _gh_args(args):
+def _gh_args(args: list[str]) -> list[str]:
     while args and args[0].startswith("-"):
         args = args[2:] if args[0] in GH_VALUED else args[1:]
     return args
 
 
-def expand(word, assigned):
+def expand(word: str, assigned: dict[str, str]) -> str:
     """The word with each $NAME or ${NAME} put in from the command's assignments or the environment, empty when unset
     as the shell does; a command substitution stays as written."""
     return VARIABLE.sub(lambda m: assigned.get(m[1] or m[2], os.environ.get(m[1] or m[2], "")), word)
 
 
-def actions(command, cwd):
+def actions(command: str, cwd: Path | str) -> Generator[tuple[str, Path, tuple[str, ...] | list[str]], None, None]:
     """Each pull request open and push the command runs, with the directory it runs in and its arguments."""
-    here, assigned = Path(cwd or "."), {}
+    here, assigned = Path(cwd or "."), dict[str, str]()
     for words in simple_commands(command):
         index = program_index(words)
         if index is None or words[index] in DECLARES:
@@ -67,7 +74,7 @@ def actions(command, cwd):
                 yield "push", where, args[1:]
 
 
-def unsaved(path):
+def unsaved(path: Path) -> str:
     """What of the checkout is not yet committed and on origin: '' when all of it is, or when it is no checkout."""
     status = git(path, "status", "--porcelain", "--untracked-files=no")
     if status.returncode != 0:
@@ -77,9 +84,9 @@ def unsaved(path):
     return "commits not on origin" if count(path, "HEAD", "--not", "--remotes=origin") else ""
 
 
-def positionals(args: list[str]) -> list[str]:
+def positionals(args: Sequence[str]) -> list[str]:
     """The push's remote and refspecs: options, their values and shell redirections with their targets left out."""
-    found, words = [], iter(args)
+    found, words = list[str](), iter(args)
     for word in words:
         redirect = REDIRECT.fullmatch(word)
         if word in PUSH_VALUED or (redirect and not redirect[1]):
@@ -89,7 +96,7 @@ def positionals(args: list[str]) -> list[str]:
     return found
 
 
-def repo_of(path, args):
+def repo_of(path: Path, args: Sequence[str]) -> str:
     """The repository a push writes: its remote argument as a URL or a remote name, origin when it names none."""
     remote = (positionals(args) or ["origin"])[0]
     url = remote if "/" in remote else git(path, "remote", "get-url", remote).stdout.strip()
@@ -97,7 +104,7 @@ def repo_of(path, args):
     return f"{found.group(1)}/{found.group(2)}".lower() if found else ""
 
 
-def destinations(path, args):
+def destinations(path: Path, args: Sequence[str]) -> set[str]:
     """The branches a push writes: each refspec's destination, the current branch for HEAD or no refspec."""
     current = git(path, "branch", "--show-current").stdout.strip()
     specs = positionals(args)[1:]
@@ -105,8 +112,8 @@ def destinations(path, args):
     return {current if end in ("", "HEAD") else end for end in ends}
 
 
-def open_refusal(slug, missing, held):
-    owed = []
+def open_refusal(slug: str, missing: list[str], held: str) -> str:
+    owed: list[str] = []
     if missing:
         agents = "sub-agent" if len(missing) == 1 else "sub-agents"
         owed.append(f"launch the {' and '.join(missing)} {agents} on the committed diff and close its findings")
@@ -118,21 +125,21 @@ def open_refusal(slug, missing, held):
     )
 
 
-def push_refusal(slug, url):
+def push_refusal(slug: str, url: str) -> str:
     return (
         f"checks still run on {url} and none is red: a push now cancels them. Wait with agentihooks swarm {slug} wait "
         f"--on checks {url}, then push once they resolve, or as soon as a check goes red"
     )
 
 
-def queue_refusal(slug, url):
+def queue_refusal(slug: str, url: str) -> str:
     return (
         f"{url} waits in the merge queue: a push now drops it. Dequeue first with agentihooks swarm {slug} merge "
         f"dequeue {url}, then push"
     )
 
 
-def never_started(pull):
+def never_started(pull: "PullRequest") -> bool:
     return (
         not pull.started and not pull.required_pending and (pull.mergeable == "CONFLICTING" or not pull.checks_pending)
     )
@@ -142,13 +149,13 @@ class OnePush:
     name = "one-push"
     default_mode = "enforce"
 
-    def __init__(self, ledger=None, github=None, target=None):
+    def __init__(self, ledger: "Any | None" = None, github: "Any | None" = None, target: str | None = None) -> None:
         self._ledger, self._github, self._target = ledger, github, target
 
-    def matches(self, call):
+    def matches(self, call: Call) -> bool:
         return call.tool == "Bash" and bool(MATCHED.search(call.command))
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: Verdicts) -> Decision:
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         cwd = Path(call.cwd) / Path(call.tool_input.get("workdir") or "").expanduser()
@@ -158,7 +165,7 @@ class OnePush:
                 return Decision.deny(reason)
         return Decision()
 
-    def opening(self, who, state, where):
+    def opening(self, who: Who, state: Verdicts, where: Path) -> str:
         budget = Budget(state.slug, SubagentBudget.name, state.home)
         missing = [name for name in READERS if not budget.spent(who.task, name)] if self.target() == "claude" else []
         held = unsaved(where)
@@ -166,8 +173,8 @@ class OnePush:
             f"{open_refusal(who.swarm, missing, held)}. Checked worktree: {where.resolve()}" if missing or held else ""
         )
 
-    def pushing(self, who, where, args):
-        task = self.ledger().task(who.swarm, who.task) or {}
+    def pushing(self, who: Who, where: Path, args: Sequence[str]) -> str:
+        task = cast(dict[str, Any], self.ledger().task(who.swarm, who.task) or {})
         found = PULL_REPO.search(str(task.get("pr_url")))
         if not found or (
             "$" not in str(where) and git(where, "rev-parse", "--is-inside-work-tree").stdout.strip() != "true"
@@ -185,17 +192,17 @@ class OnePush:
             return queue_refusal(who.swarm, task["pr_url"])
         return push_refusal(who.swarm, task["pr_url"]) if pull.running and not never_started(pull) else ""
 
-    def target(self):
+    def target(self) -> str:
         return self._target or os.environ.get("AGENTIHOOKS_TARGET") or "claude"
 
-    def ledger(self):
+    def ledger(self) -> "LedgerClient":
         if self._ledger:
             return self._ledger()
         from scripts.swarm.ledger_client import LedgerClient
 
         return LedgerClient()
 
-    def github(self):
+    def github(self) -> "Callable[..., PullRequest | None]":
         if self._github:
             return self._github
         from scripts.swarm.ledger_events import view

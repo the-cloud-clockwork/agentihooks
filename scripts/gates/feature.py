@@ -6,6 +6,7 @@ The map is read from dev and from the merged pull request head, so a feature map
 import json
 import subprocess
 from collections.abc import Callable
+from typing import Any, cast
 
 from scripts.gates.enforcement import FEATURE
 from scripts.swarm_ledger import ledger_kinds
@@ -18,13 +19,18 @@ LIVE_KINDS = ("troubleshoot", "ops", "tune")
 MISSING = f"this task is done only with the feature it proved: give --feature <id in {MAP}>"
 
 
-def required(task: dict) -> bool:
+def required(task: dict[str, Any]) -> bool:
     """Whether swarm done must name a feature for this task."""
-    flagged = (task.get("contract") or {}).get("feature") == "yes"
-    return flagged or ledger_kinds.after(task) or ledger_kinds.kind(task) in LIVE_KINDS
+    contract = cast(dict[str, Any], task.get("contract") or {})
+    flagged = contract.get("feature") == "yes"
+    return (
+        flagged
+        or cast(Callable[[dict[str, Any]], bool], ledger_kinds.after)(task)
+        or cast(Callable[[dict[str, Any]], str], ledger_kinds.kind)(task) in LIVE_KINDS
+    )
 
 
-def refusal(task: dict, feature: str, maps: Callable[[], list[dict | None]]) -> str:
+def refusal(task: dict[str, Any], feature: str, maps: Callable[[], list[dict[str, Any] | None]]) -> str:
     """Why swarm done must refuse this task's feature, or '' when it may close; an unread map is never an unmapped id."""
     if not required(task):
         return ""
@@ -47,7 +53,7 @@ def refs(head: str) -> list[str]:
     return [BASE, *([head] if head else [])]
 
 
-def read_map(ref: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> dict | None:
+def read_map(ref: str, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> dict[str, Any] | None:
     """The feature map at a revision on GitHub, or None when it cannot be read."""
     try:
         done = run(
@@ -64,9 +70,12 @@ def read_map(ref: str, run: Callable[..., subprocess.CompletedProcess] = subproc
         found = json.loads(done.stdout)
     except ValueError:
         return None
-    return found if isinstance(found, dict) else None
+    return cast(dict[str, Any], found) if isinstance(found, dict) else None
 
 
-def _features(found: dict) -> list[dict]:
+def _features(found: dict[str, Any]) -> list[dict[str, Any]]:
     entries = found.get("features")
-    return [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+    if not isinstance(entries, list):
+        return []
+    raw_entries = cast(list[Any], entries)
+    return [cast(dict[str, Any], entry) for entry in raw_entries if isinstance(entry, dict)]

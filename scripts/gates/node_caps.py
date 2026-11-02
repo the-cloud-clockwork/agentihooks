@@ -4,8 +4,9 @@ for the operator's authorization. It ships log only.
 
 import re
 from pathlib import Path
+from typing import Any, cast
 
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 
 NAME = "node-caps"
 EDITS = frozenset({"Edit", "Write", "MultiEdit"})
@@ -20,44 +21,48 @@ RESIZE = re.compile(
 RESIZE_COMMAND = "a node pool resize command"
 
 
-def refusal(found):
+def refusal(found: list[str]) -> str:
     return (
         f"node cap: {', '.join(found)} raises an infrastructure node cap, which only the operator authorizes. Send "
         "the ask to the front door master by inbox and continue other work."
     )
 
 
-def caps(text):
-    found = {}
+def caps(text: str) -> dict[str, int]:
+    found: dict[str, int] = {}
     pairs = [(f"--nodes {pool}", top) for top, pool in POOL_MAXIMUM.findall(text)] + NAMED_CAP.findall(text)
     for key, value in pairs:
         found[key] = max(found.get(key, 0), int(value))
     return found
 
 
-def raises(before, after):
+def raises(before: str, after: str) -> list[str]:
     old = caps(before)
     return [f"{key} {old[key]} to {value}" for key, value in caps(after).items() if key in old and value > old[key]]
 
 
-def resizes(command):
+def resizes(command: str) -> bool:
     return bool(RESIZE.search(command))
 
 
-def _current(path):
+def _current(path: Any) -> str | None:
     try:
         return Path(path).read_text()
     except (OSError, TypeError, ValueError):
         return None
 
 
-def _edited(call):
+def _edited(call: Call) -> tuple[str, str] | None:
     data = call.tool_input
     current = _current(data.get("file_path"))
     if call.tool == "Write":
         return (current, data["content"]) if current is not None else None
-    edits = data["edits"] if call.tool == "MultiEdit" else [data]
-    pairs = [(edit["old_string"], edit["new_string"]) for edit in edits if isinstance(edit, dict)]
+    edits = cast(list[Any], data["edits"] if call.tool == "MultiEdit" else [data])
+    pairs: list[tuple[str, str]] = [
+        (cast(dict[str, Any], edit)["old_string"], cast(dict[str, Any], edit)["new_string"])
+        for edit in edits
+        if isinstance(edit, dict)
+    ]
     if current is None:
         return "\n".join(old for old, _ in pairs), "\n".join(new for _, new in pairs)
     after = current
@@ -70,10 +75,10 @@ class NodeCaps:
     name = NAME
     default_mode = "observe"
 
-    def matches(self, call):
+    def matches(self, call: Call) -> bool:
         return call.tool in EDITS or call.tool in ("Bash", "hive-create")
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: object) -> Decision:
         if call.tool == "hive-create":
             return Decision.deny(refusal(["hive create adds infrastructure capacity"])) if who.name else Decision()
         if call.tool == "Bash":

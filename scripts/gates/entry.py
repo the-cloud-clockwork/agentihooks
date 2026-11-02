@@ -8,9 +8,15 @@ and write the gate log row instead.
 import json
 import os
 import sys
+from collections.abc import Callable, MutableMapping
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from scripts.gates import lift, log, modes
 from scripts.gates.base import Call, Decision, Who
+
+if TYPE_CHECKING:
+    from scripts.gates.base import Gate
 from scripts.gates.brain import BrainGate
 from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
@@ -51,7 +57,12 @@ GATES = {
 HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard(), NodeCaps(), Terminations(), SignIns())}
 
 
-def main(argv=None, stdin=None, environ=None, home=None):
+def main(
+    argv: list[str] | None = None,
+    stdin: "TextIO | None" = None,
+    environ: "MutableMapping[str, str] | None" = None,
+    home: str | Path | None = None,
+) -> int:
     argv = sys.argv[1:] if argv is None else argv
     environ = os.environ if environ is None else environ
     named = {**GATES, **HOST_GATES}
@@ -59,23 +70,28 @@ def main(argv=None, stdin=None, environ=None, home=None):
     if gate is None:
         print(f"agentihooks gate: name one gate of: {', '.join(sorted(named))}", file=sys.stderr)
         return 1
-    payload = json.loads((stdin or sys.stdin).read() or "{}")
+    payload = cast(dict[str, Any], json.loads((stdin or sys.stdin).read() or "{}"))
     call = Call.from_payload(payload)
-    return evaluate(gate, call, environ, home)
+    return evaluate(cast("Gate", gate), call, environ, home)
 
 
-def _brain_metric(gate, call, who, result):
+def _brain_metric(gate: "Gate", call: Call, who: Who, result: str) -> None:
     if gate.name == "brain":
         from hooks.observability import consultation
 
         consultation.gate(call, who, result)
 
 
-def evaluate(gate, call, environ=None, home=None):
+def evaluate(
+    gate: "Gate",
+    call: Call,
+    environ: "MutableMapping[str, str] | None" = None,
+    home: str | Path | None = None,
+) -> int:
     environ = os.environ if environ is None else environ
     if not gate.matches(call):
         return 0
-    who = Who.from_env(environ)
+    who = Who.from_env(cast("dict[str, str]", environ))
     mode = modes.mode(gate, environ, modes.swarm_gates(who.swarm, environ))
     if mode == "off":
         _brain_metric(gate, call, who, "off")
@@ -100,17 +116,19 @@ def evaluate(gate, call, environ=None, home=None):
     return 2
 
 
-def native(name, operation, environ=None):
-    from scripts.inbox.seen import receiving_session
+def native(name: str, operation: str, environ: "MutableMapping[str, str] | None" = None) -> int:
+    import scripts.inbox.seen
 
-    return evaluate(HOST_GATES[name], Call(operation, session=receiving_session(environ)), environ)
+    session = cast(Callable[["MutableMapping[str, str] | None"], str], scripts.inbox.seen.receiving_session)(environ)
+    return evaluate(cast("Gate", HOST_GATES[name]), Call(operation, session=session), environ)
 
 
-def _decide(gate, call, who, home, mode="enforce"):
+def _decide(gate: "Gate", call: Call, who: Who, home: str | Path | None, mode: str = "enforce") -> Decision:
     try:
         state = Verdicts(who.swarm, gate.name, home)
         if isinstance(gate, IntentGate):
-            return gate.decide(call, who, state, mode)
+            decide = cast(Callable[[Call, Who, Verdicts, str], Decision], gate.decide)
+            return decide(call, who, state, mode)
         return gate.decide(call, who, state)
     except Exception as exc:  # a crashed gate lets the call through, counted in the gate log
         detail = "gate evaluation failed" if gate.name == "brain" else f"{type(exc).__name__}: {exc}"
@@ -118,6 +136,6 @@ def _decide(gate, call, who, home, mode="enforce"):
         return FAILED_OPEN
 
 
-def _record(who, row, home):
+def _record(who: Who, row: log.Row, home: str | Path | None) -> None:
     if who.swarm:
         log.append(who.swarm, row, home)

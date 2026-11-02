@@ -3,13 +3,18 @@
 import json
 import re
 import subprocess
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Any
 
 from scripts.gates import log
 from scripts.gates.base import Decision
 from scripts.gates.budget import Budget
 from scripts.gates.identity import program_index, simple_commands
+
+if TYPE_CHECKING:
+    from scripts.gates.base import Call, Who
 
 PASSED = frozenset({"success", "skipped", "neutral"})
 VALUE_FLAGS = {"-j": "job", "--job": "job", "-R": "repo", "--repo": "repo"}
@@ -27,7 +32,7 @@ class Target:
     repo: str = ""
 
 
-def _target(args):
+def _target(args: list[str]) -> Target:
     found, words = {"run": "", "job": "", "repo": ""}, iter(args)
     for word in words:
         flag, eq, value = word.partition("=")
@@ -38,7 +43,7 @@ def _target(args):
     return Target(**found)
 
 
-def _rest_target(args):
+def _rest_target(args: list[str]) -> Target | None:
     for word in args:
         found = REST_RERUN.search(word)
         if found:
@@ -46,7 +51,7 @@ def _rest_target(args):
     return None
 
 
-def targets(command):
+def targets(command: str) -> "Generator[Target, None, None]":
     for words in simple_commands(command):
         index = program_index(words)
         if index is None or PurePosixPath(words[index]).name != "gh":
@@ -59,12 +64,14 @@ def targets(command):
                 yield found
 
 
-def _api(path, run):
+def _api(path: str, run: Callable[..., subprocess.CompletedProcess[str]]) -> Any:
     out = run(["gh", "api", path], capture_output=True, text=True, check=True, timeout=GH_TIMEOUT_SEC)
     return json.loads(out.stdout)
 
 
-def gh_jobs(target, run=subprocess.run):
+def gh_jobs(
+    target: Target, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+) -> list[dict[str, Any]]:
     repo = target.repo or "{owner}/{repo}"
     if target.job:
         return [_api(f"repos/{repo}/actions/jobs/{target.job}", run)]
@@ -73,14 +80,14 @@ def gh_jobs(target, run=subprocess.run):
     return []
 
 
-def exempt(jobs):
+def exempt(jobs: list[dict[str, Any]]) -> bool:
     unsuccessful = [job for job in jobs if job.get("conclusion") not in PASSED]
     return bool(unsuccessful) and all(
         job.get("conclusion") == "cancelled" and not job.get("runner_name") for job in unsuccessful
     )
 
 
-def refusal(slug, head, cap):
+def refusal(slug: str, head: str, cap: int) -> str:
     return (
         f"CI reruns on pull request head {head[:12]} are spent: {cap} of {cap}. Read the failed job's log and push "
         f'a fix, or block with agentihooks swarm {slug} block "<why>"'
@@ -88,16 +95,20 @@ def refusal(slug, head, cap):
 
 
 class RerunBudget:
-    name = "reruns"
-    default_mode = "enforce"
+    name: str = "reruns"
+    default_mode: str = "enforce"
 
-    def __init__(self, cap=RERUN_CAP, jobs=gh_jobs):
+    def __init__(
+        self,
+        cap: int = RERUN_CAP,
+        jobs: Callable[..., list[dict[str, Any]]] = gh_jobs,
+    ) -> None:
         self.cap, self.jobs = cap, jobs
 
-    def matches(self, call):
+    def matches(self, call: "Call") -> bool:
         return call.tool == "Bash" and "gh" in call.command and "rerun" in call.command
 
-    def decide(self, call, who, state):
+    def decide(self, call: "Call", who: "Who", state: Any) -> Decision:
         if not who.pinned:
             return Decision()
         for target in targets(call.command):

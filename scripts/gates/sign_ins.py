@@ -1,8 +1,9 @@
 """The sign in gate: an agent never signs in, solves a CAPTCHA or opens an OAuth grant in a browser. It ships log only."""
 
 import re
+from typing import Any, cast
 
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 
 NAME = "sign-ins"
 PLAYWRIGHT = "playwright"
@@ -19,19 +20,23 @@ INTERACTIONS = frozenset(
 )
 
 
-def refusal(what):
+def refusal(what: str) -> str:
     return (
         f"sign in: this browser call opens or fills {what}. Agents never sign in, solve a CAPTCHA or grant OAuth; "
         "use a page already signed in, or send the step to the front door master by inbox."
     )
 
 
-def _texts(tool_input):
-    fields = [field for field in tool_input.get("fields") or [] if isinstance(field, dict)]
-    return [str(tool_input.get("element")), *(f"{field.get('name')} {field.get('type')}" for field in fields)]
+def _texts(tool_input: dict[str, Any]) -> list[str]:
+    raw_fields = cast(list[Any], tool_input.get("fields") or [])
+    fields: list[dict[str, Any]] = [cast(dict[str, Any], field) for field in raw_fields if isinstance(field, dict)]
+    return [
+        str(tool_input.get("element")),
+        *(f"{field.get('name')} {field.get('type')}" for field in fields),
+    ]
 
 
-def sign_in(tool, tool_input):
+def sign_in(tool: str, tool_input: dict[str, Any]) -> str:
     action = tool.rpartition("__")[2]
     if action == "browser_navigate":
         return PAGE if SIGN_IN_URL.search(str(tool_input.get("url"))) else ""
@@ -44,13 +49,13 @@ class SignIns:
     name = NAME
     default_mode = "observe"
 
-    def matches(self, call):
+    def matches(self, call: Call) -> bool:
         if call.tool in ("claude-login", "codex-login", "init-agent-auth"):
             return True
         kind, _, rest = call.tool.partition("__")
         return kind == "mcp" and PLAYWRIGHT in rest.partition("__")[0]
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: object) -> Decision:
         if call.tool in ("claude-login", "codex-login", "init-agent-auth"):
             return (
                 Decision.deny("sign in: agents never initiate authentication; send the step to the front door master.")

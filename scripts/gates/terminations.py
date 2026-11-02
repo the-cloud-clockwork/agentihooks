@@ -4,7 +4,7 @@ operator's order. A bare kill names a pid, not an agent, so it is left to the ma
 
 from pathlib import PurePosixPath
 
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.swarm import naming
 
@@ -19,7 +19,7 @@ REFUSAL = (
 )
 
 
-def _terminates(words):
+def _terminates(words: list[str]) -> bool:
     index = program_index(words)
     if index is None:
         return False
@@ -29,7 +29,7 @@ def _terminates(words):
     return program == "agentihooks" and rest[:1] == ["terminate-agent"] and not INSPECTS.intersection(rest)
 
 
-def terminates(command):
+def terminates(command: str) -> bool:
     return any(map(_terminates, simple_commands(command)))
 
 
@@ -37,10 +37,10 @@ class Terminations:
     name = NAME
     default_mode = "observe"
 
-    def matches(self, call):
+    def matches(self, call: Call) -> bool:
         return call.tool in ("Bash", "terminate-agent")
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: object) -> Decision:
         if naming.lane_of(who.name) != MASTER or (call.tool == "Bash" and not terminates(call.command)):
             return Decision()
         return Decision.deny(REFUSAL)

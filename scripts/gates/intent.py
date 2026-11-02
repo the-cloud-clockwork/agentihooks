@@ -8,11 +8,12 @@ import shlex
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import Callable
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from hooks.classifier.questions import MAX_QUESTIONS
@@ -22,6 +23,25 @@ from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import timing
 from scripts.swarm_ledger import ledger_splits, plan_read
+
+if TYPE_CHECKING:
+    from hooks.classifier.definitions import Definition
+    from hooks.classifier.questions import Question
+    from hooks.classifier.result import Answer, DecisionResult
+    from scripts.swarm.store import SwarmConfig
+
+    class _Ledger(Protocol):
+        def update_task(self, slug: str, task_id: str, fields: dict[str, Any]) -> object: ...
+        def comment(self, slug: str, task_id: str, text: str, by: str = "") -> object: ...
+
+    class _Mail(Protocol):
+        master: str
+
+        def engineer(self, task: dict[str, Any]) -> str: ...
+        def send(self, key: str, to: str, text: str, ref: str = "") -> list[str]: ...
+
+
+type _Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 NAME = "intent"
 PURPOSE = "intent-check"
@@ -66,8 +86,8 @@ REASONS = {
 }
 
 
-def mode_of(config):
-    chosen = config.gates.get(NAME)
+def mode_of(config: "SwarmConfig") -> str:
+    chosen = cast(str | None, config.gates.get(NAME))
     return chosen if chosen in MODES else DEFAULT_MODE
 
 
@@ -81,7 +101,7 @@ def _tests_first(body: str) -> bool:
     )
 
 
-def _pr_diff(url: str, run) -> str | None:
+def _pr_diff(url: str, run: _Runner) -> str | None:
     try:
         patch = _gh(["gh", "pr", "diff", url], run)
         return patch.stdout if patch.returncode == 0 else None
@@ -89,15 +109,15 @@ def _pr_diff(url: str, run) -> str | None:
         return None
 
 
-def _phase(doc, task):
+def _phase(doc: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
     return next((p for p in doc["phases"] if p.get("id") == task.get("phase")), {})
 
 
-def _same_phase(record, task):
+def _same_phase(record: dict[str, Any], task: dict[str, Any]) -> bool:
     return record.get("phase") == task.get("phase")
 
 
-def section(doc, task):
+def section(doc: dict[str, Any], task: dict[str, Any]) -> str:
     phase = _phase(doc, task)
     declared = _declared(task)
     delivers = f"declared {declared['kind']}: {declared['scope']}" if declared else task["description"]
@@ -108,21 +128,21 @@ def section(doc, task):
     )
 
 
-def _declared(task):
+def _declared(task: dict[str, Any]) -> dict[str, Any] | None:
     return (task.get("pull_scopes") or {}).get(task.get("pr_url"))
 
 
-def with_intent(body, text):
+def with_intent(body: str, text: str) -> str:
     if SECTION.search(body):
         return SECTION.sub(lambda _: text, body, count=1)
     return f"{body.rstrip()}\n\n{text}" if body.strip() else text
 
 
-def _gh(args, run, data=None):
+def _gh(args: list[str], run: _Runner, data: str | None = None) -> subprocess.CompletedProcess[str]:
     return run(args, input=data, capture_output=True, text=True, timeout=GH_TIMEOUT_SEC)
 
 
-def stamp_body(url, doc, task, run=subprocess.run):
+def stamp_body(url: str, doc: dict[str, Any], task: dict[str, Any], run: _Runner = subprocess.run) -> bool:
     found = PULL.search(url)
     if not found:
         return False
@@ -139,7 +159,9 @@ def stamp_body(url, doc, task, run=subprocess.run):
     return sent.returncode == 0
 
 
-def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
+def stamp(
+    slug: str, task_id: str, url: str, doc: dict[str, Any], mode: str, now_ms: int, home: str | Path | None = None
+) -> dict[str, Any]:
     task = next((t for t in doc["tasks"] if t.get("id") == task_id), None)
     body = task is not None and stamp_body(url, doc, task)
     if mode == "off":
@@ -154,15 +176,15 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
     return {"verdict": PENDING, "body": body}
 
 
-def _split_fields(task, url):
+def _split_fields(task: dict[str, Any] | None, url: str) -> dict[str, Any]:
     return {"url": url, "split": True} if task and task.get("split") else {}
 
 
-def _pull_subject(task, url):
+def _pull_subject(task: str, url: str) -> str:
     return f"{task}.{hashlib.sha256(url.encode()).hexdigest()}"
 
 
-def _bind_pulls(state, task, url, doc):
+def _bind_pulls(state: Verdicts, task: dict[str, Any] | None, url: str, doc: dict[str, Any]) -> None:
     if task and task.get("split"):
         from scripts.swarm.done_gate import _pulls
 
@@ -178,7 +200,7 @@ def _bind_pulls(state, task, url, doc):
         )
 
 
-def _pr_field(url, field, run):
+def _pr_field(url: str, field: str, run: _Runner) -> str | None:
     found = PULL.search(url)
     if not found:
         return None
@@ -190,15 +212,15 @@ def _pr_field(url, field, run):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def pr_merged(url: str, run=subprocess.run) -> bool:
+def pr_merged(url: str, run: _Runner = subprocess.run) -> bool:
     return _pr_field(url, "merged", run) == "true"
 
 
-def pr_head(url: str, run=subprocess.run) -> str | None:
+def pr_head(url: str, run: _Runner = subprocess.run) -> str | None:
     return _pr_field(url, "head.sha", run)
 
 
-def production_unchanged(url: str, before: str, after: str, run=subprocess.run) -> bool:
+def production_unchanged(url: str, before: str, after: str, run: _Runner = subprocess.run) -> bool:
     found = PULL.search(url)
     if not found:
         return False
@@ -206,7 +228,9 @@ def production_unchanged(url: str, before: str, after: str, run=subprocess.run) 
     compare = ["gh", "api", f"repos/{owner}/{repo}/compare/{before}...{after}", "--jq", COMPARED]
     try:
         result = _gh(compare, run)
-        status, files = json.loads(result.stdout) if result.returncode == 0 else (None, [])
+        status, files = cast(
+            "tuple[str | None, list[str]]", json.loads(result.stdout) if result.returncode == 0 else (None, [])
+        )
     except (OSError, subprocess.SubprocessError, ValueError):
         return False
     return status == "ahead" and len(files) < COMPARE_FILES and all(path.startswith(NON_PRODUCTION) for path in files)
@@ -216,20 +240,20 @@ def text_key(title: str, body: str | None) -> str:
     return hashlib.sha256(json.dumps([title, body or ""]).encode()).hexdigest()
 
 
-def pr_text(url: str, run=subprocess.run) -> str | None:
+def pr_text(url: str, run: _Runner = subprocess.run) -> str | None:
     found = PULL.search(url)
     if not found:
         return None
     owner, repo, number = found.groups()
     try:
         result = _gh(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}", "--jq", "{title, body}"], run)
-        raw = json.loads(result.stdout) if result.returncode == 0 else None
+        raw = cast("dict[str, Any] | None", json.loads(result.stdout) if result.returncode == 0 else None)
         return text_key(raw["title"], raw["body"]) if raw else None
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
 
-def pr_view(url, run=subprocess.run):
+def pr_view(url: str, run: _Runner = subprocess.run) -> dict[str, Any] | None:
     found = PULL.search(url)
     if not found:
         return None
@@ -239,7 +263,7 @@ def pr_view(url, run=subprocess.run):
         return None
     try:
         done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments,isDraft,state"], run)
-        raw = json.loads(done.stdout) if done.returncode == 0 else None
+        raw = cast("dict[str, Any] | None", json.loads(done.stdout) if done.returncode == 0 else None)
         if raw is None:
             return None
         title, body, files = raw["title"], raw["body"] or "", [f["path"] for f in raw["files"]]
@@ -247,7 +271,7 @@ def pr_view(url, run=subprocess.run):
         comments = _gh(["gh", "api", "--paginate", "--jq", ".[] | @json", path], run)
         if comments.returncode:
             return None
-        diff = {}
+        diff: dict[str, Any] = {}
         if _tests_first(body):
             diff = {"diff": _pr_diff(url, run)}
         head = pr_head(url, run)
@@ -271,11 +295,12 @@ def pr_view(url, run=subprocess.run):
         return None
 
 
-def named_pulls(task, body):
+def named_pulls(task: dict[str, Any], body: str) -> list[str]:
     own = PULL.search(task["pr_url"])
     here = (own[1].lower(), own[2].lower()) if own else None
     texts = [task.get("description"), SECTION.sub("", body), *(c.get("text") for c in task.get("comments") or [])]
-    urls, seen = [], set()
+    urls: list[str] = []
+    seen: set[str] = set()
     for text in filter(None, texts):
         short = (m.groups() for m in SHORT.finditer(text) if here and m[1].lower() == here[0])
         for owner, repo, number in [*(m.groups() for m in PULL.finditer(text)), *short]:
@@ -286,10 +311,10 @@ def named_pulls(task, body):
     return urls
 
 
-def named_view(url, run=subprocess.run):
+def named_view(url: str, run: _Runner = subprocess.run) -> dict[str, Any] | None:
     try:
         done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,state"], run)
-        raw = json.loads(done.stdout) if done.returncode == 0 else None
+        raw = cast("dict[str, Any] | None", json.loads(done.stdout) if done.returncode == 0 else None)
         if raw is None:
             return None
         body, diff = raw["body"] or "", _pr_diff(url, run)
@@ -307,20 +332,20 @@ def named_view(url, run=subprocess.run):
         return None
 
 
-def _proof_notes(task, proof_chars):
+def _proof_notes(task: dict[str, Any], proof_chars: int) -> str:
     try:
         return (Path(task["workspace"]) / "proof.md").read_text()[-proof_chars:]
     except (KeyError, OSError):
         return ""
 
 
-def _split_half(task):
+def _split_half(task: dict[str, Any]) -> tuple[int, Any] | None:
     halves, pulls = task.get("split") or [], task.get("split_pulls") or []
     index = pulls.index(task.get("pr_url")) if task.get("pr_url") in pulls else len(pulls)
     return (index, halves[index]) if index < len(halves) else None
 
 
-def _split_note(task):
+def _split_note(task: dict[str, Any]) -> str:
     half = _split_half(task)
     if half is None:
         return ""
@@ -334,7 +359,7 @@ def _split_note(task):
     )
 
 
-def _plan_chunk(doc, task):
+def _plan_chunk(doc: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
     half = _split_half(task) if task.get("split") and ledger_splits.ranged(task["split"]) else None
     task = {**task, "plan_lines": half[1]} if half else task
     if not task.get("plan_lines") or task.get("follow_up") or _declared(task):
@@ -343,15 +368,15 @@ def _plan_chunk(doc, task):
         text = plan_read.exact(doc, task)
     except (ValueError, OSError):
         text = None
-    part = {"plan_lines": task["plan_lines"], "plan_chunk": text}
+    part: dict[str, Any] = {"plan_lines": task["plan_lines"], "plan_chunk": text}
     if task.get("plan_slice") != task.get("id"):
-        part = plan_read.scoped(doc, task, part)
+        part = cast(dict[str, Any], plan_read.scoped(doc, task, part))
     if "shared_slice" not in part and isinstance(text, str) and _foreign_slice(doc, task, text):
         return {}
     return part
 
 
-def _foreign_slice(doc, task, text):
+def _foreign_slice(doc: dict[str, Any], task: dict[str, Any], text: str) -> bool:
     name = task.get("plan_slice")
     if not name:
         return False
@@ -368,7 +393,7 @@ def _foreign_slice(doc, task, text):
     )
 
 
-def _parent(doc, task):
+def _parent(doc: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
     phase = _phase(doc, task)
     return {
         "overview": doc["overview"],
@@ -379,7 +404,7 @@ def _parent(doc, task):
     }
 
 
-def _task_text(task):
+def _task_text(task: dict[str, Any]) -> str:
     declared = _declared(task)
     if declared is None:
         return task["description"] + _split_note(task)
@@ -389,7 +414,7 @@ def _task_text(task):
     )
 
 
-def _task_contract(doc, task):
+def _task_contract(doc: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
     phase = _phase(doc, task)
     if task.get("split") and not ledger_splits.ranged(task["split"]):
         return {**task, "plan_lines": ""}
@@ -400,7 +425,9 @@ def _task_contract(doc, task):
     return task
 
 
-def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
+def state_of(
+    doc: dict[str, Any], task: dict[str, Any], pr: dict[str, Any], proof_chars: int = PROOF_CHARS
+) -> dict[str, Any]:
     task = _task_contract(doc, task)
     return {
         **_parent(doc, task),
@@ -416,7 +443,7 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
     }
 
 
-def plan_state(doc, task, kept):
+def plan_state(doc: dict[str, Any], task: dict[str, Any], kept: list[dict[str, Any]]) -> dict[str, Any]:
     task = _task_contract(doc, task)
     return {
         "stage": "plan",
@@ -427,7 +454,7 @@ def plan_state(doc, task, kept):
     }
 
 
-def _named_state(pr):
+def _named_state(pr: dict[str, Any]) -> dict[str, Any]:
     if "pull_requests" not in pr:
         return {}
     pulls = pr["pull_requests"]
@@ -439,41 +466,42 @@ def _named_state(pr):
     }
 
 
-def _listed(urls, more):
+def _listed(urls: list[str], more: int) -> str:
     more += len(urls[LISTED:])
     if more:
         return f"{', '.join(urls[:LISTED])} and {more} more"
     return f"{', '.join(urls[:-1])} and {urls[-1]}" if len(urls) > 1 else urls[0]
 
 
-def _judged_on(state):
+def _judged_on(state: dict[str, Any]) -> str:
     judged, unread = state.get("judged_pull_requests") or [], state.get("unread_pull_requests") or []
     text = f"; judged on {_listed(judged, 0)}" if judged else ""
     return text + (f"; could not read {_listed(unread, state.get('unread_overflow', 0))}" if unread else "")
 
 
-def _pending(pr):
+def _pending(pr: dict[str, Any]) -> dict[str, Any]:
     return {"named_pending": pr["named_pending"]} if pr.get("named_pending") else {}
 
 
-def _rows(state):
+def _rows(state: dict[str, Any]) -> list[tuple[int, str]]:
     if state.get("task_part") == "tests-first":
         return []
     text = state.get("plan_chunk")
     return plan_read.numbered(text, state["plan_lines"]) if isinstance(text, str) else []
 
 
-def _stage(state):
+def _stage(state: dict[str, Any]) -> str:
     if state.get("task_part") == "tests-first":
         return "tests-first"
     return "plan" if state.get("stage") == "plan" else "delivered"
 
 
-def _definition(state):
+def _definition(state: dict[str, Any]) -> str:
     return {"tests-first": TESTS_FIRST, "plan": PLAN}.get(_stage(state), PURPOSE)
 
 
-def _questions(definition, state, params):
+def _questions(definition: "Definition", state: object, params: dict[str, Any]) -> dict[str, "Question"]:
+    state = cast(dict[str, Any], state)
     if state.get("task_part") == "tests-first":
         return runner.questions_for(definition)
     base = PLAN_QUESTIONS if definition.name == PLAN else BASE_QUESTIONS
@@ -486,19 +514,22 @@ def _questions(definition, state, params):
     return {**{key: asked[key] for key in (*base, *CHUNK_QUESTIONS)}, **lines}
 
 
-def questions_for(state):
+def questions_for(state: dict[str, Any]) -> dict[str, "Question"]:
     return _questions(definitions.load(_definition(state)), state, {})
 
 
-def _quoted(rows):
+def _quoted(rows: list[tuple[int, str]]) -> str:
     return ", ".join(f'line {number} "{row}"' for number, row in rows)
 
 
-def _chunk_reasons(state, answers, thresholds, subject="the change"):
+def _chunk_reasons(
+    state: dict[str, Any], answers: dict[str, "Answer"], thresholds: dict[str, float], subject: str = "the change"
+) -> list[str]:
     if not _rows(state):
         return []
-    lines, under, over = state["plan_lines"], answers["underdelivers"].noul, answers["overdelivers"].noul
-    reasons = []
+    lines = state["plan_lines"]
+    under, over = cast(float, answers["underdelivers"].noul), cast(float, answers["overdelivers"].noul)
+    reasons: list[str] = []
     if under >= thresholds["chunk"]:
         reasons.append(f"{subject} may leave out something plan lines {lines} ask for, at probability {under:.2f}")
     if over >= thresholds["chunk"]:
@@ -506,63 +537,70 @@ def _chunk_reasons(state, answers, thresholds, subject="the change"):
     return reasons
 
 
-def _chunk_steps(state, answers, thresholds, subject="the change"):
-    rows, lines, steps = _rows(state), state.get("plan_lines"), []
+def _chunk_steps(
+    state: dict[str, Any], answers: dict[str, "Answer"], thresholds: dict[str, float], subject: str = "the change"
+) -> list[str]:
+    rows, lines = _rows(state), state.get("plan_lines")
+    steps: list[str] = []
     if not rows:
         return steps
     line = thresholds["chunk"]
-    if answers["underdelivers"].noul >= line:
+    if cast(float, answers["underdelivers"].noul) >= line:
         named = [(n, row) for n, row in rows if f"misses_line_{n}" in answers]
-        missed = [(n, row) for n, row in named if answers[f"misses_line_{n}"].noul >= line]
+        missed = [(n, row) for n, row in named if cast(float, answers[f"misses_line_{n}"].noul) >= line]
         if missed:
             steps.append(f"Deliver what plan lines {lines} ask for and {subject} leaves out: {_quoted(missed)}.")
         else:
             steps.append(
                 f"Deliver what plan lines {lines} ask for. No single line was named, so check each: {_quoted(rows)}."
             )
-    if answers["overdelivers"].noul >= line:
+    if cast(float, answers["overdelivers"].noul) >= line:
         steps.append(f"Remove the scope beyond plan lines {lines}, which ask only for {_quoted(rows)}.")
     return steps
 
 
-def remediation(state: dict, answers: dict, thresholds: dict) -> str:
+def remediation(state: dict[str, Any], answers: dict[str, "Answer"], thresholds: dict[str, float]) -> str:
     if state.get("task_part") == "tests-first":
         return TESTS_FIRST_GUIDANCE
-    steps = []
+    steps: list[str] = []
     if state.get("task_text"):
         task = f"{state['task']}: {state['task_text']}"
         phase = f"{state['phase']}: {state['phase_intent']}"
         steps.append(f"Deliver {task}. The phase must be able to use it for {phase}.")
-        if answers["delivers"].noul < thresholds["reason"]:
+        if cast(float, answers["delivers"].noul) < thresholds["reason"]:
             steps.append(f"Implement the missing acceptance behavior described by {task}.")
-        if answers["reachable"].noul < thresholds["reason"]:
+        if cast(float, answers["reachable"].noul) < thresholds["reason"]:
             steps.append(
                 f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}."
             )
-        if answers["weakens"].noul >= thresholds["weaken"]:
+        if cast(float, answers["weakens"].noul) >= thresholds["weaken"]:
             steps.append(f"Preserve {phase} while implementing {task}.")
     steps += _chunk_steps(state, answers, thresholds)
     return "What would meet intent: " + " ".join(steps) if steps else ""
 
 
-def _verdict(state, answers, thresholds):
+def _verdict(
+    state: dict[str, Any], answers: dict[str, "Answer"], thresholds: dict[str, float]
+) -> tuple[str, str, str | None]:
     if state.get("task_part") == "tests-first":
         faults = []
-        if answers["accepts_both_states"].noul < thresholds["reason"]:
+        if cast(float, answers["accepts_both_states"].noul) < thresholds["reason"]:
             faults.append("the preparatory tests may not accept both old and new gate states")
-        if answers["changes_gate_behavior"].noul >= thresholds["weaken"]:
+        if cast(float, answers["changes_gate_behavior"].noul) >= thresholds["weaken"]:
             faults.append("the tests first part may change gate behaviour")
         if faults:
             return FAIL, "; ".join([*faults, TESTS_FIRST_GUIDANCE]), "tests-first"
     if state.get("stage") == "plan":
         return _plan_verdict(state, answers, thresholds)
-    usable, weakens, fail = answers["usable"].noul, answers["weakens"].noul, thresholds["fail"]
+    usable = cast(float, answers["usable"].noul)
+    weakens = cast(float, answers["weakens"].noul)
+    fail = thresholds["fail"]
     chunk = _chunk_reasons(state, answers, thresholds)
     if usable >= fail and weakens < thresholds["weaken"] and not chunk:
         cited = f", judged against plan lines {state['plan_lines']}" if _rows(state) else ""
         return PASS, f"the phase can use it as delivered at probability {usable:.2f}{cited}", None
     lead, criterion = _delivered_lead(answers, thresholds)
-    reasons = [text for key, text in REASONS.items() if answers[key].noul < thresholds["reason"]]
+    reasons = [text for key, text in REASONS.items() if cast(float, answers[key].noul) < thresholds["reason"]]
     if weakens >= thresholds["weaken"]:
         reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
     reasons += chunk
@@ -572,14 +610,14 @@ def _verdict(state, answers, thresholds):
     return FAIL, "; ".join([lead, *reasons]), criterion
 
 
-def _delivered_lead(answers, thresholds):
-    usable, fail = answers["usable"].noul, thresholds["fail"]
+def _delivered_lead(answers: dict[str, "Answer"], thresholds: dict[str, float]) -> tuple[str, str]:
+    usable, fail = cast(float, answers["usable"].noul), thresholds["fail"]
     if usable >= fail:
-        weakened = answers["weakens"].noul >= thresholds["weaken"]
+        weakened = cast(float, answers["weakens"].noul) >= thresholds["weaken"]
         return f"the phase can use this change at probability {usable:.2f}", "weakens" if weakened else "chunk"
     if "aligned" not in answers:
         return f"the phase can use this change at probability {usable:.2f}, under {fail}", "usable"
-    aligned = answers["aligned"].noul
+    aligned = cast(float, answers["aligned"].noul)
     if aligned >= fail:
         return (
             f"the change fits the phase at probability {aligned:.2f}, and the phase can use it as delivered at "
@@ -593,10 +631,12 @@ def _delivered_lead(answers, thresholds):
     )
 
 
-def _plan_verdict(state, answers, thresholds):
-    aligned, covers, weakens = (answers[key].noul for key in PLAN_QUESTIONS)
+def _plan_verdict(
+    state: dict[str, Any], answers: dict[str, "Answer"], thresholds: dict[str, float]
+) -> tuple[str, str, str | None]:
+    aligned, covers, weakens = (cast(float, answers[key].noul) for key in PLAN_QUESTIONS)
     fail = thresholds["fail"]
-    faults = []
+    faults: list[tuple[str, str]] = []
     if aligned < fail:
         faults.append(
             ("phase", f"the plan may not serve the phase: it serves it at probability {aligned:.2f}, under {fail}")
@@ -623,7 +663,10 @@ def _plan_verdict(state, answers, thresholds):
     return FAIL, "; ".join([*(text for _, text in faults), "What would meet intent: " + " ".join(steps)]), faults[0][0]
 
 
-def _verdicts(definition, state, params, answers):
+def _verdicts(
+    definition: "Definition", state: object, params: dict[str, Any], answers: dict[str, "Answer"]
+) -> dict[str, Any]:
+    state = cast(dict[str, Any], state)
     thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
     verdict, reason, criterion = _verdict(state, answers, thresholds)
     shared = f"; {state['shared_slice']}" if state.get("shared_slice") else ""
@@ -633,7 +676,7 @@ def _verdicts(definition, state, params, answers):
 RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})
 
 
-def judged(state, decide=decide):
+def judged(state: dict[str, Any], decide: Callable[..., "DecisionResult"] = decide) -> dict[str, Any]:
     stage = _stage(state)
     if stage == "tests-first" and not isinstance(state.get("pull_request_diff"), str):
         reason = "the tests first part requires a complete pull request diff to judge gate behaviour"
@@ -656,7 +699,7 @@ def judged(state, decide=decide):
     }
 
 
-def judge(state, decide=decide):
+def judge(state: dict[str, Any], decide: Callable[..., "DecisionResult"] = decide) -> tuple[str, str]:
     answer = judged(state, decide)
     return answer["verdict"], answer["reason"]
 
@@ -669,19 +712,21 @@ def fix_steps(slug: str) -> str:
     )
 
 
-def _fail_kind(mode):
+def _fail_kind(mode: str) -> str:
     return "deny" if mode == "enforce" else "observe"
 
 
-def _answer(value):
+def _answer(value: dict[str, Any] | tuple[str, str] | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {"verdict": value[0], "reason": value[1]}
 
 
-def _detail(answer):
+def _detail(answer: dict[str, Any]) -> dict[str, Any]:
     return {key: answer[key] for key in DETAIL if key in answer}
 
 
-def _remember(slug, task, now_ms, state, answer, home):
+def _remember(
+    slug: str, task: dict[str, Any], now_ms: int, state: dict[str, Any], answer: dict[str, Any], home: str | Path | None
+) -> None:
     record = {
         "task": task["id"],
         "agent": task.get("claimed_by", ""),
@@ -695,7 +740,15 @@ def _remember(slug, task, now_ms, state, answer, home):
     intent_history.append(slug, record, home)
 
 
-def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
+def plan_check(
+    slug: str,
+    doc: dict[str, Any],
+    task_id: str,
+    traced: dict[str, Any],
+    mode: str,
+    now_ms: int,
+    home: str | Path | None = None,
+) -> dict[str, Any] | None:
     task = next((t for t in doc["tasks"] if t.get("id") == task_id), None)
     if mode == "off" or task is None or task.get("pr_url"):
         return None
@@ -710,7 +763,7 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
     ):
         return {"verdict": previous["verdict"], "reason": previous["reason"]}
     kept = [row for row in traced["pieces"] if row["kept"]]
-    state = intent_history.prepare(plan_state(doc, task, kept))
+    state = cast(dict[str, Any], intent_history.prepare(plan_state(doc, task, kept)))
     answer = judged(state)
     verdict, reason = answer["verdict"], answer["reason"]
     _remember(slug, task, now_ms, state, answer, home)
@@ -724,7 +777,7 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
     return {"verdict": verdict, "reason": reason}
 
 
-def _fingerprint(doc, task):
+def _fingerprint(doc: dict[str, Any], task: dict[str, Any]) -> str:
     phase = _phase(doc, task)
     parent = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
     declared = _declared(task)
@@ -732,16 +785,16 @@ def _fingerprint(doc, task):
     return hashlib.sha256(json.dumps(inputs).encode()).hexdigest()
 
 
-def _drafted(record):
+def _drafted(record: dict[str, Any] | None) -> bool:
     return bool(record) and record["verdict"] == PENDING and record["reason"] == DRAFT
 
 
 @dataclass(frozen=True)
 class _Judgment:
-    pr: dict | None
-    previous: dict | None
-    state: dict | None
-    answer: dict | tuple[str, str] | None
+    pr: dict[str, Any] | None
+    previous: dict[str, Any] | None
+    state: dict[str, Any] | None
+    answer: dict[str, Any] | tuple[str, str] | None
     inputs: str | None = None
 
 
@@ -750,19 +803,23 @@ class Check:
     slug: str
     mode: str
     now_ms: int
-    ledger: object
-    mail: object
-    view: Callable
-    ask: Callable
-    home: object = None
-    head: Callable | None = None
-    named: Callable | None = None
-    text: Callable | None = None
+    ledger: "_Ledger"
+    mail: "_Mail"
+    view: Callable[[str], dict[str, Any] | None]
+    ask: Callable[[dict[str, Any]], dict[str, Any] | tuple[str, str]]
+    home: str | Path | None = None
+    head: Callable[[str], str | None] | None = None
+    named: Callable[[str], dict[str, Any] | None] | None = None
+    text: Callable[[str], str | None] | None = None
 
-    def run(self, doc):
+    def run(self, doc: dict[str, Any]) -> list[str]:
         if self.mode == "off":
             return []
-        verdicts, actions, tasks = Verdicts(self.slug, NAME, self.home), [], []
+        verdicts, actions, tasks = (
+            Verdicts(self.slug, NAME, self.home),
+            cast(list[str], []),
+            cast(list[tuple[dict[str, Any], dict[str, Any] | None, object]], []),
+        )
         for task in doc["tasks"]:
             states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
             if task.get("state") not in states or not task.get("pr_url"):
@@ -777,16 +834,25 @@ class Check:
                 actions += self._isolated(task, self._settle, task, record, moved, future, verdicts)
         return actions
 
-    def _queue(self, doc, task, verdicts, tasks):
+    def _queue(
+        self,
+        doc: dict[str, Any],
+        task: dict[str, Any],
+        verdicts: Verdicts,
+        tasks: list[tuple[dict[str, Any], dict[str, Any] | None, object]],
+    ) -> list[str]:
         _bind_pulls(verdicts, task, task["pr_url"], doc)
         record = verdicts.read(task["id"])
         judged = record and record["verdict"] != PENDING and not record.get("planned")
         moved = (
             self.mode != "coach"
             and judged
-            and (record.get("inputs") != _fingerprint(doc, task) or self._named_moved(record))
+            and (
+                cast(dict[str, Any], record).get("inputs") != _fingerprint(doc, task)
+                or self._named_moved(cast(dict[str, Any], record))
+            )
         )
-        if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
+        if self.mode != "coach" and judged and _same_phase(cast(dict[str, Any], record), task) and not moved:
             return []
         if _drafted(record):
             verdicts.write(
@@ -800,7 +866,7 @@ class Check:
         tasks.append((task, record, moved))
         return []
 
-    def _isolated(self, task, step, *args):
+    def _isolated(self, task: dict[str, Any], step: Callable[..., list[str]], *args: Any) -> list[str]:
         from scripts.swarm.ledger_client import LedgerRefused
 
         try:
@@ -812,7 +878,14 @@ class Check:
             log.append(self.slug, log.Row.of(NAME, "fail-open", who, reason=f"{type(exc).__name__}: {exc}"), self.home)
             return [f"task {task['id']} intent check failed: {type(exc).__name__}"]
 
-    def _settle(self, task, record, moved, future, verdicts):
+    def _settle(
+        self,
+        task: dict[str, Any],
+        record: dict[str, Any] | None,
+        moved: object,
+        future: Any,
+        verdicts: Verdicts,
+    ) -> list[str]:
         if not record or not _same_phase(record, task) or moved:
             verdicts.write(
                 task["id"],
@@ -828,8 +901,8 @@ class Check:
                 task["id"],
                 PENDING,
                 DRAFT,
-                record["at"],
-                phase=record.get("phase"),
+                cast(dict[str, Any], record)["at"],
+                phase=cast(dict[str, Any], record).get("phase"),
                 **_split_fields(task, task["pr_url"]),
             )
         if judgment is None:
@@ -838,7 +911,7 @@ class Check:
         timing.keep()
         return actions
 
-    def _judge(self, doc, task):
+    def _judge(self, doc: dict[str, Any], task: dict[str, Any]) -> "_Judgment | None":
         inputs = _fingerprint(doc, task)
         previous = self._unmoved(task, inputs)
         if previous:
@@ -861,16 +934,17 @@ class Check:
         if previous and previous.get("inputs") == inputs and lift.head_lifted(self.slug, task["id"], NAME, self.home):
             return _Judgment(pr, previous, None, None)
         pr = self._with_named(task, pr)
-        state = intent_history.prepare(state_of(doc, task, pr))
+        state = cast(dict[str, Any], intent_history.prepare(state_of(doc, task, pr)))
         if state.get("task_part") == "tests-first":
             state["pull_request_diff"] = intent_history.masked(pr.get("diff"))
         return _Judgment(pr, previous, state, self.ask(state), inputs)
 
-    def _with_named(self, task, pr):
+    def _with_named(self, task: dict[str, Any], pr: dict[str, Any]) -> dict[str, Any]:
         others = named_pulls(task, pr["body"]) if self.named else []
         if not others:
             return pr
-        views = {url: self.named(url) for url in [task["pr_url"], *others[:NAMED_LIMIT]]}
+        named = cast(Callable[[str], dict[str, Any] | None], self.named)
+        views = {url: named(url) for url in [task["pr_url"], *others[:NAMED_LIMIT]]}
         pulls = [view for view in views.values() if view]
         failed = [url for url, view in views.items() if not view]
         opened = [p["url"] for p in pulls if p["url"] != task["pr_url"] and not p["merged"]]
@@ -884,11 +958,12 @@ class Check:
             "named_pending": failed + opened,
         }
 
-    def _named_moved(self, record):
+    def _named_moved(self, record: dict[str, Any]) -> bool:
         pending = record.get("named_pending") or []
-        return bool(self.named) and any((view := self.named(url)) and view["merged"] for url in pending)
+        named = cast(Callable[[str], dict[str, Any] | None], self.named)
+        return bool(self.named) and any((view := named(url)) and view["merged"] for url in pending)
 
-    def _check(self, task, judgment, verdicts):
+    def _check(self, task: dict[str, Any], judgment: "_Judgment", verdicts: Verdicts) -> list[str]:
         previous, pr = judgment.previous, judgment.pr
         if judgment.state is None and previous is None:
             verdicts.write(
@@ -896,8 +971,9 @@ class Check:
             )
             return []
         if judgment.state is None:
-            self._keep(task, previous, verdicts)
+            self._keep(task, cast(dict[str, Any], previous), verdicts)
             return []
+        pr = cast(dict[str, Any], pr)
         state, answer = judgment.state, _answer(judgment.answer)
         verdict, reason = answer["verdict"], answer["reason"]
         head = pr.get("head")
@@ -932,10 +1008,10 @@ class Check:
             self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
         return actions
 
-    def _coaching(self):
+    def _coaching(self) -> Verdicts:
         return Verdicts(self.slug, "intent-coach", self.home)
 
-    def _unmoved(self, task, inputs):
+    def _unmoved(self, task: dict[str, Any], inputs: str) -> dict[str, Any] | None:
         if self.mode != "coach" or self.head is None:
             return None
         previous = self._coaching().read(task["id"])
@@ -951,13 +1027,13 @@ class Check:
             return None
         return previous
 
-    def _text_moved(self, previous, url):
+    def _text_moved(self, previous: dict[str, Any], url: str) -> bool:
         if self.text is None:
             return False
         current = self.text(url)
         return current is None or previous.get("text") != current
 
-    def _keep(self, task, previous, verdicts):
+    def _keep(self, task: dict[str, Any], previous: dict[str, Any], verdicts: Verdicts) -> None:
         verdicts.write(
             task["id"],
             previous["verdict"],
@@ -972,7 +1048,7 @@ class Check:
 
         self._save_pull(task, {**previous, "url": task["pr_url"]})
 
-    def _save_pull(self, task, record):
+    def _save_pull(self, task: dict[str, Any], record: dict[str, Any]) -> None:
         if task.get("split"):
             fields = {key: value for key, value in record.items() if key not in ("verdict", "reason", "at")}
             Verdicts(self.slug, f"{NAME}-pulls", self.home).write(
@@ -983,7 +1059,7 @@ class Check:
                 **fields,
             )
 
-    def _failed(self, task, who, reason, rounds=0, merged=False):
+    def _failed(self, task: dict[str, Any], who: Who, reason: str, rounds: int = 0, merged: bool = False) -> list[str]:
         log.append(self.slug, log.Row.of(NAME, _fail_kind(self.mode), who, reason=reason), self.home)
         if self.mode == "coach" and (rounds >= 2 or merged):
             unmet = "on a merged pull request" if merged else "after two fix rounds"
@@ -1007,7 +1083,7 @@ class Check:
         return told
 
 
-def _gated(words):
+def _gated(words: list[str]) -> bool:
     index = program_index(words)
     if index is None:
         return False
@@ -1017,7 +1093,7 @@ def _gated(words):
     return program == "agentihooks" and rest[:1] == ["swarm"] and (rest[2:3] in RELEASES or rest[2:4] == MERGE_QUEUE)
 
 
-def _merge_target(words):
+def _merge_target(words: list[str]) -> str | None:
     index = program_index(words)
     if index is None:
         return None
@@ -1031,7 +1107,7 @@ def _merge_target(words):
     return next((word for word in operands if PULL.search(word) or word.isdigit()), None)
 
 
-def _unnamed_merge(words):
+def _unnamed_merge(words: list[str]) -> bool:
     index = program_index(words)
     return (
         index is not None
@@ -1041,8 +1117,9 @@ def _unnamed_merge(words):
     )
 
 
-def _pull_view(words):
-    rest, branch, repo = iter(words[program_index(words) + 3 :]), [], []
+def _pull_view(words: list[str]) -> list[str]:
+    index = program_index(words)
+    rest, branch, repo = iter(words[cast(int, index) + 3 :]), [], []
     for word in rest:
         if word in REPO_FLAGS:
             repo = [word, next(rest, "")]
@@ -1055,15 +1132,15 @@ def _pull_view(words):
     return ["gh", "pr", "view", *branch, *repo, "--json", "url", "--jq", ".url"]
 
 
-def _same_pull(target, url):
+def _same_pull(target: str, url: str) -> bool:
     named, bound = PULL.search(target), PULL.search(url)
     return bool(bound) and (named.groups() if named else target) == (bound.groups() if named else bound[3])
 
 
-def _queue_target(command):
+def _queue_target(command: str) -> str | None:
     for words in simple_commands(command):
         index = program_index(words)
-        if PurePosixPath(words[index]).name == "agentihooks":
+        if PurePosixPath(words[cast(int, index)]).name == "agentihooks":
             return _merge_target(words)
     return None
 
@@ -1097,7 +1174,7 @@ def queue_decision(who: Who, state: Verdicts, url: str, mode: str, head: str | N
     return Decision(allowed=mode != "enforce", reason=text if mode != "observe" else "")
 
 
-def _other_half(command, record):
+def _other_half(command: str, record: dict[str, Any] | None) -> bool:
     judged = record and record.get("split") and PULL.search(record["url"])
     if not judged:
         return False
@@ -1108,7 +1185,7 @@ def _other_half(command, record):
     return False
 
 
-def _next_step(who):
+def _next_step(who: Who) -> str:
     return (
         "Mark the pull request ready with gh pr ready <pull request url> if it is a draft, then wait for the verdict: "
         f"agentihooks swarm {who.swarm} wait --on intent <pull request url>"
@@ -1119,13 +1196,13 @@ class IntentGate:
     name = NAME
     default_mode = DEFAULT_MODE
 
-    def __init__(self, clock=time.time, run=subprocess.run):
+    def __init__(self, clock: Callable[[], float] = time.time, run: _Runner = subprocess.run) -> None:
         self.clock, self.run = clock, run
 
-    def matches(self, call):
+    def matches(self, call: Any) -> bool:
         return call.tool == "Bash" and any(word in call.command for word in ("merge", "done", "ready"))
 
-    def decide(self, call, who, state, mode="enforce"):
+    def decide(self, call: Any, who: Who, state: Verdicts, mode: str = "enforce") -> Decision:
         if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
             return Decision()
         record = state.read(who.task)
@@ -1169,8 +1246,11 @@ class IntentGate:
                 return decision
         return Decision()
 
-    def _decide_unbound(self, call, who, state, mode, record):
+    def _decide_unbound(
+        self, call: Any, who: Who, state: Verdicts, mode: str, record: dict[str, Any] | None
+    ) -> Decision:
         commands = [words for words in simple_commands(call.command) if _gated(words)]
+        decision = Decision()
         for words in commands:
             single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
             decision = self._decide_record(single, who, state, mode, record)
@@ -1178,7 +1258,7 @@ class IntentGate:
                 return decision
         return decision
 
-    def _resolve(self, call, split):
+    def _resolve(self, call: Any, split: Any) -> Any:
         if not split:
             return call
         named = [self._named(words, call.cwd) for words in simple_commands(call.command)]
@@ -1186,7 +1266,7 @@ class IntentGate:
             return None
         return replace(call, tool_input={**call.tool_input, "command": " && ".join(map(shlex.join, named))})
 
-    def _named(self, words, cwd):
+    def _named(self, words: list[str], cwd: str) -> list[str] | None:
         if not _unnamed_merge(words):
             return words
         try:
@@ -1195,8 +1275,11 @@ class IntentGate:
             return None
         return [*words, done.stdout.strip()] if done.returncode == 0 and PULL.search(done.stdout) else None
 
-    def _decide_record(self, call, who, state, mode, record, bound=False):
+    def _decide_record(
+        self, call: Any, who: Who, state: Verdicts, mode: str, record: dict[str, Any] | None, bound: bool = False
+    ) -> Decision:
         if not bound and _other_half(call.command, record):
+            record = cast(dict[str, Any], record)
             return Decision.deny(
                 f"intent for task {who.task} was judged on {record['url']}, not this pull request. Record this half "
                 f"first: agentihooks swarm {who.swarm} pr <pull request url> --half <n>, then wait for its verdict."
@@ -1211,6 +1294,7 @@ class IntentGate:
                 state.write(who.task, PENDING, RUNNING, int(self.clock() * 1000))
                 return Decision.deny("Intent must be checked on the new head. Wait for the tick to rerun the check.")
         if verdict == FAIL:
+            record = cast(dict[str, Any], record)
             rounds = record.get("coach_rounds", 0)
             merged = mode == "coach" and bool(record.get("url")) and pr_merged(record["url"])
             if mode == "coach" and (rounds >= 2 or merged):
@@ -1225,9 +1309,9 @@ class IntentGate:
             return Decision.deny(text)
         if verdict != PENDING:
             return Decision()
-        return self._pending(call, who, state, mode, record)
+        return self._pending(call, who, state, mode, cast(dict[str, Any], record))
 
-    def _pending(self, call, who, state, mode, record):
+    def _pending(self, call: Any, who: Who, state: Verdicts, mode: str, record: dict[str, Any]) -> Decision:
         if record["reason"] == DRAFT:
             if _pr_field(call.command, "draft", self.run) != "false":
                 return Decision.deny(

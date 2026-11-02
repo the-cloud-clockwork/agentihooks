@@ -8,11 +8,14 @@ file outside any git work tree are exempt. An unchecked verdict lets every edit 
 import os
 import re
 import subprocess
+from collections.abc import Generator, Iterator, Mapping
 from pathlib import Path, PurePosixPath
+from typing import Any, cast
 
 from scripts.gates import log
-from scripts.gates.base import Decision, Who
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.identity import program_index, simple_commands
+from scripts.gates.verdicts import Verdicts
 from scripts.swarm import naming, trace_plan
 from scripts.swarm_ledger import ledger_workspace
 
@@ -40,26 +43,30 @@ WHOLE_PROJECT = ""
 ALWAYS = (trace_plan.CLEARANCE.as_posix(), trace_plan.CLEARANCE_FOLDER.as_posix())
 
 
-def _area(entry):
+def _area(entry: str) -> str:
     return str(entry).strip().removeprefix("./").rstrip("/")
 
 
-def within(path, areas):
+def within(path: str, areas: list[str]) -> bool:
     return any(path == area or path.startswith(area + "/") for area in map(_area, areas) if area)
 
 
-def git_root(path):
+def git_root(path: Path) -> Path | None:
     for candidate in (path, *path.parents):
         if (candidate / ".git").exists():
             return candidate
     return None
 
 
-def task_territory(ledger_dir, slug, task):
+def task_territory(ledger_dir: Path, slug: str, task: str) -> list[str]:
     from scripts.swarm_ledger.storage import read_ledger
 
-    doc = read_ledger(ledger_dir, slug, f"tasks/{task}") or {}
-    row = next((t for t in doc.get("tasks", []) if isinstance(t, dict) and t.get("id") == task), {})
+    doc = cast(dict[str, Any], read_ledger(ledger_dir, slug, f"tasks/{task}") or {})
+    tasks = cast(list[Any], doc.get("tasks", []))
+    row = next(
+        (cast(dict[str, Any], t) for t in tasks if isinstance(t, dict) and cast(dict[str, Any], t).get("id") == task),
+        cast(dict[str, Any], {}),
+    )
     return list(row.get("territory") or [])
 
 
@@ -69,7 +76,7 @@ def task_ids(ledger_dir: Path, slug: str) -> tuple[str, ...]:
     return read_ids(ledger_dir, slug, "tasks")
 
 
-def _git_commits(command, cwd):
+def _git_commits(command: str, cwd: str) -> Generator[tuple[Path, bool], None, None]:
     """(directory, all tracked changes) for each git commit in command, following cd and git -C."""
     where = Path(cwd)
     for words in simple_commands(command):
@@ -83,7 +90,7 @@ def _git_commits(command, cwd):
             yield from _commit_in(rest, where)
 
 
-def _commit_in(rest, directory):
+def _commit_in(rest: Iterator[str], directory: Path) -> Generator[tuple[Path, bool], None, None]:
     for word in rest:
         if word == "-C":
             directory = directory / next(rest, NO_VALUE)
@@ -95,7 +102,7 @@ def _commit_in(rest, directory):
             return
 
 
-def _git_names(directory, everything):
+def _git_names(directory: Path, everything: bool) -> list[str]:
     out = subprocess.run(
         ["git", "-C", str(directory), "diff", "--name-only", "-z", "HEAD" if everything else "--cached"],
         capture_output=True,
@@ -104,13 +111,15 @@ def _git_names(directory, everything):
     return [name for name in out.stdout.split("\0") if name] if out.returncode == 0 else []
 
 
-def _patch_targets(call, key):
+def _patch_targets(call: Call, key: str) -> list[str | None]:
     body = str(call.tool_input.get("content"))
     found = PATCH_TARGET.findall(body) if PATCH_START in body else []
     return [target.strip() for target in found] or [call.tool_input.get(key)]
 
 
-def plan_areas(folder: Path, who: Who, registered: tuple[str, ...], state: dict) -> tuple[str, str | list[str]]:
+def plan_areas(
+    folder: Path, who: Who, registered: tuple[str, ...], state: dict[str, Any]
+) -> tuple[str, str | list[str]]:
     """(pass, the kept pieces' areas), (unchecked, []) or (fail, the refusal)."""
     trace = f"agentihooks swarm {who.swarm} trace-plan"
     try:
@@ -122,7 +131,7 @@ def plan_areas(folder: Path, who: Who, registered: tuple[str, ...], state: dict)
         )
     except ValueError as exc:
         return trace_plan.FAIL, f"build gate: {exc}, then run {trace}"
-    record = trace_plan.load(folder)
+    record = cast(dict[str, Any], trace_plan.load(folder))
     if record.get("plan_hash") != trace_plan.plan_hash(pieces, state):
         return trace_plan.FAIL, f"build gate: plan.md has no verdict for its current text. Run {trace}"
     if record["verdict"] == trace_plan.UNCHECKED:
@@ -133,7 +142,7 @@ def plan_areas(folder: Path, who: Who, registered: tuple[str, ...], state: dict)
     return trace_plan.PASS, [area for row in record["pieces"] if row["kept"] for area in row["areas"]]
 
 
-def refusal(who, outside, areas, plan):
+def refusal(who: Who, outside: list[str], areas: list[str], plan: Path) -> str:
     shown = ", ".join(outside[:SHOWN]) + (f" and {len(outside) - SHOWN} more" if len(outside) > SHOWN else "")
     return (
         f"build gate: outside your traced plan: {shown}. Kept areas and territory: {', '.join(areas) or 'none'}. "
@@ -147,17 +156,17 @@ class BuildGate:
     name = "build"
     default_mode = "observe"
 
-    def __init__(self, environ=None):
+    def __init__(self, environ: Mapping[str, str] | None = None) -> None:
         self.environ = os.environ if environ is None else environ
 
-    def matches(self, call):
+    def matches(self, call: Call) -> bool:
         if call.tool in EDIT_TOOLS:
             return True
         if call.tool.startswith(SERENA):
             return call.tool[len(SERENA) :] in SERENA_EDITS
         return call.tool == "Bash" and "commit" in call.command and any(_git_commits(call.command, call.cwd))
 
-    def touched(self, call, folder):
+    def touched(self, call: Call, folder: Path) -> list[str]:
         if call.tool.startswith(SERENA):
             scope = call.tool_input.get("relative_path") or WHOLE_PROJECT
             return [] if call.tool_input.get("dry_run") else [_area(scope)]
@@ -165,7 +174,7 @@ class BuildGate:
             commits = _git_commits(call.command, call.cwd)
             return sorted({name for directory, everything in commits for name in _git_names(directory, everything)})
         exempt = [folder.resolve(), (Path.home() / "scratchpad").resolve()]
-        found = []
+        found: list[str] = []
         for named in filter(None, _patch_targets(call, EDIT_TOOLS[call.tool])):
             path = (Path(call.cwd) / named).resolve()
             root = git_root(path)
@@ -174,7 +183,7 @@ class BuildGate:
             found.append(path.relative_to(root).as_posix())
         return found
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: Verdicts) -> Decision:
         if not (who.pinned and who.task) or naming.lane_of(who.name) not in LANES:
             return Decision()
         folder = ledger_workspace.folder(who.swarm, who.task)
@@ -184,14 +193,15 @@ class BuildGate:
         ledger_dir = Path(self.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
         from scripts.swarm_ledger.storage import read_ledger
 
-        doc = read_ledger(ledger_dir, who.swarm, f"tasks/{who.task}") or {}
+        doc = cast(dict[str, Any], read_ledger(ledger_dir, who.swarm, f"tasks/{who.task}") or {})
         status, value = plan_areas(folder, who, task_ids(ledger_dir, who.swarm), trace_plan.intent(doc, who.task))
         if status == trace_plan.UNCHECKED:
             reason = f"unchecked plan, edit allowed: {', '.join(paths[:SHOWN])}"
             log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
             return Decision()
         if status != trace_plan.PASS:
-            return Decision.deny(value)
+            return Decision.deny(cast(str, value))
+        value = cast(list[str], value)
         outside = [path for path in paths if not within(path, [*value, *ALWAYS])]
         if outside:
             territory = task_territory(ledger_dir, who.swarm, who.task)

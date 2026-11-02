@@ -9,14 +9,21 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hooks.config import CONDITIONS_TIMEOUT_SEC
 from scripts.gates.base import Call, Decision, Who
 from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
+
+if TYPE_CHECKING:
+    from scripts.inbox.store import Item
+    from scripts.swarm.ledger_client import LedgerClient
+    from scripts.swarm.ledger_events import PullRequest
+    from scripts.swarm.store import RedisStore
 
 WORKERS = frozenset({"eng", "ci"})
 TEMPLATE = (
@@ -62,16 +69,16 @@ class Tree:
     own: int
 
 
-def git(path, *args):
+def git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, timeout=GIT_TIMEOUT_S)
 
 
-def count(path, *args):
+def count(path: Path, *args: str) -> int:
     done = git(path, "rev-list", "--count", *args)
     return int(done.stdout) if done.returncode == 0 else 0
 
 
-def inspect(path, own):
+def inspect(path: Path, own: re.Pattern[str]) -> Tree | None:
     """The worktree's state, or None when it is not on one of the agent's own branches."""
     branch = git(path, "branch", "--show-current").stdout.strip()
     if not own.fullmatch(branch):
@@ -85,13 +92,13 @@ def inspect(path, own):
     )
 
 
-def trees(root, name):
-    own = re.compile(rf"{re.escape(plain(name))}(?:-\d+)?")
+def trees(root: str | Path, name: str) -> list[Tree]:
+    own = re.compile(rf"{re.escape(cast(Callable[[str], str], plain)(name))}(?:-\d+)?")
     found = (inspect(path, own) for path in sorted(Path(root).glob("*/*")) if own.fullmatch(path.name))
     return [tree for tree in found if tree is not None]
 
 
-def gate_refusal(tree, budget):
+def gate_refusal(tree: Tree, budget: Callable[[], float]) -> str | None:
     """Why the pre push gate keeps HEAD off origin, or None: a repo without one passes, a stamped HEAD is not rerun."""
     if not (tree.path / PREPUSH).is_file():
         return None
@@ -118,7 +125,7 @@ def gate_refusal(tree, budget):
     return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
-def push(tree, branch, seconds):
+def push(tree: Tree, branch: str, seconds: float) -> bool:
     ref = f"refs/heads/{branch}"
     lease = [] if branch == tree.branch else [f"--force-with-lease={ref}"]
     process = subprocess.Popen(
@@ -135,18 +142,18 @@ def push(tree, branch, seconds):
         return False
 
 
-def target(tree, task):
+def target(tree: Tree, task: dict[str, Any]) -> str:
     """The retained pull request branch HEAD continues, as swarm publish pushes it, else the worktree's own branch."""
     from scripts.swarm.continuation import retained
 
-    branch = retained(task)
+    branch = cast(Callable[[dict[str, Any]], str], retained)(task)
     if not branch:
         return tree.branch
     continues = git(tree.path, "merge-base", "--is-ancestor", f"refs/remotes/origin/{branch}", "HEAD")
     return branch if continues.returncode == 0 else tree.branch
 
 
-def record_text(remote, branch, head):
+def record_text(remote: str, branch: str, head: str) -> str:
     found = GITHUB_RE.search(remote)
     if not found:
         return f"The stop hook pushed the task branch {branch} to origin"
@@ -154,32 +161,32 @@ def record_text(remote, branch, head):
     return f"The stop hook pushed the task branch {web}/tree/{branch} with its head at {web}/commit/{head}"
 
 
-def own_pull(tree, task):
+def own_pull(tree: Tree, task: dict[str, Any]) -> bool:
     """Whether the task's pull request sits in the worktree's own repository; any counts for an origin off GitHub."""
     url = (task.get("pr_url") or "").lower()
     found = GITHUB_RE.search(git(tree.path, "remote", "get-url", "origin").stdout.strip())
     return bool(url) and (not found or f"github.com/{found[1]}/{found[2]}/pull/".lower() in url)
 
 
-def spoke_since(events, name, at):
+def spoke_since(events: list[dict[str, Any]], name: str, at: int) -> bool:
     return any(event.get("by") == name and event["at"] > at for event in events)
 
 
-def read(ledger, slug):
+def read(ledger: "LedgerClient", slug: str) -> dict[str, Any] | None:
     """The ledger document, or None while the ledger is unreachable: the push and the dirty check still run."""
     from scripts.swarm.store import SwarmError
 
     try:
-        return ledger.state(slug)
+        return cast(Callable[[str], dict[str, Any]], ledger.state)(slug)
     except SwarmError:
         return None
 
 
-def default_root():
+def default_root() -> str | Path:
     return os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees"
 
 
-def is_notice(item):
+def is_notice(item: "Item") -> bool:
     return item.sender == SENDER and (
         item.text == TEMPLATE
         or item.text.startswith(
@@ -191,7 +198,7 @@ def is_notice(item):
     )
 
 
-def left(name, exit_text):
+def left(name: str, exit_text: str) -> str:
     """The close reason of a notice whose agent has gone, naming whether its branch reached origin."""
     found = trees(default_root(), name)
     if not found:
@@ -205,13 +212,21 @@ class PushStop:
     name = "push-stop"
     default_mode = "enforce"
 
-    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None, github=None):
+    def __init__(
+        self,
+        connect: Callable[[], "RedisStore"] | None = None,
+        ledger: Callable[[], "LedgerClient"] | None = None,
+        root: str | Path | None = None,
+        now: Callable[[], int] | None = None,
+        clock: Callable[[], float] | None = None,
+        github: Callable[..., "PullRequest | None"] | None = None,
+    ) -> None:
         self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
         self._github = github
         # The hook process builds its gates right after its imports; the reserve covers the startup before this.
         self.started = self.clock()
 
-    def matches(self, call):
+    def matches(self, call: Call) -> bool:
         return not call.tool
 
     def decide(self, call: Call, who: Who, state: object) -> Decision:
@@ -219,10 +234,13 @@ class PushStop:
             return Decision()
         ledger = self.ledger()
         doc = read(ledger, who.swarm)
-        task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
-        if task is None or ledger_kinds.kind(task) == "plan":
+        task: dict[str, Any] | None = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
+        if task is None or cast(Callable[[dict[str, Any]], str], ledger_kinds.kind)(task) == "plan":
             return Decision()
-        store, owed, progress, failed, found = self.connect(), False, False, [], trees(self.root(), who.name)
+        store = self.connect()
+        owed, progress = False, False
+        failed: list[str] = []
+        found = trees(self.root(), who.name)
         frozen = self.frozen(store)
         for tree in found:
             if tree.unpushed and frozen:
@@ -246,14 +264,14 @@ class PushStop:
         self.notify(store, who, reason)
         return Decision.deny(" ".join([reason, *failed]))
 
-    def held(self, tree):
+    def held(self, tree: Tree) -> str | None:
         """Why HEAD stays off origin: its pre push gate refused, or less than the reserve is left for the push."""
         return gate_refusal(tree, self.left) or (PUSH_LATE.format(path=tree.path) if self.left() < 0 else None)
 
-    def on_origin(self, tree):
+    def on_origin(self, tree: Tree) -> bool:
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
 
-    def frozen(self, store: Any) -> bool:
+    def frozen(self, store: "RedisStore") -> bool:
         """Whether fleet panic holds, which denies every push but the fix; a Redis error reads as no panic."""
         from redis.exceptions import RedisError
 
@@ -264,14 +282,24 @@ class PushStop:
         except RedisError:
             return False
 
-    def waiting(self, store: Any, who: Any, doc: Any, task: Any, dirty: bool, frozen: bool) -> bool:
+    def waiting(
+        self,
+        store: "RedisStore",
+        who: Who,
+        doc: dict[str, Any] | None,
+        task: dict[str, Any] | None,
+        dirty: bool,
+        frozen: bool,
+    ) -> bool:
         """Whether a live checked wait holds the stop, so a refused push never deadlocks: any declared wait while
         fleet panic holds, one on another unfinished task, or one on the merge of a pull request still open, which a
         push would drop from the queue, while every change is committed."""
         from scripts.swarm import idle, waits
 
-        held = idle.wait(store.redis, who.swarm, who.name)
-        on = (held or {}).get("on") or {}
+        held = cast(Callable[[Any, str, str], "dict[str, Any] | None"], idle.wait)(
+            cast(Any, store.redis), who.swarm, who.name
+        )
+        on: dict[str, Any] = (held or {}).get("on") or {}
         if not (held and held["until"] > self.now()):
             return False
         if frozen:
@@ -281,25 +309,29 @@ class PushStop:
             return pull is not None and pull.state == "OPEN"
         if not (doc and on.get("kind") == "task"):
             return False
-        return waits.dependency(on, task, {row.get("id"): row for row in doc["tasks"]}, None)
+        return cast(Callable[[dict[str, Any], dict[str, Any] | None, dict[str, Any], None], bool], waits.dependency)(
+            on, task, {row.get("id"): row for row in doc["tasks"]}, None
+        )
 
-    def unrecorded(self, store, doc, who, found):
+    def unrecorded(self, store: "RedisStore", doc: dict[str, Any], who: Who, found: list[Tree]) -> bool:
         from scripts.gates.progress import Progress
 
-        mark = Progress(store.redis, who.swarm).read(who.name)
+        mark = Progress(cast(Any, store.redis), who.swarm).read(who.name)
         return (
             mark.outcome == PUSHED
             and not spoke_since(doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at)
             and not any(self._preflight(store, who, tree) for tree in found)
         )
 
-    def _preflight(self, store, who, tree):
+    def _preflight(self, store: "RedisStore", who: Who, tree: Tree) -> bool:
         from scripts.swarm import idle, mutation_wait
 
-        held = idle.wait(store.redis, who.swarm, who.name)
+        held = cast(Callable[[Any, str, str], "dict[str, Any] | None"], idle.wait)(
+            cast(Any, store.redis), who.swarm, who.name
+        )
         if not held or held["until"] <= self.now():
             return False
-        on = held.get("on") or {}
+        on: dict[str, Any] = held.get("on") or {}
         if on.get("kind") != "mutation" or on.get("task") != who.task:
             return False
         run = mutation_wait.RUN_URL.fullmatch(on["target"])
@@ -311,64 +343,66 @@ class PushStop:
             and on.get("head") == git(tree.path, "rev-parse", "HEAD").stdout.strip()
         )
 
-    def record(self, store, ledger, who, tree, branch):
+    def record(self, store: "RedisStore", ledger: "LedgerClient", who: Who, tree: Tree, branch: str) -> None:
         from scripts.gates.progress import Progress
         from scripts.swarm.store import SwarmError
 
         remote = git(tree.path, "remote", "get-url", "origin").stdout.strip()
         head = git(tree.path, "rev-parse", "HEAD").stdout.strip()
-        Progress(store.redis, who.swarm).outcome(who.name, PUSHED, self.now())
+        Progress(cast(Any, store.redis), who.swarm).outcome(who.name, PUSHED, self.now())
         try:
-            ledger.comment(who.swarm, who.task, record_text(remote, branch, head), by=SENDER)
+            cast(Callable[[str, str, str, str], None], ledger.comment)(
+                who.swarm, who.task, record_text(remote, branch, head), SENDER
+            )
         except SwarmError:
             pass
 
-    def notify(self, store, who, text):
+    def notify(self, store: "RedisStore", who: Who, text: str) -> None:
         from scripts.inbox.store import CLOSED, InboxStore
 
-        inbox = InboxStore(store.redis)
+        inbox = InboxStore(cast(Any, store.redis))
         address = inbox.names.resolve(who.name)
         if not any(item.text == text and item.state not in CLOSED for item in inbox.inbox(address)):
             inbox.send(SENDER, address, text)
 
-    def settle(self, store, who):
+    def settle(self, store: "RedisStore", who: Who) -> None:
         from scripts.inbox.store import CLOSED, InboxStore
 
-        inbox = InboxStore(store.redis)
+        inbox = InboxStore(cast(Any, store.redis))
         for item in inbox.inbox(inbox.names.resolve(who.name)):
             if is_notice(item) and item.state not in CLOSED:
                 inbox.close(item.id, SENDER, "done", SETTLED)
 
-    def root(self):
+    def root(self) -> str | Path:
         return self._root or default_root()
 
-    def connect(self):
+    def connect(self) -> "RedisStore":
         if self._connect:
             return self._connect()
         from scripts.swarm.store import connect
 
-        return connect()
+        return cast(Callable[[], "RedisStore"], connect)()
 
-    def ledger(self):
+    def ledger(self) -> "LedgerClient":
         if self._ledger:
             return self._ledger()
         from scripts.swarm.ledger_client import LedgerClient
 
         return LedgerClient()
 
-    def github(self):
+    def github(self) -> Callable[..., "PullRequest | None"]:
         from scripts.swarm.ledger_events import view
 
         return self._github or view
 
-    def now(self):
+    def now(self) -> int:
         if self._now:
             return self._now()
         return int(time.time() * 1000)
 
-    def clock(self):
+    def clock(self) -> float:
         return self._clock() if self._clock else time.monotonic()
 
-    def left(self):
+    def left(self) -> float:
         """Seconds a pre push gate may run: the Stop condition's time left after the reserve."""
         return self.started + CONDITIONS_TIMEOUT_SEC - self.clock() - RESERVE_S

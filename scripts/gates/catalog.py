@@ -1,12 +1,15 @@
 """Every swarm gate by name with its default mode: the keys swarm set takes and the controls the ledger page shows."""
 
+from collections.abc import Mapping
+from typing import cast
+
 from scripts.gates import modes, talk
 from scripts.gates.claims import GATE as CLAIMS
 from scripts.gates.enforcement import ENFORCEMENTS
 from scripts.gates.entry import GATES
 
 
-def defaults():
+def defaults() -> dict[str, str]:
     from scripts.swarm.run_window import GATE as WINDOW
     from scripts.swarm.trace_plan import GATE as TRACE_PLAN
 
@@ -14,8 +17,8 @@ def defaults():
     return {name: gate.default_mode for name, gate in gates.items()} | {talk.NAME: talk.DEFAULT_MODE}
 
 
-def current(gates):
+def current(gates: Mapping[str, str]) -> dict[str, str]:
     return {
-        name: gates.get(name) if gates.get(name) in modes.supported(name) else default
+        name: cast(str, gates.get(name)) if gates.get(name) in modes.supported(name) else default
         for name, default in defaults().items()
     }
