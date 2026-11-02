@@ -4,6 +4,8 @@ In the shared ledger folder only a master seat or the operator creates one, and 
 the operator asked. Any other folder takes any port, as the server allows; a swarm there needs its own Redis.
 """
 
+from typing import Any, Mapping
+
 MIN_TASKS = 3
 CREATORS = ("master", "operator")
 QUOTE_WORDS = 3
@@ -18,13 +20,13 @@ FLOOR = (
 )
 
 
-def caller(environ):
+def caller(environ: Mapping[str, str]) -> str | None:
     if not environ.get("AGENTIHOOKS_SWARM"):
         return "operator"
     return environ.get("AGENTIHOOKS_SWARM_LANE")
 
 
-def operator_asked(environ, quote) -> bool:
+def operator_asked(environ: Mapping[str, str], quote: str | None) -> bool:
     if len(str(quote).split()) < QUOTE_WORDS:
         return False
     name = environ.get("AGENTIHOOKS_AGENT_NAME")
@@ -37,18 +39,18 @@ def operator_asked(environ, quote) -> bool:
     return bool(operator_words.matching(name, quote))
 
 
-def shared(environ) -> bool:
+def shared(environ: Mapping[str, str]) -> bool:
     from scripts.swarm_ledger.ledger_link import shared_directory
 
     return shared_directory(environ=environ)
 
 
-def creator_refusal(environ) -> str:
+def creator_refusal(environ: Mapping[str, str]) -> str:
     """Why this session may not create a ledger here; an empty string when it may."""
     return CALLER if shared(environ) and caller(environ) not in CREATORS else ""
 
 
-def swarm_refusal(environ) -> str:
+def swarm_refusal(environ: Mapping[str, str]) -> str:
     """Why this session may not create a swarm here: a proof swarm also needs its own Redis."""
     from scripts.swarm_ledger import ports
 
@@ -60,19 +62,19 @@ def swarm_refusal(environ) -> str:
     return REDIS if environ.get("AGENTIHOOKS_SWARM_REDIS_URL", "") in ("", DEFAULT_URL) else ""
 
 
-def floor_refusal(environ, tasks, asked) -> str:
+def floor_refusal(environ: Mapping[str, str], tasks: int, asked: str | None) -> str:
     """Why a ledger or swarm in the shared folder holds too few tasks; an empty string when it holds enough."""
     if tasks >= MIN_TASKS or not shared(environ) or operator_asked(environ, asked):
         return ""
     return FLOOR.format(need=MIN_TASKS, have=tasks)
 
 
-def content_tasks(content) -> int:
+def content_tasks(content: dict[str, Any]) -> int:
     """A new ledger's least task count: its listed tasks, or one per phase when there are more phases."""
     return max(len(content.get("tasks", [])), len(content.get("phases", [])))
 
 
-def swarm_tasks(doc) -> int:
+def swarm_tasks(doc: dict[str, Any]) -> int:
     """A swarm ledger's tasks, counting each automatic phase still waiting for its planner as one."""
     tasks = doc.get("tasks", [])
     planned = {task.get("phase") for task in tasks}

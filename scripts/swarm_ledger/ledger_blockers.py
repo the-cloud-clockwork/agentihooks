@@ -8,8 +8,12 @@ comment listing every attempt, the critic resolution and the blocker reason.
 
 import hashlib
 import re
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm_ledger import ledger_freezes, ports
+
+if TYPE_CHECKING:
+    from scripts.swarm_ledger.ledger_core import Context
 
 OPS = ("blocker_attempt", "blocker_critic", "blocker_escalate")
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
@@ -39,20 +43,20 @@ def autonomy(slug: str) -> str:
     return ledger_freezes.autonomy(slug)
 
 
-def find(doc: dict, item: str) -> dict | None:
+def find(doc: dict[str, Any], item: str) -> dict[str, Any] | None:
     name, item_id = item.split("/")
     return next((row for row in doc.get(name) or () if row.get("id") == item_id), None)
 
 
-def record(row: dict | None) -> dict:
+def record(row: dict[str, Any] | None) -> dict[str, Any]:
     return {"attempts": [], "critic": None, "escalation": None, **((row or {}).get("blocker") or {})}
 
 
-def subject(row: dict | None) -> str:
+def subject(row: dict[str, Any] | None) -> str:
     return (row or {}).get("title") or (row or {}).get("text", "")
 
 
-def next_step(rec: dict) -> str:
+def next_step(rec: dict[str, Any]) -> str:
     before = [a for a in rec["attempts"] if not a.get("after_critic")]
     if rec["critic"] is None:
         return ATTEMPT if len(before) < BEFORE_CRITIC else CRITIC
@@ -61,7 +65,7 @@ def next_step(rec: dict) -> str:
     return ESCALATE if rec["escalation"] is None else ESCALATED
 
 
-def step_text(slug: str, item: str, rec: dict) -> str:
+def step_text(slug: str, item: str, rec: dict[str, Any]) -> str:
     step = next_step(rec)
     if step == ATTEMPT:
         which = "apply the critic resolution" if rec["critic"] else f"attempt {len(rec['attempts']) + 1} of 2"
@@ -79,7 +83,7 @@ def step_text(slug: str, item: str, rec: dict) -> str:
     return "leave it for the operator, since its protocol is complete"
 
 
-def notice(slug: str, tier: str, item: str, rec: dict) -> str:
+def notice(slug: str, tier: str, item: str, rec: dict[str, Any]) -> str:
     if tier in GATED:
         return (
             f"Autonomy {tier}: take the decision yourself, with no question to the operator. "
@@ -88,7 +92,7 @@ def notice(slug: str, tier: str, item: str, rec: dict) -> str:
     return f"Autonomy {tier or 'unknown'}. Triage it: resolve it if the call is yours, else leave it for the operator."
 
 
-def _attempt_lines(attempts: list) -> list[str]:
+def _attempt_lines(attempts: list[dict[str, Any]]) -> list[str]:
     return [
         f"Attempt {n}{' after the critic' if a.get('after_critic') else ''}: {a['text']}\n"
         f"Command: {a['command']}\nOutput: {a['output']}"
@@ -96,7 +100,7 @@ def _attempt_lines(attempts: list) -> list[str]:
     ]
 
 
-def blind_prompt(item: str, problem: str, tier: str, attempts: list) -> str:
+def blind_prompt(item: str, problem: str, tier: str, attempts: list[dict[str, Any]]) -> str:
     return "\n\n".join(
         [CRITIC_ROLE, f"Item: {item}\nProblem: {problem}\nAutonomy: {tier or 'unknown'}", *_attempt_lines(attempts)]
     )
@@ -106,7 +110,7 @@ def digest(prompt: str) -> str:
     return hashlib.sha256(prompt.encode()).hexdigest()
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     if set(op) - {"op", "id", "by", *FIELDS[op["op"]]}:
         raise ValueError(f"{op['op']} takes only by {' '.join(FIELDS[op['op']])}")
     by = op.get("by")
@@ -130,12 +134,12 @@ def _priority_text(reason: str) -> str:
     return "Blocked: " + " ".join(words[:PRIORITY_WORDS]) + ("…" if len(words) > PRIORITY_WORDS else "")
 
 
-def _refuse(ctx, item, rec, why):
+def _refuse(ctx: "Context", item: str, rec: dict[str, Any], why: str) -> bool:
     ctx.refused.append(f"{why}; {step_text(ctx.slug, item, rec)}")
     return False
 
 
-def _attempt(rec, op, ctx):
+def _attempt(rec: dict[str, Any], op: dict[str, Any], ctx: "Context") -> bool:
     step = next_step(rec)
     if step == CRITIC:
         return _refuse(ctx, op["item"], rec, "two attempts are recorded before the critic")
@@ -147,7 +151,7 @@ def _attempt(rec, op, ctx):
     return True
 
 
-def _critic(row, rec, op, ctx):
+def _critic(row: dict[str, Any] | None, rec: dict[str, Any], op: dict[str, Any], ctx: "Context") -> bool:
     if next_step(rec) != CRITIC:
         return _refuse(ctx, op["item"], rec, "the critic runs once, after two attempts")
     expected = digest(blind_prompt(op["item"], subject(row), autonomy(ctx.slug), rec["attempts"]))
@@ -159,14 +163,16 @@ def _critic(row, rec, op, ctx):
     return True
 
 
-def _comment(rec, reason, evidence):
+def _comment(rec: dict[str, Any], reason: str, evidence: str) -> str:
     lines = ["Blocker protocol record.", *_attempt_lines(rec["attempts"])]
     if rec["critic"]:
         lines.append(f"Critic resolution ({rec['critic']['run']}): {rec['critic']['resolution']}")
     return "\n\n".join([*lines, f"Blocker reason: {reason}\nEvidence: {evidence}"])
 
 
-def _escalate(doc, row, rec, op, ctx):
+def _escalate(
+    doc: dict[str, Any], row: dict[str, Any] | None, rec: dict[str, Any], op: dict[str, Any], ctx: "Context"
+) -> bool:
     tier = autonomy(ctx.slug)
     step = next_step(rec)
     if tier in GATED and step != ESCALATE:
@@ -179,6 +185,7 @@ def _escalate(doc, row, rec, op, ctx):
     rows = [p for p in doc.setdefault("priorities", []) if p["item"] != item]
     doc["priorities"] = rows + [{"id": op["id"], "item": item, "text": text, "by": by, "at": ctx.at}]
     entry = {"id": f"{op['id']}-record", "by": by, "at": ctx.at, "text": _comment(rec, reason, evidence)}
+    row = row or {}
     row.setdefault("comments", []).append(entry)
     ctx.record(by, "comment added", item, id=entry["id"], text=entry["text"])
     ctx.record(by, "priority added", item, id=op["id"], text=text)

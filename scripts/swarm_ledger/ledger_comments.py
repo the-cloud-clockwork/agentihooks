@@ -6,6 +6,7 @@ Agent text is for the operator: plain words saying what was done or why it was s
 
 import re
 from itertools import groupby
+from typing import Any
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 OUTCOMES = ("done", "blocked")
@@ -44,12 +45,12 @@ RULES = (
 PUNCTUATION = (("parentheses", "(", 1), ("semicolons", ";", 1))
 
 
-def web_links():
+def web_links() -> re.Pattern[str]:
     return re.compile(r"""\bhttps?://[^\s<>"']+""", re.I)
 
 
-def problems(text, kind, long=False, task_ids=()):
-    found = []
+def problems(text: str, kind: str, long: bool = False, task_ids: tuple[str, ...] = ()) -> list[str]:
+    found: list[str] = []
     prose = web_links().sub(" ", text)
     hash_prose = re.sub(r"[\w-]+", lambda match: " " if match.group() in task_ids else match.group(), prose)
     for name, pattern in RULES:
@@ -65,7 +66,7 @@ def problems(text, kind, long=False, task_ids=()):
     return found
 
 
-def check(text, kind, long=False, task_ids=()):
+def check(text: str, kind: str, long: bool = False, task_ids: tuple[str, ...] = ()) -> None:
     found = problems(text, kind, long, task_ids)
     if found:
         raise ValueError(
@@ -74,13 +75,21 @@ def check(text, kind, long=False, task_ids=()):
         )
 
 
-def can_change(entry, by, members):
+def can_change(entry: dict[str, Any], by: str, members: dict[str, Any]) -> bool:
     if entry.get("by") == "operator" or entry.get("deleted") or "outcome" in entry:
         return False
     return entry.get("by") == by or members.get(by, {}).get("role") == "orchestrator"
 
 
-def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
+def post_status(
+    thread: list[dict[str, Any]],
+    by: str,
+    entry_id: str,
+    text: str,
+    ctx: Any,
+    target: str,
+    attachments: list[dict[str, Any]] | None = None,
+) -> None:
     """An agent's comment amends its own latest one on the item, unless anyone commented after it or it is a notice."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
@@ -101,14 +110,14 @@ def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
     seen(ctx, by)
 
 
-def post_outcome(thread, op, ctx, target):
+def post_outcome(thread: list[dict[str, Any]], op: dict[str, Any], ctx: Any, target: str) -> None:
     if not any(e["id"] == op["id"] for e in thread):
         thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "outcome": op["outcome"]})
         ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
     seen(ctx, op["by"])
 
 
-def post_answer(thread, op, ctx, target):
+def post_answer(thread: list[dict[str, Any]], op: dict[str, Any], ctx: Any, target: str) -> None:
     """An answer to the operator or a swarm notice never amends a status comment and is never amended."""
     if not any(e["id"] == op["id"] for e in thread):
         key = "to" if "to" in op else "notice"
@@ -117,13 +126,13 @@ def post_answer(thread, op, ctx, target):
     seen(ctx, op["by"])
 
 
-def seen(ctx, by):
+def seen(ctx: Any, by: str) -> None:
     member = ctx.meta.get("members", {}).get(by)
     if member is not None:
         member["last_seen"] = ctx.at
 
 
-def check_outcome(op):
+def check_outcome(op: dict[str, Any]) -> None:
     agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
     if "notice" in op and (op["notice"] is not True or not agent_comment or "outcome" in op or "to" in op):
         raise ValueError("notice rides only on an agent add to a comment thread, as true, without outcome or to")
@@ -135,7 +144,7 @@ def check_outcome(op):
         )
 
 
-def worktree(op, carries):
+def worktree(op: dict[str, Any], carries: bool) -> str | None:
     if "worktree" not in op or not carries:
         return None
     folder = op["worktree"]
@@ -144,18 +153,18 @@ def worktree(op, carries):
     return folder
 
 
-def refused(text, kind, where, ctx):
+def refused(text: str, kind: str, where: str, ctx: Any) -> bool:
     found = problems(text, kind)
     if found:
         ctx.refused.append(f"{where} refused: {'; '.join(found)}")
     return bool(found)
 
 
-def addressed(thread, op):
+def addressed(thread: list[dict[str, Any]], op: dict[str, Any]) -> bool:
     return any(e["id"] == op.get("reply_to") and e.get("by") == "operator" and not e.get("deleted") for e in thread)
 
 
-def agent_thread_op(thread, op, ctx, target, noun):
+def agent_thread_op(thread: list[dict[str, Any]], op: dict[str, Any], ctx: Any, target: str, noun: str) -> bool:
     by, text = op["by"], op.get("text", "")
     if op.get("attachments") and by not in ctx.meta.get("members", {}):
         return False
@@ -194,11 +203,13 @@ def agent_thread_op(thread, op, ctx, target, noun):
     return True
 
 
-def audit_item(where, item, task_ids=()):
-    rows = []
+def audit_item(
+    where: str, item: dict[str, Any], task_ids: tuple[str, ...] = ()
+) -> list[tuple[str, str, str | None, list[str]]]:
+    rows: list[tuple[str, str, str | None, list[str]]] = []
     if "text" in item and problems(item["text"], "item", task_ids=task_ids):
         rows.append((where, "text", "", problems(item["text"], "item", task_ids=task_ids)))
-    counts = []
+    counts: list[tuple[str, int]] = []
     live = (entry for entry in item.get("comments", []) if not entry.get("deleted"))
     for by, entries in groupby(live, key=lambda entry: entry["by"]):
         if by == "operator":
@@ -213,9 +224,9 @@ def audit_item(where, item, task_ids=()):
     return rows
 
 
-def audit(doc):
+def audit(doc: dict[str, Any]) -> list[tuple[str, str, str | None, list[str]]]:
     """Every agent-written text the filter would refuse today, as (where, entry id, author, reasons)."""
-    rows = []
+    rows: list[tuple[str, str, str | None, list[str]]] = []
     task_ids = tuple(task["id"] for task in doc.get("tasks", []))
     for name in ("phases", "questions", "followups"):
         for item in doc.get(name, []):

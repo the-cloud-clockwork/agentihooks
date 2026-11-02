@@ -4,8 +4,12 @@ The lead lists `group_members`; each member carries `merged_into` and leaves the
 """
 
 import re
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm_ledger import ledger_kinds, ports
+
+if TYPE_CHECKING:
+    from scripts.swarm_ledger.ledger_core import Context
 
 OPS = ("task_group", "task_ungroup")
 MAX_TASKS = 5
@@ -19,7 +23,7 @@ ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError(f"{op['op']} needs `by`, an agent name other than operator")
@@ -42,7 +46,7 @@ def check(op):
         raise ValueError(f"a group holds at most {MAX_TASKS} tasks")
 
 
-def refusal(tasks: list[dict], known: dict, ceiling: int = CEILING) -> str:
+def refusal(tasks: list[dict[str, Any]], known: dict[str, dict[str, Any]], ceiling: int = CEILING) -> str:
     """Why these tasks cannot form one group, or '' when they can."""
     if len({(t.get("lane"), t.get("profile") or "", ledger_kinds.kind(t)) for t in tasks}) > 1:
         return "grouped tasks share the same lane, profile and kind"
@@ -69,14 +73,14 @@ def refusal(tasks: list[dict], known: dict, ceiling: int = CEILING) -> str:
     return ""
 
 
-def _upstream(task, known):
+def _upstream(task: dict[str, Any], known: dict[str, dict[str, Any]]) -> set[str]:
     seen = list(dict.fromkeys(task.get("depends_on") or []))
     for dep in seen:
         seen += [d for d in known.get(dep, {}).get("depends_on") or [] if d not in seen]
     return set(seen)
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "Context") -> bool:
     lane_of = ports.swarm().naming.lane_of
 
     if lane_of(op["by"]) in REFUSED_LANES:
@@ -87,7 +91,7 @@ def apply(doc, op, ctx):
     return (_ungroup if op["op"] == "task_ungroup" else _group)(known, op, ctx)
 
 
-def _group(known, op, ctx):
+def _group(known: dict[str, dict[str, Any]], op: dict[str, Any], ctx: "Context") -> bool:
     lead_id = op["item"].split("/")[1]
     if any(task_id not in known for task_id in (lead_id, *op["members"])):
         return False
@@ -104,7 +108,7 @@ def _group(known, op, ctx):
     return True
 
 
-def _ungroup(known, op, ctx):
+def _ungroup(known: dict[str, dict[str, Any]], op: dict[str, Any], ctx: "Context") -> bool:
     lead_id = op["item"].split("/")[1]
     if not known.get(lead_id, {}).get("group_members"):
         ctx.refused.append(f"{op['item']} leads no group")

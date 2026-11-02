@@ -6,7 +6,7 @@ class LedgerLock:
         self.state = threading.Condition()
         self.whole = False
         self.waiting = 0
-        self.held = set()
+        self.held: set[str] = set()
 
     def acquire(self, blocking: bool = True) -> bool:
         with self.state:
@@ -37,7 +37,7 @@ class LedgerLock:
     def __enter__(self) -> bool:
         return self.acquire()
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.release()
 
     def ledger(self, slug: str) -> "Ledger":
@@ -64,5 +64,5 @@ class Ledger:
     def __enter__(self) -> bool:
         return self.acquire()
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.release()

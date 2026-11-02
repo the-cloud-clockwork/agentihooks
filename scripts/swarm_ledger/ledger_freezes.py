@@ -2,11 +2,16 @@
 
 import re
 import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
-from scripts.swarm_ledger.repository.hierarchy import project
+from scripts.swarm_ledger.repository import hierarchy
+
+if TYPE_CHECKING:
+    from scripts.swarm_ledger.ledger_core import Context
 
 OPS = ("freeze_set", "freeze_clear")
 VERBS = ("freeze", "focus")
@@ -20,7 +25,7 @@ EVENTS = {"freeze": "frozen", "focus": "focused"}
 MAX_TEXT = 2000
 
 
-def resolve_name(name):
+def resolve_name(name: str) -> str:
     return ports.swarm().naming.resolve_name(name)
 
 
@@ -28,7 +33,7 @@ def selector(target: str) -> bool:
     return target in SELECTORS
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     if set(op) - {"op", "id", "by", *FIELDS[op["op"]]}:
         raise ValueError(f"{op['op']} takes only {' '.join(FIELDS[op['op']])}")
     by = op.get("by")
@@ -54,13 +59,13 @@ def autonomy(slug: str) -> str:
         return ""
 
 
-def author(op, ctx) -> tuple[str, str] | None:
+def author(op: dict[str, Any], ctx: "Context") -> tuple[str, str] | None:
     """(writer, the operator's quoted words) when the op may write freezes, else None."""
     import ledger_relay
 
     by = op.get("by")
     if by is None:
-        return "operator", op.get("quote")
+        return "operator", cast(str, op.get("quote"))
     if ports.swarm().naming.lane_of(resolve_name(by)) == DISPATCH:
         if autonomy(ctx.slug) == FULL:
             return by, ""
@@ -69,12 +74,14 @@ def author(op, ctx) -> tuple[str, str] | None:
     if ctx.meta["members"].get(by, {}).get("role") != "orchestrator":
         ctx.refused.append(f"{op['op']} refused: {by} is not an orchestrator of this ledger")
         return None
-    words = ledger_relay.verified(by, op["quote"]) if op.get("quote") else ""
+    verified = cast("Callable[..., str]", ledger_relay.verified)
+    words = verified(by, op["quote"]) if op.get("quote") else ""
     return by, words
 
 
-def _set(doc, op, ctx, by, words):
+def _set(doc: dict[str, Any], op: dict[str, Any], ctx: "Context", by: str, words: str) -> bool:
     target = op["target"]
+    project = cast("Callable[..., tuple[dict[str, Any], set[Any]]]", hierarchy.project)
     if not selector(target) and target not in project(doc)[0]:
         ctx.refused.append(f"{op['op']} refused: target {target} does not exist")
         return False
@@ -88,7 +95,7 @@ def _set(doc, op, ctx, by, words):
     return True
 
 
-def _clear(doc, op, ctx, by):
+def _clear(doc: dict[str, Any], op: dict[str, Any], ctx: "Context", by: str) -> bool:
     target = op["target"]
     rows = doc.get("freezes", [])
     gone = [row for row in rows if row["target"] == target]
@@ -100,7 +107,7 @@ def _clear(doc, op, ctx, by):
     return True
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "Context") -> bool:
     found = author(op, ctx)
     if found is None:
         return False
@@ -108,7 +115,7 @@ def apply(doc, op, ctx):
     return _set(doc, op, ctx, by, words) if op["op"] == "freeze_set" else _clear(doc, op, ctx, by)
 
 
-def lines(doc: dict) -> list[str]:
+def lines(doc: dict[str, Any]) -> list[str]:
     return [
         f"{row['verb']}  {row['target']}  by {row['by']}  at "
         + time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(row["at"] / 1000))

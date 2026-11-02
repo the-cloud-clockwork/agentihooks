@@ -14,8 +14,9 @@ import os
 import re
 import sys
 import time
+from collections.abc import Generator
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, cast
 
 import ledger_alerts
 import ledger_answer
@@ -44,31 +45,62 @@ from scripts.swarm_ledger import (
     ledger_rank,
     ledger_splits,
     models,
+    page_assets,
     ports,
 )
-from scripts.swarm_ledger.ledger_files import LOG_MAX_BYTES, append_capped, atomic_write, rotate_if_full  # noqa: F401
-from scripts.swarm_ledger.page_assets import (  # noqa: F401
-    HOME,
-    MODULES,
-    PAGE_RE,
-    PAGES,
-    PALETTE,
-    SEED_RE,
-    SHELL,
-    TOKEN_RE,
-    TOOLTIPS,
-    page_version,
-    read_token,
-    static_assets,
+from scripts.swarm_ledger.ledger_files import (
+    LOG_MAX_BYTES as LOG_MAX_BYTES,
 )
+from scripts.swarm_ledger.ledger_files import (
+    append_capped as append_capped,
+)
+from scripts.swarm_ledger.ledger_files import (
+    atomic_write as atomic_write,
+)
+from scripts.swarm_ledger.ledger_files import (
+    rotate_if_full as rotate_if_full,
+)
+from scripts.swarm_ledger.page_assets import (
+    HOME as HOME,
+)
+from scripts.swarm_ledger.page_assets import (
+    MODULES as MODULES,
+)
+from scripts.swarm_ledger.page_assets import (
+    PAGE_RE as PAGE_RE,
+)
+from scripts.swarm_ledger.page_assets import (
+    PAGES as PAGES,
+)
+from scripts.swarm_ledger.page_assets import (
+    PALETTE as PALETTE,
+)
+from scripts.swarm_ledger.page_assets import (
+    SEED_RE,
+)
+from scripts.swarm_ledger.page_assets import (
+    SHELL as SHELL,
+)
+from scripts.swarm_ledger.page_assets import (
+    TOKEN_RE as TOKEN_RE,
+)
+from scripts.swarm_ledger.page_assets import (
+    TOOLTIPS as TOOLTIPS,
+)
+from scripts.swarm_ledger.page_assets import (
+    static_assets as static_assets,
+)
+
+page_version = cast(Any, page_assets.page_version)
+read_token = cast(Any, page_assets.read_token)
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
-LISTS = models.LISTS
-BOOL_FIELDS = models.CHECKBOXES
+LISTS = cast("dict[str, tuple[Any, ...]]", models.LISTS)
+BOOL_FIELDS = cast("tuple[Any, ...]", models.CHECKBOXES)
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
-THREADS = models.THREADS
+THREADS = cast("dict[str, tuple[Any, ...]]", models.THREADS)
 AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass", "gate_lift")
 ARTIFACT_OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -115,35 +147,35 @@ EXTENSION_OPS = {
 }
 
 
-def now_ms():
+def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _reject_constant(name):
+def _reject_constant(name: str) -> None:
     raise ValueError(f"{name} is not valid JSON")
 
 
-def loads(text):
+def loads(text: str) -> Any:
     return json.loads(text, parse_constant=_reject_constant)
 
 
 PRETTY = orjson.OPT_INDENT_2 | orjson.OPT_PASSTHROUGH_DATETIME | orjson.OPT_PASSTHROUGH_DATACLASS
 
 
-def pretty(value):
+def pretty(value: Any) -> str:
     try:
         return orjson.dumps(value, option=PRETTY).decode()
     except orjson.JSONEncodeError:
         return json.dumps(value, indent=2, ensure_ascii=False)
 
 
-def legacy_entries(text, prefix, by_default, split):
+def legacy_entries(text: Any, prefix: str, by_default: str, split: bool) -> list[dict[str, Any]]:
     """A pre-thread string field as entries; comment blobs split per `<author>: ` line."""
     if not isinstance(text, str) or not text.strip():
         return []
     if not split:
         return [{"id": f"{prefix}-0", "by": by_default, "at": 0, "text": text.strip()}]
-    entries = []
+    entries: list[dict[str, Any]] = []
     for line in text.splitlines():
         match = LEGACY_LINE_RE.match(line.strip())
         if match or not entries:
@@ -168,11 +200,11 @@ def time_left_value(value: object) -> Optional[int]:
     return value if type(value) is int and value >= 0 else None
 
 
-def normalize(doc):
+def normalize(doc: Any) -> Any:
     """Return a copy in the thread shape; string comments, answer and notes become entries."""
     if not isinstance(doc, dict):
         return doc
-    doc = json.loads(json.dumps(doc))
+    doc = cast("dict[str, Any]", json.loads(json.dumps(doc)))
     doc.pop("projection", None)
     doc["time_left_minutes"] = time_left_value(doc.get("time_left_minutes"))
     if not isinstance(doc.get("notes", []), list):
@@ -188,9 +220,10 @@ def normalize(doc):
     doc.setdefault("slices", [])
     doc.setdefault("freezes", [])
     for name in THREADS:
-        for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
+        for item in cast("list[Any]", doc.get(name, []) if isinstance(doc.get(name), list) else []):
             if not isinstance(item, dict):
                 continue
+            item = cast("dict[str, Any]", item)
             key = f"legacy-{name}-{item.get('id')}"
             if name == "questions" and "answers" not in item:
                 item["answers"] = legacy_entries(item.pop("answer", ""), f"{key}-answer", "operator", False)
@@ -202,9 +235,10 @@ def normalize(doc):
     return doc
 
 
-def validate_thread(where, entries):
+def validate_thread(where: str, entries: Any) -> None:
     if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
         raise ValueError(f"{where} must be a list of entries")
+    entries = cast("list[dict[str, Any]]", entries)
     ids = [e.get("id") for e in entries]
     if not all(isinstance(i, str) and i for i in ids) or len(set(ids)) != len(ids):
         raise ValueError(f"{where}: every entry needs a unique string id")
@@ -213,9 +247,10 @@ def validate_thread(where, entries):
             raise ValueError(f"{where}/{e['id']}: text and by must be strings")
 
 
-def validate(doc):
+def validate(doc: Any) -> None:
     if not isinstance(doc, dict):
         raise ValueError("seed is not a JSON object")
+    doc = cast("dict[str, Any]", doc)
     if doc.get("time_left_minutes") is not None and (
         type(doc["time_left_minutes"]) is not int or time_left_value(doc["time_left_minutes"]) is None
     ):
@@ -235,6 +270,7 @@ def validate(doc):
         items = doc.get(name, [])
         if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
             raise ValueError(f"{name} must be a list of objects")
+        items = cast("list[dict[str, Any]]", items)
         ids = [item.get("id") for item in items]
         if not all(isinstance(i, str) and i and "/" not in i for i in ids) or len(set(ids)) != len(ids):
             raise ValueError(f"every {name} item needs a unique string id without '/'")
@@ -252,7 +288,7 @@ def validate(doc):
     ledger_plans.validate(doc)
 
 
-def thread_paths(doc):
+def thread_paths(doc: dict[str, Any]) -> Generator[tuple[str, Any], None, None]:
     yield "notes", doc["notes"]
     yield "chat", doc["chat"]
     for name in THREADS:
@@ -261,11 +297,11 @@ def thread_paths(doc):
                 yield f"{name}/{item['id']}/{thread}", item.get(thread, [])
 
 
-def thread_target(path):
+def thread_target(path: str) -> str:
     return path.rsplit("/", 1)[0] if "/" in path else ("chat" if path == "chat" else "")
 
 
-def get_thread(doc, path):
+def get_thread(doc: dict[str, Any], path: str) -> list[dict[str, Any]] | None:
     parts = path.split("/")
     if parts in (["notes"], ["chat"]):
         return doc[parts[0]]
@@ -275,7 +311,7 @@ def get_thread(doc, path):
     return None if item is None or item.get("deleted") else item.setdefault(parts[2], [])
 
 
-def parse_seed(html):
+def parse_seed(html: str) -> Any:
     match = SEED_RE.search(html)
     if not match:
         raise ValueError('no <script id="ledger-data" type="application/json"> block')
@@ -284,25 +320,25 @@ def parse_seed(html):
     return seed
 
 
-def watch_path(slug, name):
+def watch_path(slug: str, name: str) -> Path:
     addresses = ports.swarm().naming.addresses
 
     paths = [LEDGER_DIR / ".sessions" / f"{slug}.{candidate}.watch" for candidate in addresses(name)]
     return next((path for path in paths if path.exists()), paths[0])
 
 
-def seed_text(doc, rev=None):
+def seed_text(doc: dict[str, Any], rev: int | None = None) -> str:
     body = doc if rev is None else {"_rev": rev, **doc}
     return "\n" + pretty(body).replace("<", "\\u003c") + "\n"
 
 
-def text_diff(old, new):
+def text_diff(old: str, new: str) -> str:
     lines = difflib.ndiff(old.splitlines(), new.splitlines())
     return "\n".join(line for line in lines if line[:1] in "-+")
 
 
-def warnings(doc):
-    found = []
+def warnings(doc: dict[str, Any]) -> list[str]:
+    found: list[str] = []
     words = len(ledger_close.intro(doc["overview"]).split())
     if words > 200:
         found.append(f"overview has {words} words, limit 200")
@@ -312,19 +348,23 @@ def warnings(doc):
     return found
 
 
-def size_warning(text):
+def size_warning(text: str) -> bool:
     return re.fullmatch(r"(overview|phase \S+ description) has \d+ words, limit \d+", text) is not None
 
 
 class Context:
     """One sync's clock, rev, stamps and event log."""
 
-    def __init__(self, meta, at, slug=""):
+    def __init__(self, meta: dict[str, Any], at: int, slug: str = "") -> None:
         self.at, self.rev = at, meta["rev"] + 1
-        self.stamps, self.events = meta["stamps"], []
-        self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
-        self.unstored = set()
-        self.names = {}
+        self.stamps: dict[str, Any] = meta["stamps"]
+        self.events: list[dict[str, Any]] = []
+        self.meta = meta
+        self.dirty = False
+        self.refused: list[Any] = []
+        self.dropped: list[Any] = []
+        self.unstored: set[Any] = set()
+        self.names: dict[str, str] = {}
         self.slug = slug
 
     def author(self, name: str) -> str:
@@ -336,29 +376,29 @@ class Context:
             self.names[resolved] = resolved
         return self.names[name]
 
-    def record(self, by, kind, target, **extra):
+    def record(self, by: str, kind: str, target: str, **extra: Any) -> None:
         self.events.append({"rev": self.rev, "at": self.at, "by": by, "kind": kind, "target": target, **extra})
 
-    def stamp(self, path, by):
+    def stamp(self, path: str, by: str) -> None:
         self.stamps[path] = {"at": self.at, "rev": self.rev, "by": by}
 
 
-def earliest(meta, at):
+def earliest(meta: dict[str, Any], at: int) -> int:
     """The ledger's start: the oldest real timestamp among its stamps and events (legacy entries carry at=0)."""
     stamps = [s["at"] for s in meta["stamps"].values() if s.get("at")]
     events = [e["at"] for e in meta["events"] if e.get("at")]
     return min([meta.get("created_at") or at, *stamps, *events])
 
 
-def kind_of(path):
+def kind_of(path: str) -> str:
     return "chat" if path == "chat" else "comment"
 
 
-def state_event(field, value):
+def state_event(field: str, value: bool) -> str:
     return STATE_EVENTS[field][0 if value else 1]
 
 
-def set_state(item, field, value):
+def set_state(item: dict[str, Any], field: str, value: bool) -> None:
     """Done and out of scope exclude each other: setting one clears the other."""
     item[field] = value
     other = "out_of_scope" if field == "done" else "done"
@@ -366,9 +406,9 @@ def set_state(item, field, value):
         item[other] = False
 
 
-def apply_changes(doc, changes, ctx):
+def apply_changes(doc: dict[str, Any], changes: list[dict[str, Any]], ctx: Context) -> list[str]:
     """Checkbox changes: `base` is the value the page started from; a stale base loses."""
-    rejected = []
+    rejected: list[str] = []
     for change in changes:
         parts = change["path"].split("/")
         items = {i["id"]: i for i in doc.get(parts[0], [])} if parts[0] in LISTS else {}
@@ -392,7 +432,7 @@ def apply_changes(doc, changes, ctx):
     return rejected
 
 
-def clear_chat(thread, op, target, ctx):
+def clear_chat(thread: list[dict[str, Any]] | None, op: dict[str, Any], target: str, ctx: Context) -> bool:
     if target != "chat":
         return False
     if thread:
@@ -402,8 +442,8 @@ def clear_chat(thread, op, target, ctx):
     return True
 
 
-def new_entry(op, by, at, text):
-    entry = {"id": op["id"], "by": by, "at": at, "text": text}
+def new_entry(op: dict[str, Any], by: str, at: int, text: str) -> dict[str, Any]:
+    entry: dict[str, Any] = {"id": op["id"], "by": by, "at": at, "text": text}
     if op["thread"] == "notes":
         entry["comments"] = []
     if "reply_to" in op:
@@ -411,7 +451,7 @@ def new_entry(op, by, at, text):
     return entry
 
 
-def record_sync(doc, op, ctx):
+def record_sync(doc: dict[str, Any], op: dict[str, Any], ctx: Context) -> bool:
     """An operator sync order; each kind rests SYNC_COOLDOWN_MS after it was last sent."""
     import ledger_gate
     import ledger_stats
@@ -429,7 +469,7 @@ def record_sync(doc, op, ctx):
     return True
 
 
-def apply_op(doc, op, ctx):
+def apply_op(doc: dict[str, Any], op: dict[str, Any], ctx: Context) -> bool:
     if "by" in op:
         op = {**op, "by": ctx.author(op["by"])}
     if op["op"] in AGENT_OPS:
@@ -484,7 +524,7 @@ def apply_op(doc, op, ctx):
     return True
 
 
-def _screened(op, worktree=None):
+def _screened(op: dict[str, Any], worktree: Any = None) -> str:
     if not op["thread"].endswith("/comments"):
         return op["text"]
     LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
@@ -493,7 +533,7 @@ def _screened(op, worktree=None):
     return filters.screen(LEDGER_WRITE, op["text"], worktree)
 
 
-def _check_chat_address(op, chat_add):
+def _check_chat_address(op: dict[str, Any], chat_add: bool) -> None:
     answer = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
     if ("to" in op and not (chat_add or answer)) or ("reply_to" in op and not chat_add):
         raise ValueError("to addresses only an agent chat message or comment, reply_to only an agent chat message")
@@ -501,7 +541,7 @@ def _check_chat_address(op, chat_add):
         raise ValueError("an agent chat message goes to the operator or answers his line by its id")
 
 
-def check_op(op, task_ids=()):
+def check_op(op: Any, task_ids: tuple[Any, ...] = ()) -> None:
     if not isinstance(op, dict) or op.get("op") not in (
         "add",
         "edit",
@@ -513,6 +553,7 @@ def check_op(op, task_ids=()):
         *ARTIFACT_OPS,
     ):
         raise ValueError("each op needs op add, edit, delete, clear, sync or an agent op")
+    op = cast("dict[str, Any]", op)
     if not isinstance(op.get("id"), str) or not op["id"]:
         raise ValueError("each op needs a string id")
     if op["op"] in SYNC_KINDS:
@@ -557,13 +598,15 @@ def check_op(op, task_ids=()):
             ledger_comments.check(op["text"], kind_of(op["thread"]), op.get("long") is True, task_ids)
 
 
-def check_body(body, task_ids=()):
+def check_body(body: Any, task_ids: tuple[Any, ...] = ()) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Raise ValueError unless body is {"changes": [...], "ops": [...]} with well-formed members."""
     if not isinstance(body, dict):
         raise ValueError("body must be an object")
+    body = cast("dict[str, Any]", body)
     changes, ops = body.get("changes", []), body.get("ops", [])
     if not isinstance(changes, list) or not isinstance(ops, list):
         raise ValueError("changes and ops must be lists")
+    changes, ops = cast("list[dict[str, Any]]", changes), cast("list[dict[str, Any]]", ops)
     for change in changes:
         if not isinstance(change, dict) or not isinstance(change.get("path"), str):
             raise ValueError("each change needs a string path")
@@ -572,19 +615,19 @@ def check_body(body, task_ids=()):
     return changes, ops
 
 
-def load_state(json_path, seed):
+def load_state(json_path: Path, seed: dict[str, Any]) -> Any:
     from scripts.swarm_ledger.repository.legacy import load_state as read_state
 
     return read_state(json_path, seed, sys.modules[__name__])
 
 
-def gated(gate, doc, op, ctx):
+def gated(gate: Any, doc: dict[str, Any], op: dict[str, Any], ctx: Context) -> bool:
     return gate.apply(doc, op, ctx, apply_op) if gate else apply_op(doc, op, ctx)
 
 
-def sync(slug, changes=None, ops=None, gate=None):
+def sync(slug: str, changes: Any = None, ops: Any = None, gate: Any = None) -> Any:
     from scripts.swarm_ledger import storage
 
-    repository = storage.default()
+    repository = cast(Any, storage.default())
 
     return repository.bound(sys.modules[__name__]).apply_ops(slug, changes=changes, ops=ops, gate=gate)

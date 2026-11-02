@@ -4,6 +4,8 @@ Pure functions over a ledger's `_meta` and document; the CLI, the server and the
 """
 
 import re
+from collections.abc import Callable, Sequence
+from typing import Any, cast
 
 from scripts.swarm_ledger import ports
 
@@ -30,16 +32,21 @@ WRITE_COMMANDS = (
 WATCH_STALE_SECONDS = 20
 
 
-def policy(doc):
-    given = doc.get("policy") if isinstance(doc.get("policy"), dict) else {}
+def policy(doc: dict[str, Any]) -> dict[str, Any]:
+    raw_policy = doc.get("policy")
+    given = cast("dict[str, Any]", raw_policy) if isinstance(raw_policy, dict) else {}
     return {**DEFAULT_POLICY, **{k: v for k, v in given.items() if k in DEFAULT_POLICY and isinstance(v, int)}}
 
 
-def orchestrator(members):
+def orchestrator(members: dict[str, dict[str, Any]]) -> str | None:
     return next((name for name, member in members.items() if member.get("role") == "orchestrator"), None)
 
 
-def owner(event, members, tasks=()):
+def owner(
+    event: dict[str, Any],
+    members: dict[str, dict[str, Any]],
+    tasks: Sequence[dict[str, Any]] = (),
+) -> str | None:
     boss = orchestrator(members)
     target = event.get("target", "")
     if target == "chat" or target.startswith("notes/"):
@@ -57,7 +64,12 @@ def owner(event, members, tasks=()):
     return boss
 
 
-def owes(event, members, name, tasks=()):
+def owes(
+    event: dict[str, Any],
+    members: dict[str, dict[str, Any]],
+    name: str,
+    tasks: Sequence[dict[str, Any]] = (),
+) -> bool:
     resolve_name = ports.swarm().naming.resolve_name
 
     name = resolve_name(name)
@@ -65,13 +77,18 @@ def owes(event, members, name, tasks=()):
     return event.get("kind") == "sync requested" or who == name or who is None
 
 
-def unhandled_for(meta, name, tasks=(), owners=None):
+def unhandled_for(
+    meta: dict[str, Any],
+    name: str,
+    tasks: Sequence[dict[str, Any]] = (),
+    owners: dict[int, str | None] | None = None,
+) -> list[dict[str, Any]]:
     resolve_name = ports.swarm().naming.resolve_name
 
     return pending_for(meta, resolve_name(name), operator_events(meta), tasks, {} if owners is None else owners)
 
 
-def operator_events(meta):
+def operator_events(meta: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
     return [
         (index, event)
         for index, event in enumerate(meta.get("events", []))
@@ -79,13 +96,19 @@ def operator_events(meta):
     ]
 
 
-def pending_for(meta, name, events, tasks, owners):
+def pending_for(
+    meta: dict[str, Any],
+    name: str,
+    events: list[tuple[int, dict[str, Any]]],
+    tasks: Sequence[dict[str, Any]],
+    owners: dict[int, str | None],
+) -> list[dict[str, Any]]:
     members = meta.get("members", {})
     me = members.get(name)
     if me is None:
         return []
     since = me.get("handled_rev", 0)
-    mine = []
+    mine: list[dict[str, Any]] = []
     for index, event in events:
         if event.get("rev", 0) <= since:
             continue
@@ -96,11 +119,11 @@ def pending_for(meta, name, events, tasks, owners):
     return mine
 
 
-def plural(n, word):
+def plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
-def sync_summary(doc, meta):
+def sync_summary(doc: dict[str, Any], meta: dict[str, Any]) -> str:
     """The operator's sync order: what is pending, then what every member must do before acking."""
     since = min((m.get("handled_rev", 0) for m in meta.get("members", {}).values()), default=0)
     told = sum(
@@ -110,7 +133,9 @@ def sync_summary(doc, meta):
         and e.get("by") == "operator"
         and e.get("kind") not in (*IGNORED_KINDS, "sync requested")
     )
-    live = lambda name: [i for i in doc.get(name, []) if not i.get("out_of_scope")]  # noqa: E731
+    live: Callable[[str], list[dict[str, Any]]] = lambda name: [  # noqa: E731
+        i for i in doc.get(name, []) if not i.get("out_of_scope")
+    ]
     phases = sum(1 for i in live("phases") if not i.get("done"))
     followups = sum(1 for i in live("followups") if not i.get("done"))
     questions = sum(1 for i in live("questions") if not any(not a.get("deleted") for a in i.get("answers", [])))
@@ -122,13 +147,13 @@ def sync_summary(doc, meta):
     )
 
 
-def crew(meta):
+def crew(meta: dict[str, Any]) -> list[dict[str, Any]]:
     resolve_names = ports.swarm().naming.resolve_names
 
     members = meta.get("members", {})
     names = resolve_names(list(members))
     events = operator_events(meta)
-    owners = {}
+    owners: dict[int, str | None] = {}
     return [
         {
             "name": name,
@@ -141,6 +166,6 @@ def crew(meta):
     ]
 
 
-def closed(doc):
+def closed(doc: dict[str, Any]) -> bool:
     items = [*doc.get("phases", []), *doc.get("followups", [])]
     return bool(doc.get("phases")) and all(item.get("done") or item.get("out_of_scope") for item in items)

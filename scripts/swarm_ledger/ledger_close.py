@@ -1,6 +1,7 @@
 """Closing a ledger: a Summary section built from the ledger itself, written into the overview, and when it closed."""
 
 import re
+from typing import Any
 
 OPS = ("summary_set", "close", "reopen")
 HEAD = "Summary"
@@ -9,7 +10,7 @@ AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 MAX_NOTE = 4000
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     allowed = {"op", "id", "by", "note"} if op["op"] == "summary_set" else {"op", "id", "by"}
     if not set(op) <= allowed or not isinstance(op.get("by"), str) or not AUTHOR_RE.match(op["by"]):
         raise ValueError(f"{op['op']} takes id, by (an author name){' and note' if 'note' in allowed else ''}")
@@ -17,7 +18,7 @@ def check(op):
         raise ValueError(f"note must be text of at most {MAX_NOTE} characters")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     if op["op"] in ("close", "reopen"):
         doc["closed_at"] = ctx.at if op["op"] == "close" else None
         ctx.stamp("closed_at", op["by"])
@@ -29,19 +30,19 @@ def apply(doc, op, ctx):
     return True
 
 
-def _in_scope(items):
+def _in_scope(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [i for i in items if not i.get("out_of_scope")]
 
 
-def _answered(question):
+def _answered(question: dict[str, Any]) -> bool:
     return any(not a.get("deleted") and a.get("text", "").strip() for a in question.get("answers", []))
 
 
-def _block(title, lines):
+def _block(title: str, lines: list[str] | None) -> list[str]:
     return [f"{title}:", *(f"- {line}" for line in lines or ["none"])]
 
 
-def summary(doc, note=""):
+def summary(doc: dict[str, Any], note: str = "") -> str:
     phases, tasks = _in_scope(doc.get("phases", [])), _in_scope(doc.get("tasks", []))
     merged = [f"{t['title']} {t['pr_url']}" for t in tasks if t.get("state") == "done" and t.get("pr_url")]
     still = [f"{t['title']} ({t.get('state') or 'open'})" for t in tasks if t.get("state") != "done"]
@@ -54,9 +55,9 @@ def summary(doc, note=""):
     return "\n".join(lines)
 
 
-def intro(overview):
+def intro(overview: str) -> str:
     return overview.split(MARK, 1)[0]
 
 
-def with_summary(overview, text):
+def with_summary(overview: str, text: str) -> str:
     return f"{intro(overview)}\n\n{text}"

@@ -9,6 +9,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from scripts.swarm_ledger import ledger_rank, ports
 
@@ -39,7 +40,12 @@ class Match:
         return self.state == "done"
 
 
-def find(doc: dict, kind: str, items: list[dict], judge: Callable | None = None) -> list[Match | str | None]:
+def find(
+    doc: dict[str, Any],
+    kind: str,
+    items: list[dict[str, Any]],
+    judge: Callable[..., Any] | None = None,
+) -> list[Match | str | None]:
     pool = _pool(doc, kind)
     shortlists = [shortlist(item, pool) for item in items]
     if not any(shortlists):
@@ -58,19 +64,19 @@ def find(doc: dict, kind: str, items: list[dict], judge: Callable | None = None)
     return [_best(doc, i, found, output.raw.answers, floor) for i, found in enumerate(shortlists)]
 
 
-def shortlist(item: dict, pool: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
+def shortlist(item: dict[str, Any], pool: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
     mine = words(item)
     scored = [(_overlap(mine, words(c[1])), n, c) for n, c in enumerate(pool)]
     ranked = sorted((s for s in scored if s[0] > 0), key=lambda s: (-s[0], s[1]))
     return [c for _, _, c in ranked[:SHORTLIST]]
 
 
-def words(item: dict) -> set[str]:
+def words(item: dict[str, Any]) -> set[str]:
     text = " ".join(str(item.get(k) or "") for k in ("title", "description", "text")).lower()
     return {w for w in WORD.findall(text) if len(w) > 2 and w not in STOP}
 
 
-def _pool(doc, kind):
+def _pool(doc: dict[str, Any], kind: str) -> list[tuple[str, dict[str, Any]]]:
     pool = [(kind, i) for i in doc.get(LISTS[kind], []) if not i.get("out_of_scope")]
     if kind == "followup":
         pool = [c for c in pool if not c[1].get("done")]
@@ -78,13 +84,13 @@ def _pool(doc, kind):
     return pool
 
 
-def _overlap(mine, theirs):
+def _overlap(mine: set[str], theirs: set[str]) -> float:
     if not mine or not theirs:
         return 0
     return len(mine & theirs) / math.sqrt(len(mine) * len(theirs))
 
 
-def _state(items, shortlists):
+def _state(items: list[dict[str, Any]], shortlists: list[list[tuple[str, dict[str, Any]]]]) -> dict[str, Any]:
     return {
         "new": [
             {"ref": i, "title": _title(item), "description": item.get("description", "")}
@@ -98,7 +104,13 @@ def _state(items, shortlists):
     }
 
 
-def _best(doc, i, found, answers, floor):
+def _best(
+    doc: dict[str, Any],
+    i: int,
+    found: list[tuple[str, dict[str, Any]]],
+    answers: Any,
+    floor: float,
+) -> Match | None:
     yes = [(answers[_name(i, j)].noul, c) for j, c in enumerate(found)]
     yes = [(p, c) for p, c in yes if _yes(p, floor)]
     if not yes:
@@ -107,42 +119,43 @@ def _best(doc, i, found, answers, floor):
     return _match(doc, kind, item, probability)
 
 
-def _yes(noul, floor):
+def _yes(noul: Any, floor: float) -> bool:
     return isinstance(noul, (int, float)) and not isinstance(noul, bool) and noul > floor
 
 
-def _match(doc, kind, item, probability):
+def _match(doc: dict[str, Any], kind: str, item: dict[str, Any], probability: float) -> Match:
     if kind != "task":
         return Match(item["id"], kind, _title(item), _done(item), None, None, None, probability)
-    phase = next((p for p in doc.get("phases", []) if p["id"] == item.get("phase")), {})
+    empty: dict[str, Any] = {}
+    phase: dict[str, Any] = next((p for p in doc.get("phases", []) if p["id"] == item.get("phase")), empty)
     rank = item.get("rank", ledger_rank.DEFAULT)
     return Match(
         item["id"], kind, item["title"], item["state"], rank, item.get("phase"), phase.get("title"), probability
     )
 
 
-def _done(item):
+def _done(item: dict[str, Any]) -> str:
     return "done" if item.get("done") else "open"
 
 
-def _title(item):
+def _title(item: dict[str, Any]) -> str:
     return item.get("title") or item.get("text", "")
 
 
-def _name(i, j):
+def _name(i: int, j: int) -> str:
     return f"new_{i}_existing_{j}"
 
 
-def _verdicts(definition, state, params, answers):
+def _verdicts(definition: Any, state: Any, params: dict[str, Any], answers: Any) -> dict[str, bool]:
     floor = definition.thresholds["same"]
     return {"duplicate": any(_yes(answers[_name(p["new"], p["slot"])].noul, floor) for p in params["pairs"])}
 
 
-def decide(*args, **kwargs):
+def decide(*args: Any, **kwargs: Any) -> Any:
     return ports.hooks().classifier.decide(*args, **kwargs)
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     if name != "RULE":
         raise AttributeError(name)
     code_rules = ports.hooks().classifier.code_rules

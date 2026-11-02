@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.swarm_ledger import hosted_probe, ledger_route
 
@@ -33,7 +34,7 @@ class Cleartext(SystemExit):
     pass
 
 
-def base(environ=os.environ, slug="") -> str:
+def base(environ: Mapping[str, str] = os.environ, slug: str = "") -> str:
     if selected := ledger_route.url(slug) or hosted_probe.hosted(environ):
         return selected
     if remote(environ, slug):
@@ -45,18 +46,18 @@ def base(environ=os.environ, slug="") -> str:
     return f"{scheme(environ)}://{host}:{port}"
 
 
-def scheme(environ=os.environ) -> str:
+def scheme(environ: Mapping[str, str] = os.environ) -> str:
     return "https" if tls(environ) else "http"
 
 
-def tls(environ=os.environ) -> tuple[str, str] | None:
+def tls(environ: Mapping[str, str] = os.environ) -> tuple[str, str] | None:
     cert, key = environ.get(TLS_CERT_ENV, "").strip(), environ.get(TLS_KEY_ENV, "").strip()
     if bool(cert) != bool(key):
         raise SystemExit(f"the ledger serves TLS only with both {TLS_CERT_ENV} and {TLS_KEY_ENV}")
     return (cert, key) if cert else None
 
 
-def server_context(environ=os.environ) -> ssl.SSLContext | None:
+def server_context(environ: Mapping[str, str] = os.environ) -> ssl.SSLContext | None:
     found = tls(environ)
     if found is None:
         return None
@@ -73,7 +74,7 @@ def loopback(host: str | None) -> bool:
     return bool(found) and all(ipaddress.ip_address(address).is_loopback for address in found)
 
 
-def guard(url: str, headers: dict) -> None:
+def guard(url: str, headers: dict[str, str]) -> None:
     parts = urllib.parse.urlsplit(url)
     sent = {name.lower() for name, value in headers.items() if value}
     if parts.scheme == "https" or not sent & {name.lower() for name in CREDENTIAL_HEADERS}:
@@ -93,7 +94,7 @@ def reachable(url: str, environ: Mapping[str, str] = os.environ) -> bool:
     return parts.scheme == "https" or loopback(host)
 
 
-def transport(environ=os.environ) -> dict:
+def transport(environ: Mapping[str, str] = os.environ) -> dict[str, Any]:
     pem = environ.get(CA_ENV, "").strip()
     if pem:
         return {"context": ssl.create_default_context(cadata=pem)}
@@ -110,20 +111,22 @@ def transport(environ=os.environ) -> dict:
     return {"context": context}
 
 
-def ca_file(environ=os.environ) -> Path:
+def ca_file(environ: Mapping[str, str] = os.environ) -> Path:
     if environ.get(CA_FILE_ENV):
         return Path(environ[CA_FILE_ENV]).expanduser()
     return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "ledger-ca.pem"
 
 
-def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ):
+def urlopen(
+    request: urllib.request.Request, timeout: float, environ: Mapping[str, str] = os.environ
+) -> http.client.HTTPResponse:
     for name, value in access_headers(environ).items():
         request.add_header(name, value)
     guard(request.full_url, dict(request.header_items()))
     return urllib.request.urlopen(request, timeout=timeout, **transport(environ))
 
 
-def remote(environ=os.environ, slug="") -> bool:
+def remote(environ: Mapping[str, str] = os.environ, slug: str = "") -> bool:
     return bool(
         ledger_route.url(slug)
         or hosted_probe.hosted(environ)
@@ -131,12 +134,12 @@ def remote(environ=os.environ, slug="") -> bool:
     ) or not local_mode(environ)
 
 
-def local_mode(environ=os.environ) -> bool:
+def local_mode(environ: Mapping[str, str] = os.environ) -> bool:
     mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
     return not environ.get("LEDGER_URL") if mode is None else mode == "local"
 
 
-def access_headers(environ=os.environ) -> dict:
+def access_headers(environ: Mapping[str, str] = os.environ) -> dict[str, str]:
     client = environ.get("SWARM_ACCESS_CLIENT_ID") or environ.get("CF_ACCESS_CLIENT_ID")
     secret = environ.get("SWARM_ACCESS_CLIENT_SECRET") or environ.get("CF_ACCESS_CLIENT_SECRET")
     if not (client and secret):
@@ -144,16 +147,16 @@ def access_headers(environ=os.environ) -> dict:
     return {"CF-Access-Client-Id": client, "CF-Access-Client-Secret": secret, "User-Agent": USER_AGENT}
 
 
-def shared_directory(environ=os.environ) -> bool:
+def shared_directory(environ: Mapping[str, str] = os.environ) -> bool:
     return folder(environ).resolve() == (Path.home() / "development-ledger").resolve()
 
 
-def address(environ=os.environ) -> tuple[str, int]:
+def address(environ: Mapping[str, str] = os.environ) -> tuple[str, int]:
     port = 8765 if shared_directory(environ=environ) else int(environ.get("LEDGER_PORT", "8765"))
     return environ.get("LEDGER_HOST", "127.0.0.1"), port
 
 
-def public_url(environ=os.environ) -> urllib.parse.SplitResult | None:
+def public_url(environ: Mapping[str, str] = os.environ) -> urllib.parse.SplitResult | None:
     url = environ.get("SWARM_PUBLIC_URL")
     if not url:
         return None
@@ -163,18 +166,18 @@ def public_url(environ=os.environ) -> urllib.parse.SplitResult | None:
     return parts
 
 
-def listed_hosts(environ=os.environ) -> set[str]:
+def listed_hosts(environ: Mapping[str, str] = os.environ) -> set[str]:
     return {name.strip() for name in environ.get("SWARM_ALLOWED_HOSTS", "").split(",")} - {""}
 
 
-def allowed_hosts(environ=os.environ) -> set[str]:
+def allowed_hosts(environ: Mapping[str, str] = os.environ) -> set[str]:
     host, port = address(environ)
     public = public_url(environ)
     hosts = {f"{name}:{port}" for name in (host, *LOOPBACK)} | listed_hosts(environ)
     return hosts | ({public.netloc} if public else set())
 
 
-def allowed_origins(environ=os.environ) -> set[str]:
+def allowed_origins(environ: Mapping[str, str] = os.environ) -> set[str]:
     host, port = address(environ)
     public = public_url(environ)
     origins = {f"{scheme(environ)}://{name}:{port}" for name in (host, *LOOPBACK)}
@@ -182,11 +185,11 @@ def allowed_origins(environ=os.environ) -> set[str]:
     return origins | ({f"{public.scheme}://{public.netloc}"} if public else set())
 
 
-def page_url(slug):
+def page_url(slug: str) -> str:
     return f"{base(slug=slug)}/{slug}"
 
 
-def folder(environ=os.environ) -> Path:
+def folder(environ: Mapping[str, str] = os.environ) -> Path:
     return Path(environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 
 
@@ -200,11 +203,11 @@ def serving(timeout: float = 1, url: str | None = None) -> str | None:
         return ""
     except OSError:
         return None
-    served = body.get("dir") if isinstance(body, dict) else None
+    served = cast("dict[str, Any]", body).get("dir") if isinstance(body, dict) else None
     return served if isinstance(served, str) else ""
 
 
-def page_line(slug):
+def page_line(slug: str) -> str:
     line = f"Ledger page: {page_url(slug)} (open it to follow and steer the work)"
     if remote(slug=slug):
         return hosted_line(slug, line)
@@ -220,7 +223,7 @@ def page_line(slug):
     return line
 
 
-def hosted_line(slug, line):
+def hosted_line(slug: str, line: str) -> str:
     from scripts.swarm_ledger import ledger
 
     target = base(slug=slug)

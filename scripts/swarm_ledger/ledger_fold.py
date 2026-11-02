@@ -4,7 +4,10 @@ import json
 import re
 import sys
 import uuid
+from argparse import Namespace
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import ledger_groups, ledger_kinds, ledger_rank, ledger_stats
 
@@ -34,23 +37,26 @@ UNSTATED = "not stated on the ledger"
 CARD_KEYS = ("id", "title", "description", "territory", "difficulty", "lane", "profile", "phase", "depends_on")
 
 
-def pool(doc: dict) -> tuple[list[dict], dict]:
-    pending = {
-        t["id"]: t for t in ledger_stats.live(doc, "tasks") if not ledger_stats.finished(t) and not t.get("merged_into")
+def pool(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    live: list[dict[str, Any]] = ledger_stats.live(doc, "tasks")
+    pending: dict[str, dict[str, Any]] = {
+        t["id"]: t for t in live if not ledger_stats.finished(t) and not t.get("merged_into")
     }
-    inputs = ledger_stats.tick_inputs(doc.get("_meta") or {}) or {}
-    held = ledger_stats.frozen(doc, pending, inputs)
-    chained = _chained(pending)
-    kept, skipped = [], {"frozen": 0, "in flight": 0, "planner chain": 0, "grouped": 0, "not code": 0}
+    inputs: dict[str, Any] = ledger_stats.tick_inputs(doc.get("_meta") or {}) or {}
+    held: set[str] = ledger_stats.frozen(doc, pending, inputs)
+    chained: set[str] = _chained(pending)
+    kept: list[dict[str, Any]] = []
+    skipped = {"frozen": 0, "in flight": 0, "planner chain": 0, "grouped": 0, "not code": 0}
     for tid, task in pending.items():
         if reason := _left_out(task, tid in held, tid in chained):
             skipped[reason] += 1
         else:
             kept.append(task)
-    return sorted(kept, key=ledger_rank.order), skipped
+    order: Callable[[dict[str, Any]], int] = ledger_rank.order
+    return sorted(kept, key=order), skipped
 
 
-def _left_out(task: dict, held: bool, chained: bool) -> str:
+def _left_out(task: dict[str, Any], held: bool, chained: bool) -> str:
     if held:
         return "frozen"
     if task.get("state") != "open" or task.get("claimed_by"):
@@ -62,7 +68,7 @@ def _left_out(task: dict, held: bool, chained: bool) -> str:
     return "planner chain" if chained else ""
 
 
-def _chained(pending: dict) -> set:
+def _chained(pending: dict[str, dict[str, Any]]) -> set[str]:
     sliced = {tid for tid, t in pending.items() if t.get("slice") or t.get("plan_slice")}
     linked = set()
     for tid in sliced:
@@ -71,16 +77,16 @@ def _chained(pending: dict) -> set:
     return linked
 
 
-def names(task: dict) -> set:
+def names(task: dict[str, Any]) -> set[str]:
     text = "\n".join(filter(None, (task.get("title"), task.get("description"))))
     return {m.strip().lower() for pattern in NAME_RES for m in pattern.findall(text)}
 
 
-def words(title: str) -> set:
+def words(title: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > SHORT_WORD and w not in COMMON}
 
 
-def signals(a: dict, b: dict) -> list[str]:
+def signals(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
     found = []
     if shared := sorted(set(a.get("territory") or []) & set(b.get("territory") or [])):
         found.append(f"territory {', '.join(shared)}")
@@ -92,7 +98,7 @@ def signals(a: dict, b: dict) -> list[str]:
     return found
 
 
-def candidates(doc: dict) -> dict:
+def candidates(doc: dict[str, Any]) -> dict[str, Any]:
     tasks, skipped = pool(doc)
     known = {t["id"]: t for t in doc["tasks"]}
     used, groups = set(), []
@@ -115,21 +121,23 @@ def candidates(doc: dict) -> dict:
     return {"pool": len(tasks), "skipped": skipped, "groups": groups}
 
 
-def _card(task: dict) -> dict:
+def _card(task: dict[str, Any]) -> dict[str, Any]:
     return {key: task.get(key) for key in CARD_KEYS} | {"kind": ledger_kinds.kind(task)}
 
 
-def problems(doc: dict, plan: dict) -> list[str]:
+def problems(doc: dict[str, Any], plan: Any) -> list[str]:
     groups = plan.get("groups") if isinstance(plan, dict) else None
     if not isinstance(groups, list) or not groups:
         return ['the plan needs {"groups": [{"lead", "members", "seams", "done"}]} with at least one group']
-    known, seen, found = {t["id"]: t for t in doc["tasks"]}, set(), []
+    known: dict[str, dict[str, Any]] = {t["id"]: t for t in doc["tasks"]}
+    seen: set[str] = set()
+    found: list[str] = []
     for n, group in enumerate(groups, 1):
         found += [f"group {n}: {p}" for p in _group_problems(group, known, seen)]
     return found
 
 
-def _group_problems(group: dict, known: dict, seen: set) -> list[str]:
+def _group_problems(group: Any, known: dict[str, dict[str, Any]], seen: set[str]) -> list[str]:
     if not isinstance(group, dict):
         return ["each group is an object with a lead, members, seams and done"]
     lead, members = group.get("lead"), group.get("members")
@@ -156,7 +164,7 @@ def _group_problems(group: dict, known: dict, seen: set) -> list[str]:
     return found
 
 
-def plain_problems(text: str, known: dict) -> list[str]:
+def plain_problems(text: str, known: dict[str, dict[str, Any]]) -> list[str]:
     found = []
     if ids := sorted(i for i in known if re.search(rf"(?<![\w-]){re.escape(i)}(?![\w-])", text)):
         found.append(f"names task id {ids[0]}; describe the change in plain words")
@@ -175,7 +183,7 @@ def _path(text: str) -> str:
     return ""
 
 
-def description(doc: dict, lead: dict, group: dict) -> str:
+def description(doc: dict[str, Any], lead: dict[str, Any], group: dict[str, Any]) -> str:
     phase = next((p for p in doc.get("phases") or [] if p.get("id") == lead.get("phase")), {})
     mission = ": ".join(filter(None, (phase.get("title"), _sentence(phase.get("description")))))
     lines = [
@@ -192,17 +200,17 @@ def _sentence(text: str | None) -> str:
     return re.split(r"(?<=[.!?])\s", text.strip())[0].rstrip(".").strip() if text else ""
 
 
-def territory(known: dict, ids: list[str]) -> list[str]:
+def territory(known: dict[str, dict[str, Any]], ids: list[str]) -> list[str]:
     return list(dict.fromkeys(area for i in ids for area in known[i].get("territory") or []))
 
 
-def status(lead: dict, known: dict) -> str:
+def status(lead: dict[str, Any], known: dict[str, dict[str, Any]]) -> str:
     title = (lead.get("title") or "").rstrip(".")
     text = STATUS.format(title=title)
     return FALLBACK_STATUS if not title or plain_problems(text, known) else text
 
 
-def writes(doc: dict, group: dict) -> dict:
+def writes(doc: dict[str, Any], group: dict[str, Any]) -> dict[str, Any]:
     known = {t["id"]: t for t in doc["tasks"]}
     lead, members = known[group["lead"]], group["members"]
     return {
@@ -212,7 +220,7 @@ def writes(doc: dict, group: dict) -> dict:
     }
 
 
-def _plan(path: str | None) -> dict:
+def _plan(path: str | None) -> dict[str, Any]:
     if not path:
         sys.exit("fold check and fold apply take the plan file: fold check PLAN")
     try:
@@ -221,13 +229,13 @@ def _plan(path: str | None) -> dict:
         sys.exit(f"cannot read the plan {path}: {exc}")
 
 
-def _checked(doc: dict, plan: dict) -> None:
+def _checked(doc: dict[str, Any], plan: dict[str, Any]) -> None:
     if found := problems(doc, plan):
         print(json.dumps({"problems": found}, indent=2))
         sys.exit(2)
 
 
-def _apply(args, doc: dict, plan: dict) -> None:
+def _apply(args: Namespace, doc: dict[str, Any], plan: dict[str, Any]) -> None:
     from scripts.swarm_ledger import ledger
 
     for group in plan["groups"]:
@@ -241,7 +249,7 @@ def _apply(args, doc: dict, plan: dict) -> None:
         print(json.dumps({"lead": group["lead"], "folded": group["members"]}))
 
 
-def run(args) -> None:
+def run(args: Namespace) -> None:
     from scripts.swarm_ledger import ledger
 
     doc = ledger.call(args.slug)
