@@ -165,6 +165,7 @@ def test_export_leaves_out_the_tick_lock_and_keeps_its_other_keys(store: RedisSt
     keys = store.export("sw")["keys"]
     assert store.key("sw", "tick-lock") not in keys
     assert store.key("sw", "") in keys
+    assert store.culture.key("sw") in keys
 
 
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
