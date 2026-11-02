@@ -9,10 +9,10 @@ import hashlib
 import os
 import sys
 import urllib.error
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
@@ -26,11 +26,14 @@ __all__ = [
     "FrozenDict",
     "FrozenList",
     "Held",
+    "REFRESH",
     "LedgerView",
     "Reader",
     "current",
+    "document",
     "freeze",
     "frozen_views",
+    "holding",
     "refreshed",
     "start",
     "view_file",
@@ -108,6 +111,7 @@ class LedgerView:
 
 
 CURRENT: ContextVar[LedgerView | None] = ContextVar("tick_ledger_view", default=None)
+REFRESH: ContextVar[tuple[str, Callable[[], LedgerView]] | None] = ContextVar("tick_ledger_refresh", default=None)
 
 
 @dataclass
@@ -173,18 +177,45 @@ def start(slug: str, service: bool) -> LedgerView | None:
     ledger: Any = _ledger()
     base: str = ledger.base(slug)
     client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
-    renew = partial(
-        refreshed,
-        view_file(base, slug, scheduler.runtime_dir()),
-        lambda since, parts: client.changes(slug, since, parts),
-    )
+    path = view_file(base, slug, scheduler.runtime_dir())
+
+    def refresh() -> LedgerView:
+        """The held view patched with one delta read."""
+        return refreshed(path, lambda since, parts: client.changes(slug, since, parts))
+
     try:
-        view = renew()
+        view = refresh()
     except urllib.error.HTTPError as exc:
         if exc.code != 400:
             raise
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         view = None
     CURRENT.set(view)
-    HELD.set(None if view is None else Held(view, renew))
+    HELD.set(None if view is None else Held(view, refresh))
+    REFRESH.set(None if view is None else (slug, refresh))
     return view
+
+
+def document(slug: str) -> dict[str, Any] | None:
+    """The whole document of ledger ``slug`` from the pass's held view patched with one delta read, or nothing
+    when the pass holds no view of that ledger."""
+    held = REFRESH.get()
+    if held is None or held[0] != slug:
+        return None
+    view = held[1]()
+    CURRENT.set(view)
+    if (kept := HELD.get()) is not None:
+        kept.view, kept.stale = view, False
+    return view.document
+
+
+@contextmanager
+def holding() -> Generator[None]:
+    """Hold no view on entry and drop whatever view the block started on exit."""
+    current, refresh, kept = CURRENT.set(None), REFRESH.set(None), HELD.set(None)
+    try:
+        yield
+    finally:
+        HELD.reset(kept)
+        REFRESH.reset(refresh)
+        CURRENT.reset(current)
