@@ -56,7 +56,6 @@ _MANAGED_HEADER = "<!-- managed-by: agentihooks — regenerate with: agentihooks
 _MANAGED_FOOTER = "<!-- agentihooks:managed-end -->"
 
 
-# Events supported by both codex hooks.json and our hook_manager dispatch.
 CODEX_HOOK_EVENTS = (
     "SessionStart",
     "SessionEnd",
@@ -70,8 +69,6 @@ CODEX_HOOK_EVENTS = (
     "PermissionRequest",
 )
 
-# Events codex refuses additionalContext on — it warns per handler when the key
-# is set on one of them ("this event cannot emit additionalContext").
 _NO_CONTEXT_EVENTS = frozenset({"Stop", "SubagentStop", "SessionEnd", "PreCompact", "PermissionRequest"})
 
 
@@ -250,7 +247,9 @@ def _codex_stdio(name: str, spec: dict) -> dict:
 
 
 def _codex_http(name: str, spec: dict) -> dict:
-    # Claude expands ${VAR} in header values; codex sends them literally (gateway 401 on the raw placeholder).
+    """
+    Claude expands ${VAR} in header values; codex sends them literally (gateway 401 on the raw placeholder).
+    """
     from hooks.secrets import scan as _scan_secrets
 
     _i = _install_module()
@@ -310,19 +309,24 @@ def codex_mcp_entry(name: str, spec: dict) -> tuple[dict | None, str]:
 
 
 class CodexAdapter:
+    """
+    CODEX_HOOK_EVENTS: events supported by both codex hooks.json and our hook_manager dispatch.
+
+    _NO_CONTEXT_EVENTS: events codex refuses additionalContext on — it warns per handler when the key is set on one of them ("this event
+    cannot emit additionalContext").
+    """
+
     name = "codex"
 
     def __init__(self) -> None:
-        # Rules collected by install_features("rules", ...) and compiled into
-        # AGENTS.md by install_persona — the features loop runs first.
-        self._pending_rules: list[tuple[str, str, str]] = []  # (layer_label, name, text)
+        """
+        Rules collected by install_features("rules", ...) and compiled into AGENTS.md by install_persona — the features
+        loop runs first.
+        """
+        self._pending_rules: list[tuple[str, str, str]] = []
 
     def home(self) -> Path:
         return codex_home()
-
-    # ------------------------------------------------------------------
-    # settings: config.toml managed keys + hooks.json + wrapper
-    # ------------------------------------------------------------------
 
     def summary_counts(self) -> dict[str, int]:
         from scripts.init_reporter import installed_counts
@@ -362,26 +366,33 @@ class CodexAdapter:
         return managed.unwrap() if isinstance(managed, dict) else {}
 
     def write_settings(self, native: dict) -> Path:
+        """
+        A pinned catalog limits codex to the models it lists.
+
+        Native settings arrive already merged (base + bundle + profile chain). Everything else is authored natively
+        (profiles/_base/config.base.toml plus each profile's .codex/config.overrides.toml) and arrives here already
+        merged. Each key is applied under the managed-key record so a value the operator hand-edited since our last
+        write is left alone.
+
+        Nested tables (tui, features, …) merge key-by-key rather than being replaced wholesale: config.toml is a shared
+        operator file, and replacing a table would silently drop settings we never wrote.
+
+        Floor, applied after the merge: the hook layer is the entire guardrail surface, so it is never left off — not by
+        a native file, not by a hand-edit.
+
+        Notification degrade: codex has no Notification hook — the fixed `notify` mechanism (agent-turn-complete, JSON
+        as argv[1]) is bridged into the normal Notification handler by the shim module.
+        """
         _i = self._i = _install_module()
         home = self.home()
         home.mkdir(parents=True, exist_ok=True)
 
         config_path = home / "config.toml"
         doc = self._load_toml(config_path)
-        # A pinned catalog limits codex to the models it lists.
         stale = _stale_catalog_files()
         if doc.get("model_catalog_json") == str(stale[0]):
             del doc["model_catalog_json"]
 
-        # Native settings arrive already merged (base + bundle + profile chain).
-        # Everything else is authored natively (profiles/_base/config.base.toml
-        # plus each profile's .codex/config.overrides.toml) and arrives here
-        # already merged. Each key is applied under the managed-key record so a
-        # value the operator hand-edited since our last write is left alone.
-        #
-        # Nested tables (tui, features, …) merge key-by-key rather than being
-        # replaced wholesale: config.toml is a shared operator file, and
-        # replacing a table would silently drop settings we never wrote.
         managed = self._take_managed(home, doc)
         for key, value in (native or {}).items():
             if key in ("agentihooks", "mcp_servers") or key.startswith("_"):
@@ -394,14 +405,8 @@ class CodexAdapter:
                 continue
             self._apply_managed(doc, managed, key, value, key)
 
-        # Floor, applied after the merge: the hook layer is the entire guardrail
-        # surface, so it is never left off — not by a native file, not by a
-        # hand-edit.
         doc.setdefault("features", {})["hooks"] = True
 
-        # Notification degrade: codex has no Notification hook — the fixed
-        # `notify` mechanism (agent-turn-complete, JSON as argv[1]) is bridged
-        # into the normal Notification handler by the shim module.
         python_bin = str(_i._detect_venv() or sys.executable)
         doc.setdefault("notify", [python_bin, "-m", "hooks.targets.notify_shim"])
 
@@ -417,6 +422,17 @@ class CodexAdapter:
         return config_path
 
     def _write_hooks_json(self, home: Path, profile_env: dict[str, str] | None = None) -> None:
+        """
+        additionalContextLimit unset means codex spills any additionalContext over ~2500 tokens to disk and shows the
+        model a preview; 0 disables spilling, which the project-context injection depends on.
+
+        Preserve foreign matchers/hooks per event; replace only entries that point at our wrapper (identified by path).
+
+        Ours first: codex keys hook trust by group position and herdr appends its group.
+
+        Reap our own entries under events we no longer wire (e.g. a stale PostCompact from an earlier install) — foreign
+        groups there survive.
+        """
         _i = _install_module()
         wrapper = home / "agentihooks-hook.sh"
         wrapper.write_text(wrapper_text(profile_env or {}, str(_i._detect_venv() or sys.executable)))
@@ -424,9 +440,6 @@ class CodexAdapter:
 
         hooks_path = home / "hooks.json"
 
-        # additionalContextLimit unset means codex spills any additionalContext
-        # over ~2500 tokens to disk and shows the model a preview; 0 disables
-        # spilling, which the project-context injection depends on.
         def _entry(event: str) -> dict:
             hook = {"type": "command", "command": str(wrapper)}
             if event not in _NO_CONTEXT_EVENTS:
@@ -445,8 +458,6 @@ class CodexAdapter:
                 _i._cprint(f"  [!!] Unparseable hooks.json backed up → {backup}")
                 existing = {}
 
-        # Preserve foreign matchers/hooks per event; replace only entries that
-        # point at our wrapper (identified by path).
         merged = existing.get("hooks", {}) if isinstance(existing.get("hooks"), dict) else {}
         for event, groups in desired.items():
             prior = merged.get(event, [])
@@ -455,10 +466,7 @@ class CodexAdapter:
                 for g in prior
                 if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
             ]
-            # Ours first: codex keys hook trust by group position and herdr appends its group.
             merged[event] = groups + foreign
-        # Reap our own entries under events we no longer wire (e.g. a stale
-        # PostCompact from an earlier install) — foreign groups there survive.
         for event in [e for e in merged if e not in desired]:
             foreign = [
                 g
@@ -476,25 +484,23 @@ class CodexAdapter:
         _atomic_write(hooks_path, text)
         _i._cprint(f"[OK] Wrote {hooks_path} ({len(CODEX_HOOK_EVENTS)} events)")
 
-    # ------------------------------------------------------------------
-    # features: skills / agents / commands / rules
-    # ------------------------------------------------------------------
-
     def install_features(self, subdir: str, layers: list[tuple[str, Path]], filter_fn) -> None:
+        """
+        ~/.agents/skills is shared with the copilot target, which writes translated commands there as real directories.
+        Clear any whose name a real skill now claims — the symlinker refuses to replace a non-symlink, so otherwise this
+        skill silently never installs.
+
+        Codex has no auto-loaded rules dir — compile into AGENTS.md.
+        """
         _i = _install_module()
         if subdir == "skills":
             dst = agents_skills_home()
-            # ~/.agents/skills is shared with the copilot target, which writes
-            # translated commands there as real directories. Clear any whose
-            # name a real skill now claims — the symlinker refuses to replace a
-            # non-symlink, so otherwise this skill silently never installs.
             reap_translated_commands(skill_names_in(layers, filter_fn), reason="a real skill now owns the name")
             for label, src in layers:
                 _i._symlink_dir_contents(src, dst, label=f"codex {label}", filter_fn=filter_fn)
         elif subdir == "commands":
             self._reap_prompts()
         elif subdir == "rules":
-            # Codex has no auto-loaded rules dir — compile into AGENTS.md.
             collected: dict[str, tuple[str, str, str]] = {}
             for label, src in layers:
                 if not src.is_dir():
@@ -526,10 +532,6 @@ class CodexAdapter:
             manifest_path.unlink()
             _i._cprint(f"  [RM] Removed translated prompts from {prompts_dir}")
 
-    # ------------------------------------------------------------------
-    # persona: AGENTS.md
-    # ------------------------------------------------------------------
-
     def install_persona(
         self,
         profile_dirs: list[tuple[str, Path]],
@@ -538,6 +540,11 @@ class CodexAdapter:
         user_dir: Path | None = None,
         shared_dir: Path | None = None,
     ) -> None:
+        """
+        Codex caps the combined instruction doc (project_doc_max_bytes, default 32 KiB). v0.147.0 loaded a 415 KB global
+        AGENTS.md in full, but the ceiling is raised defensively anyway — a silently truncated persona is the worst
+        failure mode this file can have.
+        """
         _i = _install_module()
         managed_text = build_persona(
             profile_dirs,
@@ -551,10 +558,6 @@ class CodexAdapter:
         dst = self.home() / "AGENTS.md"
         text = write_persona(dst, managed_text, _MANAGED_HEADER, _MANAGED_FOOTER)
 
-        # Codex caps the combined instruction doc (project_doc_max_bytes,
-        # default 32 KiB). v0.147.0 loaded a 415 KB global AGENTS.md in full,
-        # but the ceiling is raised defensively anyway — a silently truncated
-        # persona is the worst failure mode this file can have.
         size = len(text.encode())
         ceiling = max(65536, int(size * 1.25))
         config_path = self.home() / "config.toml"
@@ -566,28 +569,23 @@ class CodexAdapter:
             f"{len(self._pending_rules)} rule(s); project_doc_max_bytes={ceiling})"
         )
 
-    # ------------------------------------------------------------------
-    # MCP registration
-    # ------------------------------------------------------------------
-
     def register_hooks_utils(self, profile_name: str) -> None:
+        """
+        Same transport resolver as the claude path — it reads AGENTIHOOKS_MCP_TRANSPORT and ~/.agentihooks/.env, which a
+        bare os.environ["MCP_TRANSPORT"] read does not, so the two targets could otherwise disagree about whether the
+        daemon is even in use.
+
+        Reuse the claude-side builder rather than re-deriving the URL: it validates MCP_PORT and honours MCP_SCHEME (the
+        daemon serves plaintext on its loopback bind, but an operator fronting it with TLS or moving it off loopback
+        needs https) and picks the path per transport. Re-deriving it here is how this adapter shipped a hardcoded
+        http:// that the claude path had already fixed. Codex takes the url alone — it infers the type itself.
+        """
         _i = _install_module()
         python_bin = str(_i._detect_venv() or sys.executable)
-        # Same transport resolver as the claude path — it reads
-        # AGENTIHOOKS_MCP_TRANSPORT and ~/.agentihooks/.env, which a bare
-        # os.environ["MCP_TRANSPORT"] read does not, so the two targets could
-        # otherwise disagree about whether the daemon is even in use.
         transport = _i._resolve_installer_mcp_transport()
         if transport == "stdio":
             entry: dict = {"command": python_bin, "args": ["-m", "hooks.mcp"]}
         else:
-            # Reuse the claude-side builder rather than re-deriving the URL: it
-            # validates MCP_PORT and honours MCP_SCHEME (the daemon serves
-            # plaintext on its loopback bind, but an operator fronting it with
-            # TLS or moving it off loopback needs https) and picks the path per
-            # transport. Re-deriving it here is how this adapter shipped a
-            # hardcoded http:// that the claude path had already fixed.
-            # Codex takes the url alone — it infers the type itself.
             entry = {"url": _i._build_mcp_config("")["mcpServers"][MCP_SERVER_NAME]["url"]}
         config_path = self.home() / "config.toml"
         doc = self._load_toml(config_path)
@@ -619,18 +617,34 @@ class CodexAdapter:
             _i._cprint(f"  [OK] Codex MCP servers: {', '.join(added)}")
 
     def teardown(self) -> None:
+        """
+        hooks.json: strip our groups per event; foreign groups survive.
+
+        Unparseable file may hold operator hooks mid-edit — preserve it rather than treating it as empty and deleting
+        it.
+
+        config.toml: keys still holding our recorded value are withdrawn; a hand-edited key is the operator's and stays.
+        `notify` goes only if it still points at our shim. [features].hooks is left as-is — true with no hooks
+        configured is inert, and the operator may run their own.
+
+        No record (legacy install / hand-deleted table). These values carry no agentihooks fingerprint, so removing by
+        name could revert a deliberate operator choice — warn instead, loudly: danger-full-access left behind is worth
+        the operator's look.
+
+        Ours by construction (install_persona sets it on every run).
+
+        No record: remove it only when its content proves it is ours — a name collision with the operator's own server
+        must not delete their entry.
+        """
         _i = _install_module()
         home = self.home()
         wrapper = home / "agentihooks-hook.sh"
 
-        # hooks.json: strip our groups per event; foreign groups survive.
         hooks_path = home / "hooks.json"
         if hooks_path.exists():
             try:
                 doc = json.loads(hooks_path.read_text())
             except (json.JSONDecodeError, OSError):
-                # Unparseable file may hold operator hooks mid-edit — preserve
-                # it rather than treating it as empty and deleting it.
                 backup = hooks_path.with_suffix(f".json.bak.{datetime.now(timezone.utc):%Y%m%d%H%M%S}")
                 shutil.move(str(hooks_path), str(backup))
                 _i._cprint(f"  [!!] {hooks_path.name} unparseable — preserved at {backup.name}")
@@ -654,10 +668,6 @@ class CodexAdapter:
                 _i._cprint(f"  [RM] Removed {hooks_path}")
         wrapper.unlink(missing_ok=True)
 
-        # config.toml: keys still holding our recorded value are withdrawn; a
-        # hand-edited key is the operator's and stays. `notify` goes only if it
-        # still points at our shim. [features].hooks is left as-is — true with
-        # no hooks configured is inert, and the operator may run their own.
         config_path = home / "config.toml"
         if config_path.exists():
             doc = self._load_toml(config_path)
@@ -668,10 +678,6 @@ class CodexAdapter:
                     doc.pop(key, None)
                     removed_keys.append(key)
             if not managed and any(k in doc for k in ("approval_policy", "sandbox_mode")):
-                # No record (legacy install / hand-deleted table). These values
-                # carry no agentihooks fingerprint, so removing by name could
-                # revert a deliberate operator choice — warn instead, loudly:
-                # danger-full-access left behind is worth the operator's look.
                 _i._cprint(
                     "  [!!] no managed-key record — approval_policy/sandbox_mode "
                     "left as-is; review them (a torn-down bypass install would have set "
@@ -681,7 +687,6 @@ class CodexAdapter:
             notify = doc.get("notify")
             if isinstance(notify, list) and any("notify_shim" in str(part) for part in notify):
                 doc.pop("notify", None)
-            # Ours by construction (install_persona sets it on every run).
             doc.pop("project_doc_max_bytes", None)
             table = doc.get("mcp_servers")
             from scripts.targets._common import managed_mcp_names
@@ -695,9 +700,6 @@ class CodexAdapter:
                 for own in (MCP_SERVER_NAME, *LEGACY_MCP_SERVER_NAMES) if not recorded_names else ():
                     if own not in table:
                         continue
-                    # No record: remove it only when its content proves it is
-                    # ours — a name collision with the operator's own server
-                    # must not delete their entry.
                     import tomlkit as _tomlkit
 
                     entry_text = _tomlkit.dumps({"e": table[own]})
@@ -724,10 +726,6 @@ class CodexAdapter:
 
     def post_install_reconcile(self, profile_chain: list[str], persisted_profile: str) -> None:
         return None
-
-    # ------------------------------------------------------------------
-    # doctor
-    # ------------------------------------------------------------------
 
     def doctor(self) -> int:
         """Print codex-install health; return count of failed checks."""
@@ -806,10 +804,6 @@ class CodexAdapter:
             f"with: agentihooks swarm <id> set codex-inbox-transport={LEGACY_TRANSPORT}"
         )
         return failed
-
-    # ------------------------------------------------------------------
-    # TOML round-trip (operator hand-edits outside managed keys survive)
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _load_toml(path: Path):
