@@ -180,7 +180,9 @@ def test_every_merge_queue_job_but_the_watcher_is_graded() -> None:
     if "install-smoke" in jobs:
         expected.add("install-smoke")
     assert push_only == expected
-    assert queued <= _gate_needs(jobs)
+    wiring = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    declared = {key.removeprefix("test.yml/") for key in wiring["not_gates"] if key.startswith("test.yml/")}
+    assert queued - declared <= _gate_needs(jobs)
 
 
 def test_the_watcher_budget_covers_its_work_outside_the_queue():
