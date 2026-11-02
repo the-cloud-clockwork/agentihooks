@@ -43,7 +43,7 @@ def check(op):
         raise ValueError("freeze_set needs verb freeze or focus")
     if (op.get("position") or op.get("only")) and op.get("verb") != "focus":
         raise ValueError("position and only apply to a focus")
-    if op.get("position", "bottom") not in POSITIONS or op.get("only", False) not in (True, False):
+    if op.get("position", "bottom") not in POSITIONS or not isinstance(op.get("only", False), bool):
         raise ValueError("position is top or bottom and only is true or false")
     target = op.get("target")
     if not isinstance(target, str) or not (NODE_RE.match(target) or selector(target)):
@@ -93,7 +93,7 @@ def _set(doc: dict[str, Any], op: dict[str, Any], ctx: Any, by: str, words: str)
     kept = [row for row in rows if not _displaced(row, op, graph)]
     present = any(row["verb"] == verb and row["target"] == target for row in rows)
     top = op.get("position") == "top"
-    if kept == rows and present and not top:
+    if kept == rows and present and not op.get("position"):
         return True
     kept = [row for row in kept if not (row["verb"] == verb and row["target"] == target)]
     row: dict[str, Any] = {"id": op["id"], "verb": verb, "target": target, "by": by, "at": ctx.at}

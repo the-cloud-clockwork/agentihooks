@@ -76,3 +76,38 @@ def test_unfreezing_a_task_leaves_it_free() -> None:
 def test_a_malformed_queue_field_is_refused_at_check(fields: dict[str, object], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         core.check_op({"op": "freeze_set", "id": "f1", "target": "plans/a", **fields})
+
+
+def test_focus_bottom_moves_a_queued_target_to_the_end_and_a_plain_refocus_keeps_its_place() -> None:
+    freeze("tasks/t1", verb="focus")
+    freeze("tasks/t2", verb="focus")
+    state, _ = freeze("tasks/t1", verb="focus")
+    assert targets(state) == [("focus", "tasks/t1"), ("focus", "tasks/t2")]
+    state, _ = freeze("tasks/t1", verb="focus", position="bottom")
+    assert targets(state) == [("focus", "tasks/t2"), ("focus", "tasks/t1")]
+
+
+def test_the_queue_the_op_writes_is_the_claim_order() -> None:
+    from scripts.swarm import focus_budget
+
+    freeze("tasks/t1", verb="focus")
+    state, _ = freeze("tasks/t2", verb="focus", position="top")
+    assert focus_budget.ranks(state) == {"t1": 1, "t2": 0}
+
+
+def test_an_unfrozen_task_waits_for_the_open_focus_before_it_may_be_claimed() -> None:
+    from scripts.swarm import freeze as gate
+    from scripts.swarm_ledger.repository import hierarchy
+
+    freeze("tasks/t2", verb="focus")
+    freeze("tasks/t1")
+    state, _ = write("freeze_clear", target="tasks/t1")
+    graph = hierarchy.project(state)[0]
+    first = next(row for row in state["tasks"] if row["id"] == "t1")
+    assert gate.claim_gate(first, state, graph, "")
+    assert not gate.frozen(first, state["freezes"], gate.ancestry(first, graph))
+
+
+def test_only_must_be_a_boolean() -> None:
+    with pytest.raises(ValueError, match="position is top or bottom and only is true or false"):
+        core.check_op({"op": "freeze_set", "id": "f1", "verb": "focus", "target": "plans/a", "only": 1})

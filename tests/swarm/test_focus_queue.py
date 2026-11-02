@@ -60,7 +60,40 @@ def test_a_focused_task_that_is_not_done_holds_every_task_outside_the_focus(stat
 
 def test_a_focus_covering_no_task_holds_nothing() -> None:
     assert not gate(task(), record("plans/b", "focus"))
-    assert not freeze.live(doc(record("plans/b", "focus")), {})
+    assert freeze.admitted(doc(record("plans/b", "focus")), {}) is None
+
+
+def test_the_tasks_a_focused_task_waits_on_join_the_focus() -> None:
+    focused = task("hot", phase="p2", depends_on=["dep"], parked_on=["parked"])
+    dep, parked = task("dep", depends_on=["deeper"]), task("parked")
+    deeper, other = task("deeper"), task("other")
+    rows = [focused, dep, parked, deeper, other]
+    found = doc(record("tasks/hot", "focus"), tasks=rows)
+    graph = hierarchy.project(found)[0]
+    assert freeze.admitted(found, graph) == {"hot", "dep", "parked", "deeper"}
+    assert [row["id"] for row in rows if freeze.claim_gate(row, found, graph, "")] == ["other"]
+
+
+def test_a_frozen_task_inside_the_focus_never_holds_the_queue_open() -> None:
+    inside = task("inside", phase="p2")
+    assert not gate(task(), record("plans/b", "focus"), record("tasks/inside"), tasks=[inside])
+    assert gate(inside, record("plans/b", "focus"), record("tasks/inside"))
+
+
+def test_the_admitted_set_is_computed_once_per_ledger_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    real = freeze.ancestry
+    monkeypatch.setattr(freeze, "ancestry", lambda row, graph: calls.append(row["id"]) or real(row, graph))
+    found = doc(record("tasks/hot", "focus"), tasks=[task("hot", phase="p2")])
+    assert freeze.admitted(found, {}) == freeze.admitted(found, {}) == {"hot"}
+    assert calls == ["hot"]
+    found["tasks"] = [task("hot", phase="p2", state="done")]
+    assert freeze.admitted(found, {}) is None
+    found["freezes"] = [record("tasks/other", "focus")]
+    found["tasks"] = [task("other")]
+    assert freeze.admitted(found, {}) == {"other"}
+    assert freeze.admitted({**found}, {}) == {"other"}
+    assert calls == ["hot", "other", "other"]
 
 
 def test_the_focus_queue_order_sets_the_claim_order(store: RedisStore) -> None:
