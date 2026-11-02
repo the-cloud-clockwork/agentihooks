@@ -79,15 +79,54 @@ def test_not_mutated_paths_are_listed_once_with_the_first_reason():
     assert merge.merge_reports(reports)["not_mutated"] == [{"path": "scripts/a.py", "reason": "over budget"}]
 
 
+def _measured(shard, expected, graded):
+    measurement = {"index": shard, "expected": expected, "graded": graded}
+    return {
+        "files": [_file("scripts/a.py", {"killed": graded})],
+        "not_mutated": [],
+        "failed": False,
+        "shard": measurement,
+    }
+
+
 def test_main_writes_one_report_from_every_expected_shard(tmp_path, capsys):
     shards = tmp_path / "shards"
     for shard in (0, 1):
-        _write(shards, shard, {"files": [_file("scripts/a.py", {"killed": 1})], "not_mutated": [], "failed": False})
+        _write(shards, shard, _measured(shard, 1, 1))
     out = tmp_path / "gate"
     assert merge.main([str(shards), "--shards", "2", "--output", str(out)]) == 0
     report = json.loads((out / "report.json").read_text())
-    assert report == {"files": [_file("scripts/a.py", {"killed": 2})], "not_mutated": [], "failed": False}
-    assert "Merged 2 of 2 mutation shard reports" in capsys.readouterr().out
+    assert report == {
+        "shards": [_measured(0, 1, 1)["shard"], _measured(1, 1, 1)["shard"]],
+        "files": [_file("scripts/a.py", {"killed": 2})],
+        "not_mutated": [],
+        "failed": False,
+    }
+    output = capsys.readouterr().out
+    assert "Merged 2 of 2 mutation shard reports" in output
+    assert "unmeasured" not in output
+
+
+def test_main_fails_and_names_a_green_shard_that_graded_fewer_mutants_than_it_owns(tmp_path, capsys):
+    shards = tmp_path / "shards"
+    _write(shards, 0, _measured(0, 2, 2))
+    _write(shards, 1, _measured(1, 3, 2))
+    out = tmp_path / "gate"
+    assert merge.main([str(shards), "--shards", "2", "--output", str(out)]) == 1
+    assert json.loads((out / "report.json").read_text())["failed"] is True
+    assert "mutation shards unmeasured or graded fewer mutants than they own: 1" in capsys.readouterr().out
+
+
+def test_main_fails_and_names_a_green_shard_report_without_its_measurement(tmp_path, capsys):
+    shards = tmp_path / "shards"
+    _write(shards, 0, {"files": [_file("scripts/a.py", {"killed": 1})], "not_mutated": [], "failed": False})
+    _write(shards, 1, _measured(1, 1, 1))
+    _write(shards, 2, {**_measured(2, 1, 1), "shard": {"index": 2, "graded": 1}})
+    out = tmp_path / "gate"
+    assert merge.main([str(shards), "--shards", "3", "--output", str(out)]) == 1
+    assert json.loads((out / "report.json").read_text())["failed"] is True
+    assert "mutation shards unmeasured or graded fewer mutants than they own: 0, 2" in capsys.readouterr().out
+    assert merge.short_shards({0: {"shard": {"expected": 1, "graded": 1}}}) == []
 
 
 def test_main_fails_and_names_the_missing_shard_when_a_report_is_absent(tmp_path, capsys):
