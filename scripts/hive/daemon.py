@@ -263,8 +263,8 @@ def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: th
 
 def refresh_ready() -> None:
     """Keep the rollout readiness marker fresh once a successful beat has created it; never create it."""
-    if (marker := os.environ.get("HIVE_READY_FILE")) and Path(marker).is_file():
-        Path(marker).touch()
+    if (marker := os.environ.get("HIVE_READY_FILE")) and (path := Path(marker)).is_file():
+        path.touch()
 
 
 def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
