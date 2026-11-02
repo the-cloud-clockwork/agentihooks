@@ -255,12 +255,13 @@ def unobserved(agent: AgentRecord, facts: dict) -> dict:
 def compare(agent: AgentRecord, facts: dict) -> dict:
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
-    expected = {**assignment(agent), "hooks": True}
+    expected: dict[str, object] = {**assignment(agent), "hooks": True}
+    observed: dict[str, object] = facts
     missing = [*_unheld(agent), *unobserved(agent, facts)]
     return {
-        field: {"expected": value, "actual": facts.get(field)}
+        field: {"expected": value, "actual": observed.get(field)}
         for field, value in expected.items()
-        if field not in missing and not _same(field, value, facts.get(field))
+        if field not in missing and not _same(field, value, observed.get(field))
     }
 
 
