@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TypedDict
 
 from scripts.swarm_ledger import hosted_probe, ledger_route
 
@@ -93,7 +94,13 @@ def reachable(url: str, environ: Mapping[str, str] = os.environ) -> bool:
     return parts.scheme == "https" or loopback(host)
 
 
-def transport(environ: Mapping[str, str] = os.environ) -> dict[str, ssl.SSLContext]:
+class Transport(TypedDict, total=False):
+    """Keyword arguments that make urlopen trust the ledger CA."""
+
+    context: ssl.SSLContext
+
+
+def transport(environ: Mapping[str, str] = os.environ) -> Transport:
     pem = environ.get(CA_ENV, "").strip()
     if pem:
         return {"context": ssl.create_default_context(cadata=pem)}
