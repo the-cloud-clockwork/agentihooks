@@ -8,7 +8,7 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import difficulty, grouping
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.tick import engine
+from scripts.tick import engine, pool
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Lane, Result, Write
@@ -88,6 +88,19 @@ def test_a_conflicting_write_is_dropped_and_recomputed_on_the_next_pass() -> Non
     assert store.applied == [Write(TASKS, "t1", "M from revision 2", expected=2)]
     assert store.rows == {"t1": (3, "M from revision 2")}
     assert actions([second]) == ["sized from revision 2"]
+
+
+def test_a_parallel_pass_drops_the_conflicting_write_and_recomputes_it() -> None:
+    store = Store()
+    step = SizeStep(store, rival=["L by a concurrent step"])
+
+    with pool.running(workers=2):
+        (first,) = _pass(store, step)
+        (second,) = _pass(store, step)
+
+    assert first.dropped == (Write(TASKS, "t1", "M from revision 1", expected=1),)
+    assert second.dropped == ()
+    assert store.rows == {"t1": (3, "M from revision 2")}
 
 
 def test_writes_without_an_applier_pass_through_untouched() -> None:
