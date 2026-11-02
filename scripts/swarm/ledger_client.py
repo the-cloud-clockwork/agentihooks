@@ -347,5 +347,14 @@ class LedgerClient:
         return slug in ledger_bin.entries()
 
 
+def pass_state(ledger: Any, slug: str) -> dict[str, Any]:
+    """The whole document of ledger ``slug``: the tick pass's held view patched with one delta read while the
+    pass holds a view of that ledger, else the ledger's own whole read."""
+    from scripts.tick import view
+
+    held = view.document(slug)
+    return ledger.state(slug) if held is None else held
+
+
 def _op(kind, by, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": by, **fields}
