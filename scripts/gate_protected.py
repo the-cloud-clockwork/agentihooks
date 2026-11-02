@@ -4,6 +4,7 @@ import subprocess
 from copy import deepcopy
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -217,24 +218,27 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
     return problems
 
 
-def _mutation_stage_entries(file: str, gate: dict, jobs: dict, head_config: dict) -> dict[str, dict]:
+def _mutation_stage_entries(
+    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: dict[str, Any]
+) -> dict[str, Any]:
     """Return the head's non gate entries for mutation stages whose results the required mutation job merges."""
-    mutation = jobs.get("mutation") or {}
-    if "mutation" not in ci_wiring.needs_of(gate):
+    needs = ci_wiring.needs_of
+    mutation: dict[str, Any] = jobs.get("mutation") or {}
+    if "mutation" not in needs(gate):
         return {}
-    declared = head_config.get("not_gates", {})
+    declared: dict[str, Any] = head_config.get("not_gates", {})
     return {
         f"{file}/{stage}": declared[f"{file}/{stage}"]
         for stage in MUTATION_STAGES
-        if f"{file}/{stage}" in declared and stage in ci_wiring.needs_of(mutation)
+        if f"{file}/{stage}" in declared and stage in needs(mutation)
     }
 
 
 def grade(
-    base_workflows: dict[str, dict],
-    base_config: dict,
-    head_workflows: dict[str, dict],
-    head_config: dict,
+    base_workflows: dict[str, dict[str, Any]],
+    base_config: dict[str, Any],
+    head_workflows: dict[str, dict[str, Any]],
+    head_config: dict[str, Any],
     today: date,
     policy: object = None,
 ) -> list[str]:
