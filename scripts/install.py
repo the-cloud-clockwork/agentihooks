@@ -413,7 +413,10 @@ def _save_state(state: dict) -> None:
 
 
 def _migrate_profile_rename(state: dict, old_name: str, new_name: str) -> None:
-    """One-shot migration: rewrite all profile references from old_name to new_name in state.json."""
+    """One-shot migration: rewrite all profile references from old_name to new_name in state.json.
+
+    Project entries in ~/.claude.json that reference the old profile are migrated too.
+    """
     changed = False
     targets = state.get("targets", {})
 
@@ -1143,6 +1146,8 @@ def _link_profile_unlink(
 
     Fall back to first available profile (default if it exists, else whatever's there). Never leave the chain string
     empty.
+
+    Orphan symlinks pointing into the unlinked path are swept before the re-install.
     """
     if not name:
         print("ERROR: Provide the linked profile name.", file=sys.stderr)
@@ -2427,6 +2432,9 @@ def _resolve_profile_hook_paths(settings: dict, profile_dir: Path) -> dict:
     Profile settings.overrides.json may contain hook commands with relative paths
     like ``bash profiles/patch-mode/hooks/foo.sh``. These need to be absolute so
     they work regardless of the user's CWD when Claude runs.
+
+    A relative path is looked up under the profile dir, then the bundle root (profiles/..), then the agentihooks
+    root; the first that exists wins.
     """
     hooks = settings.get("hooks")
     if not hooks or not isinstance(hooks, dict):
@@ -2587,6 +2595,8 @@ def _build_otel_env(profile_data: dict) -> dict:
 
     Reads the ``otel:`` section from a profile.yml and returns a dict
     of env vars to inject into settings.json ``env`` block.
+
+    The Langfuse destination receives traces only, over OTLP HTTP.
     """
     otel_cfg = profile_data.get("otel", {})
     if not otel_cfg.get("enabled", True):
