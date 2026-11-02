@@ -1032,3 +1032,22 @@ def test_codex_successor_prefers_week_remaining_and_requires_a_week():
     missing = capacity.Account("codex", "c", "OPEN", 0, 90.0, None, 6)
     assert quota_handoff.exclusion(missing, thresholds) == "has no quota reading"
     assert quota_handoff.successor([lesser, better, missing], ("codex",), thresholds) == better
+
+
+@pytest.mark.parametrize("declared,warned", [("spent", ["worker"]), ("other", ["front", "worker"])])
+def test_a_front_door_master_on_the_reserved_account_gets_no_warning_while_a_worker_there_does(
+    monkeypatch: pytest.MonkeyPatch, declared: str, warned: list[str]
+) -> None:
+    import fakeredis
+
+    from scripts.swarm import master_pin
+
+    monkeypatch.setattr(master_pin, "declared", lambda environ: declared)
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    front = AgentRecord("front", "master", "", harness="claude", account="spent", profile="master", seat="master@sw")
+    storage.put_agent("sw", front)
+    storage.put_agent("sw", AgentRecord("worker", "eng", "e", harness="claude", account="spent"))
+    reserved = replace(account(week=90), reserved="reserved for 1 live master: workers stop at 80% of the week")
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [reserved.__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == [f"early quota handoff warning sent to {name}" for name in warned]
+    assert [name for name in ("front", "worker") if InboxStore(storage.redis).pending_items(name)] == warned

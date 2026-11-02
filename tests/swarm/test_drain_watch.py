@@ -227,3 +227,32 @@ def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(env, ca
         "  threshold over 10 minutes after the quota handoff warning",
         "  id working-on-drain/engineer@abc-0001",
     ]
+
+
+@pytest.mark.parametrize(
+    "declared,subjects", [("alpha", ["engineer@abc-0001"]), ("beta", ["master@abc-0000", "engineer@abc-0001"])]
+)
+def test_a_front_door_master_on_the_reserved_account_at_ten_percent_is_no_finding_while_a_worker_is(
+    monkeypatch: pytest.MonkeyPatch, declared: str, subjects: list[str]
+) -> None:
+    from scripts.swarm import master_pin
+
+    monkeypatch.setattr(master_pin, "declared", lambda environ: declared)
+    store = _drain_swarm(state="OPEN", week=10.0)
+    master = AgentRecord(
+        "master@abc-0000",
+        "master",
+        "",
+        harness="claude",
+        account="alpha",
+        state="working",
+        profile="master",
+        seat=f"master@{SLUG}",
+    )
+    store.put_agent(SLUG, master)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("swarm", master.name, "QUOTA HANDOFF WARNING")
+    store.redis.hset(inbox.key("item", item.id), "created_at", 1_000_000)
+    store.redis.hset(store.key(SLUG, "quota-warnings"), master.name, item.id)
+    found = drain_watch.findings(store, SLUG, Limits(), 1_000_000 + 12 * MINUTE)
+    assert sorted(f.subject for f in found) == sorted(subjects)
