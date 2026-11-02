@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1get:90576f612115f577764b2d4666c789989419cf5ef3290d4181550cb712d36289": {
+    "reader": "Standards",
+    "reason": "typing.cast returns its second argument unchanged and performs no runtime type validation. Replacing only its first argument with None preserves the record key or value, subsequent lookups, returned value and exceptions. The removed type expressions have no application side effects. Cleared under Development Manifesto section 6.1 by standards-reader narrow CI ruling."
+  }
+}

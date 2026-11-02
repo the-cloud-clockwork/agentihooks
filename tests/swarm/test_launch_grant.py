@@ -6,6 +6,7 @@ import time
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -509,17 +510,20 @@ class Hooked:
     def __getattr__(self, name):
         return getattr(self.pipe, name)
 
-    def execute(self):
-        return self.hook(self.pipe)
+    def execute(self) -> Any:
+        return self.hook(self.pipe) if self.pipe.watching else self.pipe.execute()
 
 
-def hook_pipelines(store, monkeypatch, hook):
+def hook_pipelines(store: RedisStore, monkeypatch: pytest.MonkeyPatch, hook: Any) -> tuple[Any, list[int]]:
     real = store.redis.pipeline
     calls = []
 
-    def pipeline(*args, **kwargs):
+    def counted(pipe: Any) -> Any:
         calls.append(1)
-        return Hooked(real(*args, **kwargs), hook)
+        return hook(pipe)
+
+    def pipeline(*args: Any, **kwargs: Any) -> Hooked:
+        return Hooked(real(*args, **kwargs), counted)
 
     monkeypatch.setattr(store.redis, "pipeline", pipeline)
     return real, calls
