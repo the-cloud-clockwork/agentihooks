@@ -1,4 +1,7 @@
 [
+  "hooks/__init__.py",
+  "hooks/__main__.py",
+  "hooks/_async.py",
   "hooks/context/__init__.py",
   "hooks/context/_strip.py",
   "hooks/context/account_sessions.py",
@@ -85,5 +88,11 @@
   "hooks/integrations/postgres.py",
   "hooks/integrations/session_state.py",
   "hooks/integrations/storage.py",
+  "hooks/logfile.py",
+  "hooks/proc.py",
+  "hooks/prompt_budget.py",
+  "hooks/quota.py",
+  "hooks/secrets.py",
+  "hooks/telemetry.py",
   "tests/test_integrations_failure_paths.py"
 ]
