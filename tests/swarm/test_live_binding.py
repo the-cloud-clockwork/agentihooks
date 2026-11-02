@@ -151,7 +151,9 @@ def test_a_launch_alias_matches_the_full_model_id_both_ways(
     mounted: tuple[AgentRecord, Path, Path], expected: str, observed: str, differs: bool
 ) -> None:
     agent, proc, _ = mounted
-    assigned = replace(agent, profile_decision={"validation": {**agent.profile_decision["validation"], "model": expected}})
+    assigned = replace(
+        agent, profile_decision={"validation": {**agent.profile_decision["validation"], "model": expected}}
+    )
     facts = {**live_binding.read(agent, 42, proc), "model": observed}
     differences = live_binding.compare(assigned, facts)
     assert differences == ({"model": {"expected": expected, "actual": observed}} if differs else {})
