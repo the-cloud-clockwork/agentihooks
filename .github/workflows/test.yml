@@ -241,6 +241,18 @@ jobs:
           PY
           env -u PYTHONPATH -u PYTHONHOME "$RUNNER_TEMP/install-smoke-venv/bin/agentihooks" --help > /dev/null
 
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+
   ledger-load:
     needs: [reuse, admission]
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
@@ -728,6 +740,18 @@ jobs:
           name: selection
           path: ${{ runner.temp }}/selection/selection.txt
           retention-days: 1
+
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   test-count:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'push' }}
@@ -1693,6 +1717,18 @@ jobs:
           python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"
           python3 -m scripts.ci_unit_rerun --jobs "$RUNNER_TEMP/jobs.jsonl" --repo "$GITHUB_REPOSITORY" --plan "$PLAN"
 
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+
   unit-rerun:
     name: unit rerun (${{ matrix.python-version }}, ${{ matrix.shard }})
     if: ${{ !cancelled() && needs.unit-lost.result == 'success' }}
@@ -2150,6 +2186,18 @@ jobs:
         env:
           REPORT: ${{ github.event_name == 'push' && '--report' || '' }}
         run: python3 -m tests.shard_budget $REPORT shard-reports/durations-*/durations.json
+
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   sonar:
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' }}
@@ -3289,6 +3337,18 @@ jobs:
           retention-days: 7
           after-cancel: true
 
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
     needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
@@ -3320,6 +3380,18 @@ jobs:
 
       - name: Report each stage's wall time against its budget
         run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"
+
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   queue-fail-fast:
     name: ${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}
@@ -3608,6 +3680,18 @@ jobs:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+
   flake-budget:
     needs: [unit]
     if: ${{ !cancelled() && github.event_name == 'push' }}
@@ -3688,6 +3772,18 @@ jobs:
         with:
           path: ~/flake-history
           key: ${{ (steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key) && 'flake-history' || 'flake-seed' }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   coverage-baseline:
     needs: [unit, coverage-ratchet]
@@ -3771,6 +3867,18 @@ jobs:
           path: ~/coverage-baseline
           if-no-files-found: error
           retention-days: 90
+
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   mutation-plan:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
@@ -3974,6 +4082,18 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   mutation-stats:
     needs: [mutation-plan, admission]
@@ -4281,6 +4401,18 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   mutation-shard:
     needs: [mutation-plan, mutation-stats, mutation-refine, admission]
@@ -4602,3 +4734,15 @@ jobs:
         run: |
           echo "::error::Mutation refinement ended $REFINE and a mutation shard ended $RESULT; the merged report is incomplete."
           exit 1
+
+      - name: Record the job peak memory
+        if: always()
+        shell: bash
+        run: |
+          read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null || echo unknown; }
+          peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)
+          limit=$(read_cgroup memory.max memory.limit_in_bytes)
+          kills=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)
+          [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
+          [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
+          echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"

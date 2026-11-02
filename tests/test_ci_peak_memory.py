@@ -1,4 +1,5 @@
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -112,3 +113,34 @@ def test_pull_request_tests_record_and_upload_the_step_peak(
         extract = names.index("Take the helper scripts from the workflow revision")
         assert extract < names.index(step)
         assert steps[extract]["if"] == measured["if"]
+
+
+LIGHT_CANONICAL = {"admission", "reuse", "gate-required", "queue-fail-fast", "test-summary"}
+
+
+def test_every_light_runner_job_records_its_whole_job_peak_memory() -> None:
+    jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
+    light = [name for name, job in jobs.items() if "'anton-oss-light'" in str(job.get("runs-on", ""))]
+    measured = [name for name in light if name not in LIGHT_CANONICAL]
+    assert {"select", "shard-check", "mutation-plan", "mutation-refine", "mutation"} <= set(measured)
+    for name in measured:
+        last = jobs[name]["steps"][-1]
+        assert last["name"] == "Record the job peak memory", name
+        assert last["if"] == "always()"
+        assert last["shell"] == "bash"
+        assert "memory.peak memory.max_usage_in_bytes" in last["run"]
+        assert "memory.max memory.limit_in_bytes" in last["run"]
+        assert '"oom_kill"' in last["run"]
+        assert 'tee -a "$GITHUB_STEP_SUMMARY"' in last["run"]
+
+
+def test_the_job_peak_step_reports_the_cgroup_figures(tmp_path: Path) -> None:
+    run = yaml.safe_load(WORKFLOW.read_text())["jobs"]["select"]["steps"][-1]["run"]
+    summary = tmp_path / "summary.md"
+    env = {"PATH": "/usr/bin:/bin", "GITHUB_JOB": "select", "GITHUB_STEP_SUMMARY": str(summary)}
+    done = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True, check=False)
+    assert done.returncode == 0
+    figure = r"(\d+ MiB|unknown)"
+    pattern = rf"Job peak memory of select: {figure}, limit (\d+ MiB|max|unknown), out of memory kills (\d+|unknown)"
+    assert re.fullmatch(pattern, done.stdout.strip())
+    assert summary.read_text() == done.stdout
