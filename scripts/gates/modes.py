@@ -6,17 +6,17 @@ only outside a swarm.
 
 import re
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 MODES = ("enforce", "observe", "off")
 
+if TYPE_CHECKING:
 
-@runtime_checkable
-class Named(Protocol):
-    @property
-    def name(self) -> str: ...
-    @property
-    def default_mode(self) -> str: ...
+    class Named(Protocol):
+        @property
+        def name(self) -> str: ...
+        @property
+        def default_mode(self) -> str: ...
 
 
 LABELS = {"enforce": "deny", "observe": "log only", "off": "skip", "coach": "coach"}
@@ -39,14 +39,14 @@ def env_name(gate_name: str) -> str:
     return "AGENTIHOOKS_GATE_" + re.sub(r"[^A-Z0-9]", "_", gate_name.upper())
 
 
-def mode(gate: Named, environ: Mapping[str, str], gates: Mapping[str, str] | None = None) -> str:
+def mode(gate: "Named", environ: Mapping[str, str], gates: Mapping[str, str] | None = None) -> str:
     if gates is not None:
         return configured(gate, gates)
     chosen = str(environ.get(env_name(gate.name))).strip().lower()
     return chosen if chosen in supported(gate.name) else gate.default_mode
 
 
-def configured(gate: Named, gates: Mapping[str, str]) -> str:
+def configured(gate: "Named", gates: Mapping[str, str]) -> str:
     chosen = str(gates.get(gate.name)).strip().lower()
     return chosen if chosen in supported(gate.name) else gate.default_mode
 

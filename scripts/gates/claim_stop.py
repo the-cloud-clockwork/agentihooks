@@ -151,8 +151,7 @@ def refusal(owed: str, slug: str, task: dict[str, Any], pull: "PullRequest | Non
             f"agentihooks swarm {slug} done {proof}. {name_wait}"
         )
     if owed == "red":
-        assert pull is not None
-        failed = cast(tuple[str, ...], pull.failed)
+        failed = cast(tuple[str, ...], cast("PullRequest", pull).failed)
         return f"checks failed on {url}: {', '.join(failed) or 'a check'}. Fix them and push, or block with {block}"
     if owed == "green":
         return f"checks passed on {url}: merge it, then run agentihooks swarm {slug} done --pr {url}"
@@ -227,8 +226,8 @@ class ClaimStop:
         run_wait = held_on.get("kind") == "checks" and waits.mutation_wait.RUN_URL.fullmatch(held_on["target"])
         if checks and held_on.get("kind") not in KEPT and not run_wait:
             on: dict[str, Any] = {"kind": "checks", "target": checks}
-            cast(Callable[[Any, str, str, int, str, int, dict[str, Any]], None], idle.declare_wait)(
-                cast(Any, store.redis), who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on
+            cast(Callable[..., None], idle.declare_wait)(
+                cast(Any, store.redis), who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on
             )
         if live or not owed:
             streak.clear()

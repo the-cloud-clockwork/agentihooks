@@ -351,9 +351,7 @@ class PushStop:
         head = git(tree.path, "rev-parse", "HEAD").stdout.strip()
         Progress(cast(Any, store.redis), who.swarm).outcome(who.name, PUSHED, self.now())
         try:
-            cast(Callable[[str, str, str, str], None], ledger.comment)(
-                who.swarm, who.task, record_text(remote, branch, head), SENDER
-            )
+            cast(Callable[..., None], ledger.comment)(who.swarm, who.task, record_text(remote, branch, head), by=SENDER)
         except SwarmError:
             pass
 
