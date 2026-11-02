@@ -258,10 +258,11 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-def _publish_tick_status(store, slug, doc, view=None):
+def _publish_tick_status(
+    store: Any, slug: str, doc: Any, view: Any = None, failure: BaseException | None = None
+) -> None:
     from scripts.swarm import command_runner
 
-    failure = sys.exception()
     try:
         timing.call(command_runner.publish, store, slug, doc, view)
     except Exception:
@@ -440,7 +441,9 @@ def run_tick(
     finally:
         try:
             published: dict[str, Any] = {}
-            run_group("wrapper status", store=store, slug=slug, doc=doc, view=view, box=published)
+            run_group(
+                "wrapper status", store=store, slug=slug, doc=doc, view=view, box=published, failure=sys.exception()
+            )
             host_steps.raise_held(published)
         finally:
             beating.close()
