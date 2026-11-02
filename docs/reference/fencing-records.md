@@ -121,7 +121,7 @@ Outcomes:
 | Script answer | `fencing.write` does |
 |---|---|
 | Committed | Returns the change's result |
-| `RevisionConflict` | Sleeps 1 to 32 milliseconds at random while attempts remain, reads again and reruns `change`, up to 16 attempts, then raises `SwarmError("the swarm fencing state kept changing; nothing was committed")`; see [Retries after a fencing conflict](../swarm-v2/execution-identity.md#retries-after-a-fencing-conflict) |
+| `RevisionConflict` on the records layout, `StateConflict` on the document layout | Sleeps 1 to 32 milliseconds at random while attempts remain, reads again and reruns `change`, up to 16 attempts, then raises `SwarmError("the swarm fencing state kept changing; nothing was committed")`; see [Retries after a fencing conflict](../swarm-v2/execution-identity.md#retries-after-a-fencing-conflict) |
 | `StaleLease` | Raises `SwarmError("the controller lease is stale")` with no retry |
 
 `lease.fenced(store, slug, held, change)` passes `held` as the fence. A `Lease` fences on its owner, epoch and expiry; a

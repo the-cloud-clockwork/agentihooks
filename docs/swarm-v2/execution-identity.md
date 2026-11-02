@@ -76,7 +76,8 @@ publishes a copy of the swarm's `executions` alone, and these reads take that co
 | `ExecutionRegistry.hive` | `scripts.hive.scope.host`, and through it `scope.readings` for every agent the controller checks | current executions |
 | `ExecutionRegistry.agents` | `RedisStore.agents`, the agent roster | current executions |
 | `ExecutionRegistry.occupants` | `RedisStore.execution_occupants` | current executions |
-| `ExecutionRegistry.records`, `managed`, `archive` and the fenced writes | seat history, cleanup, admission | the whole document, archive included |
+| `ExecutionRegistry.managed` | cleanup | the `by-name` lookup, then the archive when the name has no current execution |
+| `ExecutionRegistry.records`, `archive` and the fenced writes | seat history, cleanup, admission | the whole document, archive included |
 
 Since [pull request 9279](https://github.com/the-cloud-clockwork/agentihooks/pull/9279) these reads go through the
 records port, `fencing.records(store, slug)`, described in [Fencing records](../reference/fencing-records.md#the-records-port).
@@ -84,7 +85,9 @@ On a swarm still on the document layout the port takes the published copy for an
 `by-name`, and the whole document otherwise. See
 [Execution reads through the records port](#execution-reads-through-the-records-port) for each read on both layouts.
 
-Full history and fenced write authority are unchanged: the document stays authoritative, the copy is only read.
+On a swarm still on the document layout the document stays authoritative and the copy is only read. A migrated swarm
+keeps its authority in the per record keys; see
+[Execution reads through the records port](#execution-reads-through-the-records-port).
 
 ### How the copy stays consistent
 
@@ -206,7 +209,11 @@ the whole document adapter, `fencing.WholeDocumentRecords`, for every other swar
 - `ExecutionRegistry.get` still refuses an unknown id with `unknown execution identity; display labels cannot identify
   attempts` and counts it in `execution_identity_conflicts_total`.
 
-Nothing is configured for these reads.
+On a migrated swarm every fenced `ExecutionRegistry` write (`start`, `update`, `set_pane`, `archive` and
+`end_orphan`) commits one batch of per record writes through `fencing.write`, each expecting the revision it read. A
+conflict retries as in [Retries after a fencing conflict](#retries-after-a-fencing-conflict).
+
+Nothing is configured for these reads and writes.
 
 ## Hive placement reads
 
@@ -238,6 +245,10 @@ Every agent projection write also writes the agent's hive into a separate hash, 
 |---|---|
 | unset, or anything other than `true` (default) | `ExecutionRegistry.hive`, as in [the table above](#execution-reads-through-the-records-port) |
 | `true` | One `HGET` of the agent's `hosts` field; `ExecutionRegistry.hive` only when the field is absent |
+
+The joined member list comes from the hive index and member records. Inside `scope.one_pass()`, as in the
+controller's pass, they are read once per pass, so each `scope.host` call with the flag on costs one `HGET`. Outside a
+pass every call reads them again.
 
 In both cases a member that is not among the joined members answers `""`, and a hive member process recognises only
 itself.
@@ -285,7 +296,7 @@ A fenced write that loses to a concurrent write reads again and reruns its chang
 - On the document layout, `StateConflict` from the state bucket update.
 
 Before each remaining attempt the writer sleeps a random interval between 1 and 32 milliseconds
-(`random.uniform(0.001, 0.032)`), so writers that collided do not retry in step. No sleep follows the last attempt.
+(`uniform(0.001, 0.032)` from `random`), so writers that collided do not retry in step. No sleep follows the last attempt.
 After 16 conflicts the write raises `SwarmError("the swarm fencing state kept changing; nothing was committed")`, as
 before. A stale lease raises at once with no sleep. The wait adds at most about half a second to a write that uses
 every attempt. Nothing is configured.
