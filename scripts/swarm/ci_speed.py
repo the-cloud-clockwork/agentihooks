@@ -7,7 +7,6 @@ import statistics
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -85,7 +84,23 @@ def read_runs(
 
     with ThreadPoolExecutor() as pool:
         outputs = list(pool.map(read, sorted(FINISHED)))
-    return [asdict(found) for output in outputs for found in output]
+    return [_row(found) for output in outputs for found in output]
+
+
+def _row(run: WorkflowRun) -> dict[str, object]:
+    """Write one workflow run as the row the Tests run readers consume."""
+    return {
+        "id": run.id,
+        "event": run.event,
+        "status": run.status,
+        "conclusion": run.conclusion,
+        "head_branch": run.head_branch,
+        "head_sha": run.head_sha,
+        "created_at": run.created_at,
+        "run_started_at": run.run_started_at,
+        "updated_at": run.updated_at,
+        "run_attempt": run.run_attempt,
+    }
 
 
 def refresh(
