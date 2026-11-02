@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import replace
 from typing import cast
 
 import pytest
@@ -11,6 +12,7 @@ from scripts.swarm_v2.runtime import pod_gone
 from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from tests.swarm.test_execution_identity import target
 from tests.test_swarm_v2_runtime import FakeHerdr
 
 pytestmark = pytest.mark.unit
@@ -122,19 +124,28 @@ def test_the_default_probe_is_the_kubectl_listing() -> None:
 
 
 class Ledger:
-    def tasks(self, slug: str) -> list:
-        return [{"id": "t1", "state": "claimed", "claimed_by": GONE.name}]
+    def __init__(self, claimant: str) -> None:
+        self.claimant = claimant
+        self.updated: tuple[object, ...] = ()
 
-    def update_task(self, slug: str, task: str, fields: dict) -> None:
+    def tasks(self, slug: str) -> list[dict[str, str]]:
+        return [{"id": "t1", "state": "claimed", "claimed_by": self.claimant}]
+
+    def update_task(self, slug: str, task: str, fields: dict[str, str]) -> None:
         self.updated = (slug, task, fields)
 
 
+def _started(store: RedisStore) -> AgentRecord:
+    agent = AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", started_at=123)
+    return store.start_execution("sw", replace(agent, runtime_backend="kubernetes", runtime_target=target()))
+
+
 def test_stop_now_drops_a_kubernetes_agent_whose_pod_is_gone(store: RedisStore) -> None:
-    store.put_agent("sw", GONE)
-    runtime, _ = _runtime(absent=True)
-    ledger = Ledger()
+    agent = _started(store)
+    runtime, asked = _runtime(absent=True)
+    ledger = Ledger(agent.name)
     config, left = cli.stop_now(store, "sw", runtime, ledger)
-    assert (config.state, left, store.agents("sw")) == ("stopped", [], [])
+    assert (config.state, left, store.agents("sw"), asked) == ("stopped", [], [], [agent.execution_id])
     assert ledger.updated == ("sw", "t1", {"state": "open", "claimed_by": ""})
     assert cast(Herdr, runtime.herdr_runtime).calls == [("close_space", "sw")]
     store.remove("sw")
@@ -142,7 +153,7 @@ def test_stop_now_drops_a_kubernetes_agent_whose_pod_is_gone(store: RedisStore) 
 
 
 def test_stop_now_keeps_a_kubernetes_agent_whose_pod_is_listed(store: RedisStore) -> None:
-    store.put_agent("sw", GONE)
+    agent = _started(store)
     runtime, _ = _runtime(absent=False)
-    config, left = cli.stop_now(store, "sw", runtime, Ledger())
-    assert (config.state, left, [a.name for a in store.agents("sw")]) == ("stopping", [GONE.name], [GONE.name])
+    config, left = cli.stop_now(store, "sw", runtime, Ledger(agent.name))
+    assert (config.state, left, [a.name for a in store.agents("sw")]) == ("stopping", [agent.name], [agent.name])
