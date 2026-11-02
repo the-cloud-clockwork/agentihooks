@@ -8,7 +8,7 @@ import hashlib
 import json
 import os
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hooks.classifier import DecisionRequest, YesNo, decide
 from scripts.inbox.store import Item

@@ -47,7 +47,7 @@ def of_swarm(address: str, slug: str, names: Any = None) -> bool:
         return address.endswith(f"@{slug}")
     if naming.legacy_slug(address) == slug:
         return True
-    return names is not None and bool(names.slug_of(address) == slug)
+    return names is not None and names.slug_of(address) == slug
 
 
 def master_of(address: str, names: Any = None) -> str:
