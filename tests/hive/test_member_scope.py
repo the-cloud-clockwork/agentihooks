@@ -458,14 +458,15 @@ def test_removing_an_agent_removes_its_host(redis: Any, swarm: Any) -> None:
     assert scope.host(redis, "fixture", name) == ""
 
 
+@pytest.mark.parametrize("off", ["false", "0", " OFF "])
 @pytest.mark.parametrize("legacy_change", ["remove", "move"])
-def test_host_projection_stays_untrusted_until_every_writer_upgrades(
-    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch, legacy_change: str
+def test_host_projection_off_switch_keeps_the_legacy_registry_lookup(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch, legacy_change: str, off: str
 ) -> None:
     from scripts.hive import scope
     from scripts.swarm import fencing
 
-    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", "false")
+    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", off)
     join(redis, "m1")
     join(redis, "m2")
     name = place(swarm, "m1")
