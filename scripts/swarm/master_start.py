@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.handoff import transfers
 from scripts.swarm import master_alarm, reaper
@@ -57,14 +57,15 @@ def deadline_ms(agent: AgentRecord) -> int:
     return max(DEADLINE_MS, agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS))
 
 
-def wrote_ledger(agent: AgentRecord, doc: dict) -> bool:
+def wrote_ledger(agent: AgentRecord, doc: dict[str, Any]) -> bool:
     """The agent wrote a ledger event at or after its launch."""
     since = agent.launched_at or agent.started_at
-    events = doc.get("_meta", {}).get("events", [])
-    return any(e.get("by") == agent.name and e.get("at", 0) >= since for e in events)
+    meta: dict[str, Any] = doc.get("_meta", {})
+    events: list[dict[str, Any]] = meta.get("events", [])
+    return any(event.get("by") == agent.name and event.get("at", 0) >= since for event in events)
 
 
-def seated(agent: AgentRecord, live: set[str], doc: dict) -> bool:
+def seated(agent: AgentRecord, live: set[str], doc: dict[str, Any]) -> bool:
     """A live master holds its seat once working, or while starting once it has written the ledger since launch,
     because a lost hook report leaves a live master in starting."""
     if agent.name not in live:

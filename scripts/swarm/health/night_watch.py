@@ -96,7 +96,7 @@ def _allows(watch, action, reason):
     return NIGHT_WATCH.allows(watch.store, Who(name=SENDER, swarm=watch.slug), action, reason, watch.now_ms)
 
 
-def _minutes(watch, since):
+def _minutes(watch: Watch, since: int) -> int:
     return (watch.now_ms - since) // MINUTE_MS
 
 
