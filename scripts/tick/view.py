@@ -16,6 +16,7 @@ from typing import Any
 
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
+from scripts.swarm_ledger.api.schemas import LEDGER_PARTS
 
 __all__ = [
     "CURRENT",
@@ -30,7 +31,7 @@ __all__ = [
     "view_file",
 ]
 
-PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+PARTS = LEDGER_PARTS
 
 Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
