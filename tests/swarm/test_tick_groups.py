@@ -1,19 +1,20 @@
 """The tick and the tick wrapper run the engine's registered steps at each group site, in legacy order."""
 
 from dataclasses import dataclass, field
+from threading import Event
 from time import monotonic
 from typing import Any
 
 import pytest
 
 from scripts.inbox import wake
-from scripts.swarm import cli, command_runner, controller
+from scripts.swarm import cli, command_runner, controller, snapshot_job
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import PASS, observe
+from scripts.tick.steps import PASS, observe, report
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -199,6 +200,36 @@ def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
     with pytest.raises(RuntimeError, match="^consume failed$"):
         cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
     assert [name for name, _ in seen][-2:] == ["wrapper commands", "wrapper status"]
+
+
+def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+    release = Event()
+    step = next(step for step in report.STEPS if step.name == "snapshot job")
+    monkeypatch.setattr(step, "budget_s", 0.05)
+
+    called: list[bool] = []
+
+    def start(*args: object) -> bool:
+        called.append(True)
+        release.wait(60.0)
+        return False
+
+    monkeypatch.setattr(snapshot_job, "start", start)
+    try:
+        assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == []
+    finally:
+        release.set()
+        running = engine._RUNNING.get("snapshot job")
+        if running is not None:
+            running.join(30.0)
+    assert called == [True]
+    assert [name for name, _ in seen][-3:] == ["wrapper metrics", "after", "wrapper status"]
 
 
 def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(
