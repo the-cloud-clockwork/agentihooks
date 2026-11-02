@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 CAP = 3
 
@@ -15,7 +16,7 @@ class ClaimCap:
 GATE = ClaimCap()
 
 
-def refusal(lives, reason, failure, slug, task):
+def refusal(lives: int, reason: str, failure: str, slug: str, task: str) -> str:
     return (
         f"The swarm blocked this task before a fourth agent life: claimed {lives} times, cap {CAP}. "
         f"Last handoff reason: {reason}. Last launch failure: {failure}. Change its scope or split it, then reopen "
@@ -23,7 +24,7 @@ def refusal(lives, reason, failure, slug, task):
     )
 
 
-def launch_failure(lives: int, launches: list[dict], task: str) -> str:
+def launch_failure(lives: int, launches: list[dict[str, Any]], task: str) -> str:
     rows = [row for row in launches if row["task"] == task]
     starts = sorted(row["at"] for row in rows if row["state"] == "started")
     if not starts:
