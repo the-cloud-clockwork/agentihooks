@@ -8,7 +8,7 @@ window no longer covers the gap.
 import hashlib
 import sys
 import urllib.error
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -123,7 +123,7 @@ def document(slug: str) -> dict[str, Any] | None:
 
 
 @contextmanager
-def holding() -> Iterator[None]:
+def holding() -> Generator[None]:
     """Hold no view on entry and drop whatever view the block started on exit."""
     current_token, refresh_token = CURRENT.set(None), REFRESH.set(None)
     try:

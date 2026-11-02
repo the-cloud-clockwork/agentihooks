@@ -52,7 +52,8 @@ def watched(slug: str, store: RedisStore, ledger: Any, doc: dict[str, Any]) -> d
             peer_doc = pass_state(ledger, peer)
     except (SwarmError, urllib.error.HTTPError):
         return doc
-    focus = [r["target"] for r in peer_doc.get("freezes") or [] if r["verb"] == "focus"]
+    freezes: list[dict[str, Any]] = peer_doc.get("freezes") or []
+    focus = [r["target"] for r in freezes if r["verb"] == "focus"]
     return {**doc, WATCHED: [f"the focus on {_named(peer_doc, target)} in the watched swarm" for target in focus]}
 
 

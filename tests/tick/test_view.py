@@ -169,7 +169,9 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     assert view.CURRENT.get() is held
     assert held.generation == 11
     assert api.read_export_file(view.view_file("http://ledger/sw", "sw", tmp_path)) == (11, STATE)
-    held_slug, refresh = view.REFRESH.get()
+    pair = view.REFRESH.get()
+    assert pair is not None
+    held_slug, refresh = pair
     assert held_slug == "sw"
     assert refresh().generation == 11
     assert sent[-1][4] == 11
