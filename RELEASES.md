@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.594 · 2026-11-02
+
+### 2026-11-02 · 970ac9011870 · #9463 · @nestorcolt
+
+**Pin old layout registry writes, cold host read commands and retry jitter**
+
+This change adds three regression tests covering behavior already shipped in the execution registry, with no production code added. It pins that archive and lease fenced rows are still written to the old layout document and readable by both `fencing.read` and the record port, locks the exact Redis call sequence (and count of 5) for a cold host scope read, and verifies the real retry jitter varies within `uniform(0.001, 0.032)` with no trailing sleep. It also tightens the member scope type baseline from 2 to 1 to match measured behavior, closing three spec gaps left from the registry's original review.
+
+### 2026-11-02 · 73cf77da8d59 · #9464 · @nestorcolt
+
+**Document tick steps reading the ledger view and the whole ledger state gate**
+
+This change adds reference documentation for the tick-engine's ledger view and whole-ledger-state gate, covering the eight view parts, `view.holding()`, the `pass_state` read table, the widened `parts` export, and the full gate mechanics: what counts as a whole-ledger read, the shrink-only allowlist, grading, output, threshold pins, and how to remove a read. It also adds troubleshooting guidance and test references, plus an index entry and changelog fragment, so operators and contributors have an accurate, verified record of the already-merged behavior from PR #9345, reducing confusion when auditing or extending which steps touch the ledger.
+
 ## v2.17.593 · 2026-11-02
 
 ### 2026-11-02 · 2a6326b9f65f · #9465 · @nestorcolt
