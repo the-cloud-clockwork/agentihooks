@@ -5130,7 +5130,11 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 
 
 def cmd_claude(extra_args: list[str]) -> None:
-    """Before the route lock: an install must not hold every other launch waiting."""
+    """Before the route lock: an install must not hold every other launch waiting.
+
+    Fast path: "agentihooks claude ..." bypasses argparse entirely so that any claude flags (-r, --resume, -p, etc.)
+    pass through untouched.
+    """
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import (
         RoutingError,
@@ -5898,13 +5902,6 @@ def _crew_doctor(argv: list[str]) -> bool:
 
 
 def main() -> None:
-    """Fast path: "agentihooks claude ..." bypasses argparse entirely so that any claude flags (-r, --resume, -p, etc.)
-    pass through untouched.
-
-    Dest avoids the positional `target` above, which is the path/name.
-
-    Non-claude adapters carry their own doctor(); claude's health check is the status_checker suite below.
-    """
     _argv = bundles.user_last(sys.argv[1:])
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
         _argv.remove("--local")
