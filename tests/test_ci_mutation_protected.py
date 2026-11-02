@@ -18,7 +18,8 @@ DRIVER = (
     "from pathlib import Path\n"
     "from scripts.ci_mutation.killers import RECORD\n"
     "if __name__ == '__main__':\n"
-    "    entry = sys.modules['__main__'].__spec__.name\n"
+    "    main = sys.modules['__main__']\n"
+    "    entry = f'{main.__spec__.name} {main.__spec__.origin} {main.__loader__.name}'\n"
     "    Path(sys.argv[1]).write_text(f\"{RECORD} {os.environ.get('MUTATION_GRADER', 'unset')} {entry}\")\n"
 )
 
@@ -39,6 +40,11 @@ def _grader(root: Path, record: str = "killed") -> Path:
     (package / "killers.py").write_text(f"RECORD = {record!r}\n")
     (package / "selection.py").write_text(DRIVER)
     return root
+
+
+def _record(grader: Path) -> str:
+    source = grader / "scripts/ci_mutation/selection.py"
+    return f"killed unset {protected.DRIVER} {source} {protected.DRIVER}"
 
 
 def _spec(finder: protected.ProtectedFinder, name: str) -> importlib.machinery.ModuleSpec:
@@ -102,12 +108,12 @@ def test_a_planted_head_driver_edit_cannot_change_the_kill_record(
     monkeypatch.setattr(sys, "argv", ["protected.py", str(record)])
     monkeypatch.setitem(sys.modules, "__main__", sys.modules["__main__"])
     protected.main(grader)
-    assert record.read_text() == f"killed unset {protected.DRIVER}"
+    assert record.read_text() == _record(grader)
     assert sys.argv == ["protected.py", str(record)]
     assert "MUTATION_GRADER" not in os.environ
     record.unlink()
     protected.main(grader)
-    assert record.read_text() == f"killed unset {protected.DRIVER}"
+    assert record.read_text() == _record(grader)
     assert sys.modules["mutation_grader.ci_mutation.killers"].__file__ == str(grader / "scripts/ci_mutation/killers.py")
 
 
@@ -119,7 +125,7 @@ def test_the_runner_command_ignores_a_planted_head_driver(tmp_path: Path, monkey
     monkeypatch.setenv("MUTATION_GRADER", str(grader))
     record = tmp_path / "record"
     subprocess.run([*runner.driver_command(), str(record)], cwd=head, check=True)
-    assert record.read_text() == f"killed unset {protected.DRIVER}"
+    assert record.read_text() == _record(grader)
 
 
 @pytest.mark.usefixtures("isolated")
