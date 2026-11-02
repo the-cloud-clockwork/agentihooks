@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false, reportUnusedImport=false
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any, Protocol
 
+import scripts.tick.steps.agents  # noqa: F401
 from hooks.context import context_recycle
 from scripts.doctor import priming
 from scripts.gates import Who, modes
@@ -31,8 +33,8 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     apply_wait,
-    bottleneck_remedy,
-    claim_hold,
+    bottleneck_remedy,  # noqa: F401
+    claim_hold,  # noqa: F401
     claim_order,
     content_refusal,
     continuation,
@@ -40,13 +42,13 @@ from scripts.swarm import (
     dead_resume,
     deliberate_exit,
     dev_red,
-    difficulty,
-    dispatch_seat,
+    difficulty,  # noqa: F401
     dispatcher,
+    elapsed,
     failed_panes,
     fleet_red,
     freeze,
-    grouping,
+    grouping,  # noqa: F401
     input_wait,
     launch_check,
     ledger_events,
@@ -54,17 +56,13 @@ from scripts.swarm import (
     lifetime,
     live_binding,
     lost_runner,
-    master_alarm,
     master_move,
-    master_prompt_stall,
     master_questions,
     master_retire,
-    master_stall,
     master_start,
-    master_wake,
     outage,
-    pane_evidence,
-    panic,
+    pane_evidence,  # noqa: F401
+    panic,  # noqa: F401
     preempt,
     prerequisite_wait,
     profile_first,
@@ -81,12 +79,11 @@ from scripts.swarm import (
     stack,
     stale_nudge,
     successor_retry,
-    tick_master,
     time_left,
     timing,
 )
 from scripts.swarm import idle as idle_state
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.ledger_client import LedgerRefused, pass_state
 from scripts.swarm.naming import lane_of, parse, seat_label
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
@@ -94,8 +91,14 @@ from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
-from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
+from scripts.tick import engine, steps
+from scripts.tick.deadline import Deadline
+from scripts.tick.step import Context, Domain
+from scripts.tick.steps import masters as master_steps
+from scripts.tick.steps import observe as observe_steps
+from scripts.tick.steps import place
+from scripts.tick.steps import tasks as task_steps
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60
@@ -109,6 +112,7 @@ SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
+GROUP_BUDGET_S = 600.0
 SPAWN_DUE = "spawn-due"
 HOST_SPENDS = f"{PREFIX}:host-spends"
 HOST_SPENDS_KEPT = 1000
@@ -121,8 +125,10 @@ MASTER_DOWN = (
     "The master is down and is being relaunched. Your message waits for the new master, which receives it as soon "
     "as it starts."
 )
-IDLE_NUDGE_TICKS = 3
-IDLE_KILL_TICKS = 20
+IDLE_NUDGE_MS = 2 * elapsed.PASS_MS
+IDLE_KILL_MS = 19 * elapsed.PASS_MS
+IDLE_NUDGE_TICKS = elapsed.passes(IDLE_NUDGE_MS)
+IDLE_KILL_TICKS = elapsed.passes(IDLE_KILL_MS)
 IDLE_TICKS = "idle-ticks"
 LANES = ("eng", "ci", "plan")
 ACTIVE = ("claimed", "pr")
@@ -202,116 +208,69 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
-    from scripts.swarm import automated_gc
+class _PassView:
+    """A view holding the pass state a tick group site hands its steps."""
 
-    config = store.ensure_code(slug)
-    actions = []
-    if config.state == "stopped":
-        doc = timing.call(ledger.state, slug)
-        rows = {t["id"]: t for t in doc["tasks"]}
-        actions = automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
-        retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
-        if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return (
-                actions
-                + skip_refused(_close_space, slug, config, store, runtime)
-                + _bin_closed(slug, store, ledger, doc)
-            )
-        config = store.update(slug, state="paused")
-        actions.append("the operator wrote on the ledger, paused to start the master")
+    def __init__(self, state: dict[str, object]) -> None:
+        """Keep the pass state of the group site."""
+        self._state = state
+
+    def read(self, domain: Domain, key: str) -> object | None:
+        """Return the pass state under ``key``, nothing for any other domain."""
+        return self._state.get(key) if domain == steps.PASS else None
+
+
+def run_group(name: str, **state: object) -> list[str]:
+    """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
+    return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
+
+
+@reaper.scanning_pass
+def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
+    box: dict[str, Any] = steps.PassBox()
+    passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
+    actions = run_group("start", **passing)
+    observe_steps.raise_held(box)
+    if "finished" in box:
+        return actions
     store.redis.delete(store.key(slug, SPAWN_HOLD))
-    actions += skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
-    actions += skip_refused(store.execution_registry.reconcile, slug, runtime, now_ms)
-    actions += skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
-    actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
-    doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
-    rows = {t["id"]: t for t in doc["tasks"]}
-    actions += automated_gc.run(slug, store, ledger, runtime, now_ms, partial(_collected, slug, store, ledger, rows))
-    due = store.key(slug, SPAWN_DUE)
-    if config.state == "running" and config.engine != EVENTS_ENGINE and not lifetime.sleeping(slug, store, rows):
-        if store.redis.exists(due):
-            with PLACING, _placement_pass(runtime):
-                actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
-        store.redis.set(due, now_ms)
-    actions += skip_dropped(
-        exits.sweep,
-        InboxStore(store.redis),
-        slug,
-        store,
-        lambda: {t["id"]: t for t in timing.call(ledger.state, slug)["tasks"]},
-    )
-    actions += skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
-    actions += skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
-    actions += skip_refused(resume.track_outages, slug, store, runtime, rows, now_ms) or []
-    actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(_strays, slug, config, store, runtime)
-    actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
-    if config.state not in {"stopped", "stopping"}:
-        actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
-    actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
-    actions += skip_refused(master_stall.run, slug, config, store, ledger, runtime, now_ms)
-    actions += skip_refused(master_prompt_stall.run, slug, config, store, ledger, runtime, now_ms)
+    engine.update_pass_budget(store, slug)
+    actions += run_group("observe", **passing)
+    observe_steps.raise_held(box)
+    config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
+    passing |= {"rows": rows, "doc": doc, "due": due}
+    actions += run_group("agents", **passing, config=config)
+    actions.extend(master_steps.run_masters(locals()))
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    if config.engine != EVENTS_ENGINE:
-        actions += skip_refused(_orphans, slug, store, ledger, rows)
+    actions += run_group("tasks", **passing, config=config)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
     actions += skip_refused(fleet_red.notice_pass, slug, store, ledger, rows, now_ms)
-    actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
-    actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
-    actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
-    actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
-    actions += skip_refused(dispatcher.group, slug, config, store, ledger, doc, now_ms)
+    actions += run_group(task_steps.TASK_PASSES, **passing, config=config)
+    task_steps.raise_held(box)
     from scripts.swarm import quota_notice
 
     with PLACING:
+        run_group("place")
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(lost_runner.sweep, slug, config, store, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
-        actions += skip_refused(_collect_acks, slug, config, store, ledger, runtime, doc, now_ms)
+        actions += run_group(place.ACKS, **passing, config=config, sleeping=sleeping)
+        task_steps.raise_held(box)
         if not sleeping:
-            actions += skip_refused(_codex_hook_order)
-            actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
-            actions += skip_refused(
-                tick_master.run,
-                slug,
-                config,
-                store,
-                ledger,
-                runtime,
-                now_ms,
-                lambda: _master(slug, config, store, runtime, now_ms),
-            )
-            actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
-            actions += skip_refused(master_seat_alarm.run, slug, store, ledger, runtime, doc)
-            actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
-            actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
-            if config.state == "running" and config.engine != EVENTS_ENGINE and panic.state(store) is None:
-                placement = partial(preempt.probe, runtime)
-                seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order, placement)
-                actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
-                with _placement_pass(runtime):
-                    actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
-                store.redis.delete(due)
-        actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
-    actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
-    actions += skip_refused(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
-    actions += skip_refused(_conversations, slug, store, runtime) or []
-    actions += skip_refused(_session_models, slug, store) or []
-    actions += skip_refused(transfers.observe, store, slug, runtime.live_names()) or []
-    return (
-        actions
-        + skip_refused(_settle, slug, config, store, ledger, rows, doc)
-        + skip_refused(_close_space, slug, config, store, runtime)
-    )
+            actions.extend(master_steps.run_seats(locals()))
+            actions += run_group(place.PLACEMENT, **passing, config=config)
+            task_steps.raise_held(box)
+        actions.extend(master_steps.run_dispatch(locals()))
+    actions.extend(master_steps.run_watch(locals()))
+    actions += run_group(task_steps.CLOSE, **passing, config=config)
+    task_steps.raise_held(box)
+    return actions
 
 
 def skip_refused(function, *args):
@@ -512,7 +471,7 @@ def _ended(agent, rows):
 
 
 def _launch_checks(
-    slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, doc: dict, now_ms: int
+    slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, doc: dict[str, Any], now_ms: int
 ) -> list[str]:
     waiting, actions = launch_check.pending(store, slug), []
     if not waiting:
@@ -524,7 +483,7 @@ def _launch_checks(
     agents, canaries = [agent for agent, _ in confirmed], {agent.name: miss for agent, miss in confirmed}
     facts = runtime.bindings(agents)
     if any(launch_check.joined_at(agent, doc) is None for agent in agents):
-        doc = ledger.state(slug)
+        doc = pass_state(ledger, slug)
     for agent in agents:
         found = launch_check.misses(
             store,
@@ -829,7 +788,15 @@ def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
     return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
-def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
+def _watch_idle(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
     from scripts.swarm import automated_gc
 
     observed = timing.timed(_observe, runtime, agent)
@@ -842,8 +809,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
         same = agent.input_prompt == title
-        ticks = agent.input_ticks + 1 if same else 1
-        timing.timed(input_wait.mark, store, slug, agent.name, now_ms, same)
+        began = timing.timed(input_wait.mark, store, slug, agent.name, now_ms, agent.input_ticks if same else 0)
+        ticks = elapsed.passes(now_ms - began)
         waiting = replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0)
         timing.timed(store.put_agent, slug, waiting)
         return (
@@ -864,6 +831,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
     nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == MASTER or (held and not exhausted):
+        timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, agent.idle_ticks)
         timing.timed(store.put_agent, slug, agent)
         return nudged
     state = idle_state.verdict(
@@ -880,9 +848,11 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         or timing.timed(ledger_probe.holding, store, slug)
         or timing.timed(automated_gc.owned, slug, agent)
     ):
+        timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, agent.idle_ticks)
         timing.timed(store.put_agent, slug, agent)
         return nudged
-    idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
+    since = timing.timed(elapsed.start, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks)
+    idle = replace(agent, idle_ticks=elapsed.passes(now_ms - since))
     timing.timed(store.put_agent, slug, idle)
     who = Who(name=agent.name, task=agent.task)
     timing.timed(
@@ -898,11 +868,13 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     return nudged
 
 
-def _stale_nudge(slug, store, agent, observed, pending, now_ms):
+def _stale_nudge(
+    slug: str, store: RedisStore, agent: AgentRecord, observed: Any, pending: bool, now_ms: int
+) -> list[str]:
     """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
     if agent.lane == MASTER or not agent.task or pending or timing.timed(outage.open_records, slug):
         return []
-    if agent.idle_ticks + 1 >= IDLE_KILL_TICKS:
+    if elapsed.due(store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks, IDLE_KILL_MS):
         return []
     if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         return []
@@ -1160,12 +1132,14 @@ def _hold(slug, store, text):
     return text
 
 
-def spawn_holds(store, slug):
+def spawn_holds(store: Any, slug: str) -> list[str]:
     held = store.redis.get(store.key(slug, SPAWN_HOLD))
-    return [held] if held else []
+    return [hold for hold in (held, engine.pass_budget_hold(store, slug)) if hold]
 
 
-def _spawn_stop(slug, config, store, runtime, now_ms, in_flight=0):
+def _spawn_stop(slug: str, config: SwarmConfig, store: Any, runtime: Any, now_ms: int, in_flight: int = 0) -> str:
+    if held := engine.pass_budget_hold(store, slug):
+        return held
     if stopped := run_window.claims_stopped(store, slug, config, now_ms):
         return stopped
     if not runtime.has_capacity(config):
@@ -1564,15 +1538,25 @@ def _finished_launch(slug, store, doc, agent):
     return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
 
 
-def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
-    if config.engine == EVENTS_ENGINE:
-        return []
+def _collect_acks(
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, doc: dict[str, Any], now_ms: int
+) -> list[str]:
     from scripts.swarm import launch_job
     from scripts.swarm_v2.runtime import codex
 
     rows = {t["id"]: t for t in doc["tasks"]}
-    actions, pending = launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
-    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a) and a.name not in pending]:
+    actions, pending = (
+        ([], set())
+        if config.engine == EVENTS_ENGINE
+        else launch_job.collect(_Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))
+    )
+    for agent in [
+        a
+        for a in store.agents(slug)
+        if readiness.tick_launches(config.engine, rows.get(a.task, {}))
+        and _acknowledging(slug, store, a)
+        and a.name not in pending
+    ]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:
             placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
@@ -1597,7 +1581,15 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
     return actions
 
 
-def _spawn_order(slug, config, store, agents, rows, doc, runtime):
+def _spawn_order(
+    slug: str,
+    config: SwarmConfig,
+    store: RedisStore,
+    agents: list[AgentRecord],
+    rows: dict[str, Any],
+    doc: dict[str, Any],
+    runtime: Any,
+) -> tuple[list[Any], list[Any]]:
     from scripts.swarm import capacity, focus_budget
 
     if begin := getattr(runtime, "begin_placement_pass", None):
@@ -1616,6 +1608,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ]
         busy = len(running)
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
+        ready = [task for task in ready if readiness.tick_launches(config.engine, task)]
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
@@ -1939,7 +1932,7 @@ def place_master(slug, store, runtime, now_ms):
     return _under_tick_lock(slug, store, place)
 
 
-def _under_tick_lock(slug, store, act):
+def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 
@@ -1955,7 +1948,8 @@ def _under_tick_lock(slug, store, act):
         config = store.ensure_code(slug)
         if config.state in ("stopping", "stopped"):
             return []
-        return act(config, held)
+        with lease.held_pass(store, slug, held):
+            return act(config, held)
     finally:
         controller.release_tick_lock(store, slug, token)
 

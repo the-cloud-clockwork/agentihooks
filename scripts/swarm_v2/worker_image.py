@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import http.client
 import importlib.metadata
 import io
 import json
@@ -65,11 +66,13 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
             with urllib.request.urlopen(artifact["url"], timeout=120) as response:
                 payload = response.read()
             break
-        except (urllib.error.URLError, TimeoutError) as error:
+        except (urllib.error.URLError, TimeoutError, http.client.IncompleteRead, ConnectionResetError) as error:
             if isinstance(error, urllib.error.HTTPError):
                 transient = 500 <= error.code < 600
+            elif isinstance(error, urllib.error.URLError):
+                transient = isinstance(error.reason, (TimeoutError, ConnectionResetError))
             else:
-                transient = isinstance(error, TimeoutError) or isinstance(error.reason, TimeoutError)
+                transient = True
             if not transient or attempt == 4:
                 raise
             time.sleep(2**attempt)

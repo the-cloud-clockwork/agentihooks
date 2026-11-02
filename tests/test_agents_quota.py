@@ -833,6 +833,27 @@ def test_codex_quota_rows_drop_the_default_login_once_token_accounts_exist(monke
     assert [row.account for row in agents_quota._codex(5.0)] == ["alpha"]
 
 
+def test_codex_quota_rows_read_a_renewed_login_from_the_token_block_over_a_stale_shell(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import codex_router, operator_env
+
+    seen = []
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", "stale-value")
+    monkeypatch.setattr(operator_env, "values", lambda environ: {})
+    monkeypatch.setattr(operator_env, "block_tokens", lambda: {"AH_CX_TOKEN_alpha": "renewed-value"})
+    monkeypatch.setattr(
+        codex_router, "quotas", lambda pool, environ: seen.append(environ.get("AH_CX_TOKEN_alpha")) or {}
+    )
+    monkeypatch.setattr(codex_router, "fresh_quotas", lambda pool, environ, now, force=False: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    monkeypatch.setattr(agents_quota, "next_account", lambda *args: "")
+    agents_quota._codex(5.0)
+    assert seen == ["renewed-value"]
+    assert os.environ["AH_CX_TOKEN_alpha"] == "stale-value"
+
+
 def _one_codex_token_with_live_sessions_elsewhere(monkeypatch) -> list:
     from hooks.context import account_sessions
     from scripts import codex_router

@@ -95,6 +95,7 @@ def beat(redis: "Redis", local_id: str) -> None:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+    registry.finished(redis, local_id, int(time.time() * 1000))
 
 
 def poll_orders(consumer: "Consumer", apply: Callable[[], None] | None = None) -> None:
@@ -235,6 +236,7 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             headroom.publish(redis, local_id, now_ms)
             registry.touch(redis, local_id, now_ms)
             orders.alive(redis, local_id)
+            refresh_ready()
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 
@@ -258,6 +260,12 @@ def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: th
                 herdr_stats.publish(redis, local_id, int(time.time() * 1000))
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive herdr stats publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def refresh_ready() -> None:
+    """Keep the rollout readiness marker fresh once a successful beat has created it; never create it."""
+    if (marker := os.environ.get("HIVE_READY_FILE")) and (path := Path(marker)).is_file():
+        path.touch()
 
 
 def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:

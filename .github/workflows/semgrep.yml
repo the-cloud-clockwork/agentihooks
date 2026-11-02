@@ -46,6 +46,29 @@ jobs:
           (cd "$copy" && semgrep --metrics off --test --config rules rules)
           semgrep scan --error --strict --metrics off --config "$RULES" .
 
+      - name: Source control exceptions only shrink
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          git rev-parse --verify --quiet "$BASE^{commit}" > /dev/null || { echo "cannot read base $BASE" >&2; exit 1; }
+          if ! git cat-file -e "$BASE:.semgrep/source-control-allowlist.json" 2>/dev/null; then
+            echo "The base holds no source control exception list; the head list starts it"
+            exit 0
+          fi
+          previous="$(git show "$BASE:.semgrep/source-control-allowlist.json")"
+          PREVIOUS="$previous" python - <<'PY'
+          import json
+          import os
+          import sys
+
+          previous = set(json.loads(os.environ["PREVIOUS"]))
+          with open(".semgrep/source-control-allowlist.json") as handle:
+              current = set(json.load(handle))
+          if not current <= previous:
+              sys.exit(f"source control exceptions grew: {sorted(current - previous)}")
+          print(f"source control exceptions: {len(current)} of {len(previous)}")
+          PY
+
       - name: Resolve the merge base of the head and the base
         id: baseline
         env:

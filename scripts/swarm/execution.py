@@ -84,10 +84,13 @@ class ExecutionRegistry:
         fencing.bump(self.store, slug, fencing.IDENTITY_CONFLICTS)
         raise SwarmError(message)
 
-    def _fenced(self, slug: str, change: Callable[[dict[str, Any]], Any]) -> Any:
+    def _fenced(self, slug: str, change: Callable[[dict[str, Any]], Any], *, history: bool = False) -> Any:
         from scripts.swarm import lease
 
-        return lease.fenced(self.store, slug, lease.EPOCH.get(), change)
+        def archived(doc: dict[str, Any]) -> Any:
+            return fencing.change_with_archive(self.store, slug, doc, change)
+
+        return lease.fenced(self.store, slug, lease.EPOCH.get(), archived if history else change)
 
     def records(self, slug: str) -> list[AgentRecord]:
         return records_of(fencing.read(self.store, slug))
@@ -110,6 +113,9 @@ class ExecutionRegistry:
                 for key, row in rows.items()
                 if row["generation"] < heads[row["seat"]]["generation"] and row["name"] not in listed
             ]
+            if not old and "archive_ref" in doc:
+                return 0
+            fencing.hydrate_archive(self.store, doc)
             for key in old:
                 doc["archive"][key] = doc["executions"].pop(key)
             for row in doc["archive"].values():
@@ -206,13 +212,15 @@ class ExecutionRegistry:
                 }
             return current, previous
 
-        current, previous = lease.fenced(self.store, slug, epoch, admit)
+        current, previous = self._fenced(slug, admit, history=True)
         removed = previous.name if previous and previous.name != current.name else ""
         self.store.project_agent(slug, current, removed=removed)
         return current
 
     def check_uid(self, slug: str, agent: AgentRecord, doc: dict) -> None:
         uid = agent.runtime_target.get("pod_uid")
+        if uid:
+            fencing.hydrate_archive(self.store, doc)
         if uid and any(
             row.execution_id != agent.execution_id and row.runtime_target.get("pod_uid") == uid
             for row in records_of(doc)
@@ -262,7 +270,7 @@ class ExecutionRegistry:
             doc["executions"][execution_id] = asdict(updated)
             return (updated, current) if execution_id in heads and current.name in listed else None
 
-        shown = self._fenced(slug, change)
+        shown = self._fenced(slug, change, history=True)
         if shown is not None:
             self.store.project_agent(slug, *shown, listed_only=True)
 

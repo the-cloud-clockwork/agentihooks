@@ -17,6 +17,21 @@ import pytest
 
 ESCAPES = {"subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork", "os.forkpty"}
 SKIPPED = (".git/", ".venv/", ".playwright/", "node_modules/")
+HELPERS = (f"{os.sep}pathlib.py", f"{os.sep}tokenize.py")
+LOADERS = (
+    "<frozen importlib",
+    f"{os.sep}importlib{os.sep}",
+    f"{os.sep}_pytest{os.sep}assertion{os.sep}",
+    "linecache.py",
+)
+
+
+def loading(frame: FrameType | None) -> bool:
+    """Whether the code that opened a file, past pathlib and tokenize helpers, is an import, assertion rewriting or
+    traceback source lookup rather than test code."""
+    while frame is not None and frame.f_code.co_filename.endswith(HELPERS):
+        frame = frame.f_back
+    return frame is not None and any(loader in frame.f_code.co_filename for loader in LOADERS)
 
 
 class DepInputs:
@@ -96,6 +111,8 @@ class DepInputs:
                     return
                 if opened.startswith(self.own):
                     return
+                if opened.endswith(".py") and (test is self.shared or loading(sys._getframe(1))):
+                    return
                 owner = None
                 if self.collecting and opened.startswith(self.root) and not opened.endswith((".py", ".pyc")):
                     owner = self.importing(sys._getframe(1))
@@ -122,7 +139,11 @@ class DepInputs:
         try:
             yield
         finally:
-            previous[0].update(path for path in self.loose if not path.startswith(self.root + ".github/workflows/"))
+            previous[0].update(
+                path
+                for path in self.loose
+                if not path.startswith(self.root + ".github/workflows/") and not path.endswith(".py")
+            )
             self.collecting = None
             self.current = previous
             for name in set(sys.modules) - imported:
@@ -203,10 +224,10 @@ class DepInputs:
             yield
         finally:
             self.register(self.children / f"{os.getpid()}-shared")
+            test, self.current = self.current, self.shared
             reads, escapes = self.closure(item.nodeid.split("::", 1)[0])
-            self.current[0].update(reads)
-            self.current[1] = self.current[1] or escapes
-            self.current = self.shared
+            test[0].update(reads)
+            test[1] = test[1] or escapes
             self.finish(item.nodeid)
 
     def kept(self, opened: set[str]) -> dict[str, str]:
@@ -215,7 +236,7 @@ class DepInputs:
             if not full.startswith(self.root):
                 continue
             relative = full[len(self.root) :]
-            if relative.endswith((".py", ".pyc")) or relative.startswith(SKIPPED) or "__pycache__" in relative:
+            if relative.endswith(".pyc") or relative.startswith(SKIPPED) or "__pycache__" in relative:
                 continue
             if not Path(full).is_relative_to(self.folder):
                 kept[full] = relative

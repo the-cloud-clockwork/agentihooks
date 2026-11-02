@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm import automated_gc
+from scripts.swarm import automated_gc, tick_stop
 from scripts.swarm import tick as tick_module
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -60,9 +60,9 @@ def test_a_paused_pass_keeps_the_due_mark_for_the_next_running_pass(store, monke
 
 def test_a_pass_stopped_before_its_spawn_leaves_the_next_pass_due(store, monkeypatch):
     def stopped(*a, **k):
-        raise SystemExit("stopped by the service")
+        raise tick_stop.Stopped
 
     monkeypatch.setattr(tick_module, "_reap", stopped)
-    with pytest.raises(SystemExit):
+    with pytest.raises(tick_stop.Stopped):
         tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert store.redis.get(store.key("sw", tick_module.SPAWN_DUE)) == "1000"

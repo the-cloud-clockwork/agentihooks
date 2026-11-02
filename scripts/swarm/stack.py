@@ -3,14 +3,22 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
 from scripts.swarm import apply_wait
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import LedgerClient, pass_state
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
+if TYPE_CHECKING:
+    from scripts.tick.ports.contracts import SourceControl
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+PORT_SECONDS = 60.0
+PORT_ERRORS = (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError)
+GITHUB = "https://github.com/"
 WORK_KINDS = ("ops", "tune", "troubleshoot", "research")
 READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
 SSH_UNVERIFIED = ("Host key verification failed", "Permission denied (publickey")
@@ -76,14 +84,17 @@ def worktree() -> str:
     return top
 
 
-def _issue_ready(row):
+def _issue_ready(row: dict[str, object]) -> None:
+    """Refuse a park without a recorded issue when the repository takes issues."""
+    from scripts.tick.deadline import Deadline
+
     if row.get("issue_url"):
         return
-    answer = _out(["gh", "repo", "view", "--json", "hasIssuesEnabled"], "cannot tell whether the repo has issues")
+    provider = repository_source_control()
     try:
-        has_issues = json.loads(answer)["hasIssuesEnabled"]
-    except (ValueError, KeyError) as exc:
-        raise SwarmError(f"cannot tell whether the repo has issues: {exc}") from exc
+        has_issues = provider.issues_enabled(deadline=Deadline.after(PORT_SECONDS))
+    except PORT_ERRORS as exc:
+        raise SwarmError(f"cannot tell whether the repo has issues: {refusal(exc)}") from exc
     if has_issues:
         raise SwarmError("the repo has issues; open one and run swarm issue before parking")
 
@@ -132,18 +143,76 @@ def _foreign(open_):
     return [b for b in marked if repo_key(b["branch_repo"]) != home]
 
 
-def _merged_into_dev(dep):
-    if not dep.get("pr_url"):
-        return False
-    answer = _out(
-        ["gh", "pr", "view", dep["pr_url"], "--json", "state,baseRefName"],
-        "cannot read the dependency pull request",
-    )
+def source_control(url: str) -> "tuple[SourceControl, ChangeRef]":
+    """Return the source control port and the change reference a pull request or issue url names."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+    from scripts.tick.ports.source_control import ChangeRef
+
+    if not url.startswith(GITHUB):
+        raise ValueError(f"{url} is not a GitHub pull request or issue url")
+    owner, name, _, number = url.removeprefix(GITHUB).split("/")[:4]
+    return GitHubSourceControl(f"{owner}/{name}", Path.cwd(), "dev"), ChangeRef(f"{owner}/{name}", int(number))
+
+
+def change(url: str, refused: str) -> "ChangeState":
+    """Read one change through the source control port, refusing with a swarm error it cannot answer."""
+    from scripts.tick.deadline import Deadline
+
     try:
-        pull = json.loads(answer)
-        return pull["state"] == "MERGED" and pull["baseRefName"] == "dev"
-    except (ValueError, KeyError) as exc:
-        raise SwarmError(f"cannot read the dependency pull request: {exc}") from exc
+        provider, reference = source_control(url)
+        return provider.change(reference, deadline=Deadline.after(PORT_SECONDS))
+    except subprocess.CalledProcessError as exc:
+        raise SwarmError(f"{refused}: {(exc.stderr or '').strip()}") from exc
+    except PORT_ERRORS as exc:
+        raise SwarmError(f"{refused}: {exc}") from exc
+
+
+def login_source_control() -> "SourceControl":
+    """Return the source control port for reads that belong to the login rather than one repository."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    return GitHubSourceControl("", Path.cwd(), "dev")
+
+
+def repository_source_control() -> "SourceControl":
+    """Return the source control port for the repository the current checkout's origin names."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    origin = repo_key(_out(["git", "remote", "get-url", "origin"], "cannot read the repo origin"))
+    return GitHubSourceControl(origin.removeprefix("github.com/"), Path.cwd(), "dev")
+
+
+def origin_source_control(root: Path) -> "SourceControl":
+    """Return the source control port for the repository a checkout's origin names, run from that checkout."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    return GitHubSourceControl(origin_key(str(root)).removeprefix("github.com/"), root, "dev")
+
+
+def refusal(exc: Exception) -> str:
+    """Return the words a failed port call gives: the provider's error output, else the exception text."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        return (exc.stderr or "").strip()
+    return str(exc)
+
+
+def _comment(url: str, body: str) -> None:
+    """Post a comment on the issue through the source control port, refusing with a swarm error on failure."""
+    from scripts.tick.deadline import Deadline
+
+    try:
+        provider, reference = source_control(url)
+        provider.comment(reference, body, deadline=Deadline.after(PORT_SECONDS))
+    except PORT_ERRORS as exc:
+        raise SwarmError(f"could not comment on the issue: {refusal(exc)}") from exc
+
+
+def _merged_into_dev(dep: dict[str, object]) -> bool:
+    url = dep.get("pr_url")
+    if not url:
+        return False
+    pull = change(str(url), "cannot read the dependency pull request")
+    return pull.merged and pull.base == "dev"
 
 
 def https_url(url: str) -> str:
@@ -251,7 +320,7 @@ def _ledger_note(open_):
 
 
 def park(store, slug: str, agent, text: str, ledger) -> dict:
-    state = ledger.state(slug)
+    state = pass_state(ledger, slug)
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
     if ledger_kinds.read_only(row):
@@ -268,7 +337,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
     if row.get("issue_url"):
         body = _issue_body(row, open_, base, foreign)
-        _out(["gh", "issue", "comment", row["issue_url"], "--body", body], "could not comment on the issue")
+        _comment(row["issue_url"], body)
     repos = {}
     for dep in foreign:
         repos.setdefault(repo_key(dep["branch_repo"]), dep["branch_repo"])
@@ -389,7 +458,7 @@ def _rebase(base: str) -> None:
 
 
 def restack(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
-    rows = {t["id"]: t for t in ledger.state(slug)["tasks"]}
+    rows = {t["id"]: t for t in pass_state(ledger, slug)["tasks"]}
     row = rows.get(agent.task) or {}
     if not row.get("parked_on") or not row.get("stacked_base"):
         raise SwarmError("this task has no parked work with a stacked base")

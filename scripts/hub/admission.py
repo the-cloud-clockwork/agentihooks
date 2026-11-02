@@ -4,6 +4,7 @@ or occupy a seat, and a remote hive makes no service ledger reads."""
 import json
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window
@@ -34,7 +35,7 @@ class Admission:
     def _key(self, slug: str, request: dict) -> str:
         return self.store.key(slug, ADMITTED, request["task"], str(request["generation"]))
 
-    def admit(self, slug: str, request: dict) -> dict | None:
+    def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
@@ -45,12 +46,19 @@ class Admission:
         view = self.source.snapshot(slug)
         if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
             return None
+        if not self._placeable(view.rows[task_id], request["hive"]):
+            print(f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused", file=sys.stderr)
+            return None
         from scripts.swarm import tick
 
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
             print(f"hub: events claim cap swarm={slug} task={task_id}: {reason}", file=sys.stderr)
             return None
         return self._claim(slug, request, view.rows)
+
+    def _placeable(self, row: dict[str, Any], hive: str) -> bool:
+        """A workstation task, a task pinned to another hive or one needing what the hive lacks is never admitted."""
+        return readiness.placeable(row, hive, readiness.declared(self.store, hive))
 
     def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
         from scripts.swarm import tick

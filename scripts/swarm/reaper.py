@@ -4,12 +4,23 @@ never by the agent's bare name, which subagents, resumed duplicates and proof da
 import os
 import signal
 import time
+from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
+from typing import ParamSpec, TypeVar
 
-from hooks.proc import Process, processes
+from hooks.proc import Process, _process, processes  # pyright: ignore[reportPrivateUsage]
 from scripts.swarm import naming
+from scripts.tick.adapters.processes import PassProcesses
+from scripts.tick.deadline import Deadline
 
+P = ParamSpec("P")
+R = TypeVar("R")
+PROC = Path("/proc")
+SCAN_S = 10.0
+PASS: ContextVar[PassProcesses | None] = ContextVar("reaper_pass", default=None)
 SCRATCH = Path.home() / "scratchpad"
 NAME_KEY = "AGENTIHOOKS_AGENT_NAME"
 HOME_KEYS = ("HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR")
@@ -76,8 +87,33 @@ def _split(found: list[Process], launch: Process | None, table: dict[int, Proces
     return Targets(frozenset(whole), frozenset(singles))
 
 
+def _table(wanted: list[int]) -> dict[int, Process]:
+    """The pass snapshot, else a fresh scan; a live wanted process the snapshot lacks rescans the pass snapshot."""
+    shared = PASS.get()
+    if shared is None:
+        return processes()
+    table = shared.scan(deadline=Deadline.after(SCAN_S))
+    if all(pid in table or _process(pid, PROC) is None for pid in wanted):
+        return table
+    return shared.rescan(deadline=Deadline.after(SCAN_S))
+
+
+def scanning_pass(function: Callable[P, R]) -> Callable[P, R]:
+    """Serve one process table scan to every target selection made while the wrapped pass runs."""
+
+    @wraps(function)
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+        token = PASS.set(PassProcesses(lambda: processes()))
+        try:
+            return function(*args, **kwargs)
+        finally:
+            PASS.reset(token)
+
+    return wrapped
+
+
 def targets(name: str, pid: int | str | None, homes: list[Path], start: int = 0) -> Targets:
-    table = processes()
+    table = _table([int(pid)] if pid else [])
     launch = table.get(int(pid)) if pid else None
     if launch is not None and (not carries(launch, name) or start and launch.start_time != start):
         launch = None
@@ -90,11 +126,11 @@ def _members(found: Targets) -> dict[int, int]:
 
 
 def _alive(members: dict[int, int]) -> list[int]:
-    table = processes()
+    found = {pid: _process(pid, PROC) for pid in members}
     return sorted(
         pid
         for pid, started in members.items()
-        if pid in table and table[pid].start_time == started and table[pid].state != "Z"
+        if (seen := found[pid]) is not None and seen.start_time == started and seen.state != "Z"
     )
 
 
@@ -136,5 +172,5 @@ def retire(name: str, pid: int | None, homes: list[Path], start: int = 0) -> Out
 
 def reap(pids: list[int]) -> Outcome:
     """End agent processes holding a name the swarm no longer records, each with its group when it leads one."""
-    table = processes()
+    table = _table(pids)
     return end(_split([table[pid] for pid in pids if pid in table], None, table))

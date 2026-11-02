@@ -2,10 +2,15 @@ import hashlib
 import json
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 
 import pytest
+
+
+def is_direct(test: str, direct: Collection[str]) -> bool:
+    """Tell whether a test node is named directly, by its parameterless id or its whole file."""
+    return test.partition("[")[0] in direct or test.partition("::")[0] in direct
 
 
 class KillMemory:
@@ -70,7 +75,7 @@ class KillMemory:
             key=lambda test: (
                 test != killer,
                 test.partition("[")[0] not in self.first,
-                test.partition("[")[0] not in direct,
+                not is_direct(test, direct),
             ),
         )
 

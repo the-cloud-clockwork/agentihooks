@@ -1,0 +1,142 @@
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.source_control import (
+    Capabilities,
+    ChangeRef,
+    ChangeState,
+    CheckState,
+    Comment,
+    Merged,
+    OpenChange,
+    QueueEntry,
+    QueueHealth,
+    RateLimit,
+    RepositoryRun,
+    Run,
+    Tag,
+    WorkflowRun,
+)
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import SwarmConfig
+
+
+@dataclass(frozen=True)
+class Unsupported:
+    operation: str
+
+
+class UndeclaredEffect(PermissionError):
+    pass
+
+
+@runtime_checkable
+class Ledger(Protocol):
+    def export(self, *, deadline: Deadline) -> object: ...
+
+    def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object: ...
+
+
+@runtime_checkable
+class Coordination(Protocol):
+    def read(self, *, deadline: Deadline) -> object: ...
+
+    def lease(self, *, deadline: Deadline) -> object: ...
+
+    def lock(self, name: str, *, deadline: Deadline) -> object: ...
+
+    def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object: ...
+
+    def capacity(self, *, deadline: Deadline) -> object: ...
+
+    def mark(self, name: str, value: object, *, deadline: Deadline) -> object: ...
+
+
+@runtime_checkable
+class SourceControl(Protocol):
+    def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState: ...
+
+    def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]: ...
+
+    def runs(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[Run, ...]: ...
+
+    def enqueue(self, reference: ChangeRef, *, deadline: Deadline) -> QueueEntry | Unsupported: ...
+
+    def merge(self, reference: ChangeRef, *, deadline: Deadline) -> Merged: ...
+
+    def queue_health(self, *, deadline: Deadline) -> QueueHealth | Unsupported: ...
+
+    def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]: ...
+
+    def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment: ...
+
+    def capabilities(self, *, deadline: Deadline) -> Capabilities: ...
+
+    def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str: ...
+
+    def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str: ...
+
+    def rate_limit(self, *, deadline: Deadline) -> RateLimit: ...
+
+    def issues_enabled(self, *, deadline: Deadline) -> bool: ...
+
+    def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]: ...
+
+    def cancel_run(self, run_id: int, *, deadline: Deadline) -> None: ...
+
+    def merged_at(self, commit: str, *, deadline: Deadline) -> str | None: ...
+
+    def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]: ...
+
+    def workflow_runs(
+        self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline
+    ) -> tuple[WorkflowRun, ...]: ...
+
+    def download(self, path: str, *, deadline: Deadline) -> bytes: ...
+
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any: ...
+
+
+@runtime_checkable
+class Runtime(Protocol):
+    def inspect(self, handle: str, *, deadline: Deadline) -> object: ...
+
+    def launch(self, request: Mapping[str, object], *, deadline: Deadline) -> object: ...
+
+    def stop(self, handle: str, *, deadline: Deadline) -> object: ...
+
+    def panes(self, *, deadline: Deadline) -> object: ...
+
+
+@runtime_checkable
+class Processes(Protocol):
+    def scan(self, *, deadline: Deadline) -> object: ...
+
+
+@runtime_checkable
+class Inbox(Protocol):
+    def read(self, address: str, *, deadline: Deadline) -> object: ...
+
+    def send(self, address: str, body: str, *, deadline: Deadline) -> object: ...
+
+    def close(self, item_id: str, outcome: str, detail: str, *, deadline: Deadline) -> object: ...
+
+
+@runtime_checkable
+class Llm(Protocol):
+    def classify(self, request: Mapping[str, object], *, deadline: Deadline) -> object: ...
+
+
+@runtime_checkable
+class Metrics(Protocol):
+    def emit(self, measurements: Mapping[str, object], *, deadline: Deadline) -> object: ...
+
+
+@runtime_checkable
+class Host(Protocol):
+    def read(self, name: str, *, deadline: Deadline) -> object: ...
+
+    def run(self, request: Mapping[str, object], *, deadline: Deadline) -> object: ...

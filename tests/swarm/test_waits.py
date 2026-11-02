@@ -8,8 +8,8 @@ from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, idle, merge_queue, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import head as github_head
-from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from tests.swarm.graph_port import view as github_view
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_ledger_events import APP_SUITE, QUEUED_TESTS, SKIPPED_ONLY
 
