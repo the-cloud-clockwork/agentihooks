@@ -13,7 +13,7 @@ REFERENCE = port.ChangeRef("owner/project", 7)
 PULL = {
     "number": 7,
     "state": "open",
-    "head": {"sha": "head", "ref": "engineer-1"},
+    "head": {"sha": "head", "ref": "engineer-1", "repo": {"full_name": "fork-owner/project"}},
     "base": {"ref": "dev"},
     "merged": False,
     "html_url": "https://github.com/owner/project/pull/7",
@@ -21,6 +21,7 @@ PULL = {
     "draft": True,
 }
 OPTIONS = {"capture_output": True, "text": True, "check": True}
+REST = {**OPTIONS, "run": subprocess.run}
 
 
 class Recorder:
@@ -164,18 +165,20 @@ def test_github_change_uses_audited_reads_and_deadline(monkeypatch: pytest.Monke
         "engineer-1",
         "Closes #12",
         True,
+        "fork-owner/project",
     )
     assert recorder.calls == [
-        ("tick.source_control", ["api", "repos/owner/project/pulls/7"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
+        ("tick.source_control", ["api", "repos/owner/project/pulls/7"], {"cwd": tmp_path, "timeout": 9, **REST})
     ]
 
 
 @pytest.mark.feature("swarm-tick-source-control-port")
 def test_github_change_names_its_head_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    pull = {**PULL, "head": {"sha": "head", "ref": "engineer-2"}}
+    pull = {**PULL, "head": {"sha": "head", "ref": "engineer-2", "repo": None}}
     provider, _ = _provider(monkeypatch, tmp_path, [pull])
 
-    assert provider.change(REFERENCE, deadline=_deadline()).head_branch == "engineer-2"
+    change = provider.change(REFERENCE, deadline=_deadline())
+    assert (change.head_branch, change.head_repository) == ("engineer-2", "")
 
 
 @pytest.mark.feature("swarm-tick-source-control-port")
@@ -189,7 +192,7 @@ def test_github_change_reads_an_empty_body_as_no_text(monkeypatch: pytest.Monkey
 @pytest.mark.feature("swarm-tick-source-control-port")
 def test_a_change_record_defaults_to_no_body_and_not_a_draft() -> None:
     change = port.ChangeState(REFERENCE, "open", "head", "dev", False, "https://x/7")
-    assert (change.head_branch, change.body, change.draft) == ("", "", False)
+    assert (change.head_branch, change.body, change.draft, change.head_repository) == ("", "", False, "")
 
 
 @pytest.mark.feature("swarm-tick-source-control-port")
@@ -335,7 +338,7 @@ def test_github_issue_state_reads_the_issue(monkeypatch: pytest.MonkeyPatch, tmp
 
     assert provider.issue_state(REFERENCE, deadline=_deadline()) == "open"
     assert recorder.calls == [
-        (github.CALLER, ["api", "repos/owner/project/issues/7"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
+        (github.CALLER, ["api", "repos/owner/project/issues/7"], {"cwd": tmp_path, "timeout": 9, **REST})
     ]
 
 
@@ -352,6 +355,23 @@ def test_github_rate_limit_reads_the_core_quota(monkeypatch: pytest.MonkeyPatch,
 
     assert provider.rate_limit(deadline=_deadline()) == port.RateLimit(40, 4960, 1700)
     assert recorder.calls[0][1] == ["api", "rate_limit"]
+
+
+def test_github_calls_run_through_subprocess_run_as_it_stands_at_call_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    body = {"resources": {"core": {"used": 1, "remaining": 2, "reset": 3}}}
+    seen: list[list[str]] = []
+
+    def run(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        seen.append(command)
+        return subprocess.CompletedProcess(command, 0, json.dumps(body), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+    assert provider.rate_limit(deadline=_deadline()) == port.RateLimit(1, 2, 3)
+    assert seen == [["gh", "api", "rate_limit"]]
 
 
 @pytest.mark.feature("swarm-tick-source-control-port")
@@ -373,7 +393,7 @@ def test_github_merged_at_reads_the_first_merged_change_carrying_a_commit(
 
     assert provider.merged_at("abc123", deadline=_deadline()) == expected
     assert recorder.calls == [
-        (github.CALLER, ["api", "repos/owner/project/commits/abc123/pulls"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
+        (github.CALLER, ["api", "repos/owner/project/commits/abc123/pulls"], {"cwd": tmp_path, "timeout": 9, **REST})
     ]
 
 
@@ -420,8 +440,8 @@ def test_github_open_changes_reads_each_open_pull_request_check_rollup(
     )
     query = ["api", "graphql", "-f", f"query={github._OPEN}", "-f", "owner=owner", "-f", "name=project"]
     assert recorder.calls == [
-        (github.CALLER, query, {"cwd": tmp_path, "timeout": 9, **OPTIONS}),
-        (github.CALLER, [*query, "-f", "after=next"], {"cwd": tmp_path, "timeout": 9, **OPTIONS}),
+        (github.CALLER, query, {"cwd": tmp_path, "timeout": 9, **REST}),
+        (github.CALLER, [*query, "-f", "after=next"], {"cwd": tmp_path, "timeout": 9, **REST}),
     ]
 
 
@@ -432,15 +452,15 @@ def test_github_open_changes_reads_one_page_when_no_next_page(monkeypatch: pytes
     assert len(recorder.calls) == 1
 
 
-def test_github_open_changes_stops_after_two_hundred_pull_requests(
+def test_github_open_changes_stops_after_two_hundred_pull_requests_in_pages_of_twenty_five(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    pages: list[object] = [_open_page([f"u{n}"], [], f"c{n}") for n in range(3)]
+    pages: list[object] = [_open_page([f"u{n}"], [], f"c{n}") for n in range(9)]
     provider, recorder = _provider(monkeypatch, tmp_path, pages)
 
-    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()), port.OpenChange("u1", ()))
-    assert len(recorder.calls) == 2
-    assert "pullRequests(states: OPEN, first: 100, after: $after)" in github._OPEN
+    assert provider.open_changes(deadline=_deadline()) == tuple(port.OpenChange(f"u{n}", ()) for n in range(8))
+    assert len(recorder.calls) == 8
+    assert "pullRequests(states: OPEN, first: 25, after: $after)" in github._OPEN
 
 
 @pytest.mark.parametrize("enabled", [True, False])
@@ -450,9 +470,7 @@ def test_github_issues_enabled_reads_the_repository(
     provider, recorder = _provider(monkeypatch, tmp_path, [{"has_issues": enabled, "has_wiki": not enabled}])
 
     assert provider.issues_enabled(deadline=_deadline()) is enabled
-    assert recorder.calls == [
-        (github.CALLER, ["api", "repos/owner/project"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})
-    ]
+    assert recorder.calls == [(github.CALLER, ["api", "repos/owner/project"], {"cwd": tmp_path, "timeout": 9, **REST})]
 
 
 def test_github_latest_runs_read_the_newest_runs_of_the_repository(
@@ -474,9 +492,148 @@ def test_github_latest_runs_read_the_newest_runs_of_the_repository(
         (
             github.CALLER,
             ["api", "repos/owner/project/actions/runs?per_page=100"],
-            {"cwd": tmp_path, "timeout": 9, **OPTIONS},
+            {"cwd": tmp_path, "timeout": 9, **REST},
         )
     ]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_workflow_runs_read_every_page_of_one_workflow_since_a_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    row = {
+        "id": 8,
+        "event": "pull_request",
+        "status": "completed",
+        "conclusion": "success",
+        "head_branch": "feature",
+        "head_sha": "abc",
+        "created_at": "2026-10-08T10:00:00Z",
+        "run_started_at": "2026-10-08T10:01:00Z",
+        "updated_at": "2026-10-08T10:06:00Z",
+        "run_attempt": 2,
+        "name": "Tests",
+    }
+    first = [{**row, "id": index} for index in range(100)]
+    provider, recorder = _provider(monkeypatch, tmp_path, [{"workflow_runs": first}, {"workflow_runs": [row]}])
+
+    found = provider.workflow_runs("test.yml", "pull_request", "success", "2026-10-07T10:06:40Z", deadline=_deadline())
+
+    assert len(found) == 101
+    assert found[-1] == port.WorkflowRun(
+        8,
+        "pull_request",
+        "completed",
+        "success",
+        "feature",
+        "abc",
+        "2026-10-08T10:00:00Z",
+        "2026-10-08T10:01:00Z",
+        "2026-10-08T10:06:00Z",
+        2,
+    )
+    path = (
+        "repos/owner/project/actions/workflows/test.yml/runs?event=pull_request&status=success"
+        "&exclude_pull_requests=true&created=>=2026-10-07T10:06:40Z&per_page=100"
+    )
+    assert recorder.calls == [
+        (github.CALLER, ["api", f"{path}&page=1"], {"cwd": tmp_path, "timeout": 9, **REST}),
+        (github.CALLER, ["api", f"{path}&page=2"], {"cwd": tmp_path, "timeout": 9, **REST}),
+    ]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+@pytest.mark.parametrize("code,stderr", [(0, b""), (1, b"HTTP 502")])
+def test_github_download_reads_raw_bytes_under_the_named_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code: int, stderr: bytes
+) -> None:
+    seen: list[tuple[str, list[str], dict[str, object]]] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[bytes]:
+        seen.append((caller, args, options))
+        return subprocess.CompletedProcess(["gh", *args], code, b"PK\x03", stderr)
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+    path = "repos/owner/project/actions/artifacts/3/zip"
+
+    with github.github_reads.calling("waits.checks"):
+        if code:
+            with pytest.raises(subprocess.CalledProcessError) as raised:
+                provider.download(path, deadline=_deadline())
+            assert (raised.value.returncode, raised.value.stderr) == (1, b"HTTP 502")
+        else:
+            assert provider.download(path, deadline=_deadline()) == b"PK\x03"
+    assert seen == [
+        (
+            "waits.checks",
+            ["api", path],
+            {"run": subprocess.run, "cwd": tmp_path, "timeout": 9, "capture_output": True},
+        )
+    ]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_download_outside_a_named_reader_counts_as_the_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    callers: list[str] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[bytes]:
+        callers.append(caller)
+        return subprocess.CompletedProcess(["gh", *args], 0, b"{}", b"")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    assert provider.download("rate_limit", deadline=_deadline()) == b"{}"
+    assert callers == [github.CALLER]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_graph_returns_the_whole_body_under_the_named_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen: list[tuple[str, list[str], dict[str, object]]] = []
+    body = {"data": {"p0": None}, "errors": [{"path": ["p0"]}]}
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        seen.append((caller, args, options))
+        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(body), "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    with github.github_reads.calling("swarm.checks"):
+        assert provider.graph("{q}", {"url": "u", "id": "c"}, deadline=_deadline()) == body
+    assert github.github_reads.counts(0, float("inf")) == {"swarm.checks": 1}
+    charged = (github.github_reads.home() / "charged.jsonl").read_text().splitlines()
+    assert [json.loads(row)["endpoint"] for row in charged] == ["graphql"]
+    assert seen == [
+        (
+            "swarm.checks",
+            ["api", "graphql", "-f", "query={q}", "-f", "url=u", "-f", "id=c"],
+            {"cwd": tmp_path, "timeout": 9, **REST},
+        )
+    ]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_graph_outside_a_named_reader_counts_as_the_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    callers: list[str] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        callers.append(caller)
+        return subprocess.CompletedProcess(["gh", *args], 0, "{}", "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    assert provider.graph("{q}", {}, deadline=_deadline()) == {}
+    assert callers == [github.CALLER]
 
 
 @pytest.mark.parametrize("body", ["", "{}"])
@@ -497,7 +654,7 @@ def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
         (
             github.CALLER,
             ["api", "repos/owner/project/actions/runs/5/cancel", "-X", "POST"],
-            {"cwd": tmp_path, "timeout": 9, **OPTIONS},
+            {"cwd": tmp_path, "timeout": 9, **REST},
         )
     ]
 
@@ -513,6 +670,9 @@ def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
         ("cancel_run", (5,), None),
         ("merged_at", ("abc123",), "2026-10-19T21:20:03Z"),
         ("open_changes", (), (port.OpenChange("u", (port.RollupCheck("Tests", "FAILURE", "t"),)),)),
+        ("workflow_runs", ("test.yml", "push", "success", "2026-10-07T10:06:40Z"), ()),
+        ("download", ("repos/owner/project/actions/artifacts/3/zip",), b"PK"),
+        ("graph", ("{q}", {"url": "u"}), {"data": {}}),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(

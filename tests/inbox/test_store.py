@@ -546,7 +546,7 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
     store.send("sender", "other", "another swarm request")
     store.open_items("receiver")
     store.pending_items("receiver")
-    keys, memberships = store.keys_for(lambda address: address == "receiver")
+    keys, memberships = store.keys_at(["receiver"])
     assert set(keys) == {
         store.key("address", "receiver"),
         store.key("pending", "receiver"),
@@ -566,13 +566,13 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
 
 def test_open_index_cleanup_keeps_empty_addresses_and_redirected_mail(store):
     assert store.open_items("empty") == []
-    keys, memberships = store.keys_for(lambda address: address == "empty")
+    keys, memberships = store.keys_at(["empty"])
     assert set(keys) == {store.key(kind, "empty") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {store.key("open-indexed"): ["empty"]}
     item = store.send("sender", "old", "work")
     store.open_items("old")
     store.redirect(item.id, "swarm", "new", "moved", "old")
-    keys, memberships = store.keys_for(lambda address: address == "old")
+    keys, memberships = store.keys_at(["old"])
     assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {store.key("open-indexed"): ["old"]}
 
@@ -624,7 +624,7 @@ def test_open_index_observes_writes_from_a_channel_using_the_previous_protocol(s
 def test_open_index_cleanup_finds_a_redirected_address_before_first_read(store):
     item = store.send("sender", "old", "work")
     store.redirect(item.id, "swarm", "new", "moved", "old")
-    keys, memberships = store.keys_for(lambda address: address == "old")
+    keys, memberships = store.keys_at(["old"])
     assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {}
 
@@ -679,7 +679,7 @@ def test_cleanup_reads_legacy_addresses_and_index_members_without_size_stamps(st
     store.redis.delete(store.key("open", "legacy"), store.key("open-size", "legacy"))
     store.open_items("empty")
     store.redis.delete(store.key("open-size", "empty"))
-    keys, memberships = store.keys_for(lambda address: True)
+    keys, memberships = store.keys_at(["empty", "legacy"])
     expected = {
         store.key(kind, address)
         for address in ("empty", "legacy")

@@ -1,6 +1,7 @@
 """Tests for the gate that refuses new whole ledger state reads in the swarm and tick packages."""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -96,8 +97,22 @@ def test_an_allowlisted_read_kept_or_removed_is_green(tmp_path: Path, capsys: py
 
 
 def test_files_outside_the_scope_are_not_graded(tmp_path: Path) -> None:
-    tree = _recorded(tmp_path / "tree", {"scripts/swarm_ledger/page.py": WHOLE, "hooks/hook.py": WHOLE})
-    assert no_whole_ledger.load(tree) == {}
+    files = {"scripts/swarm_ledger/page.py": WHOLE, "hooks/hook.py": WHOLE, "scripts/tick/step.py": WHOLE}
+    tree = _recorded(tmp_path / "tree", files)
+    assert no_whole_ledger.load(tree) == {"scripts/tick/step.py": 1}
+
+
+def test_a_file_past_its_allowance_names_the_allowance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _recorded(tmp_path / "base", {"scripts/swarm/job.py": WHOLE})
+    head = _recorded(tmp_path / "head", {"scripts/swarm/job.py": WHOLE + WHOLE})
+    monkeypatch.chdir(head)
+    assert no_whole_ledger.main(["--base", str(base)]) == 1
+    assert capsys.readouterr().out == (
+        "1 files read the whole ledger state, 1 on the base allowlist, 1 errors\n"
+        "::error::scripts/swarm/job.py reads the whole ledger state 2 times; the base allowlist allows 1\n"
+    )
 
 
 def test_a_base_without_an_allowlist_takes_the_heads_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -118,9 +133,16 @@ def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         no_whole_ledger.main([])
     assert raised.value.code == 2
-    assert "grading needs --base" in capsys.readouterr().err
+    assert capsys.readouterr().err.splitlines()[-1].endswith(": error: grading needs --base")
 
 
+def test_write_records_one_space_indented_sorted_json(tmp_path: Path) -> None:
+    tree = _recorded(tmp_path, {"scripts/tick/b.py": WHOLE, "scripts/swarm/a.py": WHOLE + WHOLE})
+    expected = '{\n "scripts/swarm/a.py": 2,\n "scripts/tick/b.py": 1\n}\n'
+    assert (tree / no_whole_ledger.ALLOWLIST).read_text() == expected
+
+
+@pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy duplicates every function body")
 def test_the_recorded_allowlist_matches_the_repository() -> None:
     assert no_whole_ledger.load(_ROOT) == no_whole_ledger.measure(_ROOT)
 
