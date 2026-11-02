@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.572 · 2026-11-02
+
+### 2026-11-02 · e8753f43f9f9 · #9321 · @agenticore-app
+
+**Refresh the hive ready marker from the headroom thread during long beats**
+
+This change fixes a readiness bug where a long agent launch inside the daemon beat could leave the hive ready marker stale past its sixty-second freshness window, causing rollout readiness checks to fail even while the hive was actually serving. Now the headroom publish path calls a new refresh_ready function after each successful publish, touching the marker independently of the launch step, so it stays fresh regardless of how long dispatch.poll takes. It only touches the file once it already exists, preserving the original behavior that readiness starts on this process's first successful beat.
+
 ## v2.17.570 · 2026-11-02
 
 ### 2026-11-02 · 085fdfa8e901 · #9316 · @agenticore-app
