@@ -1,6 +1,7 @@
 import json
 import subprocess
 from types import SimpleNamespace
+from typing import TypeVar
 
 import pytest
 
@@ -12,6 +13,8 @@ from scripts.swarm import capacity, cli, linked_issues, merge_queue, ready, stac
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -29,12 +32,37 @@ QUEUED = PullRequest("OPEN", None, 1, False, True, head=HEAD, queued=True)
 MERGED = PullRequest("MERGED", 2, 1, False, True, head=HEAD)
 CLOSED = PullRequest("CLOSED", None, 1, False, True, head=HEAD)
 REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
-BODY = ["gh", "pr", "view", URL, "--json", "body", "--jq", ".body"]
+T = TypeVar("T")
+
+
+class ChangePort:
+    def __init__(self) -> None:
+        self.body, self.draft = "", False
+        self.calls: list[tuple[str, ...]] = []
+        self.fail: set[str] = set()
+
+    def _answer(self, call: tuple[str, ...], deadline: Deadline, answer: T) -> T:
+        assert 59 < deadline.remaining <= stack.PORT_SECONDS
+        self.calls.append(call)
+        if call[0] in self.fail:
+            raise subprocess.CalledProcessError(1, [], stderr=" boom\n")
+        return answer
+
+    def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
+        url = f"https://github.com/{reference.repository}/pull/{reference.number}"
+        state = ChangeState(reference, "open", HEAD, "dev", False, url, body=self.body, draft=self.draft)
+        return self._answer(("change", url), deadline, state)
+
+
+def _port(monkeypatch: pytest.MonkeyPatch, port: ChangePort) -> None:
+    parse = stack.source_control
+    monkeypatch.setattr(stack, "source_control", lambda url: (port, parse(url)[1]))
 
 
 class Shell:
     def __init__(self):
-        self.calls, self.status, self.head, self.draft, self.fail = [], "", HEAD, "false", ()
+        self.calls, self.status, self.head, self.fail = [], "", HEAD, ()
+        self.port = ChangePort()
 
     def __call__(self, argv):
         self.calls.append(argv)
@@ -44,7 +72,6 @@ class Shell:
             ("bash", str(stack.WT_SCRIPT), "root"): ROOT,
             ("git", "status", "--porcelain"): self.status,
             ("git", "rev-parse", "HEAD"): self.head,
-            ("gh", "pr", "view"): self.draft,
         }.get(tuple(argv[:3]), "")
         code = 1 if tuple(argv[:3]) in self.fail else 0
         return subprocess.CompletedProcess(argv, code, stdout=out + "\n", stderr=" boom\n" if code else "")
@@ -65,6 +92,7 @@ def released(env, monkeypatch, tmp_path):
     )
     shell = Shell()
     monkeypatch.setattr(stack, "shell", shell)
+    _port(monkeypatch, shell.port)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
     doc = tmp_path / "handoff.md"
     doc.write_text(HANDOFF.format(intent="Finish the parser task for the swarm."))
@@ -108,7 +136,7 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
         "at": NOW,
         "on": {"kind": "checks", "target": URL, "head": HEAD},
     }
-    assert ["gh", "pr", "view", URL, "--json", "isDraft", "--jq", ".isDraft"] in shell.calls
+    assert shell.port.calls == [("change", URL)]
     assert store.handoff("sw", "t1") == doc.read_text()
     assert store.handoff_envelope("sw", "t1")["reason"] == "exit"
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["finished"]
@@ -446,13 +474,13 @@ def test_ready_refuses_a_pull_request_it_cannot_carry(released, capsys, pull, sa
 
 def test_ready_refuses_a_draft_pull_request(released, capsys):
     store, _, shell, doc = released
-    shell.draft = "true"
+    shell.port.draft = True
     assert release(doc) == 1
     assert capsys.readouterr().err == (
         f"swarm: pull request {URL} is a draft; mark it ready for review with gh pr ready first\n"
     )
     assert ready.record(store, "sw", "t1") is None and working(store)
-    shell.fail = (("gh", "pr", "view"),)
+    shell.port.fail = {"change"}
     assert release(doc) == 1
     assert capsys.readouterr().err == (
         f"swarm: cannot read whether pull request {URL} is a draft; run swarm ready again when it answers\n"
@@ -544,6 +572,7 @@ def merging(monkeypatch):
     pulls, queued, shell = {URL: RUNNING}, [], Shell()
     monkeypatch.setattr("scripts.swarm.runtime.HerdrRuntime.live_names", lambda self: set())
     monkeypatch.setattr(stack, "shell", shell)
+    _port(monkeypatch, shell.port)
 
     def queue(action, url, journal=None):
         queued.append((action, url))
@@ -763,7 +792,7 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["pr_url"] == URL
     assert merging.rows["t1"]["awaiting"] == ""
     assert merging.rows["t2"]["state"] == "done" and merging.rows["t2"]["pr_url"] == URL
-    assert merging.shell.calls == [BODY, REMOVE]
+    assert merging.shell.calls == [REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
@@ -868,30 +897,38 @@ MEMBER = "https://github.com/o/r/issues/7"
 CLOSED_BY = f"Closed by the swarm: pull request {URL} merged into dev."
 
 
+class IssuePort(ChangePort):
+    def __init__(self) -> None:
+        super().__init__()
+        self.states = {ISSUE: "open", NAMED: "open"}
+
+    def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str | None:
+        url = _issue_url(reference)
+        return self._answer(("issue_state", url), deadline, self.states[url])
+
+    def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str | None:
+        return self._answer(("close_issue", _issue_url(reference)), deadline, "closed")
+
+    def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> str | None:
+        return self._answer(("comment", _issue_url(reference), body), deadline, None)
+
+
+def _issue_url(reference: ChangeRef) -> str:
+    return f"https://github.com/{reference.repository}/issues/{reference.number}"
+
+
 @pytest.fixture
 def issues(merging, monkeypatch):
-    states, body = {ISSUE: "OPEN", NAMED: "OPEN"}, "Fixes the parser.\n\nCloses #12\n"
-
-    def shell(argv):
-        code = 1 if tuple(argv[:3]) in merging.shell.fail else 0
-        if argv[:3] == ["gh", "pr", "view"]:
-            assert argv == BODY
-            merging.shell.calls.append(argv)
-            return subprocess.CompletedProcess(argv, code, stdout=body, stderr=" boom\n")
-        if argv[:3] == ["gh", "issue", "view"]:
-            assert argv[4:] == ["--json", "state", "--jq", ".state"]
-            merging.shell.calls.append(argv)
-            return subprocess.CompletedProcess(argv, code, stdout=states[argv[3]] + "\n", stderr=" boom\n")
-        return merging.shell(argv)
-
-    monkeypatch.setattr(stack, "shell", shell)
+    port = IssuePort()
+    port.body = "Fixes the parser.\n\nCloses #12\n"
+    _port(monkeypatch, port)
     merging.rows["t1"]["issue_url"] = ISSUE
     merging.pulls[URL] = MERGED
-    return states
+    return port
 
 
-def issue_writes(merging):
-    return [c for c in merging.shell.calls if c[:3] in (["gh", "issue", "comment"], ["gh", "issue", "close"])]
+def issue_writes(port):
+    return [call for call in port.calls if call[0] in ("close_issue", "comment")]
 
 
 def test_a_merged_ready_pull_request_closes_the_task_issue_and_the_issue_it_names(merging, issues):
@@ -901,11 +938,11 @@ def test_a_merged_ready_pull_request_closes_the_task_issue_and_the_issue_it_name
         f"closed issue {NAMED}",
         f"removed the worktree {TOP}",
     ]
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", ISSUE],
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
-        ["gh", "issue", "close", NAMED],
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", ISSUE),
+        ("comment", ISSUE, CLOSED_BY),
+        ("close_issue", NAMED),
+        ("comment", NAMED, CLOSED_BY),
     ]
 
 
@@ -913,49 +950,49 @@ def test_an_issue_linked_to_a_task_still_open_stays_open(merging, issues):
     merging.rows["t2"]["issue_url"] = NAMED
     merging.rows["t3"] = {"id": "t3", "state": "done", "issue_url": ISSUE}
     merging.run()
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", ISSUE],
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", ISSUE),
+        ("comment", ISSUE, CLOSED_BY),
     ]
 
 
 def test_an_issue_already_closed_gets_no_second_comment(merging, issues):
-    issues[ISSUE] = "CLOSED"
+    issues.states[ISSUE] = "closed"
     assert f"closed issue {ISSUE}" not in merging.run()
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", NAMED],
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", NAMED),
+        ("comment", NAMED, CLOSED_BY),
     ]
 
 
 def test_an_issue_the_swarm_cannot_close_is_reported_and_the_task_still_closes(merging, issues):
-    merging.shell.fail = (("gh", "issue", "close"),)
+    issues.fail = {"close_issue"}
     actions = merging.run()
     assert f"could not close issue {ISSUE}: boom" in actions
     assert merging.rows["t1"]["state"] == "done"
-    assert ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY] not in merging.shell.calls
+    assert ("comment", ISSUE, CLOSED_BY) not in issues.calls
 
 
 def test_a_closed_issue_whose_comment_fails_is_reported(merging, issues):
-    merging.shell.fail = (("gh", "issue", "comment"),)
+    issues.fail = {"comment"}
     actions = merging.run()
     assert f"closed issue {ISSUE}; could not comment on it: boom" in actions
     assert f"closed issue {ISSUE}" not in actions
 
 
 def test_an_issue_whose_state_cannot_be_read_is_reported_without_a_comment(merging, issues):
-    merging.shell.fail = (("gh", "issue", "view"),)
+    issues.fail = {"issue_state"}
     actions = merging.run()
     assert f"could not close issue {ISSUE}: boom" in actions and f"could not close issue {NAMED}: boom" in actions
-    assert issue_writes(merging) == []
+    assert issue_writes(issues) == []
 
 
 def test_a_pull_request_body_that_cannot_be_read_still_closes_the_task_issue(merging, issues):
-    merging.shell.fail = (("gh", "pr", "view"),)
+    issues.fail = {"change"}
     assert f"could not read the issues named by {URL}: boom" in merging.run()
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", ISSUE],
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", ISSUE),
+        ("comment", ISSUE, CLOSED_BY),
     ]
 
 
@@ -963,13 +1000,13 @@ def test_a_group_member_issue_closes_with_the_group(merging, issues):
     del merging.rows["t1"]["issue_url"]
     merging.rows["t1"]["group_members"] = ["t2"]
     merging.rows["t2"]["issue_url"] = MEMBER
-    issues[MEMBER] = "OPEN"
+    issues.states[MEMBER] = "open"
     merging.run()
-    assert issue_writes(merging) == [
-        ["gh", "issue", "close", MEMBER],
-        ["gh", "issue", "comment", MEMBER, "--body", CLOSED_BY],
-        ["gh", "issue", "close", NAMED],
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    assert issue_writes(issues) == [
+        ("close_issue", MEMBER),
+        ("comment", MEMBER, CLOSED_BY),
+        ("close_issue", NAMED),
+        ("comment", NAMED, CLOSED_BY),
     ]
 
 
@@ -1003,7 +1040,7 @@ def test_a_split_task_stays_in_pr_until_its_last_pull_request_merges(merging, re
     assert merging.rows["t1"]["state"] == "done"
     assert merging.rows["t1"]["split_pulls"] == [URL, second]
     assert merging.rows["t1"]["awaiting"] == ""
-    assert merging.shell.calls == [BODY, REMOVE]
+    assert merging.shell.calls == [REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
@@ -1027,7 +1064,7 @@ def test_the_watched_pull_request_completes_the_remaining_split_binding(merging)
     merging.run()
     assert merging.rows["t1"]["state"] == "done"
     assert merging.rows["t1"]["awaiting"] == ""
-    assert merging.shell.calls == [BODY, REMOVE]
+    assert merging.shell.calls == [REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
 
@@ -1039,7 +1076,8 @@ def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(me
     merging.pulls[URL] = MERGED
     assert merging.run() == [f"task t1 done, {URL} merged"]
     assert merging.rows["t1"]["state"] == "done"
-    assert merging.shell.calls == [BODY]
+    assert merging.shell.calls == []
+    assert merging.shell.port.calls == [("change", URL)]
     assert ready.record(merging.store, "sw", "t1") is None
 
 

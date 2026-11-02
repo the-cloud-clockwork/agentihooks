@@ -624,7 +624,7 @@ def test_the_tick_runs_the_watchdog_before_the_ledger_probe(monkeypatch, store):
     monkeypatch.setenv("SWARM_HIVE_ID", "home")
     store.update("sw", state="paused")
     order = []
-    monkeypatch.setattr(cli.ledger_watchdog, "watch", lambda *a: order.append("watch") or ["restarted"])
-    monkeypatch.setattr(cli.ledger_probe, "observe", lambda *a: order.append("probe") or [])
+    monkeypatch.setattr(ledger_watchdog, "watch", lambda *a: order.append("watch") or ["restarted"])
+    monkeypatch.setattr(ledger_probe, "observe", lambda *a: order.append("probe") or [])
     actions = cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
     assert order[:2] == ["watch", "probe"] and actions[0] == "restarted"

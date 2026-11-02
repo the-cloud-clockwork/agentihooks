@@ -58,13 +58,13 @@
           "week_resets_at": 1900007200
         },
         {
-          "cap": null,
+          "cap": 6,
           "five_left": null,
           "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
-          "state": "UNKNOWN",
+          "state": "OPEN",
           "week_left": 90.0,
           "week_resets_at": 1900007200
         },
@@ -159,12 +159,12 @@
       ],
       "allocation": {
         "ci": {
-          "claude": 0,
-          "codex": 1
+          "claude": 1,
+          "codex": 0
         },
         "eng": {
-          "claude": 3,
-          "codex": 0
+          "claude": 2,
+          "codex": 1
         },
         "plan": {
           "claude": 1,
@@ -182,14 +182,14 @@
         "plan": 1
       },
       "placeable": {
-        "claude": 18,
+        "claude": 24,
         "codex": 10
       },
       "placements": {
         "ci": [
           {
-            "account": "alpha",
-            "harness": "codex",
+            "account": "FOXTROT",
+            "harness": "claude",
             "index": 0
           }
         ],
@@ -200,12 +200,12 @@
             "index": 0
           },
           {
-            "account": "DELTA",
-            "harness": "claude",
+            "account": "alpha",
+            "harness": "codex",
             "index": 1
           },
           {
-            "account": "GOLF",
+            "account": "DELTA",
             "harness": "claude",
             "index": 2
           }
@@ -218,7 +218,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 18 free seats and Codex has 10 free seats"
+      "reason": "accounts are closed, unknown; Claude has 24 free seats and Codex has 10 free seats"
     },
     "claude_only": {
       "accounts": [
@@ -278,13 +278,13 @@
           "week_resets_at": 1900007200
         },
         {
-          "cap": null,
+          "cap": 6,
           "five_left": null,
           "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
-          "state": "UNKNOWN",
+          "state": "OPEN",
           "week_left": 90.0,
           "week_resets_at": 1900007200
         },
@@ -324,8 +324,8 @@
       ],
       "allocation": {
         "ci": {
-          "claude": 1,
-          "codex": 2
+          "claude": 2,
+          "codex": 1
         },
         "eng": {
           "claude": 7,
@@ -347,7 +347,7 @@
         "plan": 1
       },
       "placeable": {
-        "claude": 22,
+        "claude": 28,
         "codex": 6
       },
       "placements": {
@@ -363,8 +363,8 @@
             "index": 1
           },
           {
-            "account": "default",
-            "harness": "codex",
+            "account": "ALPHA",
+            "harness": "claude",
             "index": 2
           }
         ],
@@ -380,33 +380,33 @@
             "index": 1
           },
           {
-            "account": "ALPHA",
+            "account": "FOXTROT",
             "harness": "claude",
             "index": 2
           },
           {
-            "account": "DELTA",
-            "harness": "claude",
+            "account": "default",
+            "harness": "codex",
             "index": 3
           },
           {
-            "account": "GOLF",
+            "account": "DELTA",
             "harness": "claude",
             "index": 4
           },
           {
-            "account": "BRAVO",
+            "account": "GOLF",
             "harness": "claude",
             "index": 5
           },
           {
-            "account": "ALPHA",
+            "account": "BRAVO",
             "harness": "claude",
             "index": 6
           },
           {
-            "account": "default",
-            "harness": "codex",
+            "account": "FOXTROT",
+            "harness": "claude",
             "index": 7
           }
         ],
@@ -418,7 +418,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 6 free seats"
+      "reason": "accounts are closed; Claude has 28 free seats and Codex has 6 free seats"
     },
     "demand": {
       "accounts": [
@@ -478,13 +478,13 @@
           "week_resets_at": 1900007200
         },
         {
-          "cap": null,
+          "cap": 6,
           "five_left": null,
           "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
-          "state": "UNKNOWN",
+          "state": "OPEN",
           "week_left": 90.0,
           "week_resets_at": 1900007200
         },
@@ -561,8 +561,8 @@
           "codex": 0
         },
         "eng": {
-          "claude": 3,
-          "codex": 1
+          "claude": 4,
+          "codex": 0
         },
         "plan": {
           "claude": 0,
@@ -580,7 +580,7 @@
         "plan": 0
       },
       "placeable": {
-        "claude": 22,
+        "claude": 28,
         "codex": 12
       },
       "placements": {
@@ -608,14 +608,14 @@
             "index": 2
           },
           {
-            "account": "alpha",
-            "harness": "codex",
+            "account": "FOXTROT",
+            "harness": "claude",
             "index": 3
           }
         ],
         "plan": []
       },
-      "reason": "eng, ci and plan have no more ready tasks; accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
+      "reason": "eng, ci and plan have no more ready tasks; accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
     "lane_agent": {
       "accounts": [
@@ -675,13 +675,13 @@
           "week_resets_at": 1900007200
         },
         {
-          "cap": null,
+          "cap": 6,
           "five_left": null,
           "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
-          "state": "UNKNOWN",
+          "state": "OPEN",
           "week_left": 90.0,
           "week_resets_at": 1900007200
         },
@@ -777,7 +777,7 @@
         "plan": 1
       },
       "placeable": {
-        "claude": 22,
+        "claude": 28,
         "codex": 12
       },
       "placements": {
@@ -833,7 +833,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
+      "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
     "no_refresh": {
       "accounts": [
@@ -893,13 +893,13 @@
           "week_resets_at": 1900007200
         },
         {
-          "cap": null,
+          "cap": 6,
           "five_left": null,
           "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
-          "state": "UNKNOWN",
+          "state": "OPEN",
           "week_left": 90.0,
           "week_resets_at": 1900007200
         },
@@ -976,8 +976,8 @@
           "codex": 0
         },
         "eng": {
-          "claude": 2,
-          "codex": 1
+          "claude": 3,
+          "codex": 0
         },
         "plan": {
           "claude": 1,
@@ -995,7 +995,7 @@
         "plan": 1
       },
       "placeable": {
-        "claude": 22,
+        "claude": 28,
         "codex": 12
       },
       "placements": {
@@ -1018,8 +1018,8 @@
             "index": 1
           },
           {
-            "account": "alpha",
-            "harness": "codex",
+            "account": "FOXTROT",
+            "harness": "claude",
             "index": 2
           }
         ],
@@ -1031,7 +1031,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
+      "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
     "open": {
       "accounts": [
@@ -1091,13 +1091,13 @@
           "week_resets_at": 1900007200
         },
         {
-          "cap": null,
+          "cap": 6,
           "five_left": null,
           "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
-          "state": "UNKNOWN",
+          "state": "OPEN",
           "week_left": 90.0,
           "week_resets_at": 1900007200
         },
@@ -1174,8 +1174,8 @@
           "codex": 0
         },
         "eng": {
-          "claude": 2,
-          "codex": 1
+          "claude": 3,
+          "codex": 0
         },
         "plan": {
           "claude": 1,
@@ -1193,7 +1193,7 @@
         "plan": 1
       },
       "placeable": {
-        "claude": 22,
+        "claude": 28,
         "codex": 12
       },
       "placements": {
@@ -1216,8 +1216,8 @@
             "index": 1
           },
           {
-            "account": "alpha",
-            "harness": "codex",
+            "account": "FOXTROT",
+            "harness": "claude",
             "index": 2
           }
         ],
@@ -1229,7 +1229,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
+      "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
     "requirements": {
       "accounts": [
@@ -1289,13 +1289,13 @@
           "week_resets_at": 1900007200
         },
         {
-          "cap": null,
+          "cap": 6,
           "five_left": null,
           "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "FOXTROT",
           "sessions": 0,
-          "state": "UNKNOWN",
+          "state": "OPEN",
           "week_left": 90.0,
           "week_resets_at": 1900007200
         },
@@ -1391,7 +1391,7 @@
         "plan": 1
       },
       "placeable": {
-        "claude": 22,
+        "claude": 28,
         "codex": 12
       },
       "placements": {
@@ -1429,7 +1429,7 @@
             "index": 3
           },
           {
-            "account": "ALPHA",
+            "account": "FOXTROT",
             "harness": "claude",
             "index": 4
           }
@@ -1442,7 +1442,7 @@
           }
         ]
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
+      "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     }
   },
   "codex_select": {
@@ -1542,17 +1542,11 @@
       "source": "cached"
     },
     "full": {
-      "error": "no Claude account has a free session under its quota band",
-      "results": [
-        "ALPHA",
-        "BRAVO",
-        "CHARLIE",
-        "DELTA",
-        "ECHO",
-        "FOXTROT",
-        "GOLF",
-        "HOTEL"
-      ]
+      "account": "FOXTROT",
+      "env_name": "AH_CC_TOKEN_FOXTROT",
+      "max_sessions": 6,
+      "sessions": 0,
+      "source": "cached"
     },
     "none": {
       "error": "no non-empty AH_CC_TOKEN_* variables found",
@@ -1594,17 +1588,17 @@
       "source": "cached"
     },
     "subset": {
-      "account": "BRAVO",
-      "env_name": "AH_CC_TOKEN_BRAVO",
-      "max_sessions": 4,
-      "sessions": 3,
+      "account": "FOXTROT",
+      "env_name": "AH_CC_TOKEN_FOXTROT",
+      "max_sessions": 6,
+      "sessions": 0,
       "source": "cached"
     },
     "tie": {
-      "account": "ALPHA",
-      "env_name": "AH_CC_TOKEN_ALPHA",
+      "account": "FOXTROT",
+      "env_name": "AH_CC_TOKEN_FOXTROT",
       "max_sessions": 6,
-      "sessions": 1,
+      "sessions": 0,
       "source": "cached"
     }
   }

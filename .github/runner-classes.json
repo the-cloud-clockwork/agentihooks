@@ -97,6 +97,7 @@
   "test.yml/unit-lost": "light",
   "test.yml/unit-rerun": "standard",
   "test.yml/unit-selected": "standard",
+  "tick-equivalence.yml/tick-equivalence": "standard",
   "worker-resources.yml/measure": "batch",
   "writer-lock.yml/inputs": "light",
   "writer-lock.yml/scenario": "standard"

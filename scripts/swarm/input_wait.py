@@ -1,17 +1,20 @@
 """When each swarm agent entered the input prompt it waits on, kept beside its row so the row stays readable by older
 strict readers."""
 
-DAY_S = 86_400
+from typing import Any
+
+from scripts.swarm import elapsed
+
+KIND = "input-since"
 
 
 def _key(store, slug, name):
-    return store.key(slug, "input-since", name)
+    return store.key(slug, KIND, name)
 
 
-def mark(store, slug: str, name: str, now_ms: int, same: bool) -> None:
-    key = _key(store, slug, name)
-    store.redis.set(key, now_ms, nx=same)
-    store.redis.expire(key, DAY_S)
+def mark(store: Any, slug: str, name: str, now_ms: int, counted: int) -> int:
+    """When the agent began waiting on its prompt: kept while ``counted`` passes run on, else anchored to them."""
+    return elapsed.start(store, slug, KIND, name, now_ms, counted)
 
 
 def clear(store, slug: str, name: str) -> None:

@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
@@ -39,29 +39,6 @@ def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
     return HYBRID if machine == LOCAL and config.hive_placement else machine
 
 
-class FencedLedger:
-    def __init__(self, store: RedisStore, slug: str, held: lease.Lease, ledger):
-        self.store, self.slug, self.held, self.ledger = store, slug, held, ledger
-
-    def __getattr__(self, name):
-        value = getattr(self.ledger, name)
-        if not callable(value):
-            return value
-
-        def call(*args, **kwargs):
-            lease.renew(self.store, self.slug, self.held)
-            with lease.fencing(self._epoch(args[0] if args else kwargs.get("slug", self.slug))):
-                return value(*args, **kwargs)
-
-        return call
-
-    def _epoch(self, slug: str) -> int | None:
-        if slug == self.slug:
-            return self.held.epoch
-        owner = lease.current(self.store, slug)
-        return owner.epoch if owner else None
-
-
 class FencedRuntime:
     def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
@@ -82,17 +59,8 @@ class FencedRuntime:
             )
         self.runtime, self.deployment = runtime, deployment
 
-    def __getattr__(self, name):
-        value = getattr(self.runtime, name)
-        if not callable(value):
-            return value
-
-        def call(*args, **kwargs):
-            lease.renew(self.store, self.slug, self.held)
-            with lease.kept(self.store, self.slug, self.held):
-                return value(*args, **kwargs)
-
-        return call
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.runtime, name)
 
     def _mode_refusal(self) -> str:
         if self.deployment == LOCAL:
@@ -241,7 +209,6 @@ class FencedRuntime:
         spawn_stall.refuse_local(self.store, self.slug, machine, taken, maximum, lease.now_ms(self.store))
 
     def has_capacity(self, config) -> bool:
-        lease.renew(self.store, self.slug, self.held)
         if self._mode_refusal():
             return False
         return self.deployment != LOCAL or self.runtime.has_capacity(config)
@@ -251,7 +218,7 @@ class FencedRuntime:
         return room(config) if room else 1
 
     def spawn(self, config, lane, name, task):
-        lease.renew(self.store, self.slug, self.held)
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
         task = _master_task(lane, task)
         try:
             return self._spawn(config, lane, name, task)
@@ -279,24 +246,20 @@ class FencedRuntime:
             from scripts.swarm.commands import hive_id
 
             admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}")
-        with lease.kept(self.store, self.slug, self.held):
-            runtime = self.runtime
-            if workstation:
-                runtime = runtime.herdr_runtime
-            elif (
-                not _hive_lane(lane, task, self.kubernetes_proof) and getattr(runtime, "hive_launch", None) is not None
-            ):
-                runtime = runtime.original_runtime
-            return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+        runtime = self.runtime
+        if workstation:
+            runtime = runtime.herdr_runtime
+        elif not _hive_lane(lane, task, self.kubernetes_proof) and getattr(runtime, "hive_launch", None) is not None:
+            runtime = runtime.original_runtime
+        return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
     def collect(self, config, lane, name, task):
         from scripts.swarm.tick import SpawnError
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
-        lease.renew(self.store, self.slug, self.held)
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        with lease.kept(self.store, self.slug, self.held):
-            outcome = self.runtime.hive_launch.collect(request)
+        outcome = self.runtime.hive_launch.collect(request)
         if not outcome.ok:
             raise SpawnError(outcome.detail, outcome.status)
         return outcome.value
@@ -304,9 +267,9 @@ class FencedRuntime:
     def expire(self, config, lane, name, task):
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        with lease.kept(self.store, self.slug, self.held):
-            return self.runtime.hive_launch.expire(request)
+        return self.runtime.hive_launch.expire(request)
 
 
 def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:

@@ -135,7 +135,7 @@ def test_an_item_entry_is_listed_with_its_keys_and_others_are_not(swarm):
     _, inbox = swarm
     plain = inbox.send("operator", "eng", "hello")
     item = relayed(swarm, operator_write(12, "comment added", "tasks/t1", "is the fix merged"))
-    keys, _ = inbox.keys_for(lambda address: True)
+    keys, _ = inbox.keys_at(sorted({plain.address, item.address}))
     assert inbox.key("entry", item.id) in keys and inbox.key("entry", plain.id) not in keys
 
 

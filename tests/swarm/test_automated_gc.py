@@ -347,7 +347,7 @@ def test_tick_collects_with_the_current_ledger_rows(world, monkeypatch, swarm_st
     monkeypatch.setattr(tick, "skip_dropped", lambda *_: [])
     monkeypatch.setattr(tick.freeze, "watched", lambda slug, actual_store, actual_ledger, doc: doc)
     monkeypatch.setattr(tick.lifetime, "sleeping", lambda *_: True)
-    monkeypatch.setattr(tick.timing, "call", lambda fn, *args: fn(*args) if fn == ledger.state else [])
+    monkeypatch.setattr(tick.timing, "call", lambda fn, *args: fn(*args) if fn is tick.pass_state else [])
     collected = Mock()
     monkeypatch.setattr(tick, "_collected", collected)
     record = automated_gc.state(store, SLUG, agent)

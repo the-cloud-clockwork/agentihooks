@@ -307,6 +307,53 @@ def test_liveness_follows_the_heartbeat_window():
     assert registry.LIVE_MS == 90_000
 
 
+def test_a_stalled_beat_turns_the_hive_not_ready_while_the_headroom_heartbeat_stays_fresh(redis):
+    registry.update(redis, "box", ["max-agents=2"])
+    registry.beat(redis, "box", {"heartbeat_at": 1_000})
+    registry.finished(redis, "box", 1_000)
+    stalled = 1_000 + registry.BEAT_WINDOW_MS + 1
+    registry.touch(redis, "box", stalled)
+    record = registry.show(redis, "box")
+    assert record is not None
+    assert record["heartbeat_at"] == stalled
+    assert record["beat_at"] == 1_000
+    assert registry.live(record, stalled) is False
+    assert registry.live(record, stalled - 1) is True
+    registry.finished(redis, "box", stalled)
+    resumed = registry.show(redis, "box")
+    assert resumed is not None
+    assert resumed["beat_at"] == stalled
+    assert registry.live(resumed, stalled) is True
+    assert registry.BEAT_WINDOW_MS == 300_000
+
+
+def test_a_finished_beat_never_creates_a_missing_hive(redis):
+    registry.finished(redis, "ghost", 5)
+    assert registry.show(redis, "ghost") is None
+
+
+def test_a_first_beat_that_never_finishes_ages_out_under_the_headroom_heartbeat(redis):
+    registry.update(redis, "box", ["max-agents=2"])
+    registry.beat(redis, "box", {"heartbeat_at": 1_000})
+    registry.touch(redis, "box", 2_000)
+    seeded = registry.show(redis, "box")
+    assert seeded is not None
+    assert seeded["beat_at"] == 2_000
+    later = 2_001 + registry.BEAT_WINDOW_MS
+    registry.touch(redis, "box", later)
+    record = registry.show(redis, "box")
+    assert record is not None
+    assert record["beat_at"] == 2_000
+    assert record["heartbeat_at"] == later
+    assert registry.live(record, later) is False
+
+
+def test_a_record_without_a_finished_beat_keeps_the_heartbeat_rule():
+    assert registry.live({"heartbeat_at": 1_000}, 1_000 + registry.LIVE_MS) is True
+    assert registry.live({"heartbeat_at": 1_000, "beat_at": 1_000}, 1_000 + registry.LIVE_MS) is True
+    assert registry.live({"heartbeat_at": 0, "beat_at": 5}, 5) is False
+
+
 def test_hives_lists_indexed_records_sorted_and_skips_missing(redis):
     names = ["zeta", "alpha", "mu", "kappa", "omega", "beta", "delta", "sigma"]
     for name in names:

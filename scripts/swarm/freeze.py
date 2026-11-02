@@ -5,6 +5,7 @@ from typing import Any
 
 from scripts.doctor import loop, priming
 from scripts.swarm import notice_text
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 from scripts.swarm_ledger.repository import hierarchy
@@ -42,10 +43,11 @@ def watched(slug: str, store: RedisStore, ledger: Any, doc: dict[str, Any]) -> d
     if not peer:
         return doc
     try:
-        peer_doc = ledger.state(peer)
+        peer_doc = pass_state(ledger, peer)
     except SwarmError:
         return doc
-    focus = [r["target"] for r in peer_doc.get("freezes") or [] if r["verb"] == "focus"]
+    freezes: list[dict[str, Any]] = peer_doc.get("freezes") or []
+    focus = [r["target"] for r in freezes if r["verb"] == "focus"]
     return {**doc, WATCHED: [f"the focus on {_named(peer_doc, target)} in the watched swarm" for target in focus]}
 
 

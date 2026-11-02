@@ -511,6 +511,21 @@ def test_the_plan_publishes_direct_tests_the_estimate_left_unnamed(tmp_path, mon
     assert calls == [(tmp_path, manifest, {"scripts/sample.py": {2}})]
 
 
+def test_a_changed_file_without_recorded_direct_tests_names_the_test_modules_importing_it(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_steps.py").write_text("from scripts import steps\n")
+    (tmp_path / "tests/helper.py").write_text("from scripts import steps\n")
+    (tmp_path / "tests/test_tick.py").write_text("from tests import helper\n")
+    changes = {"scripts/steps.py": {1}, "scripts/tick.py": {2}}
+    direct = {"scripts/steps.py": [], "scripts/tick.py": ["tests/test_tick.py::test_run"]}
+    assert plan.first_tests(tmp_path, changes, direct) == {
+        "scripts/steps.py": ["tests/test_steps.py"],
+        "scripts/tick.py": ["tests/test_tick.py::test_run"],
+    }
+    assert plan.first_tests(tmp_path, {"scripts/steps.py": {1}}, {}) == {"scripts/steps.py": ["tests/test_steps.py"]}
+
+
 def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path, monkeypatch):
     from coverage import CoverageData
 

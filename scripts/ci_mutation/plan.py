@@ -19,6 +19,7 @@ from typing import Any
 import yaml
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
+from scripts.ci_mutation import scope
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import file_seconds, mutation_counts, partition, stats_shards
@@ -569,6 +570,11 @@ def recorded_direct(root: Path, manifest: dict[str, Any] | None, changes: dict[s
     return direct_tests(manifest, recorded_lines(root, manifest, changes)[0], changes)
 
 
+def first_tests(root: Path, changes: dict[str, set[int]], direct: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Name each changed file's direct tests, or the test modules importing it when no recorded line names any."""
+    return {path: direct.get(path) or scope.select_tests(root, Path(path), helpers=False) for path in changes}
+
+
 @cache
 def file_text(path: Path) -> str:
     return path.read_text() if path.is_file() else ""
@@ -673,7 +679,7 @@ def main() -> int:
     selection: dict[str, list[str]] = {}
     direct: dict[str, list[str]] = {}
     seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure), direct)
-    direct = direct or recorded_direct(root, manifest, changes)
+    direct = first_tests(root, changes, direct or recorded_direct(root, manifest, changes))
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
