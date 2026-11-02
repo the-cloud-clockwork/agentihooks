@@ -3890,7 +3890,8 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           grader="$RUNNER_TEMP/grader"
-          [[ -d "$grader" && ! -f "$grader/scripts/ci_mutation/regrade.py" ]] && grader="$GITHUB_WORKSPACE"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade bases . "$BASE" "$BASES"
 
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
@@ -3926,7 +3927,8 @@ jobs:
         run: |
           python -m scripts.ci_mutation --bases "$BASES" --budget 1080
           grader="$RUNNER_TEMP/grader"
-          [[ -d "$grader" && ! -f "$grader/scripts/ci_mutation/regrade.py" ]] && grader="$GITHUB_WORKSPACE"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
       - name: Forward the reused or empty mutation report
@@ -4132,7 +4134,8 @@ jobs:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
         run: |
           grader="$RUNNER_TEMP/grader"
-          [[ -d "$grader" && ! -f "$grader/scripts/ci_mutation/regrade.py" ]] && grader="$GITHUB_WORKSPACE"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
       - name: Upload complete inline mutation evidence
@@ -4357,7 +4360,8 @@ jobs:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
         run: |
           grader="$RUNNER_TEMP/grader"
-          [[ -d "$grader" && ! -f "$grader/scripts/ci_mutation/regrade.py" ]] && grader="$GITHUB_WORKSPACE"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
       - name: Upload complete mutation evidence

@@ -2016,7 +2016,10 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     )
 
 
-GRADER_FALLBACK = '[[ -d "$grader" && ! -f "$grader/scripts/ci_mutation/regrade.py" ]] && grader="$GITHUB_WORKSPACE"'
+GRADER_FALLBACK = (
+    '[[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }\n'
+    '[[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"'
+)
 
 
 def test_the_protected_grader_holds_the_planned_mutation_bases() -> None:
