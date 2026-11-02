@@ -498,7 +498,7 @@ def test_a_replacement_that_loses_its_projection_leaves_no_host_for_either_name(
             "fixture", AgentRecord(new, "eng", "task", seat="eng-1@fixture", hive="m2"), previous.execution_id
         )
     assert redis.hmget(swarm.key("fixture", "hosts"), [old, new]) == [None, None]
-    assert scope.host(redis, "fixture", old) == swarm.execution_registry.hive("fixture", old)
+    assert scope.host(redis, "fixture", old) == "m1"
 
 
 @pytest.mark.parametrize("off", ["false", "0", "no", " OFF "])
