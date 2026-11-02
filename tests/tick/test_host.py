@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.inbox import relay
 from scripts.swarm import (
     command_runner,
@@ -24,7 +25,7 @@ from scripts.swarm.health import prompt_backlog, urgent_hold
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, host
+from scripts.tick.steps import PASS, CallStep, actions, budgets, host
 
 pytestmark = pytest.mark.unit
 
@@ -132,7 +133,7 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, CallStep.budget_s)
+        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
 
 
 def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatch: pytest.MonkeyPatch) -> None:
