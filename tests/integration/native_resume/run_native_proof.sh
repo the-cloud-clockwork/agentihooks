@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # The fresh home receives the account only through the environment: NATIVE_PROOF_CLAUDE_ACCOUNT names an
 # AH_CC_TOKEN_<slug> variable, NATIVE_PROOF_CODEX_ROUTE a Codex account slug, since a fresh home holds no quota readings.
 # NATIVE_PROOF_IMAGE restores and resumes inside a fresh container of that image: only the durable store and this
 # checkout are mounted, the restored home exists only inside the container, and the conversation reopens in the
 # mounted project checkout.
+set -euo pipefail
 
 proof_root="${1:?work directory required}"
 harness="${2:?harness required: claude or codex}"

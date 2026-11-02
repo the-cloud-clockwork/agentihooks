@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # Purpose:  Validate that CWD looks like a project root.
 # Inputs:   None (uses CWD)
 # Outputs:  Exit 0 if valid, exit 1 with error message if not.
 # Idempotency: Read-only check, always safe to re-run.
+set -euo pipefail
 
 MARKERS=(
   src lib packages stacks k8s app cmd internal

@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # Purpose:  Create docs/ directory and touch all planned doc files.
 # Inputs:   Newline-separated filenames via stdin (e.g. "0A-ARCH.md")
 # Outputs:  Created files listed to stdout.
 # Idempotency: mkdir -p and touch are idempotent — existing files untouched.
+set -euo pipefail
 
 DOCS_DIR="docs"
 mkdir -p "$DOCS_DIR"

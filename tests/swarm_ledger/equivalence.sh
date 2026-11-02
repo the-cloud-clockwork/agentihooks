@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
+# Run from the workspace holding the base and head checkouts; the replays are this file's own checkout.
 set -euo pipefail
 
-# Run from the workspace holding the base and head checkouts; the replays are this file's own checkout.
 replays=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 replay() {

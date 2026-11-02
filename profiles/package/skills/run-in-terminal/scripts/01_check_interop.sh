@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
 # Check if this OS's terminal-launch mechanism is available.
-# Linux/WSL2: WSL interop (wt.exe reachable). macOS: Terminal.app via osascript.
+# Linux/WSL2: WSL interop (wt.exe reachable), detected through binfmt_misc with a Windows binary call as fallback.
+# macOS: Terminal.app via osascript.
 # Exits 0 if the launch path works, exits 1 with remediation instructions if not.
 # Idempotent: read-only check.
+set -euo pipefail
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
   if command -v osascript >/dev/null 2>&1; then
@@ -18,12 +19,10 @@ EOF
   exit 1
 fi
 
-# Fast path: try to detect WSL interop via binfmt_misc
 if [[ -f /proc/sys/fs/binfmt_misc/WSLInterop ]]; then
   exit 0
 fi
 
-# Fallback: try to actually invoke a Windows binary
 if wt.exe --help >/dev/null 2>&1; then
   exit 0
 fi
