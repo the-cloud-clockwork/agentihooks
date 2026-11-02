@@ -11,7 +11,7 @@ from uuid import uuid4
 import yaml
 
 from scripts.workflows import exit_checks, loader, schema, store
-from scripts.workflows.launchers import HeadlessProfile
+from scripts.workflows.launchers import HeadlessProfile, Judge, Routed
 from scripts.workflows.runner import Runner
 
 PROG = "agentihooks workflow"
@@ -95,7 +95,7 @@ def run_folder(identifier: str) -> Path:
 
 def execute(folder: Path, state: dict) -> dict:
     definition = schema.parse(yaml.safe_dump(state["definition"]))
-    launcher = HeadlessProfile(harness=state["harness"])
+    launcher = Routed(HeadlessProfile(harness=state["harness"]), Judge(harness=state["harness"]))
     return Runner(definition, launcher, exit_checks.check).run(folder)
 
 
