@@ -57,6 +57,27 @@ def deadline_ms(agent: AgentRecord) -> int:
     return max(DEADLINE_MS, agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS))
 
 
+def wrote_ledger(agent: AgentRecord, doc: dict) -> bool:
+    """The agent wrote a ledger event at or after its launch."""
+    since = agent.launched_at or agent.started_at
+    events = doc.get("_meta", {}).get("events", [])
+    return any(e.get("by") == agent.name and e.get("at", 0) >= since for e in events)
+
+
+def seated(agent: AgentRecord, live: set[str], doc: dict) -> bool:
+    """A live master holds its seat once working, or while starting once it has written the ledger since launch,
+    because a lost hook report leaves a live master in starting."""
+    if agent.name not in live:
+        return False
+    return agent.state == "working" or (agent.state == "starting" and wrote_ledger(agent, doc))
+
+
+def dead(agent: AgentRecord, live: set[str], at: int) -> bool:
+    """A starting master with no live process past its start deadline will never report."""
+    since = agent.launched_at or agent.started_at
+    return agent.state == "starting" and agent.name not in live and at - since >= deadline_ms(agent)
+
+
 def failed(store: RedisStore, slug: str, error: str, at: int) -> list[str]:
     pending = read(store, slug)
     repeated = pending.get("alerted") and master_alarm.read(store, slug).get("error") == error

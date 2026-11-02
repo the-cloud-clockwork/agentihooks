@@ -16,7 +16,7 @@ def test_a_forced_launch_finishes_a_dead_suspect_lead_and_launches_its_replaceme
     runtime.live.clear()
     config = swarm.config("sw")
     actions = tick_master.run(
-        "sw", config, swarm, tasks(), runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
+        "sw", swarm, tasks(), runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
     )
 
     assert len(runtime.masters) == 1
@@ -43,7 +43,7 @@ def test_a_forced_launch_lists_each_unfinished_lead_with_its_state():
     runtime.live.clear()
     config = swarm.config("sw")
     actions = tick_master.run(
-        "sw", config, swarm, tasks(), runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
+        "sw", swarm, tasks(), runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
     )
 
     assert actions == [
@@ -74,7 +74,7 @@ def test_a_forced_launch_reports_startup_state_recorded_during_the_launch(pendin
         master_start.save(swarm, "sw", pending)
         return []
 
-    actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, 300_001, launch)
+    actions = tick_master.run("sw", swarm, tasks(), runtime, 300_001, launch)
 
     assert actions == ["master down 5 minutes, forced a master launch", reason, "no live engineer to promote"]
     assert tick_master.read(swarm, "sw")["failure"] == reason
@@ -93,9 +93,7 @@ def test_an_ordinary_tick_does_not_report_an_unfinished_lead_as_a_forced_refusal
     config = swarm.config("sw")
 
     assert (
-        tick_master.run(
-            "sw", config, swarm, tasks(), runtime, 300_000, lambda: _master("sw", config, swarm, runtime, 300_000)
-        )
+        tick_master.run("sw", swarm, tasks(), runtime, 300_000, lambda: _master("sw", config, swarm, runtime, 300_000))
         == []
     )
     assert tick_master.read(swarm, "sw") == {"since": 1}
@@ -110,7 +108,7 @@ def test_a_successful_forced_launch_reports_placement_without_a_refusal():
     swarm, runtime = direct()
     config = swarm.config("sw")
     actions = tick_master.run(
-        "sw", config, swarm, tasks(), runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
+        "sw", swarm, tasks(), runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
     )
 
     assert len(runtime.masters) == 1
@@ -132,7 +130,7 @@ def test_a_forced_launch_finishes_a_dead_starting_lead_past_its_deadline_and_lau
     runtime.live.clear()
     config = swarm.config("sw")
     actions = tick_master.run(
-        "sw", config, swarm, tasks(), runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
+        "sw", swarm, tasks(), runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
     )
 
     name = runtime.masters[0][0]
@@ -152,7 +150,7 @@ def test_a_dead_starting_lead_inside_its_deadline_still_holds_the_forced_launch(
     lead = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, started_at=180_002, state="starting", seat="master@sw")
     swarm, runtime = direct(lead)
     runtime.live.clear()
-    actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, 300_001, lambda: [])
+    actions = tick_master.run("sw", swarm, tasks(), runtime, 300_001, lambda: [])
 
     assert actions[:2] == [
         "master down 5 minutes, forced a master launch",
@@ -172,9 +170,7 @@ def test_a_live_starting_lead_that_wrote_the_ledger_since_launch_ends_the_outage
 
     lead = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, started_at=5, state="starting", seat="master@sw")
     swarm, runtime = direct(lead)
-    actions = tick_master.run(
-        "sw", swarm.config("sw"), swarm, tasks(), runtime, 300_001, lambda: [], ledger_doc(lead.name, 5)
-    )
+    actions = tick_master.run("sw", swarm, tasks(), runtime, 300_001, lambda: [], ledger_doc(lead.name, 5))
 
     assert actions == []
     assert tick_master.read(swarm, "sw") == {}

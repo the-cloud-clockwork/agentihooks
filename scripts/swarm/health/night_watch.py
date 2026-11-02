@@ -13,7 +13,7 @@ from scripts.gates.base import Who
 from scripts.gates.enforcement import NIGHT_WATCH
 from scripts.hive import placement_waits
 from scripts.hive.placement import HAS_ROOM, LOCAL_FULL
-from scripts.swarm import capacity, operator_email, redis_budget, tick_master, timing
+from scripts.swarm import capacity, master_start, operator_email, redis_budget, tick_master, timing
 from scripts.swarm.health import merge_stall, spawn_stall
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import MASTER
@@ -134,7 +134,7 @@ def _close(watch, source, outcome):
 def _seat_held(watch):
     live = watch.runtime.live_names()
     return any(
-        a.lane == MASTER and a.state == "working" and a.name in live and front_door.holds(watch.slug, a.seat)
+        a.lane == MASTER and master_start.seated(a, live, watch.doc) and front_door.holds(watch.slug, a.seat)
         for a in watch.store.agents(watch.slug)
     )
 

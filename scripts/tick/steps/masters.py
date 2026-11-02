@@ -153,12 +153,12 @@ def _tick_master(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
         SEAT.tick_master.run,
         get("slug"),
-        get("config"),
         get("store"),
         get("ledger"),
         get("runtime"),
         get("now_ms"),
         lambda: tick._master(get("slug"), get("config"), get("store"), get("runtime"), get("now_ms")),
+        get("doc"),
     )
 
 
