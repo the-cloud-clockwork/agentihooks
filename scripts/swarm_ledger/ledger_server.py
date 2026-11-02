@@ -56,13 +56,13 @@ import ledger_layout  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
+from scripts import ledger_effects  # noqa: E402
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     composition,
     ledger_blockers,
     ledger_closed,
     ledger_task_duplicates,
-    outbox_host,
     page_policy,
     ports,
     request_body,
@@ -761,7 +761,7 @@ def side_effects() -> Iterator[None]:
     """Run held write side effects on the outbox host's effects worker for as long as the server serves."""
     global EFFECTS
     try:
-        with outbox_host.effects(replay_unrelayed) as worker:
+        with ledger_effects.effects(replay_unrelayed) as worker:
             EFFECTS = worker
             yield
     finally:
@@ -1680,6 +1680,7 @@ def serve() -> None:
     drained = True
     try:
         from scripts.hub import projector
+        from scripts.swarm_ledger import outbox_host
 
         with outbox_host.running(stored), side_effects(), projector.running(repository, HUB):
             try:

@@ -5,7 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm_ledger import ledger_server, outbox_host
+from scripts import ledger_effects
+from scripts.swarm_ledger import ledger_server
 from tests.swarm_ledger.test_relay_outage import ENG, SLUG, Outage, core, make_ledger, mentions, watch_passes
 
 ASK = {"op": "add", "thread": "chat", "id": "m-1", "text": "@ro-eng-1 please rebase onto dev"}
@@ -30,7 +31,7 @@ def test_a_write_returns_before_its_relay_runs(down: Outage, monkeypatch: pytest
         ledger_server.replay_unrelayed()
         drained.set()
 
-    with outbox_host.effects(drain) as worker:
+    with ledger_effects.effects(drain) as worker:
         monkeypatch.setattr(ledger_server, "EFFECTS", worker)
         state, _ = core.sync(SLUG, ops=[ASK])
         assert ledger_server.deferred(ledger_server.RELAY)(SLUG, state) == []
@@ -54,7 +55,7 @@ def test_a_failed_relay_is_retried_from_the_store_and_the_write_stands(
         ledger_server.replay_unrelayed()
         ran.set()
 
-    with outbox_host.effects(drain) as worker:
+    with ledger_effects.effects(drain) as worker:
         monkeypatch.setattr(ledger_server, "EFFECTS", worker)
         state, _ = core.sync(SLUG, ops=[ASK])
         ledger_server.deferred(ledger_server.RELAY)(SLUG, state)
@@ -198,7 +199,7 @@ def test_the_effects_worker_logs_a_failed_drain_and_runs_the_next_wake(capsys: p
             raise OSError("redis gone")
         done.set()
 
-    with outbox_host.effects(drain) as worker:
+    with ledger_effects.effects(drain) as worker:
         worker.wake()
         assert failed.wait(5)
         worker.wake()
@@ -210,7 +211,7 @@ def test_the_effects_worker_logs_a_failed_drain_and_runs_the_next_wake(capsys: p
 
 def test_closing_an_idle_worker_runs_no_drain_and_ends_its_thread() -> None:
     drain = Mock()
-    with outbox_host.effects(drain) as worker:
+    with ledger_effects.effects(drain) as worker:
         assert worker.thread.is_alive() and not worker.stopping
     drain.assert_not_called()
     assert worker.stopping
@@ -221,7 +222,7 @@ def test_the_server_worker_drains_held_revisions_while_it_serves() -> None:
     assert ledger_server.EFFECTS is None
     with ledger_server.side_effects():
         worker = ledger_server.EFFECTS
-        assert isinstance(worker, outbox_host.Effects)
+        assert isinstance(worker, ledger_effects.Effects)
         assert worker.drain is ledger_server.replay_unrelayed
         assert worker.thread.is_alive()
     assert ledger_server.EFFECTS is None
@@ -243,7 +244,7 @@ def test_a_worker_still_draining_at_shutdown_stays_the_server_worker(monkeypatch
     def stuck(drain: object) -> Iterator[Mock]:
         yield worker
 
-    monkeypatch.setattr(outbox_host, "effects", stuck)
+    monkeypatch.setattr(ledger_effects, "effects", stuck)
     monkeypatch.setattr(ledger_server, "EFFECTS", None)
     with ledger_server.side_effects():
         assert ledger_server.EFFECTS is worker
