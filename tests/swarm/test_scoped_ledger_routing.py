@@ -43,14 +43,17 @@ def store():
     return result
 
 
-class _StepsPerTick(dict):
+class _StepsPerTick:
     """The engine's running steps kept apart per tick thread, so one swarm's tick never holds the other's step."""
 
+    def __init__(self) -> None:
+        self._steps: dict[tuple[int, str], Thread] = {}
+
     def get(self, name: str, default: Thread | None = None) -> Thread | None:
-        return super().get((get_ident(), name), default)
+        return self._steps.get((get_ident(), name), default)
 
     def __setitem__(self, name: str, worker: Thread) -> None:
-        super().__setitem__((get_ident(), name), worker)
+        self._steps[(get_ident(), name)] = worker
 
 
 def test_only_the_selected_tick_uses_the_hosted_ledger(store, monkeypatch):
