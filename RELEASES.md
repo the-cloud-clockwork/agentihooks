@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.579 · 2026-11-02
+
+### 2026-11-02 · a8c2935df89c · #9361 · @agenticore-app
+
+**Read the dead stream until the over-cap redelivery is fetched**
+
+This fixes a flaky NATS contract test that intermittently failed because the dead-letter stream was read only once, before the server's over-cap redelivery had actually arrived; under load or after an expired pull, the letter could land late and the single read would find nothing. The test now retries the take-and-read-dead-stream cycle for up to six ack-wait intervals (3.6s on NATS), so a late redelivery is caught without weakening any assertions. The memory backend is unaffected since it uses a fake clock and finds the letter immediately.
+
+### 2026-11-02 · e5fbeec85aa0 · #9352 · @agenticore-app
+
+**Turn automatic snapshots off in the swarm cli test fixture**
+
+This change disables automatic snapshotting in the swarm cli test fixture by setting `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES=0`, fixing a flaky test where the tick's snapshot step, run inline on a cold worker, exceeded its time budget and caused the engine to abandon the step, dropping the tick's actions and triggering a `KeyError`. Since no swarm cli test actually exercises automatic snapshots, disabling it removes an unnecessary source of timing-dependent failures and lets the late handoff redirect test pass reliably on first run.
+
 ## v2.17.578 · 2026-11-02
 
 ### 2026-11-02 · 167efdbe8118 · #9343 · @agenticore-app
