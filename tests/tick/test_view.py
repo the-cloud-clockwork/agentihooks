@@ -226,6 +226,14 @@ def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> N
     assert (held.tasks, held.meta, held.phases) == (state["tasks"], state["_meta"], state["phases"])
 
 
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_the_view_and_the_export_schema_read_one_ledger_part_list() -> None:
+    from scripts.swarm_ledger.api import routes, schemas
+
+    assert view.PARTS is schemas.LEDGER_PARTS
+    assert routes.SINCE_SCHEMA["properties"]["parts"]["items"]["enum"] == list(schemas.LEDGER_PARTS)
+
+
 class Whole:
     """A ledger that records each whole state read and answers it with its own document."""
 
