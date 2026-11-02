@@ -427,7 +427,7 @@ def run_tick(
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             run_group("wrapper view", **passing, inbox=inbox, doc=doc, view=view)
             host_steps.raise_held(box)
-            view = box["view"]
+            view = box.get("view", view)
             rows = {t["id"]: t for t in doc["tasks"]}
             passing |= {"inbox": inbox, "doc": doc, "config": config, "view": view, "rows": rows, "agents": agents}
             actions += run_group("wrapper events", **passing)
