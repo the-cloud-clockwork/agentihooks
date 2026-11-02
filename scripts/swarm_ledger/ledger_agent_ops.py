@@ -4,7 +4,7 @@ Every op carries `by`, the agent's name; the server records it so the gate can a
 """
 
 import re
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import ledger_comments
 
@@ -64,10 +64,10 @@ def _check_text(op: dict[str, Any], kind: str, task_ids: tuple[str, ...]) -> Non
     followup = (kind == "add_item" and op["list"] == "followups") or (
         kind == "retext" and op["item"].startswith("followups/")
     )
-    worktree = ledger_comments.worktree(op, followup)
+    worktree = cast(Any, ledger_comments).worktree(op, followup)
     if kind in ("add_item", "retext"):
         op["text"] = _screened(op["text"], worktree)
-        ledger_comments.check(op["text"], "item", task_ids=task_ids)
+        cast(Any, ledger_comments).check(op["text"], "item", task_ids=task_ids)
 
 
 def check(op: dict[str, Any], task_ids: tuple[str, ...] = ()) -> None:
@@ -83,7 +83,7 @@ def check(op: dict[str, Any], task_ids: tuple[str, ...] = ()) -> None:
         if not _text(op["status"]):
             raise ValueError(f"status must be text up to {MAX_TEXT} characters")
         op["status"] = _screened(op["status"])
-        ledger_comments.check(op["status"], "comment", task_ids=task_ids)
+        cast(Any, ledger_comments).check(op["status"], "comment", task_ids=task_ids)
 
 
 def check_hive(op: dict[str, Any]) -> None:
@@ -202,12 +202,12 @@ def _set(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
             item[field] = op["value"]
             kind = FLAG_EVENTS[0 if op["value"] else 1]
         else:
-            core.set_state(item, field, op["value"])
-            kind = core.state_event(field, op["value"])
+            cast(Any, core).set_state(item, field, op["value"])
+            kind = cast(Any, core).state_event(field, op["value"])
         ctx.stamp(op["path"], op["by"])
         ctx.record(op["by"], kind, target)
     if op.get("status"):
-        ledger_comments.post_status(item["comments"], op["by"], f"{op['id']}-st", op["status"], ctx, target)
+        cast(Any, ledger_comments).post_status(item["comments"], op["by"], f"{op['id']}-st", op["status"], ctx, target)
     return True
 
 
@@ -215,7 +215,7 @@ def _add_item(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     items = doc.setdefault(op["list"], [])
     if any(i["id"] == op["id"] for i in items):
         return True
-    item = {"id": op["id"], "text": op["text"], "comments": []}
+    item: dict[str, Any] = {"id": op["id"], "text": op["text"], "comments": []}
     item.update({"done": False} if op["list"] == "followups" else {"answers": []})
     for field in ("hive", "task", "not_duplicate"):
         if field in op:
@@ -234,7 +234,7 @@ def _retext(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     if item is None:
         return False
     if item["text"] != op["text"]:
-        ctx.record(op["by"], "text changed", op["item"], diff=core.text_diff(item["text"], op["text"]))
+        ctx.record(op["by"], "text changed", op["item"], diff=cast(Any, core).text_diff(item["text"], op["text"]))
         item["text"] = op["text"]
         ctx.stamp(f"{op['item']}/text", op["by"])
     return True
@@ -252,7 +252,7 @@ def _gate_lift(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     return True
 
 
-HANDLERS: dict[str, Callable[[dict[str, Any], dict[str, Any], "ledger_core.Context"], bool]] = {
+HANDLERS: dict[str, Callable[[dict[str, Any], dict[str, Any], Any], bool]] = {
     "join": _join,
     "leave": _leave,
     "ack": _ack,

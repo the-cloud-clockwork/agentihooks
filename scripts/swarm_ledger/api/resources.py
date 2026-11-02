@@ -185,11 +185,10 @@ def page(
     revisions: list[str | None] | None = None,
     hash_page: bool = False,
 ) -> dict[str, Any]:
-    from .schemas import PAGINATION
-    from .schemas import validate as _validate
+    from . import schemas as _schemas
 
-    validate = cast(Callable[[dict[str, Any], object], None], _validate)
-    validate(PAGINATION, query)
+    validate = cast(Callable[[dict[str, Any], object], None], _schemas.validate)
+    validate(_schemas.PAGINATION, query)
     if "state" in query or "offset" in query:
         raise APIError(400, "schema_invalid", DONE_ONLY)
     offset = 0
@@ -244,10 +243,10 @@ def swarm_read(status: dict[str, Any] | None, path: str, query: dict[str, Any]) 
 
 
 def hierarchy_read(repository: Any, slug: str, path: str, query: dict[str, Any]) -> dict[str, Any]:
-    from ..repository.hierarchy import KINDS, READS
-    from ..repository.hierarchy import text as _text
+    from ..repository import hierarchy as _hierarchy
 
-    text = cast(Callable[[object], bool], _text)
+    text = cast(Callable[[object], bool], _hierarchy.text)
+    KINDS, READS = _hierarchy.KINDS, _hierarchy.READS
     name, _, node = path.removeprefix("hierarchy").removeprefix("/").partition("/")
     if (name or "subtree") not in READS:
         raise APIError(404, "resource_missing", "No such hierarchy read")
@@ -257,10 +256,10 @@ def hierarchy_read(repository: Any, slug: str, path: str, query: dict[str, Any])
         raise APIError(404, "resource_missing", "No such node") from None
     doc: dict[str, Any] = {"tasks": [], **cast(dict[str, Any], repository.current(slug).state)}
     items: dict[str, dict[str, Any]] = {
-        f"{key}/{item['id']}": item
+        f"{key}/{typed['id']}": typed
         for key in KINDS
-        for item in cast(list[dict[str, Any]], doc.get(key) or [])
-        if isinstance(item, dict) and text(item.get("id"))
+        for item in cast(list[Any], doc.get(key) or [])
+        if isinstance(item, dict) and text((typed := cast(dict[str, Any], item)).get("id"))
     }
     data = [
         {**row, "state": node_state(row["kind"], items.get(row["node"], cast(dict[str, Any], {})), doc)} for row in rows

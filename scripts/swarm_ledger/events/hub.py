@@ -78,6 +78,7 @@ class Hub:
 
     def open(self, slug: str, load: Callable[[], dict[str, Any]], cursor: str | None = None) -> tuple[int, list[Any]]:
         """Subscribe and answer (seq, first events): a snapshot without a cursor, the retained events after one."""
+        seq: int | None = None
         with self.changed:
             if cursor is not None:
                 seq = self.position(slug, cursor)
@@ -144,7 +145,7 @@ class Hub:
             self.changed.notify_all()
             return True
 
-    def wait(self, slug, seq, timeout):
+    def wait(self, slug: str, seq: int, timeout: float | None) -> list[Any]:
         """The events after seq, waiting up to timeout for one; Expired once they fell out of retention, Closed once
         the hub drains."""
         with self.changed:
@@ -156,12 +157,12 @@ class Hub:
                 raise Expired
             return [entry for entry in channel.log if entry[0] > seq]
 
-    def drain(self):
+    def drain(self) -> None:
         with self.changed:
             self.closing = True
             self.changed.notify_all()
 
-    def evict(self, now=None, idle=IDLE_EVICT_S):
+    def evict(self, now: float | None = None, idle: float = IDLE_EVICT_S) -> None:
         now = self.clock() if now is None else now
         with self.changed:
             for slug in [s for s, c in self.channels.items() if not c.subscribers and now >= c.idle_since + idle]:

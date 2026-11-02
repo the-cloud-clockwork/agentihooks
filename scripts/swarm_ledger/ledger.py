@@ -110,7 +110,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm_ledger import ledger_route
 
@@ -354,12 +354,13 @@ def retried[T](read: Callable[[], T], attempts: int) -> T:
             if attempt >= attempts:
                 raise
         time.sleep(REMOTE_READ_PAUSE * attempt)
+    raise AssertionError("unreachable: itertools.count never exhausts")
 
 
 def refusal_text(exc: urllib.error.HTTPError) -> str:
     if not hasattr(exc, "ledger_text"):
-        exc.ledger_text = exc.read().decode(errors="replace")
-    return exc.ledger_text
+        setattr(exc, "ledger_text", exc.read().decode(errors="replace"))
+    return cast(str, getattr(exc, "ledger_text"))
 
 
 def op(kind: str, args: argparse.Namespace, /, **fields: Any) -> dict[str, Any]:
