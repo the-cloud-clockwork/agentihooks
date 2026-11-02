@@ -1,7 +1,7 @@
 """Per pass tick executor: tick mode, two lane deadlines, the critical heartbeat, per agent fan out and call caps."""
 
 import fcntl
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
@@ -101,7 +101,7 @@ def running(
     critical_s: float = CRITICAL_S,
     slow_s: float = SLOW_S,
     heartbeat: Callable[[], object] | None = None,
-) -> Iterator[Pass]:
+) -> Generator[Pass, None, None]:
     """Run one pass in ``mode``; a parallel pass writes ``heartbeat`` by the critical deadline without slow work."""
     if mode not in (PARALLEL, SEQUENTIAL):
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
@@ -149,7 +149,7 @@ def _slotted(slots: BoundedSemaphore, action: Callable[[Item], Found], value: It
 
 
 @contextmanager
-def limit(resource: str) -> Iterator[None]:
+def limit(resource: str) -> Generator[None, None, None]:
     """Hold one of the host's slots for ``resource`` calls while the block runs."""
     with _GATES[resource]:
         yield

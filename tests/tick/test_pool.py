@@ -218,6 +218,7 @@ def test_external_calls_obey_the_resource_cap(resource: str, cap: int) -> None:
     assert peak == cap
 
 
+@pytest.mark.wall_clock
 def test_fifteen_agent_load_finishes_under_sixty_seconds() -> None:
     from scripts.tick import pool
 

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn, cast
+from typing import Any, NoReturn, TypeVar, cast
 
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
@@ -48,22 +48,35 @@ def _refuse(*_args: object, **_kwargs: object) -> NoReturn:
     raise TypeError(READ_ONLY)
 
 
+Frozen = TypeVar("Frozen")
+
+
+def _refusing(names: tuple[str, ...]) -> Callable[[type[Frozen]], type[Frozen]]:
+    """Return a class decorator that makes every method in ``names`` refuse the change."""
+
+    def decorate(cls: type[Frozen]) -> type[Frozen]:
+        for name in names:
+            setattr(cls, name, staticmethod(_refuse))
+        return cls
+
+    return decorate
+
+
+@_refusing(("__setitem__", "__delitem__", "__ior__", "clear", "pop", "popitem", "setdefault", "update"))
 class FrozenDict(dict[str, Any]):
     """A mapping of the view that refuses every change and copies to a plain dict."""
-
-    __setitem__ = __delitem__ = __ior__ = staticmethod(_refuse)  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
-    clear = pop = popitem = setdefault = update = staticmethod(_refuse)  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
 
     def __reduce__(self) -> tuple[type[dict[str, Any]], tuple[dict[str, Any]]]:
         """Copy and pickle as a plain dict."""
         return dict, (dict(self),)
 
 
+@_refusing(
+    ("__setitem__", "__delitem__", "__iadd__", "__imul__", "append", "extend", "insert", "pop", "remove", "clear")
+    + ("sort", "reverse")
+)
 class FrozenList(list[Any]):
     """A list of the view that refuses every change and copies to a plain list."""
-
-    __setitem__ = __delitem__ = __iadd__ = __imul__ = staticmethod(_refuse)  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
-    append = extend = insert = pop = remove = clear = sort = reverse = staticmethod(_refuse)  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
 
     def __reduce__(self) -> tuple[type[list[Any]], tuple[list[Any]]]:
         """Copy and pickle as a plain list."""
