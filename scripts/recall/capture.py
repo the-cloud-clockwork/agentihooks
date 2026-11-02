@@ -7,12 +7,13 @@ import sys
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.swarm.store import RedisStore
 
 from .reindex import sync_ledger
 from .store import RecallStore, SQLiteRecallStore, SyncCounts, agentihooks_home, content_hash, default_path
-from .swarm import extract_swarm
+from .swarm import extract_swarm  # pyright: ignore[reportUnknownVariableType]
 
 CURSOR = "recall-cursor"
 
@@ -27,7 +28,7 @@ class LedgerCapture:
 
     def __init__(
         self,
-        read: Callable[[str], dict],
+        read: Callable[[str], dict[str, Any]],
         store: Callable[[], RecallStore] = archive,
         home: Callable[[], Path] = agentihooks_home,
     ) -> None:
@@ -40,7 +41,7 @@ class LedgerCapture:
         self.busy = False
         self.worker: threading.Thread | None = None
 
-    def __call__(self, slug: str, state: dict) -> None:
+    def __call__(self, slug: str, state: dict[str, Any]) -> None:
         """Queue ``slug`` for indexing and start the worker on first use; the published state is not read."""
         with self.queued:
             self.pending.add(slug)
@@ -75,21 +76,22 @@ class LedgerCapture:
                 raise TimeoutError(f"recall capture still pending after {timeout} s")
 
 
-def capture_swarm(store: RedisStore, slug: str, document: dict | None = None) -> SyncCounts:
+def capture_swarm(store: RedisStore, slug: str, document: dict[str, Any] | None = None) -> SyncCounts:
     """Write the recall records of one swarm's seats, transfers, inbox and task folders to the archive."""
     return archive().sync(f"swarm/{slug}", extract_swarm(slug, store, document))
 
 
-def swarm_pass(slug: str, store: RedisStore, document: dict) -> list[str]:
+def swarm_pass(slug: str, store: RedisStore, document: dict[str, Any]) -> list[str]:
     """Index the swarm's seat data when it changed since the cursor, skipping the archive write otherwise."""
     records = extract_swarm(slug, store, document)
     digest = hashlib.sha256("\n".join(sorted(f"{r.key} {content_hash(r)}" for r in records)).encode()).hexdigest()
-    key = store.key(slug, CURSOR)
-    if store.redis.get(key) == digest:
+    held = cast(Any, store)
+    key: str = held.key(slug, CURSOR)
+    if held.redis.get(key) == digest:
         return []
     try:
         counts = archive().sync(f"swarm/{slug}", records)
     except (sqlite3.Error, OSError) as exc:
         return [f"skipped recall capture: the archive refused its write: {exc}"]
-    store.redis.set(key, digest)
+    held.redis.set(key, digest)
     return [f"recall archived {counts.written} swarm records"] if counts.written else []

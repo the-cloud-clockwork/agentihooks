@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.swarm_ledger.storage import read_document, read_registry, read_slugs
 
@@ -38,7 +39,7 @@ def deleted_refs(document: dict) -> list[str]:
     ]
 
 
-def sync_ledger(store: RecallStore, slug: str, document: dict, home: Path) -> SyncCounts:
+def sync_ledger(store: RecallStore, slug: str, document: dict[str, Any], home: Path) -> SyncCounts:
     """Write the recall records of one ledger document to the archive, removing its deleted entries."""
     swarm_slug = slug if (home / "swarm" / slug).is_dir() else ""
     records = extract_ledger(slug, document, swarm_slug=swarm_slug)
@@ -57,7 +58,7 @@ def reindex(store: RecallStore, folder: Path, home: Path, slugs: list[str], incl
             result["unreadable"].append(slug)
             continue
         try:
-            counts = sync_ledger(store, slug, document, home)
+            counts = sync_ledger(store, slug, cast(Any, document), home)
         except (ValueError, AttributeError, KeyError, TypeError):
             result["unreadable"].append(slug)
             continue

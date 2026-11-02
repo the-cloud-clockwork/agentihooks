@@ -780,12 +780,15 @@ class RedisStore:
     def clear_peer(self, slug):
         self.redis.delete(self.key(slug, "peer"))
 
-    def remove(self, slug):
+    def remove(self, slug: str, capture: Callable[[str], object] | None = None) -> None:
+        """Delete the swarm's keys, first handing its slug to ``capture`` so its history outlives them."""
         if not slug or set(slug) & set("*?[]\\"):
             raise SwarmError(f"refusing to remove swarm {slug!r}: an empty or pattern name would match other swarms")
         self.config(slug)
         if self.agents(slug):
             raise SwarmError(f"swarm {slug} still has agents; stop it with stop --now first")
+        if capture is not None:
+            capture(slug)
         from scripts.swarm import fencing
 
         fencing.write(self, slug, lambda doc: doc.update({**fencing.EMPTY, "epoch": doc["epoch"]}))

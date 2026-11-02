@@ -125,6 +125,7 @@ def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("inbox wake", "wrapper metrics", 30),
         ("snapshot job", "wrapper metrics", 40),
         ("last tick", "wrapper metrics", 50),
+        ("recall capture", "wrapper metrics", 60),
         ("heartbeat", "after", 10),
         ("status publish", "wrapper status", 10),
     ]

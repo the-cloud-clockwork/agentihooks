@@ -1216,8 +1216,10 @@ def cmd_save_template(store, args):
     print(json.dumps({"swarm": args.slug, "template": args.template_name, "path": str(path)}))
 
 
-def cmd_remove(store, args):
-    store.remove(args.slug)
+def cmd_remove(store: RedisStore, args: argparse.Namespace) -> None:
+    from scripts.recall import capture
+
+    store.remove(args.slug, lambda slug: capture.capture_swarm(store, slug))
     activity.clear(args.slug)
     print(json.dumps({"removed": args.slug}))
 

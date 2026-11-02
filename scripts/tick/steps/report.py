@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from scripts.gates import progress, quiet
+from scripts.recall import capture
 from scripts.swarm import (
     bottleneck_status,
     dispatcher,
@@ -205,6 +206,10 @@ def _last_tick(cli: Any, get: Get) -> None:
     store.redis.set(store.key(get("slug"), "last-tick"), cli.now_ms())
 
 
+def _recall_capture(cli: Any, get: Get) -> list[str]:
+    return capture.swarm_pass(get("slug"), get("store"), get("doc"))
+
+
 def _heartbeat(cli: Any, get: Get) -> None:
     tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))  # pyright: ignore[reportUnknownMemberType]
 
@@ -231,6 +236,7 @@ STEPS = (
     CallStep("inbox wake", "wrapper metrics", 30, held(_inbox_wake)),
     CallStep("snapshot job", "wrapper metrics", 40, held(_snapshot_job)),
     CallStep("last tick", "wrapper metrics", 50, held(_last_tick)),
+    CallStep("recall capture", "wrapper metrics", 60, held(_recall_capture)),
     CallStep("heartbeat", "after", 10, held(_heartbeat)),
     CallStep("status publish", "wrapper status", 10, held(_status_publish)),
 )

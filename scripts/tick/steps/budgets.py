@@ -119,6 +119,7 @@ MEASURED: dict[str, Timing] = {
     "inbox wake": Timing(0.34, CRITICAL_S),
     "snapshot job": Timing(0.009, SLOW_S),
     "last tick": Timing(0.005, CRITICAL_S),
+    "recall capture": Timing(UNMEASURED_S, CRITICAL_S),
     "heartbeat": Timing(UNMEASURED_S, CRITICAL_S),
     "status publish": Timing(UNMEASURED_S, CRITICAL_S),
 }

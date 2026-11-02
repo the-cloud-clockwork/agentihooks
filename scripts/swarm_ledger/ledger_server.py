@@ -35,7 +35,7 @@ import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
@@ -56,6 +56,7 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
+from scripts.recall import capture as recall_capture  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     composition,
     ledger_blockers,
@@ -176,6 +177,8 @@ def publish_snapshot(slug: str, state: dict) -> None:
 
 stored = storage.default()
 repository = publishing(stored, publish_snapshot)
+RECALL = recall_capture.LedgerCapture(cast(Any, stored).get_document)
+publishing(stored, RECALL)
 
 
 def all_summaries():
