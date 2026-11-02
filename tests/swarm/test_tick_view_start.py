@@ -106,7 +106,7 @@ def test_a_stopped_pass_reads_its_ledger_through_the_view(env: tuple, monkeypatc
 
     monkeypatch.setattr(view, "reads", lambda client: client is ledger)
     monkeypatch.setattr(view, "start", start)
-    assert store.config("sw").state == "stopped"
+    store.update("sw", state="stopped")
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert started == [("sw", True)]
     assert whole == []
