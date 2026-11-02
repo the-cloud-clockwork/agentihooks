@@ -1565,8 +1565,9 @@ def test_block_closes_open_items_once_and_tells_the_sender(env, state):
     assert len(inbox.pending_items("ci@a1b2c3-0001")) == 1
 
 
-def test_tick_redirects_a_late_handoff_item_to_the_successor(env, tmp_path):
+def test_tick_redirects_a_late_handoff_item_to_the_successor(env, tmp_path, monkeypatch):
     store, _, _ = env
+    monkeypatch.setattr(cli.snapshot, "take", lambda *a, _t=cli.snapshot.take: __import__("time").sleep(1.5) or _t(*a))
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     doc = _handoff_doc(tmp_path)
