@@ -1,0 +1,55 @@
+{
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "dependencies": "SV2-MIG-03: the cutover reads the session catalog that the legacy backfill fills; SV2-MIG-01 and SV2-MIG-02 consumer inventory and expiring aliases stay in hooks.memory.compatibility and hooks.memory.api.records",
+  "evidence_class": "mocked: questions reconstructed from repository history over the sanitized session tools fixture, served by temporary SQLite catalogs and object stores; no live transcript, hosted catalog or deployed consumer was used",
+  "fixture_inputs": {
+    "capture": "a new turn appended to the lock session while the consumer route is switched and rolled back",
+    "grants": "the fixture grant over both projects, and a narrow grant over the kernel project only",
+    "questions": "catalog lock incident and empty kernel feed, each with a hand checked expected source range",
+    "unexpandable": "the same catalog served with an empty object store, so search answers and expansion is refused"
+  },
+  "interfaces": [
+    "hooks.memory.cutover.shadow replays fixed questions through session_search and expands every hit with session_records under the same grant; an expected range counts as recalled only when each of its sequences was expanded",
+    "ConsumerRoutes.qualify stores the shadow proof bound to consumer and grant under an operation id derived from the inputs and the outcome",
+    "ConsumerRoutes.switch moves a consumer between local.v1 and session.v1 by compare and set on the route revision and only with an accepted proof for that consumer and grant",
+    "ConsumerRoutes.rollback undoes the switch at the given revision by restoring the route accepted before it, as a new revision; only a switch can be rolled back, and capture, the catalog and stored proofs are untouched",
+    "ConsumerRoutes.call dispatches to the routed endpoint, checks the request protocol major against the endpoint version and keeps alias expiry from hooks.memory.api.records"
+  ],
+  "metrics": "shadow_search_source_recall is recalled expected ranges over expected ranges for the fixture questions; case A observed 1.0 over two questions and two ranges, case B observed 0.0 for the unexpandable consumer",
+  "mocked": true,
+  "outcomes": {
+    "accepted": "shadow proofs stored by ConsumerRoutes.qualify with state accepted",
+    "committed": "route revisions in the fixture route store written by switch and rollback",
+    "externally_verified": "none; no deployed consumer was switched and no live catalog was replayed",
+    "observed": "case outputs in the a, b and c result files, graded by the touched tests of Mutation preflight 40810720708 on the tested commit"
+  },
+  "package": "SV2-MIG-04",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/8578",
+  "remaining_limitations": [
+    "The questions are reconstructed from repository history over the sanitized session tools fixture; replaying live historical sessions needs read access to the hosted catalog.",
+    "No consumer outside agentihooks routes through ConsumerRoutes yet.",
+    "Route changes are authorized by the caller grant; the route store has no separate operator role.",
+    "A cited range is expanded in one page of up to 200 records; a larger citation counts as unexpandable, so qualification fails closed."
+  ],
+  "repeat": "case A runs a second fixture whose session identities differ from the first, in its own folder, and compares the outcomes with operation ids set aside",
+  "rollback_rehearsal": "case C switched the consumer, restarted the route store, captured a new turn, rolled back to local.v1 at revision 2, replayed the rollback with the same result, kept the shadow proof and refused the stale switch",
+  "status": "fixture_verified",
+  "supported_versions": {
+    "alias_removal_deadline": "2027-01-31T00:00:00Z",
+    "endpoints": [
+      "local.v1",
+      "session.v1"
+    ],
+    "session_tools_schema": "2.0"
+  },
+  "test_outputs": {
+    "green": "Mutation preflight 40810720708 attempt 2 on the tested commit: touched tests 24 passed and 3 passed; changed line mutation 4 complete shards, 100 of 100 mutants killed in each, no clearances; attempt 1 lost its stats runner",
+    "red": "Mutation preflight 40627140712 on a57726f46: ModuleNotFoundError No module named hooks.memory.cutover"
+  },
+  "tested_commit": "6ad7648d3aadd22286e0ac96b9ae864d207cf216",
+  "tested_commit_note": "the tested commit holds all code; the commit after it changes only this record and the manifest"
+}

@@ -1,0 +1,48 @@
+{
+  "case": "B",
+  "expired_alias": {
+    "error": "alias_expired",
+    "sessions": [],
+    "state": "rejected"
+  },
+  "protected_unchanged": true,
+  "refused": {
+    "empty_baseline": "a shadow replay needs at least one question",
+    "other_consumer": "the shadow evidence does not qualify this consumer",
+    "other_grant": "no shadow evidence with this operation for this grant",
+    "unexpandable_proof": "the shadow evidence does not qualify this consumer",
+    "unknown_proof": "no shadow evidence with this operation for this grant",
+    "unsupported_endpoint": "unsupported consumer endpoint 'session.v2'"
+  },
+  "route_after_refusals": {
+    "action": "initial",
+    "consumer": "memory-keeper",
+    "endpoint": "local.v1",
+    "operation_id": null,
+    "revision": 0
+  },
+  "schema_version": "2.0",
+  "unauthorized": {
+    "expected_ranges": 1,
+    "questions": 1,
+    "recalled_ranges": 0,
+    "schema_version": "2.0",
+    "shadow_search_source_recall": 0.0,
+    "state": "rejected",
+    "unauthorized_results": 0,
+    "unexpandable_results": 0,
+    "unresolved_ranges": 1
+  },
+  "unauthorized_discloses_session": false,
+  "unexpandable": {
+    "expected_ranges": 2,
+    "questions": 2,
+    "recalled_ranges": 0,
+    "schema_version": "2.0",
+    "shadow_search_source_recall": 0.0,
+    "state": "rejected",
+    "unauthorized_results": 0,
+    "unexpandable_results": 3,
+    "unresolved_ranges": 2
+  }
+}

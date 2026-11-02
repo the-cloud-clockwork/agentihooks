@@ -1,0 +1,67 @@
+{
+  "case": "A",
+  "independent_outcomes_equal": true,
+  "runs": {
+    "first": {
+      "dispatch": {
+        "error": null,
+        "sessions": [
+          "lock"
+        ],
+        "state": "answered"
+      },
+      "proof": {
+        "consumer": "memory-keeper",
+        "expected_ranges": 2,
+        "observed_at": 5000.0,
+        "operation_id": "shadow-cca8cefe87a06c1c",
+        "questions": 2,
+        "recalled_ranges": 2,
+        "schema_version": "2.0",
+        "shadow_search_source_recall": 1.0,
+        "state": "accepted",
+        "unauthorized_results": 0,
+        "unexpandable_results": 0,
+        "unresolved_ranges": 0
+      },
+      "route": {
+        "action": "switch",
+        "consumer": "memory-keeper",
+        "endpoint": "session.v1",
+        "operation_id": "shadow-cca8cefe87a06c1c",
+        "revision": 1
+      }
+    },
+    "second": {
+      "dispatch": {
+        "error": null,
+        "sessions": [
+          "lock"
+        ],
+        "state": "answered"
+      },
+      "proof": {
+        "consumer": "memory-keeper",
+        "expected_ranges": 2,
+        "observed_at": 5000.0,
+        "operation_id": "shadow-c10bfd5c6b2f747f",
+        "questions": 2,
+        "recalled_ranges": 2,
+        "schema_version": "2.0",
+        "shadow_search_source_recall": 1.0,
+        "state": "accepted",
+        "unauthorized_results": 0,
+        "unexpandable_results": 0,
+        "unresolved_ranges": 0
+      },
+      "route": {
+        "action": "switch",
+        "consumer": "memory-keeper",
+        "endpoint": "session.v1",
+        "operation_id": "shadow-c10bfd5c6b2f747f",
+        "revision": 1
+      }
+    }
+  },
+  "schema_version": "2.0"
+}
