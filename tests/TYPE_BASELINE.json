@@ -238,7 +238,7 @@
   "scripts/ci_mutation/replay.py": 47,
   "scripts/ci_mutation/report.py": 60,
   "scripts/ci_mutation/reuse.py": 53,
-  "scripts/ci_mutation/runner.py": 114,
+  "scripts/ci_mutation/runner.py": 102,
   "scripts/ci_mutation/scope.py": 22,
   "scripts/ci_mutation/selection.py": 340,
   "scripts/ci_mutation/stats.py": 9,

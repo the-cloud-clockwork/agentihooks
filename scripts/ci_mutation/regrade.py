@@ -3,26 +3,33 @@
 import argparse
 import json
 from pathlib import Path
+from typing import Any, cast
 
-from scripts.ci_mutation.clearances import load_clearances
-from scripts.ci_mutation.report import evaluate, survivor_text
-from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases
+from scripts.ci_mutation.clearances import load_clearances  # pyright: ignore[reportUnknownVariableType]
+from scripts.ci_mutation.report import evaluate, survivor_text  # pyright: ignore[reportUnknownVariableType]
+from scripts.ci_mutation.scope import (
+    discover_changes,
+    graded_green,
+    own_bases,  # pyright: ignore[reportUnknownVariableType]
+)
 
 
-def regrade(report: dict, cleared: dict, changes: dict[str, set[int]]) -> dict:
+def regrade(report: dict[str, Any], cleared: dict[str, Any], changes: dict[str, set[int]]) -> dict[str, Any]:
     """Return the report with every changed file graded again from its recorded rows."""
-    graded = report.get("graded", [])
+    graded: list[dict[str, Any]] = report.get("graded", [])
     if sorted(entry["path"] for entry in graded) != sorted(file["path"] for file in report["files"]):
         raise ValueError("Mutation report rows do not cover exactly its graded files")
     if sorted(file["path"] for file in report["files"] + report["not_mutated"]) != sorted(changes):
         raise ValueError("Mutation report does not cover exactly the changed Python files")
-    files = [evaluate(entry["path"], entry["rows"], changes[entry["path"]], cleared) for entry in graded]
+    files: list[dict[str, Any]] = [
+        evaluate(entry["path"], entry["rows"], changes[entry["path"]], cleared) for entry in graded
+    ]
     return {**report, "files": files, "failed": bool(report["not_mutated"]) or any(file["failures"] for file in files)}
 
 
 def bases_held(root: Path, base: str, claimed: list[str]) -> bool:
     """Return whether the claimed bases start at the merge base and add only ones this grader graded green."""
-    chosen = own_bases(root, base, "HEAD", graded_green)
+    chosen: list[str] = own_bases(root, base, "HEAD", graded_green)
     return claimed[:1] == chosen[:1] and set(claimed) <= set(chosen)
 
 
@@ -45,7 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Protected grader: the planned mutation bases {args.bases} are not ones it would choose")
         return 1
     changes = discover_changes(args.root, args.bases.split(","), "HEAD")
-    graded = regrade(json.loads(args.report.read_text()), load_clearances(args.root), changes)
+    cleared = cast(dict[str, Any], load_clearances(args.root))
+    graded = regrade(json.loads(args.report.read_text()), cleared, changes)
     args.report.write_text(json.dumps(graded) + "\n")
     for file in graded["files"]:
         if file["failures"]:

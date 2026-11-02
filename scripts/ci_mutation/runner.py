@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import tomlkit
 
@@ -421,8 +422,13 @@ def record_shard_measurement(
 
 
 def grade_shard_rows(
-    report: dict, path: str, rows: list[dict], lines: set[int], cleared: dict, split: set[str]
-) -> dict:
+    report: dict[str, Any],
+    path: str,
+    rows: list[dict[str, Any]],
+    lines: set[int],
+    cleared: dict[str, Any],
+    split: set[str],
+) -> dict[str, Any]:
     if units := [row for row in rows if row["name"] in split]:
         report.setdefault("units", []).append({"path": path, "lines": sorted(lines), "rows": units})
     graded = [row for row in rows if row["name"] not in split]

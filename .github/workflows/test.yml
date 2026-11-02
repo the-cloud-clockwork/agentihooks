@@ -3954,6 +3954,9 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
     steps:
       - uses: actions/checkout@v4
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -4159,6 +4162,9 @@ jobs:
         shard: ${{ fromJSON(needs.mutation-plan.outputs.shards) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
     steps:
       - uses: actions/checkout@v4
         if: needs.mutation-plan.outputs.forwarded != 'true'
