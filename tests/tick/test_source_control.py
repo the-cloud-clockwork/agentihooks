@@ -542,6 +542,54 @@ def test_github_workflow_runs_read_every_page_of_one_workflow_since_a_time(
     ]
 
 
+@pytest.mark.feature("swarm-tick-source-control-port")
+@pytest.mark.parametrize("code,stderr", [(0, b""), (1, b"HTTP 502")])
+def test_github_download_reads_raw_bytes_under_the_named_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code: int, stderr: bytes
+) -> None:
+    seen: list[tuple[str, list[str], dict[str, object]]] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[bytes]:
+        seen.append((caller, args, options))
+        return subprocess.CompletedProcess(["gh", *args], code, b"PK\x03", stderr)
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+    path = "repos/owner/project/actions/artifacts/3/zip"
+
+    with github.github_reads.calling("waits.checks"):
+        if code:
+            with pytest.raises(subprocess.CalledProcessError) as raised:
+                provider.download(path, deadline=_deadline())
+            assert (raised.value.returncode, raised.value.stderr) == (1, b"HTTP 502")
+        else:
+            assert provider.download(path, deadline=_deadline()) == b"PK\x03"
+    assert seen == [
+        (
+            "waits.checks",
+            ["api", path],
+            {"run": subprocess.run, "cwd": tmp_path, "timeout": 9, "capture_output": True},
+        )
+    ]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_download_outside_a_named_reader_counts_as_the_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    callers: list[str] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[bytes]:
+        callers.append(caller)
+        return subprocess.CompletedProcess(["gh", *args], 0, b"{}", b"")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    assert provider.download("rate_limit", deadline=_deadline()) == b"{}"
+    assert callers == [github.CALLER]
+
+
 @pytest.mark.parametrize("body", ["", "{}"])
 def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, body: str
@@ -577,6 +625,7 @@ def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
         ("merged_at", ("abc123",), "2026-10-19T21:20:03Z"),
         ("open_changes", (), (port.OpenChange("u", (port.RollupCheck("Tests", "FAILURE", "t"),)),)),
         ("workflow_runs", ("test.yml", "push", "success", "2026-10-07T10:06:40Z"), ()),
+        ("download", ("repos/owner/project/actions/artifacts/3/zip",), b"PK"),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(
