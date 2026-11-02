@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.582 · 2026-11-02
+
+### 2026-11-02 · 5d07c35e2013 · #9385 · @agenticore-app
+
+**Announce the protected grader blob that keeps base mutation stage entries (Refs #9324)**
+
+This change registers blob f009486c of scripts/gate_protected.py in tests/registry/FROZEN_GATES.json, marking it as a trusted frozen gate grader. That blob implements the reviewed fix ensuring a base mutation stage entry keeps its original expiry via setdefault, preventing a pull request from silently extending it. Since the frozen gate check only trusts blobs already announced on dev, this entry must land first so the dependent grader PR #9370 can pass its own gate check cleanly.
+
 ## v2.17.579 · 2026-11-02
 
 ### 2026-11-02 · a8c2935df89c · #9361 · @agenticore-app
