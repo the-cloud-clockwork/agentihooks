@@ -43,8 +43,8 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
 
 def driver_command() -> list[str]:
     """Return the selection driver command, from the protected grader checkout once it carries the launcher."""
-    launcher = Path(os.environ.get("MUTATION_GRADER", "")) / "scripts/ci_mutation/protected.py"
-    if os.environ.get("MUTATION_GRADER") and launcher.is_file():
+    grader = os.environ.get("MUTATION_GRADER")
+    if grader and (launcher := Path(grader) / "scripts/ci_mutation/protected.py").is_file():
         return [sys.executable, "-P", str(launcher.resolve())]
     return [sys.executable, "-m", "scripts.ci_mutation.selection"]
 

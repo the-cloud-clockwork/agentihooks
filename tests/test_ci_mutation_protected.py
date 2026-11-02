@@ -1,4 +1,5 @@
 import ast
+import importlib.machinery
 import py_compile
 import sys
 from collections.abc import Iterator
@@ -15,7 +16,8 @@ DRIVER = (
     "from pathlib import Path\n"
     "from scripts.ci_mutation.killers import RECORD\n"
     "if __name__ == '__main__':\n"
-    "    Path(sys.argv[1]).write_text(f\"{RECORD} {os.environ.get('MUTATION_GRADER', 'unset')}\")\n"
+    "    entry = sys.modules['__main__'].__spec__.name\n"
+    "    Path(sys.argv[1]).write_text(f\"{RECORD} {os.environ.get('MUTATION_GRADER', 'unset')} {entry}\")\n"
 )
 
 
@@ -35,6 +37,12 @@ def _grader(root: Path, record: str = "killed") -> Path:
     (package / "killers.py").write_text(f"RECORD = {record!r}\n")
     (package / "selection.py").write_text(DRIVER)
     return root
+
+
+def _spec(finder: protected.ProtectedFinder, name: str) -> importlib.machinery.ModuleSpec:
+    spec = finder.find_spec(name)
+    assert spec is not None
+    return spec
 
 
 def _imports(source: str) -> str:
@@ -66,14 +74,15 @@ def test_only_the_scripts_package_and_its_modules_are_renamed() -> None:
 
 def test_the_finder_serves_only_the_protected_package_from_its_checkout(tmp_path: Path) -> None:
     finder = protected.ProtectedFinder(_grader(tmp_path))
-    package = finder.find_spec("mutation_grader.ci_mutation")
-    module = finder.find_spec("mutation_grader.ci_mutation.killers")
+    package = _spec(finder, "mutation_grader.ci_mutation")
+    module = _spec(finder, "mutation_grader.ci_mutation.killers")
     assert package.origin == str(tmp_path / "scripts/ci_mutation/__init__.py")
     assert package.submodule_search_locations == [str(tmp_path / "scripts/ci_mutation")]
+    assert isinstance(package.loader, protected.ProtectedLoader)
     assert module.origin == str(tmp_path / "scripts/ci_mutation/killers.py")
     assert module.submodule_search_locations is None
     assert isinstance(module.loader, protected.ProtectedLoader)
-    assert finder.find_spec("mutation_grader").origin == str(tmp_path / "scripts/__init__.py")
+    assert _spec(finder, "mutation_grader").origin == str(tmp_path / "scripts/__init__.py")
     assert finder.find_spec("mutation_grader.ci_mutation.missing") is None
     assert finder.find_spec("scripts.ci_mutation.killers") is None
     assert finder.find_spec("mutation_graderx") is None
@@ -90,8 +99,12 @@ def test_a_planted_head_driver_edit_cannot_change_the_kill_record(
     record = tmp_path / "record"
     monkeypatch.setattr(sys, "argv", ["protected.py", str(record)])
     protected.main(grader)
-    assert record.read_text() == "killed unset"
+    assert record.read_text() == f"killed unset {protected.DRIVER}"
     assert sys.argv == ["protected.py", str(record)]
+    monkeypatch.delenv("MUTATION_GRADER")
+    record.unlink()
+    protected.main(grader)
+    assert record.read_text() == f"killed unset {protected.DRIVER}"
     assert sys.modules["mutation_grader.ci_mutation.killers"].__file__ == str(grader / "scripts/ci_mutation/killers.py")
 
 

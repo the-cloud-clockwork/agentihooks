@@ -44,8 +44,7 @@ class ProtectedLoader(importlib.machinery.SourceFileLoader):
 
     def get_code(self, fullname: str) -> CodeType:
         """Return the renamed module code, never reading the checkout's cached bytecode."""
-        tree = renamed(ast.parse(self.get_data(self.path), self.path))
-        return compile(tree, self.path, "exec", dont_inherit=True)
+        return compile(renamed(ast.parse(self.get_data(self.path))), self.path, "exec")
 
 
 class ProtectedFinder(importlib.abc.MetaPathFinder):
@@ -61,17 +60,15 @@ class ProtectedFinder(importlib.abc.MetaPathFinder):
         if fullname != PACKAGE and not fullname.startswith(f"{PACKAGE}."):
             return None
         location = self.root.joinpath("scripts", *fullname.split(".")[1:])
-        if (location / "__init__.py").is_file():
-            init = str(location / "__init__.py")
-            return importlib.util.spec_from_file_location(
-                fullname, init, loader=ProtectedLoader(fullname, init), submodule_search_locations=[str(location)]
-            )
-        source = location.with_suffix(".py")
-        if source.is_file():
-            return importlib.util.spec_from_file_location(
-                fullname, str(source), loader=ProtectedLoader(fullname, str(source))
-            )
-        return None
+        package = (location / "__init__.py").is_file()
+        source = location / "__init__.py" if package else location.with_suffix(".py")
+        if not source.is_file():
+            return None
+        return importlib.util.spec_from_file_location(
+            fullname,
+            loader=ProtectedLoader(fullname, str(source)),
+            submodule_search_locations=[str(location)] if package else None,
+        )
 
 
 def install(root: Path) -> ProtectedFinder:
