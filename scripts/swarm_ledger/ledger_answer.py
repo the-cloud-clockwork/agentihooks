@@ -35,7 +35,7 @@ def check(op: dict[str, Any]) -> None:
     text = op.get("text")
     if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
         raise ValueError(f"answer needs text up to {MAX_TEXT} characters")
-    ledger_comments.check(text, "comment")
+    ledger_comments.check(text, "comment")  # pyright: ignore[reportUnknownMemberType]
 
 
 def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:

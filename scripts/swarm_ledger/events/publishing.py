@@ -66,7 +66,7 @@ class Publishing:
                 raise TimeoutError(f"stream publications still pending after {timeout} s")
 
     def get_document(self, slug: str) -> dict[str, Any]:
-        return self.current(slug).mutable()
+        return self.current(slug).mutable()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
     def apply_ops(
         self,

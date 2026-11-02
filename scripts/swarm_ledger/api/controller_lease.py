@@ -42,9 +42,9 @@ def read(slug: str) -> dict[str, Any]:
 def act(slug: str, principal: str, payload: dict[str, Any]) -> dict[str, Any]:
     if principal:
         raise APIError(403, "controller_access_required", "Controller access required")
-    schemas.validate(SCHEMA, payload)
+    schemas.validate(SCHEMA, payload)  # pyright: ignore[reportUnknownMemberType]
     action = payload["action"]
-    schemas.validate({**SCHEMA, "required": ["action", *REQUIRED[action]]}, payload)
+    schemas.validate({**SCHEMA, "required": ["action", *REQUIRED[action]]}, payload)  # pyright: ignore[reportUnknownMemberType]
     lease, SwarmError = ports.swarm().lease, ports.swarm().store.SwarmError
     store = connect()
     try:

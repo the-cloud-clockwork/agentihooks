@@ -36,7 +36,7 @@ def healthy(url: str) -> bool:
     from scripts.swarm_ledger import ledger_link
 
     try:
-        with ledger_link.urlopen(urllib.request.Request(f"{url}/healthz"), PROBE_S) as response:
+        with ledger_link.urlopen(urllib.request.Request(f"{url}/healthz"), PROBE_S) as response:  # pyright: ignore[reportUnknownMemberType]
             return isinstance(json.loads(response.read()), dict)
     except (OSError, ValueError, http.client.HTTPException):
         return False
