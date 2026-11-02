@@ -126,6 +126,7 @@ def test_the_auth_service_issues_the_signed_operator_session(auth: dict) -> None
     assert kind == "bearer"
     assert tokens.verify(KEY, token, SLUG) == ""
     assert cookie[name]["secure"]
+    assert int(cookie[name]["max-age"]) > 0
     assert write(auth, Cookie=f"{name}={cookie[name].value}") == 200
     assert write(auth, **{"Cf-Access-Jwt-Assertion": "operator-assertion"}) == 403
 
@@ -148,6 +149,20 @@ def test_edge_mode_without_an_auth_service_opens_no_session(live: dict, monkeypa
     assert not cookie
 
 
+def test_local_mode_with_an_auth_service_keeps_the_page_session(live: dict, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_AUTH_URL", "http://127.0.0.1:9")
+    monkeypatch.delenv("SWARM_AUTH_MODE", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_AUTH_LEGACY", raising=False)
+    with allowed(live):
+        status, cookie, _ = open_session(live)
+    name = f"ledger-session-{SLUG}"
+
+    assert status == 200
+    assert cookie[name].value.startswith("page:")
+    assert not cookie[name]["secure"]
+    assert write(live, Cookie=f"{name}={cookie[name].value}") == 200
+
+
 def test_an_unmarked_cookie_carries_no_credential(live: dict) -> None:
     with allowed(live):
         _, cookie, _ = open_session(live)
@@ -167,7 +182,7 @@ def test_the_page_renews_its_session_before_it_expires() -> None:
     )
     probe = (
         "const SESSION_ROOT='/api'; const SLUG='sw'; const timers=[]; const calls=[];\n"
-        "global.setTimeout=(fn,ms)=>timers.push(ms);\n"
+        "global.setTimeout=(fn,ms)=>timers.push([fn.name,ms]);\n"
         "let replies=[{ok:true,json:async()=>({expires_in:900})},{ok:false},null];\n"
         "global.fetch=async (url)=>{calls.push(url); const r=replies.shift(); if(!r) throw new Error('down'); return r;};\n"
         + functions
@@ -178,4 +193,4 @@ def test_the_page_renews_its_session_before_it_expires() -> None:
     observed = json.loads(result.stdout)
 
     assert observed["calls"] == ["/api/sw/session"] * 3
-    assert observed["timers"] == [720000, 30000, 30000]
+    assert observed["timers"] == [["keepSession", 720000], ["keepSession", 30000], ["keepSession", 30000]]

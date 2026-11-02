@@ -283,13 +283,15 @@ def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[int, 
 def page_session(slug: str, headers: Mapping[str, str]) -> tuple[int, str | None, int | None]:
     """The status, session credential and lifetime for a page session on the ledger.
 
-    With an auth service the credential is its signed operator token; without one it is the page credential, only
-    while legacy credentials are on and outside edge mode, where the page credential is never read.
+    With an auth service and an operator assertion, or in edge mode, the credential is the auth service's signed
+    operator token; otherwise it is the page credential, only while legacy credentials are on and outside edge mode,
+    where the page credential is never read.
     """
     url = os.environ.get("AGENTIHOOKS_AUTH_URL")
-    if url:
+    edge = os.environ.get("SWARM_AUTH_MODE") == "edge"
+    if url and (edge or headers.get("Cf-Access-Jwt-Assertion")):
         return auth_session(url, slug, headers)
-    if os.environ.get("SWARM_AUTH_MODE") == "edge" or not switch.legacy(os.environ):
+    if edge or not switch.legacy(os.environ):
         return 503, None, None
     credential = repository.token(slug)
     return (200, f"page:{credential}", None) if credential else (503, None, None)
