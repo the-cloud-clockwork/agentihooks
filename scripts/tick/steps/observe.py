@@ -127,8 +127,10 @@ def step_spawn_due(
         and not tick.lifetime.sleeping(slug, store, rows)
     ):
         if store.redis.exists(due):
+            claimed = dict(rows)
             with tick.PLACING, tick._placement_pass(runtime):
-                actions += tick.skip_refused(tick._spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+                actions += tick.skip_refused(tick._spawn, slug, config, store, ledger, runtime, claimed, doc, now_ms)
+            box["rows"] = MappingProxyType(claimed)
         store.redis.set(due, now_ms)
     return actions
 

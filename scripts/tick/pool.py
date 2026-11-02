@@ -1,8 +1,8 @@
 """Per pass tick executor: tick mode, two lane deadlines, the critical heartbeat, per agent fan out and call caps."""
 
 import fcntl
-from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Generator, Iterable
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
@@ -50,6 +50,7 @@ class Pass:
     workers: int
     critical: Deadline
     slow: Deadline
+    slots: BoundedSemaphore
 
     @property
     def parallel(self) -> bool:
@@ -100,13 +101,13 @@ def running(
     critical_s: float = CRITICAL_S,
     slow_s: float = SLOW_S,
     heartbeat: Callable[[], object] | None = None,
-) -> Iterator[Pass]:
+) -> Generator[Pass, None, None]:
     """Run one pass in ``mode``; a parallel pass writes ``heartbeat`` by the critical deadline without slow work."""
     if mode not in (PARALLEL, SEQUENTIAL):
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
     if workers < 1:
         raise ValueError("a pass needs at least one worker")
-    current = Pass(mode, workers, Deadline.after(critical_s), Deadline.after(slow_s))
+    current = Pass(mode, workers, Deadline.after(critical_s), Deadline.after(slow_s), BoundedSemaphore(workers))
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
     try:
@@ -118,20 +119,37 @@ def running(
 
 
 def fan_out(action: Callable[[Item], Found], items: Iterable[Item]) -> list[Found]:
-    """Return ``action`` of each item in item order, run on the pass workers each under a copy of this context."""
+    """Return ``action`` of each item in item order, run under copied context on the pass's shared worker slots.
+
+    Every fan out of a pass shares its ``workers`` slots; a fan out started inside a fanned out action runs inline.
+    """
     found, values = active(), list(items)
-    if found is None or not found.parallel or len(values) < 2:
+    if found is None or not found.parallel or len(values) < 2 or getattr(_FANNED, "inside", False):
         return [action(value) for value in values]
     executor = ThreadPoolExecutor(max_workers=min(found.workers, len(values)), thread_name_prefix="tick-fan-out")
     try:
-        futures = [executor.submit(copy_context().run, action, value) for value in values]
+        futures = [executor.submit(copy_context().run, _slotted, found.slots, action, value) for value in values]
+        wait(futures)
         return [future.result() for future in futures]
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
 
+_FANNED = local()
+
+
+def _slotted(slots: BoundedSemaphore, action: Callable[[Item], Found], value: Item) -> Found:
+    """Return ``action`` of ``value`` while holding one of the pass's worker slots."""
+    with slots:
+        _FANNED.inside = True
+        try:
+            return action(value)
+        finally:
+            _FANNED.inside = False
+
+
 @contextmanager
-def limit(resource: str) -> Iterator[None]:
+def limit(resource: str) -> Generator[None, None, None]:
     """Hold one of the host's slots for ``resource`` calls while the block runs."""
     with _GATES[resource]:
         yield
@@ -161,8 +179,8 @@ class HostLock:
         except BaseException:
             handle.close()
             raise
-        stack: list[IO[str]] = self._held.__dict__.setdefault("stack", [])
-        stack.append(handle)
+        stack: list[IO[str]] = getattr(self._held, "stack", [])
+        self._held.stack = [*stack, handle]
         with self._counting:
             self._count += 1
         return self
