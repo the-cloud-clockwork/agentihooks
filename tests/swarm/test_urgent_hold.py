@@ -112,10 +112,12 @@ def test_a_frozen_task_is_held_by_the_freeze_that_covers_it():
     assert hold(found, "b") == ""
 
 
-def test_a_focus_elsewhere_never_holds_a_normal_task_or_an_urgent_one():
+def test_a_focus_elsewhere_holds_a_normal_task_and_an_urgent_one_only_while_it_has_open_work():
     focus = [{"verb": "focus", "target": "lane:ci"}]
-    assert hold(doc([task("a")], freezes=focus), "a") == ""
-    assert hold(doc([task("a", rank="urgent")], freezes=focus), "a") == ""
+    work = task("c", lane="ci")
+    assert hold(doc([task("a"), work], freezes=focus), "a") == "a focus elsewhere holds it"
+    assert hold(doc([task("a", rank="urgent"), work], freezes=focus), "a") == "a focus elsewhere holds it"
+    assert hold(doc([task("a", rank="urgent"), {**work, "state": "done"}], freezes=focus), "a") == ""
 
 
 def test_an_urgent_task_is_still_held_by_a_freeze():

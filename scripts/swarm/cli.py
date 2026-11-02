@@ -31,7 +31,7 @@ agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or opera
 agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or operator classifies a suspect execution attempt
 agentihooks swarm <id> terminal EXECUTION                         operator opens the worker terminal of an execution in herdr
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
-agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
+agentihooks swarm <id> freeze | focus [--only] [--top|--bottom] | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
 agentihooks swarm <id> cover STAGE ITEM --reason TEXT              operator, master or dispatcher marks a bottleneck stage owned by an open phases/ID or tasks/ID
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
@@ -1359,7 +1359,7 @@ def cmd_status(store, args):
         )
 
 
-def cmd_freeze(store, args):
+def cmd_freeze(store: RedisStore, args: argparse.Namespace) -> None:
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
     full = store.config(args.slug).autonomy == FULL
@@ -1367,8 +1367,10 @@ def cmd_freeze(store, args):
         raise SwarmError(
             "below full autonomy the master writes freezes only with the operator's words: pass them with --quote"
         )
-    LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
-    print(json.dumps({args.command: args.target, "by": writer}))
+    given: dict[str, Any] = vars(args)
+    queue = {key: given[key] for key in ("position", "only") if given.get(key)}
+    LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote, **queue)
+    print(json.dumps({args.command: args.target, "by": writer, **queue}))
 
 
 def cmd_cover(store, args):
@@ -2450,6 +2452,11 @@ def build_parser() -> argparse.ArgumentParser:
         frozen.add_argument("target")
         frozen.add_argument("--reason", default="")
         frozen.add_argument("--quote", default="")
+        if verb == "focus":
+            frozen.add_argument("--only", action="store_true")
+            place = frozen.add_mutually_exclusive_group()
+            place.add_argument("--top", dest="position", action="store_const", const="top", default="")
+            place.add_argument("--bottom", dest="position", action="store_const", const="bottom")
     scale = sub.add_parser("autoscale")
     scale.add_argument("--fixture", default="")
     scale.add_argument("--json", action="store_true")

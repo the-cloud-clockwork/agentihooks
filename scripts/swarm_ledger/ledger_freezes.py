@@ -2,6 +2,7 @@
 
 import re
 import time
+from typing import Any
 
 from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.ledger_kinds import KINDS
@@ -15,7 +16,11 @@ SELECTORS = frozenset({*(f"lane:{lane}" for lane in LANES), *(f"kind:{kind}" for
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 DISPATCH = "dispatch"
 FULL = "full"
-FIELDS = {"freeze_set": ("verb", "target", "reason", "quote"), "freeze_clear": ("target", "reason", "quote")}
+FIELDS = {
+    "freeze_set": ("verb", "target", "reason", "quote", "position", "only"),
+    "freeze_clear": ("target", "reason", "quote"),
+}
+POSITIONS = ("top", "bottom")
 EVENTS = {"freeze": "frozen", "focus": "focused"}
 MAX_TEXT = 2000
 
@@ -36,6 +41,10 @@ def check(op):
         raise ValueError("invalid freeze author")
     if op["op"] == "freeze_set" and op.get("verb") not in VERBS:
         raise ValueError("freeze_set needs verb freeze or focus")
+    if (op.get("position") or op.get("only")) and op.get("verb") != "focus":
+        raise ValueError("position and only apply to a focus")
+    if op.get("position", "bottom") not in POSITIONS or op.get("only", False) not in (True, False):
+        raise ValueError("position is top or bottom and only is true or false")
     target = op.get("target")
     if not isinstance(target, str) or not (NODE_RE.match(target) or selector(target)):
         raise ValueError("a freeze target is a plan, phase, slice or task address")
@@ -73,19 +82,47 @@ def author(op, ctx) -> tuple[str, str] | None:
     return by, words
 
 
-def _set(doc, op, ctx, by, words):
-    target = op["target"]
-    if not selector(target) and target not in project(doc)[0]:
+def _set(doc: dict[str, Any], op: dict[str, Any], ctx: Any, by: str, words: str) -> bool:
+    target: str = op["target"]
+    graph = project(doc)[0]
+    if not selector(target) and target not in graph:
         ctx.refused.append(f"{op['op']} refused: target {target} does not exist")
         return False
-    rows = doc.setdefault("freezes", [])
-    if any(row["verb"] == op["verb"] and row["target"] == target for row in rows):
+    verb: str = op["verb"]
+    rows: list[dict[str, Any]] = doc.setdefault("freezes", [])
+    kept = [row for row in rows if not _displaced(row, op, graph)]
+    present = any(row["verb"] == verb and row["target"] == target for row in rows)
+    top = op.get("position") == "top"
+    if kept == rows and present and not top:
         return True
-    row = {"id": op["id"], "verb": op["verb"], "target": target, "by": by, "at": ctx.at, "reason": op.get("reason", "")}
-    rows.append({**row, **({"quote": words} if words else {})})
-    ctx.record(by, EVENTS[op["verb"]], target, id=op["id"], reason=row["reason"])
+    kept = [row for row in kept if not (row["verb"] == verb and row["target"] == target)]
+    row: dict[str, Any] = {"id": op["id"], "verb": verb, "target": target, "by": by, "at": ctx.at}
+    row = {**row, "reason": op.get("reason", ""), **({"quote": words} if words else {})}
+    at = next((i for i, r in enumerate(kept) if r["verb"] == "focus"), len(kept)) if top else len(kept)
+    doc["freezes"] = [*kept[:at], row, *kept[at:]]
+    ctx.record(by, EVENTS[verb], target, id=op["id"], reason=row["reason"])
     ctx.stamp("freezes", by)
     return True
+
+
+def _displaced(row: dict[str, Any], op: dict[str, Any], graph: dict[str, Any]) -> bool:
+    """A focus drops the freezes on its target and beneath it, and with only every other focus; a freeze drops the
+    focus on its own target."""
+    target: str = op["target"]
+    if op["verb"] == "freeze":
+        return row["verb"] == "focus" and row["target"] == target
+    if row["verb"] == "focus":
+        return op.get("only") is True and row["target"] != target
+    return row["target"] == target or target in _above(row["target"], graph)
+
+
+def _above(node: str, graph: dict[str, Any]) -> list[str]:
+    chain: list[str] = []
+    up: str | None = (graph.get(node) or (None, None))[1]
+    while up and up not in chain:
+        chain.append(up)
+        up = (graph.get(up) or (None, None))[1]
+    return chain
 
 
 def _clear(doc, op, ctx, by):

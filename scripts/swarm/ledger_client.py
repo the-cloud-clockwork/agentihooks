@@ -246,12 +246,23 @@ class LedgerClient:
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
-    def freeze(self, slug, verb, target, by=None, reason="", quote=""):
+    def freeze(
+        self,
+        slug: str,
+        verb: str,
+        target: str,
+        by: str | None = None,
+        reason: str = "",
+        quote: str = "",
+        position: str = "",
+        only: bool = False,
+    ) -> None:
         fields = {"target": target, **({"reason": reason} if reason else {}), **({"quote": quote} if quote else {})}
         if verb == "unfreeze":
             op = _op("freeze_clear", by, **fields)
         else:
-            op = _op("freeze_set", by, verb=verb, **fields)
+            queue = {**({"position": position} if position else {}), **({"only": True} if only else {})}
+            op = _op("freeze_set", by, verb=verb, **fields, **queue)
         if by is None:
             op.pop("by")
         self._call(slug, [op])

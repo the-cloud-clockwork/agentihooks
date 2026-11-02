@@ -1,5 +1,6 @@
 """Whether a freeze or a focus on the ledger holds an open task back from a claim, and the drain notice naming them."""
 
+import sys
 from collections.abc import Iterable
 from typing import Any
 
@@ -16,22 +17,18 @@ WATCHED = "watched_focus"
 
 
 def held(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
+    """A freeze, a focus with open work elsewhere or a watched focus keeps a claim off the open task."""
     if task.get("state") != "open":
         return False
     records, chain = doc.get("freezes") or [], ancestry(task, graph)
     return (
         frozen(task, records, chain)
-        or unfocused(task, records, chain, fix_phase)
+        or unfocused(task, doc, graph, chain, fix_phase)
         or outside_watched(task, doc, fix_phase)
     )
 
 
-def claim_gate(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
-    """A freeze or a watched focus keeps a claim off the task; its own swarm's focus only orders claims (dispatcher)."""
-    if task.get("state") != "open":
-        return False
-    records, chain = doc.get("freezes") or [], ancestry(task, graph)
-    return frozen(task, records, chain) or outside_watched(task, doc, fix_phase)
+claim_gate = held
 
 
 def outside_watched(task: dict, doc: dict, fix_phase: str) -> bool:
@@ -51,13 +48,40 @@ def watched(slug: str, store: RedisStore, ledger: Any, doc: dict[str, Any]) -> d
     return {**doc, WATCHED: [f"the focus on {_named(peer_doc, target)} in the watched swarm" for target in focus]}
 
 
-def frozen(task: dict, records: list, chain: list) -> bool:
-    return any(r["verb"] == "freeze" and covers(r["target"], task, chain) for r in records)
+def frozen(task: dict[str, Any], records: list[dict[str, Any]], chain: list[str]) -> bool:
+    return _nearest(records, "freeze", task, chain) < _nearest(records, "focus", task, chain)
 
 
-def unfocused(task: dict, records: list, chain: list, fix_phase: str) -> bool:
-    focus = [r["target"] for r in records if r["verb"] == "focus"]
-    return bool(focus) and not exempt(task, fix_phase) and not any(covers(target, task, chain) for target in focus)
+def _nearest(records: list[dict[str, Any]], verb: str, task: dict[str, Any], chain: list[str]) -> int:
+    targets: list[str] = [r["target"] for r in records if r["verb"] == verb]
+    levels = [chain.index(t) if t in chain else len(chain) for t in targets if covers(t, task, chain)]
+    return min(levels, default=sys.maxsize)
+
+
+def unfocused(
+    task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], chain: list[str], fix_phase: str
+) -> bool:
+    records: list[dict[str, Any]] = doc.get("freezes") or []
+    return outside(task, records, chain, fix_phase) and live(doc, graph)
+
+
+def outside(task: dict[str, Any], records: list[dict[str, Any]], chain: list[str], fix_phase: str) -> bool:
+    focus: list[str] = [r["target"] for r in records if r["verb"] == "focus"]
+    fix = bool(fix_phase) and task.get("phase") == fix_phase
+    return bool(focus) and not fix and not any(covers(target, task, chain) for target in focus)
+
+
+def live(doc: dict[str, Any], graph: dict[str, Any]) -> bool:
+    """Whether any focus covers a task that is not done: only then does the focus hold every other task."""
+    records: list[dict[str, Any]] = doc.get("freezes") or []
+    tasks: list[dict[str, Any]] = doc.get("tasks") or []
+    focus: list[str] = [r["target"] for r in records if r["verb"] == "focus"]
+    return any(
+        task.get("state") != "done"
+        and not task.get("out_of_scope")
+        and any(covers(target, task, ancestry(task, graph)) for target in focus)
+        for task in tasks
+    )
 
 
 def exempt(task: dict, fix_phase: str) -> bool:
@@ -90,17 +114,17 @@ def marks(doc: dict, graph: dict, fix: str, watched: bool) -> dict:
     focus = [r["target"] for r in records if r["verb"] == "focus"]
     tasks = {f"tasks/{t.get('id')}": t for t in doc.get("tasks") or [] if isinstance(t, dict)}
     chains = {node: _chain(node, graph, tasks) for node in graph}
-    found = {"frozen": [], "held": []}
+    found, focused = {"frozen": [], "held": []}, live(doc, graph)
     for node, chain in chains.items():
         task = tasks.get(node)
         if task is not None:
             cold = frozen(task, records, chain)
             hold = task.get("state") == "open" and (
-                unfocused(task, records, chain, fix) or watched and not exempt(task, fix)
+                focused and outside(task, records, chain, fix) or watched and not exempt(task, fix)
             )
         else:
             cold = any(r["verb"] == "freeze" and r["target"] in chain for r in records)
-            hold = bool(focus) and not any(_reaches(target, node, chains) for target in focus)
+            hold = focused and not any(_reaches(target, node, chains) for target in focus)
         if cold or hold:
             found["frozen" if cold else "held"].append(node)
     return found
@@ -133,7 +157,7 @@ def notice(doc: dict, tasks: Iterable[dict], phase: str) -> str:
         return DRAINED
     records = doc.get("freezes") or []
     chains = [(t, ancestry(t, graph)) for t in waiting]
-    focused_out = any(unfocused(t, records, chain, phase) for t, chain in chains)
+    focused_out = any(unfocused(t, doc, graph, chain, phase) for t, chain in chains)
     holding = [
         name
         for r, name in zip(records, names(doc))
