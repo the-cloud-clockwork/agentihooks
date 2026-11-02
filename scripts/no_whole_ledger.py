@@ -64,7 +64,7 @@ def write(tree: Path) -> None:
 
 
 def grade(base: dict[str, int] | None, head: dict[str, int], recorded: dict[str, int] | None) -> list[str]:
-    """Reject missing base permissions, excessive whole ledger reads and stale head records."""
+    """Reject a missing base allowlist, reads above the base allowance and a head record that differs from its measurement."""
     if base is None:
         return [f"{ALLOWLIST} is missing from the base"]
     errors = [
