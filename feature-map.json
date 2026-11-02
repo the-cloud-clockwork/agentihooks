@@ -1226,7 +1226,8 @@
         "tests/swarm_ledger/test_export_parts.py::test_the_tick_view_parts_are_accepted",
         "tests/tick/test_view.py::test_the_view_holds_every_top_level_part_the_pass_reads",
         "tests/tick/test_view.py::test_a_pass_holding_a_view_reads_each_document_through_one_delta_read",
-        "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read"
+        "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
+        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
       ]
     }
   ],
