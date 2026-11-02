@@ -5,6 +5,7 @@ from functools import partial
 from inspect import signature
 from typing import Any
 
+from scripts.swarm import tick
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.tick import registry
 from scripts.tick.steps import CallStep
@@ -13,13 +14,13 @@ RAISED = "raised"
 PASS_KEYS = ("slug", "store", "ledger", "runtime", "now_ms", "box")
 
 
-def _run(call: Callable[..., Any], tick: Any, get: Callable[[str], Any]) -> Any:
-    """Run the tick step function ``call`` with the tick module and the pass state, skipping once a step held an exception."""
+def _run(call: Callable[..., Any], _module: Any, get: Callable[[str], Any]) -> Any:
+    """Run the tick step function ``call`` with the pass state, skipping once a step held an exception."""
     box = get("box")
     if RAISED in box:
         return []
     try:
-        values = {"tick": tick, **{key: get(key) for key in PASS_KEYS}, **box}
+        values = {**{key: get(key) for key in PASS_KEYS}, **box}
         return call(**{name: values[name] for name in signature(call).parameters})
     except (Exception, SystemExit) as exc:
         box[RAISED] = exc
@@ -32,13 +33,12 @@ def raise_held(box: dict[str, Any]) -> None:
         raise box[RAISED]
 
 
-def step_config_load(tick: Any, slug: str, store: RedisStore, box: dict[str, Any]) -> list[str]:
+def step_config_load(slug: str, store: RedisStore, box: dict[str, Any]) -> list[str]:
     box["config"] = store.ensure_code(slug)
     return []
 
 
 def step_stopped_branch(
-    tick: Any,
     slug: str,
     config: SwarmConfig,
     store: RedisStore,
@@ -69,27 +69,25 @@ def step_stopped_branch(
     return actions
 
 
-def step_pane_evidence(tick: Any, slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
+def step_pane_evidence(slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return tick.skip_refused(tick.pane_evidence.sweep, slug, store, runtime, now_ms)
 
 
-def step_execution_reconcile(tick: Any, slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
+def step_execution_reconcile(slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return tick.skip_refused(store.execution_registry.reconcile, slug, runtime, now_ms)
 
 
 def step_master_move_fail_over(
-    tick: Any, slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int
+    slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int
 ) -> list[str]:
     return tick.skip_refused(tick.master_move.fail_over, slug, config, store, runtime, now_ms)
 
 
-def step_recover_master(
-    tick: Any, slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int
-) -> list[str]:
+def step_recover_master(slug: str, config: SwarmConfig, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     return tick.skip_refused(tick._recover_master, slug, config, store, runtime, now_ms)
 
 
-def step_ledger_state(tick: Any, slug: str, store: RedisStore, ledger: Any, box: dict[str, Any]) -> list[str]:
+def step_ledger_state(slug: str, store: RedisStore, ledger: Any, box: dict[str, Any]) -> list[str]:
     doc = tick.freeze.watched(slug, store, ledger, tick.timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     box.update(doc=doc, rows=rows)
@@ -97,7 +95,6 @@ def step_ledger_state(tick: Any, slug: str, store: RedisStore, ledger: Any, box:
 
 
 def step_automated_cleanup(
-    tick: Any,
     slug: str,
     store: RedisStore,
     ledger: Any,
@@ -111,7 +108,6 @@ def step_automated_cleanup(
 
 
 def step_spawn_due(
-    tick: Any,
     slug: str,
     config: SwarmConfig,
     store: RedisStore,
@@ -135,7 +131,7 @@ def step_spawn_due(
     return actions
 
 
-def step_exits_sweep(tick: Any, slug: str, store: RedisStore, ledger: Any) -> list[str]:
+def step_exits_sweep(slug: str, store: RedisStore, ledger: Any) -> list[str]:
     return tick.skip_dropped(
         tick.exits.sweep,
         tick.InboxStore(store.redis),
@@ -146,13 +142,12 @@ def step_exits_sweep(tick: Any, slug: str, store: RedisStore, ledger: Any) -> li
 
 
 def step_master_start_watch(
-    tick: Any, slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, now_ms: int
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, now_ms: int
 ) -> list[str]:
     return tick.skip_refused(tick.master_start.observe, slug, config, store, ledger, runtime, now_ms)
 
 
 def step_launch_checks(
-    tick: Any,
     slug: str,
     store: RedisStore,
     ledger: Any,
@@ -165,13 +160,12 @@ def step_launch_checks(
 
 
 def step_track_outages(
-    tick: Any, slug: str, store: RedisStore, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
+    slug: str, store: RedisStore, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
 ) -> list[str]:
     return tick.skip_refused(tick.resume.track_outages, slug, store, runtime, rows, now_ms) or []
 
 
 def step_verify(
-    tick: Any,
     slug: str,
     store: RedisStore,
     ledger: Any,
