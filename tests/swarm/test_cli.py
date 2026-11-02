@@ -36,6 +36,7 @@ def env(monkeypatch, tmp_path):
 
     from scripts.swarm.health import merge_stall
 
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setattr(
         merge_stall,
         "observe",
