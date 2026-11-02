@@ -256,10 +256,11 @@ def session_credential(headers: http.client.HTTPMessage, path: str) -> None:
     morsel = cookies.get(SESSION_COOKIE + session_slug(path, headers))
     if morsel is None or not morsel.value:
         return
-    if morsel.value.count(".") == 2:
-        headers["Authorization"] = f"Bearer {morsel.value}"
-    else:
-        headers["X-Ledger-Token"] = morsel.value
+    kind, _, value = morsel.value.partition(":")
+    if kind == "bearer" and value:
+        headers["Authorization"] = f"Bearer {value}"
+    elif kind == "page" and value:
+        headers["X-Ledger-Token"] = value
 
 
 def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[int, str | None, int | None]:
@@ -276,7 +277,7 @@ def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[int, 
         return (403 if refused.code == 403 else 503), None, None
     except (OSError, ValueError, KeyError, TypeError):
         return 503, None, None
-    return 200, data["token"], data["expires_in"]
+    return 200, f"bearer:{data['token']}", data["expires_in"]
 
 
 def page_session(slug: str, headers: Mapping[str, str]) -> tuple[int, str | None, int | None]:
@@ -290,7 +291,8 @@ def page_session(slug: str, headers: Mapping[str, str]) -> tuple[int, str | None
         return auth_session(url, slug, headers)
     if os.environ.get("SWARM_AUTH_MODE") == "edge" or not switch.legacy(os.environ):
         return 503, None, None
-    return 200, repository.token(slug), None
+    credential = repository.token(slug)
+    return (200, f"page:{credential}", None) if credential else (503, None, None)
 
 
 @functools.cache

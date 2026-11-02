@@ -2,6 +2,8 @@
 
 import http.client
 import json
+import re
+import subprocess
 import threading
 import uuid
 from collections.abc import Iterator
@@ -118,8 +120,12 @@ def test_the_auth_service_issues_the_signed_operator_session(auth: dict) -> None
         status, cookie, _ = open_session(auth, **{"Cf-Access-Jwt-Assertion": "operator-assertion"})
     name = f"ledger-session-{SLUG}"
 
+    kind, _, token = cookie[name].value.partition(":")
+
     assert status == 200
-    assert tokens.verify(KEY, cookie[name].value, SLUG) == ""
+    assert kind == "bearer"
+    assert tokens.verify(KEY, token, SLUG) == ""
+    assert cookie[name]["secure"]
     assert write(auth, Cookie=f"{name}={cookie[name].value}") == 200
     assert write(auth, **{"Cf-Access-Jwt-Assertion": "operator-assertion"}) == 403
 
@@ -130,3 +136,46 @@ def test_the_auth_service_refuses_a_session_without_the_operator(auth: dict) -> 
 
     assert status == 403
     assert not cookie
+
+
+def test_edge_mode_without_an_auth_service_opens_no_session(live: dict, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_AUTH_URL", raising=False)
+    monkeypatch.setenv("SWARM_AUTH_MODE", "edge")
+    with allowed(live):
+        status, cookie, _ = open_session(live)
+
+    assert status == 503
+    assert not cookie
+
+
+def test_an_unmarked_cookie_carries_no_credential(live: dict) -> None:
+    with allowed(live):
+        _, cookie, _ = open_session(live)
+    name = f"ledger-session-{SLUG}"
+    _, _, credential = cookie[name].value.partition(":")
+
+    assert cookie[name].value.startswith("page:")
+    assert write(live, Cookie=f"{name}={credential}") == 403
+    assert write(live, Cookie=f"{name}=bearer:{credential}") == 403
+
+
+def test_the_page_renews_its_session_before_it_expires() -> None:
+    api = (server.core.HOME.parent / "static" / "js" / "api.js").read_text(encoding="utf-8")
+    functions = "\n".join(
+        re.search(rf"(export (?:async )?function {name}\(.*?\n\}})", api, re.S).group(1).removeprefix("export ")
+        for name in ("openSession", "keepSession")
+    )
+    probe = (
+        "const SESSION_ROOT='/api'; const SLUG='sw'; const timers=[]; const calls=[];\n"
+        "global.setTimeout=(fn,ms)=>timers.push(ms);\n"
+        "let replies=[{ok:true,json:async()=>({expires_in:900})},{ok:false},null];\n"
+        "global.fetch=async (url)=>{calls.push(url); const r=replies.shift(); if(!r) throw new Error('down'); return r;};\n"
+        + functions
+        + "\n(async()=>{await keepSession(); await keepSession(); await keepSession();"
+        "process.stdout.write(JSON.stringify({timers,calls}));})();"
+    )
+    result = subprocess.run(["node", "-e", probe], capture_output=True, text=True, check=True)
+    observed = json.loads(result.stdout)
+
+    assert observed["calls"] == ["/api/sw/session"] * 3
+    assert observed["timers"] == [720000, 30000, 30000]
