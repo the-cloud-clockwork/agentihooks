@@ -1365,7 +1365,7 @@ def _spawn(
     order, actions = timing.timed(_spawn_order, slug, config, store, agents, rows, doc, runtime)
     actions += timing.timed(_block_unresolved, slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
-    run = _Pass(slug, config, store, ledger, runtime, dict(rows), doc, now_ms)
+    run = _Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
     clock, batch = _LaunchClock(), []
     for lane, task in order:
         stop = held or [
