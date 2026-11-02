@@ -1,6 +1,7 @@
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from scripts.ci_mutation.clearances import load_clearances
 from scripts.ci_mutation.report import evaluate, survivor_text
@@ -50,14 +51,14 @@ def merge_reports(reports: list[dict], cleared: dict | None = None) -> dict:
     }
 
 
-def short_shards(reports: dict[int, dict]) -> list[str]:
-    """Return every shard whose report carries no owned and graded counts or graded fewer mutants than it owns."""
-    return [
-        str(shard)
-        for shard, report in reports.items()
-        if not {"expected", "graded"} <= (measurement := report.get("shard", {})).keys()
-        or measurement["graded"] < measurement["expected"]
-    ]
+def short_shards(reports: dict[int, dict[str, Any]]) -> list[str]:
+    """Return every shard whose report lacks an expected or graded count or graded fewer mutants than it owns."""
+    short: list[str] = []
+    for shard, report in reports.items():
+        measurement: dict[str, int] = report.get("shard", {})
+        if not {"expected", "graded"} <= measurement.keys() or measurement["graded"] < measurement["expected"]:
+            short.append(str(shard))
+    return short
 
 
 def main(argv: list[str] | None = None) -> int:
