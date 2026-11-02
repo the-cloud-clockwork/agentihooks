@@ -145,7 +145,12 @@ def _is_control(tok: str, prev: str) -> bool:
 
 
 def _fallback_heads(text: str) -> frozenset[str]:
-    from hooks.context.credential_guard import split_commands, split_stages, tokens_of, verb_index  # pyright: ignore[reportUnknownVariableType]
+    from hooks.context.credential_guard import (  # pyright: ignore[reportUnknownVariableType]
+        split_commands,
+        split_stages,
+        tokens_of,
+        verb_index,
+    )
 
     heads: set[str] = set()
     for segment in split_commands(text):

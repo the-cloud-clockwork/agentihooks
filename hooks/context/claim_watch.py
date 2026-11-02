@@ -33,7 +33,11 @@ def check(
 
     env = os.environ if environ is None else environ
     slug, name, task = (env.get(k) for k in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK"))
-    if env.get("AGENTIHOOKS_SWARM_LANE") not in WORKERS or not (slug and name and task) or worker_mode.active(cast("dict[str, str]", env)):
+    if (
+        env.get("AGENTIHOOKS_SWARM_LANE") not in WORKERS
+        or not (slug and name and task)
+        or worker_mode.active(cast("dict[str, str]", env))
+    ):
         return None
     now = time.time() if now is None else now
     folder = ledger_workspace.folder(slug, task)  # pyright: ignore[reportUnknownMemberType]
