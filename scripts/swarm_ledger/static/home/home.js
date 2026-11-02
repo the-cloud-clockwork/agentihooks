@@ -1,5 +1,5 @@
 import { monitor } from "./monitor.js";
-import { loadTips, readCollection, readLayout, readLedgerPage, writeBin, writeLayout, writeLedgerSwarm } from "../js/api.js";
+import { loadTips, readCollection, readLayout, openSession, writeBin, writeLayout, writeLedgerSwarm } from "../js/api.js";
 
 const view = new URLSearchParams(location.search).get("view") === "bin" ? "bin" : "home";
 const list = document.getElementById("rows");
@@ -122,10 +122,9 @@ function binRow(s) {
 }
 
 async function reopenLedger(b) {
-  const page = await readLedgerPage(b.dataset.slug);
-  if (!page.ok) return page;
-  const doc = new DOMParser().parseFromString(await page.text(), "text/html");
-  return writeLedgerSwarm(b.dataset.slug, doc.querySelector("meta[name=ledger-token]").content, { action: "reopen" });
+  const session = await openSession(b.dataset.slug);
+  if (!session.ok) return session;
+  return writeLedgerSwarm(b.dataset.slug, { action: "reopen" });
 }
 
 function notice(text, actions = []) {

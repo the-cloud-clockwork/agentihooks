@@ -161,7 +161,7 @@ def test_editing_max_agents_writes_it_as_the_operator(hives_page):
     box.fill("5")
     box.press("Enter")
     wait_for(page, lambda: page.patches)
-    assert page.patches == [("pod", {"max_agents": 5}, "__LEDGER_TOKEN__", "__LEDGER_SLUG__")]
+    assert page.patches == [("pod", {"max_agents": 5}, None, "__LEDGER_SLUG__")]
     page.tab.wait_for_function("() => document.querySelector('#hive-pod').cells[6].textContent === '0/5'")
 
 

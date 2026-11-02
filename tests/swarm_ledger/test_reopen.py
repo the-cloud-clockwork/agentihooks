@@ -50,25 +50,25 @@ def test_reopen_buttons_call_the_existing_authenticated_swarm_endpoint():
     script = (
         "\n".join(
             re.search(rf"(export function {name}\(.*?\n\}})", api, re.S).group(1).removeprefix("export ")
-            for name in ("readLedgerPage", "writeLedgerSwarm")
+            for name in ("openSession", "writeLedgerSwarm")
         )
-        + "\nconst ROOT_API = '/api/v1';\n"
+        + "\nconst ROOT_API = '/api/v1'; const SESSION_ROOT = '/api'; const SLUG = '';\n"
         + script
     )
     probe = (
         """
 const calls=[];
 global.document={addEventListener(){}};
-global.DOMParser=class {parseFromString(){return {querySelector(){return {content:'ledger-token'}}}}};
-global.fetch=async (url,options)=>{calls.push([url,options]);return {ok:true,text:async()=>'<html>'}};
+global.fetch=async (url,options)=>{calls.push([url,options]);return {ok:true,json:async()=>({})}};
 """
         + script
         + "\nreopenLedger({dataset:{slug:'sw'}}).then(()=>process.stdout.write(JSON.stringify(calls)));"
     )
     result = subprocess.run(["node", "-e", probe], capture_output=True, text=True, check=True)
     calls = json.loads(result.stdout)
-    assert calls[0][0] == "/sw"
+    assert calls[0][0] == "/api/sw/session"
+    assert calls[0][1]["method"] == "POST"
     assert calls[1][0] == "/api/v1/ledgers/sw/swarm/controls"
     assert calls[1][1]["method"] == "PUT"
-    assert calls[1][1]["headers"]["X-Ledger-Token"] == "ledger-token"
+    assert "X-Ledger-Token" not in calls[1][1]["headers"]
     assert json.loads(calls[1][1]["body"]) == {"action": "reopen"}

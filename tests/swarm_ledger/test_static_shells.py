@@ -104,7 +104,8 @@ def test_an_error_page_the_server_library_writes_carries_the_policy_too(base):
 def test_the_ledger_shell_holds_metadata_but_no_record_seed(base):
     _, _, body = get(f"{base}/{SLUG}")
     token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
-    assert f'<meta name="ledger-token" content="{token}">' in body
+    assert token not in body
+    assert "ledger-token" not in body
     assert f'<meta name="ledger-page" content="{core.page_version()}">' in body
     assert "<title>Shell &lt;ledger&gt;</title>" in body
     assert "secret record overview" not in body
@@ -227,10 +228,10 @@ def test_the_bin_shell_leaves_the_watermark_slot_empty(base):
     assert '/css/tooltips.css">\n<main>' in server.index_page()
 
 
-def test_the_shell_names_the_server_port_and_an_empty_token_when_the_record_has_none(base, monkeypatch):
+def test_the_shell_names_the_server_port_and_no_token_when_the_record_has_none(base, monkeypatch):
     monkeypatch.setattr(server.repository, "token", lambda slug: None)
     page = server.page_for(SLUG)
-    assert '<meta name="ledger-token" content="">' in page
+    assert "ledger-token" not in page
     assert f'<meta name="ledger-port" content="{server.PORT}">' in page
 
 

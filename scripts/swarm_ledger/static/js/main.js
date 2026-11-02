@@ -12,7 +12,7 @@ import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
 import { loadArchitecture } from "./architecture.js";
-import { loadTips } from "./api.js";
+import { keepSession, loadTips } from "./api.js";
 import { tips } from "./state.js";
 import { toggleFrozenView } from "./frozen_view.js";
 
@@ -102,6 +102,7 @@ function start() {
   setInterval(renderSync, 1000);
 }
 
+await keepSession();
 wireSwarm();
 loadArchitecture();
 window.addEventListener("pagehide", () => flush(true));

@@ -18,6 +18,8 @@ import argparse
 import errno
 import functools
 import html
+import http.client
+import http.cookies
 import http.server
 import importlib
 import itertools
@@ -32,7 +34,8 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+import urllib.request
+from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import cast
@@ -55,6 +58,7 @@ import ledger_layout  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
+from scripts.auth import switch  # noqa: E402
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     composition,
@@ -214,19 +218,74 @@ def index_page():
     return core.HOME.read_bytes().decode().replace("__HOME_PAGE__", served_version())
 
 
-def page_for(slug):
+def page_for(slug: str) -> str:
     """The ledger shell: the page's metadata and asset links, read without writing; the records load over the API."""
     title = repository.read(slug, "title").get("title") or slug
     values = {
-        "TOKEN": html.escape(repository.token(slug) or ""),
         "PAGE": served_version(),
         "SLUG": html.escape(slug),
         "PORT": str(PORT),
         "TITLE": html.escape(title),
     }
     return re.sub(
-        r"__LEDGER_(TOKEN|PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], core.SHELL.read_text(encoding="utf-8")
+        r"__LEDGER_(PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], core.SHELL.read_text(encoding="utf-8")
     )
+
+
+SESSION_COOKIE = "ledger-session-"
+SESSION_TARGET = re.compile(r"/api/(?:v1/ledgers/)?([a-z0-9][a-z0-9-]*)")
+
+
+def session_slug(path: str, headers: Mapping[str, str]) -> str:
+    """The ledger a request targets: its X-Ledger-Slug header, else the ledger named in its API path."""
+    match = SESSION_TARGET.match(path)
+    return headers.get("X-Ledger-Slug") or (match.group(1) if match else "")
+
+
+def session_credential(headers: http.client.HTTPMessage, path: str) -> None:
+    """Carry the page session cookie of the targeted ledger as the credential of a request that names none."""
+    if headers.get("Authorization") or headers.get("X-Ledger-Token") or not headers.get("Cookie"):
+        return
+    try:
+        cookies = http.cookies.SimpleCookie(headers["Cookie"])
+    except http.cookies.CookieError:
+        return
+    morsel = cookies.get(SESSION_COOKIE + session_slug(path, headers))
+    if morsel is None or not morsel.value:
+        return
+    if morsel.value.count(".") == 2:
+        headers["Authorization"] = f"Bearer {morsel.value}"
+    else:
+        headers["X-Ledger-Token"] = morsel.value
+
+
+def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[str, int] | None:
+    """Exchange the browser's operator assertion at the auth service for a signed token and its lifetime."""
+    forwarded = {name: headers[name] for name in ("Cf-Access-Jwt-Assertion",) if headers.get(name)}
+    request = urllib.request.Request(
+        f"{url.rstrip('/')}/v1/ledgers/{slug}/token", data=b"", headers=forwarded, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            data = json.load(reply)["data"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return data["token"], data["expires_in"]
+
+
+def page_session(slug: str, headers: Mapping[str, str]) -> tuple[int, str | None, int | None]:
+    """The status, session credential and lifetime for a page session on the ledger.
+
+    With an auth service the credential is its signed operator token; without one it is the page credential, only
+    while legacy credentials are on and outside edge mode, where the page credential is never read.
+    """
+    url = os.environ.get("AGENTIHOOKS_AUTH_URL")
+    if url:
+        issued = auth_session(url, slug, headers)
+        return (403, None, None) if issued is None else (200, *issued)
+    if os.environ.get("SWARM_AUTH_MODE") == "edge" or not switch.legacy(os.environ):
+        return 503, None, None
+    return 200, repository.token(slug), None
 
 
 @functools.cache
@@ -904,6 +963,7 @@ class Handler(BaseHTTPRequestHandler):
         request_metrics.arrived()
         if parsed:
             self.rfile = request_body.Body(self.rfile, request_body.length(self.headers))
+            session_credential(self.headers, self.path)
         return parsed
 
     def send_response(self, code, message=None):
@@ -1209,6 +1269,32 @@ class Handler(BaseHTTPRequestHandler):
         for prefix, post in (("/api/media/", self.post_media), ("/api/artifacts/", self.post_artifact)):
             if route.startswith(prefix):
                 return functools.partial(post, route.removeprefix(prefix))
+        if route.startswith("/api/") and route.endswith("/session"):
+            return functools.partial(self.post_session, route.removeprefix("/api/").removesuffix("/session"))
+        return None
+
+    def post_session(self, slug: str) -> None:
+        """Open the operator's page session on the ledger as an HttpOnly cookie; the page itself carries no token."""
+        if self.headers.get("Origin") not in ALLOWED_ORIGINS:
+            return self.send(403, "origin not allowed", "text/plain")
+        if not self.exists(slug):
+            return self.send(404, "no such ledger", "text/plain")
+        status, credential, ttl = page_session(slug, self.headers)
+        if credential is None:
+            return self.send(status, "no operator session", "text/plain")
+        attributes = ["Path=/", "HttpOnly", "SameSite=Strict"]
+        if ttl:
+            attributes.append(f"Max-Age={int(ttl)}")
+        if self.tls is not None or os.environ.get("SWARM_AUTH_MODE") == "edge":
+            attributes.append("Secure")
+        data = json.dumps({"expires_in": ttl}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Set-Cookie", "; ".join([f"{SESSION_COOKIE}{slug}={credential}", *attributes]))
+        self.end_headers()
+        self.wfile.write(data)
         return None
 
     def probe_write(self) -> None:

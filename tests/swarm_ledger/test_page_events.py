@@ -78,8 +78,9 @@ def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(
     events = [r for r in seen if is_events(r["url"])]
     assert [r["headers"].get("last-event-id") for r in events[:4]] == [None, "first", None, "second"]
     assert all(r["url"].endswith("/api/v1/ledgers/__LEDGER_SLUG__/events") for r in events)
-    assert all("token" not in r["url"].lower() and r["headers"].get("x-ledger-token") for r in events)
+    assert all("token" not in r["url"].lower() and not r["headers"].get("x-ledger-token") for r in events)
     assert sorted(r["url"] for r in seen if "/api/" in r["url"] and not is_events(r["url"])) == [
+        "http://ledger.test/api/__LEDGER_SLUG__/session",
         "http://ledger.test/api/v1/layout",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/architecture",

@@ -1,54 +1,54 @@
-import { API_V1, EVENTS_API, HIVES_API, LAYOUT_API, ROOT_API, ROUTING_API, SLUG, TIPS_API, TOKEN } from "./config.js";
+import { API_V1, EVENTS_API, HIVES_API, LAYOUT_API, ROOT_API, ROUTING_API, SESSION_ROOT, SLUG, TIPS_API } from "./config.js";
 
 export function openEvents(cursor) {
-  const headers = { Accept: "text/event-stream", "X-Ledger-Token": TOKEN };
+  const headers = { Accept: "text/event-stream" };
   if (cursor) headers["Last-Event-ID"] = cursor;
   return fetch(EVENTS_API, { cache: "no-store", headers });
 }
 
 export function writeLedger(body, unloading) {
   return fetch(`${API_V1}/saves`, { method: "PUT", keepalive: unloading && body.length < 60000,
-    headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body });
+    headers: { "Content-Type": "application/json" }, body });
 }
 
 export function writeSwarm(body) {
-  return fetch(`${API_V1}/swarm/controls`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
+  return fetch(`${API_V1}/swarm/controls`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
 export function readModels() {
-  return fetch(`${API_V1}/swarm/models`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(`${API_V1}/swarm/models`, { cache: "no-store", headers: {} });
 }
 
 export function uploadImage(file) {
-  return fetch(`${API_V1}/uploads/media`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Ledger-Token": TOKEN }, body: file });
+  return fetch(`${API_V1}/uploads/media`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
 }
 
 export function readMetadata() {
-  return fetch(API_V1, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(API_V1, { cache: "no-store", headers: {} });
 }
 
 export function readWorkspace(taskId) {
-  return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store", headers: {} });
 }
 
 export function readContextEvidence(task, ref) {
-  return fetch(`${API_V1}/swarm/context/${encodeURIComponent(task)}/${encodeURIComponent(ref)}`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(`${API_V1}/swarm/context/${encodeURIComponent(task)}/${encodeURIComponent(ref)}`, { cache: "no-store", headers: {} });
 }
 
 export function readClosed(name, offset) {
-  return fetch(`${API_V1}/${name}?state=done&offset=${offset}&limit=10`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(`${API_V1}/${name}?state=done&offset=${offset}&limit=10`, { cache: "no-store", headers: {} });
 }
 
 export function searchClosed(name, text, offset = 0) {
-  return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=${offset}&limit=50`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=${offset}&limit=50`, { cache: "no-store", headers: {} });
 }
 
 export function readArchitecture() {
-  return fetch(`${API_V1}/architecture`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(`${API_V1}/architecture`, { cache: "no-store", headers: {} });
 }
 
 export function writeArchitecture(body) {
-  return fetch(`${API_V1}/architecture/actions`, { method: "POST", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
+  return fetch(`${API_V1}/architecture/actions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
 export function readArtifact(id) {
@@ -60,7 +60,7 @@ export function readRouting() {
 }
 
 export function writeRouting(changes) {
-  return fetch(ROUTING_API, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN, "X-Ledger-Slug": SLUG }, body: JSON.stringify(changes) });
+  return fetch(ROUTING_API, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Ledger-Slug": SLUG }, body: JSON.stringify(changes) });
 }
 
 export function readMonitor() {
@@ -72,7 +72,7 @@ export function readHives() {
 }
 
 export function writeHive(id, changes) {
-  return fetch(`${HIVES_API}/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN, "X-Ledger-Slug": SLUG }, body: JSON.stringify(changes) });
+  return fetch(`${HIVES_API}/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Ledger-Slug": SLUG }, body: JSON.stringify(changes) });
 }
 
 export function readLayout() {
@@ -104,12 +104,22 @@ export function writeBin(action, slug) {
   return fetch(`${ROOT_API}/bin/actions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, slug }) });
 }
 
-export function readLedgerPage(slug) {
-  return fetch(`/${encodeURIComponent(slug)}`);
+export function openSession(slug = SLUG) {
+  return fetch(`${SESSION_ROOT}/${encodeURIComponent(slug)}/session`, { method: "POST", cache: "no-store" });
 }
 
-export function writeLedgerSwarm(slug, token, body) {
-  return fetch(`${ROOT_API}/ledgers/${encodeURIComponent(slug)}/swarm/controls`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": token }, body: JSON.stringify(body) });
+export async function keepSession() {
+  try {
+    const resp = await openSession();
+    const ttl = resp.ok ? (await resp.json()).expires_in : null;
+    if (ttl) setTimeout(keepSession, ttl * 800);
+  } catch (e) {
+    setTimeout(keepSession, 30000);
+  }
+}
+
+export function writeLedgerSwarm(slug, body) {
+  return fetch(`${ROOT_API}/ledgers/${encodeURIComponent(slug)}/swarm/controls`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
 export function mediaUrl(id) {

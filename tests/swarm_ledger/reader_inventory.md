@@ -13,7 +13,7 @@ session, telemetry and install state files).
 | Consumer symbol | Resource | Read or write through |
 | --- | --- | --- |
 | ledger_core.sync | whole ledger | facade over repository.apply_ops |
-| ledger_server.page_for | title, token | repository.read(slug, "title"), repository.token |
+| ledger_server.page_for | title | repository.read(slug, "title") |
 | ledger_server.Handler.exists, refused, reply_state, receive, post_media, post_artifact | document, members, token | repository.exists, token, read(slug, "_meta.members"), get_document, apply_ops |
 | ledger_server.stream_resources, all_summaries, serve | ledger view, summaries | repository.get_document, list_summaries |
 | ledger_server.watch_ledgers | bin sweep only | bin_storage; the page seed scan is removed |
