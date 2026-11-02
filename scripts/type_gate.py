@@ -172,6 +172,23 @@ def write(head: Path) -> None:
     (head / BASELINE).write_text(json.dumps(measure(head), indent=2) + "\n")
 
 
+def drifts(
+    path: str, base: dict[str, int], head: dict[str, int], recorded: dict[str, int], touched: set[str] | None
+) -> bool:
+    """Return whether the head's baseline entry for ``path`` disagrees with its measurement in a way the gate refuses.
+
+    With ``touched`` None every disagreement counts. Otherwise only a graded file or an edited entry counts, and a
+    recorded count above the measurement passes while it stays at or below the base's, so fixed errors need no
+    baseline write.
+    """
+    kept, measured, allowed = recorded.get(path, 0), head.get(path, 0), base.get(path, 0)
+    if kept == measured:
+        return False
+    if touched is None:
+        return True
+    return (path in touched or kept != allowed) and (measured > kept or kept > allowed)
+
+
 def grade(
     base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
 ) -> list[str]:
@@ -191,8 +208,7 @@ def grade(
         f"{BASELINE} records {recorded.get(path, 0)} type errors in {path}, the head has {head.get(path, 0)}; "
         "run python -m scripts.type_gate --write"
         for path in sorted(set(recorded) | set(head))
-        if recorded.get(path, 0) != head.get(path, 0)
-        and (touched is None or path in touched or recorded.get(path, 0) != base.get(path, 0))
+        if drifts(path, base, head, recorded, touched)
     ]
     return errors
 

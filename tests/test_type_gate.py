@@ -69,15 +69,20 @@ def test_a_new_ill_typed_function_is_red(tmp_path: Path, capsys: pytest.CaptureF
     ) in out
 
 
-def test_a_fixed_error_with_a_stale_baseline_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_fixed_error_with_a_stale_baseline_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 1})
     head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 1})
-    code, out = _grade(base, head, capsys)
-    assert code == 1
-    assert out == (
+    assert _grade(base, head, capsys) == (0, "0 type errors in 0 files, 1 allowed, 0 errors\n")
+
+
+def test_a_stale_baseline_raised_past_the_base_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 1})
+    head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 2})
+    assert _grade(base, head, capsys) == (
+        1,
         "0 type errors in 0 files, 1 allowed, 1 errors\n"
-        f"::error::{type_gate.BASELINE} records 1 type errors in hooks/planted.py, the head has 0; "
-        "run python -m scripts.type_gate --write\n"
+        f"::error::{type_gate.BASELINE} records 2 type errors in hooks/planted.py, the head has 0; "
+        "run python -m scripts.type_gate --write\n",
     )
 
 
@@ -184,8 +189,15 @@ def test_grade_holds_drift_only_on_touched_files_and_edited_entries() -> None:
         f"{type_gate.BASELINE} records 2 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
     )
     assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}, set()) == []
-    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}, {"a.py"}) == [drift]
-    assert type_gate.grade({"a.py": 3}, {"a.py": 1}, {"a.py": 2}, set()) == [drift]
+    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}, {"a.py"}) == []
+    assert type_gate.grade({"a.py": 3}, {"a.py": 1}, {"a.py": 2}, set()) == []
+    assert type_gate.grade({"a.py": 1}, {"a.py": 1}, {"a.py": 2}, set()) == [
+        f"{type_gate.BASELINE} records 2 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
+    ]
+    assert type_gate.grade({"a.py": 1}, {"a.py": 0}, {"a.py": 2}, {"a.py"}) == [
+        f"{type_gate.BASELINE} records 2 type errors in a.py, the head has 0; run python -m scripts.type_gate --write"
+    ]
+    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}) == [drift]
     assert type_gate.grade({"a.py": 1}, {"a.py": 1}, {}, set()) == [
         f"{type_gate.BASELINE} records 0 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
     ]
