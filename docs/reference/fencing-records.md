@@ -51,7 +51,12 @@ Two implementations exist:
   surfaces as `RevisionConflict`. It serves bus deployments and unmigrated swarms.
 
 `fencing.records(store, slug)` returns the Redis adapter for a migrated swarm and the whole document adapter
-otherwise. No tick step calls it yet; fenced writes reach the port through `fencing.write`.
+otherwise. Fenced writes reach the port through `fencing.write`. Since
+[pull request 9279](https://github.com/the-cloud-clockwork/agentihooks/pull/9279), `ExecutionRegistry` and
+`fencing.read_executions` read executions through it; see
+[Execution reads through the records port](../swarm-v2/execution-identity.md#execution-reads-through-the-records-port).
+On the whole document adapter, a `sections` or `record` call limited to `executions` and `by-name` takes the
+[published copy](../swarm-v2/execution-identity.md#how-the-copy-stays-consistent) when it is current.
 
 ## Redis keys
 
@@ -116,7 +121,7 @@ Outcomes:
 | Script answer | `fencing.write` does |
 |---|---|
 | Committed | Returns the change's result |
-| `RevisionConflict` | Reads again and reruns `change`, up to 16 attempts, then raises `SwarmError("the swarm fencing state kept changing; nothing was committed")` |
+| `RevisionConflict` on the records layout, `StateConflict` on the document layout | Sleeps 1 to 32 milliseconds at random while attempts remain, reads again and reruns `change`, up to 16 attempts, then raises `SwarmError("the swarm fencing state kept changing; nothing was committed")`; see [Retries after a fencing conflict](../swarm-v2/execution-identity.md#retries-after-a-fencing-conflict) |
 | `StaleLease` | Raises `SwarmError("the controller lease is stale")` with no retry |
 
 `lease.fenced(store, slug, held, change)` passes `held` as the fence. A `Lease` fences on its owner, epoch and expiry; a
