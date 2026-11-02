@@ -352,6 +352,7 @@ def _state(
 
 
 def parse_probe(account: str, output: str, elapsed_ms: int, include_fable: bool = False) -> ProbeResult:
+    """Keep probe context telemetry for future session retirement when a reused session nears its context limit."""
     rate_info: dict = {}
     model = "?"
     usage: dict = {}
@@ -384,7 +385,6 @@ def parse_probe(account: str, output: str, elapsed_ms: int, include_fable: bool 
     fable = _window(rate_info, "seven_day_overage_included")
     provider_status = str(rate_info.get("status") or "unknown")
     state, margin = _state(provider_status, five_hour, seven_day, fable if include_fable else None)
-    # Keep probe context telemetry for future session retirement when a reused session nears its context limit.
     context_used = None
     if usage:
         context_used = sum(

@@ -112,9 +112,9 @@ def deletes_path_filters(base: object, head: object) -> bool:
 
 
 def same_events(baseline: dict, workflow: dict) -> bool:
+    """Deleting a pull request path filter from an otherwise identical workflow only runs it on more pull requests."""
     if events(baseline) == events(workflow):
         return True
-    # Deleting a pull request path filter from an otherwise identical workflow only runs it on more pull requests.
     return without_path_filters(baseline) == without_path_filters(workflow) and all(
         deletes_path_filters(old, new) for old, new in zip(events(baseline), events(workflow))
     )

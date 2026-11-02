@@ -23,23 +23,27 @@ def _graded(tree: Path) -> list[Path]:
 
 
 def hits(tree: Path) -> dict[str, list[str]]:
+    """Vulture drops test_ functions and Test classes from any path holding /test, which hooks/ and scripts/ never are.
+
+    A noqa comment in the graded tree hides nothing. Per line, since the pattern's trailing \\s takes newlines.
+
+    Loads vulture's whitelists for the modules the graded files import.
+
+    Vulture's own whitelists carry relative names; every graded file is absolute.
+    """
     tree = tree.resolve()
     scanner = vulture.Vulture()
-    # Vulture drops test_ functions and Test classes from any path holding /test, which hooks/ and scripts/ never are.
     with patch.object(vulture.core, "_is_test_file", frozenset().__contains__):
         for path in _graded(tree):
             try:
                 code = read_file(path)
             except VultureInputException as exc:
                 raise GradeError(f"vulture cannot read {path}: {exc}") from exc
-            # A noqa comment in the graded tree hides nothing. Per line, since the pattern's trailing \s takes newlines.
             scanner.scan("\n".join(NOQA_REGEXP.sub("#", line) for line in code.split("\n")), filename=path)
-        # Loads vulture's whitelists for the modules the graded files import.
         scanner.scavenge([])
     if scanner.exit_code == ExitCode.InvalidInput:
         raise GradeError(f"vulture cannot parse every graded file in {tree}; its error is above")
     found = {}
-    # Vulture's own whitelists carry relative names; every graded file is absolute.
     graded = [item for item in scanner.get_unused_code(min_confidence=MIN_CONFIDENCE) if item.filename.is_absolute()]
     for item in graded:
         unit = item.filename.relative_to(tree).as_posix()
@@ -66,7 +70,7 @@ def write(tree: Path) -> None:
 
 
 def grade(base: dict, measured: dict[str, int], head: dict[str, list[str]], recorded: dict) -> list[str]:
-    # The base's measurement grades, not its record: lint skips the merge queue, so dev's record can go stale.
+    """The base's measurement grades, not its record: lint skips the merge queue, so dev's record can go stale."""
     errors = []
     for unit, found in sorted(head.items()):
         allowed = measured.get(unit, 0)
