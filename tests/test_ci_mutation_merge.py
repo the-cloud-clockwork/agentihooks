@@ -121,6 +121,23 @@ def test_main_grades_a_split_unit_that_survived_every_tests_shard(tmp_path):
     assert json.loads((out / "report.json").read_text())["failed"] is True
 
 
+@pytest.mark.parametrize(("strict", "status"), [(True, 1), (False, 0)])
+def test_strict_main_fails_when_a_shard_graded_fewer_mutants_than_it_owns(tmp_path, capsys, strict, status):
+    shards = tmp_path / "shards"
+    for shard, complete in ((0, True), (1, False)):
+        path = shards / f"mutation-report-{shard}" / "report.json"
+        path.parent.mkdir(parents=True)
+        measurement = {"index": shard, "total": 2, "expected": 3, "graded": 3 if complete else 2, "complete": complete}
+        report = {"files": [_file("scripts/a.py", {"killed": 1})], "not_mutated": [], "failed": False}
+        path.write_text(json.dumps({**report, "shard": measurement}))
+    out = tmp_path / "gate"
+    argv = [str(shards), "--prefix", "mutation-report-", "--shards", "2", "--output", str(out)]
+    assert merge.main([*argv, "--strict"] if strict else argv) == status
+    assert json.loads((out / "report.json").read_text())["failed"] is strict
+    printed = "mutation shards that did not grade every mutant they own: 1" in capsys.readouterr().out
+    assert printed is strict
+
+
 def test_main_fails_and_names_the_missing_shard_when_a_report_is_absent(tmp_path, capsys):
     shards = tmp_path / "shards"
     _write(shards, 1, {"files": [_file("scripts/a.py", {"killed": 1})], "not_mutated": [], "failed": False})

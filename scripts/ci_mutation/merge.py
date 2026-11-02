@@ -56,18 +56,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shards", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--prefix", default="mutation-preflight-shard-")
+    parser.add_argument("--strict", action="store_true")
     args = parser.parse_args(argv)
     found = {shard: args.folder / f"{args.prefix}{shard}" / "report.json" for shard in range(args.shards)}
     missing = [str(shard) for shard, path in found.items() if not path.is_file()]
     reports = [json.loads(path.read_text()) for path in found.values() if path.is_file()]
     cleared = load_clearances(Path.cwd()) if any(report.get("units") for report in reports) else {}
     merged = merge_reports(reports, cleared)
-    merged["failed"] = merged["failed"] or bool(missing)
+    short = [str(entry["index"]) for entry in merged.get("shards", []) if args.strict and not entry["complete"]]
+    merged["failed"] = merged["failed"] or bool(missing) or bool(short)
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "report.json").write_text(json.dumps(merged) + "\n")
     print(f"Merged {args.shards - len(missing)} of {args.shards} mutation shard reports")
     if missing:
         print(f"missing mutation shard reports: {', '.join(missing)}")
+    if short:
+        print(f"mutation shards that did not grade every mutant they own: {', '.join(short)}")
     for entry in merge_units(reports, cleared):
         if entry["failures"]:
             print(survivor_text(entry))
