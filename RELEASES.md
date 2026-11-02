@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.585 · 2026-11-02
+
+### 2026-11-02 · 2374b33699f7 · #9370 · @agenticore-app
+
+**Let the protected grader accept the merged mutation stages as non gates**
+
+This change updates `gate_protected.grade` so the protected grader no longer blocks pull requests introducing the new `mutation-refine` and `mutation-shard` jobs added in PR 9365. Previously, any non-gate entry had to already exist on the base branch, which broke lint since these jobs run outside Gate — Required by design. Now the grader permits them specifically when Gate — Required needs `mutation` and the head `mutation` job needs that stage, keeping the exception narrow while unblocking the mutation-shard budget work. All other new non-gate entries still require an existing base entry, and new tests cover gated, merged, and non-mutation cases.
+
+### 2026-11-02 · 3c3ab8a7bf65 · #9383 · @agenticore-app
+
+**Announce the protected grader and reuse blobs that admit the split unit steps**
+
+This registry-only update records the blob hashes for `scripts/gate_protected.py` and `scripts/ci_reuse.py` from branch `ci-323133-3649` into `tests/registry/FROZEN_GATES.json`, formally announcing the protected grader and letting later steps reuse these blobs. It exists purely to satisfy the frozen gate protocol, allowing the actual gate change admitting split mutation unit steps in Gate — Required to be submitted as its own follow-up pull request, which then feeds into activation in #9382.
+
 ## v2.17.584 · 2026-11-02
 
 ### 2026-11-02 · b502e850eedc · #9345 · @nestorcolt
