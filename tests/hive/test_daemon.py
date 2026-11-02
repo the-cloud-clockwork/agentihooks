@@ -656,14 +656,16 @@ def test_headroom_leaves_the_ready_marker_alone_when_its_publish_fails(monkeypat
 def test_headroom_ignores_an_unset_ready_marker(monkeypatch, tmp_path):
     from scripts.hive import headroom
 
-    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "work"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
     monkeypatch.delenv("HIVE_READY_FILE", raising=False)
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
     monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
     stop, _, beats = _paced(monkeypatch, 2)
     PUBLISH_HEADROOM(object(), object(), "local", stop)
     assert len(beats) == 1
-    assert list(tmp_path.iterdir()) == []
+    assert list(folder.iterdir()) == []
 
 
 def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect(monkeypatch):
