@@ -1,0 +1,180 @@
+"""Focus is an exclusive ordered queue: focused work runs first, free work waits for it, frozen work never runs."""
+
+import json
+from collections.abc import Sequence
+from typing import Any
+
+import pytest
+
+from scripts.swarm import cli, freeze
+from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm.tick import tick
+from scripts.swarm_ledger.repository import hierarchy
+from tests.swarm.test_freeze import FrozenLedger, doc, record, spawned, task
+from tests.swarm.test_swarm_freeze_cli import acting, swarm  # noqa: F401
+from tests.swarm.test_tick import FakeRuntime
+
+pytestmark = [pytest.mark.unit, pytest.mark.feature("swarm-focus")]
+
+
+@pytest.fixture
+def store() -> RedisStore:
+    import fakeredis
+
+    s = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    return s
+
+
+def gate(row: dict[str, Any], *records: dict[str, Any], tasks: Sequence[dict[str, Any]] = ()) -> bool:
+    found = doc(*records, tasks=[row, *tasks])
+    return freeze.claim_gate(row, found, hierarchy.project(found)[0], "")
+
+
+def test_focus_only_a_phase_leaves_every_other_unfrozen_task_free_and_unclaimed_while_a_focused_task_is_open(
+    store: RedisStore,
+) -> None:
+    ledger = FrozenLedger(
+        [{"id": "focused", "phase": "p1"}, {"id": "free", "phase": "p2"}, {"id": "later", "phase": "p2"}],
+        record("phases/p1", "focus"),
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned(runtime) == ["focused"]
+    assert ledger.rows["free"]["state"] == ledger.rows["later"]["state"] == "open"
+    ledger.rows["focused"]["state"] = "pr"
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned(runtime) == ["focused"]
+    ledger.rows["focused"]["state"] = "done"
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert spawned(runtime) == ["focused", "free", "later"]
+
+
+@pytest.mark.parametrize("state", ["open", "claimed", "blocked", "pr"])
+def test_a_focused_task_that_is_not_done_holds_every_task_outside_the_focus(state: str) -> None:
+    focused = task("hot", phase="p2", state=state)
+    assert gate(task(), record("tasks/hot", "focus"), tasks=[focused])
+    assert not gate(task(), record("tasks/hot", "focus"), tasks=[{**focused, "state": "done"}])
+    assert not gate(task(), record("tasks/hot", "focus"), tasks=[{**focused, "out_of_scope": True}])
+
+
+def test_a_focus_covering_no_task_holds_nothing() -> None:
+    assert not gate(task(), record("plans/b", "focus"))
+    assert not freeze.live(doc(record("plans/b", "focus")), {})
+
+
+def test_the_focus_queue_order_sets_the_claim_order(store: RedisStore) -> None:
+    store.update("sw", max_eng=1)
+    rows = [{"id": "bottom", "phase": "p1"}, {"id": "top", "phase": "p2"}]
+    runtime = FakeRuntime()
+    tick(
+        "sw",
+        store,
+        FrozenLedger(rows, record("tasks/top", "focus"), record("tasks/bottom", "focus")),
+        runtime,
+        now_ms=1_000,
+    )
+    assert spawned(runtime) == ["top"]
+
+
+def test_the_reversed_focus_queue_claims_the_other_task_first(store: RedisStore) -> None:
+    store.update("sw", max_eng=1)
+    rows = [{"id": "top", "phase": "p2"}, {"id": "bottom", "phase": "p1"}]
+    runtime = FakeRuntime()
+    tick(
+        "sw",
+        store,
+        FrozenLedger(rows, record("tasks/bottom", "focus"), record("tasks/top", "focus")),
+        runtime,
+        now_ms=1_000,
+    )
+    assert spawned(runtime) == ["bottom"]
+
+
+def test_a_focus_beneath_a_freeze_unfreezes_the_task_and_a_freeze_beneath_a_focus_holds_it() -> None:
+    assert not gate(task(), record("phases/p1"), record("tasks/t1", "focus"))
+    assert gate(task(), record("tasks/t1"), record("phases/p1", "focus"))
+    assert not gate(task(kind="research"), record("lane:eng"), record("kind:research", "focus"))
+
+
+def test_an_unfrozen_task_is_free_and_claimed_only_after_the_focus_queue_is_empty(store: RedisStore) -> None:
+    ledger = FrozenLedger(
+        [{"id": "focused", "phase": "p1"}, {"id": "thawed", "phase": "p2"}],
+        record("tasks/focused", "focus"),
+        record("tasks/thawed"),
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned(runtime) == ["focused"]
+    ledger.freezes = [record("tasks/focused", "focus")]
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned(runtime) == ["focused"]
+    ledger.rows["focused"]["state"] = "done"
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert spawned(runtime) == ["focused", "thawed"]
+
+
+def test_urgent_rank_never_bypasses_the_focus_queue(store: RedisStore) -> None:
+    ledger = FrozenLedger(
+        [{"id": "urgent", "phase": "p2", "rank": "urgent"}, {"id": "focused", "phase": "p1", "rank": "low"}],
+        record("plans/a", "focus"),
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned(runtime) == ["focused"]
+    assert ledger.rows["urgent"]["state"] == "open"
+    assert gate(task(rank="urgent"), record("tasks/hot", "focus"), tasks=[task("hot", phase="p2")])
+
+
+def test_an_urgent_task_held_by_the_focus_names_the_focus() -> None:
+    from scripts.swarm import claim_hold
+
+    row, hot = task(rank="urgent"), task("hot", phase="p2")
+    found = doc(record("tasks/hot", "focus"), tasks=[row, hot])
+    rows = {t["id"]: t for t in found["tasks"]}
+    assert claim_hold.urgent(row, rows, found, hierarchy.project(found)[0], "") == claim_hold.FOCUS
+
+
+def test_the_focus_command_passes_only_and_the_queue_position(
+    swarm: tuple[RedisStore, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, ledger = swarm
+    acting(monkeypatch)
+    assert cli.main(["demo", "focus", "phases/p1", "--only"]) == 0
+    assert cli.main(["demo", "focus", "tasks/t1", "--top"]) == 0
+    assert cli.main(["demo", "focus", "tasks/t2", "--bottom"]) == 0
+    assert [entry[3] for entry in ledger.freezes] == [
+        {"by": None, "reason": "", "quote": "", "only": True},
+        {"by": None, "reason": "", "quote": "", "position": "top"},
+        {"by": None, "reason": "", "quote": "", "position": "bottom"},
+    ]
+    assert [json.loads(line) for line in capsys.readouterr().out.splitlines()][0] == {
+        "focus": "phases/p1",
+        "by": "operator",
+        "only": True,
+    }
+
+
+def test_top_and_bottom_together_are_refused(swarm: tuple[RedisStore, Any], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    acting(monkeypatch)
+    with pytest.raises(SystemExit):
+        cli.main(["demo", "focus", "tasks/t1", "--top", "--bottom"])
+
+
+def test_the_client_sends_the_queue_fields_only_on_a_focus(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm.ledger_client import LedgerClient
+
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops: sent.append(ops[0]))
+    LedgerClient().freeze("demo", "focus", "plans/a", position="top", only=True)
+    LedgerClient().freeze("demo", "unfreeze", "plans/a", position="top", only=True)
+    assert {key: sent[0][key] for key in ("op", "verb", "target", "position", "only")} == {
+        "op": "freeze_set",
+        "verb": "focus",
+        "target": "plans/a",
+        "position": "top",
+        "only": True,
+    }
+    assert "position" not in sent[1] and "only" not in sent[1]
