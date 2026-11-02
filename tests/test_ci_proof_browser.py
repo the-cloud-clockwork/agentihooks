@@ -63,7 +63,9 @@ def test_proof_dependencies_install_offline_into_the_baked_venv(
     assert [next(flag for flag in ("--offline", "--system") if flag in line) for line in lines] == expected
     assert all("--constraint .github/test-requirements.lock" in line for line in lines)
     assert all("-e .[dev,all]" in line for line in lines)
-    assert github_path.read_text() == (f"{venv}/bin\n" if expected == ["--offline"] else "")
+    hit = expected == ["--offline"]
+    assert github_path.read_text() == (f"{venv}/bin\n" if hit else "")
+    assert ("Baked venv hit" if hit else "Baked venv miss") in result.stdout
     assert install["env"]["BAKED_VENV"] == "/opt/agentihooks-venv"
 
 
