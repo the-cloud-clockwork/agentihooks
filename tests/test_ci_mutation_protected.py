@@ -2,6 +2,7 @@ import ast
 import importlib.machinery
 import os
 import py_compile
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -107,6 +108,17 @@ def test_a_planted_head_driver_edit_cannot_change_the_kill_record(
     protected.main(grader)
     assert record.read_text() == f"killed unset {protected.DRIVER}"
     assert sys.modules["mutation_grader.ci_mutation.killers"].__file__ == str(grader / "scripts/ci_mutation/killers.py")
+
+
+def test_the_runner_command_ignores_a_planted_head_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    head = _grader(tmp_path / "head", record="forged")
+    grader = _grader(tmp_path / "grader")
+    launcher = grader / "scripts/ci_mutation/protected.py"
+    launcher.write_text(Path(protected.__file__).read_text())
+    monkeypatch.setenv("MUTATION_GRADER", str(grader))
+    record = tmp_path / "record"
+    subprocess.run([*runner.driver_command(), str(record)], cwd=head, check=True)
+    assert record.read_text() == f"killed unset {protected.DRIVER}"
 
 
 @pytest.mark.usefixtures("isolated")

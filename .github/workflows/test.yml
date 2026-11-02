@@ -3924,6 +3924,7 @@ jobs:
         if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
         env:
           BASES: ${{ steps.plan.outputs.bases }}
+          MUTATION_GRADER: ${{ runner.temp }}/grader
         run: |
           python -m scripts.ci_mutation --bases "$BASES" --budget 1080
           grader="$RUNNER_TEMP/grader"

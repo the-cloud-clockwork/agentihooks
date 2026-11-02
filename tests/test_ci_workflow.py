@@ -2097,6 +2097,7 @@ def test_mutation_shards_grade_their_rows_with_the_protected_grader(
         ("mutation", "Mutate changed Python files"),
         ("mutation", "Mutate dispatched Python files"),
         ("mutation-stats", "Mutate the only shard in the statistics job"),
+        ("mutation-plan", "Grade the empty change set"),
     ],
 )
 def test_mutation_shards_drive_selection_from_the_protected_grader(job: str, mutate: str) -> None:
