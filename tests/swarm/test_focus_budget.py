@@ -29,6 +29,33 @@ def test_scheduler_batch_keeps_five_focused_slots_and_never_claims_frozen_work()
     assert ids == [task["id"] for task in hot[:5] + plain[:5]]
 
 
+def _spawned(tasks, focused):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.tick import _spawn_order
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("sw", "/repo", max_eng=10, max_ci=0, max_plan=0)
+    store.create(config)
+    plain = [work(f"plain{i}") for i in range(3)]
+    ledger = FakeLedger([*plain, *tasks])
+    doc = {**ledger.state("sw"), "freezes": [{"verb": "focus", "target": f"tasks/{name}"} for name in focused]}
+    selected, _ = _spawn_order("sw", config, store, [], ledger.rows, doc, FakeRuntime())
+    return [task["id"] for _, task in selected]
+
+
+def test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus():
+    tasks = [work("older", rank=None), work("newer", rank="urgent")]
+    assert _spawned(tasks, ["older", "newer"]) == ["newer", "older", "plain0", "plain1", "plain2"]
+
+
+def test_focus_record_order_breaks_ties_within_one_rank_band():
+    tasks = [work("first"), work("second"), work("urgent", rank="urgent")]
+    assert _spawned(tasks, ["second", "urgent", "first"]) == ["urgent", "second", "first", "plain0", "plain1", "plain2"]
+
+
 @pytest.mark.feature("swarm-focus")
 def test_ten_lane_slots_allocate_five_focused_and_five_normal_tasks():
     from scripts.swarm import focus_budget
