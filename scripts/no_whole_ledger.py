@@ -60,7 +60,7 @@ def load(tree: Path) -> dict[str, int] | None:
 
 def write(tree: Path) -> None:
     """Record the measurement of tree as its allowlist."""
-    (tree / ALLOWLIST).write_text(json.dumps(measure(tree), indent=1, sort_keys=True) + "\n")
+    (tree / ALLOWLIST).write_text(json.dumps(measure(tree), indent=1) + "\n")
 
 
 def grade(base: dict[str, int] | None, head: dict[str, int], recorded: dict[str, int] | None) -> list[str]:
@@ -80,17 +80,18 @@ def grade(base: dict[str, int] | None, head: dict[str, int], recorded: dict[str,
 def main(argv: list[str] | None = None) -> int:
     """Grade the head against the base, or record the head's allowlist with --write."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", type=Path)
-    parser.add_argument("--head", type=Path, default=Path.cwd())
+    parser.add_argument("--base")
+    parser.add_argument("--head", default=".")
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)
     if not (args.write or args.base):
         parser.error("grading needs --base")
+    tree = Path(args.head)
     try:
         if args.write:
-            write(args.head)
+            write(tree)
             return 0
-        head, recorded, base = measure(args.head), load(args.head), load(args.base)
+        head, recorded, base = measure(tree), load(tree), load(Path(args.base))
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
