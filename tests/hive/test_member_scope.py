@@ -496,3 +496,36 @@ def test_renaming_an_agent_removes_only_its_old_host_projection(redis: Any, swar
     swarm.project_agent("fixture", renamed, previous=current, removed=old)
     assert redis.hgetall(swarm.key("fixture", "hosts")) == {other: "m1", renamed.name: "m2"}
     assert not redis.hexists(swarm.key("fixture", "agents"), old)
+
+
+def test_a_cold_host_read_issues_five_redis_commands(redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", "true")
+    issued: list[object] = []
+    direct = redis.execute_command
+    opened = redis.pipeline
+
+    def command(*args: Any, **kwargs: Any) -> Any:
+        issued.append(args[0])
+        return direct(*args, **kwargs)
+
+    def pipeline(*args: Any, **kwargs: Any) -> Any:
+        pipe = opened(*args, **kwargs)
+        run = pipe.execute
+
+        def execute(*inner: Any, **options: Any) -> Any:
+            issued.append(tuple(entry[0][0] for entry in pipe.command_stack))
+            return run(*inner, **options)
+
+        monkeypatch.setattr(pipe, "execute", execute)
+        return pipe
+
+    monkeypatch.setattr(redis, "execute_command", command)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+    assert scope.PASS.get() is None
+    assert scope.host(redis, "fixture", name) == "m1"
+    assert issued == ["HGET", "SMEMBERS", "HGET", "HGETALL", "HGET"]
+    assert len(issued) == 5
