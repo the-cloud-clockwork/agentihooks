@@ -785,7 +785,8 @@ def test_the_workflow_keeps_a_one_file_change_selected_after_dev_moves(repo, mon
     output = tmp_path / "github-output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     line = next(line for line in step["run"].splitlines() if "scripts.ci_select" in line)
-    argv = [os.path.expandvars(part) for part in shlex.split(line.partition("--durations")[0])[3:]]
+    words = shlex.split(line.partition("--durations")[0])
+    argv = [os.path.expandvars(part) for part in words[words.index("scripts.ci_select") + 1 :]]
     assert ci_select.main(argv) == 0
     assert output.read_text() == "scope=selected\nlegs=[1]\ncount=1\nfiles_1=tests/test_sample.py\n"
 

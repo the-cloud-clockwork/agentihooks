@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
+from scripts.tick.steps import budgets
 
 PASS = Domain("pass")
 
@@ -15,8 +16,6 @@ class CallStep:
     """A step running one call of the tick module with the pass state and writing the actions it returned."""
 
     lane = Lane("tick")
-    budget_s = 600.0
-    interval_s = 0.0
 
     def __init__(
         self,
@@ -32,6 +31,7 @@ class CallStep:
         self.group = group
         self.order = order
         self.call = call
+        self.budget_s, self.interval_s = budgets.timing_of(name)
         self.writes = frozenset({actions_of(name)})
 
     def run(self, ctx: Context) -> Result:
@@ -55,3 +55,15 @@ def actions(records: Iterable[StepRecord]) -> list[str]:
         if write.domain == actions_of(record.name)
         for action in cast(list[str], write.value)
     ]
+
+
+class Left(KeyError):
+    """A pass value no step stored, because its writer was held or left running past its budget."""
+
+
+class PassBox(dict[str, Any]):
+    """The pass box: reading a value no step stored raises ``Left`` instead of a plain ``KeyError``."""
+
+    def __missing__(self, key: str) -> Any:
+        """Raise ``Left`` naming the value no step stored."""
+        raise Left(key)

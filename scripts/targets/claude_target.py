@@ -78,17 +78,18 @@ def _keep_foreign_hooks(settings_path: Path, rendered: dict) -> dict:
 
 
 def settings_document(rendered: dict) -> dict:
+    """
+    rendered["env"] can carry connector-injected literal values, and this is the one adapter that copies the whole dict
+    into settings verbatim — codex and copilot read only permissions.defaultMode. Scan each env value and drop
+    credential-shaped literals before they reach disk; ${VAR}/$VAR references pass through untouched (claude expands
+    them).
+    """
     _i = _install_module()
     rendered = deepcopy(rendered)
     profile_env = rendered.pop("_agentihooks", {}).get("env", {})
     if profile_env:
         rendered["env"] = {**profile_env, **rendered.get("env", {})}
 
-    # rendered["env"] can carry connector-injected literal values, and this
-    # is the one adapter that copies the whole dict into settings verbatim
-    # — codex and copilot read only permissions.defaultMode. Scan each env
-    # value and drop credential-shaped literals before they reach disk;
-    # ${VAR}/$VAR references pass through untouched (claude expands them).
     env_block = rendered.get("env")
     if isinstance(env_block, dict) and env_block:
         from hooks.secrets import scan as _scan_secrets
@@ -273,17 +274,19 @@ class ClaudeAdapter:
         _install_module()._merge_mcp_to_user_scope(servers)
 
     def teardown(self) -> None:
-        # Claude's removal path predates the adapter seam and stays in
-        # uninstall_global (settings restore, symlink sweep, CLAUDE.md restore,
-        # ~/.claude.json MCP removal). Nothing extra to do here.
+        """
+        Claude's removal path predates the adapter seam and stays in uninstall_global (settings restore, symlink sweep,
+        CLAUDE.md restore, ~/.claude.json MCP removal). Nothing extra to do here.
+        """
         return
 
     def post_install_reconcile(self, profile_chain: list[str], persisted_profile: str) -> None:
+        """
+        Guard: only prune when the FULL intended profile chain resolved this run — a transiently-missing profile source
+        would otherwise shrink the managed set and falsely delete that profile's servers.
+        """
         _i = _install_module()
 
-        # Guard: only prune when the FULL intended profile chain resolved this
-        # run — a transiently-missing profile source would otherwise shrink the
-        # managed set and falsely delete that profile's servers.
         intended_chain = [p.strip() for p in persisted_profile.split(",") if p.strip()]
         missing = [name for name in intended_chain if name not in profile_chain]
         if not missing:

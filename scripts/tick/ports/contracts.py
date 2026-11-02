@@ -1,6 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import (
@@ -17,6 +17,7 @@ from scripts.tick.ports.source_control import (
     RepositoryRun,
     Run,
     Tag,
+    WorkflowRun,
 )
 
 if TYPE_CHECKING:
@@ -89,6 +90,14 @@ class SourceControl(Protocol):
     def merged_at(self, commit: str, *, deadline: Deadline) -> str | None: ...
 
     def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]: ...
+
+    def workflow_runs(
+        self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline
+    ) -> tuple[WorkflowRun, ...]: ...
+
+    def download(self, path: str, *, deadline: Deadline) -> bytes: ...
+
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any: ...
 
 
 @runtime_checkable

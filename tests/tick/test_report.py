@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from scripts.gates import progress, quiet
 from scripts.inbox import wake
 from scripts.swarm import (
@@ -29,7 +30,7 @@ from scripts.swarm.status import findings
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, host, report
+from scripts.tick.steps import PASS, CallStep, actions, budgets, host, report
 
 pytestmark = pytest.mark.unit
 
@@ -130,7 +131,7 @@ def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in report.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, CallStep.budget_s)
+        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
 
 
 def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,7 +211,7 @@ def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
         "metrics record": frozenset({"health findings"}),
     }
     assert {step.needs for step in host.STEPS} == {frozenset()}
-    assert CallStep("x", "g", 1, host.held(lambda cli, get: None)).needs == frozenset()
+    assert CallStep("heartbeat", "g", 1, host.held(lambda cli, get: None)).needs == frozenset()
 
 
 def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,5 +222,6 @@ def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_the_status_publish_hands_over_the_doc_and_view(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper status", calls, _pass(), monkeypatch) == []
-    assert calls == [("publish", STORE, "sw", DOC, "view")]
+    failure = RuntimeError("tick failed")
+    assert _run("wrapper status", calls, _pass(failure=failure), monkeypatch) == []
+    assert calls == [("publish", STORE, "sw", DOC, "view", failure)]

@@ -974,7 +974,7 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
 def test_mutation_runs_in_tests_beside_unit_and_lint():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
-    assert job["needs"] in (["mutation-plan", "mutation-stats"], ["mutation-plan", "mutation-stats", "admission"])
+    assert job["needs"] == ["mutation-plan", "mutation-stats", "mutation-refine", "mutation-shard", "admission"]
     assert workflow["jobs"]["mutation-stats"]["needs"] in ("mutation-plan", ["mutation-plan", "admission"])
     assert workflow["jobs"]["mutation-plan"].get("needs", []) in ([], ["admission"])
     assert job["if"] in (

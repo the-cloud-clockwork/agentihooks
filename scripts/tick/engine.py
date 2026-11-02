@@ -3,8 +3,10 @@
 import json
 import os
 from collections.abc import Iterable
+from contextvars import Context as ContextCopy
 from contextvars import copy_context
 from dataclasses import dataclass
+from threading import Lock, Thread
 from typing import Any
 from uuid import uuid4
 
@@ -13,11 +15,15 @@ from scripts.tick import registry
 from scripts.tick.adapters.inbox import notify_pass_budget
 from scripts.tick.step import Context, Result, Step
 
-__all__ = ["FAILED", "LATE", "OK", "StepRecord", "group_steps", "run_group", "run_step"]
+__all__ = ["FAILED", "HELD", "LATE", "OK", "StepRecord", "group_steps", "run_group", "run_step"]
 
 OK = "ok"
 LATE = "late"
 FAILED = "failed"
+HELD = "held"
+
+_RUNNING: dict[str, Thread] = {}
+_RUNNING_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -29,13 +35,17 @@ class StepRecord:
     budget_s: float
     error: str = ""
     result: Result | None = None
+    abandoned: bool = False
+    held: bool = False
 
     @property
     def outcome(self) -> str:
-        """Return failed when the step raised, late when it ran past its budget, else ok."""
+        """Return failed when the step raised, held when its earlier run was alive, late when it ran past its budget or was left running, else ok."""
         if self.error:
             return FAILED
-        return LATE if self.wall_s > self.budget_s else OK
+        if self.held:
+            return HELD
+        return LATE if self.abandoned or self.wall_s > self.budget_s else OK
 
 
 def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, ...]:
@@ -45,16 +55,49 @@ def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, .
 
 
 def run_step(step: Step, ctx: Context) -> StepRecord:
-    """Run one step under a copied context and its own deadline, recording failure and overrun."""
+    """Run one step under a copied context and its own deadline, waiting at most its budget for it to end.
+
+    A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
+    While that earlier run is alive, a new run of the same step is held: no thread starts and the record reads held.
+    """
     deadline = ctx.deadline.child(step.budget_s)
     clock = deadline.clock
     started = clock()
+    outcome: list[Result | BaseException] = []
+    caller = copy_context()
+    with _RUNNING_LOCK:
+        earlier = _RUNNING.get(step.name)
+        if earlier is not None and earlier.is_alive():
+            return StepRecord(step.name, 0.0, step.budget_s, held=True)
+        worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline)), daemon=True)
+        _RUNNING[step.name] = worker
+        worker.start()
+    worker.join(step.budget_s)
+    return (_finished if outcome else _left)(step, outcome, clock() - started)
+
+
+def _left(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
+    """Record a step still running at its budget as abandoned, keeping its wall time."""
+    return StepRecord(step.name, wall_s, step.budget_s, abandoned=True)
+
+
+def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
+    """Record a step that ended within its budget with its result, or the error it raised."""
+    found = outcome[0]
+    if isinstance(found, BaseException) and not isinstance(found, (Exception, SystemExit)):
+        raise found
+    if isinstance(found, BaseException):
+        error = f"{type(found).__module__}.{type(found).__qualname__}"
+        return StepRecord(step.name, wall_s, step.budget_s, error)
+    return StepRecord(step.name, wall_s, step.budget_s, result=found)
+
+
+def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context) -> None:
+    """Run ``step`` in the caller's copied context and append its result or the error it raised."""
     try:
-        result = copy_context().run(timing.within, step.budget_s, step.run, Context(ctx.view, deadline))
-    except (Exception, SystemExit) as exc:
-        error = f"{type(exc).__module__}.{type(exc).__qualname__}"
-        return StepRecord(step.name, clock() - started, step.budget_s, error)
-    return StepRecord(step.name, clock() - started, step.budget_s, result=result)
+        outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx))
+    except BaseException as exc:
+        outcome.append(exc)
 
 
 def run_group(name: str, ctx: Context, steps: Iterable[Step] | None = None) -> tuple[StepRecord, ...]:
@@ -73,9 +116,14 @@ def pass_budget_hold(store: Any, slug: str) -> str:
 
 
 def update_pass_budget(store: Any, slug: str) -> str:
+    from redis.exceptions import RedisError
+
     stage = os.environ.get("AGENTIHOOKS_TICK_STAGE", "S1")
     target = STAGE_TARGETS[stage]
-    rows = tick_report.history(store, slug, "tick:passes", PASS_WINDOW)
+    try:
+        rows = tick_report.history(store, slug, "tick:passes", PASS_WINDOW)
+    except RedisError:
+        rows = []
     if len(rows) < PASS_WINDOW:
         return pass_budget_hold(store, slug)
     measured = tick_report.p95([row["wall_s"] for row in rows])

@@ -18,7 +18,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions
+from scripts.tick.steps import PASS, CallStep, Left, PassBox, actions, budgets
 
 __all__ = [
     "DISPATCH",
@@ -73,8 +73,8 @@ class _SiteView:
 
 def run_site(group: str, found: Mapping[str, Any]) -> list[str]:
     """Run tick group ``group`` against the tick's locals ``found``, raising what a step held, returning actions."""
-    box: dict[str, Any] = {}
-    records = engine.run_group(group, Context(_SiteView(found, box), Deadline.after(CallStep.budget_s)))
+    box: dict[str, Any] = PassBox()
+    records = engine.run_group(group, Context(_SiteView(found, box), Deadline.after(budgets.SLOW_S)))
     raise_held(box)
     return actions(records)
 
@@ -94,6 +94,8 @@ def _held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
             return []
         try:
             return call(tick, get)
+        except Left:
+            return []
         except (Exception, SystemExit) as exc:
             box[RAISED] = exc
             return []
@@ -153,12 +155,12 @@ def _tick_master(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
         SEAT.tick_master.run,
         get("slug"),
-        get("config"),
         get("store"),
         get("ledger"),
         get("runtime"),
         get("now_ms"),
         lambda: tick._master(get("slug"), get("config"), get("store"), get("runtime"), get("now_ms")),
+        get("doc"),
     )
 
 
