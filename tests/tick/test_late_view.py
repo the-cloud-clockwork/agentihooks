@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 SLOWEST_OBSERVED_VIEW_S = 2.88
 
 
-@pytest.mark.feature("swarm-tick-left-pass-value")
+@pytest.mark.feature("swarm-tick-late-view")
 def test_the_view_budget_covers_the_measured_ledger_read() -> None:
     assert budgets.MEASURED["tick view"] == budgets.MEASURED["ledger state"]
     step = next(step for step in host.STEPS if step.name == "tick view")
@@ -26,7 +26,7 @@ def test_the_view_budget_covers_the_measured_ledger_read() -> None:
     assert step.budget_s >= SLOWEST_OBSERVED_VIEW_S
 
 
-@pytest.mark.feature("swarm-tick-left-pass-value")
+@pytest.mark.feature("swarm-tick-late-view")
 @pytest.mark.parametrize("outcome", [engine.LATE, engine.HELD, engine.OK])
 def test_a_late_view_keeps_events_metrics_and_heartbeat_running(
     env: tuple[Any, Any, Any],  # noqa: F811

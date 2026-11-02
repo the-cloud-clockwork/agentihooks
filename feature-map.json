@@ -100,6 +100,17 @@
       ]
     },
     {
+      "id": "swarm-tick-late-view",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2334",
+      "behaviour": "The tick view step budget comes from the measured ledger read time, and a late or held view refresh keeps the earlier view so events, metrics and the heartbeat still run in that pass.",
+      "seam": "the tick view step in scripts.tick.steps.host with its budget from scripts.tick.steps.budgets, and the wrapper pass in scripts.swarm.cli.run_tick",
+      "tests": [
+        "tests/tick/test_late_view.py::test_the_view_budget_covers_the_measured_ledger_read",
+        "tests/tick/test_late_view.py::test_a_late_view_keeps_events_metrics_and_heartbeat_running"
+      ]
+    },
+    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
