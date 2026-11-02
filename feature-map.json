@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "operator-dead-starting-front-door",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2335",
+      "behaviour": "Operator master up finishes an expired starting front door whose process is gone and launches its replacement while preserving refusal for a live starting front door when no seat is free.",
+      "seam": "agentihooks swarm master up --new",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_dead_starting_front_door_is_finished_and_replaced",
+        "tests/swarm/test_master_launch.py::test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master"
+      ]
+    },
+    {
       "id": "swarm-tick-real-backends",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
@@ -97,6 +108,17 @@
         "tests/tick/test_left_value.py::test_a_held_writer_skips_its_reader_and_the_pass_completes",
         "tests/tick/test_left_value.py::test_an_observe_step_missing_a_pass_value_is_skipped_without_holding_an_error",
         "tests/tick/test_left_value.py::test_a_pass_box_names_the_left_value_as_a_key_error"
+      ]
+    },
+    {
+      "id": "swarm-tick-late-view",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2334",
+      "behaviour": "The tick view step budget comes from the measured ledger read time, and a late or held view refresh keeps the earlier view so events, metrics and the heartbeat still run in that pass.",
+      "seam": "the tick view step in scripts.tick.steps.host with its budget from scripts.tick.steps.budgets, and the wrapper pass in scripts.swarm.cli.run_tick",
+      "tests": [
+        "tests/tick/test_late_view.py::test_the_view_budget_covers_the_measured_ledger_read",
+        "tests/tick/test_late_view.py::test_a_late_view_keeps_events_metrics_and_heartbeat_running"
       ]
     },
     {

@@ -3,12 +3,14 @@ when that launch fails, promote one live engineer whose only purpose is restorin
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import master_alarm, master_start
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
 
 KEY = "master-outage"
@@ -17,6 +19,7 @@ FORCED = "master down {minutes} minutes, forced a master launch"
 NO_HOOK = "the forced master launch reported no hook within two minutes"
 NO_LAUNCH = "no master launched"
 SUSPECT = "suspect"
+STARTING = "starting"
 PROMPT = (
     "PROMOTED: swarm {slug} has had no live master for {minutes} minutes and the forced master launch failed: "
     "{reason}. The exact launch error: {error}. This replaces any master down notice you were sent. You stay {name} "
@@ -71,11 +74,22 @@ def status_line(state) -> str:
     return f"promoted  {state['promoted']}  restoring the master: {state['failure']}"
 
 
-def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
-    """launch runs the tick's own master launch and returns its actions."""
+def run(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    now_ms: int,
+    launch: Callable[[], list[str]],
+    doc: dict,
+) -> list[str]:
+    """launch runs the tick's own master launch and returns its actions; doc is the ledger, whose writes seat a
+    live master still recorded as starting."""
+    config = store.config(slug)
     state, minutes = read(store, slug), down_minutes(os.environ)
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
-    finished = _finish_dead(store, slug) if forcing else []
+    forcing = forcing and not _bound(store, slug, runtime, doc)
+    finished = _finish_dead(store, slug, runtime, now_ms) if forcing else []
     if forcing and not _starting(store, slug):
         master_start.clear_unalerted(store, slug)
     launched = launch()
@@ -85,7 +99,7 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     if config.state == "stopping":
         master_alarm.drop(store, slug)
         return actions + _stop(slug, store, ledger, state, now_ms)
-    if master := _bound(store, slug, runtime):
+    if master := _bound(store, slug, runtime, doc):
         back = master_alarm.clear(store, slug)
         return actions + _hand_back(slug, store, ledger, state, master.name, now_ms) + back
     if not state:
@@ -138,13 +152,23 @@ def _forced(store, slug, state, now_ms, launched):
     return {**state, "forced_at": now_ms, "failure": "; ".join(launched) or NO_LAUNCH}
 
 
-def _finish_dead(store, slug):
-    """A suspect lead has not answered through the whole down window, so the forced launch may replace it."""
-    actions = []
+def _finish_dead(store: RedisStore, slug: str, runtime: Any, now_ms: int) -> list[str]:
+    """A suspect lead has not answered through the whole down window, and a dead starting lead never will, so the
+    forced launch may replace either."""
+    return _finish(store, slug, runtime, now_ms, (SUSPECT, STARTING))
+
+
+def finish_dead_starting(store: RedisStore, slug: str, runtime: Any, now_ms: int) -> list[str]:
+    """A starting lead with no live process past its start deadline never reports, so any relaunch may replace it."""
+    return _finish(store, slug, runtime, now_ms, (STARTING,))
+
+
+def _finish(store: RedisStore, slug: str, runtime: Any, now_ms: int, states: tuple[str, ...]) -> list[str]:
+    actions, live = [], runtime.live_names()
     for lead in _masters(store, slug):
-        if lead.state == SUSPECT:
+        if lead.state in states and (lead.state == SUSPECT or master_start.dead(lead, live, now_ms)):
             store.put_agent(slug, replace(lead, state="finished"))
-            actions.append(f"finished dead lead {lead.name} ({SUSPECT})")
+            actions.append(f"finished dead lead {lead.name} ({lead.state})")
     return actions
 
 
@@ -160,10 +184,10 @@ def _launch_refusal(store, slug):
     return NO_LAUNCH
 
 
-def _bound(store, slug, runtime):
-    """Any live working master seat ends an outage: with the lead down, operator chat reaches the lowest live seat."""
+def _bound(store: RedisStore, slug: str, runtime: Any, doc: dict) -> AgentRecord | None:
+    """Any seated master ends an outage: with the lead down, operator chat reaches the lowest live seat."""
     live = runtime.live_names()
-    return next((a for a in store.agents(slug) if a.lane == MASTER and a.state == "working" and a.name in live), None)
+    return next((a for a in store.agents(slug) if a.lane == MASTER and master_start.seated(a, live, doc)), None)
 
 
 def _engineer(store, slug, name):
