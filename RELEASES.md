@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.589 · 2026-11-02
+
+### 2026-11-02 · 68b6af7aa7c1 · #9412 · @agenticore-app
+
+**Fail the whole ledger read gate when the base lacks its allowlist**
+
+This change closes a self-grading loophole in the whole ledger read gate: previously, if the protected base branch lacked its own allowlist, the gate would fall back to trusting whatever the head branch claimed, letting a head script effectively grade itself. Now a missing base allowlist simply fails the gate outright. This matters because that fallback was only ever meant to bootstrap the gate's own rollout, and leaving it in place after that point let an attacker-controlled head branch bypass the allowlist check entirely by targeting a base without one.
+
 ## v2.17.586 · 2026-11-02
 
 ### 2026-11-02 · 699dbac59add · #9393 · @agenticore-app
