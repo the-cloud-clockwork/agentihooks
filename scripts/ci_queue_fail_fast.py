@@ -8,7 +8,7 @@ EXITED = re.compile(r"##\[error\]" + STEP_EXITED.pattern)
 
 
 def logged_loss(repo: str, job: dict, seen: dict[str, bool]) -> bool:
-    # A lost runner may leave no log or only an annotation; only a step that exited nonzero proves a real failure.
+    """A lost runner may leave no log or only an annotation; only a step that exited nonzero proves a real failure."""
     key = str(job["id"])
     if key not in seen:
         try:

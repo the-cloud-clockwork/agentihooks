@@ -1,4 +1,7 @@
-"""GitHub lists at most 1000 runs for one filtered query, so runs are read one hour at a time and a full hour fails."""
+"""GitHub lists at most 1000 runs for one filtered query, so runs are read one hour at a time and a full hour fails.
+
+RESERVE: Calls left for the other users of the token's hourly limit after the job reads.
+"""
 
 import argparse
 import json
@@ -21,7 +24,6 @@ TIERS = {"pull_request": "pull request", "pull_request_target": "pull request", 
 TOP = 25
 CACHE = Path("ci-minutes-jobs.json")
 KEEP = timedelta(days=7)
-# Calls left for the other users of the token's hourly limit after the job reads.
 RESERVE = 1000
 
 

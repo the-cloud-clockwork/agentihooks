@@ -19,7 +19,6 @@ from tests import coverage_check, reused_coverage
 
 ARTIFACT = re.compile(rf"branch-coverage-3\.12-({LEG.pattern})-(\d+)", re.ASCII)
 PAGE = 100
-# Each download holds a shard's coverage database, about 50 MB, in memory.
 WORKERS = 4
 TIMEOUT = 300
 ERRORS = (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError)
@@ -144,6 +143,7 @@ def _runs(plan: Path, deselected: Path) -> dict[tuple[int, int], tuple[str, set[
 
 
 def main(argv: list[str] | None = None) -> int:
+    """WORKERS: Each download holds a shard's coverage database, about 50 MB, in memory."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository", required=True)
     parser.add_argument("--plan", type=Path, required=True)

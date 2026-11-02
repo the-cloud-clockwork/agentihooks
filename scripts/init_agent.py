@@ -222,12 +222,14 @@ def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[s
 
 
 def _bind_brain(environ: dict[str, str]) -> None:
-    # The profile renderer reads the binding from the process environment.
+    """The profile renderer reads the binding from the process environment.
+
+    A herdr pane gets credentials only from the env files its launcher sources.
+    """
     if not environ.get("AGENTIHOOKS_SWARM"):
         os.environ.pop(brain_binding.VARIABLE, None)
         environ.pop(brain_binding.VARIABLE, None)
         return
-    # A herdr pane gets credentials only from the env files its launcher sources.
     decided = brain_binding.decide(environ, operator_env.values(environ))
     environ[brain_binding.VARIABLE] = os.environ[brain_binding.VARIABLE] = json.dumps(decided, sort_keys=True)
 
@@ -250,7 +252,9 @@ def _predecessor_export(environ: dict[str, str]) -> str:
 
 
 def _config_home_export(environ: dict[str, str]) -> str:
-    # A herdr pane inherits the herdr server's environment, not the caller's, so trust lands where Claude reads only if pinned.
+    """A herdr pane inherits the herdr server's environment, not the caller's, so trust lands where Claude reads only if
+    pinned.
+    """
     home = environ.get("CLAUDE_CONFIG_DIR")
     return f"export CLAUDE_CONFIG_DIR={shlex.quote(home)}\n" if home else "unset CLAUDE_CONFIG_DIR\n"
 
@@ -263,9 +267,9 @@ def _codex_otel_args(environ: dict[str, str]) -> list[str]:
 
 
 def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
+    """An inline table, because Codex splits a dotted -c key on every dot, path dots included."""
     if not claude_trust.allowed(environ):
         return []
-    # An inline table, because Codex splits a dotted -c key on every dot, path dots included.
     return ["-c", f'projects={{{json.dumps(str(directory))}={{trust_level="trusted"}}}}']
 
 
@@ -447,7 +451,10 @@ def _agent_command(
     directory: Path,
     opening: Path | None = None,
 ) -> tuple[list[str], str]:
-    """(command, line run before it): Claude routes through `agentihooks claude`, Codex through `agentihooks codex`."""
+    """(command, line run before it): Claude routes through `agentihooks claude`, Codex through `agentihooks codex`.
+
+    A server on MCP revision 2026-07-28 never registers as a channel.
+    """
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
     if spec.agent == "codex" and spec.transport == APP_SERVER:
         return _app_server_command(spec, report, agent_args, environ, directory, opening), ""
@@ -486,7 +493,6 @@ def _agent_command(
     from scripts import front_door_route
 
     command = [*command[:2], *front_door_route.check(spec.profile, spec.title or name, command[2:])]
-    # A server on MCP revision 2026-07-28 never registers as a channel.
     before = "export MCP_PROTOCOL_NEGOTIATION=legacy\n" if spec.channel else ""
     return _profile_command(command, spec), before
 
@@ -769,6 +775,10 @@ def _launch_command(
     title: str,
     environ: dict[str, str],
 ) -> tuple[str, list[str]]:
+    """wt.exe is a Windows process: the program must be a Windows-resolvable name, never a /mnt/c path.
+
+    Interactive, so ~/.bashrc exports the AH_CC_TOKEN_* accounts that --route resolves.
+    """
     system = platform.system()
     if system == "Darwin":
         osascript = shutil.which("osascript")
@@ -783,7 +793,6 @@ def _launch_command(
         if ";" in str(launcher):
             raise RuntimeError(f"launcher path contains ';', which wt.exe splits on: {launcher}")
         distro = environ.get("WSL_DISTRO_NAME", "")
-        # wt.exe is a Windows process: the program must be a Windows-resolvable name, never a /mnt/c path.
         return "wsl", [
             wt,
             "-w",
@@ -795,7 +804,6 @@ def _launch_command(
             *(["-d", distro] if distro else []),
             "--",
             "bash",
-            # Interactive, so ~/.bashrc exports the AH_CC_TOKEN_* accounts that --route resolves.
             "-lic",
             str(launcher),
         ]
@@ -1071,6 +1079,7 @@ def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
 
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
+    """A handoff must land on another account, so it never falls back to bare Claude."""
     args = _parser().parse_args(argv)
     launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
@@ -1105,7 +1114,6 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             prompt = _binding_request(args, agent, prompt, active_env, claude_args)
         channel = args.inbox_channel and agent == "claude"
         claude_args = [*_inbox_channel_args(active_env), *claude_args] if channel else claude_args
-        # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,
             name,

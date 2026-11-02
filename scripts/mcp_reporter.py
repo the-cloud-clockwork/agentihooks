@@ -58,7 +58,6 @@ def load_all_mcp_configs(project_path: Optional[str] = None) -> dict[str, dict]:
 
     servers: dict[str, dict] = {}
 
-    # User scope: ~/.claude.json
     user_mcp = claude_json()
     if user_mcp.exists():
         try:
@@ -68,7 +67,6 @@ def load_all_mcp_configs(project_path: Optional[str] = None) -> dict[str, dict]:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Project scope: .mcp.json in CWD or provided path
     project_dir = Path(project_path) if project_path else Path.cwd()
     project_mcp = project_dir / ".mcp.json"
     if project_mcp.exists():
@@ -87,6 +85,10 @@ def count_tools_per_server(servers: dict[str, dict]) -> dict[str, int]:
 
     For the agentihooks server, reads from the MCP registry.
     For external servers, uses a default estimate based on server type.
+
+    Each category module has ~3-4 tools on average.
+
+    For stdio and sse servers nothing can be introspected, so a heuristic applies: a typical MCP server has 5-15 tools.
     """
     counts: dict[str, int] = {}
 
@@ -103,7 +105,6 @@ def count_tools_per_server(servers: dict[str, dict]) -> dict[str, int]:
 
                 cats = os.getenv("MCP_CATEGORIES", "all")
                 if cats.lower() == "all":
-                    # Each category module has ~3-4 tools on average
                     counts[name] = len(CATEGORY_MODULES) * 4
                 else:
                     counts[name] = len(cats.split(",")) * 4
@@ -111,8 +112,6 @@ def count_tools_per_server(servers: dict[str, dict]) -> dict[str, int]:
                 counts[name] = 20  # fallback estimate
             continue
 
-        # For stdio/sse servers, we can't introspect — use heuristic
-        # Typical MCP server has 5-15 tools
         args = config.get("args", [])
         if any("github" in str(a).lower() for a in args):
             counts[name] = 40  # GitHub MCP is large

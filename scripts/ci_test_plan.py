@@ -19,7 +19,6 @@ from scripts.ci_budget.rate_limit import gh_api
 from tests import dep_manifest
 
 UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
-# Full scope runs carry these into their own coverage for the tests they reuse.
 COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 21))
 PACKED = "dep-manifest-packed"
 PACKED_FILE = "packed.json"
@@ -53,10 +52,10 @@ def _strings(value: object) -> bool:
 
 
 def _valid_test(record: object, unit_count: int, checked: set[int]) -> bool:
+    """An unpacked manifest shares one files list across many tests; each list is checked once."""
     if not isinstance(record, dict):
         return False
     files, units = record.get("files"), record.get("units")
-    # An unpacked manifest shares one files list across many tests; each list is checked once.
     if id(files) not in checked:
         if not _strings(files):
             return False
@@ -108,6 +107,7 @@ def _recorded(run: dict, repository: str) -> bool:
 
 
 def _usable(pool: ThreadPoolExecutor, actions: str, runs: list[dict], tally: Counter) -> tuple[dict, dict] | None:
+    """COVERAGE: Full scope runs carry these into their own coverage for the tests they reuse."""
     listings = [pool.submit(_api, f"{actions}/runs/{run['id']}/artifacts?per_page=100") for run in runs]
     tally["requests"] += len(runs)
     for run, listing in zip(runs, listings):
