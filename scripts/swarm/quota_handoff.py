@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, quota_notice
+from scripts.swarm import capacity, master_pin, quota_notice
 from scripts.swarm.store import MASTER, RedisStore
 
 
@@ -67,7 +67,7 @@ def directive(slug: str, account: capacity.Account, crossed: list[str]) -> str:
     )
 
 
-def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
+def warn(slug: str, store: RedisStore, environ: dict[str, str]) -> list[str]:
     thresholds = Thresholds.from_env(environ)
     accounts = {
         (row["harness"], row["name"]): capacity.Account(**row) for row in capacity.read(store, slug).get("accounts", [])
@@ -76,7 +76,7 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
     lives, periods = store.key(slug, "quota-warning-lives"), store.key(slug, "quota-warning-periods")
     for agent in store.agents(slug):
         account = accounts.get((agent.harness, agent.account))
-        if agent.state == "finished" or account is None:
+        if agent.state == "finished" or account is None or master_pin.stays(slug, agent, environ):
             continue
         account = replace(account, reserved="") if agent.lane == MASTER else account
         life, due = str(agent.started_at), []

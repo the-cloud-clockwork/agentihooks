@@ -124,3 +124,33 @@ def test_the_declared_master_account_joins_the_master_lane(monkeypatch):
     assert joined.lanes == {"master": {"agent": "claude", "account": "main"}, "eng": {"agent": "codex"}}
     assert replace(joined, lanes=config.lanes) == config
     assert seen == [environ]
+
+
+FRONT = AgentRecord("front", "master", "", harness="claude", account="main", profile="master", seat="master@sw")
+
+
+@pytest.mark.parametrize(
+    ("agent", "declared", "expected"),
+    [
+        (FRONT, "main", True),
+        (FRONT, "other", False),
+        (replace(FRONT, lane="eng"), "main", False),
+        (replace(FRONT, harness="codex"), "main", False),
+        (replace(FRONT, account=""), "", False),
+        (replace(FRONT, seat="master-2@sw"), "main", False),
+        (replace(FRONT, profile="engineer"), "main", False),
+    ],
+)
+def test_only_a_front_door_master_on_the_declared_account_stays(
+    monkeypatch: pytest.MonkeyPatch, agent: AgentRecord, declared: str, expected: bool
+) -> None:
+    seen: list[object] = []
+
+    def found(environ: object) -> str:
+        seen.append(environ)
+        return declared
+
+    monkeypatch.setattr(master_pin, "declared", found)
+    environ = {"AGENTIHOOKS_HOME": "/x"}
+    assert master_pin.stays("sw", agent, environ) is expected
+    assert seen in ([], [environ])

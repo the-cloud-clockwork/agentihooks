@@ -1,8 +1,10 @@
 """Agents still working on a draining account past their quota handoff warning, a health finding for the master."""
 
+import os
+
 from scripts import quota_freshness, quota_state
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import capacity, quota_view
+from scripts.swarm import capacity, master_pin, quota_view
 from scripts.swarm.health.findings import MINUTE_MS, Finding, Limits
 from scripts.swarm.store import MASTER, RedisStore
 
@@ -38,7 +40,7 @@ def findings(store: RedisStore, slug: str, limits: Limits, now_ms: int) -> list[
             continue
         if account is None or not draining(account, limits, now_ms / 1000):
             continue
-        if agent.lane == MASTER and account.get("reserved"):
+        if (agent.lane == MASTER and account.get("reserved")) or master_pin.stays(slug, agent, os.environ):
             continue
         try:
             warned_at = inbox.get(warned[agent.name]).created_at

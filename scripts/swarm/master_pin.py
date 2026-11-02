@@ -75,3 +75,14 @@ def pinned(master: dict[str, Any], observations: Iterable[Account], agents: Iter
         and _front_door(slug, agent)
         for agent in agents
     )
+
+
+def stays(slug: str, agent: AgentRecord, environ: Mapping[str, str]) -> bool:
+    """Whether a front door master runs on the declared Claude master account its successor routes back onto."""
+    return (
+        agent.lane == "master"
+        and agent.harness == "claude"
+        and agent.account != ""
+        and _front_door(slug, agent)
+        and agent.account == declared(environ)
+    )
