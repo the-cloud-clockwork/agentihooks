@@ -109,6 +109,9 @@ def test_main_grades_in_place_with_the_tree_clearances_and_protected_scope(
     assert main(["report", str(target), str(tmp_path), "one"]) == 0
     assert json.loads(target.read_text())["files"][0]["failures"] == []
     assert capsys.readouterr().out == "Protected grader: mutation report passed\n"
+    target.write_text(json.dumps({"files": [], "not_mutated": [], "failed": False}))
+    with pytest.raises(ValueError, match=r"^Mutation report does not cover exactly the changed Python files$"):
+        main(["report", str(target), str(tmp_path), "one"])
 
 
 def test_bases_prints_the_protected_choice_for_the_step_output(
