@@ -213,7 +213,10 @@ def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
     step = next(step for step in report.STEPS if step.name == "snapshot job")
     monkeypatch.setattr(step, "budget_s", 0.05)
 
+    called: list[bool] = []
+
     def start(*args: object) -> bool:
+        called.append(True)
         release.wait(60.0)
         return False
 
@@ -225,6 +228,7 @@ def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
         running = engine._RUNNING.get("snapshot job")
         if running is not None:
             running.join(30.0)
+    assert called == [True]
     assert [name for name, _ in seen][-3:] == ["wrapper metrics", "after", "wrapper status"]
 
 
