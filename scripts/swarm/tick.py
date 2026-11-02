@@ -53,6 +53,7 @@ from scripts.swarm import (
     ledger_probe,
     lifetime,
     live_binding,
+    lost_runner,
     master_move,
     master_questions,
     master_retire,
