@@ -7,6 +7,7 @@ import pytest
 from scripts.hive import auth
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger_authority as authority
+from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api import routes
 from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.api_fakes import as_services
@@ -149,22 +150,23 @@ def test_a_revoked_member_cannot_be_recreated_by_token_issuance(hive):
 
 
 def test_revoke_conflicting_with_token_recording_cannot_recreate_membership(hive):
+    from scripts.events.redis_state import RedisStateStore
+
     store, grant = hive
-    transact = store.redis.transaction
+    create = RedisStateStore.create
     revoked = []
 
-    def concurrent_record(callback, key):
-        def record(pipe):
-            callback(pipe)
-            if not revoked:
-                revoked.append(True)
-                auth.revoke(store.redis, grant["id"])
+    def concurrent_record(self, key, value):
+        if key.startswith(f"agent.{grant['id']}.") and not revoked:
+            revoked.append(True)
+            auth.revoke(store.redis, grant["id"])
+        return create(self, key, value)
 
-        return transact(record, key)
-
-    with patch.object(store.redis, "transaction", side_effect=concurrent_record):
+    with patch.object(RedisStateStore, "create", concurrent_record):
         with pytest.raises(auth.HiveError, match="Hive membership was revoked"):
             auth.issue_agent(store.redis, grant["id"], SLUG, WORKER)
+    assert revoked == [True]
+    assert auth.member(store.redis, grant["id"]) is None
     assert auth.ledger_member(store.redis, grant["ledger_credential"]) is None
 
 
@@ -197,3 +199,31 @@ def test_local_page_derived_agent_tokens_still_work(live, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
     token = authority.agent_token(live["admin"], SLUG, WORKER)
     assert authority.principal(live["admin"], SLUG, token, WORKER) == WORKER
+
+
+def test_a_token_request_while_every_hive_permit_is_held_answers_busy(live, hive, monkeypatch):
+    from scripts.swarm_ledger import hive_work
+    from tests.swarm_ledger.test_hive_work import every_permit_held
+
+    store, grant = hive
+    store.start_execution(SLUG, AgentRecord(WORKER, "eng", "proof", seat=f"eng-1@{SLUG}", hive=grant["id"]))
+    monkeypatch.setattr(hive_work, "WAIT_S", 0.05)
+    with every_permit_held():
+        status, reply = mint(live, grant, WORKER)
+    assert status == 503
+    assert reply == {"error": {"code": "busy", "message": "The ledger is busy with other hive credential requests"}}
+
+
+def test_a_page_route_with_a_hive_token_while_every_hive_permit_is_held_answers_busy(live, monkeypatch):
+    from scripts.swarm_ledger import hive_work
+    from tests.swarm_ledger.test_hive_work import every_permit_held
+
+    read = []
+    monkeypatch.setattr(hive_work, "WAIT_S", 0.05)
+    monkeypatch.setattr(ledger_server, "swarm_status", lambda slug: read.append(slug))
+    with every_permit_held():
+        status, body, kind = send(
+            live, "GET", f"/api/swarm/{SLUG}", **{"X-Ledger-Token": "hive.m.t", "X-Ledger-Agent": WORKER}
+        )
+    assert (status, body, kind) == (503, b"The ledger is busy with other hive credential requests", "text/plain")
+    assert read == []

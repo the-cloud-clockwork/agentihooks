@@ -48,6 +48,35 @@ def test_a_block_at_assist_needs_no_record(started):
     assert ledger.rows["t2"]["state"] == "blocked"
 
 
+def test_a_block_reads_its_task_and_dependencies_by_id_never_the_collection(started, monkeypatch, capsys):
+    store, ledger = started
+    store.update("sw", autonomy="assist")
+    ledger.rows["t2"]["depends_on"] = ["t1"]
+    ledger.rows["t1"]["state"] = "done"
+    monkeypatch.setattr(ledger, "tasks", lambda slug: pytest.fail("block read the whole tasks collection"))
+    assert run("sw", "--as", CI, "block", "waiting on a token") == 0
+    assert ledger.rows["t2"]["state"] == "blocked"
+
+
+def test_a_block_waits_on_a_dependency_the_ledger_no_longer_holds(started, capsys):
+    store, ledger = started
+    store.update("sw", autonomy="assist")
+    ledger.rows["t2"]["depends_on"] = ["t9"]
+    capsys.readouterr()
+    assert run("sw", "--as", CI, "block", "waiting on a token") == 0
+    assert json.loads(capsys.readouterr().out)["waits_on"]["target"] == "t9"
+    assert ledger.rows["t2"].get("state") != "blocked"
+
+
+def test_a_block_without_its_task_on_the_ledger_is_a_named_refusal(started, capsys):
+    store, ledger = started
+    store.update("sw", autonomy="assist")
+    del ledger.rows["t2"]
+    capsys.readouterr()
+    assert run("sw", "--as", CI, "block", "waiting on a token") == 1
+    assert capsys.readouterr().err == "swarm: ledger sw has no task t2\n"
+
+
 @pytest.mark.parametrize("action", ["attempt", "critic", "escalate", "status"])
 def test_resolve_parses_each_step_with_empty_defaults(action):
     parsed = cli.build_parser().parse_args(["sw", "resolve", action, "tasks/t2"])

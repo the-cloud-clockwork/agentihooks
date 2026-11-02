@@ -471,10 +471,12 @@ Each scan joins it with:
 | `telemetry never exported` | no trace for the binding's session past the grace, once the agent has completed a turn (a recorded Stop or session end, or a second prompt in the exporter cursor) or has worked past the first turn bound |
 | `exporter backlog` | observations queued in the cursor, or a pending cap overflow, and the oldest unaccepted source event older than the threshold |
 | `telemetry stale` | generated progress unaccepted past the threshold while nothing is queued, even with the exporter process alive; or the exporter recorded more accepted observations than Langfuse holds past the threshold since its last acceptance |
+| `telemetry count drift` | past the grace, a Langfuse trace was found for the binding's session and the exporter cursor's accepted aggregate (accepted identities plus paged spans) differs from the accepted observation identities, which are rebuilt from the transcript up to the accepted offset when the cursor holds paged spans; any difference raises it, alongside a misattributed or stale finding; id the agent's life, number the size of the difference. When the identities cannot be read it is not raised; the failed read is listed on `trace reader unavailable` |
 | `telemetry misattributed` | a trace tagged with the agent carries another life, seat, task, harness or resolved profile, or the session was accepted with no trace under the agent |
+| `telemetry start unknown` | the binding has no positive start; see [Agent start](#agent-start) |
 | `trace reader unavailable` | the trace listing or any active read failed or ran out of its budget |
 | `trace coverage partial` | the historical backfill has not read every listed trace's observations yet; see [Trace coverage](#trace-coverage) |
-| `wait history partial` | the wait history of an agent with a turn gap over the limit was not read inside the 15 second wait budget or the 55 second step deadline it shares with the trace reads; its turn gaps are not judged that scan |
+| `wait history partial` | the wait history of a live agent with a turn gap over the limit was not read inside the 15 second wait budget or the 55 second step deadline it shares with the trace reads; its turn gaps are not judged that scan |
 
 Threshold `AGENTIHOOKS_DOCTOR_ACTIVE_STALE_SECONDS` (60), grace
 `AGENTIHOOKS_DOCTOR_ACTIVE_GRACE_SECONDS` (60), first turn bound
@@ -491,6 +493,64 @@ An agent Langfuse could not be read for is judged only on its local exporter.
 Watermarks and the outage start live in
 `<swarm home>/<slug>/doctor-telemetry.json`.
 
+#### Agent start
+
+The grace, the first turn bound and the age in `telemetry never exported` are
+all measured from the binding's start. The Doctor takes it from the agent
+record in this order:
+
+1. `started_at`, the spawn time, when it is above zero.
+2. `launched_at`, the time the swarm launched the agent, when it is above
+   zero. A hive agent can carry a zero `started_at` while its launch time is
+   recorded.
+3. Otherwise the start is unknown.
+
+A zero, negative, missing or null value counts as absent. The life keeps the
+raw `started_at`, so a hive agent resolved from its launch time still has life
+`name#0` and its traces correlate as before. The `telemetry never exported`
+and `telemetry misattributed` ids use the resolved start; the
+`telemetry count drift` id keeps the raw life.
+
+An unknown start raises `telemetry start unknown` instead of any other active
+telemetry finding for that binding. The Doctor does not apply the grace, does
+not compute an age and does not judge the binding never exported, stale or
+misattributed until a start is recorded. The finding has measure 1 and its id
+is the agent name alone, so the Doctor master gets one notice per agent while
+the gap lasts.
+
+| Agent record | Resolved start | Result at a scan |
+|---|---|---|
+| `started_at` 60 seconds ago, `launched_at` 10 minutes ago | spawn time | inside the 60 second grace: no finding |
+| `started_at` 0, `launched_at` 60 seconds ago | launch time | inside the grace: no finding |
+| `started_at` 0, `launched_at` 3700 seconds ago, past the first turn bound; read this scan, no trace, nothing accepted locally, no backlog | launch time | `telemetry never exported` after 3700 seconds |
+| `started_at` 0 or absent, `launched_at` 0 or absent | none | `telemetry start unknown` |
+
+Example finding for an agent with neither time recorded:
+
+```json
+{
+  "kind": "telemetry start unknown",
+  "subject": "engineer@hive-1",
+  "summary": "working agent start is unknown",
+  "evidence": [
+    "agent engineer@hive-1",
+    "seat unknown",
+    "task unknown",
+    "session unknown",
+    "no positive spawn or launch timestamp; launch grace cannot be established"
+  ],
+  "threshold": "an observed start is required to judge active telemetry"
+}
+```
+
+Before pull request
+[#5670](https://github.com/the-cloud-clockwork/agentihooks/pull/5670), a zero
+`started_at` was subtracted directly, so hive agents were reported as never
+exported with ages of decades and skipped the grace. If this finding appears,
+check the agent record in the swarm store: a working agent needs a positive
+`started_at` or `launched_at`. The order is fixed in code; no setting changes
+it.
+
 ### Read budget
 
 Each scan reads every active binding in one round: the read pool has one worker
@@ -498,6 +558,17 @@ per binding. A binding takes up to three requests in sequence (its trace
 listing, its observations since the watermark and its observation count) and
 gets two attempts. The active reads run beside the historical listing and
 backfill, which keep their own budget.
+
+The read pool starts bindings largest trace first, by the observation count each
+binding's trace reported at its last read. A master binding with no recorded
+count starts before every other binding, and any other binding with no recorded
+count starts last. When a binding's cursor holds accepted identities, its trace's
+observation identities are listed page by page for the
+`telemetry count drift` check. A later scan reuses that listing while the trace
+reports the same observation count and the same newest event, and lists again
+once either changes. The correlation attributes of each listed trace's root
+observation are kept in reader state once a read returns every one of them, so
+a later scan reads the root only of a trace it has not yet seen complete.
 
 | Limit | Value | Applies to |
 |---|---|---|
@@ -720,23 +791,26 @@ fewer agents to read.
 
 **Agents left unread.** An agent whose wait history was not read gets no turn
 gap judgement in that scan, so no turn gap finding is raised for it. The scan
-raises one `wait history partial` finding for the swarm instead.
-The finding's subject is the swarm slug and its number is the count of unread
-agents:
+raises one `wait history partial` finding for the swarm instead, but only
+when at least one of the unread agents is live (see
+[Live agents first](#live-agents-first)). The finding's subject is the swarm
+slug and its number is the count of unread live agents:
 
 ```text
-wait history of 6 agents with turn gaps over 30 minutes not read in budget
-unread: eng-3, eng-7, ci-1, eng-12, eng-4
-live agents unread: 2
+wait history of 2 live agents with turn gaps over 30 minutes not read in budget
+unread: eng-3, eng-7
+retired agents unread: 104
 turn gap findings skip agents whose wait history was not read
 each Doctor scan reads the wait history again within its budget
 ```
 
 The first line is the title. The `unread` line names the first five unread
-agents in read order. The threshold reads `every agent with a turn gap over the
-limit has its wait history read`. The finding is absent when every agent that
-needs its wait history was read. Each scan picks the agents again, so the next
-scan retries the unread ones.
+live agents in read order. The `retired agents unread` line counts the retired
+agents also left unread. The threshold reads `every live agent with a turn gap
+over the limit has its wait history read`. The finding is absent when every
+live agent that needs its wait history was read, even if retired agents were
+left unread: a retired agent's skipped turn gap judgement needs no verdict.
+Each scan picks the agents again, so the next scan retries the unread ones.
 
 #### Live agents first
 
@@ -757,23 +831,20 @@ step deadline, so the unread agents are always the tail of the list. A live
 agent is left unread only when every retired agent with a long gap was left
 unread too. For example, with 3 live and 100 retired agents with long gaps
 and time for 40 reads, the 3 live agents and the 37 retired agents whose newest
-gap ends latest are read. The 63 left unread are all retired, and the finding
-reads `live agents unread: 0`.
+gap ends latest are read. The 63 left unread are all retired, and no
+`wait history partial` finding is raised.
 
-The `live agents unread` evidence line of `wait history partial` counts every
-live agent among all unread agents, not only the five the `unread` line names.
-A value above 0 means even the live agents did not fit in the budget. Turn gap
-findings for those live agents are missing from that scan, and no retired agent
-was read at all.
-
-| `live agents unread` | Meaning | Action |
-|---|---|---|
-| `0` | every live agent with a long gap was judged; only retired agents were skipped | none for the live swarm; retired agents are retried on later scans |
-| above `0` | the wait reads covered fewer agents than the live agents with long gaps | read the trace step time below; the Langfuse reads or Redis used up the step |
+When the finding is raised, even the live agents did not fit in the budget.
+Turn gap findings for those live agents are missing from that scan, and no
+retired agent was read at all. Read the trace step time below; the Langfuse
+reads or Redis used up the step.
 
 The finding's number, which `doctor measure wait-history-partial/<slug>`
-prints, stays the count of all unread agents, live and retired. The live count
-appears only in the evidence line.
+prints, is the count of unread live agents. Pull request #5229 first counted
+all unread agents and showed the live count only as a `live agents unread`
+evidence line. On 27 October the finding fired with five unread retired agents
+and no live ones and was judged a false positive, so issue #8060 raised it only
+for unread live agents.
 
 **Why live agents come first.** Pull request #5176 bounded the wait reads and
 read the agents newest gap first. The next scans on rig-grade-swarm raised
@@ -864,7 +935,7 @@ otherwise it fails with `no finding wait-history-partial/<slug> has been seen`.
 | `wait history partial` with `doctor.trace` well under 55 seconds | the wait reads themselves used the 15 seconds; many agents have long gaps, or Redis answers slowly |
 | `doctor.trace` above 60 seconds | a Langfuse request or a wait read in flight finished past its budget; read the `trace reader unavailable` failure lines for timeouts |
 | a turn gap finding disappears while `wait history partial` is present | its agent was left unread in that scan; it is judged again once its wait history is read |
-| `wait history partial` evidence reads `live agents unread` above 0 | every retired agent with a long gap was also left unread and the live agents did not fit; see [Live agents first](#live-agents-first) |
+| `wait history partial` is raised at all | every retired agent with a long gap was also left unread and the live agents did not fit; see [Live agents first](#live-agents-first) |
 
 ### Historical findings
 

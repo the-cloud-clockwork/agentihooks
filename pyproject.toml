@@ -18,8 +18,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "tree-sitter>=0.25",
-    "tree-sitter-bash>=0.25",
+    "tree-sitter==0.26.0",
+    "tree-sitter-bash==0.25.1",
+    "tree-sitter-javascript==0.25.0",
+    "tree-sitter-css==0.25.0",
     # Upper bound is load-bearing: mcp 2.0.0 removes `mcp.server.fastmcp`
     # outright (replaced by `mcp.server.mcpserver.MCPServer`, a different API),
     # so an unbounded spec resolves to a version where `hooks/mcp/__init__.py`
@@ -81,13 +83,15 @@ all = [
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
 dev = [
+    "setuptools-scm>=9.2",
     "Pillow>=10.0",
-    "pytest>=8.0",
+    "pytest>=8.0,<9.2",
     "pytest-cov>=5.0",
     "pytest-xdist>=3.5",
     "pytest-split>=0.10",
     "pytest-asyncio>=0.23",
     "ruff==0.15.12",
+    "basedpyright==1.40.2",
     "vulture==2.14",
     "boto3>=1.34.0",
     "fakeredis[lua]>=2.0",
@@ -141,6 +145,7 @@ Issues = "https://github.com/The-Cloud-Clockwork/agentihooks/issues"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+    "feature(id): Behaviour test owned by the feature map",
     "unit: Unit tests",
     "wall_clock: asserts an elapsed real time bound; the mutation stats pass deselects it",
     "codex_rollouts: runs the real Codex rollout lookup instead of the conftest stub",
@@ -166,7 +171,14 @@ ignore = [
 [tool.ruff.format]
 quote-style = "double"
 
+[tool.basedpyright]
+include = ["hooks", "scripts", "tests"]
+pythonVersion = "3.12"
+pythonPlatform = "Linux"
+typeCheckingMode = "standard"
+strict = ["hooks", "scripts"]
+
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
+    "pytest>=9.0.2,<9.2",
 ]

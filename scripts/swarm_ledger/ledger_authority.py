@@ -7,12 +7,14 @@ binding governs the transport a session selects; any process of the operator's u
 import hashlib
 import hmac
 import time
+from collections.abc import Mapping
 from functools import lru_cache
 from os import environ
 
 import jwt
 
-from scripts.swarm_ledger import ports
+from scripts.auth import switch, tokens
+from scripts.swarm_ledger import hive_work, ports
 from scripts.swarm_ledger.ledger_link import remote
 
 
@@ -67,12 +69,21 @@ def principal(admin: str, slug: str, token: str, agent: str) -> str | None:
 
 
 def hive_principal(slug: str, token: str, agent: str) -> str | None:
-    member = ports.hive().auth.agent_member(ports.swarm().store.redis_client(), token, slug, agent)
+    with hive_work.bounded():
+        member = ports.hive().auth.agent_member(ports.swarm().store.redis_client(), token, slug, agent)
     return agent if member and hive_agent(member, slug, agent) else None
 
 
-def caller(headers, admin: str, slug: str) -> str | None:
-    """principal for this request under SWARM_AUTH_MODE: local reads the page credential, edge never does."""
+def caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
+    """principal for this request: a signed auth token, else today's credentials while legacy credentials are on."""
+    bearer = headers.get("Authorization")
+    if bearer and bearer.startswith("Bearer "):
+        return tokens.verify(tokens.key(environ), bearer.removeprefix("Bearer "), slug)
+    return credential_caller(headers, admin, slug) if switch.legacy(environ) else None
+
+
+def credential_caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
+    """principal from today's credentials under SWARM_AUTH_MODE: local reads the page credential, edge never does."""
     token, agent = headers.get("X-Ledger-Token"), headers.get("X-Ledger-Agent")
     if environ.get("SWARM_AUTH_MODE") != "edge":
         return principal(admin, slug, token, agent)
@@ -122,14 +133,28 @@ def hive_member(credential):
 
 
 def hive_agent(member: str, slug: str, name: str) -> bool:
-    return any(agent.name == name and agent.hive == member for agent in ports.swarm().store.connect().agents(slug))
+    from scripts.doctor.priming import doctor_slug
+
+    store = ports.swarm().store.connect()
+    return any(
+        agent.name == name and agent.hive == member
+        for ledger in (slug, doctor_slug(slug))
+        for agent in store.agents(ledger)
+    )
 
 
 def hive_agent_token(member: str, slug: str, name: str) -> str:
-    return ports.hive().auth.issue_agent(ports.swarm().store.redis_client(), member, slug, name)
+    with hive_work.bounded():
+        return ports.hive().auth.issue_agent(ports.swarm().store.redis_client(), member, slug, name)
 
 
-def controller(credential):
+def controller(credential: str | None) -> bool:
+    """Whether a controller or service credential checks, only while legacy credentials are on."""
+    return switch.legacy(environ) and controller_credential(credential)
+
+
+def controller_credential(credential: str | None) -> bool:
+    """Whether the controller or service credential matches its stored digest."""
     return bool(credential) and ports.hive().auth.controller(ports.swarm().store.redis_client(), credential)
 
 

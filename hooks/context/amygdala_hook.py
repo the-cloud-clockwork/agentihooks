@@ -35,7 +35,10 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def _check_via_http() -> bool:
-    """Poll kb-router /signal. Returns True when handled (even if no signal)."""
+    """Poll kb-router /signal. Returns True when handled (even if no signal).
+
+    A transient HTTP error leaves the prior state alone.
+    """
     from hooks._brain_http import brain_http_enabled, get
 
     if not brain_http_enabled():
@@ -43,7 +46,6 @@ def _check_via_http() -> bool:
 
     payload = get("/signal")
     if payload is None:
-        # Transient HTTP error — leave prior state alone, do not clear.
         return True
 
     active = bool(payload.get("active"))

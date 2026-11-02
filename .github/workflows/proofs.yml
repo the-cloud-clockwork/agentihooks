@@ -68,7 +68,7 @@ jobs:
           enable-cache: false
       - name: Install shared dependencies
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Observe base receipt request times
         working-directory: base
         run: |
@@ -111,7 +111,7 @@ jobs:
           enable-cache: false
       - name: Install dependencies shared by both revisions
         working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Replay base on the shared runner
         working-directory: base
         env:
@@ -302,7 +302,22 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        env:
+          BAKED_VENV: /opt/agentihooks-venv
+          WHEELHOUSE: /opt/wheelhouse
+        run: |
+          editable="$RUNNER_TEMP/editable"
+          mkdir -p "$editable"
+          if [[ -x "$BAKED_VENV/bin/python" ]] \
+            && "$BAKED_VENV/bin/python" -c 'import sys; from setuptools import build_meta; build_meta.build_editable(sys.argv[1])' "$editable" >&2 \
+            && wheels=("$editable"/agentihooks-*.whl) && [[ -f "${wheels[0]}" ]] \
+            && uv pip install --offline --no-index --find-links "$WHEELHOUSE" --python "$BAKED_VENV/bin/python" --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt "agentihooks[dev,all] @ file://${wheels[0]}"; then
+            echo "$BAKED_VENV/bin" >> "$GITHUB_PATH"
+            echo "::notice title=Baked venv hit::The runner venv served the install offline"
+          else
+            echo "::warning title=Baked venv miss::The runner venv cannot serve the install; fetching from PyPI"
+            uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+          fi
 
       - name: Install the pinned nats server for the bus backend tests
         timeout-minutes: 3
@@ -333,8 +348,14 @@ jobs:
           PYTHONUNBUFFERED: '1'
           PROOF_REPORT_DIR: ${{ runner.temp }}/proof-reports
         run: |
+          set -o pipefail
           read -r -a paths <<< "$TEST_PATHS"
-          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short
+          log="$RUNNER_TEMP/focused-proof.log"
+          status=0
+          workers=$(python -m scripts.ci_cpu_quota)
+          python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?
+          python -m scripts.ci_proof_outcome "$log" || status=1
+          exit "$status"
 
       - name: Retain nested proof reports
         if: always()

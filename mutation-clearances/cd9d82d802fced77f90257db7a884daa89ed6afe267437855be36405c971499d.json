@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/authority.py:scripts.swarm_v2.authority.x\u01c1TaskAuthority\u01c1_commit__mutmut_17:a2322b734e6bb4556513b013663ce68ad86fcb56eb4d949de93faff71108c8fc": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: RenewalFence is a frozen data-only dataclass. The local seen.key is never read or returned; only seen.sequence and seen.digest are observed. Replacing the local key with None preserves comparisons, stored rows and results."
+  }
+}

@@ -1,21 +1,29 @@
+from dataclasses import dataclass
+
 from scripts.swarm import lease
-from scripts.swarm.store import PREFIX, RedisStore
+from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
 from scripts.swarm_v2.runtime.base import LOCAL
 
 PENDING_MS = 300000
 STARTING = "starting"
+Records = dict[str, tuple[str, AgentRecord]]
+
+
+@dataclass
+class PassCache:
+    records: Records | None = None
 
 
 def key(machine: str) -> str:
     return f"{PREFIX}:local-slots:{machine}"
 
 
-def held(store: RedisStore, machine: str, slug: str, task: str) -> int:
-    return len(_held(store, store.redis.hgetall(key(machine)), f"{slug}/{task}", lease.now_ms(store))[0])
+def held(store: RedisStore, machine: str, slug: str, task: str, cache: PassCache | None = None) -> int:
+    return len(_held(store, store.redis.hgetall(key(machine)), f"{slug}/{task}", lease.now_ms(store), cache)[0])
 
 
-def running(store: RedisStore, slug: str, task: str) -> int:
-    return len(_workers(_records(store), f"{slug}/{task}"))
+def running(store: RedisStore, slug: str, task: str, cache: PassCache | None = None) -> int:
+    return len(_workers(_records(store, cache), f"{slug}/{task}"))
 
 
 def occupancy(store: RedisStore, machine: str) -> tuple[int, int]:
@@ -43,23 +51,35 @@ def claim(store: RedisStore, machine: str, slug: str, task: str, name: str, loca
                 now = lease.now_ms(store)
                 taken, settled = _held(store, pipe.hgetall(key(machine)), f"{slug}/{task}", now)
                 if len(taken) >= local_max:
+                    _journal(slug, machine, task, name, local_max, taken)
                     return len(taken)
                 pipe.multi()
                 if settled:
                     pipe.hdel(key(machine), *settled)
                 pipe.hset(key(machine), f"{slug}/{name}", now)
                 pipe.execute()
+                _journal(slug, machine, task, name, local_max, taken)
                 return len(taken)
             except WatchError:
                 continue
+
+
+def _journal(slug: str, machine: str, task: str, name: str, local_max: int, taken: list[str]) -> None:
+    print(
+        f"{slug}: local slot claim {name} for {task} on {machine} counted {len(taken)} of {local_max}: "
+        + ", ".join(sorted(taken)),
+        flush=True,
+    )
 
 
 def release(store: RedisStore, machine: str, slug: str, name: str) -> None:
     store.redis.hdel(key(machine), f"{slug}/{name}")
 
 
-def _held(store: RedisStore, claims: dict, own: str | None, now: int) -> tuple[list[str], list[str]]:
-    records = _records(store)
+def _held(
+    store: RedisStore, claims: dict, own: str | None, now: int, cache: PassCache | None = None
+) -> tuple[list[str], list[str]]:
+    records = _records(store, cache)
     agents = _workers(records, own)
     pending = [
         named
@@ -69,12 +89,17 @@ def _held(store: RedisStore, claims: dict, own: str | None, now: int) -> tuple[l
     return [*agents, *pending], [named for named in claims if named not in pending]
 
 
-def _records(store: RedisStore) -> dict:
-    return {
+def _records(store: RedisStore, cache: PassCache | None = None) -> Records:
+    if cache is not None and cache.records is not None:
+        return cache.records
+    built: Records = {
         f"{slug}/{agent.name}": (f"{slug}/{agent.task}", agent)
         for slug in store.slugs()
         for agent in store.agents(slug)
     }
+    if cache is not None:
+        cache.records = built
+    return built
 
 
 def live() -> set[str]:
@@ -100,5 +125,6 @@ def _local_worker(agent) -> bool:
         agent.runtime_backend == LOCAL
         and agent.hive in ("", hive_id())
         and agent.lane != "master"
-        and agent.state not in (STARTING, "finished", "ended")
+        and agent.state not in ("finished", "ended")
+        and (agent.state != STARTING or bool(agent.pane_id))
     )

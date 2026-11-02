@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from hooks.context import operator_mode
+from scripts.events.redis_state import RedisStateStore
 
 pytestmark = pytest.mark.unit
 
@@ -20,7 +21,7 @@ def clocked_scheduler(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     monkeypatch.setattr("scripts.inbox.cli.registered_name", lambda: "")
     monkeypatch.delenv("AGENTIHOOKS_OPERATOR_TIMEOUT_SEC", raising=False)
-    return Scheduler(redis)
+    return Scheduler(RedisStateStore(redis, "scheduler"))
 
 
 def legacy_timer(scheduler, session_id):
@@ -41,13 +42,13 @@ def test_operator_on_survives_idle_time_without_notifying_its_session(clocked_sc
 
     operator_mode.observe("pane", "operator on", True, now=100)
     operator_mode.observe("other", "operator on", True, now=200)
-    restarted = Scheduler(clocked_scheduler.redis)
+    restarted = Scheduler(RedisStateStore(clocked_scheduler.state.redis, "scheduler"))
     assert restarted.run_due(now=100000) == 0
     assert operator_mode.present("pane", now=100000)
     assert operator_mode.present("other", now=100000)
     assert "timer_id" not in operator_mode._load("pane")
-    assert InboxStore(clocked_scheduler.redis).inbox("pane") == []
-    assert InboxStore(clocked_scheduler.redis).inbox("other") == []
+    assert InboxStore(clocked_scheduler.state.redis).inbox("pane") == []
+    assert InboxStore(clocked_scheduler.state.redis).inbox("other") == []
 
 
 @pytest.mark.parametrize(("prompt", "fires"), [("continue", 1), ("operator off", 0)])
@@ -61,7 +62,7 @@ def test_a_typed_prompt_cancels_a_legacy_timer_without_expiring_presence(clocked
     assert clocked_scheduler.run_due(now=100000) == 0
     assert operator_mode.present("pane", now=100000) is bool(fires)
     assert "timer_id" not in operator_mode._load("pane")
-    assert InboxStore(clocked_scheduler.redis).inbox("pane") == []
+    assert InboxStore(clocked_scheduler.state.redis).inbox("pane") == []
 
 
 def test_operator_off_without_a_timer_keeps_the_session_off(clocked_scheduler):
@@ -71,7 +72,7 @@ def test_operator_off_without_a_timer_keeps_the_session_off(clocked_scheduler):
     assert not operator_mode.present("pane", now=100)
     assert operator_mode._load("pane") == {"on": False, "at": 100, "turn_at": None}
     assert clocked_scheduler.run_due(now=400) == 0
-    assert InboxStore(clocked_scheduler.redis).inbox("pane") == []
+    assert InboxStore(clocked_scheduler.state.redis).inbox("pane") == []
 
 
 @pytest.mark.parametrize("seconds", [60, 600])
@@ -90,9 +91,9 @@ def test_an_already_claimed_expiry_cannot_override_a_newer_prompt(clocked_schedu
     operator_mode.observe("pane", "operator on", True, now=100)
     old_event = legacy_timer(clocked_scheduler, "pane").record
     operator_mode.observe("pane", prompt, True, now=200)
-    expire(old_event, "old-delivery", clocked_scheduler.redis)
+    expire(old_event, "old-delivery", clocked_scheduler.state.redis)
     assert operator_mode.present("pane", now=400) is present
-    assert InboxStore(clocked_scheduler.redis).inbox("pane") == []
+    assert InboxStore(clocked_scheduler.state.redis).inbox("pane") == []
 
 
 def test_legacy_expiry_and_its_retry_preserve_presence_without_a_notice(clocked_scheduler):
@@ -104,9 +105,9 @@ def test_legacy_expiry_and_its_retry_preserve_presence_without_a_notice(clocked_
     assert clocked_scheduler.run_due(now=400) == 1
     assert operator_mode.present("pane", now=400)
     assert "timer_id" not in operator_mode._load("pane")
-    expire(event, "retry", clocked_scheduler.redis)
+    expire(event, "retry", clocked_scheduler.state.redis)
     assert operator_mode.present("pane", now=401)
-    assert InboxStore(clocked_scheduler.redis).inbox("pane") == []
+    assert InboxStore(clocked_scheduler.state.redis).inbox("pane") == []
 
 
 def test_legacy_expiry_does_not_notify_the_bound_session(clocked_scheduler, monkeypatch):
@@ -117,6 +118,6 @@ def test_legacy_expiry_does_not_notify_the_bound_session(clocked_scheduler, monk
     legacy_timer(clocked_scheduler, "session-uuid")
     assert clocked_scheduler.run_due(now=400) == 1
     assert operator_mode.present("session-uuid", now=400)
-    inbox = InboxStore(clocked_scheduler.redis)
+    inbox = InboxStore(clocked_scheduler.state.redis)
     assert inbox.inbox("engineer@proof") == []
     assert inbox.inbox("session-uuid") == []

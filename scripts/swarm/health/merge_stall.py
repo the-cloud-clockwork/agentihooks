@@ -1,11 +1,12 @@
 import json
+import re
 import subprocess
 import time
 from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
 
-from scripts.swarm import timing
+from scripts.swarm import github_reads, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
 
@@ -14,6 +15,7 @@ HOUR_MS = 3_600_000
 CACHE_MS = 300_000
 RUNS = 10
 STREAK = 3
+REMOTE = re.compile(r"[a-z][a-z0-9+.-]*://|[\w-]+(\.[\w-]+)+/", re.IGNORECASE)
 FAILED = frozenset({"failure", "timed_out", "action_required", "startup_failure"})
 QUERY = """
 query($owner:String!,$name:String!,$cursor:String){
@@ -34,7 +36,15 @@ def request(repo: str, args: list[str]) -> dict:
     if remaining <= 0:
         raise SwarmError("GitHub merge observation exhausted its read budget")
     with timing.step("scripts.swarm.health.merge_stall.github_read"):
-        result = subprocess.run(["gh", *args], cwd=repo, capture_output=True, text=True, timeout=min(20, remaining))
+        result = github_reads.rest(
+            "swarm.merge_stall",
+            args,
+            subprocess.run,
+            cwd=None if REMOTE.match(repo) else repo,
+            capture_output=True,
+            text=True,
+            timeout=min(20, remaining),
+        )
     if result.returncode:
         raise SwarmError(result.stderr.strip() or "GitHub API failed")
     data = json.loads(result.stdout)

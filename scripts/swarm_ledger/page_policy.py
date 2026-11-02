@@ -13,8 +13,11 @@ def scratch(folder: Path, port: int) -> bool:
 
 
 def policy(environ: Mapping[str, str], folder: Path, port: int) -> str:
-    live = f" {LIVE_ORIGIN}" if environ.get(LIVE_SETTING) == "1" and scratch(folder, port) else ""
+    on = environ.get(LIVE_SETTING) == "1" and scratch(folder, port)
+    live = f" {LIVE_ORIGIN}" if on else ""
+    styles = f" 'unsafe-inline'{live}" if on else ""
     return (
-        f"default-src 'none'; script-src 'self'{live}; style-src 'self'; img-src 'self'; connect-src 'self'{live}; "
+        f"default-src 'none'; script-src 'self'{live}; style-src 'self'{styles}; img-src 'self'; "
+        f"connect-src 'self'{live}; "
         "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
     )

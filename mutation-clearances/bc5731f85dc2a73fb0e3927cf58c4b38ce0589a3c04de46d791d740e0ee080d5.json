@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_run_waits__mutmut_12:5d8f7803d3f3a3c4fd1cd37380b12faad196ad26cfc2bd493fcfcc6902a7c7cb": {
+    "reader": "standards_reader",
+    "reason": "Mutant tick_headers(slug) -> tick_headers(None) in scripts/swarm/cli.py run_waits is EQUIVALENT: tick_headers returns {} or a non-empty dict depending only on the bound secret, the slug affects only the token value, and run_waits branches on truthiness alone, so no observable output of run_waits changes."
+  }
+}

@@ -1,6 +1,7 @@
 """Process identity a local runtime may act on: a PID names a process only inside the PID namespace that recorded it
 and only while that process keeps the start time recorded with it."""
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from scripts.swarm_v2.runtime.base import Unqualified
 
 BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
 PID_NAMESPACE = Path("/proc/self/ns/pid")
+PROC = Path("/proc")
 IDENTITY = ("process_namespace", "pid", "pid_start")
 LAUNCH_LABELS = {"process_namespace": "process namespace", "pid": "process number", "pid_start": "start time"}
 
@@ -25,6 +27,18 @@ def previous_boot(recorded: str, current: str) -> bool:
     recorded_boot, _, recorded_pid = recorded.partition("/")
     current_boot, _, current_pid = current.partition("/")
     return bool(recorded_boot and recorded_pid and current_boot and current_pid and recorded_boot != current_boot)
+
+
+def started_ms(proc: Path = PROC) -> int:
+    """When process 1 of this PID namespace started, which in a pod is when the pod started; 0 when unreadable."""
+    try:
+        boot = next(
+            int(line.split()[1]) for line in (proc / "stat").read_text().splitlines() if line.startswith("btime ")
+        )
+        ticks = int((proc / "1" / "stat").read_text().rpartition(")")[2].split()[19])
+    except (OSError, ValueError, IndexError, StopIteration):
+        return 0
+    return boot * 1000 + ticks * 1000 // os.sysconf("SC_CLK_TCK")
 
 
 def reopened_process(agent: AgentRecord) -> Process | None:

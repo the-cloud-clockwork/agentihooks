@@ -1,6 +1,7 @@
 """The capacity and registry given here must authorize with LaunchAuthority.verify, never register."""
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -145,7 +146,12 @@ class DistributedLaunch:
     def spawn(
         self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str, opening: str
     ) -> Launch:
-        admitted = self.controller.admit(replace(agent, account=terms.account), previous)
+        agent = replace(
+            agent,
+            account=terms.account,
+            profile_decision={**agent.profile_decision, "automated": {"swarm": self.slug, "seat": agent.seat}},
+        )
+        admitted = self.controller.admit(agent, previous)
         return self._place(request, admitted, terms, self.end_refused, opening)
 
     def relaunch(self, request: SpawnRequest, admitted: AgentRecord, terms: LaunchTerms) -> Launch:
@@ -216,6 +222,15 @@ class DistributedLaunch:
         profile = seat_profile(request)
         if self.router.placement is not None and profile in self.router.placement.local_profiles:
             return Outcome("spawn", Status.REFUSED, backend, detail=f"profile {profile} runs only on the workstation")
+        if user := profile_chain.registered_user_bundle(profile_chain.read_state(), os.environ):
+            return Outcome(
+                "spawn",
+                Status.REFUSED,
+                backend,
+                detail=f"profile {profile} cannot run on a worker pod: the user bundle at {user} is registered on "
+                "this host and a pod carries only the root bundle; run agentihooks bundle unlink --user to launch "
+                "remotely",
+            )
         if not shipped(profile, terms.bundled):
             return Outcome(
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"

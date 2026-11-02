@@ -86,8 +86,6 @@ def test_import_exports_the_source_document_and_survives_a_restart(tmp_path):
     restarted = store(tmp_path)
     assert restarted.export_document("ledger") == state
     assert restarted.token("ledger") == "t" * 24
-    assert restarted.events_since("ledger", 0) == state["_meta"]["events"]
-    assert restarted.events_since("ledger", 1) == []
     with repo.connect() as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
@@ -176,7 +174,7 @@ def test_every_write_leaves_rows_and_events_equal_to_the_returned_state(tmp_path
         state, _ = repo.apply_ops("ledger", ops=ops)
         assert store(tmp_path).get_document("ledger") == state
         assert len(state["_meta"]["events"]) <= 3
-        assert store(tmp_path).events_since("ledger", -1) == state["_meta"]["events"]
+        assert store(tmp_path).export_document("ledger")["_meta"]["events"] == state["_meta"]["events"]
 
 
 def test_checkbox_changes_keep_the_stale_base_guard(tmp_path):
@@ -390,7 +388,7 @@ def test_whole_and_every_ledger_reads_need_no_writable_connection(tmp_path):
 
 def test_missing_ledgers_raise_one_error_both_lookup_and_value_callers_catch(tmp_path):
     repo = store(tmp_path)
-    for call in (lambda: repo.get_document("missing"), lambda: repo.events_since("missing", 0)):
+    for call in (lambda: repo.get_document("missing"), lambda: repo.export_document("missing")):
         with pytest.raises(KeyError):
             call()
         with pytest.raises(ValueError):
@@ -453,3 +451,63 @@ def test_concurrent_first_connections_set_up_the_store_once(tmp_path, monkeypatc
         thread.join(5)
     assert errors == []
     assert len(setups) == 1
+
+
+def test_one_thread_reads_existence_credential_and_task_rows_through_one_connection(tmp_path, monkeypatch):
+    writer = store(tmp_path)
+    writer.create("ledger", CONTENT)
+    repo = store(tmp_path)
+    opened, connect = [], sqlite3.connect
+    monkeypatch.setattr(
+        sqlite3, "connect", lambda *args, **kwargs: opened.append(threading.get_ident()) or connect(*args, **kwargs)
+    )
+    generations = []
+
+    def request():
+        assert repo.exists("ledger") is True and repo.exists("other") is False
+        assert repo.token("ledger") is not None and repo.token("other") is None
+        with pytest.raises(Missing):
+            repo.task_rows("other")
+        generation, _, rows = repo.task_rows("ledger")
+        assert [row["title"] for row in rows] == ["first", "second"]
+        generations.append(generation)
+
+    request()
+    reads = len(opened)
+    writer.apply_ops("ledger", ops=[chat(1)])
+    statements = []
+    repo.trace = statements.append
+    request()
+    assert any(statement.startswith("SELECT token FROM ledgers") for statement in statements), statements
+    worker = threading.Thread(target=request)
+    worker.start()
+    worker.join(5)
+    readers = [ident for ident in opened if ident != threading.get_ident()]
+    assert generations[0] < generations[1] == generations[2]
+    assert reads == 1 and len(readers) == 1
+
+
+@pytest.mark.parametrize("read", ["connect", "reader"])
+def test_a_store_setup_failure_closes_the_connection_it_opened(tmp_path, monkeypatch, read):
+    closed = []
+
+    class Closing(sqlite3.Connection):
+        def close(self):
+            closed.append(self)
+            super().close()
+
+    connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: connect(*args, factory=Closing, **kwargs))
+    repo = store(tmp_path)
+
+    def refuse(connection, path):
+        raise sqlite3.OperationalError("disk full")
+
+    monkeypatch.setattr(repo, "_set_up", refuse)
+    with pytest.raises(sqlite3.OperationalError, match="disk full"):
+        if read == "connect":
+            with repo.connect():
+                pass
+        else:
+            repo.exists("ledger")
+    assert len(closed) == 1

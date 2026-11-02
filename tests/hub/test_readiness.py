@@ -143,6 +143,34 @@ def test_snapshot_uses_live_owners_and_release_and_apply_admission(monkeypatch):
     assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
 
 
+def test_snapshot_holds_a_task_red_only_from_checks_failing_across_its_repository(monkeypatch):
+    from datetime import UTC, datetime
+
+    from scripts.swarm import fleet_red
+    from scripts.tick.ports.source_control import OpenChange, RollupCheck
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    row, store, ledger = source()
+    row["pr_url"] = "https://github.com/x/y/pull/1"
+    at = datetime.now(UTC).isoformat()
+
+    def listing(conclusion: str) -> list[OpenChange]:
+        others = [(RollupCheck("Tests", conclusion, at),)] * 3
+        mine = (RollupCheck("Tests", "FAILURE", at),)
+        return [
+            OpenChange(f"https://github.com/x/y/pull/{n}", checks) for n, checks in enumerate([mine, *others], start=1)
+        ]
+
+    reads = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or listing("FAILURE"))
+    provider = readiness.Source(store, ledger)
+    assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
+    assert reads == ["x/y"]
+    monkeypatch.setattr(fleet_red, "read", lambda repo: listing("SUCCESS"))
+    assert readiness.claimable(row, "eng", provider.snapshot("rig"))
+
+
 def test_readiness_passes_export_a_large_ledger_once_per_revision(monkeypatch):
     from scripts.hub.readiness import Readiness
 

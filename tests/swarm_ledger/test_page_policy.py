@@ -12,7 +12,8 @@ SELF_ONLY = (
     "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
 LIVE = (
-    "default-src 'none'; script-src 'self' http://localhost:8400; style-src 'self'; img-src 'self'; "
+    "default-src 'none'; script-src 'self' http://localhost:8400; "
+    "style-src 'self' 'unsafe-inline' http://localhost:8400; img-src 'self'; "
     "connect-src 'self' http://localhost:8400; "
     "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )

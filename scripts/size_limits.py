@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 RUFF_VERSION = "0.15.12"
@@ -16,6 +17,7 @@ _SETTINGS = (
     f"lint.pylint.max-branches={RULES['PLR0912']}",
     f"lint.pylint.max-args={RULES['PLR0913']}",
     f"lint.pylint.max-statements={RULES['PLR0915']}",
+    f"target-version='py{sys.version_info.major}{sys.version_info.minor}'",
 )
 _MEASURED = re.compile(r"\((\d+) > \d+\)")
 # -I keeps a ruff module in the graded tree from shadowing the real one.
@@ -84,14 +86,18 @@ def _lengths(tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measured:
                 _record(measured, f"{rel}::{name}", "function-lines", length)
 
 
-def _ruff_hits(tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measured: dict) -> None:
+def _ruff(paths: list[Path]) -> list[dict]:
     flags = ("--isolated", "--ignore-noqa", "--exit-zero")
     command = [*_RUFF, "check", *flags, "--output-format", "json", "--select", ",".join(RULES)]
-    command += [f"--config={setting}" for setting in _SETTINGS] + [str(path) for path in defs]
+    command += [f"--config={setting}" for setting in _SETTINGS] + [str(path) for path in paths]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise GradeError(f"ruff exited {result.returncode}: {result.stderr.strip()}")
-    for hit in json.loads(result.stdout):
+    return json.loads(result.stdout)
+
+
+def _ruff_hits(tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measured: dict, hits: list[dict]) -> None:
+    for hit in hits:
         path, row, message = Path(hit["filename"]), hit["location"]["row"], hit["message"]
         value = _MEASURED.search(message)
         if hit["code"] not in RULES or value is None or row not in defs.get(path, {}):
@@ -100,11 +106,18 @@ def _ruff_hits(tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measure
 
 
 def measure(tree: Path) -> dict[str, dict[str, int]]:
+    """Measure every tracked Python file, parsing only files that can hold a long function or carry a ruff hit."""
     tree = tree.resolve()
-    defs = {path: functions(path.read_text()) for path in files(tree)}
+    sources = {path: path.read_text() for path in files(tree)}
+    hits = _ruff(list(sources))
+    reported = {Path(hit["filename"]) for hit in hits}
+    needed = [path for path, text in sources.items() if path in reported or len(text.splitlines()) > FUNCTION_LINES]
+    with ProcessPoolExecutor() as pool:
+        parsed = dict(zip(needed, pool.map(functions, [sources[path] for path in needed])))
+    defs = {path: parsed.get(path, {}) for path in sources}
     measured = {}
     _lengths(tree, defs, measured)
-    _ruff_hits(tree, defs, measured)
+    _ruff_hits(tree, defs, measured, hits)
     return measured
 
 

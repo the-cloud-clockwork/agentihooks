@@ -43,6 +43,14 @@ def render(template: str, hive: Hive) -> dict[str, str]:
     return {path: "".join(body) for path, body in files.items()}
 
 
+def paths(template: str, name: str) -> set[str]:
+    return {
+        Template(line.removeprefix(FILE_MARK).strip()).safe_substitute(name=name)
+        for line in template.splitlines()
+        if line.startswith(FILE_MARK)
+    }
+
+
 def lan_address(services: list[dict]) -> str:
     found = {
         _annotations(service).get(LAN_IP_ANNOTATION)

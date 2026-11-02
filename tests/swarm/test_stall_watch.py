@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from scripts.hive import join_report
 from scripts.inbox.store import InboxStore
 from scripts.swarm import idle, ledger_events, outage, ready, release_wait, stall_watch, waits
 from scripts.swarm.health.findings import Finding
@@ -238,6 +239,45 @@ def test_an_owner_not_live_past_its_limit_reopens_and_nothing_is_retired():
     assert not _reopened(swarm)
     swarm.tick(START + 10 * MINUTE)
     assert _reopened(swarm) and swarm.retired == []
+    assert "owner not live for 10 minutes" in swarm.inbox()[0].text
+
+
+def _hive_owner(status="running"):
+    swarm = Swarm(RUNNING, live=False)
+    swarm.store.drop_agent(SLUG, OWNER)
+    name = swarm.store.next_name(SLUG, "eng")
+    hive_agent = swarm.store.execution_registry.start(
+        SLUG, AgentRecord(name, "eng", "t1", seat="eng-1@sw", hive="hive-one"), ""
+    )
+    swarm.ledger.rows["t1"]["claimed_by"] = name
+    report = {"agent": name, "slug": SLUG, "execution_id": hive_agent.execution_id, "status": status}
+
+    def beat(at):
+        row = {**report, "generation": hive_agent.generation, "heartbeat_at": at}
+        swarm.store.redis.hset(join_report.key("hive-one"), hive_agent.execution_id, json.dumps(row))
+
+    return swarm, beat
+
+
+WINDOW = 2 * join_report.HEARTBEAT_MS
+
+
+def test_a_hive_owner_with_a_fresh_join_heartbeat_is_live():
+    swarm, beat = _hive_owner()
+    beat(START - 60 * MINUTE)
+    swarm.tick(START)
+    beat(START + 10 * MINUTE - WINDOW)
+    assert swarm.tick(START + 10 * MINUTE) == [] and not _reopened(swarm)
+
+
+@pytest.mark.parametrize(("status", "age"), [("running", WINDOW + 1), ("ended", 0)])
+def test_a_hive_owner_with_a_stale_or_ended_join_report_is_not_live(status, age):
+    swarm, beat = _hive_owner(status)
+    beat(START - 60 * MINUTE)
+    swarm.tick(START)
+    beat(START + 10 * MINUTE - age)
+    swarm.tick(START + 10 * MINUTE)
+    assert _reopened(swarm)
     assert "owner not live for 10 minutes" in swarm.inbox()[0].text
 
 
@@ -514,10 +554,11 @@ def test_a_closed_unclaimed_alert_is_not_sent_again_while_the_task_still_waits()
 def test_the_tick_runs_the_stall_pass_after_the_merge_pass():
     import inspect
 
-    from scripts.swarm import cli
+    from scripts.tick.steps import report
 
-    source = inspect.getsource(cli.run_tick)
+    source = inspect.getsource(report)
     assert source.index("ready.merge_pass") < source.index("stall_watch.stall_pass")
+    assert source.index('"merge pass"') < source.index('"stall watch"')
 
 
 def _alert(**fields):
@@ -1375,9 +1416,9 @@ def test_the_pull_request_view_reads_check_starts_and_the_latest_reopen_or_queue
 def test_the_tick_rereads_a_stall_from_github_before_acting():
     import inspect
 
-    from scripts.swarm import cli
+    from scripts.tick.steps import report
 
-    assert "reread=ledger_events.view" in inspect.getsource(cli.run_tick)
+    assert "reread=ledger_events.view" in inspect.getsource(report)
 
 
 def test_a_new_owner_inside_its_limit_costs_no_github_reread():
@@ -1388,3 +1429,65 @@ def test_a_new_owner_inside_its_limit_costs_no_github_reread():
     reads = []
     assert swarm.tick(claim + MINUTE, reread=lambda url: reads.append(url) or RED) == []
     assert reads == []
+
+
+def _doctor_store() -> RedisStore:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1))
+    return store
+
+
+def test_a_task_the_watched_focus_keeps_from_claims_is_not_ready_and_the_count_matches_autoscale() -> None:
+    from scripts.swarm import capacity
+    from tests.swarm.test_freeze import record
+    from tests.swarm.test_freeze_doctor import DemandRuntime, doctor
+
+    store = _doctor_store()
+    ledger, runtime = doctor(store, [record("plans/a", "focus")]), DemandRuntime()
+    ready_tasks = stall_watch.ready_lanes(SLUG, store, ledger, ledger.state(SLUG), 1_000)
+    assert [task["id"] for task in ready_tasks("eng")] == ["fix"]
+    assert ready_tasks("ci") == []
+    assert ledger.read.count("watched") == 1
+    capacity.apply(SLUG, store.config(SLUG), store, ledger, runtime, 1_000)
+    counted = {lane: len(ready_tasks(lane)) for lane in capacity.LANES}
+    assert runtime.demand == [counted] == [{"eng": 1, "ci": 0, "plan": 0}]
+
+
+def test_a_task_a_fresh_placement_refusal_holds_is_ready_again_once_the_refusal_expires() -> None:
+    from scripts.hive import placement_waits
+    from tests.swarm.test_freeze import record
+    from tests.swarm.test_freeze_doctor import doctor
+
+    store = _doctor_store()
+    ledger = doctor(store, [record("plans/a", "focus")])
+    placement_waits.observe(store, SLUG, "eng", "fix", "no hive for eng has room", 0)
+    doc = ledger.state(SLUG)
+    assert stall_watch.ready_lanes(SLUG, store, ledger, doc, placement_waits.FRESH_MS - 1)("eng") == []
+    expired = stall_watch.ready_lanes(SLUG, store, ledger, doc, placement_waits.FRESH_MS)("eng")
+    assert [task["id"] for task in expired] == ["fix"]
+
+
+def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_unclaimed_alert() -> None:
+    from tests.swarm.test_freeze import record
+    from tests.swarm.test_freeze_doctor import doctor
+
+    swarm = Swarm(RUNNING)
+    ledger = doctor(swarm.store, [record("plans/a", "focus")], [{"id": "watch", "phase": "p1"}])
+    swarm.store.put_agent(SLUG, AgentRecord("engineer@abc-0002", "eng", "t9", seat="eng-2@sw"))
+    decision = {"configured": {"eng": 2, "ci": 1, "plan": 0}, "placeable": {"claude": 1, "codex": 0}}
+    swarm.store.redis.set(swarm.store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    doc = ledger.state(SLUG)
+    ready_tasks = stall_watch.ready_lanes(SLUG, swarm.store, ledger, doc, START)
+    swarm.ready = {"eng": ready_tasks("eng"), "ci": ready_tasks("ci")}
+    swarm.tick(START, doc)
+    assert swarm.tick(START + 30 * MINUTE, doc) == [] and swarm.inbox() == []
+
+
+def test_the_tick_reads_stall_readiness_through_the_watched_focus() -> None:
+    import inspect
+
+    from scripts.tick.steps import report
+
+    assert 'stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms())' in inspect.getsource(report)

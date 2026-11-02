@@ -65,6 +65,68 @@ def test_the_freed_seat_goes_to_the_urgent_task_and_the_normal_successor_yields(
     assert "t2" not in {a.task for a in workers(store)}
 
 
+def test_the_preempted_life_is_refunded_and_a_refused_urgent_task_asks_nobody(store):  # noqa: F811
+    from scripts.hive import placement_waits
+
+    ledger, runtime = busy_with_normal_work(store)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    tick("sw", store, ledger, runtime, now_ms=4_000)
+    victim = next(a for a in workers(store) if a.task == "t2")
+    ledger.rows["t2"]["branch"] = victim.name.replace("@", "-")
+    store.put_handoff("sw", "t2", "pushed, preempted", seat=victim.seat, envelope={"reason": "operator"})
+    store.put_agent("sw", replace(victim, state="finished"))
+    tick("sw", store, ledger, runtime, now_ms=5_000)
+    assert store.claims("sw", "t2") == 0
+    ledger.rows["t4"] = {"id": "t4", "lane": "eng", "state": "open", "claimed_by": "", "rank": "urgent"}
+    placement_waits.observe(store, "sw", "eng", "t4", "no eng hive has room: cpu", 5_000)
+    for at in (6_000, 7_000, 7_000 + preempt.ANSWER_MS):
+        tick("sw", store, ledger, runtime, now_ms=at)
+    assert [asks(store, a.name) for a in workers(store)] == [[], []]
+
+
+def test_a_full_lane_probes_placement_again_before_asking_for_an_urgent_task_refused_long_ago(
+    store,  # noqa: F811
+    monkeypatch,
+):
+    from scripts.hive import placement_waits
+
+    refused = "no eng hive has room: cpu"
+    ledger, runtime = busy_with_normal_work(store)
+    ledger.rows["t3"]["rank"] = "high"
+    monkeypatch.setattr(
+        runtime, "placement_refusal", lambda lane, task: refused if task.get("id") == "t4" else "", raising=False
+    )
+    ledger.rows["t4"] = {"id": "t4", "lane": "eng", "state": "open", "claimed_by": "", "rank": "urgent"}
+    placement_waits.observe(store, "sw", "eng", "t4", refused, 3_000)
+    for at in (3_000, 4_000 + placement_waits.WAIT_MS, 5_000 + placement_waits.WAIT_MS + preempt.ANSWER_MS):
+        tick("sw", store, ledger, runtime, now_ms=at)
+    assert workers(store)
+    assert [a.name for a in store.agents("sw") if asks(store, a.name)] == []
+
+
+def test_an_urgent_task_with_an_unresolved_profile_asks_nobody_once_its_refusal_is_old(
+    store,  # noqa: F811
+    monkeypatch,
+):
+    from scripts.hive import placement_waits
+    from scripts.swarm.profile_choice import ProfileUnresolved
+
+    def refusal(lane, task):
+        if task.get("id") == "t4":
+            raise ProfileUnresolved("t4 profile is unresolved")
+        return ""
+
+    ledger, runtime = busy_with_normal_work(store)
+    ledger.rows["t3"]["rank"] = "high"
+    monkeypatch.setattr(runtime, "placement_refusal", refusal, raising=False)
+    ledger.rows["t4"] = {"id": "t4", "lane": "eng", "state": "open", "claimed_by": "", "rank": "urgent"}
+    placement_waits.observe(store, "sw", "eng", "t4", "no eng hive has room: cpu", 3_000)
+    for at in (3_000, 4_000 + placement_waits.WAIT_MS):
+        tick("sw", store, ledger, runtime, now_ms=at)
+    assert workers(store)
+    assert [a.task for a in store.agents("sw") if asks(store, a.name)] == []
+
+
 def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store, monkeypatch):  # noqa: F811
     from importlib import import_module
     from unittest.mock import Mock, call

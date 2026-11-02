@@ -1,0 +1,6 @@
+{
+  "hooks/context/task_context.py:hooks.context.task_context.x_offer:1736fb58092810444d2f91213cd27b432d32a9593c137fbec85619ebfb3165f6": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the call sits under if not pack, so pack is None or an empty string; _delivery uses pack only in len((pack or '').encode()), which is 0 for both, and in classify(pack) if pack else 'missing', which yields 'missing' for both, so the recorded row is byte-identical under the mutant."
+  }
+}

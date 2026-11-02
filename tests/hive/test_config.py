@@ -151,7 +151,7 @@ def live(redis, hive_id, snapshot):
     from scripts.hive import registry
 
     registry.update(redis, hive_id, [f"name={hive_id}"])
-    redis.hset(registry.key(hive_id), "heartbeat_at", str(registry_now()))
+    registry.beat(redis, hive_id, {"heartbeat_at": registry_now()})
     if snapshot is not None:
         redis.set(f"{registry.key(hive_id)}:config", json.dumps(snapshot))
 

@@ -137,6 +137,36 @@ def test_closed_item_and_unrelated_deadline_never_advance_ladder(rig):
     assert steps(rig, item) == []
 
 
+@pytest.mark.parametrize(("source_world", "target_world"), [("", "hive"), ("hive", "")])
+@pytest.mark.parametrize("flushed", [False, True])
+def test_world_move_transfers_the_wake_to_its_destination(rig, monkeypatch, source_world, target_world, flushed):
+    from scripts.hive import scope
+    from scripts.inbox.store import InboxStore
+
+    monkeypatch.setattr(scope, "member", lambda: True)
+    source = InboxStore(rig.inbox.redis, world=source_world)
+    target = InboxStore(rig.inbox.redis, world=target_world)
+    monkeypatch.setattr(type(source.names), "slug_of", lambda self, name: "sw")
+    item = source.send("sender", "worker", "moved request")
+    monkeypatch.setattr(scope, "member", lambda: False)
+    monkeypatch.setattr(scope, "members", lambda redis: ["hive"])
+    if flushed:
+        rig.reactor.flush()
+        pump(rig)
+    source.move_world(item.id, target, "swarm", "worker moved")
+    assert source.redis.smembers(source.key("wake-outbox")) == set()
+    assert target.redis.smembers(target.key("wake-outbox")) == {item.id}
+    assert not source.redis.exists(source.key("item", item.id))
+    rig.reactor.flush()
+    rig.reactor.flush()
+    pump(rig)
+    advance(rig, 1000)
+    assert rig.herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert [row["event"] for row in target.history(item.id) if "event" in row] == ["woken"]
+    assert source.redis.smembers(source.key("wake-outbox")) == set()
+    assert target.redis.smembers(target.key("wake-outbox")) == set()
+
+
 def test_hive_mail_is_resolved_from_its_own_world(rig, monkeypatch):
     from scripts.hive import scope
     from scripts.inbox.store import InboxStore

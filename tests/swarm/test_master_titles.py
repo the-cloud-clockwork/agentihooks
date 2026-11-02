@@ -89,7 +89,7 @@ def test_a_doctor_front_door_launch_registers_remote_control_under_its_seat(tmp_
     argv, placed = _spawned(tmp_path, "rig-doctor", "master", "master@rig-doctor", kind)
     passed = _passed(argv)
     at = passed.index("--remote-control")
-    assert passed[:2] == ["--route", master_claude_login.ROUTE]
+    assert passed[:2] == ["--route", "claude-ai"]
     assert passed[at : at + 2] == ["--remote-control", "master 1 · rig-doctor"]
     assert (placed.route_kind, placed.remote_control) == (
         "interactive",
@@ -204,7 +204,7 @@ def test_a_front_door_on_an_exhausted_explicit_route_still_launches_on_the_login
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", agent_choice.ALL_FULL))
     task = {"id": "master", "title": "rig", "seat": "master@rig", "route_kind": kind}
     placed = runtime.spawn(config, "master", "agent", task)
-    assert _passed(seen[0])[:2] == ["--route", master_claude_login.ROUTE]
+    assert _passed(seen[0])[:2] == ["--route", "claude-ai"]
     assert placed.route_kind == "interactive"
 
 

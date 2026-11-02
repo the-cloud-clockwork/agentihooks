@@ -293,7 +293,7 @@ def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
     assert take["run"].splitlines() == [
         'git fetch --no-tags origin "$GITHUB_SHA"',
         'mkdir -p "$RUNNER_TEMP/workflow"',
-        'git archive "$GITHUB_SHA" .github/scripts | tar -x -C "$RUNNER_TEMP/workflow"',
+        'git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"',
     ]
 
 
@@ -317,6 +317,7 @@ def test_a_head_that_predates_the_helper_still_runs_it_from_the_workflow_revisio
     git(repo, "checkout", "-q", "--detach", head)
     (origin / ".github/scripts").mkdir(parents=True)
     shutil.copy(RETRY, origin / ".github/scripts/pypi-retry.sh")
+    shutil.copy(ROOT / ".github/test-requirements.lock", origin / ".github/test-requirements.lock")
     git(origin, "add", ".")
     git(origin, "commit", "-qm", "workflow revision")
     workflow_sha = git(origin, "rev-parse", "HEAD").strip()
@@ -350,7 +351,10 @@ def test_the_test_planner_installs_its_pinned_pyyaml_with_uv_through_the_retry()
         'bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- '
         '"$HOME/venv/bin/uv" pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3'
     ]
-    assert 'cat "$RUNNER_TEMP/plan.log"' in next(s for s in steps if s.get("name") == "Wait for the test plan")["run"]
+    assert (
+        'tail -n +1 -f --pid="$!" "$RUNNER_TEMP/plan.log"'
+        in next(s for s in steps if s.get("name") == "Wait for the test plan")["run"]
+    )
 
 
 class _FlakyIndex(BaseHTTPRequestHandler):

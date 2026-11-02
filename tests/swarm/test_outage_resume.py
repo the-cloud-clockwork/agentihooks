@@ -1,10 +1,12 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from scripts.swarm import idle, outage, profile_choice, prompt, resume
+from scripts.swarm import fencing, idle, outage, profile_choice, prompt, resume
 from scripts.swarm.pane import PaneObservation
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -250,14 +252,13 @@ def test_a_new_task_generation_fences_the_recovery_pass(store):
         "generation": 1,
         "lease_deadline_ms": 20 * MINUTE,
     }
-    key = store.key("sw", "task-authority", agent.task)
-    store.redis.set(key, json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     rows = {task["id"]: task for task in ledger.state("sw")["tasks"]}
     resume.track_outages("sw", store, runtime, rows, 8 * MINUTE)
     assert resume.recovery_pending(store, "sw", agent)
     authority["generation"] += 1
-    store.redis.set(key, json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     outage.observe("sw", "provider", [], 9 * MINUTE)
     resume.recover_outages("sw", store, ledger, runtime, rows, 9 * MINUTE)
     assert not resume.recovery_pending(store, "sw", agent)
@@ -348,7 +349,7 @@ def test_an_owner_that_loses_its_task_drops_its_pending_recovery(store, tmp_path
             "generation": 0,
             "lease_deadline_ms": 20 * MINUTE if released else 10 * MINUTE,
         }
-        store.redis.set(store.key("sw", "task-authority", agent.task), json.dumps(authority))
+        fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     resume.track_outages("sw", store, runtime, rows, 10 * MINUTE)
     assert recovery_state(store, agent.name) is None
     assert not resume.recovery_pending(store, "sw", agent)
@@ -391,7 +392,7 @@ def test_an_unchanged_owner_does_not_stop_rerecording_a_later_owner_with_a_new_i
         "generation": 1,
         "lease_deadline_ms": 20 * MINUTE,
     }
-    store.redis.set(store.key("sw", "task-authority", last.task), json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({last.task: authority}))
     assert not resume.recovery_pending(store, "sw", last)
     resume.track_outages("sw", store, runtime, rows_of(ledger), 9 * MINUTE)
     assert resume.recovery_pending(store, "sw", agents[0])
@@ -508,6 +509,33 @@ def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_s
     assert recovery_state(store, dead.name) == "done"
 
 
+def test_an_unsupported_handoff_restart_retries_fresh_on_the_same_seat(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.tick import SpawnError as RestartError
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    native_spawn = runtime.spawn
+    launched = []
+
+    def spawn(config: SwarmConfig, lane: str, name: str, task: dict[str, object]) -> Placed:
+        launched.append(task)
+        if len(launched) == 1:
+            raise RestartError("saved run options unavailable", "unsupported")
+        return native_spawn(config, lane, name, task)
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
+    actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert f"outage resume for {dead.name}" in actions
+    assert len(launched) == 2
+    assert not launched[0].get(profile_choice.FRESH)
+    assert launched[1] == {**launched[0], profile_choice.FRESH: True}
+    assert launched[1]["seat"] == dead.seat
+    assert recovery_state(store, dead.name) == "done"
+
+
 def test_a_restart_refused_for_another_reason_is_reported(store, tmp_path, monkeypatch):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
     dead = agents[2]
@@ -616,6 +644,56 @@ def test_an_owner_with_pending_input_is_not_prompted(store, tmp_path, monkeypatc
     assert resume.recovery_pending(store, "sw", agents[0])
 
 
+def test_a_recovery_held_by_pane_input_names_why_until_the_input_clears(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    runtime.inputs[holder.name] = "half typed reply"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert resume.recovery_blocker(store, "sw", holder) == "its pane holds input"
+    runtime.inputs.pop(holder.name)
+    runtime.nudge_refusals[holder.name] = "pane busy"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 10 * MINUTE)
+    assert resume.recovery_blocker(store, "sw", holder) == f"1 of {resume.RECOVERY_ATTEMPTS} resume attempts made"
+
+
+def test_a_recovery_whose_task_moved_since_the_tick_read_names_the_ownership_change(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    rows = {task: dict(row) for task, row in rows_of(ledger).items()}
+    ledger.rows[holder.task]["claimed_by"] = "successor"
+    resume.recover_outages("sw", store, ledger, runtime, rows, 9 * MINUTE)
+    assert holder.name not in runtime.nudged
+    assert resume.recovery_blocker(store, "sw", holder) == "its task ownership changed"
+
+
+def test_a_working_owner_with_typed_text_completes_its_recovery(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    runtime.statuses[agents[0].name] = "working"
+    runtime.inputs[agents[0].name] = "half typed reply"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert agents[0].name not in runtime.nudged
+    assert recovery_state(store, agents[0].name) == "done"
+
+
+def test_a_dead_owner_whose_pane_reads_unknown_is_still_resumed(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    runtime.statuses[dead.name] = "unknown"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert [name for name, _, _ in runtime.resumed] == [dead.name]
+
+
+def test_a_pending_recovery_holds_while_an_outage_is_open_and_its_window_after_closure(store, tmp_path, monkeypatch):
+    _, _, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    outage.observe("sw", "provider", ["provider unavailable"], 10 * MINUTE)
+    assert resume.recovery_holds(store, "sw", holder, 10 * MINUTE + 2 * resume.RECOVERY_HOLD_MS)
+    outage.observe("sw", "provider", [], 11 * MINUTE)
+    assert resume.recovery_holds(store, "sw", holder, 11 * MINUTE + resume.RECOVERY_HOLD_MS - 1)
+    assert not resume.recovery_holds(store, "sw", holder, 11 * MINUTE + resume.RECOVERY_HOLD_MS)
+
+
 def test_a_reopened_conversation_records_the_placement_it_reports(store, tmp_path, monkeypatch):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     dead = agents[2]
@@ -702,6 +780,55 @@ def test_a_pending_recovery_stops_once_its_attempts_are_spent(store, tmp_path, m
     record["attempts"] = resume.RECOVERY_ATTEMPTS
     store.redis.hset(key, agents[0].name, json.dumps(record))
     assert not resume.recovery_pending(store, "sw", agents[0])
+
+
+@pytest.mark.parametrize("control", ["closed", "open", "typed", "wait"])
+def test_a_pending_recovery_after_its_outage_closes_retires_an_idle_holder_while_paused_unless_a_control_holds_it(
+    store, tmp_path, monkeypatch, control
+):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
+    holder = agents[0]
+    store.put_agent("sw", replace(holder, idle_ticks=IDLE_KILL_TICKS - 1))
+    for agent in agents[1:]:
+        runtime.statuses[agent.name] = "working"
+    if control == "open":
+        outage.observe("sw", "provider", ["provider unavailable"], 10 * MINUTE)
+    elif control == "typed":
+        runtime.inputs[holder.name] = "half typed reply"
+    elif control == "wait":
+        idle.declare_wait(store.redis, "sw", holder.name, 60 * MINUTE, "checks", 10 * MINUTE)
+    assert store.config("sw").state == "paused"
+    assert resume.recovery_pending(store, "sw", holder)
+    actions = tick("sw", store, ledger, runtime, 40 * MINUTE)
+    if control != "closed":
+        assert holder.name not in runtime.killed
+        assert store.claimant("sw", holder.task) == holder.name
+        return
+    assert runtime.killed == [holder.name]
+    assert (ledger.rows[holder.task]["state"], ledger.rows[holder.task]["claimed_by"]) == ("open", "")
+    stalled = [action for action in actions if action.startswith(f"stalled {holder.name}")]
+    assert stalled and "outage recovery could not proceed" in stalled[0], actions
+
+
+def test_a_pending_recovery_holds_an_idle_holder_only_until_its_window_after_closure_ends(store, tmp_path, monkeypatch):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
+    holder = agents[0]
+    store.put_agent("sw", replace(holder, idle_ticks=IDLE_KILL_TICKS - 1))
+    closed = 9 * MINUTE
+    tick("sw", store, ledger, runtime, closed + resume.RECOVERY_HOLD_MS - MINUTE)
+    assert holder.name not in runtime.killed
+    assert store.claimant("sw", holder.task) == holder.name
+    actions = tick("sw", store, ledger, runtime, closed + resume.RECOVERY_HOLD_MS)
+    assert holder.name in runtime.killed
+    assert ledger.rows[holder.task]["state"] == "open"
+    stalled = [action for action in actions if action.startswith(f"stalled {holder.name}")]
+    assert stalled and stalled[0].endswith(f"0 of {resume.RECOVERY_ATTEMPTS} resume attempts made"), actions
 
 
 def test_an_owner_holding_its_task_authority_is_recovered(store, tmp_path, monkeypatch):

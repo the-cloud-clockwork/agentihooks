@@ -123,6 +123,7 @@ def test_the_filter_confirm_line_comes_from_its_definition(packaged, monkeypatch
     spec = SimpleNamespace(mode="classifier", intent_from=None, intent="no ids", question="Q?")
     findings = [filter_runner.Finding((), 0, 2, "t1", "an id")]
     monkeypatch.setattr("hooks.classifier.decide", _judge(0.5))
+    monkeypatch.setenv("AGENTIHOOKS_FILTER_CACHE_TTL_S", "0")
     entry, payload = {"file": "f.filter.yaml", "path": "f"}, {"tool_input": {}}
     assert filter_runner.confirm(entry, spec, payload, findings) == findings
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_FILTER_CONFIRM", "0.6")

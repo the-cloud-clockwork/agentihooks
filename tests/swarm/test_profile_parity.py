@@ -179,21 +179,32 @@ def test_a_pod_launch_without_a_kept_profile_picks_afresh(monkeypatch, asked, ta
 
 
 @pytest.mark.parametrize(
+    "task",
+    [
+        {**TASK, "handoff": "## Next\nGo on\n"},
+        {**TASK, "handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {**LAUNCH, "profile": ""}}},
+    ],
+    ids=["handoff-without-launch", "handoff-without-profile"],
+)
+def test_an_incomplete_handoff_picks_afresh_on_both_paths(tmp_path, monkeypatch, asked, task):
+    on_local = local(tmp_path, task, {})
+    on_pod = pod(World(monkeypatch), task, {})
+
+    assert (on_local, on_pod) == ("frontend", "frontend")
+    assert asked == ["t1", "t1"]
+
+
+@pytest.mark.parametrize(
     ("task", "reason"),
     [
-        ({**TASK, "handoff": True}, "unsupported handoff: original profile and run options are missing"),
-        (
-            {**TASK, "handoff_envelope": {"launch": {**LAUNCH, "profile": ""}}},
-            "unsupported handoff: original profile and run options are missing",
-        ),
         (
             {**TASK, "handoff_envelope": {"launch": {**LAUNCH, "harness": "gemini"}}},
             "unsupported handoff harness: gemini",
-        ),
+        )
     ],
-    ids=["handoff-without-launch", "handoff-without-profile", "handoff-on-another-harness"],
+    ids=["handoff-on-another-harness"],
 )
-def test_a_pod_launch_refuses_an_incomplete_handoff_like_the_local_launch(tmp_path, monkeypatch, asked, task, reason):
+def test_a_pod_launch_refuses_an_unsupported_handoff_like_the_local_launch(tmp_path, monkeypatch, asked, task, reason):
     with pytest.raises(SpawnError) as on_local:
         local(tmp_path, task, {})
     world = World(monkeypatch)

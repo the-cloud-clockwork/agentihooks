@@ -1,0 +1,6 @@
+{
+  "scripts/ci_proof_outcome.py:scripts.ci_proof_outcome.x_verdict__mutmut_14:8a9410bf047b2447cd0c46dab296d1a8e73a33933ffdc297b6fe0e40bb19a8db": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: a summary part adds a completed count only when its name is exactly one of the completed outcomes and its count is digits, which needs exactly one space, where partition and rpartition split identically; with zero or two or more spaces neither form yields a completed count, so no input can kill it."
+  }
+}

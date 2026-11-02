@@ -12,6 +12,9 @@ RAW = "Accept: application/vnd.github.raw"
 AUTO_REFUSED = "auto merge is not allowed"
 PASSED = ("SUCCESS", "NEUTRAL", "SKIPPED")
 WAITING = (None, "PENDING", "EXPECTED")
+OPEN_LIMIT = 1000
+TRUNCATED = "truncated"
+TREE = f'if .truncated then "{TRUNCATED}" else .tree[].path end'
 REQUIRED = '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique'
 
 
@@ -37,6 +40,21 @@ def clone(run: Run, repo: str, folder: str) -> str:
 
 def read(run: Run, repo: str, path: str, ref: str, cwd: str | None = None) -> str:
     return gh(run, ["api", "-H", RAW, f"repos/{repo}/contents/{path}?ref={ref}"], cwd=cwd) + "\n"
+
+
+def tree(run: Run, repo: str, ref: str) -> set[str]:
+    listed = gh(run, ["api", f"repos/{repo}/git/trees/{ref}?recursive=1", "--jq", TREE])
+    if listed == TRUNCATED:
+        raise auth.HiveError(f"the {repo} {ref} tree is too large to list, so hive create cannot see its hive files")
+    return set(listed.splitlines())
+
+
+def open_heads(run: Run, repo: str) -> set[str]:
+    argv = ["pr", "list", "-R", repo, "--state", "open", "--limit", str(OPEN_LIMIT), "--json", "headRefName"]
+    heads = gh(run, [*argv, "--jq", ".[].headRefName"]).splitlines()
+    if len(heads) >= OPEN_LIMIT:
+        raise auth.HiveError(f"{repo} has {OPEN_LIMIT} or more open pull requests, so hive create cannot see them all")
+    return set(heads)
 
 
 def open_pr(

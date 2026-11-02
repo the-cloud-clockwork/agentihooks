@@ -1,0 +1,1 @@
+{"type": "user", "uuid": "c-u1", "sessionId": "s-conflict", "cwd": "/work/agentihooks", "timestamp": "2026-02-01T08:00:00Z", "message": {"role": "user", "content": "Rotate the runner pool."}}

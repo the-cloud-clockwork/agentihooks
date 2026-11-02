@@ -1,5 +1,9 @@
 import inspect
+import io
+import os
 import subprocess
+import time
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -279,6 +283,52 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     assert ledger_load.run(tmp_path) == ([], 0.7)
 
 
+def test_the_load_server_trusts_its_writer_but_refuses_an_unrelated_project(monkeypatch, tmp_path):
+    import os
+    import subprocess
+
+    stranger = tmp_path / "stranger"
+    stranger.mkdir()
+    subprocess.run(["git", "init", "-q", str(stranger)], check=True)
+    subprocess.run(
+        ["git", "-C", str(stranger), "remote", "add", "origin", "https://github.com/stranger/project.git"],
+        check=True,
+    )
+    (stranger / ".agentihooks" / "conditions").mkdir(parents=True)
+    checkout = Path(ledger_load.__file__).resolve().parents[2]
+    script = tmp_path / "trust_server.py"
+    script.write_text(
+        "import os, socket\n"
+        "from hooks import config\n"
+        "from hooks.context import profile_chain\n"
+        "from hooks.filters.check import trusted_folder\n"
+        "profile_chain.read_state = lambda: {}\n"
+        "assert config.CONDITIONS_ENABLED\n"
+        f"trusted_folder({str(checkout)!r})\n"
+        "try:\n"
+        f"    trusted_folder({str(stranger)!r})\n"
+        "except ValueError as exc:\n"
+        "    assert 'outside the operator' in str(exc)\n"
+        "else:\n"
+        "    raise AssertionError('unrelated writer was trusted')\n"
+        "listener = socket.socket()\n"
+        "listener.bind(('127.0.0.1', int(os.environ['LEDGER_PORT'])))\n"
+        "listener.listen()\n"
+        "while True:\n"
+        "    connection, _ = listener.accept()\n"
+        "    connection.close()\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(checkout))
+    monkeypatch.setenv("CONDITIONS_ENABLED", "true")
+    monkeypatch.setenv("CONDITIONS_TRUSTED_OWNERS", "")
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    monkeypatch.setattr(ledger_load, "RELAYS", {})
+    with (tmp_path / "server.log").open("w") as log:
+        server = ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+        ledger_load.stop_server(server)
+    assert os.environ["CONDITIONS_TRUSTED_OWNERS"] == ""
+
+
 @pytest.mark.parametrize("unwritable_log", [False, True])
 def test_a_server_that_fails_at_startup_names_its_exit_status_and_stderr(monkeypatch, tmp_path, unwritable_log):
     script = tmp_path / "failing_server.py"
@@ -504,3 +554,48 @@ def test_a_silent_event_stream_inside_the_window_stays_red(monkeypatch):
     assert clock.now == ledger_load.TIMEOUT_S
     assert results["errors"] == ["event stream: TimeoutError: silent event stream"]
     assert stream.closed
+
+
+def preflight_client(sent: list, refusal=None) -> type:
+    class Api:
+        def __init__(self, base, credentials, timeout):
+            pass
+
+        def mutate(self, slug, operations):
+            sent.append(operations[0]["op"])
+            if refusal and operations[0]["op"] != "join":
+                raise refusal()
+            return {"data": {}}
+
+        def request(self, slug, path):
+            return {"data": {}}
+
+    return Api
+
+
+@pytest.mark.wall_clock
+def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkeypatch):
+    body = b'{"error": {"code": "invalid_operation", "message": "the thread is not on this ledger"}}'
+    sent = []
+    monkeypatch.setattr(
+        ledger_load,
+        "ResourceClient",
+        preflight_client(sent, lambda: urllib.error.HTTPError("http://x", 400, "Bad Request", {}, io.BytesIO(body))),
+    )
+    monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
+    began = time.monotonic()
+    with pytest.raises(SystemExit, match=r"HTTP 400 Bad Request.*the thread is not on this ledger"):
+        ledger_load.load(0, "token", os.getpid(), 15.0)
+    assert time.monotonic() - began < 5
+    assert sent == ["join"] * ledger_load.CLIENTS + ["add"]
+
+
+def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ledger_load, "ResourceClient", preflight_client(sent))
+    monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
+    monkeypatch.setattr(ledger_load, "watcher", lambda base, credentials, deadline, results: None)
+    results = ledger_load.load(0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
+    assert sent == ["join"] * ledger_load.CLIENTS + ["add"] * 3
+    assert len(results["writes"]) == 2
+    assert results["errors"] == []

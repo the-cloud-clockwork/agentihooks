@@ -1,23 +1,24 @@
-"""Hive registry: one Redis hash per hive under <ROOT>:hive:<id>, indexed in <ROOT>:hives."""
+"""Hive registry: one record per hive in the hive state store, indexed there too; <ROOT>:hive:<id> is the legacy hash."""
 
 import json
 import os
 import re
+import socket
+import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
-from scripts.hive import scope
-from scripts.hive.auth import INDEX, HiveError
+from scripts.events import state
+from scripts.hive import hive_state, scope
+from scripts.hive.auth import HiveError
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm_v2.keyspace import INSTALLATION_FILE
 
-if TYPE_CHECKING:
-    from redis import Redis
-    from redis.client import Pipeline
-
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
+BEAT_WINDOW_MS = 300_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 JSON_FIELDS = {
@@ -30,12 +31,16 @@ JSON_FIELDS = {
     "master_login": dict,
     "repos": list,
     "capabilities": list,
+    "drains": list,
 }
-INT_FIELDS = ("max_agents", "heartbeat_at")
+DRAINS_KEPT = 20
+INT_FIELDS = ("max_agents", "heartbeat_at", "beat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
 KEPT = (*UNSET, "ui", "ephemeral")
+MASTER_NAME = "swarm-master"
+INDEX = hive_state.LEGACY_INDEX
 
 
 def key(hive_id: str) -> str:
@@ -158,94 +163,152 @@ def _decode(hive_id: str, field: str, value: str) -> object:
         raise HiveError(f"hive {hive_id} holds an unreadable {field}: {value!r}") from exc
 
 
-def _stored(redis: "Redis", hive_id: str) -> dict | None:
-    stored = redis.hgetall(key(hive_id))
-    if not stored:
-        return None
-    if LEGACY in stored:
-        stored = {field: value for field, value in stored.items() if field not in LEGACY_FIELDS}
-    return {field: _decode(hive_id, field, value) for field, value in stored.items()}
+def _legacy(client, hive_id: str):
+    def stored() -> dict | None:
+        legacy = client.hgetall(key(hive_id)) if hive_state.on_redis() else {}
+        if not legacy:
+            return None
+        if LEGACY in legacy:
+            legacy = {field: value for field, value in legacy.items() if field not in LEGACY_FIELDS}
+        return {field: _decode(hive_id, field, value) for field, value in legacy.items()}
+
+    return stored
+
+
+def _stored(client, hive_id: str) -> dict | None:
+    return hive_state.read(hive_state.records(client, hive_id), hive_id, _legacy(client, hive_id))
+
+
+def _seeded(hive_id: str) -> dict:
+    return {field: value for field, value in _default(hive_id).items() if field not in KEPT}
+
+
+def _amend(client, hive_id: str, change):
+    return hive_state.amend(hive_state.records(client, hive_id), hive_id, change, _legacy(client, hive_id))
 
 
 def _settle(hive_id: str, record: dict) -> dict:
-    return {**_default(hive_id, record.get("ui", "no")), **record}
+    """The hive hosting the operator's interface runs the masters and is always named MASTER_NAME."""
+    settled = {**_default(hive_id, record.get("ui", "no")), **record}
+    return {**settled, "name": MASTER_NAME} if settled["ui"] == "yes" else settled
 
 
-def show(redis: "Redis", hive_id: str) -> dict | None:
-    stored = _stored(redis, hive_id)
+@dataclass(frozen=True)
+class Drain:
+    """Who changed a hive's drain flag, why, and the time by which its agents must be gone."""
+
+    owner: str
+    reason: str
+    deadline_at: int = 0
+
+
+def wall_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def drain_owner(environ: Mapping[str, str] = os.environ) -> str:
+    return environ.get("AGENTIHOOKS_AGENT_NAME") or socket.gethostname()
+
+
+def _ready(record: dict[str, Any], at: int) -> bool:
+    return "heartbeat_at" in record and live(record, at) and record.get("draining") != "yes"
+
+
+def _drained(record: dict[str, Any], stored: dict[str, Any], drain: Drain | None) -> dict[str, Any]:
+    """Appends a drain flag change to the record's retained history, keeping the newest DRAINS_KEPT entries."""
+    if record.get("draining", "no") == stored.get("draining", "no"):
+        return record
+    drain = drain or Drain(drain_owner(), "hive set")
+    at = wall_ms()
+    entry = {
+        "at": at,
+        "draining": record["draining"],
+        "owner": drain.owner,
+        "reason": drain.reason,
+        "deadline_at": drain.deadline_at,
+        "ready_before": _ready(stored, at),
+        "ready_after": _ready(record, at),
+    }
+    return {**record, "drains": [*stored.get("drains", []), entry][-DRAINS_KEPT:]}
+
+
+def show(client, hive_id: str) -> dict | None:
+    stored = _stored(client, hive_id)
     return None if stored is None else _settle(hive_id, stored)
 
 
-def migrate(redis: "Redis", hive_id: str) -> None:
-    hash_key = key(hive_id)
-
-    def drop(pipe: "Pipeline") -> None:
-        if pipe.hexists(hash_key, LEGACY):
-            pipe.multi()
-            pipe.hdel(hash_key, *LEGACY_FIELDS)
-
-    redis.transaction(drop, hash_key)
-
-
-def seed(pipe: "Pipeline", hive_id: str) -> None:
-    for field, value in _default(hive_id).items():
-        if field not in KEPT:
-            pipe.hsetnx(key(hive_id), field, _encode(field, value))
-
-
-def update(redis: "Redis", hive_id: str, pairs: list[str], keep: bool = False) -> dict:
+def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, drain: Drain | None = None) -> dict:
     if not HIVE_ID.fullmatch(hive_id):
         raise HiveError(f"hive id {hive_id!r} must be letters, digits, dots, dashes or underscores")
     if not pairs:
         raise HiveError("hive set needs at least one setting")
     parsed = parse(pairs)
 
-    def write(pipe: "Pipeline") -> dict:
-        legacy = pipe.hexists(key(hive_id), LEGACY)
-        stored = _stored(pipe, hive_id) or {}
-        fields = {f: v for f, v in parsed.items() if not (keep and f in KEPT and f in stored)}
-        record = _settle(hive_id, {**stored, **fields})
-        _check(record)
-        pipe.multi()
-        if legacy:
-            pipe.hdel(key(hive_id), *LEGACY_FIELDS)
-        seed(pipe, hive_id)
-        if fields:
-            pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
-        return record
+    def write(stored: dict | None) -> dict:
+        stored = stored or {}
+        fields = {
+            f: v
+            for f, v in parsed.items()
+            if not (keep and f in stored and (f in KEPT or (f == "name" and stored[f] != hive_id)))
+        }
+        _check(_settle(hive_id, {**stored, **fields}))
+        return _drained({**_seeded(hive_id), **stored, **fields}, stored, drain)
 
-    record = redis.transaction(write, key(hive_id), value_from_callable=True)
+    record = _settle(hive_id, _amend(client, hive_id, write))
     if hive_id != scope.member():
-        _index(redis, hive_id)
+        _index(client, hive_id)
     return record
 
 
-def _index(redis: "Redis", hive_id: str) -> None:
-    from redis.exceptions import NoPermissionError
+def beat(client, hive_id: str, fields: dict) -> None:
+    _amend(client, hive_id, lambda stored: {**_seeded(hive_id), **(stored or {}), **fields})
 
+
+def forget(client, hive_id: str) -> None:
+    _amend(client, hive_id, lambda stored: None)
+    hive_state.indexed(client, hive_id, False)
+
+
+def _index(client, hive_id: str) -> None:
     try:
-        redis.sadd(INDEX, hive_id)
-    except NoPermissionError:
+        hive_state.indexed(client, hive_id, True)
+    except state.unavailable():
         pass
 
 
-def hives(redis: "Redis") -> list[dict]:
-    return [record for hive_id in sorted(redis.smembers(INDEX)) if (record := show(redis, hive_id))]
+def hives(client) -> list[dict]:
+    return [record for hive_id in hive_state.index(client) if (record := show(client, hive_id))]
 
 
-def live(record: dict, now_ms: int) -> bool:
-    return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] <= LIVE_MS
+def live(record: Any, now_ms: int) -> bool:
+    """A fresh heartbeat counts only while the last finished beat, where the record carries one, is within the window."""
+    finished_at: int = record.get("beat_at", record["heartbeat_at"])
+    return (
+        record["heartbeat_at"] > 0
+        and now_ms - record["heartbeat_at"] <= LIVE_MS
+        and now_ms - finished_at <= BEAT_WINDOW_MS
+    )
 
 
-def touch(redis: "Redis", hive_id: str, now_ms: int) -> None:
-    hash_key = key(hive_id)
+def touch(client: Any, hive_id: str, now_ms: int) -> None:
+    """Refreshes the heartbeat and seeds the finished beat once, so a first beat that never ends ages out."""
 
-    def refresh(pipe: "Pipeline") -> None:
-        if pipe.hexists(hash_key, "heartbeat_at"):
-            pipe.multi()
-            pipe.hset(hash_key, "heartbeat_at", now_ms)
+    def refresh(stored: dict[str, Any] | None) -> object:
+        if not stored or "heartbeat_at" not in stored:
+            return hive_state.KEEP
+        return {"beat_at": now_ms, **stored, "heartbeat_at": now_ms}
 
-    redis.transaction(refresh, hash_key)
+    if "heartbeat_at" in (_amend(client, hive_id, refresh) or {}):
+        client.pexpire(f"{key(hive_id)}:sessions", LIVE_MS)
+
+
+def finished(client: Any, hive_id: str, now_ms: int) -> None:
+    """Records the end of a whole daemon beat, which the headroom heartbeat never refreshes."""
+
+    def stamp(stored: dict[str, Any] | None) -> object:
+        return {**stored, "beat_at": now_ms} if stored else hive_state.KEEP
+
+    _amend(client, hive_id, stamp)
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:

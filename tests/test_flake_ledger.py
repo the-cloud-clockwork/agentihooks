@@ -12,7 +12,7 @@ import xdist.newhooks
 import yaml
 from xdist.scheduler import LoadScopeScheduling
 
-from tests.flake_ledger import FlakeLedger, RefillingLoadGroupScheduling
+from tests.flake_ledger import WORKER_FILES, FlakeLedger, RefillingLoadGroupScheduling
 
 pytestmark = pytest.mark.unit
 
@@ -347,6 +347,67 @@ def test_a_crashed_test_skips_a_replacement_worker_that_has_not_collected(tmp_pa
     sched.schedule()
     assert events == [("sent", 0), ("sent", 1)]
     assert not joining.shutting_down
+
+
+def _owned_scheduler(tmp_path, collections):
+    (tmp_path / ".test_durations").write_text(json.dumps({"t.py::slow": 9.0}))
+    stash = pytest.Stash()
+    stash[WORKER_FILES] = {"gw0": ["t.py"]}
+    session = SimpleNamespace(testscollected=0)
+    sched = RefillingLoadGroupScheduling.__new__(RefillingLoadGroupScheduling)
+    sched.config = SimpleNamespace(
+        stash=stash,
+        rootpath=tmp_path,
+        option=SimpleNamespace(loadscopereorder=True),
+        pluginmanager=SimpleNamespace(getplugin=lambda name: SimpleNamespace(_session=session)),
+    )
+    sched.log = lambda *args: None
+    sched.numnodes = len(collections)
+    sched.collection = None
+    sched.workqueue = OrderedDict()
+    sched.registered_collections = {}
+    sched.assigned_work = {worker: {} for worker in collections}
+    for worker, collection in collections.items():
+        sched.add_node_collection(worker, collection)
+    return sched, session
+
+
+def test_workers_with_different_owned_collections_run_only_what_they_collected(tmp_path):
+    one, two = [], []
+    first, second = _Worker(one), _Worker(two)
+    collections = {first: ["t.py::a", "t.py::slow"], second: ["u.py::b", "u.py::c", "t.py::slow"]}
+    sched, session = _owned_scheduler(tmp_path, collections)
+    sched.schedule()
+    assert session.testscollected == 4
+    assert sched.collection[0] == "t.py::slow"
+    sent = {
+        worker: [collections[worker][index] for _, index in events] for worker, events in ((first, one), (second, two))
+    }
+    assert sent == {first: ["t.py::slow", "t.py::a"], second: ["u.py::b", "u.py::c"]}
+    assert not sched.workqueue
+
+
+def test_a_worker_with_nothing_left_it_collected_is_shut_down(tmp_path):
+    busy, idle = _Worker([]), _Worker([])
+    sched, _ = _owned_scheduler(tmp_path, {busy: [f"t.py::{n}" for n in range(6)], idle: ["u.py::only"]})
+    sched.schedule()
+    assert idle.events == [("sent", 0)]
+    assert idle.shutting_down
+    assert not busy.shutting_down
+    assert list(sched.workqueue) == [f"t.py::{n}" for n in range(2, 6)]
+
+
+def test_a_replacement_worker_collecting_the_whole_shard_is_registered_and_fed(tmp_path):
+    events = []
+    first, joining = _Worker([]), _Worker(events)
+    sched, _ = _owned_scheduler(tmp_path, {first: ["t.py::a"]})
+    sched.schedule()
+    sched.workqueue["u.py::b"] = {"u.py::b": False}
+    sched.assigned_work[joining] = {}
+    sched.add_node_collection(joining, ["t.py::a", "u.py::b"])
+    sched.schedule()
+    assert events == [("sent", 1)]
+    assert first.shutting_down
 
 
 def test_a_worker_crash_without_reruns_stays_red_and_is_not_run_again(tmp_path):

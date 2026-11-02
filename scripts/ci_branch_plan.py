@@ -93,7 +93,7 @@ def _schema(record: object) -> bool:
         and all(_strings(record.get(key)) for key in ("passed", "failed", "flaky"))
         and _strings(units)
         and isinstance(tests, dict)
-        and all(_valid_test(test, len(units)) for test in tests.values())
+        and all(_valid_test(test, len(units), set()) for test in tests.values())
     )
 
 
@@ -166,7 +166,8 @@ def _evaluate(root: str, records: list[dict], cache: dict) -> list[tuple[dict, s
             missing.append(record["commit"])
             unfetched |= _blocked(record)
         else:
-            usable.append((record, *_outcomes(record, changed)))
+            summary = {key: record[key] for key in ("run", "attempt", "commit", "head")}
+            usable.append((summary, *_outcomes(record, changed)))
     if missing:
         raise Barrier(f"commit {missing[0]} could not be fetched", unfetched.union(*(v for _, _, v in usable)))
     return usable

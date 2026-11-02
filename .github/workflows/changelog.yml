@@ -1,0 +1,89 @@
+name: Changelog
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to explain, such as v2.17.438
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: max
+
+jobs:
+  changelog:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Explain every change of the release in 20 to 100 words
+        env:
+          CHANGELOG_LITELLM_KEY: ${{ secrets.CHANGELOG_LITELLM_KEY }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          CHANGELOG_LITELLM_URL: ${{ vars.CHANGELOG_LITELLM_URL }}
+          CHANGELOG_MODEL: ${{ vars.CHANGELOG_MODEL }}
+        run: python -m scripts.release_changelog explain "$TAG" "$RUNNER_TEMP/section.md"
+
+      - name: Insert the release into the changelog branch
+        run: |
+          repo="repos/$GITHUB_REPOSITORY"
+          write() {
+            local parent blob tree commit
+            parent=$(gh api "$repo/git/matching-refs/heads/changelog" --jq '.[] | select(.ref == "refs/heads/changelog") | .object.sha') || return 1
+            : > "$RUNNER_TEMP/RELEASES.md"
+            if [[ -n "$parent" ]]; then
+              gh api -H 'Accept: application/vnd.github.raw' "$repo/contents/RELEASES.md?ref=$parent" > "$RUNNER_TEMP/RELEASES.md" || return 1
+            fi
+            cp "$RUNNER_TEMP/RELEASES.md" "$RUNNER_TEMP/RELEASES.before"
+            python -m scripts.release_changelog insert "$RUNNER_TEMP/section.md" "$RUNNER_TEMP/RELEASES.md" || return 1
+            if [[ -n "$parent" ]] && cmp -s "$RUNNER_TEMP/RELEASES.before" "$RUNNER_TEMP/RELEASES.md"; then
+              return 0
+            fi
+            blob=$(python -c 'import base64, json, sys; print(json.dumps({"content": base64.b64encode(open(sys.argv[1], "rb").read()).decode(), "encoding": "base64"}))' "$RUNNER_TEMP/RELEASES.md" \
+              | gh api "$repo/git/blobs" --input - --jq .sha) || return 1
+            tree=$(python -c 'import json, sys; print(json.dumps({"tree": [{"path": "RELEASES.md", "mode": "100644", "type": "blob", "sha": sys.argv[1]}]}))' "$blob" \
+              | gh api "$repo/git/trees" --input - --jq .sha) || return 1
+            commit=$(python -c 'import json, sys; print(json.dumps({"message": sys.argv[1], "tree": sys.argv[2], "parents": sys.argv[3:]}))' "Explain the changes of $TAG" "$tree" ${parent:+"$parent"} \
+              | gh api "$repo/git/commits" --input - --jq .sha) || return 1
+            if [[ -n "$parent" ]]; then
+              gh api -X PATCH "$repo/git/refs/heads/changelog" -f "sha=$commit" -F force=false >/dev/null
+            else
+              gh api "$repo/git/refs" -f ref=refs/heads/changelog -f "sha=$commit" >/dev/null
+            fi
+          }
+          for attempt in 1 2 3 4 5; do
+            if write; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 1
+
+      - name: Add the explanations to the release notes
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          if ! grep -qx '## Change explanations' "$RUNNER_TEMP/notes.md"; then
+            { printf '\n## Change explanations\n\n'; tail -n +2 "$RUNNER_TEMP/section.md"; } >> "$RUNNER_TEMP/notes.md"
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+          fi

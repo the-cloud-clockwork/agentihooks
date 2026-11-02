@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_40:28ee61cbea951d52b4603b85833387124309746c37b6376ea9f57e18919be1b3": {
+    "reader": "standards-reader",
+    "reason": "Omitting dict.get default makes an absent saved harness None instead of empty string. Both values differ from claude, so the first route check returns unchanged empty flags. Present harnesses and preceding want or requested values are unchanged. Later routing and the post-selection check receive unchanged inputs. Independently verified by Standards against CI40642792101 and current spawn on 0e00a45ab."
+  }
+}

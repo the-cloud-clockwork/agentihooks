@@ -21,6 +21,7 @@ def empty_bin():
         repository.save_registry(connection, "restored", {})
 
 
+@pytest.mark.feature("ledger-bin")
 def test_a_closed_ledger_goes_to_the_bin_at_the_given_time():
     assert bin_storage.bin_closed("closed-one", closed_at=100, now=200) is True
     assert ledger_bin.entries() == {"closed-one": 200}
@@ -33,6 +34,7 @@ def test_a_ledger_already_in_the_bin_keeps_its_first_time():
 
 
 @pytest.mark.parametrize("restored_at", [100, 400])
+@pytest.mark.feature("ledger-bin")
 def test_a_restore_at_or_after_the_close_keeps_the_ledger_out(restored_at):
     bin_storage.bin_closed("closed-one", closed_at=50, now=60)
     ledger_bin.restore("closed-one", now=restored_at)
@@ -40,6 +42,7 @@ def test_a_restore_at_or_after_the_close_keeps_the_ledger_out(restored_at):
     assert "closed-one" not in ledger_bin.entries()
 
 
+@pytest.mark.feature("ledger-bin")
 def test_closing_again_after_a_restore_bins_it_again():
     bin_storage.bin_closed("closed-one", closed_at=50, now=60)
     ledger_bin.restore("closed-one", now=99)

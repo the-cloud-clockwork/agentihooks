@@ -131,7 +131,7 @@ def test_launch_budget_changes_only_for_a_native_claude_master(agent, route):
 
     from scripts import master_login_chain as chain
 
-    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10)
+    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10, launch_until=None)
     native = agent in ("", "claude") and route == "master-login"
     assert init_agent._launch_seconds(args) == (chain.BUDGET.launch if native else init_agent.LAUNCH_DEADLINE_S)
     assert args.route_timeout == (chain.BUDGET.route if native else 10)
@@ -862,6 +862,44 @@ def test_swarm_launch_replaces_only_the_inherited_gateway_key(monkeypatch, tmp_p
     assert all(value not in launcher for value in (managed, inherited, other))
 
 
+def _master_launch(tmp_path, companion, extra):
+    state = tmp_path / ".agentihooks"
+    state.mkdir()
+    (state / ".env").write_text("OTHER_KEY=file-other\n")
+    (state / "gateway-master.env").write_text(companion)
+    environ = {
+        "HOME": str(tmp_path),
+        "PATH": os.environ["PATH"],
+        "AGENTIHOOKS_SWARM": "example",
+        "AGENTIHOOKS_SWARM_SPAWN": "1",
+        **extra,
+    }
+    return init_agent._launch_environ(environ, "master@abcdef-0001", False)
+
+
+def test_a_master_launch_carries_the_gateway_key_from_a_companion_env_file(tmp_path):
+    launched = _master_launch(tmp_path, "MCP_KEY_GATEWAY=managed-gateway\n", {})
+    assert launched["MCP_KEY_GATEWAY"] == "managed-gateway"
+    assert "OTHER_KEY" not in launched
+
+
+def test_a_master_launch_without_the_gateway_key_gets_the_named_email_refusal(tmp_path, monkeypatch):
+    from hooks.integrations import mailer
+    from scripts.swarm import operator_email
+
+    mail = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "LANGFUSE_MCP_URL": "https://gw/mcp/"}
+    launched = _master_launch(tmp_path, "UNRELATED=x\n", mail)
+    assert "MCP_KEY_GATEWAY" not in launched
+    sent = []
+    monkeypatch.setattr(mailer.EmailClient, "_instance", None)
+    monkeypatch.setattr(mailer.EmailClient, "reachable", lambda self, timeout=3.0: False)
+    monkeypatch.setattr(operator_email, "gateway_send", lambda *a: sent.append(a) or {"status": "sent"})
+    assert operator_email.send("S", "T", launched, str(tmp_path)) == (
+        "email failed: the SMTP relay is unreachable and MCP_KEY_GATEWAY is not set"
+    )
+    assert sent == []
+
+
 def test_a_quota_handoff_keeps_its_swarm_identity(monkeypatch, tmp_path):
     assert _handoff(monkeypatch, tmp_path, None, extra=["--dry-run"], env_extra=AGENT_ENV) == 0
     launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
@@ -1242,8 +1280,35 @@ def test_the_channel_warning_is_answered_in_the_agents_pane(monkeypatch, seen, s
 
     calls = []
     monkeypatch.setattr(init_agent.herdr_host, "answer", lambda *args: calls.append(args) or seen)
-    assert init_agent._answer_channel_warning("w1:p2", {"K": "v"}) == said
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: 0.0)
+    launch = init_agent.LaunchDeadline(270.0)
+    assert init_agent._answer_channel_warning("w1:p2", {"K": "v"}, launch) == said
     assert calls == [("w1:p2", channel.WARNING, {"K": "v"}, init_agent.CHANNEL_WARNING_MS)]
+
+
+@pytest.mark.parametrize(("ends", "ms"), [(35.5, 25500), (10.0, 0), (7.0, 0)])
+def test_the_channel_warning_wait_ends_with_the_launch_deadline(monkeypatch, ends, ms):
+    calls = []
+    monkeypatch.setattr(init_agent.herdr_host, "answer", lambda *args: calls.append(args[3]) or False)
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: 10.0)
+    launch = init_agent.LaunchDeadline(270.0)
+    launch.ends = ends
+    assert init_agent._answer_channel_warning("w1:p2", {}, launch) == "unseen"
+    assert calls == [ms]
+
+
+def test_the_start_wait_ends_with_the_launch_deadline(tmp_path, monkeypatch, capsys):
+    now = [0.0]
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("claude", "explicit"))
+    monkeypatch.setattr(init_agent.claude_trust, "ensure_trusted", lambda *a: ("trusted", ""))
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(init_agent.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(init_agent.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    monkeypatch.setattr(init_agent, "_start_herdr", lambda *a: [])
+    argv = ["--host", "herdr", "--agent", "claude", "--dir", str(tmp_path), "--start-timeout", "30"]
+    argv += ["--launch-until", "1004000"]
+    assert init_agent.main(argv, {"XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 2
+    assert now[0] == 4.0
 
 
 @pytest.mark.parametrize(
@@ -1425,6 +1490,26 @@ def test_a_resumed_or_served_session_is_named_without_typing(transport, resume, 
     assert init_agent._served(SimpleNamespace(codex_transport=transport, resume=resume)) is served
 
 
+@pytest.mark.parametrize(
+    ("agent", "transport", "push"),
+    [("codex", init_agent.APP_SERVER, "1"), ("codex", "", None), ("claude", init_agent.APP_SERVER, None)],
+)
+def test_only_a_codex_app_server_launch_renders_its_profile_home_with_push(monkeypatch, agent, transport, push):
+    from types import SimpleNamespace
+
+    from scripts import select_profile
+
+    seen = {}
+    monkeypatch.setattr(select_profile, "prepare", lambda *a: seen.update(a[5]) or ({}, a[4]))
+    args = SimpleNamespace(
+        handoff="", resume="", profile="engineer", overlay=[], bundle_revision="r1", codex_transport=transport
+    )
+    environ = {select_profile.RECORDED_HOME: "/old"}
+    init_agent._prepare_profile(args, agent, [], environ)
+    assert seen.get(select_profile.PUSH) == push
+    assert select_profile.PUSH not in environ
+
+
 @pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])
 def test_the_codex_launcher_line_runs_its_command_without_the_prompt_only_when_held(tmp_path, held, argv):
     spec = init_agent.AgentSpec(agent="codex")
@@ -1485,7 +1570,7 @@ def test_a_codex_launcher_holds_its_prompt_behind_the_herdr_variable(monkeypatch
     assert init_agent.PROMPT_AFTER_START == "AGENTIHOOKS_PROMPT_AFTER_START"
 
 
-@pytest.mark.parametrize("prompt", ["Start.", "x" * init_agent.PROMPT_ARGUMENT_LIMIT])
+@pytest.mark.parametrize("prompt", ["Start.", "x" * init_agent.PROMPT_ARGUMENT_LIMIT], ids=["short", "at-limit"])
 def test_a_claude_launcher_separates_its_prompt_from_a_trailing_config_option(monkeypatch, tmp_path, prompt):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks")

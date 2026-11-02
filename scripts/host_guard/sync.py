@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from redis import Redis
+    from scripts.events.bus import StateStore
 
 REPO = Path(__file__).resolve().parent
 LINKS = ("guard-daemon.sh", "guard-config.json")
@@ -39,9 +39,8 @@ def _systemctl(*args: str) -> bool:
 
 def _scheduler():
     from scripts.scheduler import Scheduler
-    from scripts.swarm.store import redis_client
 
-    return Scheduler(redis_client())
+    return Scheduler()
 
 
 def _entries(scheduler) -> list:
@@ -49,11 +48,11 @@ def _entries(scheduler) -> list:
 
 
 def _records() -> list[dict] | None:
-    from redis.exceptions import RedisError
+    from scripts.events import state
 
     try:
         return [entry.record for entry in _entries(_scheduler())]
-    except RedisError:
+    except state.unavailable():
         return None
 
 
@@ -110,13 +109,15 @@ def _remove_units(home: Path) -> bool:
 def _stranded_scheduler():
     import redis
 
+    from scripts.events.redis_state import RedisStateStore
     from scripts.scheduler import Scheduler
+    from scripts.scheduler.core import BUCKET
     from scripts.swarm.store import DEFAULT_URL, redis_url
 
     if redis_url(os.environ) == DEFAULT_URL:
         return None
     client = redis.Redis.from_url(DEFAULT_URL, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
-    return Scheduler(client)
+    return Scheduler(RedisStateStore(client, BUCKET))
 
 
 def _retire(payload: str) -> bool:
@@ -133,7 +134,7 @@ def _retire(payload: str) -> bool:
 
 
 def _schedule(home: Path) -> str:
-    from redis.exceptions import RedisError
+    from scripts.events import state
 
     try:
         scheduler = _scheduler()
@@ -145,8 +146,8 @@ def _schedule(home: Path) -> str:
         entry.start()
         for old in stale:
             old.cancel()
-    except RedisError:
-        return f"[!!] Host guard linked in {home}; Redis is unreachable, so the guard is not scheduled"
+    except state.unavailable():
+        return f"[!!] Host guard linked in {home}; the scheduler store is unreachable, so the guard is not scheduled"
     _start()
     message = f"[OK] Host guard installed in {home} from {REPO}, every {EVERY}s on the agentihooks scheduler"
     return message if retired else f"{message}; a guard entry on the local Redis could not be checked or retired"
@@ -177,10 +178,10 @@ def reconcile(home: Path) -> str:
     return install(home, enable=linked or bool(_for(home, records)))
 
 
-def tick(event: dict, delivery_id: str, redis: "Redis") -> None:
-    from hooks._redis import redis_key
+def tick(event: dict, delivery_id: str, state: "StateStore") -> None:
+    from scripts.scheduler.slots import first_delivery
 
-    if not redis.set(redis_key("scheduler", f"{OWNER}:{delivery_id}"), "1", nx=True, ex=3600):
+    if not first_delivery(state, OWNER, delivery_id):
         return
     script = json.loads(event["payload"])["script"]
     limit = ["timeout", str(EVERY * 2)] if shutil.which("timeout") else []

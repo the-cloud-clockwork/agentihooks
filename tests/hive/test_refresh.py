@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
 from scripts.hive import auth, cli, registry, server
 from scripts.swarm import store
 
@@ -107,13 +108,28 @@ def test_a_revoked_member_cannot_refresh(admin):
     assert admin.acl_users() == ["default"]
 
 
+def test_a_refresh_cannot_restore_a_member_revoked_after_its_lookup(admin, monkeypatch):
+    grant = auth.mint(admin, "laptop", PUBLIC)
+    set_user = auth._set_user
+
+    def revoke_before_set(client, member_id, password):
+        auth.revoke(client, member_id)
+        set_user(client, member_id, password)
+
+    monkeypatch.setattr(auth, "_set_user", revoke_before_set)
+    with pytest.raises(auth.HiveError, match="belongs to no hive member"):
+        auth.refresh(admin, grant["ledger_credential"], PUBLIC)
+    assert f"hive-{grant['id']}" not in admin.acl_users()
+    assert grant["id"] not in auth.members(admin)
+
+
 def test_a_redis_refusal_during_refresh_is_reported(admin, redis_lib, monkeypatch):
     grant = auth.mint(admin, "laptop", PUBLIC)
 
     def refuse(self, *args, **kwargs):
         raise redis_lib.exceptions.ResponseError("NOPERM")
 
-    monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
+    monkeypatch.setattr(admin, "hget", refuse)
 
     with pytest.raises(auth.HiveError, match=r"^Redis refused the refreshed member \(NOPERM\)$"):
         auth.refresh(admin, grant["ledger_credential"], PUBLIC)
@@ -613,7 +629,7 @@ def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
     admin, hive, redis_lib, tmp_path, monkeypatch
 ):
     from scripts.hive import daemon
-    from scripts.scheduler.core import Scheduler
+    from scripts.scheduler.core import Scheduler, bucket
     from scripts.swarm.keyspace import ROOT
 
     left = auth.mint(admin, "pod-before-recreate", PUBLIC)
@@ -629,7 +645,7 @@ def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
     started = []
 
     def beat(redis, local_id):
-        scheduler = Scheduler(redis, machine="pod")
+        scheduler = Scheduler(RedisStateStore(redis, bucket()), machine="pod")
         user = redis.connection_pool.connection_kwargs["username"]
         started.append((user, local_id, [scheduler.key(suffix) for suffix in SCHEDULER_SUFFIXES]))
         raise KeyboardInterrupt

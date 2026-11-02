@@ -1,4 +1,5 @@
 import ast
+import json
 import re
 import subprocess
 import unicodedata
@@ -63,6 +64,12 @@ def graded_green(sha: str) -> bool:
 
 def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:
     bases = own_bases(root, base, head) if isinstance(base, str) else base
+    for own in bases:
+        # One numstat diff fetches the missing blobs of a blobless clone; each diff or show would fetch its own.
+        subprocess.check_output(
+            ["git", "diff", "--no-renames", "--numstat", own, head, "--", "hooks/*.py", "scripts/*.py", "tests/*.py"],
+            cwd=root,
+        )
     given, *newer = [changes_since(root, own, head) for own in bases]
     weak = [weakened_tests(root, own, head) for own in bases[1:]]
     reached = [{path: set(select_tests(root, Path(path))) for path in changes} for changes in newer]
@@ -141,6 +148,47 @@ def bindings(node: ast.stmt) -> list[str]:
     return []
 
 
+def moved_lines(root: Path, comparison: str) -> dict[str, set[int]]:
+    """Name the head lines one whole diff colours as moved unchanged, so moves between files count too."""
+    command = [
+        "git",
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--no-renames",
+        "--no-ext-diff",
+        "--color=always",
+        "--color-moved=blocks",
+        "--color-moved-ws=allow-indentation-change",
+        "--ws-error-highlight=none",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "-U0",
+        comparison,
+        "--",
+        "hooks/",
+        "scripts/",
+    ]
+    moved: dict[str, set[int]] = {}
+    current: set[int] = set()
+    line, header = 0, False
+    for raw in subprocess.check_output(command, cwd=root).decode().splitlines():
+        text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
+        hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", text)
+        if text.startswith("diff --git "):
+            header = True
+        elif header and text.startswith("+++ "):
+            path = text.removeprefix("+++ ").removesuffix("\t")
+            current = moved.setdefault((json.loads(path) if path.startswith('"') else path).removeprefix("b/"), set())
+        elif hunk:
+            header, line = False, int(hunk[1])
+        elif not header and text.startswith("+"):
+            if raw.startswith("\x1b[1;36m"):
+                current.add(line)
+            line += 1
+    return moved
+
+
 def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
     comparison = f"{base}...{head}"
     names = (
@@ -151,14 +199,33 @@ def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
         .decode()
         .split("\0")
     )
+    fork = subprocess.check_output(["git", "merge-base", base, head], cwd=root).decode().strip()
+    moved = moved_lines(root, comparison)
     changes = {}
     for name in names:
         path = Path(name)
         if path.suffix != ".py" or not (root / path).is_file():
             continue
+        if bare_tree(blob(root, fork, name)) == bare_tree(blob(root, head, name)):
+            continue
         diff = subprocess.check_output(["git", "diff", "-U0", comparison, "--", name], cwd=root).decode()
-        changes[name] = changed_lines(diff)
+        if lines := changed_lines(diff) - moved[name]:
+            changes[name] = lines
     return changes
+
+
+def bare_tree(source: bytes | None) -> str:
+    tree = ast.parse(source or b"")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            if ast.get_docstring(node) is not None:
+                node.body = node.body[1:]
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and not node.decorator_list:
+            node.returns = None
+            for arg in ast.walk(node.args):
+                if isinstance(arg, ast.arg):
+                    arg.annotation = None
+    return ast.dump(tree)
 
 
 def module_name(path: Path) -> str:
@@ -169,22 +236,38 @@ def module_name(path: Path) -> str:
 @cache
 def imported_names(text: str, package: tuple[str, ...]) -> frozenset[str]:
     names = set()
-    pending = [ast.parse(text)]
+    for level, module, aliases in module_facts(text)[0]:
+        if level is None:
+            names.update(aliases)
+            continue
+        base = package[: len(package) - level + 1] if level else ()
+        module = ".".join([*base, *([module] if module else [])])
+        names.add(module)
+        names.update(f"{module}.{alias}" for alias in aliases)
+    return frozenset(names)
+
+
+@cache
+def module_facts(text: str) -> tuple[tuple[tuple[int | None, str | None, tuple[str, ...]], ...], frozenset[str]]:
+    imports, functions = [], set()
+    pending = [(ast.parse(text), "")]
     while pending:
-        node = pending.pop()
+        node, prefix = pending.pop()
         if isinstance(node, ast.Import):
-            names.update(alias.name for alias in node.names)
+            imports.append((None, None, tuple(alias.name for alias in node.names)))
         elif isinstance(node, ast.ImportFrom):
-            base = package[: len(package) - node.level + 1] if node.level else ()
-            module = ".".join([*base, *([node.module] if node.module else [])])
-            names.add(module)
-            names.update(f"{module}.{alias.name}" for alias in node.names)
+            imports.append((node.level, node.module, tuple(alias.name for alias in node.names)))
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            functions.add(prefix + node.name)
+            prefix += node.name + "."
+        elif isinstance(node, ast.ClassDef):
+            prefix += node.name + "."
         pending.extend(
-            child
+            (child, prefix)
             for child in ast.iter_child_nodes(node)
             if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
         )
-    return frozenset(names)
+    return tuple(imports), frozenset(functions)
 
 
 @cache
@@ -193,19 +276,19 @@ def mentions(text: str) -> tuple[bool, frozenset[str]]:
     return re.search(r"\bfrom\W*\.", normalized) is not None, frozenset(re.findall(r"\w+", normalized))
 
 
-def mentioned(text: str, words: set[str]) -> bool:
+def mentioned(text: str, words: list[frozenset[str]]) -> bool:
     relative, tokens = mentions(text)
-    return relative or not words.isdisjoint(tokens)
+    return relative or any(parts <= tokens for parts in words)
 
 
-def select_tests(root: Path, source: Path) -> list[str]:
+def select_tests(root: Path, source: Path, helpers: bool = True) -> list[str]:
     module = module_name(source)
     named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
     texts = {path: path.read_text() for path in sorted((root / "tests").rglob("*.py")) if path.is_file()}
 
     def importing(modules: set[str]) -> set[Path]:
-        # Every import of a module names its last part or is relative, so other files are never parsed.
-        words = {name.rpartition(".")[2] for name in modules}
+        # Every import of a module names each of its parts or is relative, so other files are never parsed.
+        words = [frozenset(name.split(".")) for name in modules]
         return {
             path
             for path, text in texts.items()
@@ -215,9 +298,12 @@ def select_tests(root: Path, source: Path) -> list[str]:
     reaching = {
         path
         for path, text in texts.items()
-        if (module in text and named.search(text)) or path.name == f"test_{source.stem}.py"
+        if (module in text and named.search(text))
+        or path.name == f"test_{source.stem}.py"
+        or source.suffix == ".js"
+        and source.name in text
     } | importing({module})
-    added = reaching
+    added: set[Path] = set() if helpers is False else reaching
     while added:
         added = importing({module_name(path.relative_to(root)) for path in added}) - reaching
         reaching |= added

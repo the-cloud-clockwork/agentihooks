@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from playwright.sync_api import expect
 
 from tests.swarm_ledger import test_swarm_layout as layout
@@ -24,6 +25,7 @@ def model_page(open_page, catalog=CATALOG):
     return page
 
 
+@pytest.mark.feature("ledger-model-controls")
 def test_select_options_come_only_from_catalog_route(open_page):
     page = model_page(open_page)
     for harness in ("claude", "codex"):
@@ -51,6 +53,7 @@ def test_populated_catalog_does_not_add_an_absent_current_model(open_page):
     expect(page.tab.locator("#cap-claude_model option")).to_have_attribute("value", "future-claude")
 
 
+@pytest.mark.feature("ledger-model-controls")
 def test_apply_sends_changed_models_and_xhigh_in_one_body(open_page):
     page = model_page(open_page)
     page.tab.locator("#cap-claude_model").select_option("future-claude")
@@ -102,6 +105,7 @@ def test_apply_keeps_the_sent_values_while_the_answer_still_carries_the_old_conf
     expect(page.tab.locator("#cap-claude_model")).to_have_value("future-claude")
 
 
+@pytest.mark.feature("ledger-model-controls")
 def test_a_failed_apply_returns_the_panel_to_the_stored_config(open_page):
     page = model_page(open_page)
     page.payload["commands"] = [

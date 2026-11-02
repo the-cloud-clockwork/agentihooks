@@ -33,6 +33,7 @@ def beat(state, age_ms=0):
         ("working", beat("idle"), {"until": NOW + 1}, idle.WORKING),
     ],
 )
+@pytest.mark.feature("swarm-idle")
 def test_an_agent_is_idle_only_when_pane_heartbeat_and_wait_all_say_so(pane, heartbeat, wait, expected):
     assert idle.verdict(pane, heartbeat, wait, NOW) == expected
 

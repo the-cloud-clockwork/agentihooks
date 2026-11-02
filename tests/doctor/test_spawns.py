@@ -20,6 +20,16 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert record["actions"] == []
 
 
+@pytest.mark.parametrize("reopened", ["", ", task dt2 reopened"])
+def test_a_failure_reason_with_colons_keeps_its_subject_and_whole_text(reopened):
+    record = load("spawns")
+    reason = "hive launch failed: refused: agentihooks init-agent: canary timeout"
+    record["actions"] = [f"{record['slug']}: spawn failed for dt2{reopened}: {reason}"]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.evidence == (reason,)
+
+
 def test_reservation_refusals_require_recorded_free_sessions():
     record = load("spawns")
     slug = record["slug"]
@@ -37,6 +47,22 @@ def test_reservation_refusals_require_recorded_free_sessions():
     assert found.id == "failed-spawn/dt2"
     assert found.measure == 1
     assert found.evidence == ("account reservation is full",)
+
+
+@pytest.mark.parametrize(("sessions", "count"), [(6, 0), (7, 0), (5, 1)])
+def test_a_refusal_is_judged_by_the_session_count_taken_at_the_refusal(sessions, count):
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "claude",
+        "accounts": [{"harness": "claude", "state": "OPEN", "sessions": 0, "cap": 6}],
+    }
+    record["actions"] = [
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full: account=claude:a "
+        f"sessions={sessions} cap=6 five_left=80 week_left=40",
+    ]
+    assert [finding.subject for finding in spawns.failed(record)] == ["dt2"] * count
 
 
 @pytest.mark.parametrize(
@@ -91,12 +117,15 @@ def test_capacity_evidence_is_consumed_by_one_failure_and_other_errors_remain():
     assert found["master"].evidence == ("boom",)
 
 
-def test_runtime_records_the_launcher_overflow_placement(tmp_path):
+def test_runtime_records_the_launcher_overflow_placement(tmp_path, monkeypatch):
     import os
     import subprocess
+    from dataclasses import asdict
+    from pathlib import Path
 
     import fakeredis
 
+    from scripts.swarm import launch_job
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm.store import RedisStore, SwarmConfig
     from scripts.swarm.tick import tick
@@ -104,10 +133,15 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running")
     store.create(config)
-    launched = []
+    launched, live = [], set()
 
     def run(argv, **kwargs):
+        from scripts.routing import native_login
+
+        if argv[1:] == list(native_login.COMMAND):
+            return subprocess.CompletedProcess(argv, 1, "", "")
         launched.append(argv)
+        live.add(argv[argv.index("--name") + 1])
         return subprocess.CompletedProcess(
             argv,
             0,
@@ -121,7 +155,14 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     runtime = HerdrRuntime(
         home=tmp_path, run=run, choose=lambda *args: ("codex", "fallthrough: claude is at its session cap")
     )
-    runtime.live_names = lambda: set()
+
+    def complete(job):
+        spec = json.loads(Path(job["request"]).read_text())
+        placed = runtime._launch(SwarmConfig(**spec["config"]), spec["lane"], name=spec["name"], **spec["launch"])
+        Path(job["path"]).write_text(json.dumps({"placed": asdict(placed)}))
+
+    monkeypatch.setattr(launch_job, "spawn", complete)
+    runtime.live_names = lambda: live
     runtime.conversations = lambda: {}
     runtime.has_capacity = lambda config: True
     runtime.quota_capacity = None
@@ -153,7 +194,10 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
         def comment(self, *args):
             pass
 
-    actions = tick("sw", store, Ledger(), runtime, 1000)
+    ledger = Ledger()
+    actions = tick("sw", store, ledger, runtime, 1000)
+    assert any(action.startswith("launching engineer") for action in actions), actions
+    actions = tick("sw", store, ledger, runtime, 2000)
     agents = store.agents("sw")
     assert len(agents) == 2, actions
     assert all(a.placement == "overflow" for a in agents)
@@ -260,3 +304,25 @@ def test_a_local_agent_keeps_the_first_event_rule():
     late = {**agent, "started_at": 1_000_000}
     [found] = spawns.silent_starts([late], {}, 1_000_000 + 2 * spawns.TICK_MS)
     assert found.measure == 2
+
+
+def test_live_worker_hives_without_a_fresh_headroom_reading_are_flagged():
+    from scripts.hive import registry
+
+    now = 1_000_000
+    beat = now - 5_000
+    hives = [
+        {"id": "hh4", "name": "swarm-hive-002", "ui": "no", "heartbeat_at": beat, "version": "v1"},
+        {"id": "hh5", "name": "swarm-hive-003", "ui": "no", "heartbeat_at": beat, "version": "v1"},
+        {"id": "hh6", "name": "swarm-hive-004", "ui": "no", "heartbeat_at": beat},
+        {"id": "ws", "name": "swarm-master", "ui": "yes", "heartbeat_at": beat, "version": "v1"},
+        {"id": "old", "name": "gone", "ui": "no", "heartbeat_at": now - registry.LIVE_MS - 1, "version": "v1"},
+    ]
+    readings = {"hh5": {"measured_at": now}}
+    found, unversioned = spawns.missing_headroom(hives, readings, now)
+    assert found.id == "missing-headroom/hh4"
+    assert found.measure == 1
+    assert found.summary == "live hive has no fresh headroom reading, so the tick refuses its launches"
+    assert found.threshold == "a live worker hive with no fresh headroom reading"
+    assert found.evidence == ("hive swarm-hive-002", f"heartbeat at {beat}", "version v1")
+    assert unversioned.evidence == ("hive swarm-hive-004", f"heartbeat at {beat}", "version ")

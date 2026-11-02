@@ -61,6 +61,7 @@ def test_a_process_is_alive_unless_its_stat_state_is_zombie(monkeypatch):
     assert tick_reaper.alive(2) is False
 
 
+@pytest.mark.feature("swarm-tick-reaper")
 def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group(admit):
     left = _plant(SHELL, "swarm", "tick", stdout=subprocess.PIPE)
     try:

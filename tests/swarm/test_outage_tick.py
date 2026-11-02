@@ -43,6 +43,18 @@ def test_a_tick_records_redis_failure_and_recovery_before_its_work(store, tmp_pa
     assert outage.read("sw")["redis"]["ended_at"] == 2000
 
 
+def test_a_tick_pass_runs_inside_one_member_records_pass(store, tmp_path, monkeypatch):
+    from scripts.hive import scope
+    from scripts.swarm import lease
+
+    monkeypatch.setattr(outage, "HOME", tmp_path)
+    seen = []
+    monkeypatch.setattr(lease, "acquire", lambda *args: seen.append(scope.PASS.get()))
+    assert cli.run_tick(store, "sw", tasks(), FakeRuntime()) == ["the swarm belongs to another hive"]
+    assert seen == [{}]
+    assert scope.PASS.get() is None
+
+
 def test_a_redis_failure_during_a_tick_is_recorded_without_raising(store, tmp_path, monkeypatch):
     from scripts.swarm import lease
 

@@ -38,6 +38,7 @@ def test_parts_round_trip_in_part_order(tmp_path):
         "part": 1,
         "parts": 2,
         "results": second,
+        "split": "",
     }
     assert load_parts(tmp_path / "group-0", "k") == (first + second, "")
 
@@ -63,6 +64,17 @@ def test_parts_that_disagree_on_their_count_are_missing(tmp_path):
     write_part(tmp_path / "part-0.json", "k", (0, 2), [])
     write_part(tmp_path / "part-1.json", "k", (1, 3), [])
     assert load_parts(tmp_path, "k") == ([], "mutation stats missing: found parts [0, 1] of [2, 3]")
+
+
+def test_parts_that_split_the_tests_on_different_timings_are_refused(tmp_path):
+    write_part(tmp_path / "part-0.json", "k", (0, 2), [{"tests": {}, "durations": {}, "cpu": 0}], "first")
+    write_part(tmp_path / "part-1.json", "k", (1, 2), [], "second")
+    assert load_parts(tmp_path, "k") == (
+        [],
+        "mutation stats split differs: the parts divided the tests on different timings",
+    )
+    write_part(tmp_path / "part-1.json", "k", (1, 2), [], "first")
+    assert load_parts(tmp_path, "k") == ([{"tests": {}, "durations": {}, "cpu": 0}], "")
 
 
 def test_a_part_collected_for_another_commit_or_selection_is_stale(tmp_path):

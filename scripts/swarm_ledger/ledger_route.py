@@ -15,7 +15,8 @@ def configured(store: object, slug: str) -> str:
 
     if not ledger_link.local_mode(os.environ):
         return ""
-    return store.redis.hget(store.key(slug, "config"), "api_url") or ""
+    address = store.redis.hget(store.key(slug, "config"), "api_url")
+    return address if address and ledger_link.reachable(address) else ""
 
 
 def url(slug: str = "") -> str:
@@ -42,7 +43,7 @@ def session(slug: str) -> Iterator[None]:
         and not os.environ.get("SWARM_URL")
     ):
         store = ports.swarm().store.connect()
-        with scoped(slug, store.config(slug).api_url):
+        with scoped(slug, configured(store, slug)):
             yield
             _acknowledge(store, slug, Who.from_env())
     else:

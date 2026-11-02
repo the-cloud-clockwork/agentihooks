@@ -62,7 +62,13 @@ def _deselect_in_test_count(tmp_path, head_manifest):
         (checkout / "tests" / "dep_manifest.py").write_text(manifest)
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
     (runner / "collected.json").write_text(json.dumps(collected))
-    env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(workspace), "PYTHON_PATH": sys.executable}
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_WORKSPACE": str(workspace),
+        "PYTHON_PATH": sys.executable,
+        "DEV_PLAN": str(workspace / "reused-tests.json"),
+    }
     run = _step("test-count", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
     return json.loads((runner / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
@@ -178,6 +184,18 @@ def test_tests_files_and_global_inputs_invalidate_their_dependants(tmp_path):
     assert dep_manifest.invalidated(manifest, [("profiles/x.py", "", "y")])[1] == "profiles/x.py"
 
 
+def test_a_source_change_invalidates_the_tests_that_read_it_as_data():
+    manifest = {
+        "units": [],
+        "tests": {
+            "tests/test_reader.py::test_scan": {"units": [], "files": ["hooks/scanned.py"], "escapes": False},
+            "tests/test_other.py::test_other": {"units": [], "files": [], "escapes": False},
+        },
+    }
+    changed: list[tuple[str, str | None, str | None]] = [("hooks/scanned.py", "VALUE = 1\n", "VALUE = 2\n")]
+    assert dep_manifest.invalidated(manifest, changed)[0] == {"tests/test_reader.py::test_scan"}
+
+
 def test_changes_read_both_sides_of_a_git_diff(tmp_path):
     def git(*args):
         subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
@@ -256,6 +274,31 @@ def test_the_inputs_plugin_records_files_a_child_process_reads_for_its_test_only
     assert not (Path(sysconfig.get_path("purelib")) / f"agentihooks-dep-inputs-{name}.pth").exists()
 
 
+def test_the_inputs_plugin_records_python_files_a_child_process_reads_as_data_but_not_its_imports(tmp_path):
+    (tmp_path / "source.py").write_text("VALUE = 1\n")
+    (tmp_path / "helper.py").write_text("VALUE = 2\n")
+    (tmp_path / "test_sample.py").write_text(
+        "import subprocess, sys\n"
+        "def test_child_reads_source():\n"
+        "    subprocess.run([sys.executable, '-c', \"open('source.py').read()\"], env={}, check=True)\n"
+        "def test_child_imports_helper():\n"
+        "    subprocess.run([sys.executable, '-c', 'import helper'], cwd='.', env={}, check=True)\n"
+    )
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", "test_sample.py"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    lines = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    assert {line["test"]: line["files"] for line in lines} == {
+        "test_sample.py::test_child_reads_source": ["source.py"],
+        "test_sample.py::test_child_imports_helper": [],
+    }
+
+
 def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     run = _step("unit", "Run tests")
     coverage_options = run["env"]["PYTEST_ADDOPTS"].split("||")[0]
@@ -265,40 +308,43 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     assert "dep-inputs/" in _step("unit", "Upload coverage")["with"]["path"]
 
 
-def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
-    steps = [step.get("name") for step in _job("sonar")["steps"]]
+def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it():
+    job = _job("dep-manifest")
+    assert set(job["needs"]) == {"unit", "select", "reuse", "admission"}
+    assert "sonar" not in job["needs"]
+    assert "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')" in job["if"]
+    steps = [step.get("name") for step in job["steps"]]
     assert (
-        steps.index("Merge shard coverage")
+        steps.index("Install coverage")
+        < steps.index("Download shard coverage")
         < steps.index("Build the test dependency manifest")
-        < steps.index("Start Cloudflare Access proxy")
+        < steps.index("Upload the test dependency manifest")
     )
-    build = _step("sonar", "Build the test dependency manifest")
+    assert _step("dep-manifest", "Download shard coverage")["with"]["pattern"] == "coverage-3.12-*"
+    build = _step("dep-manifest", "Build the test dependency manifest")
     assert "python -m tests.dep_manifest build" in build["run"]
-    assert "< /dev/null" in build["run"] and 'echo "pid=$!"' in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
     contexts = '--data-file="$RUNNER_TEMP/dep-manifest/.coverage"'
     assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep {contexts}" in build["run"]
     assert '--coverage "$RUNNER_TEMP/dep-manifest/.coverage"' in build["run"]
     assert build["run"].index(contexts) < build["run"].index("python -m tests.dep_manifest build")
-    assert (
-        steps.index("Build the test dependency manifest")
-        < steps.index("Wait for the test dependency manifest")
-        < steps.index("SonarQube Scan")
-        < steps.index("Upload the test dependency manifest")
-    )
-    wait = _step("sonar", "Wait for the test dependency manifest")
-    assert wait["env"]["MANIFEST_PID"] == "${{ steps.manifest.outputs.pid }}"
-    assert 'exit "$(< "$RUNNER_TEMP/manifest.status")"' in wait["run"]
-    upload = _step("sonar", "Upload the test dependency manifest")
+    upload = _step("dep-manifest", "Upload the test dependency manifest")
     assert upload["with"]["name"] == "dep-manifest"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/manifest.json"
-    assert not any("cache/save" in step.get("uses", "") for step in _job("sonar")["steps"])
-    assert "github.event_name == 'push'" in _job("coverage-baseline")["if"]
-    assert _step("coverage-baseline", "Download the test dependency manifest")["with"]["name"] == "dep-manifest"
-    save = _step("coverage-baseline", "Save the dev test dependency manifest")
-    assert save["if"] == "needs.gate-required.result == 'success'"
-    assert save["uses"].startswith("actions/cache/save@")
-    assert save["with"]["key"] == "dep-manifest-${{ github.sha }}"
+    sonar = [step.get("name") for step in _job("sonar")["steps"]]
+    assert not any("dependency manifest" in (name or "") for name in sonar)
+    assert not any("cache/save" in step.get("uses", "") for step in job["steps"] + _job("sonar")["steps"])
+
+
+def test_the_coverage_baseline_carries_no_dependency_manifest_step():
+    baseline = _job("coverage-baseline")["steps"]
+    assert not any("dependency manifest" in step.get("name", "") for step in baseline)
+    assert not any("dep-manifest" in str(step.get("with", {})) for step in baseline)
+
+
+def test_the_gate_and_stage_budget_wait_for_the_manifest_job():
+    for name in ("gate-required", "stage-budget"):
+        assert "dep-manifest" in _job(name)["needs"]
 
 
 def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suffix():
@@ -356,6 +402,18 @@ def test_a_workflow_only_plant_reuses_unrelated_tests_and_a_graded_plant_runs_it
     ]
 
 
+def _recorded_inputs(root: Path, modules: list[str]) -> list[dict]:
+    out = root / "inputs"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", *modules],
+        cwd=root,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    return [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+
+
 @pytest.mark.parametrize("shared_import", [None, "helper", "test_reader", "dynamic"])
 def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tmp_path, shared_import):
     workflow = tmp_path / ".github" / "workflows" / "smoke.yml"
@@ -385,27 +443,7 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
         )
         consumers = ["test_consumer.py"]
     (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
-    out = tmp_path / "inputs"
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "tests.dep_inputs",
-            "-p",
-            "no:cacheprovider",
-            "test_reader.py",
-            *consumers,
-            "test_unrelated.py",
-        ],
-        cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
-        check=True,
-        capture_output=True,
-    )
-    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    rows = _recorded_inputs(tmp_path, ["test_reader.py", *consumers, "test_unrelated.py"])
     expected = (
         []
         if not shared_import
@@ -419,6 +457,42 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
     )
     assert sorted(rows, key=lambda row: row["test"]) == expected + [
         {"test": "test_reader.py::test_reads", "files": [".github/workflows/smoke.yml"], "escapes": False},
+        {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
+    ]
+
+
+@pytest.mark.parametrize("layout", ["module", "package", "runtime"])
+def test_files_a_module_reads_while_imported_during_collection_belong_only_to_its_importers(
+    tmp_path: Path, layout: str
+) -> None:
+    (tmp_path / "page.js").write_text("x")
+    reader = "from pathlib import Path\ndef digest():\n    return Path(__file__).with_name('page.js').read_text()\n"
+    if layout == "package":
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "__init__.py").write_text(
+            reader.replace("with_name(", "parent.with_name(") + "DIGEST = digest()\n"
+        )
+        (tmp_path / "pkg" / "other.py").write_text("from pkg import DIGEST\n")
+        (tmp_path / "pkg" / "sub.py").write_text("def f():\n    return 1\n")
+        (tmp_path / "side.txt").write_text("x")
+        (tmp_path / "side.py").write_text("from pathlib import Path\nSIDE = Path('side.txt').read_text()\n")
+        imports = ("from pkg.other import DIGEST\nimport side\n", "from pkg.sub import f\n")
+    else:
+        (tmp_path / "helper.py").write_text(reader + "DIGEST = digest()\n")
+        (tmp_path / "wrapper.py").write_text("from helper import DIGEST\n")
+        imports = ("from helper import DIGEST\n", "import helper\n" if layout == "module" else "")
+    (tmp_path / "test_reader.py").write_text(imports[0] + "def test_reads():\n    assert DIGEST\n")
+    cached = "    from wrapper import DIGEST\n    assert DIGEST\n" if layout == "runtime" else "    assert 2 + 2 == 4\n"
+    (tmp_path / "test_consumer.py").write_text(imports[1] + "def test_cached():\n" + cached)
+    (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
+    rows = _recorded_inputs(tmp_path, ["test_reader.py", "test_consumer.py", "test_unrelated.py"])
+    assert sorted(rows, key=lambda row: row["test"]) == [
+        {"test": "test_consumer.py::test_cached", "files": ["page.js"], "escapes": False},
+        {
+            "test": "test_reader.py::test_reads",
+            "files": ["page.js", "side.txt"] if layout == "package" else ["page.js"],
+            "escapes": False,
+        },
         {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
     ]
 
@@ -555,7 +629,7 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
     assert calls == {
         ("test-count", "Plan the tests whose inputs did not change"),
         ("test-count", "Deselect the reused tests"),
-        ("sonar", "Build the test dependency manifest"),
+        ("dep-manifest", "Build the test dependency manifest"),
     }
 
 
@@ -653,10 +727,50 @@ def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_u
     assert dep_manifest.main([*argv, "--out", str(out), "--packed", str(packed)]) == 0
     assert json.loads(out.read_text()) == built
     assert dep_manifest.unpack(json.loads(packed.read_text())) == built
-    build = _step("sonar", "Build the test dependency manifest")
+    build = _step("dep-manifest", "Build the test dependency manifest")
     assert '--packed "$RUNNER_TEMP/dep-manifest/packed.json"' in build["run"]
-    upload = _step("sonar", "Upload the packed test dependency manifest")
-    assert upload["if"] == _step("sonar", "Upload the test dependency manifest")["if"]
+    upload = _step("dep-manifest", "Upload the packed test dependency manifest")
+    assert upload.get("if") == _step("dep-manifest", "Upload the test dependency manifest").get("if")
     assert upload["with"]["name"] == "dep-manifest-packed"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/packed.json"
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+def test_the_inputs_plugin_records_python_files_a_test_reads_as_data_but_not_its_imports(tmp_path):
+    (tmp_path / "source.py").write_text("VALUE = 1\n")
+    (tmp_path / "helper.py").write_text("VALUE = 2\n")
+    (tmp_path / "module.py").write_text("VALUE = 3\n")
+    (tmp_path / "test_sample.py").write_text(
+        "from pathlib import Path\n"
+        "MODULE = Path('module.py').read_text()\n"
+        "def test_reads_source():\n    assert 'VALUE' in Path('source.py').read_text()\n"
+        "def test_imports_helper():\n    import helper\n    assert helper.VALUE == 2\n"
+        "def test_reads_bytes():\n    assert Path('source.py').read_bytes()\n"
+    )
+    (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "tests.dep_inputs",
+            "-p",
+            "no:cacheprovider",
+            "test_sample.py",
+            "test_unrelated.py",
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    assert {row["test"]: row["files"] for row in rows} == {
+        "test_sample.py::test_reads_source": ["module.py", "source.py"],
+        "test_sample.py::test_imports_helper": ["module.py"],
+        "test_sample.py::test_reads_bytes": ["module.py", "source.py"],
+        "test_unrelated.py::test_other": [],
+    }

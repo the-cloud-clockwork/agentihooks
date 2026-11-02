@@ -53,6 +53,7 @@ def reads(tmp_path, monkeypatch):
         ("priorities/r1", "text", "Pick a hive"),
     ],
 )
+@pytest.mark.feature("ledger-item-reads")
 def test_get_prints_one_item_read_through_the_ledger_api(reads, capsys, monkeypatch, item, field, expected):
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "get", item])
     ledger.main()
@@ -63,11 +64,13 @@ def test_get_prints_one_item_read_through_the_ledger_api(reads, capsys, monkeypa
 @pytest.mark.parametrize(
     "item", ["chat/c1", "tasks/", "tasks/a/b", "tasks/t1?state=done", "tasks/a#b", "tasks/.", "tasks/.."]
 )
+@pytest.mark.feature("ledger-item-reads")
 def test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities(item):
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["--slug", SLUG, "get", item])
 
 
+@pytest.mark.feature("ledger-item-reads")
 def test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection(reads, capsys, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "tasks"])
     ledger.main()

@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, machine, nats_grant, registry
+from scripts.hive import auth, create, create_github, hive_state, machine, nats_grant, registry
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.inbox.store import InboxStore
     from scripts.swarm.store import AgentRecord, RedisStore
 
 ENDED = ("finished", "ended")
@@ -32,6 +33,27 @@ ROLL = (
     "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
     "another hive."
 )
+WITHDRAWN = "hive {hive} stopped draining for its release, so its hand off order no longer applies"
+RECOVERY = """## Intent
+Continue task {task}; hive {hive} stopped for a release while {name} still worked it.
+
+## Done
+unknown: {name} left no handoff document within {wait} seconds of its handoff order; its task folder records its steps and evidence.
+
+## Stopped at
+Hive {hive} stopped with {name} still running.
+
+## Decisions and promises
+unknown: none recorded outside the task folder and the ledger.
+
+## Next
+Read the task folder {folder} (steering.md, progress.md, proof.md) and the ledger task {task}, then continue the task.
+
+## Read first
+{folder}/progress.md
+
+<!-- handoff complete -->
+"""
 MANIFESTS = (
     "k8s/argocd/apps/{release}.yaml",
     "k8s/manifests/{release}/",
@@ -58,12 +80,13 @@ class Host:
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
+    wall: Callable[[], float] = time.time
     known_hosts: Path = field(default_factory=lambda: Path.home() / ".ssh" / "known_hosts")
     home: Path = field(default_factory=registry.home)
 
 
 def resolve(redis: "Redis", given: str) -> tuple[str, str]:
-    if name := redis.hget(member_key(given), "name"):
+    if name := (auth.member(redis, given) or {}).get("name"):
         return _sole(redis, given, name), name
     if member := machine.named_member(redis, given):
         return _sole(redis, member, given), given
@@ -73,18 +96,13 @@ def resolve(redis: "Redis", given: str) -> tuple[str, str]:
 
 
 def _sole(redis: "Redis", hive: str, name: str) -> str:
-    for key in redis.scan_iter(match=member_key("*")):
-        other = key.removeprefix(member_key(""))
-        if other != hive and redis.hget(key, "name") == name:
+    for other, found in auth.members(redis).items():
+        if other != hive and found["name"] == name:
             raise auth.HiveError(
                 f"hive {hive} is named {name}, a name hive {other} also holds, so its herdr machine "
                 "could be the other hive's; pass --label"
             )
     return hive
-
-
-def member_key(hive: str) -> str:
-    return f"{auth.PREFIX}:member:{hive}"
 
 
 def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
@@ -103,8 +121,14 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
         names = ", ".join(agent.name for _, agent in hosted(store, plan.hive)) or "no agents"
         return [f"would stop placement on {plan.hive} and wait up to {plan.wait_s} seconds for {names} to hand off"]
     if registry.show(store.redis, plan.hive) is not None:
-        registry.update(store.redis, plan.hive, ["draining=yes"])
-    inbox, ordered = InboxStore(store.redis), set()
+        deadline_at = int((host.wall() + plan.wait_s) * 1000)
+        registry.update(
+            store.redis,
+            plan.hive,
+            ["draining=yes"],
+            drain=registry.Drain(registry.drain_owner(), "hive remove", deadline_at),
+        )
+    inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + plan.wait_s
     while remaining := hosted(store, plan.hive):
         _order(inbox, ordered, remaining, ORDER, plan.hive)
@@ -119,11 +143,17 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     return [f"drained {plan.hive}: {len(ordered)} agents handed off: {handed}"]
 
 
-def _order(inbox, ordered: set, remaining: list[tuple[str, "AgentRecord"]], text: str, hive: str) -> None:
+def _order(
+    inbox: "InboxStore",
+    ordered: dict[tuple[str, str], str],
+    remaining: list[tuple[str, "AgentRecord"]],
+    text: str,
+    hive: str,
+) -> None:
     for slug, agent in remaining:
         if (slug, agent.name) not in ordered:
-            inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
-            ordered.add((slug, agent.name))
+            sent = inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
+            ordered[(slug, agent.name)] = sent.id
 
 
 def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
@@ -131,20 +161,65 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
 
     if registry.show(store.redis, hive) is None:
         raise auth.HiveError(f"hive {hive} has no record to drain")
-    registry.update(store.redis, hive, ["draining=yes"])
-    inbox, ordered = InboxStore(store.redis), set()
+    deadline_at = int((host.wall() + wait_s) * 1000)
+    registry.update(
+        store.redis,
+        hive,
+        ["draining=yes"],
+        drain=registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at),
+    )
+    inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + wait_s
-    while remaining := hosted(store, hive):
+    while remaining := _unhanded(store, hive):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
-            names = ", ".join(agent.name for _, agent in remaining)
-            return f"hive {hive} stops after {wait_s} seconds with {names} still running"
+            ended = _recover(store, hive, wait_s, remaining, host)
+            break
         host.sleep(POLL_S)
-    return f"hive {hive} drained: no agents running, {len(ordered)} ordered to hand off"
+    else:
+        ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
+    _withdraw(inbox, ordered, hive)
+    return ended
+
+
+def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
+    worlds = inbox.worlds()
+    for item_id in ordered.values():
+        for world in worlds:
+            world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
+
+
+def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
+    return [(slug, agent) for slug, agent in hosted(store, hive) if agent.task and not _handed(store, slug, agent)]
+
+
+def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:
+    return (store.handoff_envelope(slug, agent.task) or {}).get("agent") == agent.name
+
+
+def _recover(
+    store: "RedisStore", hive: str, wait_s: int, remaining: list[tuple[str, "AgentRecord"]], host: Host
+) -> str:
+    from scripts.handoff import envelope, transfers
+    from scripts.swarm_ledger.ledger_workspace import folder
+
+    at = int(host.wall() * 1000)
+    for slug, agent in remaining:
+        text = RECOVERY.format(
+            name=agent.name, task=agent.task, hive=hive, wait=wait_s, folder=folder(slug, agent.task)
+        )
+        built = envelope.build(store, slug, agent, "exit", None, at, run=host.run)
+        store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=built)
+        transfers.record(store, slug, agent, "exit", text, at)
+    names = ", ".join(agent.name for _, agent in remaining)
+    return (
+        f"hive {hive} stops after {wait_s} seconds; {names} did not hand off, "
+        "so each got a recovery handoff and its task reopens once the swarm retires it"
+    )
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
-    if not redis.exists(member_key(hive)):
+    if auth.member(redis, hive) is None:
         return [f"{hive} holds no member credential"]
     if dry_run:
         bus = [f"would revoke the NATS credential of {hive}"] if signer is not None else []
@@ -159,7 +234,8 @@ def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
     state = home / create.STATE_FILE
     created = _created(state) == plan.label
     if plan.dry_run:
-        lines = [f"would delete {redis.exists(*_keys(redis, plan.hive))} registry records of {plan.hive}"]
+        held = redis.exists(*_keys(redis, plan.hive)) + _recorded(redis, plan.hive)
+        lines = [f"would delete {held} registry records of {plan.hive}"]
     else:
         lines = forget(redis, plan.hive)
         if nodes:
@@ -184,6 +260,10 @@ def _keys(redis: "Redis", hive: str) -> list[str]:
     return [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
 
 
+def _recorded(redis: "Redis", hive: str) -> bool:
+    return hive_state.read(hive_state.records(redis, hive), hive) is not None
+
+
 def forget(redis: "Redis", hive: str) -> list[str]:
     keys = _keys(redis, hive)
     prefix = f"{registry.key(hive)}:swarm:"
@@ -196,8 +276,11 @@ def forget(redis: "Redis", hive: str) -> list[str]:
         for target, history in histories.items():
             pipe.hset(target, mapping=history)
         pipe.delete(*keys)
-        pipe.srem(registry.INDEX, hive)
-        deleted, _ = pipe.execute()[-2:]
+        deleted = pipe.execute()[-1]
+    if _recorded(redis, hive):
+        registry.forget(redis, hive)
+        deleted += 1
+    hive_state.indexed(redis, hive, False)
     return [f"deleted {deleted} registry records of {hive}"]
 
 

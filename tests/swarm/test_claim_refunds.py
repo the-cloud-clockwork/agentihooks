@@ -23,6 +23,26 @@ def test_three_quota_handoffs_allow_a_fourth_claim(store):  # noqa: F811
     assert store.claims("sw", "t1") == 1
 
 
+@pytest.mark.parametrize(
+    ("reason", "asked", "lives"), [("operator", True, 1), ("operator", False, 3), ("recycle", True, 3)]
+)
+def test_two_preemption_handoffs_then_a_reclaim_count_one_life(store, reason, asked, lives):  # noqa: F811
+    from scripts.swarm import preempt
+
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    for at in (2_000, 3_000):
+        agent = workers(store)[0]
+        if asked:
+            store.redis.hset(store.key("sw", preempt.VICTIMS), agent.name, "t9")
+        store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": reason})
+        store.put_agent("sw", replace(agent, state="finished"))
+        tick("sw", store, ledger, runtime, now_ms=at)
+    assert [task for _, _, task in runtime.spawned] == ["t1"] * 3
+    assert store.claims("sw", "t1") == lives
+    assert store.redis.hgetall(store.key("sw", preempt.VICTIMS)) == {}
+
+
 @pytest.mark.parametrize("ending", ["block", "exit"])
 @pytest.mark.parametrize("prior_life", ["none", "quota", "retirement"])
 def test_three_failed_lives_still_block_the_fourth_claim(store, ending, prior_life):  # noqa: F811

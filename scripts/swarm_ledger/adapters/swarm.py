@@ -60,6 +60,12 @@ class Swarm:
         return model_catalog
 
     @property
+    def context_view(self):
+        from scripts.swarm import context_view
+
+        return context_view
+
+    @property
     def default_models(self):
         from scripts.swarm import default_models
 

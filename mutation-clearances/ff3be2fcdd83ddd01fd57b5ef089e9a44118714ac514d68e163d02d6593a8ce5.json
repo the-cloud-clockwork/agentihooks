@@ -1,0 +1,6 @@
+{
+  "scripts/locked_tests.py:scripts.locked_tests.x__returns_early__mutmut_21:750a98d5aa19772551e72f1eade7ea7504cc0821fbbac25c214c57346a1bbd6a": {
+    "reader": "standards-reader",
+    "reason": "Continue has no expression children. A distinct loop check cannot start at its end offset in parsed Python; following statements require a separator and earlier checks have earlier positions. Replacing < with <= changes no reachable result. Reviewed against CI run 40498418691 shard 122171203895."
+  }
+}

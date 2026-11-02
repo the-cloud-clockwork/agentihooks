@@ -53,6 +53,11 @@ ATTEMPTS_FILE = "codex-probe-attempts.json"
 READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
 READING_MAX_AGE_H = 6.0
 HOUR_S = 3600
+TOKEN_MIN_LIFE_ENV = "AGENTIHOOKS_CODEX_TOKEN_MIN_LIFE_H"
+TOKEN_MIN_LIFE_H = 6.0
+EXPIRING = (
+    "{env} expires in under {hours:g} h; the refresh authority renews it, else run agentihooks codex login {name}"
+)
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
@@ -142,12 +147,38 @@ def credential(account: CodexAccount, environ: Mapping[str, str]) -> CodexAccoun
     return replace(account, bearer=True) if credential_kind(account, environ) == OAUTH_KIND else account
 
 
-def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
+def refusal(account: CodexAccount, environ: Mapping[str, str], now: float | None = None) -> str:
     try:
         credential_kind(account, environ)
     except RoutingError as exc:
         return str(exc)
-    return ""
+    return expiry_refusal(account, environ, time.time() if now is None else now)
+
+
+def expiry_refusal(account: CodexAccount, environ: Mapping[str, str], now: float) -> str:
+    if not expiring(account, environ, now):
+        return ""
+    return EXPIRING.format(env=account.env_name, hours=_min_life(environ) / HOUR_S, name=account.name)
+
+
+def _min_life(environ: Mapping[str, str]) -> float:
+    try:
+        return max(0.0, float(environ.get(TOKEN_MIN_LIFE_ENV) or TOKEN_MIN_LIFE_H)) * HOUR_S
+    except ValueError:
+        return TOKEN_MIN_LIFE_H * HOUR_S
+
+
+def expiring(account: CodexAccount, environ: Mapping[str, str], now: float) -> bool:
+    """A routed session holds only the bearer token and cannot refresh it, so it dies at the token's exp."""
+    exp = expires_at(account, environ)
+    return exp is not None and exp - now < _min_life(environ)
+
+
+def expires_at(account: CodexAccount, environ: Mapping[str, str]) -> float | None:
+    """The exp claim of this account's token, or None when the token carries none."""
+    token = environ.get(account.env_name)
+    exp = _claims(token).get("exp") if token else None
+    return exp if isinstance(exp, int | float) else None
 
 
 def bearer_overrides() -> list[str]:
@@ -325,7 +356,7 @@ def fingerprint(account_id: str) -> str:
     return hashlib.sha256(account_id.encode()).hexdigest()[:FINGERPRINT_LENGTH] if account_id else ""
 
 
-def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
+def duplicates(pool: list[CodexAccount], environ: Mapping[str, str], now: float | None = None) -> dict[str, str]:
     """Each token account whose ChatGPT account another token account shares, mapped to the one routed for both."""
     groups: dict[str, list[CodexAccount]] = {}
     for account in pool:
@@ -334,7 +365,7 @@ def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str
             groups.setdefault(found, []).append(account)
     repeated = {}
     for group in groups.values():
-        kept = min(group, key=lambda account: _routed_rank(account, environ))
+        kept = min(group, key=lambda account: (bool(refusal(account, environ, now)), _routed_rank(account, environ)))
         repeated.update({account.name: kept.name for account in group if account is not kept})
     return repeated
 
@@ -371,12 +402,17 @@ def routed_live(
 
 
 def _shadowed(tokens: list[CodexAccount], environ: Mapping[str, str]) -> set[str]:
+    return set(shadows(tokens, environ))
+
+
+def shadows(tokens: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
+    """Each token name dropped because a listed token account holds the identical token, mapped to that account."""
+    holder = {environ[account.env_name]: account.name for account in tokens}
     kept = {account.env_name for account in tokens}
-    held = {environ[name] for name in kept}
     return {
-        name.removeprefix(CODEX_TOKEN_PREFIX)
+        name.removeprefix(CODEX_TOKEN_PREFIX): holder[environ[name]]
         for name in environ
-        if name.startswith(CODEX_TOKEN_PREFIX) and name not in kept and environ[name] in held
+        if name.startswith(CODEX_TOKEN_PREFIX) and name not in kept and environ[name] in holder
     }
 
 
@@ -534,6 +570,8 @@ def select(
             if account.name == route:
                 if not account.signed_in:
                     raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
+                if expired := expiry_refusal(account, environ or {}, now):
+                    raise RoutingError(expired)
                 return account, "forced", None
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
@@ -549,7 +587,8 @@ def select(
     if seat is None:
         refused = [text for account in token_accounts(environ or {}) if (text := refusal(account, environ or {}))]
         no_seat = "no signed in Codex account has a fresh reading and a free session under its quota band"
-        raise RoutingError("; ".join([no_seat, *refused]))
+        closed = place.closure(codex_api.CodexApiSource(sessions), "codex", environ or {}, now)
+        raise RoutingError("; ".join([no_seat, *refused, *closed]))
     if seat.kind == API:
         return api_account(environ or {}), "open", seat
     return by_name[seat.account], "open", seat

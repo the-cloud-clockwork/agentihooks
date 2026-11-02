@@ -1,0 +1,49 @@
+rules:
+  - id: feature-stale-nudge-in-tick
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-10-28, a claimed agent silent ten minutes with no checked wait gets the swarm stale nudge: the tick's
+      idle watch must call _stale_nudge for the claimant, and _stale_nudge must send it through stale_nudge.nudge.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def _watch_idle(...):
+                    ...
+              - pattern-not: |
+                  def _watch_idle(...):
+                    ...
+                    $NUDGED = _stale_nudge(...) if claimant else []
+                    ...
+          - patterns:
+              - pattern: |
+                  def _stale_nudge(...):
+                    ...
+              - pattern-not: |
+                  def _stale_nudge(...):
+                    ...
+                    return stale_nudge.nudge(...)
+    paths:
+      include:
+        - /scripts/swarm/tick.py
+        - '*.test.py'
+  - id: feature-stale-nudge-recorded
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-10-28, the swarm health panel shows each stale claimant's last nudge: stale_nudge.nudge must record
+      the time of every nudge it sends under the LAST key.
+    patterns:
+      - pattern: |
+          def nudge(...):
+            ...
+      - pattern-not: |
+          def nudge(...):
+            ...
+            redis.set(idle.key($SLUG, LAST, $AGENT.name), $NOW, ...)
+            ...
+    paths:
+      include:
+        - /scripts/swarm/stale_nudge.py
+        - '*.test.py'

@@ -113,8 +113,8 @@ class SizeOnCreate(unittest.TestCase):
             (sizes["home-small"], sizes["proof-a1b2c3-home-1"], sizes["home-legacy"]), ("small", "swarm", "swarm")
         )
         home = browser_home(server)
-        self.assertIn('<span class="kind">small</span>', home)
-        self.assertIn('<span class="kind">swarm</span>', home)
+        self.assertIn('<span class="kind" role="cell">small</span>', home)
+        self.assertIn('<span class="kind" role="cell">swarm</span>', home)
 
 
 class Lifecycle(unittest.TestCase):

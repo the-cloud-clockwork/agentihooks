@@ -122,7 +122,7 @@ def test_an_unreadable_file_reads_as_the_defaults():
 
 def test_the_layout_rows_carry_no_health_row():
     assert "health-box" not in layout.ROWS
-    assert {"quota-box", "hives-box", "agents-box", "handoff-box", "recovery-box"} <= set(layout.ROWS)
+    assert {"quota-box", "hives-box", "agents-box", "handoff-box", "recovery-box", "context-box"} <= set(layout.ROWS)
 
 
 @pytest.mark.parametrize(

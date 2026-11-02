@@ -1,5 +1,7 @@
 import sqlite3
 from contextlib import contextmanager
+from typing import Any
+from unittest.mock import MagicMock, call
 
 import psycopg2
 import psycopg2.errors
@@ -245,6 +247,8 @@ def test_a_new_connection_bounds_lock_waits_idle_transactions_and_statements_and
         {
             "options": "-c lock_timeout=10s -c idle_in_transaction_session_timeout=15s -c statement_timeout=60s"
             " -c agentihooks.ledger_writer_version=1",
+            "connect_timeout": 10,
+            "tcp_user_timeout": 30000,
             "keepalives": 1,
             "keepalives_idle": 30,
             "keepalives_interval": 10,
@@ -416,6 +420,33 @@ def test_sqlite_read_helpers_open_an_object_that_carries_its_own_reader():
     assert opened == [True]
 
 
+@pytest.mark.parametrize(
+    ("relation", "row", "expected"),
+    [(None, None, None), ("ledgers", None, None), ("ledgers", ("stored-credential",), "stored-credential")],
+)
+def test_credentials_read_without_initializing_the_writer(
+    monkeypatch: pytest.MonkeyPatch, relation: str | None, row: tuple[str] | None, expected: str | None
+) -> None:
+    database = MagicMock()
+    connection = database.return_value.read_only.return_value.__enter__.return_value
+    connection.execute.return_value.fetchone.side_effect = [(relation,), row]
+    monkeypatch.setattr(postgres, "Database", database)
+    repository = postgres.PostgresLedgerRepository(ADDRESS)
+    writer = MagicMock(side_effect=AssertionError("credential reads must not open a writer"))
+    monkeypatch.setattr(repository, "connect", writer)
+
+    assert repository.token("requested-ledger") == expected
+
+    database.assert_called_once_with(ADDRESS)
+    database.return_value.read_only.assert_called_once_with()
+    queries = [call("SELECT to_regclass('ledgers')")]
+    if relation is not None:
+        queries.append(call(sqlite.TOKEN, ("requested-ledger",)))
+    assert connection.execute.call_args_list == queries
+    database.return_value.read_only.return_value.__exit__.assert_called_once_with(None, None, None)
+    writer.assert_not_called()
+
+
 def test_the_repository_sets_its_schema_up_once_under_the_writer_lock(opened):
     repository = postgres.PostgresLedgerRepository(ADDRESS, domain="domain")
     assert repository.adopts is False and repository.address == ADDRESS
@@ -483,16 +514,11 @@ def test_a_snapshot_reads_one_repeatable_read_transaction(opened):
     assert opened.raws[0].commits == 1
 
 
-def test_events_since_reads_one_snapshot_and_relay_holds_take_the_writer_lock(opened):
+def test_relay_holds_take_the_writer_lock(opened: Any) -> None:
     repository = postgres.PostgresLedgerRepository(ADDRESS)
     repository._ready.add(ADDRESS)
-    with pytest.raises(sqlite.Missing):
-        repository.events_since("s", 3)
+    repository.hold_revision("inbox", "s", 4)
     raw = opened.raws[0]
-    assert raw.log == [
-        ("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", ()),
-        ("SELECT 1 FROM ledgers WHERE slug=%s", ("s",)),
-    ]
     lock = "SELECT pg_advisory_xact_lock(1279607879)"
     for write, arguments, statement in (
         (

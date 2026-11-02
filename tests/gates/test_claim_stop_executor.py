@@ -174,24 +174,28 @@ def test_a_stop_with_work_owed_is_blocked_and_the_third_blocks_the_task(rig):
 @pytest.mark.parametrize("scope", ["session", "agent", "task"])
 def test_a_lifted_stop_never_blocks_the_claim_and_clear_restarts_the_streak(rig, scope):
     from scripts.gates import lift
+    from scripts.swarm.store import RedisStore
 
     assert rig.stop().returncode == 2
     assert rig.stop().returncode == 2
-    paths = {
-        "session": lift.lift_path(SLUG, SID, "claim-stop", rig.home / ".agentihooks" / "swarm"),
-        "agent": lift.agent_lift_path(SLUG, ME, "claim-stop", rig.home / ".agentihooks" / "swarm"),
-        "task": lift.task_lift_path(SLUG, rig.task, "claim-stop", rig.home / ".agentihooks" / "swarm"),
-    }
-    path = paths[scope]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"at": time.time()}))
+    path = lift.lift_path(SLUG, SID, "claim-stop", rig.home / ".agentihooks" / "swarm")
+    store = RedisStore(rig.redis)
+    subject = rig.task if scope == "task" else ME
+    if scope == "session":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": time.time()}))
+    else:
+        store.put_gate_lift(SLUG, f"{scope}s", subject, "claim-stop", {"at": time.time()})
     for _ in range(4):
         stopped = rig.stop()
         assert stopped.returncode == 0, stopped.stderr
         assert rig.ledger_task()["state"] == "claimed"
     assert not any(row["kind"] == "blocked" for row in rig.rows())
 
-    path.unlink()
+    if scope == "session":
+        path.unlink()
+    else:
+        rig.redis.hdel(store.key(SLUG, "gate-lifts", f"{scope}s", subject), "claim-stop")
     first = rig.stop()
     assert first.returncode == 2 and "stop block 1 of 2" in first.stderr
     assert rig.stop().returncode == 2

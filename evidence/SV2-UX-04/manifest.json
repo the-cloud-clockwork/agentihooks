@@ -1,0 +1,18 @@
+{
+  "case_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40419395776"
+  ],
+  "cases": [
+    "T-SV2-UX-04-A",
+    "T-SV2-UX-04-B",
+    "T-SV2-UX-04-C"
+  ],
+  "evidence_class": "mocked: a fakeredis swarm store holding the fixture's delivered pack and its evidence records, read through the ledger page projection and the evidence expand path a ledger API read calls; no ledger HTTP server, browser, brain or cluster runs",
+  "inputs": {
+    "tests/fixtures/swarm_v2/context-evidence.json": "94f47557b84005cbf5bc5b98019dba4cc7467464b76b4de955a738eebf134a45"
+  },
+  "red_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40416506868"
+  ],
+  "tested_commit": "4d8ede91c"
+}

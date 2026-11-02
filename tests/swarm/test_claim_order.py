@@ -68,6 +68,7 @@ def test_a_dependency_missing_from_the_ledger_still_blocks_the_dependent():
     assert ordered(ledger)[:2] == ["big", "c1"]
 
 
+@pytest.mark.feature("swarm-claim-order")
 def test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth():
     ledger = rows(
         {"id": "a", "rank": "high", "difficulty": "S", "phase": "p1"},
@@ -119,6 +120,7 @@ def test_rank_orders_before_depth_and_the_exception():
     assert ordered(ledger) == ["urgent", "deep", "small", "w1", "w2", "w3"]
 
 
+@pytest.mark.feature("swarm-claim-order")
 def test_within_a_rank_the_longer_chain_goes_first_and_ledger_order_breaks_ties():
     ledger = rows(
         {"id": "leaf"},

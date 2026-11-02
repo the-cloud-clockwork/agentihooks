@@ -33,6 +33,15 @@ def check(command, session, cwd=""):
     prod_lockdown.check_prod_lockdown(payload)
 
 
+def needs_pr_phrase(base):
+    return (
+        f"BLOCKED: a PR into '{base}' needs the operator's PR phrase in this session.\n"
+        "The operator includes 'open a pr', 'create a pr', 'make a pr' or 'pr please' in a message; "
+        "bypass mode does not replace it.\n"
+        f"Merging into '{base}' stays with the operator or CI."
+    )
+
+
 def test_release_dance_opens_publication_without_a_pr_signal(session):
     assert ci_manifesto.contains_release_signal("do the release dance")
     assert not ci_manifesto.contains_pr_signal("do the release dance")
@@ -55,9 +64,8 @@ def test_other_phrases_do_not_open_publication(session, prompt):
 
 
 @pytest.mark.parametrize("base", ["main", "master", "v1"])
-@pytest.mark.parametrize("operation", ["create", "merge"])
 @pytest.mark.parametrize("signal", ["none", "release", "hotfix", "pr", "bypass", "legacy"])
-def test_protected_promotions_stay_closed(session, base, operation, signal):
+def test_protected_merges_stay_closed(session, base, signal):
     setters = {
         "none": lambda _: None,
         "release": prod_lockdown.set_release_signal,
@@ -67,14 +75,33 @@ def test_protected_promotions_stay_closed(session, base, operation, signal):
         "legacy": prod_lockdown.set_bypass,
     }
     setters[signal](session)
-    command = f"gh pr create --base {base}" if operation == "create" else f"gh pr merge 123 --base {base}"
     with pytest.raises(BlockAction) as blocked:
-        check(command, session)
+        check(f"gh pr merge 123 --base {base}", session)
     assert str(blocked.value) == (
-        f"BLOCKED: agent PR creation into '{base}' is forbidden. CI alone promotes dev into protected branches."
-        if operation == "create"
-        else "BLOCKED [gh pr merge to main/master/v1]: CI alone promotes dev into protected branches."
+        "BLOCKED [gh pr merge to main/master/v1]: CI alone promotes dev into protected branches."
     )
+
+
+@pytest.mark.parametrize("base", ["main", "master", "v1"])
+@pytest.mark.parametrize("signal", ["none", "release", "hotfix", "bypass", "legacy"])
+def test_protected_creation_needs_the_pr_phrase(session, base, signal):
+    setters = {
+        "none": lambda _: None,
+        "release": prod_lockdown.set_release_signal,
+        "hotfix": prod_lockdown.set_hotfix_signal,
+        "bypass": set_controls_disabled,
+        "legacy": prod_lockdown.set_bypass,
+    }
+    setters[signal](session)
+    with pytest.raises(BlockAction) as blocked:
+        check(f"gh pr create --base {base}", session)
+    assert str(blocked.value) == needs_pr_phrase(base)
+
+
+@pytest.mark.parametrize("base", ["main", "master", "v1"])
+def test_pr_phrase_opens_protected_creation(session, base):
+    branch_guard.set_pr_signal(session)
+    check(f"gh pr create --base {base}", session)
 
 
 @pytest.mark.parametrize("signal", [False, True])
@@ -108,9 +135,7 @@ def test_each_pr_creation_is_guarded(session, separator, protected_first):
         commands.reverse()
     with pytest.raises(BlockAction) as blocked:
         check(separator.join(commands), session)
-    assert str(blocked.value) == (
-        "BLOCKED: agent PR creation into 'main' is forbidden. CI alone promotes dev into protected branches."
-    )
+    assert str(blocked.value) == needs_pr_phrase("main")
 
 
 @pytest.mark.parametrize("branch_command", ["git switch -c topic", "git checkout -b topic", "git branch topic"])
@@ -123,9 +148,7 @@ def test_branch_authorization_cannot_skip_protected_creation(session, branch_com
         set_controls_disabled(session)
     with pytest.raises(BlockAction) as blocked:
         check(f"{branch_command} && gh pr create --base {base}", session)
-    assert str(blocked.value) == (
-        f"BLOCKED: agent PR creation into '{base}' is forbidden. CI alone promotes dev into protected branches."
-    )
+    assert str(blocked.value) == needs_pr_phrase(base)
 
 
 @pytest.mark.parametrize(
@@ -135,9 +158,7 @@ def test_branch_authorization_cannot_skip_protected_creation(session, branch_com
 def test_effective_pr_base_is_protected(session, arguments):
     with pytest.raises(BlockAction) as blocked:
         check(f"gh pr create {arguments}", session)
-    assert str(blocked.value) == (
-        "BLOCKED: agent PR creation into 'main' is forbidden. CI alone promotes dev into protected branches."
-    )
+    assert str(blocked.value) == needs_pr_phrase("main")
 
 
 @pytest.mark.parametrize("flag", ["--title", "--body", "-t", "-b"])
@@ -145,9 +166,7 @@ def test_effective_pr_base_is_protected(session, arguments):
 def test_pr_message_cannot_change_the_actual_base(session, flag, value):
     with pytest.raises(BlockAction) as blocked:
         check(f"gh pr create --base main {flag} '{value}'", session)
-    assert str(blocked.value) == (
-        "BLOCKED: agent PR creation into 'main' is forbidden. CI alone promotes dev into protected branches."
-    )
+    assert str(blocked.value) == needs_pr_phrase("main")
 
 
 @pytest.mark.parametrize(

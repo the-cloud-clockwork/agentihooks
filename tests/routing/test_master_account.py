@@ -3,7 +3,7 @@ import pytest
 from scripts.claude_quota_balancer import RowMarks
 from scripts.routing import master_account, place
 from scripts.routing.master_account import MasterAccount
-from scripts.routing.settings import FileSettings, RedisSettings
+from scripts.routing.settings import FileSettings, StateSettings
 from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION
 
 ENV = {"AH_CC_TOKEN_luna": "t", "AH_CX_TOKEN_work": "t"}
@@ -69,10 +69,11 @@ def test_clear_removes_the_named_harnesses_only(store):
 
 
 def test_load_reads_the_store_the_routing_client_opens(monkeypatch):
-    import fakeredis
+    from scripts.events import memory
+    from scripts.events.config import BusConfig
 
-    client = fakeredis.FakeStrictRedis(decode_responses=True)
-    RedisSettings(client).set("master-account-claude", "luna", "operator", 1.0)
+    client = memory.open_bus(BusConfig()).state("routing")
+    StateSettings(client).set("master-account-claude", "luna", "operator", 1.0)
     seen = []
     monkeypatch.setattr(place, "_client", lambda environ: seen.append(environ) or client)
 

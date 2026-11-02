@@ -4,7 +4,8 @@ import sys
 import urllib.error
 import uuid
 from pathlib import Path
-from urllib.parse import quote
+from typing import Any
+from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
 from scripts.swarm.store import SwarmError
@@ -21,6 +22,24 @@ class LedgerRefused(SwarmError):
     pass
 
 
+class LedgerUnreachable(SwarmError):
+    pass
+
+
+UNREACHABLE = (
+    "ledger server not answering",
+    "server refused: 5",
+    "unauthenticated:",
+    "ledger talk queued while the server was down",
+    "the local inbox outbox is full",
+)
+
+
+def _accepted(slug, state):
+    if "queued" in state:
+        raise LedgerUnreachable(f"ledger {slug}: the server is not answering, the post waits in the local outbox")
+
+
 def _ledger():
     if str(LEDGER_DIR) not in sys.path:
         sys.path.insert(0, str(LEDGER_DIR))
@@ -30,13 +49,14 @@ def _ledger():
 
 
 class LedgerClient:
-    def __init__(self, service=False):
+    def __init__(self, service: bool = False, read_timeout: float | None = None) -> None:
         self.service = service
+        self.read_timeout = read_timeout
 
-    def _call(self, slug, ops=None):
+    def _call(self, slug: str, ops: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         from scripts.swarm import lease
 
-        if ops is not None and (epoch := lease.EPOCH.get()) is not None:
+        if ops is not None and (epoch := lease.epoch_for(slug)) is not None:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
@@ -46,14 +66,17 @@ class LedgerClient:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
             refused = str(exc).startswith("server refused: 4")
-            raise (LedgerRefused if refused else SwarmError)(f"ledger {slug}: {exc}") from exc
+            unreachable = str(exc).startswith(UNREACHABLE)
+            error = LedgerRefused if refused else LedgerUnreachable if unreachable else SwarmError
+            raise error(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
         return state
 
-    def _resource(self, slug, path, collection=False):
-        return _ledger().resource(slug, path, service=self.service, collection=collection)
+    def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
+        bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
+        return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
 
     def state(self, slug):
         return self._call(slug)
@@ -63,6 +86,27 @@ class LedgerClient:
 
     def tasks(self, slug):
         return self._resource(slug, "tasks", collection=True)
+
+    def tasks_targeting(self, slug: str, url: str) -> list[dict[str, Any]]:
+        """The tasks naming this pull request, read by a scoped query instead of the whole tasks collection.
+
+        A ledger server older than the targets query refuses it as schema_invalid; only then is the whole
+        collection read and filtered here, so queueing keeps working until that server is redeployed.
+        """
+        from scripts.swarm_ledger.api.task_list import pull_links
+
+        rows: list[Any]
+        try:
+            rows = self._resource(slug, f"tasks?{urlencode({'targets': url})}")
+        except urllib.error.HTTPError as exc:
+            from scripts.swarm_ledger.api.client import failure
+
+            replay, error = failure(exc)
+            if exc.code != 400 or error.get("code") != "schema_invalid":
+                raise replay from None
+            rows = self.tasks(slug)
+        found: list[dict[str, Any]] = [row for row in rows if url in pull_links(row)]
+        return found
 
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
@@ -164,11 +208,11 @@ class LedgerClient:
             op["id"] = op_id
         if reply_to:
             op["reply_to"] = reply_to
-        LedgerClient(service=True)._call(slug, [op])
+        _accepted(slug, LedgerClient(service=True)._call(slug, [op]))
 
     def relay_comment(self, slug, entry, text, by, op_id):
         op = {**_op("add", by, thread=f"{entry}/comments", text=text, to="operator"), "id": op_id}
-        LedgerClient(service=True)._call(slug, [op])
+        _accepted(slug, LedgerClient(service=True)._call(slug, [op]))
 
     def notify(self, slug, text):
         from scripts.gates import Who
@@ -263,11 +307,11 @@ class LedgerClient:
     def join(self, slug, name, role):
         self._call(slug, [_op("join", name, role=role)])
 
-    def _lifecycle(self, slug, payload):
+    def _lifecycle(self, slug: str, payload: dict[str, Any]) -> Any:
         from scripts.swarm import lease
         from scripts.swarm_ledger.api.client import ResourceClient
 
-        if (epoch := lease.EPOCH.get()) is not None:
+        if (epoch := lease.epoch_for(slug)) is not None:
             payload = {**payload, "controller_epoch": epoch}
         ledger = _ledger()
         try:
@@ -301,6 +345,15 @@ class LedgerClient:
         import ledger_bin
 
         return slug in ledger_bin.entries()
+
+
+def pass_state(ledger: Any, slug: str) -> dict[str, Any]:
+    """The whole document of ledger ``slug``: the tick pass's held view patched with one delta read while the
+    pass holds a view of that ledger, else the ledger's own whole read."""
+    from scripts.tick import view
+
+    held = view.document(slug)
+    return ledger.state(slug) if held is None else held
 
 
 def _op(kind, by, **fields):

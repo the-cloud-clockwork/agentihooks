@@ -31,9 +31,11 @@ def _choose(version: str, restored: Path, collected: list[str]) -> None:
     if not committed.is_file():
         committed = _ROOT / ".test_durations"
     if (restored / ".test_durations").is_file():
-        durations = adopt(restored, version)
         try:
+            durations = adopt(restored, version)
             validate_coverage(durations, collected)
+        except json.JSONDecodeError as error:
+            print(f"::warning::Refusing the torn restored dev durations: {error}")
         except IncompleteDurations as error:
             print(f"Refusing the restored dev durations: {error}")
         else:

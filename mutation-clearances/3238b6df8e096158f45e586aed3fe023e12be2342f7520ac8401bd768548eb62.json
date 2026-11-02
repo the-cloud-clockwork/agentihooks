@@ -1,0 +1,6 @@
+{
+  "hooks/context/task_context.py:hooks.context.task_context.x_offer__mutmut_2:fa33a1f0a28150be84c9906fca97eda79c1337a69b751ab8949af92efd0351e1": {
+    "reader": "Standards",
+    "reason": "Under the annotated str or None contract the absent pack branch admits None or an empty string. Both normalize to zero bytes, missing retrieval and identical context and outcome metadata."
+  }
+}

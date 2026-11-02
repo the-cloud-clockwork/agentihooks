@@ -1,3 +1,4 @@
+import importlib
 from types import SimpleNamespace
 
 import pytest
@@ -39,6 +40,11 @@ def test_the_composition_root_binds_an_adapter_for_every_port(unbound):
 )
 def test_each_adapter_implements_the_interface_the_ledger_owns(adapter, port):
     assert isinstance(adapter, port)
+
+
+@pytest.mark.parametrize("name", ["auth", "registry", "launch", "reports", "herdr_stats", "headroom"])
+def test_the_hive_adapter_hands_out_each_hive_module(name):
+    assert getattr(hive.Hive(), name) is importlib.import_module(f"scripts.hive.{name}")
 
 
 def test_an_unwired_port_takes_the_composition_root_default(unbound):

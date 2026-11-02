@@ -93,6 +93,28 @@ def test_every_group_reached_after_the_deadline_is_reported_over_budget(tmp_path
     assert "hooks/sample.py: not mutated, over budget" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("stage", ["scripts.ci_mutation.selection", "scripts.ci_mutation.report"])
+def test_a_mutation_child_killed_at_the_shard_deadline_turns_the_gate_red_as_over_budget(tmp_path, monkeypatch, stage):
+    timeouts = []
+
+    def process(command, cwd, timeout, log):
+        timeouts.append(timeout)
+        log.write_text("")
+        return None if stage in command else 0
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", lambda root, work, paths, tests: None)
+    monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
+    report = run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 600)
+    assert report["failed"] is True
+    assert report["files"] == []
+    assert report["not_mutated"] == [
+        {"path": "hooks/sample.py", "reason": "over budget"},
+        {"path": "scripts/ci_mutation/identity.py", "reason": "over budget"},
+    ]
+    assert len(timeouts) == (2 if stage.endswith("selection") else 4)
+    assert all(0 < timeout <= 600 for timeout in timeouts)
+
+
 def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_run(tmp_path, monkeypatch):
     calls = []
 
@@ -208,6 +230,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "profiles",
         "docs",
         ".github",
+        ".semgrep",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -235,6 +258,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "profiles/",
         "docs/",
         ".github/",
+        ".semgrep/",
         "evidence/",
         "observability/",
         "docker/swarm-node/",
@@ -266,6 +290,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "profiles",
         "docs",
         ".github",
+        ".semgrep",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -565,6 +590,32 @@ def test_workspace_discovers_inputs_read_by_a_parent_conftest(tmp_path):
     assert (work / "records/input.json").read_text() == "fixture"
 
 
+@pytest.mark.parametrize(
+    "importer",
+    [
+        "from tests.nested.helper import startup\n\ndef test_selected():\n    startup()\n",
+        "from tests.nested import helper\n\ndef test_selected():\n    helper.startup()\n",
+    ],
+)
+def test_workspace_discovers_inputs_read_by_an_imported_test_helper(tmp_path, importer):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests/nested").mkdir(parents=True)
+    (root / "deploy/worker").mkdir(parents=True)
+    (root / "deploy/worker/start.sh").write_text("fixture")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/nested/helper.py").write_text(
+        'from pathlib import Path\nSTART = Path(__file__).resolve().parents[2] / "deploy/worker/start.sh"\n'
+        "def startup():\n    return START.read_text()\n"
+    )
+    (root / "tests/nested/test_selected.py").write_text(importer)
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/nested/test_selected.py::test_selected"])
+    assert (work / "deploy/worker/start.sh").read_text() == "fixture"
+
+
 def test_workspace_does_not_copy_inputs_referenced_through_repository_parent_traversal(tmp_path):
     from scripts.ci_mutation.runner import prepare_workspace
 
@@ -845,6 +896,7 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
     monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
+    (tmp_path / ".mutation-direct.json").write_text(json.dumps({"hooks/sample.py": ["tests/test_sample.py::test_f"]}))
     rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20, (1, 4), None)
     expected = reason
     if reason.startswith("mutmut failed"):
@@ -862,8 +914,12 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         "4",
     ]
     assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {
-        "hooks/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]},
-        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"]},
+        "hooks/sample.py": {
+            "lines": [2],
+            "tests": ["tests/test_sample.py"],
+            "direct": ["tests/test_sample.py::test_f"],
+        },
+        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"], "direct": []},
     }
     if len(commands) == 2:
         assert commands[1] == [
@@ -1089,6 +1145,7 @@ def test_a_shard_mutates_with_every_matching_stats_part(tmp_path, monkeypatch):
 def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(tmp_path, monkeypatch, stale):
     import json
 
+    from scripts.ci_mutation.killers import KillMemory
     from scripts.ci_mutation.runner import mutate_files
     from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
 
@@ -1102,18 +1159,22 @@ def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(
         "keys": ["other" if stale == "selection" else key],
         "shards": 4,
         "assignments": {"mutant": 2},
+        "splits": {"hooks.sample.x_f": {"head": ["a"], "slices": [["b"], ["c"]], "costs": [1.0, 1.0]}},
     }
     (stats.folder / "plan.json").write_text(json.dumps(plan))
     rows, reason = mutate_files(tmp_path, tmp_path / "work", selected, 20, (2, 4), stats.group(0))
+    kept = KillMemory(tmp_path / "work/killers").split("hooks.sample.x_f", ["c", "b", "a"])
     if stale:
         assert rows == {}
         assert reason == "measured mutation plan stale for this commit or selection"
         assert commands == []
+        assert kept is None
     else:
         assert reason == ""
         assert rows == {"hooks/sample.py": [{"status": "killed"}]}
         assert json.loads((tmp_path / "work/shard-plan.json").read_text()) == plan
         assert commands[0][-4:] == ["2", "4", "reuse", str(tmp_path / "work/shared-stats.json")]
+        assert kept == {"head": ["a"], "slices": [["b"], ["c"]]}
 
 
 @pytest.mark.parametrize("kept", [True, False])

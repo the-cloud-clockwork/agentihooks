@@ -1,6 +1,8 @@
+import hashlib
 import io
 import itertools
 import json
+import os
 import random
 import time
 import urllib.error
@@ -8,7 +10,11 @@ import urllib.request
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote, urlencode
+
+import orjson
 
 from .. import ledger_link
 from ..repository.entry import thawed
@@ -31,7 +37,32 @@ def kept_exports() -> Iterator[None]:
         KEPT = None
 
 
-def patched(state: dict, changes: dict) -> dict:
+def export_file(base: str, slug: str, environ=os.environ) -> Path:
+    home = Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
+    return home / "ledger-exports" / f"{hashlib.sha256(f'{base} {slug}'.encode()).hexdigest()[:32]}.json"
+
+
+def read_export_file(path: Path) -> tuple[int, dict[str, Any]] | None:
+    try:
+        stored = orjson.loads(path.read_bytes())
+        generation, state = stored["generation"], stored["state"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return (generation, state) if isinstance(generation, int) and isinstance(state, dict) else None
+
+
+def write_export_file(path: Path, generation: int, state: dict[str, Any]) -> None:
+    partial = path.with_name(f"{path.name}.{uuid.uuid4().hex}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as stream:
+            stream.write(orjson.dumps({"generation": generation, "state": state}))
+        os.replace(partial, path)
+    except OSError:
+        partial.unlink(missing_ok=True)
+
+
+def patched(state: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
     for key, touched in changes["lists"].items():
         old = {encode(parts[-1]): child for child, parts, *_ in children(state[key], [], None)}
         state[key] = [touched["items"][item] if item in touched["items"] else old[item] for item in touched["order"]]
@@ -54,13 +85,15 @@ class ResourceClient:
         self.credentials = credentials
         self.timeout = timeout
 
-    def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
+    def request(self, slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.base}/api/v1/ledgers/{quote(slug, safe='')}/{path}",
             data=None if payload is None else json.dumps(payload).encode(),
             headers={"Content-Type": "application/json", **self.credentials},
             method="GET" if payload is None else "POST",
         )
+        for name, value in (writer_header() if path == "operations" else {}).items():
+            request.add_header(name, value)
         with ledger_link.urlopen(request, self.timeout) as response:
             return json.loads(response.read())
 
@@ -95,30 +128,48 @@ class ResourceClient:
             query["cursor"] = reply["next_cursor"]
 
     def snapshot(self, slug: str) -> dict:
-        state = self.export(slug) if KEPT is not None else self.request(slug, "export", {})["data"]
+        state = self.export(slug) if KEPT is not None else self.stored_export(slug)
         import ledger_gate
 
         state["_meta"]["crew"] = ledger_gate.crew(state["_meta"])
         return state
 
-    def export(self, slug: str) -> dict:
+    def export(self, slug: str, kept: dict | None = None) -> dict:
         """The full export, read as the changes since the one this process kept for this server and ledger."""
+        kept = KEPT if kept is None else kept
         key = (self.base, slug)
-        generation, kept = KEPT.get(key, (0, None))
+        generation, held = kept.get(key, (0, None))
         try:
             reply = self.request(slug, "export", {"since": generation})
         except urllib.error.HTTPError as exc:
             if exc.code != 400:
                 raise
-            KEPT.pop(key, None)
+            kept.pop(key, None)
             return self.request(slug, "export", {})["data"]
         try:
-            state = patched(kept, reply["changes"]) if "changes" in reply else reply["data"]
+            state = patched(held, reply["changes"]) if "changes" in reply else reply["data"]
         except (KeyError, IndexError, TypeError, AttributeError):
-            KEPT.pop(key, None)
-            return self.export(slug)
-        KEPT[key] = (reply["generation"], state)
+            kept.pop(key, None)
+            return self.export(slug, kept)
+        kept[key] = (reply["generation"], state)
         return thawed(state)
+
+    def changes(self, slug: str, since: int, parts: tuple[str, ...]) -> dict[str, Any]:
+        """The export of the named parts as the changes since generation since, or in full when the server no
+        longer holds every change after it."""
+        return self.request(slug, "export", {"since": since, "parts": list(parts)})
+
+    def stored_export(self, slug: str) -> dict:
+        """The full export, read as the changes since the one the last command on this host stored for it."""
+        path, kept = export_file(self.base, slug), {}
+        stored = read_export_file(path)
+        if stored is not None:
+            kept[(self.base, slug)] = stored
+        state = self.export(slug, kept)
+        fresh = kept.get((self.base, slug))
+        if fresh is not None and (stored is None or fresh[0] != stored[0]):
+            write_export_file(path, *fresh)
+        return state
 
     def mutate(self, slug: str, operations: list) -> dict:
         unpinned = [
@@ -171,6 +222,13 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
     except (ValueError, KeyError, TypeError):
         return replay, {}
     return replay, error if isinstance(error, dict) else {}
+
+
+def writer_header() -> dict:
+    try:
+        return {schemas.WORKTREE_HEADER: quote(os.getcwd())}
+    except FileNotFoundError:
+        return {}
 
 
 def retryable(replay: urllib.error.HTTPError, error: dict, fetched: set) -> bool:

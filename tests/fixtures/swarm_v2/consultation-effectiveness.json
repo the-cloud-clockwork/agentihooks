@@ -1,0 +1,11 @@
+{
+  "brain": "fixture-brain",
+  "project": "github.com/example/fixture",
+  "operator": "fixture-operator",
+  "cases": [
+    {"name": "useful", "pack": "Consult the recorded retry limit.", "reference": true, "usefulness": "useful"},
+    {"name": "irrelevant", "pack": "An unrelated styling lesson.", "reference": false, "usefulness": "irrelevant"},
+    {"name": "missing", "pack": "HTTP succeeded but the target cannot inject.", "reference": false, "usefulness": "unreviewed"},
+    {"name": "override", "pack": null, "reference": false, "usefulness": "unreviewed"}
+  ]
+}

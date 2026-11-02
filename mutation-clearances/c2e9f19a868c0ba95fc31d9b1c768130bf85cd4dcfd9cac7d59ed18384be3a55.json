@@ -1,0 +1,6 @@
+{
+  "hooks/context/brain_adapter.py:hooks.context.brain_adapter.x__compute_hash:d69ddaa95d8a9a0f4a30e208aec383ce8cb6e60ab9a6151b21550121a184dd9e": {
+    "reader": "standards_reader",
+    "reason": "_compute_hash output is compared only against a value the same function produced earlier, and feed_channel() still enters the JSON under the renamed key, so the hash still changes whenever the brain changes; only the persisted string differs, causing at most one republish on upgrade."
+  }
+}

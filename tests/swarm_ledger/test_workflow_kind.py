@@ -34,7 +34,7 @@ def test_task_add_takes_the_workflow_kind_with_its_name_and_case(tmp_path):
     sent = add("--workflow", "simple-workflow", case=case)
     fields = sent[0][1]
     assert (fields["kind"], fields["workflow"], fields["case"]) == ("workflow", "simple-workflow", str(case))
-    assert (fields["lane"], fields["profile"]) == ("eng", "engineer")
+    assert (fields["lane"], fields["profile"]) == ("eng", "scouter")
 
 
 def test_the_ledger_stores_a_workflow_task_with_its_name_and_case():

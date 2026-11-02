@@ -1,0 +1,2 @@
+{"type": "user", "uuid": "d-u1", "sessionId": "s-shared", "cwd": "/srv/other/agentihooks", "version": "2.0.9", "timestamp": "2026-01-15T14:20:00Z", "message": {"role": "user", "content": "Check the desktop build cache."}}
+{"type": "assistant", "uuid": "d-a1", "sessionId": "s-shared", "cwd": "/srv/other/agentihooks", "version": "2.0.9", "timestamp": "2026-01-15T14:20:09Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "The cache holds two stale layers."}]}}

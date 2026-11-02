@@ -12,6 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
   statuses: write
 
@@ -54,7 +55,11 @@ jobs:
 
       - name: Grade the head with the protected gate logic
         id: grade
-        run: python -m scripts.gate_protected --head "$HEAD_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m scripts.gate_protected --head "$HEAD_SHA"
+          python -m scripts.ci_tests_start --repository "$GITHUB_REPOSITORY" --head "$HEAD_SHA"
 
       - name: Report Gate Required on the head
         if: ${{ always() }}

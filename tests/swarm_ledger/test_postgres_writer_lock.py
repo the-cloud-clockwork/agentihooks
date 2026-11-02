@@ -1,11 +1,14 @@
 import os
 import threading
+import uuid
 from contextlib import closing
 
 import psycopg2
 import pytest
 
+from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.repository import postgres, sqlite
+from tests.swarm_ledger.test_hierarchy_reads import STATE
 
 URL = os.environ.get("LEDGER_TEST_POSTGRES_URL", "")
 PATIENCE = 30
@@ -44,3 +47,60 @@ def test_the_server_ends_an_idle_writer_lock_holder_and_the_waiting_writer_commi
     finally:
         holder.close()
         thread.join(PATIENCE)
+
+
+def holds(first_lock, second_lock, patience=5.0):
+    first = postgres.Connection(URL)
+    got = threading.Event()
+
+    def second():
+        with postgres.Connection(URL) as writer:
+            second_lock(writer)
+            got.set()
+
+    try:
+        first_lock(first)
+        thread = threading.Thread(target=second, daemon=True)
+        thread.start()
+        granted = got.wait(patience)
+    finally:
+        first.close()
+    thread.join(PATIENCE)
+    return granted
+
+
+def test_writers_of_two_ledgers_hold_their_locks_at_once():
+    assert holds(lambda c: c.lock_ledger("one"), lambda c: c.lock_ledger("two"))
+
+
+def test_a_second_writer_of_the_same_ledger_waits():
+    assert not holds(lambda c: c.lock_ledger("one"), lambda c: c.lock_ledger("one"), patience=2.0)
+
+
+def test_a_whole_store_writer_and_a_ledger_writer_exclude_each_other():
+    assert not holds(lambda c: c.execute(sqlite.BEGIN_IMMEDIATE), lambda c: c.lock_ledger("one"), patience=2.0)
+    assert not holds(lambda c: c.lock_ledger("one"), lambda c: c.execute(sqlite.BEGIN_IMMEDIATE), patience=2.0)
+
+
+def test_a_cold_command_reads_credentials_while_the_writer_lock_is_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    slug = f"credentials-{uuid.uuid4().hex[:12]}"
+    repository = postgres.PostgresLedgerRepository(URL)
+    repository.import_document(slug, STATE)
+    token = repository.token(slug)
+    cold = postgres.PostgresLedgerRepository(URL)
+    monkeypatch.setattr(cold, "_ready", set())
+    monkeypatch.setattr(ledger, "repository", cold)
+    monkeypatch.setattr(postgres, "LOCK_TRIES", 1)
+    with repository.connect() as holder, holder:
+        holder.execute(sqlite.BEGIN_IMMEDIATE)
+        holder.execute("SET LOCAL idle_in_transaction_session_timeout = 0")
+        assert ledger.local_credentials(slug, "", True) == {"X-Ledger-Token": token}
+        assert ledger.local_credentials(f"{slug}-missing", "", True) == {"X-Ledger-Token": ""}
+
+
+def test_an_uninitialized_database_has_no_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        postgres, "SESSION", {**postgres.SESSION, "options": f"{postgres.SESSION['options']} -c search_path=pg_temp"}
+    )
+    address = psycopg2.extensions.make_dsn(URL, application_name=f"empty-{uuid.uuid4().hex[:12]}")
+    assert postgres.PostgresLedgerRepository(address).token("missing") is None

@@ -1,5 +1,11 @@
 class Hooks:
     @property
+    def account_sessions(self):
+        from hooks.context import account_sessions
+
+        return account_sessions
+
+    @property
     def config(self):
         from hooks import config
 

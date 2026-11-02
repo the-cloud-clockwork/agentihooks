@@ -3,6 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NoReturn
 
 import pytest
 
@@ -13,6 +14,7 @@ from scripts.gates.push_stop import (
     GATE_FAILED,
     GATE_LATE,
     GATE_SLOW,
+    PANIC_HELD,
     PROGRESS,
     PUSH_LATE,
     RESERVE_S,
@@ -673,7 +675,10 @@ def test_the_failure_text_is_exact():
 def gone(pid):
     status = Path(f"/proc/{pid}/status")
     for _ in range(40):
-        if not status.exists() or "State:\tZ" in status.read_text():
+        try:
+            if "State:\tZ" in status.read_text():
+                return True
+        except FileNotFoundError:
             return True
         time.sleep(0.05)
     return False
@@ -1127,3 +1132,62 @@ def test_pushed_work_with_an_origin_off_github_and_no_pull_request_is_still_refu
     git(rig.seed, "remote", "set-url", "origin", str(rig.origin))
     rig.commit()
     assert (rig.stop().allowed, rig.stop().reason) == (False, PROGRESS.format(swarm=SLUG))
+
+
+def panic_on(rig: SimpleNamespace) -> None:
+    from scripts.swarm import panic
+
+    panic.engage(rig.store, "test", False, (), NOW)
+
+
+def test_fleet_panic_keeps_the_stop_hook_from_pushing_and_names_panic(rig: SimpleNamespace) -> None:
+    panic_on(rig)
+    rig.commit()
+    decision = rig.stop()
+    assert rig.remote_head() == ""
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PANIC_HELD.format(path=rig.tree)}")
+    assert rig.ledger.comments == []
+
+
+@pytest.mark.parametrize(
+    "on",
+    [
+        None,
+        {"kind": "checks", "target": "https://github.com/o/r/pull/7"},
+        {"kind": "merge", "target": "https://github.com/o/r/pull/7"},
+        {"kind": "task", "target": "t9"},
+    ],
+)
+def test_any_live_declared_wait_lets_the_stop_pass_while_fleet_panic_holds(
+    rig: SimpleNamespace, on: dict[str, str] | None
+) -> None:
+    panic_on(rig)
+    rig.commit()
+    wait_on(rig, on)
+    assert rig.stop().allowed
+    assert rig.remote_head() == ""
+    assert rig.inbox() == []
+
+
+def test_an_ended_wait_still_refuses_the_stop_while_fleet_panic_holds(rig: SimpleNamespace) -> None:
+    panic_on(rig)
+    rig.commit()
+    wait_on(rig, None, at=NOW - 120_000, until=NOW)
+    assert not rig.stop().allowed
+
+
+def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(
+    monkeypatch: pytest.MonkeyPatch, rig: SimpleNamespace
+) -> None:
+    from redis.exceptions import RedisError
+
+    from scripts.swarm import panic
+
+    def broken(store: object) -> NoReturn:
+        raise RedisError("down")
+
+    monkeypatch.setattr(panic, "state", broken)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head

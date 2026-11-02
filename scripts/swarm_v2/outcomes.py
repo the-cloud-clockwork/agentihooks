@@ -1,7 +1,6 @@
-import json
 import re
 from dataclasses import asdict, dataclass, replace
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from scripts.swarm.store import SwarmError
@@ -88,7 +87,7 @@ class Outcomes:
     def propose(self, token: str, proposal: Proposal) -> dict:
         pull = self.provider.read(proposal.pr_url)
 
-        def accept(pipe, scope, previous):
+        def accept(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             if scope.task_id != proposal.task_id:
                 raise SwarmError("forbidden_scope")
             self.authority._holder(scope, proposal.generation, previous)
@@ -107,15 +106,14 @@ class Outcomes:
                 if previous.result.get("proposal") != outcome["proposal"]:
                     self._conflict()
                 return previous
-            return replace(previous, result=self._inherit(pipe, proposal.task_id, outcome))
+            return replace(previous, result=self._inherit(doc, proposal.task_id, outcome))
 
         return self.authority._write(token, "outcome_proposed", accept).result
 
-    def _inherit(self, pipe, task_id: str, outcome: dict) -> dict:
-        store = self.authority.store
+    def _inherit(self, doc: dict, task_id: str, outcome: dict) -> dict:
         operations = {}
-        for raw in pipe.lrange(store.key(self.authority.slug, "claim-journal", task_id), 0, -1):
-            prior = json.loads(raw)["claim"]["result"]
+        for entry in doc["journals"][task_id]:
+            prior = entry["claim"]["result"]
             if prior.get("operation_id"):
                 operations[prior["operation_id"]] = prior
         for prior in operations.values():
@@ -131,7 +129,7 @@ class Outcomes:
         return outcome
 
     def integrate(self, token: str, generation: int) -> dict:
-        scope = self.authority._scope(token)
+        scope = self.authority.scoped(token)
         claim = self.authority.current(scope.task_id)
         self.authority.controller.require()
         self.authority._identity(scope, generation, claim)
@@ -170,7 +168,7 @@ class Outcomes:
         return self._settle(token, generation, observed)
 
     def complete(self, token: str, generation: int, repository: LedgerRepository) -> dict:
-        scope = self.authority._scope(token)
+        scope = self.authority.scoped(token)
         claim = self.authority.current(scope.task_id)
         self.authority.controller.require()
         self.authority._identity(scope, generation, claim)
@@ -196,13 +194,13 @@ class Outcomes:
         return {**outcome, "ledger_revision": state["_meta"]["rev"]}
 
     def _receipt(self, token: str, generation: int, outcome: dict) -> TaskClaim:
-        def check(pipe, scope, previous):
+        def check(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             proof = outcome["proposal"]["proof"]
             if self.verify_proof(proof) is not True:
                 raise SwarmError("required proof artifacts are absent or unverified")
             if not self.integration_enabled:
                 raise SwarmError("final integration is paused")
-            if self.authority._scope(token) != scope:
+            if self.authority._scope(token, doc) != scope:
                 raise SwarmError("forbidden_scope")
             self.authority.controller.require()
             self.authority._identity(scope, generation, previous)
@@ -210,8 +208,6 @@ class Outcomes:
                 self.authority._holder(scope, generation, previous)
             if previous.result != outcome:
                 self._conflict()
-            pipe.multi()
-            pipe.execute()
             return previous
 
         return self.authority._write(token, "outcome_checked", check)
@@ -235,7 +231,7 @@ class Outcomes:
         return self._update(token, generation, pull, settle)
 
     def _update(self, token: str, generation: int, pull: PullRequest, change: Callable[[dict], dict]) -> dict:
-        def update(pipe, scope, previous):
+        def update(doc: dict[str, Any], scope: Any, previous: Any, projected: Any) -> Any:
             self.authority._identity(scope, generation, previous)
             if previous.state != "completed":
                 self.authority._holder(scope, generation, previous)

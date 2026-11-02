@@ -515,6 +515,20 @@ def test_orphan_cleanup_is_on_by_default(fixture):
     assert pods.deleted == [("eng-2", "uid-eng-2")]
 
 
+def test_a_stale_holder_cannot_record_orphan_counts(fixture, monkeypatch):
+    from scripts.swarm import fencing
+
+    store, _, transport, _, grant = fixture
+    controller = observed(store, transport, grant, Pods([managed("eng-2", "exec-orphan")]), cleanup=False)
+    assert controller.acquire()
+    fencing.write(store, "fixture", lambda doc: doc.update(orphans={}, lease={**doc["lease"], "owner": "usurper"}))
+    monkeypatch.setattr(controller, "_authority", lambda: None)
+
+    with pytest.raises(SwarmError, match=f"^{lease.STALE}$"):
+        controller.reconcile()
+    assert fencing.read(store, "fixture")["orphans"] == {}
+
+
 def test_journal_without_a_pod_is_reported_missing(fixture):
     store, (first, _), transport, clock, grant = fixture
     attempt = launched(store, first)

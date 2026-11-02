@@ -54,7 +54,7 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert "!docker/swarm-node/requirements.lock" in ignored
     assert "COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/" in dockerfile
     assert 'worker_image.py install --tool herdr --architecture "$TARGETARCH"' in dockerfile
-    assert "COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
+    assert "COPY --link=true --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
     assert "herdrdev/herdr" not in dockerfile
     assert "sha256:" not in dockerfile.split("AS herdr")[1]
     bases = [line.split()[1] for line in dockerfile.splitlines() if line.startswith("FROM ")]
@@ -64,3 +64,14 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert '["debian_snapshot"]' in dockerfile
     keyed = json.loads((root / ".github/input-keys.json").read_text())["helm-kind"]["paths"]
     assert "docker/swarm-node" in keyed
+
+
+def test_the_swarm_image_carries_gh_behind_the_app_token_wrapper_for_hub_pull_polls():
+    root = Path(__file__).parents[1]
+    dockerfile = (root / "Dockerfile").read_text()
+    assert "apt-get install -y --no-install-recommends gh\n" in dockerfile.split("AS gh")[1]
+    assert "COPY --link=true --from=gh /usr/bin/gh /usr/bin/gh" in dockerfile
+    assert "COPY --link=true --chmod=0755 deploy/worker/gh /usr/local/bin/gh" in dockerfile
+    assert "!deploy/worker/gh" in (root / ".dockerignore").read_text().splitlines()
+    wrapper = (root / "deploy/worker/gh").read_text()
+    assert "scripts.github_app_cli exec /usr/bin/gh" in wrapper

@@ -8,18 +8,21 @@ import subprocess
 import time
 import zipfile
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
 from itertools import accumulate
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
+from scripts.ci_mutation import scope
 from scripts.ci_mutation.browser import needs_browser
-from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
-from scripts.ci_mutation.selection import changed_mutations, file_seconds, partition, stats_shards
+from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
+from scripts.ci_mutation.selection import file_seconds, mutation_counts, partition, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import (
     GLOBAL_FILES,
@@ -36,6 +39,7 @@ from tests.dep_manifest import changes as recorded_changes
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
 WORKERS = 4
+BATCH_RUNNERS = 40
 RECORD_RETRY_SECONDS = 10
 STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
@@ -58,6 +62,7 @@ def estimate(
     selection: dict[str, list[str]] | None = None,
     manifest: dict | None = None,
     everything: bool = False,
+    direct: dict[str, list[str]] | None = None,
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     drift = record_drift(root, manifest) if manifest is not None else None
@@ -65,7 +70,7 @@ def estimate(
         stale, drifted, paths = drift
         units, unrecorded = changed_recorded_units(root, manifest, changes)
         if "lines" in manifest:
-            covering = line_covering_tests(root, manifest, changes, paths)
+            covering = line_covering_tests(root, manifest, changes, paths, direct)
         else:
             covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
@@ -91,14 +96,20 @@ def estimate(
                 raise SystemExit(f"{path}: not mutated, no matching or importing test modules")
             continue
         tests.update(chosen)
-        _, mutations = changed_mutations(path, (root / path).read_text(), lines)
-        # mutmut emits only mutants inside a function or method.
-        mutants += sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
+        found, ungraded = mutation_counts(path, (root / path).read_text(), lines)
+        if ungraded:
+            raise SystemExit(f"{path}: not mutated, changed functions produce no mutants: {', '.join(ungraded)}")
+        mutants += found
     return mutants * MUTANT_SECONDS, mutants, sorted(tests)
 
 
 def every_test(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py") if path.is_file())
+
+
+def touches_code(root: Path, base: str, head: str) -> bool:
+    names = _git(root, "diff", "--name-only", "-z", f"{base}...{head}", "--", "hooks/", "scripts/").split("\0")
+    return any(name.endswith(".py") for name in names)
 
 
 def record_failure(error: Exception) -> str:
@@ -516,8 +527,16 @@ def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
     }
 
 
-def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]], paths: set[str]) -> set[str]:
+def line_covering_tests(
+    root: Path,
+    manifest: dict,
+    changes: dict[str, set[int]],
+    paths: set[str],
+    direct: dict[str, list[str]] | None = None,
+) -> set[str]:
     lines, fallback, tables = recorded_lines(root, manifest, changes)
+    if direct is not None:
+        direct.update(direct_tests(manifest, lines, changes))
     return {
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
@@ -532,31 +551,58 @@ def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]]
     }
 
 
+def direct_tests(manifest: dict, lines: dict[str, set[int]], changes: dict[str, set[int]]) -> dict[str, list[str]]:
+    return {
+        path: sorted(
+            {
+                node(test).partition("[")[0]
+                for test, covered in manifest["lines"].items()
+                if lines[path].intersection(covered.get(path, ()))
+            }
+        )
+        for path in changes
+    }
+
+
+def recorded_direct(root: Path, manifest: dict[str, Any] | None, changes: dict[str, set[int]]) -> dict[str, list[str]]:
+    if not manifest or "lines" not in manifest or not manifest.get("commit"):
+        return {}
+    return direct_tests(manifest, recorded_lines(root, manifest, changes)[0], changes)
+
+
+def first_tests(root: Path, changes: dict[str, set[int]], direct: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Name each changed file's direct tests, or the test modules importing it when no recorded line names any."""
+    return {path: direct.get(path) or scope.select_tests(root, Path(path), helpers=False) for path in changes}
+
+
 @cache
 def file_text(path: Path) -> str:
     return path.read_text() if path.is_file() else ""
 
 
-@cache
 def defined_tests(path: Path) -> set[str]:
-    return {name for _, _, _, name in _spans(ast.parse(path.read_text())) if name.rpartition(".")[2].startswith("test")}
+    return {name for name in module_facts(path.read_text())[1] if name.rpartition(".")[2].startswith("test")}
 
 
 def narrow(
     root: Path, chosen: list[str], covering: set[str], recorded: dict[str, set[str]], stale: set[str]
 ) -> list[str]:
-    kept = set()
+    kept, by_file = set(), {}
+    for test in covering:
+        by_file.setdefault(test_file(test), set()).add(test)
     for path in chosen:
         defined = {name.replace(".", "::") for name in defined_tests(root / path)}
         if path in stale or not defined <= recorded.get(path, set()):
             kept.add(path)
         else:
-            kept.update(test for test in covering if test_file(test) == path)
+            kept.update(by_file.get(path, ()))
     return sorted(kept) or chosen
 
 
-def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
-    return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
+def shard_count(seconds: float, mutants: int, target: float, limit: int, budget: float = 1080) -> int:
+    wanted = min(limit, math.ceil(seconds / (shard_workers() * target)))
+    needed = min(BATCH_RUNNERS, math.ceil(seconds / (shard_workers() * budget)))
+    return max(1, min(mutants, max(wanted, needed)))
 
 
 def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, float] | None = None) -> float:
@@ -582,12 +628,17 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
 def validate_tests(root: Path, tests: list[str]) -> None:
     from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
 
+    # A module a clean walk visited cannot reach the SDK, so later walks may skip it.
+    clean = set()
     for test in sorted({test_file(entry) for entry in tests}):
         path = root / test
-        if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
+        if loads_heavy(test.removesuffix(".py").replace("/", "."), clean):
             raise SystemExit(f"{test}: loads the MCP SDK while collecting")
         source = path.read_text()
-        if loads_sdk_when_run(source) and SDK_GROUP not in source:
+        walked = set(clean)
+        if not loads_sdk_when_run(source, walked):
+            clean = walked
+        elif SDK_GROUP not in source:
             raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")
 
 
@@ -601,29 +652,38 @@ def main() -> int:
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
-    bases = own_bases(root, args.base, args.head, graded_green)
-    print(f"Mutation bases: {' '.join(bases)}")
-    changes = discover_changes(root, bases, args.head)
     manifest, failure = None, ""
-    if args.repository and not changes:
-        print("No change remains to mutate, so the recorded dev coverage is not read.")
-    elif args.repository:
-        found, failure = read_record(args.repository)
-        if failure:
-            print(
-                "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
-                f" test module is selected for each changed file: {failure}"
-            )
-        elif found is None:
-            print("No dev test dependency manifest found; tests are selected by import only.")
-        else:
-            run, manifest = found
-            print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
-    selection = {}
-    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
+    with ThreadPoolExecutor() as pool:
+        # The record downloads while the bases, changes and test imports are worked out.
+        if args.repository and touches_code(root, args.base, args.head):
+            record = pool.submit(read_record, args.repository)
+        bases = own_bases(root, args.base, args.head, graded_green)
+        print(f"Mutation bases: {' '.join(bases)}")
+        changes = discover_changes(root, bases, args.head)
+        if args.repository and not changes:
+            print("No change remains to mutate, so the recorded dev coverage is not read.")
+        elif args.repository:
+            for path in changes:
+                select_tests(root, Path(path))
+            found, failure = record.result()
+            if failure:
+                print(
+                    "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so"
+                    f" every test module is selected for each changed file: {failure}"
+                )
+            elif found is None:
+                print("No dev test dependency manifest found; tests are selected by import only.")
+            else:
+                run, manifest = found
+                print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
+    selection: dict[str, list[str]] = {}
+    direct: dict[str, list[str]] = {}
+    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure), direct)
+    direct = first_tests(root, changes, direct or recorded_direct(root, manifest, changes))
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
+    (root / ".mutation-direct.json").write_text(json.dumps(direct) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(

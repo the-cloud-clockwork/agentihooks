@@ -19,10 +19,14 @@ def stats_key(head: str, selected: dict[str, tuple[set[int], list[str]]]) -> str
     return hashlib.sha256(json.dumps({"head": head, "files": files}, sort_keys=True).encode()).hexdigest()
 
 
-def write_part(path: Path, key: str, part: tuple[int, int], results: list[dict]) -> None:
+def write_part(path: Path, key: str, part: tuple[int, int], results: list[dict], split: str = "") -> None:
     index, total = part
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"key": key, "part": index, "parts": total, "results": results}))
+    path.write_text(json.dumps({"key": key, "part": index, "parts": total, "results": results, "split": split}))
+
+
+def split_key(parts: list[list[str]]) -> str:
+    return hashlib.sha256(json.dumps([sorted(part) for part in parts]).encode()).hexdigest()
 
 
 def load_parts(folder: Path, key: str) -> tuple[list[dict], str]:
@@ -36,4 +40,6 @@ def load_parts(folder: Path, key: str) -> tuple[list[dict], str]:
     found = sorted(part["part"] for part in parts)
     if len(totals) != 1 or found != list(range(max(totals))):
         return [], f"mutation stats missing: found parts {found} of {sorted(totals)}"
+    if len({part.get("split", "") for part in parts}) > 1:
+        return [], "mutation stats split differs: the parts divided the tests on different timings"
     return [result for part in parts for result in part["results"]], ""

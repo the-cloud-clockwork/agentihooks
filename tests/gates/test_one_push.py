@@ -6,7 +6,15 @@ import pytest
 
 from hooks.targets.normalizer import normalize_payload
 from scripts.gates import Call, Gate, Who, entry
-from scripts.gates.one_push import OnePush, actions, destinations, open_refusal, push_refusal, queue_refusal
+from scripts.gates.one_push import (
+    OnePush,
+    actions,
+    destinations,
+    open_refusal,
+    positionals,
+    push_refusal,
+    queue_refusal,
+)
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm.ledger_events import PullRequest, pull_request
@@ -320,6 +328,27 @@ def test_a_push_passes_once_a_check_is_red_or_checks_resolved_or_the_pull_reques
     assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
 
 
+@pytest.mark.parametrize("suite_status", ["COMPLETED", "QUEUED", "IN_PROGRESS"])
+@pytest.mark.parametrize(
+    ("check_status", "conclusion", "allowed"),
+    [("COMPLETED", "CANCELLED", True), ("QUEUED", None, False), ("IN_PROGRESS", None, False)],
+)
+def test_cancelled_suites_finish_but_active_checks_still_hold_a_push(
+    tree, tmp_path, suite_status, check_status, conclusion, allowed
+):
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [
+            {"name": name, "status": check_status, "conclusion": conclusion} for name in ("unit", "lint")
+        ],
+        "checkSuites": [{"status": suite_status, "conclusion": "CANCELLED", "workflowRun": {"databaseId": 1}}],
+    }
+    decision = gate(pull_request(raw)).decide(bash("git push", tree), ME, state(tmp_path))
+    assert decision.allowed is allowed
+    if not allowed:
+        assert decision.reason == push_refusal("demo", URL)
+
+
 def test_a_push_passes_with_no_pull_request_or_into_another_repo(tree, tmp_path):
     assert gate(pull(), pr_url=None).decide(bash("git push -u origin HEAD", tree), ME, state(tmp_path)).allowed
     other = "https://github.com/o/elsewhere/pull/3"
@@ -602,3 +631,19 @@ def test_assignments_split_at_their_first_equals_and_read_earlier_ones():
     command = 'R=/r; B=$R/b=c; cd "$B" && git push'
     assert list(actions(command, "/x")) == [("push", Path("/r/b=c"), [])]
     assert list(actions("cd - && git push", "/x")) == [("push", Path("/x/$OLDPWD"), [])]
+
+
+@pytest.mark.parametrize("redirect", ["2>&1 | grep -v x", "2>/dev/null", "> push.log", "2> push.log", ">>push.log"])
+def test_a_push_to_a_second_repo_passes_while_the_first_runs_checks_and_the_task_branch_stays_held(
+    tree: Path, other_repo: Path, tmp_path: Path, redirect: str
+) -> None:
+    passed = gate(pull()).decide(bash(f"git -C {other_repo} push -q {redirect}", tree), ME, state(tmp_path))
+    held = gate(pull()).decide(bash(f"git -C {tree} push -q {redirect}", other_repo), ME, state(tmp_path))
+    assert (passed.allowed, held.allowed, held.reason) == (True, False, push_refusal("demo", URL))
+
+
+def test_redirections_and_their_targets_are_never_read_as_remote_or_refspec() -> None:
+    words = ["-q", "origin", "task", "2>", "err", ">", "log", "2>/dev/null", ">>out", "<in", ">all", "1>&2"]
+    assert positionals(words) == ["origin", "task"]
+    assert positionals(["origin", "2>"]) == ["origin"]
+    assert positionals(["origin", "2>/dev/null", "task"]) == ["origin", "task"]

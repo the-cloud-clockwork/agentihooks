@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import lightweight common module at startup
 from hooks.common import log
-from hooks.context import tool_end
+from hooks.context import seat_notes, tool_end
 from hooks.prompt_budget import PromptBudget
 
 
@@ -782,13 +782,18 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
 
     run = budget.run
     run("secrets", _prompt_secrets, payload)
+    typed = bool(run("operator_words", _operator_words, payload))
+    run("operator_mode", _operator_mode, payload, typed)
+    run("master_coding", _master_coding, payload, typed)
+    run("prod_bypass", _prompt_prod_bypass, payload, session_id)
+    run("signals", _prompt_signals, payload, session_id, typed)
+    if typed:
+        run("gate_lifts", _arm_gate_lifts, payload)
+    run("seat_notes", seat_notes.inject)
     run("amygdala", _prompt_amygdala, session_id)
     run("confirm_inbox", _confirm_inbox, session_id)
     run("swarm_heartbeat", _swarm_heartbeat, "working", payload.get("prompt", ""))
     run("swarm_ledger", _swarm_ledger, payload)
-    typed = bool(run("operator_words", _operator_words, payload))
-    run("operator_mode", _operator_mode, payload, typed)
-    run("master_coding", _master_coding, payload, typed)
     run("trace_flush", _request_trace_flush, payload, "prompt")
     run("quota_usage", _prompt_quota_usage, session_id)
     run("quota_policy", _prompt_quota_policy, payload, session_id)
@@ -796,10 +801,6 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     run("enforcements", _prompt_enforcements, payload, session_id)
     run("ci_manifesto", _prompt_ci_manifesto, session_id)
     run("rules_refresh", _prompt_rules_refresh, session_id)
-    run("prod_bypass", _prompt_prod_bypass, payload, session_id)
-    run("signals", _prompt_signals, payload, session_id, typed)
-    if typed:
-        run("gate_lifts", _arm_gate_lifts, payload)
     run("voice", _prompt_voice, payload, session_id, typed)
     run("controls", _prompt_controls, payload, session_id, typed)
     # --- Broadcast: inject pending messages ---
@@ -1163,7 +1164,9 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
 def _swarm_outcome(payload: dict) -> None:
     try:
         from hooks.context.swarm_heartbeat import outcome
+        from hooks.observability.consultation import search
 
+        search(payload)
         outcome(payload)
     except Exception as e:
         log("swarm outcome record failed", {"error": str(e)})
@@ -1255,8 +1258,10 @@ def _operator_question(payload: dict) -> str:
     try:
         from hooks.context import master_question, operator_mode
 
-        return master_question.move(payload) or operator_mode.question_block(
-            payload.get("tool_name"), payload.get("session_id")
+        return (
+            master_question.move(payload)
+            or master_question.refusal(payload)
+            or operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
         )
     except Exception as e:
         log("operator question check failed", {"error": str(e)})
@@ -1374,6 +1379,10 @@ def _check_shell_guards(payload: dict) -> None:
 
     check_local_tests(payload)
     check_github_watch(payload)
+    from hooks.context.blocker_window import checked as _blocker_checked
+
+    if _blocker_block := _blocker_checked(payload):
+        raise BlockAction(_blocker_block)
     if payload.get("tool_name") != "Bash":
         return
     try:
@@ -1465,15 +1474,11 @@ def on_pre_tool_use(payload: dict) -> None:
         log("swarm activity record failed", {"error": str(e)})
     _swarm_heartbeat("working", payload=payload)
 
-    _recycle_block = None
-    try:
-        from hooks.context.context_recycle import gate as _recycle_gate
+    from hooks.context.swarm_gates import pretool as _swarm_gates
 
-        _recycle_block = _recycle_gate(tool_name, tool_input, payload.get("session_id", ""))
-    except Exception as e:
-        log("context recycle gate failed", {"error": str(e)})
-    if _recycle_block:
-        raise BlockAction(_recycle_block)
+    _swarm_block = _swarm_gates(tool_name, tool_input, payload.get("session_id", ""))
+    if _swarm_block:
+        raise BlockAction(_swarm_block)
 
     from hooks.lifecycle.guard import pretool as _lifecycle_pretool
 
@@ -2213,11 +2218,9 @@ def on_post_tool_use(payload: dict) -> None:
             from hooks.config import FILE_READ_CACHE_ENABLED
 
             if FILE_READ_CACHE_ENABLED:
-                from hooks.context.file_read_cache import mark_file_read
+                from hooks.context.file_read_cache import mark_read_result
 
-                file_path = payload.get("tool_input", {}).get("file_path", "")
-                if file_path and payload.get("session_id"):
-                    mark_file_read(payload["session_id"], file_path)
+                mark_read_result(payload)
         except Exception as e:
             log("file_read_cache mark failed", {"error": str(e)})
 

@@ -19,36 +19,69 @@ jobs:
     outputs:
       hit: ${{ steps.key.outputs.hit }}
       key: ${{ steps.key.outputs.key }}
+      hive_join: ${{ steps.hive-join.outputs.due }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       - name: Key the declared inputs
         id: key
         uses: ./.github/actions/input-key
         with:
           job: writer-lock
+      - name: Select hive join smoke inputs
+        id: hive-join
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          HIVE_JOIN_INPUTS: >-
+            scripts/hive/daemon.py scripts/hive/dispatch.py scripts/hive/orders.py
+            scripts/packaging/hive-join-smoke.sh .github/workflows/writer-lock.yml
+            .github/workflows/swarm-smoke.yml .github/workflows/hive-join.yml .github/workflows/test.yml
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/hive-join-changed"
+          due=false
+          read -r -a inputs <<< "$HIVE_JOIN_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              if [[ "$path" == "$input" ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/hive-join-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+  hive-join:
+    needs: [inputs]
+    if: github.event_name == 'pull_request' && needs.inputs.outputs.hive_join == 'true'
+    uses: ./.github/workflows/hive-join.yml
 
   scenario:
     needs: [inputs]
     if: github.event_name == 'workflow_dispatch' || needs.inputs.outputs.hit != 'true'
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:16
+      pgvector:
+        image: pgvector/pgvector:0.8.0-pg16
         env:
           POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_DB: ledger
+          POSTGRES_DB: memory
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 2s
           --health-retries 30
     env:
       LEDGER_TEST_POSTGRES_URL: postgresql://postgres@127.0.0.1:5432/ledger
+      MEMORY_TEST_POSTGRES_URL: postgresql://postgres@127.0.0.1:5433/memory
     steps:
+      - name: Start the ledger Postgres from the service image
+        run: |
+          docker run --pull never --rm -d --name writer-lock-postgres -p 127.0.0.1:5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger pgvector/pgvector:0.8.0-pg16
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -64,13 +97,18 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Wait for the ledger Postgres
+        run: timeout 60 bash -c 'until docker exec writer-lock-postgres pg_isready -h 127.0.0.1 -p 5432 -d ledger; do sleep 1; done'
 
       - name: Run the idle writer lock holder scenario
         shell: bash
         run: |
-          python -m pytest tests/swarm_ledger/test_postgres_writer_lock.py tests/swarm_ledger/test_postgres_outbox.py tests/swarm_ledger/test_postgres_writer_floor.py tests/swarm_ledger/test_postgres_repository.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/writer-lock.log"
-          grep -q ' 14 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor and repository scenarios did not run.'; exit 1; }
+          python -m pytest tests/swarm_ledger/test_postgres_writer_lock.py tests/swarm_ledger/test_postgres_outbox.py tests/swarm_ledger/test_postgres_writer_floor.py tests/swarm_ledger/test_postgres_repository.py tests/test_memory_postgres_parity.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/writer-lock.log"
+          grep -q ' 21 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor, repository and session memory parity scenarios did not run.'; exit 1; }
 
       - name: Save the passed input key
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

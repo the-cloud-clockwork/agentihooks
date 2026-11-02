@@ -26,7 +26,7 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
         "${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
     )
     load = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]["load"]
-    assert "redis" in load["services"]
+    assert any(step.get("name") == "Start Redis from a retried pull" for step in load["steps"])
     assert load["timeout-minutes"] <= 15
     gate = next(
         step
@@ -37,18 +37,20 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
     assert gate["if"] == "${{ !inputs.streams && !inputs.compare && steps.key.outputs.hit != 'true' }}"
 
 
-def test_every_ledger_load_service_pulls_redis_from_the_google_mirror():
+def test_every_ledger_load_job_starts_redis_from_a_retried_pull():
     jobs = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]
-    images = {name: job["services"]["redis"]["image"] for name, job in jobs.items() if "services" in job}
-    assert images == {
-        "load": "mirror.gcr.io/library/redis:7-alpine",
-        "compare": "mirror.gcr.io/library/redis:7-alpine",
-    }
-    assert all(
-        not service["image"].startswith("public.ecr.aws/")
-        for job in jobs.values()
-        for service in job.get("services", {}).values()
-    )
+    assert all("services" not in job for job in jobs.values())
+    image = "public.ecr.aws/docker/library/redis:7-alpine"
+    for name in ("load", "compare"):
+        assert "'anton-oss'" in jobs[name]["runs-on"]
+        steps = jobs[name]["steps"]
+        start = next(i for i, step in enumerate(steps) if step.get("name") == "Start Redis from a retried pull")
+        assert "if" not in steps[start]
+        assert any(step.get("uses", "").startswith("actions/checkout@") for step in steps[:start])
+        run = steps[start]["run"]
+        pull = run.index(f"bash scripts/packaging/pull-runtime-image.sh {image}\n")
+        assert pull < run.index(f"docker run --pull never --rm -d --name ledger-load-redis -p 6379:6379 {image}\n")
+        assert "until docker exec ledger-load-redis redis-cli ping" in run
 
 
 def test_the_ledger_load_gate_grades_with_the_budgets_of_the_fetched_base():

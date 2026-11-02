@@ -27,7 +27,13 @@ finish() {
 }
 trap finish EXIT
 
-if ! helm pull "$chart" --version "$version" --destination "$pulled"; then
+if [[ -n ${CHART_DIR:-} ]]; then
+  chart="$CHART_DIR"
+  if ! cp "$CHART_DIR/agentihooks-swarm-$version.tgz" "$pulled/"; then
+    printf 'the packaged chart %s version %s is missing\n' "$chart" "$version" >&2
+    exit 1
+  fi
+elif ! helm pull "$chart" --version "$version" --destination "$pulled"; then
   printf 'the chart %s version %s is not published\n' "$chart" "$version" >&2
   exit 1
 fi
@@ -39,7 +45,8 @@ fi
 tar -xzf "$archive" -C "$pulled"
 printf 'pulled %s version %s\n' "$chart" "$version"
 
-kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
+node="$(bash "$(dirname "$0")/pull-kind-node.sh")"
+kind create cluster --name "$cluster" --image "$node" &
 cluster_setup=$!
 deadline=$((SECONDS + ${IMAGE_WAIT_SECONDS:-1200}))
 until docker pull -q "$image"; do

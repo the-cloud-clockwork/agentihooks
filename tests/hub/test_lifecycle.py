@@ -135,6 +135,40 @@ def test_redelivery_does_not_repeat_task_or_slot_effects(rig):
     assert len(rig.ledger.writes) == len(rig.returned) == 1
 
 
+@pytest.mark.parametrize(
+    "dep_state, reason, victim, lives",
+    [
+        ("claimed", None, False, 1),
+        ("done", None, False, 2),
+        (None, "quota", False, 1),
+        (None, "operator", True, 1),
+        (None, "operator", False, 2),
+        (None, "recycle", True, 2),
+    ],
+)
+def test_exit_refunds_a_started_life_for_a_park_a_quota_handoff_or_an_operator_preemption(
+    rig, dep_state, reason, victim, lives
+):
+    from scripts.swarm import preempt
+
+    rows = {"task": rig.row, "dep": {"id": "dep", "state": dep_state}}
+    rig.ledger.task = lambda slug, task_id: dict(rows[task_id]) if slug == "rig" else None
+    if dep_state:
+        rig.row["parked_on"] = ["dep"]
+    if reason:
+        rig.store.put_handoff("rig", "task", "handoff", envelope={"reason": reason})
+    if victim:
+        rig.store.redis.hset(rig.store.key("rig", preempt.VICTIMS), "engineer", "1")
+    for _ in range(2):
+        rig.store.count_claim("rig", "task")
+
+    rig.react.handle(rig.event)
+    rig.react.handle(replace(rig.event, id="redelivery"))
+
+    assert rig.store.claims("rig", "task") == lives
+    assert rig.store.redis.hget(rig.store.key("rig", preempt.VICTIMS), "engineer") is None
+
+
 def test_failed_slot_return_retries_without_prematurely_reopening_the_task(rig):
     def unavailable(*_):
         raise OSError("slot store unavailable")
@@ -241,8 +275,10 @@ def test_a_launching_exit_keeps_its_original_revision_after_a_slot_outage(rig):
 
 
 def successor(rig):
+    from scripts.swarm import fencing
+
     agent = replace(rig.agent, execution_id="successor", generation=4)
-    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    fencing.write(rig.store, "rig", lambda doc: doc["executions"].update({agent.execution_id: asdict(agent)}))
     rig.store.redis.hset(rig.store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
     return agent
 
@@ -307,12 +343,16 @@ def test_legacy_hive_exit_events_remain_owned_by_the_legacy_tick(rig):
     assert rig.store.execution_registry.get("rig", "execution") == rig.agent
 
 
-@pytest.mark.parametrize("guard", ["task-authority", "claim-journal"])
+@pytest.mark.parametrize("guard", ["claims", "journals"])
 def test_returning_capacity_preserves_a_protected_task_claim(rig, guard):
-    rig.store.redis.set(rig.store.key("rig", guard, "task"), "protected")
+    from scripts.swarm import fencing
+
+    sentinel = {"protected": True} if guard == "claims" else [{"protected": True}]
+    fencing.write(rig.store, "rig", lambda doc: doc[guard].update({"task": sentinel}))
     rig.react.handle(rig.event)
     assert rig.store.redis.get(rig.store.key("rig", "claim", "task")) == "engineer"
     assert rig.store.execution_registry.get("rig", "execution").state == "ended"
+    assert fencing.read(rig.store, "rig")[guard]["task"] == sentinel
 
 
 def test_an_exited_unqueued_pull_request_reopens_for_another_engineer(rig):

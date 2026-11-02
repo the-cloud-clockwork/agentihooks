@@ -49,6 +49,7 @@ def test_phase_records_a_plan_link_and_refuses_anything_else(plan_ledger):
         phase_plan(plan_ledger, url="issue twelve")
 
 
+@pytest.mark.feature("plan-links")
 def test_task_added_to_a_phase_with_a_plan_carries_its_link(plan_ledger):
     add(plan_ledger, "before")
     phase_plan(plan_ledger)
@@ -70,6 +71,7 @@ def test_explicit_plan_link_wins_over_the_phase_and_can_be_set_later(plan_ledger
         add(plan_ledger, "bad", plan_url="the plan")
 
 
+@pytest.mark.feature("plan-links")
 def test_slice_is_refused_while_a_slice_task_carries_no_plan_link(plan_ledger):
     add(plan_ledger, "plan", lane="plan", kind="plan")
     add(plan_ledger, "build")
@@ -208,6 +210,7 @@ class Tracker:
 
 
 @pytest.mark.parametrize("issues", [False, None])
+@pytest.mark.feature("plan-publish")
 def test_publish_goes_to_an_artifact_without_issues(issues):
     run, calls = gh(issues)
     uploads = []
@@ -222,6 +225,7 @@ def test_publish_goes_to_an_artifact_without_issues(issues):
     assert len(calls) == 1
 
 
+@pytest.mark.feature("plan-publish")
 def test_publish_opens_an_issue_where_the_repo_has_issues():
     run, calls = gh(True)
     stored = "http://127.0.0.1:8765/artifacts/demo/x.md"
@@ -304,6 +308,7 @@ def test_title_is_the_first_heading_or_names_the_phases():
     assert ledger_publish.title_of("no heading", ["p1", "p2"]) == "Plan for phases p1, p2"
 
 
+@pytest.mark.feature("plan-publish")
 def test_publish_plan_command_links_each_phase_and_comments_it(plan_ledger, tmp_path, monkeypatch, capsys):
     phase_two = {"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Ship"}
     core.check_op(phase_two)

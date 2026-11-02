@@ -1,4 +1,5 @@
 import hashlib
+import http.client
 import io
 import json
 import subprocess
@@ -660,7 +661,10 @@ def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("action", ["install", "download"])
-@pytest.mark.parametrize("failure", [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout"])
+@pytest.mark.parametrize(
+    "failure",
+    [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout", "incomplete-read", "read-reset", "wrapped-reset"],
+)
 @pytest.mark.parametrize("failures", [1, 4, 5])
 def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action, failure, failures):
     path, lock, payloads = locked
@@ -670,17 +674,20 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
     monkeypatch.setattr("time.sleep", sleeps)
     if isinstance(failure, int):
         error = urllib.error.HTTPError(herdr["url"], failure, "Server error", {}, None)
-    elif failure == "wrapped-timeout":
-        error = urllib.error.URLError(TimeoutError("timed out"))
     else:
-        error = TimeoutError("timed out")
+        error = {
+            "wrapped-timeout": urllib.error.URLError(TimeoutError("timed out")),
+            "incomplete-read": http.client.IncompleteRead(b"partial", 29057246),
+            "read-reset": ConnectionResetError("connection reset by peer"),
+            "wrapped-reset": urllib.error.URLError(ConnectionResetError("connection reset by peer")),
+        }.get(failure, TimeoutError("timed out"))
 
     def opened(url, timeout):
         assert timeout == 120
         attempts.append(url)
         response = io.BytesIO(payloads[url])
         if attempts.count(url) <= failures:
-            if failure == "read-timeout":
+            if failure in {"read-timeout", "incomplete-read", "read-reset"}:
                 response.read = Mock(side_effect=error)
             else:
                 raise error

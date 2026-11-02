@@ -695,6 +695,8 @@ class CopilotAdapter:
         profile_dirs: list[tuple[str, Path]],
         profile_chain: list[str],
         bundle_dir: Path | None,
+        user_dir: Path | None = None,
+        shared_dir: Path | None = None,
     ) -> None:
         _i = _install_module()
         managed_text = build_persona(
@@ -704,6 +706,7 @@ class CopilotAdapter:
             self._pending_rules,
             _MANAGED_HEADER,
             _MANAGED_FOOTER,
+            {"shared bundle": shared_dir, "user bundle": user_dir},
         )
         dst = self.home() / "copilot-instructions.md"
         text = write_persona(dst, managed_text, _MANAGED_HEADER, _MANAGED_FOOTER)

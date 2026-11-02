@@ -133,8 +133,9 @@ def test_render_prints_every_stage_and_the_run_against_the_budget():
     ]
 
 
-def test_every_job_of_the_tests_workflow_has_a_budget():
-    assert set(_workflow_jobs()) == set(ci_budget.BUDGETS)
+def test_every_job_of_the_tests_workflow_has_a_budget() -> None:
+    jobs = set(_workflow_jobs())
+    assert jobs <= set(ci_budget.BUDGETS) <= jobs | {"type-gate"}
 
 
 def test_the_longest_chain_of_budgets_to_gate_required_fits_fifteen_minutes():

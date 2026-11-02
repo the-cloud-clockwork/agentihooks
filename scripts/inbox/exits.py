@@ -41,7 +41,7 @@ def _settle_world(inbox, name, seat, exit_text):
         if item.state in CLOSED:
             continue
         if ended := _life_notice_end(item, name, exit_text):
-            inbox.close(item.id, BY, "done", ended)
+            inbox.settle(item.id, BY, "done", ended)
         elif successor:
             inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
         elif seat and _task_continues(inbox, item, seat):
@@ -51,7 +51,7 @@ def _settle_world(inbox, name, seat, exit_text):
         elif (
             inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", name) and item.sender != BY
         ):
-            inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
+            inbox.send(BY, notice_address(inbox, item), _told(item, name, exit_text), fyi=True)
     if names.entry(name).get("type") != "master":
         _settle_taken_seat_mail(inbox, name, exit_text, bool(seat))
 
@@ -78,14 +78,14 @@ def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: st
         exit_text = f"left its seat and task {item.task}"
         goes_on = False
     if ended := _life_notice_end(item, name, exit_text):
-        inbox.close(item.id, BY, "done", ended)
+        inbox.settle(item.id, BY, "done", ended)
     elif goes_on:
         inbox.redirect(item.id, BY, held, f"{name} {exit_text}; back to {held} for its next occupant", held, name)
     elif (
         inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", held, name)
         and item.sender != BY
     ):
-        inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
+        inbox.send(BY, notice_address(inbox, item), _told(item, name, exit_text), fyi=True)
 
 
 def _task_continues(inbox: "InboxStore", item, seat: str) -> bool:
@@ -142,11 +142,15 @@ def _close_world(inbox: "InboxStore", slug: str) -> None:
                 inbox.withdraw(item.id, BY, f"cancelled: swarm closed; {address} has no further work", address)
 
 
-def notice_address(inbox: "InboxStore", sender: str) -> str:
+def notice_address(inbox: "InboxStore", item) -> str:
     from scripts.inbox.seats import is_seat, master_of
+    from scripts.inbox.store import OPERATOR
     from scripts.swarm.store import RedisStore
 
+    sender = item.sender
     store = RedisStore(inbox.redis)
+    if sender == OPERATOR:
+        return master_of(inbox.names.resolve(item.address), store.names) or item.address
     master = master_of(sender, store.names)
     if not master or is_seat(sender):
         return sender
@@ -285,7 +289,7 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
                     if push_stop.is_notice(item)
                     else _life_notice_end(item, owner, outcome.get("reason", "left its seat"))
                 )
-            inbox.close(item.id, BY, "done", reason)
+            inbox.settle(item.id, BY, "done", reason)
 
 
 def _settle_left_behind(inbox: "InboxStore", item, seat: str, active: set) -> None:
@@ -319,7 +323,7 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
                 agent.seat,
                 owner or None,
             ):
-                inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
+                inbox.send(BY, notice_address(inbox, item), _told(item, owner, exit_text), fyi=True)
 
 
 def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
@@ -339,7 +343,7 @@ def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
                     f"{item.text.splitlines()[0][:200]} is closed. "
                     "Send it to whoever carries that work on if it still matters."
                 )
-                inbox.send(BY, notice_address(inbox, item.sender), text, fyi=True)
+                inbox.send(BY, notice_address(inbox, item), text, fyi=True)
 
 
 def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:

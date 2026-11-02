@@ -179,6 +179,7 @@ def test_a_pool_whose_every_launch_failed_spares_the_spawn_budget(store, monkeyp
 def test_a_started_pool_spends_the_spawn_budget_for_the_next_one(store, monkeypatch):
     from types import SimpleNamespace
 
+    monkeypatch.setattr(tick_module, "SPAWN_BUDGET_S", 20)
     store.update("sw", max_eng=3)
     ledger, pooled = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), PooledRuntime(2)
     clock = [0.0]
@@ -199,6 +200,7 @@ def test_a_started_pool_spends_the_spawn_budget_for_the_next_one(store, monkeypa
 def test_the_next_pool_is_priced_at_a_whole_pool_not_one_launch(store, monkeypatch):
     from types import SimpleNamespace
 
+    monkeypatch.setattr(tick_module, "SPAWN_BUDGET_S", 20)
     store.update("sw", max_eng=9)
     ledger, pooled = tasks(*((f"t{n}", "eng") for n in range(1, 10))), PooledRuntime(8)
     clock = [0.0]
@@ -214,6 +216,16 @@ def test_the_next_pool_is_priced_at_a_whole_pool_not_one_launch(store, monkeypat
     actions = tick("sw", store, ledger, pooled, now_ms=1_000)
     assert len(pooled.spawned) == 8
     assert "spent this pass's 20 second launch budget, t9 waits a pass" in actions
+
+
+def test_the_spawn_budget_is_sixty_seconds_and_fits_a_second_launch_in_one_pass(store):
+    from scripts.swarm.tick import SPAWN_BUDGET_S
+
+    assert SPAWN_BUDGET_S == 60
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert not any("launch budget" in action for action in actions)
 
 
 def _quota_launch(launching, fail=False):

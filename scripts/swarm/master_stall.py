@@ -9,6 +9,7 @@ from scripts.handoff import envelope, transfers
 from scripts.swarm import affinity, launch_check, master_retire, naming
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import MASTER
 
 STALLED = "stalled"
@@ -62,7 +63,7 @@ def parent_blocked(slug, store, ledger):
     task = slug.split("-")[2]
     return any(
         re.sub(r"[^a-z0-9]", "", row["id"].lower()) == task and row.get("state") == "blocked"
-        for row in ledger.state(parent)["tasks"]
+        for row in pass_state(ledger, parent)["tasks"]
     )
 
 
@@ -83,9 +84,12 @@ def run(slug, config, store, ledger, runtime, now_ms):
     live = master.name in runtime.live_names()
     if held := master_retire.hold(store, slug, master, held_for or REASON.format(minutes=minutes), live, now_ms):
         return [held]
-    text = RECOVERY.format(slug=slug, name=master.name, minutes=minutes)
-    found = envelope.build(store, slug, master, "recycle", ledger.state(slug)["tasks"], now_ms)
-    store.put_handoff(slug, MASTER, text, seat=master.seat, envelope=found)
-    transfers.record(store, slug, master, STALLED, text, now_ms)
-    store.put_agent(slug, replace(master, state="finished"))
+    recycle(slug, store, ledger, master, RECOVERY.format(slug=slug, name=master.name, minutes=minutes), now_ms, STALLED)
     return [f"recycled master {master.name} in its seat after {minutes} minutes busy with no tool call"]
+
+
+def recycle(slug, store, ledger, master, text, now_ms, reason):
+    found = envelope.build(store, slug, master, "recycle", pass_state(ledger, slug)["tasks"], now_ms)
+    store.put_handoff(slug, MASTER, text, seat=master.seat, envelope=found)
+    transfers.record(store, slug, master, reason, text, now_ms)
+    store.put_agent(slug, replace(master, state="finished"))

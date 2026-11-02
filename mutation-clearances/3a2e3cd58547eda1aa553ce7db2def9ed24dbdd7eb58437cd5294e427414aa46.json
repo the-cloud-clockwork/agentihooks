@@ -1,0 +1,6 @@
+{
+  "hooks/context/task_context.py:hooks.context.task_context.x__record__mutmut_1:11f1cef56248a123ecb1d9f34fcd5f250c7b8e43486e363f74319661d3062e64": {
+    "reader": "Standards",
+    "reason": "All four production references to the private helper explicitly pass the session and pack, so the changed default is unreachable."
+  }
+}

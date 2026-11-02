@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/report.py:scripts.ci_mutation.report.x_mutant_identity:cfb189ddf22a76bc7ae599f832f329301a572df76a7b9ac511b75cb0ce09be17": {
+    "reader": "Standards",
+    "reason": "difflib SequenceMatcher only truth tests autojunk in its b chain setup, if self.autojunk and n >= 200, so None and False are both falsy and skip the popular element purge identically for every input."
+  }
+}

@@ -29,7 +29,8 @@ def test_dependency_block_and_wake_cover_the_wait_between_turns(monkeypatch):
     redis = fakeredis.FakeRedis(decode_responses=True)
     agent = SimpleNamespace(name="engineer", task="own", state="working", seat="")
     store = SimpleNamespace(redis=redis, agents=lambda slug: [agent])
-    ledger = SimpleNamespace(tasks=lambda slug: [{"id": "own", "depends_on": ["dep"]}, {"id": "dep", "state": "pr"}])
+    rows = {"own": {"id": "own", "depends_on": ["dep"]}, "dep": {"id": "dep", "state": "pr"}}
+    ledger = SimpleNamespace(task=lambda slug, task_id: rows.get(task_id))
     monkeypatch.setattr(cli, "_worker", lambda store, args: agent)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "now_ms", lambda: 60_001)

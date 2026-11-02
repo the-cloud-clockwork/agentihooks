@@ -185,8 +185,13 @@ def test_explicit_priority_commands_pass_the_question_hook_without_automatic_que
 
 
 def test_a_master_whose_operator_typed_in_the_last_ten_minutes_may_ask(master):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
     typed_at(NOW - master_question.WINDOW_SEC + 1)
-    assert master_question.move(ask(FOCUS), master, now=NOW) == ""
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    assert master_question.move(ask(FOCUS), master, now=NOW, store=store) == ""
     assert master.questions == []
 
 
@@ -219,8 +224,12 @@ def _row(kind, reason):
 
 
 def test_an_open_question_tool_writes_the_last_typed_turn_to_the_gate_log(master):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
     typed_at(NOW - master_question.WINDOW_SEC + 1)
-    master_question.move(ask(FOCUS), master, now=NOW)
+    master_question.move(ask(FOCUS), master, now=NOW, store=RedisStore(fakeredis.FakeRedis(decode_responses=True)))
     assert _gate_rows() == [_row("count", "opened: the operator typed at 1970-01-12T13:36:41Z, 599 seconds ago")]
 
 

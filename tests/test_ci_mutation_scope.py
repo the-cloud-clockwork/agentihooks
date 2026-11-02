@@ -132,6 +132,7 @@ def test_selection_parses_only_test_modules_that_name_a_reached_module(tmp_path,
     parse = scope.ast.parse
     monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
     scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
     assert select_tests(tmp_path, Path("hooks/context/parsed_sample.py")) == [
         "tests/test_direct.py",
         "tests/test_helper_user.py",
@@ -289,6 +290,148 @@ def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
     git("merge", "-q", "--no-edit", "dev")
     commit("kept.py", "def k():\n    return 1\n")
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
+
+
+STEP = (
+    "def step(items):\n"
+    "    total = sum(item.weight for item in items)\n"
+    "    limit = max(total, len(items) + 10)\n"
+    "    return [item.name for item in items if item.weight <= limit]\n"
+)
+
+
+def test_lines_moved_unchanged_into_another_file_are_not_graded_and_its_new_glue_is(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    pinned = commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    git("add", "hooks/old.py")
+    commit("new name.py", f"def run(items):\n    return len(step(items)) + 1\n\n\n{STEP}")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new name.py": {1, 2}}
+
+
+def test_a_block_moved_reindented_into_a_class_grades_only_the_edited_signature_and_new_glue(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    pinned = commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    git("add", "hooks/old.py")
+    moved = STEP.replace("\n    ", "\n        ").replace("(items)", "(self, items)", 1)
+    commit("new.py", f"class Runner:\n    {moved}")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {1, 2}}
+
+
+def test_blocks_moved_from_two_files_over_a_removed_line_grade_only_the_line_after_them(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    other = (
+        "def other(rows):\n"
+        "    counted = {row.key: row.value for row in rows if row.value}\n"
+        "    return sorted(counted.items(), key=lambda pair: pair[1])\n"
+    )
+    git, commit = _repo(tmp_path)
+    commit("old.py", f"def keep():\n    return 0\n\n\n{STEP}")
+    commit("other.py", f"def keep():\n    return 1\n\n\n{other}")
+    pinned = commit("new.py", "VALUE = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("def keep():\n    return 0\n")
+    (tmp_path / "hooks" / "other.py").write_text("def keep():\n    return 1\n")
+    git("add", "hooks/old.py", "hooks/other.py")
+    commit("new.py", f"{STEP}{other}VALUE = 2\n")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/new.py": {8}}
+
+
+def test_moves_into_a_non_ascii_name_and_a_name_git_quotes_are_skipped_and_their_new_lines_graded(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    other = (
+        "def other(rows):\n"
+        "    counted = {row.key: row.value for row in rows if row.value}\n"
+        "    return sorted(counted.items(), key=lambda pair: pair[1])\n"
+    )
+    git, commit = _repo(tmp_path)
+    commit("old.py", STEP)
+    pinned = commit("other.py", other)
+    git("checkout", "-q", "-b", "branch")
+    (tmp_path / "hooks" / "old.py").write_text("")
+    (tmp_path / "hooks" / "other.py").write_text("")
+    (tmp_path / "hooks" / 'quo"te.py').write_text(f"VALUE = 1\n{other}")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ñame.py").write_text(STEP)
+    git("add", "hooks/old.py", "hooks/other.py", 'hooks/quo"te.py', "scripts/ñame.py")
+    git("commit", "-q", "-m", "move")
+    assert discover_changes(tmp_path, pinned, "HEAD") == {'hooks/quo"te.py': {1}}
+
+
+@pytest.mark.parametrize(
+    ("head", "expected"),
+    [
+        ("def f(a):\n    return a + 1\n", {}),
+        ("def f(a: int) -> int:\n    return a + 1  # one\n", {}),
+        ('def f(a):\n    """Add one."""\n    return a + 1  # one\n', {}),
+        ("def f(a):\n    return a + 2\n", {"hooks/own.py": {2}}),
+        ("def f(a: int) -> int:\n    return a - 1  # one\n", {"hooks/own.py": {1, 2}}),
+    ],
+)
+def test_a_change_leaving_the_bare_syntax_tree_unchanged_selects_no_line(tmp_path, head, expected):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    base = commit("own.py", "def f(a):\n    return a + 1  # one\n")
+    commit("own.py", head)
+    assert discover_changes(tmp_path, base, "HEAD") == expected
+
+
+@pytest.mark.parametrize(
+    ("base", "head", "expected"),
+    [
+        ("class C:\n    a = 1\n", 'class C:\n    """C."""\n    a = 1\n', {}),
+        (
+            "async def f(a, *b, **c):\n    return a\n",
+            'async def f(a: int, *b: int, **c: int) -> int:\n    """F."""\n    return a\n',
+            {},
+        ),
+        ("a: int = 1\n", "a: float = 1\n", {"hooks/own.py": {1}}),
+        ("@cache\ndef f(a):\n    return a\n", "@cache\ndef f(a: int) -> int:\n    return a\n", {"hooks/own.py": {2}}),
+        (
+            "def f():\n    @cache\n    def g(a):\n        return a\n",
+            "def f():\n    @cache\n    def g(a: int):\n        return a\n",
+            {"hooks/own.py": {3}},
+        ),
+    ],
+)
+def test_runtime_read_annotations_stay_graded_while_docstrings_and_plain_signatures_do_not(
+    tmp_path, base, head, expected
+):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    first = commit("own.py", base)
+    commit("own.py", head)
+    assert discover_changes(tmp_path, first, "HEAD") == expected
+
+
+def test_a_bare_tree_is_the_tree_of_the_source_written_without_signature_annotations():
+    import ast
+
+    from scripts.ci_mutation.scope import bare_tree
+
+    plain = ast.dump(ast.parse("def f(a):\n    return a\n"))
+    assert bare_tree(b'def f(a: int) -> int:\n    """F."""\n    return a\n') == plain
+
+
+def test_a_new_docstring_module_selects_no_line_and_an_annotated_assignment_still_does(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    base = commit("own.py", "class Own:\n    a = 1\n")
+    commit("notes.py", '"""Notes."""\n')
+    commit("own.py", 'class Own:\n    """Own."""\n\n    a: int = 1\n')
+    assert discover_changes(tmp_path, base, "HEAD") == {"hooks/own.py": {2, 3, 4}}
 
 
 def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_from_current_dev(tmp_path):
@@ -466,6 +609,30 @@ def test_weakened_tests_name_every_test_change_beyond_added_tests(tmp_path):
     git("add", "tests")
     commit("dev.py", "a = 2\n")
     assert weakened_tests(tmp_path, base, "HEAD") == {"tests/test_skip.py", "tests/test_moved.py"}
+
+
+def test_discovery_fetches_each_base_diff_in_one_request_before_reading_files(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    git, commit = _repo(tmp_path)
+    first = commit("own.py", "a = 1\n")
+    second = commit("own.py", "a = 2\n")
+    commit("own.py", "a = 3\n")
+    calls = []
+    check_output = scope.subprocess.check_output
+
+    def recorded(command, **kwargs):
+        calls.append((command, kwargs))
+        return check_output(command, **kwargs)
+
+    monkeypatch.setattr(scope.subprocess, "check_output", recorded)
+    monkeypatch.setattr(scope, "select_tests", lambda root, path: [])
+    scope.discover_changes(tmp_path, [first, second], "HEAD")
+    paths = ["--", "hooks/*.py", "scripts/*.py", "tests/*.py"]
+    assert calls[:2] == [
+        (["git", "diff", "--no-renames", "--numstat", first, "HEAD", *paths], {"cwd": tmp_path}),
+        (["git", "diff", "--no-renames", "--numstat", second, "HEAD", *paths], {"cwd": tmp_path}),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -746,6 +913,60 @@ def test_a_word_inside_a_longer_identifier_does_not_mark_a_file_for_parsing(tmp_
     parse = scope.ast.parse
     monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
     scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
     scope.mentions.cache_clear()
     assert select_tests(tmp_path, Path("hooks/context/word_sample.py")) == ["tests/test_direct.py"]
     assert parsed == ["from hooks.context import word_sample\n"]
+
+
+def test_a_file_naming_only_the_last_part_of_a_module_is_not_parsed(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_direct.py").write_text("from hooks.context import part_sample\n")
+    (tests / "test_other.py").write_text("from scripts.other import part_sample\n")
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
+    scope.mentions.cache_clear()
+    assert select_tests(tmp_path, Path("hooks/context/part_sample.py")) == ["tests/test_direct.py"]
+    assert parsed == ["from hooks.context import part_sample\n"]
+
+
+def test_a_text_naming_exactly_every_part_of_a_module_is_mentioned():
+    from scripts.ci_mutation import scope
+
+    assert scope.mentioned("hooks.exact_sample", [frozenset({"hooks", "exact_sample"})])
+    assert not scope.mentioned("hooks.other", [frozenset({"hooks", "exact_sample"})])
+
+
+def test_module_facts_names_every_import_and_nested_function_from_one_parse(monkeypatch):
+    from scripts.ci_mutation import scope
+
+    source = (
+        "import os.path\n"
+        "try:\n    from . import sibling\nexcept ImportError:\n    from .. import parent as p\n"
+        "class TestGroup:\n    def test_one(self):\n        import json\n"
+        "        def helper():\n            pass\n"
+        "async def test_two():\n    match 1:\n        case 1:\n            from hooks import context\n"
+    )
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    scope.module_facts.cache_clear()
+    assert scope.imported_names(source, ("tests", "unit")) == {
+        "os.path",
+        "tests.unit",
+        "tests.unit.sibling",
+        "tests",
+        "tests.parent",
+        "json",
+        "hooks",
+        "hooks.context",
+    }
+    assert scope.module_facts(source)[1] == {"TestGroup.test_one", "TestGroup.test_one.helper", "test_two"}
+    assert parsed == [source]

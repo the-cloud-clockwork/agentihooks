@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -336,13 +337,18 @@ def linked_profile_names() -> set[str]:
     return {e.get("name", "") for e in entries if isinstance(e, dict)}
 
 
-def read_manifestos(bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None) -> str:
+def read_manifestos(
+    bundle_dir: Path | None = None,
+    profile_dirs: list[tuple[str, Path]] | None = None,
+    user_dir: Path | None = None,
+    shared_dir: Path | None = None,
+) -> str:
     try:
         from hooks.config import manifesto_body
         from scripts.profiles import manifestos
 
         parts = []
-        for path in manifestos.paths(bundle_dir, profile_dirs or []):
+        for path in manifestos.paths(bundle_dir, profile_dirs or [], user_dir, shared_dir):
             if path.is_file():
                 parts.append(f"<!-- manifesto: {path.name} -->\n{manifesto_body(path).strip()}")
         return "\n\n---\n\n".join(parts)
@@ -444,6 +450,15 @@ def clear_managed_mcp(target: str) -> None:
         _i._save_state(state)
 
 
+def shared_directive(bundle_dir: Path | None) -> str:
+    if not bundle_dir:
+        return ""
+    bundle_md = bundle_dir / ".claude" / "CLAUDE.md"
+    if not bundle_md.exists():
+        bundle_md = bundle_dir / "CLAUDE.md"
+    return bundle_md.read_text().strip() if bundle_md.exists() else ""
+
+
 def build_persona(
     profile_dirs: list[tuple[str, Path]],
     profile_chain: list[str],
@@ -451,21 +466,22 @@ def build_persona(
     pending_rules: list[tuple[str, str, str]],
     managed_header: str,
     managed_footer: str,
+    user_dir: Path | None | Mapping[str, Path | None] = None,
 ) -> str:
-    """Assemble the managed region of a compiled instruction file."""
+    """Assemble the managed region of a compiled instruction file.
+
+    ``user_dir`` is the user bundle, or a mapping of label to directory for every bundle after the
+    root, in precedence order (``shared bundle`` then ``user bundle``).
+    """
     from hooks.context.profile_chain import inherited
 
+    later = user_dir if isinstance(user_dir, Mapping) else {"user bundle": user_dir}
     parents = inherited(profile_dirs)
     parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]
 
-    if bundle_dir:
-        bundle_md = bundle_dir / ".claude" / "CLAUDE.md"
-        if not bundle_md.exists():
-            bundle_md = bundle_dir / "CLAUDE.md"
-        if bundle_md.exists():
-            content = bundle_md.read_text().strip()
-            if content:
-                parts.append(f"<!-- bundle shared directives -->\n{content}")
+    for label, directory in (("bundle", bundle_dir), *later.items()):
+        if content := shared_directive(directory):
+            parts.append(f"<!-- {label} shared directives -->\n{content}")
 
     for pname, pdir in profile_dirs:
         src = pdir / "CLAUDE.md"
@@ -478,7 +494,7 @@ def build_persona(
         rule_parts = [f"<!-- rule: {name} ({label}) -->\n{text.strip()}" for label, name, text in pending_rules]
         parts.append("# Rules\n\n" + "\n\n---\n\n".join(rule_parts))
 
-    manifesto_text = read_manifestos(bundle_dir, profile_dirs)
+    manifesto_text = read_manifestos(bundle_dir, profile_dirs, later.get("user bundle"), later.get("shared bundle"))
     if manifesto_text:
         parts.append(f"<!-- ci-manifesto -->\n{manifesto_text.strip()}")
 

@@ -1,5 +1,8 @@
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -149,10 +152,19 @@ def test_the_hive_materializes_the_seeds_below_its_own_home(setup, homes):
 def test_the_hive_keeps_its_own_progress_on_relaunch(homes):
     with at(homes.hive):
         folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "seed\n", "steering.md": "old\n"})
-        (folder / "progress.md").write_text("hive step\n", encoding="utf-8")
+        (folder / "progress.md").write_text("seed\nhive step\n", encoding="utf-8")
         ledger_workspace.materialize("fixture", "task", {"progress.md": "seed\n", "steering.md": "new\n"})
-    assert (folder / "progress.md").read_text(encoding="utf-8") == "hive step\n"
+    assert (folder / "progress.md").read_text(encoding="utf-8") == "seed\nhive step\n"
     assert (folder / "steering.md").read_text(encoding="utf-8") == "new\n"
+
+
+def test_a_hive_holding_an_older_folder_takes_the_newer_copy(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "old step\n", "measure.sh": "v1\n"})
+        sent = {"progress.md": "old step\nnewer step\n", "measure.sh": "v2\n"}
+        ledger_workspace.materialize("fixture", "task", sent)
+    assert (folder / "progress.md").read_text(encoding="utf-8") == "old step\nnewer step\n"
+    assert (folder / "measure.sh").read_text(encoding="utf-8") == "v2\n"
 
 
 @pytest.mark.parametrize("change", ["opening", "digest", "no opening", "no digest"])
@@ -205,6 +217,176 @@ def test_a_finished_remote_task_keeps_its_synced_lines(setup, homes):
         (ledger_workspace.folder("fixture", "task") / "proof.md").write_text("controller only\n", encoding="utf-8")
         tails = ledger_workspace.published(setup.store, "fixture", ledger)
     assert tails == {"task": {"latest_progress": "controller step", "latest_proof": "hive proof"}}
+
+
+def test_a_hive_task_folder_reaches_the_controller(setup, homes):
+    carry(setup, homes)
+    with at(homes.hive):
+        setup.consumer.apply(setup.order)
+        folder = ledger_workspace.folder("fixture", "task")
+        with (folder / "progress.md").open("a", encoding="utf-8") as fh:
+            fh.write("hive step\n")
+        (folder / "proof.md").write_text("hive proof\n", encoding="utf-8")
+        (folder / "measure.sh").write_text("echo measured\n", encoding="utf-8")
+        setup.consumer.sync_workspaces(45)
+    ledger = {"tasks": [{"id": "task", "workspace": TASK["workspace"]}]}
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
+        with patch.object(command_runner, "status_report", return_value={}):
+            command_runner.publish(setup.store, "fixture", ledger)
+    folder = homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks" / "task"
+    assert (folder / "progress.md").read_text(encoding="utf-8") == "controller step\nhive step\n"
+    assert (folder / "proof.md").read_text(encoding="utf-8") == "hive proof\n"
+    assert (folder / "measure.sh").read_text(encoding="utf-8") == "echo measured\n"
+    assert (folder / "steering.md").read_text(encoding="utf-8").startswith("# task: Carry the opening to the hive")
+
+
+def test_a_dead_hive_folder_still_reaches_the_controller(setup, homes):
+    carry(setup, homes)
+    with at(homes.hive):
+        setup.consumer.apply(setup.order)
+        (ledger_workspace.folder("fixture", "task") / "handoff.md").write_text("handoff\n", encoding="utf-8")
+        setup.consumer.sync_workspaces(45)
+    setup.redis.delete(ledger_workspace.synced_key("host"))
+    assert setup.redis.ttl(ledger_workspace.files_key("host")) > 45
+    ledger = {"tasks": [{"id": "task", "workspace": TASK["workspace"]}]}
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
+        ledger_workspace.mirror(setup.store, "fixture", ledger)
+    folder = homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks" / "task"
+    assert (folder / "handoff.md").read_text(encoding="utf-8") == "handoff\n"
+
+
+def test_a_task_run_here_keeps_its_own_folder(setup, homes):
+    carry(setup, homes)
+    setup.redis.set(
+        ledger_workspace.files_key("host"), json.dumps({"fixture": {"task": {"progress.md": "stale hive\n"}}})
+    )
+    ledger = {"tasks": [{"id": "task", "workspace": TASK["workspace"]}]}
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="host"):
+        ledger_workspace.mirror(setup.store, "fixture", ledger)
+        assert (ledger_workspace.folder("fixture", "task") / "progress.md").read_text(encoding="utf-8") == (
+            "controller step\n"
+        )
+
+
+def test_a_successor_hive_receives_the_files_its_predecessor_added(homes):
+    with at(homes.controller):
+        folder = ledger_workspace.scaffold("fixture", TASK)
+        (folder / "mutation-fix.patch").write_text("--- a\n+++ b\n", encoding="utf-8")
+        payload = orders.carried("fixture", TASK, "text")
+    with at(homes.hive):
+        ledger_workspace.materialize("fixture", "task", payload[orders.SEEDS])
+    folder = homes.hive / ".agentihooks" / "swarm" / "fixture" / "tasks" / "task"
+    assert (folder / "mutation-fix.patch").read_text(encoding="utf-8") == "--- a\n+++ b\n"
+
+
+def test_the_folder_copy_holds_only_plain_text_files(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "step\n", "../escape": "x"})
+        (folder / "nested").mkdir()
+        (folder / "nested" / "inner.txt").write_text("inner", encoding="utf-8")
+        (folder / "blob.bin").write_bytes(b"\xff\xfe\x00")
+        (folder / "huge.log").write_text("x" * (ledger_workspace.SEED_CHARS + 1), encoding="utf-8")
+        (folder / ".hidden").write_text("hidden", encoding="utf-8")
+        (folder / "linked").symlink_to(homes.controller)
+        assert ledger_workspace.seeds("fixture", "task") == {"progress.md": "step\n"}
+    assert not (folder.parent / "escape").exists()
+
+
+def test_the_file_cap_counts_only_added_files_that_travel(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "step\n", "proof.md": "proof\n"})
+        (folder / "a0.log").write_text("x" * (ledger_workspace.SEED_CHARS + 1), encoding="utf-8")
+        for index in range(1, ledger_workspace.FILES + 2):
+            (folder / f"a{index:02}.txt").write_text(f"{index}\n", encoding="utf-8")
+        sent = ledger_workspace.seeds("fixture", "task")
+    assert sent["progress.md"] == "step\n" and sent["proof.md"] == "proof\n"
+    assert sorted(set(sent) - {"progress.md", "proof.md"}) == [
+        f"a{index:02}.txt" for index in range(1, ledger_workspace.FILES + 1)
+    ]
+
+
+def test_an_added_file_at_the_size_limit_still_travels(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "step\n"})
+        (folder / "edge.log").write_text("x" * ledger_workspace.SEED_CHARS, encoding="utf-8")
+        assert len(ledger_workspace.seeds("fixture", "task")["edge.log"]) == ledger_workspace.SEED_CHARS
+
+
+def test_an_unreadable_or_linked_file_never_stops_the_files_after_it(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "step\n"})
+        (folder / "a.bin").write_bytes(b"\xff\xfe\x00")
+        (homes.controller / "outside.txt").write_text("outside\n", encoding="utf-8")
+        (folder / "b.txt").symlink_to(homes.controller / "outside.txt")
+        (folder / "c.txt").write_text("kept\n", encoding="utf-8")
+        assert ledger_workspace.seeds("fixture", "task") == {"progress.md": "step\n", "c.txt": "kept\n"}
+
+
+def test_each_hive_keeps_its_own_folder_files_key():
+    assert ledger_workspace.files_key("one") != ledger_workspace.files_key("two")
+    assert ledger_workspace.files_key("one").startswith(ledger_workspace.synced_key("one"))
+
+
+def test_the_controller_steering_replaces_a_hive_steering_that_only_contains_it(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"steering.md": "new\nhive extra\n"})
+        ledger_workspace.materialize("fixture", "task", {"steering.md": "new\n"})
+    assert (folder / "steering.md").read_text(encoding="utf-8") == "new\n"
+
+
+def test_the_mirror_fills_every_hive_task_into_a_fresh_home(homes):
+    copies = {
+        "first": {},
+        "second": {"progress.md": "hive step\n", "steering.md": "hive steering\n", "../escape": "x"},
+    }
+    with at(homes.controller), patch.object(ledger_workspace, "_synced", return_value=copies):
+        ledger_workspace.mirror(None, "fixture", {})
+    folder = homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks"
+    assert (folder / "second" / "progress.md").read_text(encoding="utf-8") == "hive step\n"
+    assert sorted(path.name for path in folder.iterdir()) == ["second"]
+    assert sorted(path.name for path in (folder / "second").iterdir()) == ["progress.md"]
+
+
+def test_the_mirror_writes_utf8_under_an_ascii_locale(homes):
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from unittest.mock import patch\n"
+        "from scripts.swarm_ledger import ledger_workspace\n"
+        "copies = {'task': {'progress.md': 'caf\\u00e9\\n'}}\n"
+        "with patch.object(Path, 'home', return_value=Path(sys.argv[1])):\n"
+        "    with patch.object(ledger_workspace, '_synced', return_value=copies):\n"
+        "        ledger_workspace.mirror(None, 'fixture', {})\n"
+    )
+    ascii_locale = {"LC_ALL": "C", "LANG": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    done = subprocess.run(
+        [sys.executable, "-c", script, str(homes.controller)],
+        env={**os.environ, **ascii_locale},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    progress = homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks" / "task" / "progress.md"
+    assert progress.read_bytes() == "café\n".encode()
+
+
+def test_the_mirror_names_utf8_when_it_writes(homes, monkeypatch):
+    import codecs
+
+    used = []
+    real = Path.write_text
+
+    def spy(self, text, *args, **kwargs):
+        used.append(kwargs.get("encoding"))
+        return real(self, text, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", spy)
+    copies = {"task": {"progress.md": "step —\n"}}
+    with at(homes.controller), patch.object(ledger_workspace, "_synced", return_value=copies):
+        ledger_workspace.mirror(None, "fixture", {})
+    assert len(used) == 1
+    assert used[0] and codecs.lookup(used[0]).name == "utf-8"
 
 
 def test_the_latest_execution_of_a_task_wins(setup):

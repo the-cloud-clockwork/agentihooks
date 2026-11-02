@@ -318,7 +318,7 @@ def collect_cached_stats(
     options: list[str],
     collect: Callable[[list[str]], list[dict]],
 ) -> list[dict]:
-    from scripts.ci_mutation.stats_dependencies import StoredStats
+    from scripts.ci_mutation.stats_dependencies import StoredStats, cap
 
     tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
@@ -362,6 +362,7 @@ def collect_cached_stats(
         if result is not None:
             dependencies = inputs.for_test(path, covered, fresh)
             stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
+    cap(folder)
     return reused + [
         {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]

@@ -53,6 +53,8 @@ ledger:
   tolerations: []
   port: 8765
   publicUrl: ""
+  # Extra host:port names the ledger answers, such as the internal address hives reach when publicUrl is the public route.
+  allowedHosts: []
   # Secret with tls.crt, tls.key and ca.crt; clients refuse to send ledger credentials over plain http off loopback.
   # The certificate must name <fullname>-ledger, the service and ingress backend name, as a SAN.
   tls:
@@ -115,6 +117,8 @@ controller:
               - key: anton.io/capacity-type
                 operator: DoesNotExist
   tolerations: []
+  # Scheduler lease and slot store: redis or bus, the controller's configured NATS bus; empty follows AGENTIHOOKS_STATE_BACKEND.
+  schedulerState: ""
   # Required with workers: the Kubernetes runtime creates worker Pods with this account's token.
   serviceAccountName: ""
   # Swarms in this Redis that their own host ticks; the controller never ticks them or probes their lease.
@@ -139,6 +143,7 @@ controller:
   # lives here: approved accounts come from the shared account secret.
   workers:
     apiUrl: ""
+    kubernetesProofSwarm: ""
     imageTag: dev
     profile: ""
     cap: 1
@@ -231,6 +236,26 @@ hub:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
+# Auth service: issues signed tokens other services verify with AGENTIHOOKS_AUTH_KEY, a secret of at least 32 bytes
+# given through secretEnv. legacy "off" makes services accept only signed tokens.
+auth:
+  enabled: false
+  replicas: 2
+  port: 8768
+  legacy: "on"
+  affinity: {}
+  tolerations: []
+  env: {}
+  secretEnv: []
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 256Mi
+      ephemeral-storage: 256Mi
+
 # secretName must hold AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and the receiver's own AGENTIHOOKS_BUS_URL.
 githubWebhook:
   enabled: false
@@ -269,9 +294,18 @@ workers:
   maxAgents: 20
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
   drainSeconds: 3600
+  rollout:
+    enabled: false
+    namespace: default
+    leaseName: agentihooks-hive-rollout
+    drainSeconds: 1200
+    # Optional pod stamp; each new value rolls the hives one at a time. Release hives leave it unset and roll on the chart version.
+    release: ""
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
   masterSwarms: []
+  # Placement rank per role, role:rank pairs such as eng:1,ci:1; the lowest rank takes a role's agents first while it has room.
+  prefer: ""
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev
@@ -286,6 +320,10 @@ workers:
     name: ""
     key: ""
   envFromSecrets: []
+  brainBinding:
+    secretName: ""
+    key: binding.json
+    credentials: {}
   githubAuth:
     mode: token
     secretName: ""
@@ -317,12 +355,33 @@ workers:
   worktreeMinFreeGb: 50
   worktreeMaxPerRepo: 60
   worktreeStaleDays: 7
+  # Node whose hiveStorage entry (else hiveStorage.default) gives this hive its home and /tmp host folders,
+  # <homes>/<folder> and <tmp>/<folder>, where folder is the release name, or <release>_<name> for a workers.hives
+  # entry; it pins the hive to that node and replaces homeVolume. workers.hives entries inherit it. Empty keeps homeVolume.
+  node: ""
   nodeSelector: {}
   affinity: {}
   tolerations: []
   # More hives in this release, one pod each, so an entry never sets replicas. Every entry needs a name and its own credentialSecret; its other
   # top level keys replace the workers keys above whole, so a hive with a homeVolume sets the complete source.
   hives: []
+
+# Host folders for hive homes and hive /tmp, by node name, read by every hive whose workers.node is set and by the
+# hive home DaemonSet. An entry has homes, an optional tmp (else /tmp is an emptyDir) and an optional mount
+# {path, fsType, marker}: both folders must sit under that path, and the hive's folder Job refuses unless the path
+# is that filesystem and holds marker, a path that exists only on the data disk, so a node whose data disk did not
+# mount never gets hive folders on its system drive. An entry without tmp gives the hive an emptyDir /tmp. default
+# serves nodes with no entry.
+hiveStorage:
+  image: alpine:3.20
+  default: {}
+  nodes: {}
+  # Hives whose homeVolume is set by hand under default.homes: one DaemonSet makes their folders on every node
+  # it selects outside hiveStorage.nodes.
+  homeFolders:
+    hives: []
+    nodeSelector: {}
+    tolerations: []
 
 worker:
   enabled: false

@@ -64,7 +64,7 @@ def test_a_clashing_code_is_minted_again(redis):
 
 def test_an_existing_swarm_without_a_code_gets_one(store):
     store.redis.hset(store.key("sw", "config"), "code", "")
-    store.redis.hdel(naming.NameRegistry.key("code-of"), "sw")
+    store.names.release("sw")
     assert store.ensure_code("sw").code
     assert store.config("sw").code == store.ensure_code("sw").code
 
@@ -120,7 +120,7 @@ def test_the_swarm_space_is_repo_dash_code():
     assert naming.space("/home/x/dev/agentihooks/", "a1b2c3") == "agentihooks-a1b2c3"
 
 
-def test_a_pending_item_passes_to_the_successor_of_the_same_type(store):
+def test_a_pending_item_passes_to_the_successor_of_the_same_type(store: RedisStore) -> None:
     old = store.next_name("sw", MASTER, at=1)
     store.put_agent("sw", AgentRecord(old, MASTER, MASTER, seat=seat_address("sw", MASTER)))
     store.seats.occupy(seat_address("sw", MASTER), old, 1)
@@ -129,9 +129,10 @@ def test_a_pending_item_passes_to_the_successor_of_the_same_type(store):
     store.drop_agent("sw", old, at=2)
     new = store.next_name("sw", MASTER, at=3)
     store.put_agent("sw", AgentRecord(new, MASTER, MASTER, seat=seat_address("sw", MASTER)))
+    store.seats.occupy(seat_address("sw", MASTER), new, 3)
     store.next_name("sw", "eng", at=3)
     exits.settle(inbox, old, "", "exited")
-    assert inbox.get(item.id).address == new
+    assert inbox.get(item.id).address == seat_address("sw", MASTER)
     assert store.names.successor(old) == new
 
 
@@ -190,7 +191,7 @@ def test_a_swarm_without_a_code_gets_one_at_its_next_tick_and_spawns_new_names(s
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
     store.redis.hset(store.key("sw", "config"), "code", "")
-    store.redis.hdel(naming.NameRegistry.key("code-of"), "sw")
+    store.names.release("sw")
     rt = FakeRuntime()
     tick("sw", store, FakeLedger([{"id": "t1"}]), rt, 1_000)
     code = store.config("sw").code
@@ -283,54 +284,36 @@ def test_a_proof_swarm_space_is_closed_and_renamed_by_its_slug(proof_store):
     assert runtime.close_space(proof_store.config(PROOF)) is False
 
 
-def test_resolve_many_reads_every_alias_in_one_round_trip(store, redis, monkeypatch):
+def test_resolve_many_reads_the_store_once_then_the_legacy_keys_it_lacks_once(store, redis, monkeypatch):
     new = store.next_name("sw", "eng")
     store.names.alias("sw-eng-1", new)
     reads = []
-    mget = redis.mget
+    mget, hmget = redis.mget, redis.hmget
     monkeypatch.setattr(redis, "get", lambda key: reads.append(key))
+    monkeypatch.setattr(redis, "hget", lambda *a: reads.append(a))
+    monkeypatch.setattr(redis, "hmget", lambda key, fields: reads.append("hmget") or hmget(key, fields))
     monkeypatch.setattr(redis, "mget", lambda keys: reads.append(list(keys)) or mget(keys))
-    keys = [f"{naming.PREFIX}:alias:{name}" for name in ("sw-eng-1", new, "stranger")]
+    expected = ["hmget", [f"{naming.PREFIX}:alias:{name}" for name in (new, "stranger")]]
     assert naming.NameRegistry(redis).resolve_many(["sw-eng-1", new, "stranger"]) == {
         "sw-eng-1": new,
         new: new,
         "stranger": "stranger",
     }
-    assert reads == [keys]
+    assert reads == expected
     assert naming.NameRegistry(redis).resolve_many([]) == {}
-    assert reads == [keys]
+    assert reads == expected
 
 
-def test_names_batches_alias_and_record_reads_without_changing_rows(store, redis, monkeypatch):
-    from unittest.mock import Mock
-
-    names = [store.next_name("sw", lane, at=at) for lane, at in (("eng", 17), ("ci", 23))]
-    store.names.note(names[1], session_id="session")
-    store.names.retire(names[1], 31)
+def test_names_reads_the_store_once_and_legacy_records_one_page_per_pipeline(store, redis, monkeypatch):
     code = store.names.code_of("sw")
-    redis.rpush(store.names.key("names", code), "old-agent", "missing", names[0])
-    store.names.alias("old-agent", names[1])
-    expected = [store.names.entry(name) for name in [*names, "old-agent", "missing", names[0]]]
-    direct = Mock(wraps=redis.hgetall)
-    aliases = Mock(wraps=redis.mget)
-    pipeline = Mock(wraps=redis.pipeline)
-    monkeypatch.setattr(redis, "hgetall", direct)
-    monkeypatch.setattr(redis, "mget", aliases)
-    monkeypatch.setattr(redis, "pipeline", pipeline)
-
-    assert store.names.names("sw") == expected
-    direct.assert_not_called()
-    aliases.assert_called_once_with(
-        [store.names.key("alias", name) for name in [*names, "old-agent", "missing", names[0]]]
-    )
-    pipeline.assert_called_once_with(transaction=False)
-
-
-def test_names_reads_records_one_page_per_pipeline_and_keeps_the_rows(store, redis, monkeypatch):
-    names = [store.next_name("sw", "eng", at=at) for at in range(5)]
+    legacy = [f"engineer@{code}-{n:04d}" for n in range(1, 6)]
+    for number, name in enumerate(legacy, 1):
+        redis.hset(store.names.key("name", name), mapping={"type": "engineer", "number": number, "spawned_at": 0})
+    redis.rpush(store.names.key("names", code), *legacy, "missing")
+    late = store.next_name("sw", "ci", at=3)
     expected = store.names.names("sw")
-    sizes = []
-    pipeline = redis.pipeline
+    sizes, reads = [], []
+    pipeline, hmget = redis.pipeline, redis.hmget
 
     def counted(**kwargs):
         pipe = pipeline(**kwargs)
@@ -345,10 +328,22 @@ def test_names_reads_records_one_page_per_pipeline_and_keeps_the_rows(store, red
 
     monkeypatch.setattr(naming, "NAMES_PAGE", 2, raising=False)
     monkeypatch.setattr(redis, "pipeline", counted)
+    monkeypatch.setattr(redis, "hmget", lambda key, fields: reads.append(len(fields)) or hmget(key, fields))
 
     assert store.names.names("sw") == expected
-    assert [row["name"] for row in expected] == names
-    assert sizes == [2, 2, 1]
+    assert [row.get("name") for row in expected] == [*legacy, None, late]
+    assert expected[0]["number"] == 1
+    assert sizes == [2, 2, 2]
+    assert reads == [len(legacy) + 2, len(legacy) + 2]
+
+
+def test_names_lists_legacy_names_first_then_new_ones_in_spawn_order(store, redis):
+    code = store.names.code_of("sw")
+    redis.hset(store.names.key("name", "old-agent"), mapping={"type": "engineer", "spawned_at": 1})
+    redis.rpush(store.names.key("names", code), "old-agent")
+    late = store.next_name("sw", "eng", at=9)
+    early = store.next_name("sw", "ci", at=4)
+    assert store.names.names("sw") == [store.names.entry(name) for name in ("old-agent", early, late)]
 
 
 def test_names_without_a_code_reads_no_records(store, redis, monkeypatch):
@@ -382,7 +377,9 @@ def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, capl
     ]
 
 
-def test_slugs_of_answers_slug_of_for_every_name_in_two_reads(store, redis, monkeypatch):
+def test_slugs_of_answers_slug_of_for_every_name_with_one_legacy_read_for_codes_the_store_lacks(
+    store, redis, monkeypatch
+):
     store.create(SwarmConfig("other", "/home/x/dev/other", max_eng=1, max_ci=1))
     mine, theirs = store.next_name("sw", "eng"), store.next_name("other", "ci")
     store.names.alias("sw-eng-1", mine)
@@ -395,10 +392,10 @@ def test_slugs_of_answers_slug_of_for_every_name_in_two_reads(store, redis, monk
         monkeypatch.setattr(redis, command, lambda *a, real=real, command=command: reads.append(command) or real(*a))
     assert naming.NameRegistry(redis).slugs_of(names) == expected
     assert expected == {"sw-eng-1": "sw", mine: "sw", theirs: "other", "sw-ci-2": "sw", "stranger": "", orphan: ""}
-    assert reads == ["mget", "hmget"]
+    assert reads == ["hmget", "mget", "hmget", "hmget"]
     reads.clear()
     assert naming.NameRegistry(redis).slugs_of(["stranger"]) == {"stranger": ""}
-    assert reads == ["mget"]
+    assert reads == ["hmget", "mget"]
 
 
 def test_resolve_names_needs_no_redis(monkeypatch):

@@ -23,6 +23,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     store = _store()
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
     pods = Pods("swarm-pod-proof")
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
     monkeypatch.setattr(deployed.image_tag, "resolve", lambda repository, tag: IMAGE)

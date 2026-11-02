@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_38:6feb38a058ddcc73638ff8cbd19b0bf841ac47d1f2a5d6847a1c3210e9de9076": {
+    "reader": "standards-reader",
+    "reason": "Absent saved harness becomes None instead of empty string. Both values differ from claude, so the first route check returns unchanged empty flags. Present harnesses and preceding want or requested values are unchanged. Later routing and the post-selection check receive unchanged inputs. Independently verified by Standards against CI40642792101 and current spawn on 0e00a45ab."
+  }
+}

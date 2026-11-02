@@ -29,6 +29,44 @@ def _decide(five, week, others, push=False):
     )
 
 
+def test_a_session_with_only_a_week_window_still_reads_its_windows(monkeypatch):
+    from hooks.context import quota_usage
+
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    monkeypatch.setattr(quota_usage, "_load_native", lambda session: {"seven_day": {"used_percentage": 92.0}})
+    assert qp._session_windows("s") == (0.0, 92.0, None, None)
+    monkeypatch.setattr(quota_usage, "_load_native", lambda session: {"five_hour": {"used_percentage": 92.0}})
+    assert qp._session_windows("s") is None
+    week = {"used_percentage": 92.0}
+    later = time.time() + 3600
+    limits = {"five_hour": {"used_percentage": 40, "resets_at": later}, "seven_day": week}
+    monkeypatch.setattr(quota_usage, "_load_native", lambda session: limits)
+    assert qp._session_windows("s") == (40.0, 92.0, later, None)
+    past = time.time() - 60
+    limits = {"five_hour": {"used_percentage": 40, "resets_at": past}, "seven_day": week}
+    assert qp._session_windows("s") == (0.0, 92.0, past, None)
+
+
+def test_other_accounts_read_a_week_only_account_and_refuse_a_rejected_or_weekless_one(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    for account in ("open", "spent", "rejected", "weekless"):
+        monkeypatch.setenv(f"AH_CC_TOKEN_{account}", f"available-{account}")
+    week = balancer.QuotaWindow(30.0, None)
+    missing = balancer.QuotaWindow()
+    spent = balancer.QuotaWindow(90.0, int(time.time()) - 60)
+    results = [
+        balancer.ProbeResult("open", "allowed", "NORMAL", 70.0, missing, week),
+        balancer.ProbeResult("spent", "allowed", "NORMAL", 70.0, spent, week),
+        balancer.ProbeResult("rejected", "rejected", "BLOCKED", 0.0, missing, week),
+        balancer.ProbeResult("weekless", "allowed", "UNKNOWN", None, spent, missing),
+    ]
+    observed = time.time()
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed, result) for result in results])
+    found = {candidate.account: (candidate.five_used, candidate.cap) for candidate in qp._other_accounts({})}
+    assert found == {"open": (0.0, 6), "spent": (0.0, 6)}
+
+
 def test_below_both_triggers_nothing_happens():
     assert _decide(98.9, 97.9, []) is None
 

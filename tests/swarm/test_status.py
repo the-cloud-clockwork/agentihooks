@@ -102,7 +102,8 @@ def test_busy_tool_stall_is_reported_until_a_new_tool_call_or_named_wait(monkeyp
     activity.record("Read", {}, env, tmp_path, now_ms=at - 10 * 60_000)
     from scripts.swarm.tick import _watch_idle
 
-    _watch_idle("sw", store, ledger, runtime, ledger.tasks("sw"), store.agents("sw")[0], at)
+    rows = {t["id"]: t for t in ledger.tasks("sw")}
+    _watch_idle("sw", store, ledger, runtime, rows, store.agents("sw")[0], at)
     assert store.redis.get(store.key("sw", "pane-state", name)) == "working"
     assert 0 < store.redis.ttl(store.key("sw", "pane-state", name)) <= idle.BEAT_TTL_S
     found = findings(store, "sw", config, ledger.tasks("sw"), [])
@@ -155,6 +156,22 @@ def test_unknown_start_and_tool_times_are_not_reported_as_a_stall(monkeypatch, t
     worker = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
     rows = _health_rows(store, "sw", [worker], {}, 1_000_000)
     assert rows[0]["tool_quiet_minutes"] is None
+
+
+def test_health_rows_carry_the_minutes_since_the_last_stale_nudge(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.swarm import idle, stale_nudge
+    from scripts.swarm.health import activity
+    from scripts.swarm.status import _health_rows
+    from scripts.swarm.store import AgentRecord
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    worker = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    assert _health_rows(store, "sw", [worker], {}, 1_000_000)[0]["last_nudge_minutes"] is None
+    store.redis.set(idle.key("sw", stale_nudge.LAST, worker.name), 1_000_000 - 3 * 60_000 - 1)
+    assert _health_rows(store, "sw", [worker], {}, 1_000_000)[0]["last_nudge_minutes"] == 3
 
 
 def test_missing_tool_clock_remains_unmeasured_despite_old_launch_or_heartbeat(monkeypatch, tmp_path):

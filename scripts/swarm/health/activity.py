@@ -7,6 +7,8 @@ import shutil
 import time
 from pathlib import Path
 
+from scripts import gh_audit
+
 NAME_RE = re.compile(r"^[A-Za-z0-9][\w.@-]{0,63}$")
 CALL_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 WATCH_TOOLS = ("Monitor", "TaskOutput", "BashOutput")
@@ -55,6 +57,7 @@ def classify(tool_name, tool_input):
 
 
 def record(tool_name, tool_input, environ=None, root=None, now_ms=None, call_id=""):
+    gh_audit.charge_command(tool_name, tool_input)
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):

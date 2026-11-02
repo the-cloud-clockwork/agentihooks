@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_frozen:b307de862e585cd845166794d2cf1600dd722e39d9ac36832a1167ff5b2e1bc6": {
+    "reader": "standards_reader",
+    "reason": "Equivalent mutant: with_dependencies asks claim_gate only about tasks held() already holds. For a non-frozen held task, held() requires not exempt(task, fix), which forces the fix-phase exemption off, so claim_gate(..., fix) and claim_gate(..., None) return the same value. Frozen tasks return True in both."
+  }
+}

@@ -205,6 +205,6 @@ def test_compare_runs_both_windows_together_and_fails_when_either_side_fails(tmp
     assert (result.returncode == 0) is (not failed_side), result.stdout + result.stderr
     for side in ("base", "head"):
         assert (workspace / f"load-evidence/{side}.log").read_text() == f"{side} window ran\n"
-    upload = next(step for step in compare["steps"] if step.get("uses") == "actions/upload-artifact@v4")
+    upload = next(step for step in compare["steps"] if step.get("uses") == "./.github/actions/retry-upload")
     assert upload["with"]["name"] == "compare-pair-${{ matrix.pair }}"
     assert upload["if"] == "always()"

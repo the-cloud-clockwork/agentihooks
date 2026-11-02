@@ -604,6 +604,15 @@ def test_the_watchdog_item_carries_the_window_ref(swarm):
     assert (item.ref, item.task, item.id) == (ref, "", hashlib.sha256(ref.encode()).hexdigest()[:12])
 
 
+def test_the_final_handoff_goes_to_the_configured_watchdog(swarm):
+    store, ledger = swarm
+    store.update(SLUG, watchdog_address="watchdog-session")
+    _step(store, ledger, END)
+    assert _items(store, "watchdog-session") == [FINAL_OBSERVE]
+    assert _items(store, "master-watchdog") == []
+    assert ledger.notices == [ON_LEDGER.replace("master-watchdog", "watchdog-session")]
+
+
 def test_an_untitled_task_and_an_empty_cutoff_read_plainly(swarm):
     store, ledger = swarm
     flying = [AgentRecord(OWNER, "eng", "t1")]

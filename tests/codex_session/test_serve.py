@@ -1,9 +1,11 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from scripts import codex_router
 from scripts.codex_session import serve, supervisor
+from scripts.profiles import binding
 from scripts.routing import codex_api
 from scripts.swarm.store import SwarmError
 
@@ -84,6 +86,19 @@ def test_serve_refuses_outside_a_swarm_execution_and_reports_the_failure(tmp_pat
     assert report.read_text() == f"status=failed\nerror={reason}\n"
 
 
+def test_serve_refuses_a_launch_without_a_recorded_home_and_never_renders(tmp_path, monkeypatch, capsys):
+    def render(*args):
+        raise AssertionError("serve rendered a profile without the home init agent recorded")
+
+    monkeypatch.setattr(serve.select_profile, "prepare", render)
+    report = tmp_path / "route"
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", "--report", str(report)]
+    assert serve.main(argv, dict(SWARM_ENV)) == 2
+    assert capsys.readouterr().err == f"agentihooks codex-session: {serve.NO_HOME}\n"
+    assert report.read_text() == f"status=failed\nerror={serve.NO_HOME}\n"
+    assert "--home" in serve.NO_HOME
+
+
 def test_the_serve_parser_reads_every_option_and_its_defaults(capsys):
     parser = serve._parser()
     assert parser.prog == "python -m scripts.codex_session"
@@ -95,6 +110,7 @@ def test_the_serve_parser_reads_every_option_and_its_defaults(capsys):
         "seat": "eng-1@sw",
         "overlay": [],
         "bundle_revision": "",
+        "home": "",
         "exclude": "",
         "report": "",
         "previous_execution": "",
@@ -191,6 +207,7 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
         "eng-1@sw",
         "--overlay=frontend",
         "--bundle-revision=abc",
+        f"--home={home}",
         "--exclude",
         "old",
         "--report",
@@ -235,6 +252,40 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
     assert spec.startup_timeout_s == 7.0
 
 
+def test_prepare_mounts_the_home_init_agent_rendered_after_the_bundle_moved(tmp_path, monkeypatch):
+    home = tmp_path / "rendered" / "engineer" / "codex"
+    home.mkdir(parents=True)
+    (home / binding.PERSONAS["codex"]).write_text("persona rendered at launch\n")
+    (home.parent / "codex.sources.json").write_text("{}")
+    recorded = {
+        "profile": "engineer",
+        "harness": "codex",
+        "home": str(home.resolve()),
+        "persona": binding.digest(home / binding.PERSONAS["codex"]),
+        "sources": binding.digest(home.parent / "codex.sources.json"),
+        "canary": "canary-at-launch",
+    }
+    (home / binding.FILE).write_text(json.dumps(recorded))
+    root = tmp_path / "engineer"
+    root.mkdir()
+    (root / "profile.yml").write_text("model: gpt-6.1-sol\neffort: high\n")
+
+    def rerender(*args, **kwargs):
+        raise AssertionError("serve rendered the profile again after the bundle checkout moved")
+
+    monkeypatch.setattr(serve.select_profile.profiles, "_chain", lambda name: [(name, root)])
+    monkeypatch.setattr(serve.select_profile.profiles, "render", rerender)
+    monkeypatch.setattr(serve.select_profile.profiles, "channels", lambda name: "amygdala,brain")
+    monkeypatch.setattr(serve.select_profile.plugins, "claude_only", lambda name: False)
+    monkeypatch.setattr(
+        serve, "route_account", lambda environ, route, exclude: (codex_router.CodexAccount("t"), "open", {})
+    )
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={home}"]
+    spec = serve.prepare(serve._parser().parse_args(argv), [], {**SWARM_ENV, "HOME": str(tmp_path)})
+    assert spec.codex_home == str(home)
+    assert json.loads((home / binding.FILE).read_text())["canary"] == "canary-at-launch"
+
+
 def test_prepare_checks_the_login_of_an_interactive_route_and_opens_nothing_without_a_prompt(tmp_path, monkeypatch):
     def prepare(name, agent, model, effort, args, environ, overlays):
         return {"CODEX_HOME": str(tmp_path)}, list(args)
@@ -244,8 +295,8 @@ def test_prepare_checks_the_login_of_an_interactive_route_and_opens_nothing_with
 
     monkeypatch.setattr(serve.select_profile, "prepare", prepare)
     monkeypatch.setattr(serve, "route_account", route)
-    args = serve._parser().parse_args(["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"])
-    spec = serve.prepare(args, ["--route", serve.INTERACTIVE], dict(SWARM_ENV))
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={tmp_path}"]
+    spec = serve.prepare(serve._parser().parse_args(argv), ["--route", serve.INTERACTIVE], dict(SWARM_ENV))
     assert (spec.account_type, spec.opening, spec.agent.effort) == ("chatgpt", "", "")
 
 
@@ -253,8 +304,8 @@ def _serve_with(tmp_path, monkeypatch, inherited):
     monkeypatch.setattr(serve.select_profile, "prepare", lambda *_: ({"CODEX_HOME": str(tmp_path)}, []))
     account = codex_router.CodexAccount("t", "AH_CX_TOKEN_t")
     monkeypatch.setattr(serve, "route_account", lambda environ, route, exclude: (account, "open", dict(environ)))
-    args = serve._parser().parse_args(["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"])
-    return serve.prepare(args, [], {**SWARM_ENV, **inherited})
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={tmp_path}"]
+    return serve.prepare(serve._parser().parse_args(argv), [], {**SWARM_ENV, **inherited})
 
 
 def test_prepare_pins_the_agentihooks_langfuse_keys_over_inherited_ones(tmp_path, monkeypatch):

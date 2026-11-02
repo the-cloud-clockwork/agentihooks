@@ -5,11 +5,13 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from scripts.swarm import lease
+from scripts.swarm import lease, ledger_client
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm.tick import Placed, SpawnError
+from scripts.swarm_v2.kubernetes.watch import BACKEND as KUBERNETES
+from scripts.swarm_v2.runtime import pod_gone
 from scripts.swarm_v2.runtime.base import (
     HIVE_LANES,
     LOCAL,
@@ -19,6 +21,7 @@ from scripts.swarm_v2.runtime.base import (
     Runtime,
     RuntimeRouter,
     SpawnRequest,
+    Status,
     Unqualified,
 )
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
@@ -28,13 +31,22 @@ NO_LAUNCH = "a Kubernetes runtime needs a distributed launch"
 
 
 class RoutedRuntime:
-    def __init__(self, herdr: HerdrRuntime, router: RuntimeRouter, launch: Launcher | None = None):
+    def __init__(
+        self,
+        herdr: HerdrRuntime,
+        router: RuntimeRouter,
+        launch: Launcher | None = None,
+        pod_absent: Callable[[str], bool] = pod_gone.absent,
+    ) -> None:
         self.herdr_runtime, self.router, self.launch, self.refused = herdr, router, launch, {}
+        self.pod_absent = pod_absent
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.herdr_runtime, name)
 
     def spawn(self, config: Any, lane: str, name: str, task: dict) -> Placed:
+        if lane == MASTER:
+            ledger_client.LedgerClient(service=True).join(config.slug, name, "orchestrator")
         request = SpawnRequest(config, lane, name, task)
         placed = self.launch is not None and self.router.spawn_backend(request) != LOCAL
         outcome = self.launch(request) if placed else self.router.spawn(request)
@@ -59,7 +71,8 @@ class RoutedRuntime:
             self.refused[agent.name] = {"process": 0, "refusal": outcome.detail}
         else:
             self.refused.pop(agent.name, None)
-        return outcome.ok
+        gone = outcome.status is Status.UNAVAILABLE and agent.runtime_backend == KUBERNETES
+        return outcome.ok or (gone and self.pod_absent(agent.execution_id))
 
     def refusal(self, agent: AgentRecord) -> dict:
         return self.refused.get(agent.name) or self.herdr_runtime.refusal(agent)
@@ -69,6 +82,8 @@ class RoutedRuntime:
         return outcome.value if outcome.ok else Placed("", "")
 
     def resume(self, config: Any, agent: AgentRecord, text: str) -> Placed:
+        if agent.lane == MASTER:
+            ledger_client.LedgerClient(service=True).join(config.slug, agent.name, "orchestrator")
         outcome = self.router.recover(agent, Recovery.RESUME, config, text)
         if not outcome.ok:
             raise SpawnError(outcome.detail, outcome.status)

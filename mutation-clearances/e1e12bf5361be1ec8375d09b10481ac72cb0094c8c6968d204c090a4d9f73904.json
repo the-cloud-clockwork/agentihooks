@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/artifact_files.py:scripts.swarm_ledger.repository.artifact_files.x_ids__mutmut_7:eb8076a9fed82746b4762317878eee0e534263b155bd0a6b99fbda7e457979f7": {
+    "reader": "Standards",
+    "reason": "Equivalent: SQL keywords and unquoted identifiers are case insensitive in SQLite and fold to lowercase in Postgres; translate() only maps placeholders for this query, so the changed case returns the same rows."
+  }
+}

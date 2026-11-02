@@ -343,6 +343,61 @@ def test_access_env_block_names_the_token_and_the_eval_form():
     )
 
 
+GH_TOKEN_RENDERERS = [
+    "gh auth status",
+    "gh auth status --show-token",
+    "gh auth status -t",
+    "gh auth status -h github.com",
+    "gh --hostname github.com auth status",
+    "gh auth token",
+    "/usr/bin/gh auth status",
+    "sudo gh auth status",
+    "GH_TOKEN=x gh auth status",
+    "env GH_HOST=github.com gh auth token",
+    "gh auth status 2>&1 | head -5",
+    "cd /repo && gh auth status",
+    'echo "$(gh auth token)"',
+    "bash -c 'gh auth status'",
+    "ssh hive-002 gh auth status",
+    "docker exec worker gh auth status",
+    "kubectl exec pod-0 -- gh auth status",
+    "ssh hive-002 'gh auth status'",
+    "ssh hive-002 gh --hostname github.com auth status",
+    "gh -R owner/repo auth token",
+]
+
+GH_LEAK_FREE = [
+    "gh auth login --with-token < /dev/null",
+    "gh auth setup-git",
+    "gh pr view 7843",
+    "gh pr list --search auth token",
+    "gh help auth status",
+    "gh -R owner/repo help auth status",
+    "gh",
+    'gh issue comment 1 --body "auth status"',
+    "gh api rate_limit --jq .rate.remaining",
+    'test -n "${GH_TOKEN:-}" && echo set || echo unset',
+    "grep -rn 'gh auth status' docs",
+    "git log --grep 'gh auth token'",
+]
+
+
+@pytest.mark.parametrize("command", GH_TOKEN_RENDERERS)
+def test_gh_commands_that_print_a_token_are_refused(command):
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    assert reason == (
+        block("printing the GitHub token (gh auth status or gh auth token)", KIND_ENVIRONMENT)
+        + '\nTo test whether the token is set:  test -n "${GH_TOKEN:-}" && echo set || echo unset'
+        + "\nTo test whether it works:  gh api rate_limit --jq .rate.remaining"
+    )
+
+
+@pytest.mark.parametrize("command", GH_LEAK_FREE)
+def test_gh_commands_that_print_no_token_pass(command):
+    assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
+
+
 def _bash(command, cwd=""):
     return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
 

@@ -63,11 +63,13 @@ def misses(store, agent, facts, doc, bundled=True, declared=()):
     return launch_check.misses(store, "sw", agent, facts, doc, bundled, list(declared))
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_a_clean_launch_passes(store, launched):
     agent, facts, doc = launched
     assert misses(store, agent, facts, doc) == {}
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_not_joined_is_named(store, launched):
     agent, facts, _ = launched
     assert list(misses(store, agent, facts, {"_meta": {"members": {}}})) == ["joined"]
@@ -95,12 +97,14 @@ def test_a_harness_start_before_the_launch_is_ignored(store, launched):
     assert launch_check.session_started_at(agent) == LAUNCH
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_seat_held_by_another_is_named(store, launched):
     agent, facts, doc = launched
     store.seats.occupy(agent.seat, "someone-else", LAUNCH + 1)
     assert list(misses(store, agent, facts, doc)) == ["joined"]
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_wrong_profile_variable_is_named(store, launched):
     agent, facts, doc = launched
     found = misses(store, agent, {**facts, "profile": "anton"}, doc)
@@ -108,6 +112,7 @@ def test_wrong_profile_variable_is_named(store, launched):
 
 
 @pytest.mark.parametrize("field,value", [("hooks", False), ("model", "sonnet"), ("effort", "low")])
+@pytest.mark.feature("swarm-launch-check")
 def test_missing_hooks_or_wrong_model_or_effort_is_named_settings(store, launched, field, value):
     agent, facts, doc = launched
     found = misses(store, agent, {**facts, field: value}, doc)
@@ -122,8 +127,11 @@ def test_unavailable_process_reports_an_observation_without_configuration_mismat
     assert found == {"observation": {"expected": "available process observation", "actual": "unavailable"}}
     launch_check.record(store, "sw", agent, found, LAUNCH_CHECKED, launch_check.DEADLINE_MS)
     findings = launch_check.findings(store, "sw")
-    assert [finding.id for finding in findings] == [f"launch-check/{agent.name}/observation"]
-    assert findings[0].evidence == ("expected available process observation; observed unavailable",)
+    assert [finding.subject.split("/")[0] for finding in findings] == ["observation"]
+    assert findings[0].evidence == (
+        f"agents {agent.name}",
+        "expected available process observation; observed unavailable",
+    )
 
 
 @pytest.mark.parametrize(
@@ -172,6 +180,7 @@ def test_a_launch_with_every_declared_overlay_passes(store, launched):
     "rendered,declared",
     [([], ["brain"]), (["router"], ["brain", "router"]), (None, ["brain"])],
 )
+@pytest.mark.feature("swarm-launch-check")
 def test_a_launch_missing_a_declared_overlay_fails_the_check(store, launched, rendered, declared):
     agent, facts, doc = launched
     chain = ["base", "package:engineer", "engineer", *(rendered or [])]
@@ -194,6 +203,7 @@ def test_declared_adds_the_overlays_the_agent_wears(monkeypatch):
     assert launch_check.declared("engineer", ["brain"]) == ["brain"]
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_a_launch_missing_a_worn_overlay_fails_the_check(store, launched):
     agent, facts, doc = launched
     chain = ["base", "package:engineer", "engineer", "brain"]
@@ -340,6 +350,74 @@ def test_a_late_join_that_holds_its_seat_is_reported_and_kept(store, monkeypatch
     assert name not in launch_check.pending(store, "sw")
 
 
+@pytest.mark.parametrize("hive,relaunch", [("", True), ("remote", True), ("remote", False)])
+@pytest.mark.parametrize("age", [0, 20 * 60_000 - 1])
+def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, hive, relaunch, age):
+    from scripts.swarm import idle
+
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    runtime.profile = "anton"
+    tick("sw", store, ledger, runtime, LAUNCH)
+    agent = store.agents("sw")[0]
+    monkeypatch.setattr("scripts.swarm.tick.reports.host", lambda observed: hive if observed.name == agent.name else "")
+    joined(ledger, runtime, LAUNCH + 1)
+    launch_check.begin(store, "sw", agent, LAUNCH, relaunch=relaunch)
+    runtime.statuses[agent.name] = "idle"
+    now = LAUNCH + idle.STALE_MS + launch_check.DEADLINE_MS
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, now - age)
+
+    actions = tick("sw", store, ledger, runtime, now)
+
+    assert agent.name not in runtime.killed
+    assert len(runtime.spawned) == 1
+    field = "hive_join" if hive else "profile"
+    assert f"{agent.name} failed its launch check on {field}; reported only while working" in actions
+    assert store.agents("sw")[0].name == agent.name
+    assert ledger.rows["t1"]["claimed_by"] == agent.name
+    assert launch_check.pending(store, "sw") == {}
+    assert not launch_check.relaunched(store, "sw", "t1")
+    report = launch_check.report(store, "sw", "t1")
+    assert report["state"] == "failed"
+    assert report["held"] is True
+    expected = (
+        {"hive_join": {"expected": "session join report", "actual": "missing"}}
+        if hive
+        else {"profile": {"expected": "engineer", "actual": "anton"}}
+    )
+    assert report["misses"] == expected
+    assert report["at"] == now
+    assert report["elapsed_ms"] == now - LAUNCH
+
+
+@pytest.mark.parametrize("hive,relaunch", [("", True), ("remote", True), ("remote", False)])
+@pytest.mark.parametrize("state,age", [(None, 0), ("idle", 0), ("working", 20 * 60_000)])
+def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(
+    store, monkeypatch, scratch, hive, relaunch, state, age
+):
+    from scripts.swarm import idle
+
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    runtime.profile = "anton"
+    tick("sw", store, ledger, runtime, LAUNCH)
+    agent = store.agents("sw")[0]
+    monkeypatch.setattr("scripts.swarm.tick.reports.host", lambda observed: hive if observed.name == agent.name else "")
+    joined(ledger, runtime, LAUNCH + 1)
+    launch_check.begin(store, "sw", agent, LAUNCH, relaunch=relaunch)
+    runtime.statuses[agent.name] = "idle"
+    now = LAUNCH + idle.STALE_MS + launch_check.DEADLINE_MS
+    if state is not None:
+        idle.beat(store.redis, "sw", agent.name, state, now - age)
+
+    actions = tick("sw", store, ledger, runtime, now)
+
+    assert agent.name in runtime.killed
+    field = "hive_join" if hive else "profile"
+    reason = "hive join failed" if hive and not relaunch else f"launch check failed on {field}"
+    assert any(action.startswith(f"retired {agent.name} after its {reason}") for action in actions)
+
+
 def test_an_agent_that_never_joins_is_still_retired_and_relaunched(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
@@ -370,6 +448,7 @@ def test_a_failed_launch_names_every_miss_and_times_from_the_launch(store, monke
     assert launch_check.report(store, "sw", "t1")["elapsed_ms"] == launch_check.DEADLINE_MS
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -383,6 +462,48 @@ def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("delay", [launch_check.DEADLINE_MS, launch_check.DEADLINE_MS + 1, None])
+@pytest.mark.parametrize("master_joined", [False, True])
+def test_launch_judgment_refreshes_a_join_after_the_snapshot(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, delay: int | None, master_joined: bool
+) -> None:
+    import copy
+
+    ledger, runtime = checked(store, monkeypatch)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    name = runtime.spawned[0][1]
+    if master_joined:
+        ledger.members[runtime.masters[0][0]] = {"joined_at": LAUNCH + 1}
+    read = ledger.state
+    observations = []
+
+    def snapshot(slug: str) -> dict:
+        assert slug == "sw"
+        doc = copy.deepcopy(read(slug))
+        observations.append(doc)
+        return doc
+
+    bindings = runtime.bindings
+
+    def joining(agents: list[AgentRecord]) -> dict:
+        if delay is not None:
+            joined(ledger, runtime, LAUNCH + delay)
+        return bindings(agents)
+
+    monkeypatch.setattr(ledger, "state", snapshot)
+    monkeypatch.setattr(runtime, "bindings", joining)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS + 2)
+    report = launch_check.report(store, "sw", "t1")
+    if delay == launch_check.DEADLINE_MS:
+        assert f"{name} passed its launch check in {delay // 1000} seconds" in actions
+        assert report["misses"] == {}
+        assert len(observations) >= 2
+    else:
+        assert report["misses"].keys() == ({"joined"} if delay is None else {"late"})
+    assert name not in launch_check.pending(store, "sw")
+
+
+@pytest.mark.feature("swarm-launch-check")
 def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, scratch):
     homes = scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
@@ -398,7 +519,7 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, sc
     assert (failed["at"], failed["elapsed_ms"], failed["held"]) == (LAUNCH + 60_000, 60_000, False)
     assert runtime.tasks[1]["launch_assignment"]["profile"] == "engineer"
     (finding,) = launch_check.findings(store, "sw")
-    assert finding.id == f"launch-check/{first}/profile"
+    assert (finding.subject.split("/")[0], finding.evidence[0]) == ("profile", f"agents {first}")
     second = runtime.spawned[1][1]
     assert runtime.spawned[1][2] == "t1"
     joined(ledger, runtime, LAUNCH + launch_check.DEADLINE_MS + 1)
@@ -407,9 +528,10 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, sc
     assert f"{second} failed its launch check on profile; its one relaunch is spent" in actions
     assert second not in runtime.killed
     assert len(runtime.spawned) == 2
-    assert [f.id for f in launch_check.findings(store, "sw")] == [f"launch-check/{second}/profile"]
+    assert [f.evidence[0] for f in launch_check.findings(store, "sw")] == [f"agents {second}"]
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     store.update("sw", state="running")
@@ -457,10 +579,7 @@ def test_master_notification_names_every_miss(store, monkeypatch, tmp_path):
         "The master failed its launch check within a minute on joining the ledger and holding its seat, "
         "its role on the package base role. It is being retired and relaunched once."
     ]
-    assert [f.id for f in launch_check.findings(store, "sw")] == [
-        f"launch-check/{first}/joined",
-        f"launch-check/{first}/base",
-    ]
+    assert [f.subject.split("/")[0] for f in launch_check.findings(store, "sw")] == ["joined", "base"]
     assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "base"]
 
 
@@ -477,9 +596,7 @@ def test_a_wrong_base_retires_and_relaunches_the_launch(store, monkeypatch, tmp_
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
     assert any(a.startswith(f"retired {first} after its launch check failed on base") for a in actions)
     assert first in runtime.killed
-    assert [f.id for f in launch_check.findings(store, "sw") if f.subject.startswith(first)] == [
-        f"launch-check/{first}/base"
-    ]
+    assert [f.subject.split("/")[0] for f in launch_check.findings(store, "sw") if first in f.evidence[0]] == ["base"]
     assert list(launch_check.report(store, "sw", "t1")["misses"]) == ["base"]
     assert launch_check.relaunched(store, "sw", "t1") is True
 
@@ -708,9 +825,10 @@ def test_captured_missing_process_cases_have_no_unsupported_configuration_findin
         found = misses(store, agent, facts, doc, declared=expected["overlay"]["expected"])
         launch_check.record(store, "sw", agent, found, case["at"], case["elapsed_ms"])
     findings = launch_check.findings(store, "sw")
-    after = sum(finding.id.rsplit("/", 1)[-1] in configuration for finding in findings)
-    observations = sum(finding.id.endswith("/observation") for finding in findings)
-    joins = sum(finding.id.endswith("/joined") for finding in findings)
+    named = [(f.subject.split("/")[0], len(f.evidence[0].split(", "))) for f in findings]
+    after = sum(field in configuration for field, _ in named)
+    observations = sum(count for field, count in named if field == "observation")
+    joins = sum(count for field, count in named if field == "joined")
     print(
         f"captured cases=3 unsupported configuration before={before} after={after} unavailable={observations} joined={joins}"
     )
@@ -807,12 +925,14 @@ def test_findings_carry_the_field_evidence_and_threshold(store, launched):
 
     agent, _, _ = launched
     launch_check.record(store, "sw", agent, {"name": {"expected": "a", "actual": "b"}}, LAUNCH, 0)
+    (finding,) = launch_check.findings(store, "sw")
+    assert finding.subject.startswith("name/")
     assert launch_check.findings(store, "sw") == [
         Finding(
             "launch check",
-            f"{agent.name}/name",
-            f"{agent.name} failed its launch check on name",
-            ("expected a; observed b",),
+            finding.subject,
+            f"{agent.name} failed the launch check on name",
+            (f"agents {agent.name}", "expected a; observed b"),
             "a launch must pass within sixty seconds",
             1,
         )
@@ -828,10 +948,10 @@ def test_only_enforced_misses_raise_findings(store, launched, monkeypatch, repor
         "name": {"expected": "a", "actual": "b"},
     }
     launch_check.record(store, "sw", agent, found, LAUNCH, 0)
-    expected = [f"launch-check/{agent.name}/name"]
+    expected = ["name"]
     if not report_only:
-        expected.insert(0, f"launch-check/{agent.name}/overlay")
-    assert [f.id for f in launch_check.findings(store, "sw")] == expected
+        expected.insert(0, "overlay")
+    assert [f.subject.split("/")[0] for f in launch_check.findings(store, "sw")] == expected
     assert launch_check.report(store, "sw", "t1")["misses"] == found
 
 

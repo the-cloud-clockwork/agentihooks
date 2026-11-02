@@ -77,6 +77,7 @@ from the live thread without a typed wake.
 | Execution `degraded` | The pump hit a protocol or Redis failure. It reconnects to the recorded endpoint, resumes the thread and recovers its open receipts; items stay pending until accepted. |
 | Items pending on a connected execution | Open the viewer with `agentihooks swarm <id> terminal <execution-id>` and check the thread for an open approval or a stuck turn. |
 | A legacy pane got no wake | The pane was busy, held typed text or was inside the quiet window; the wake retries per `AGENTIHOOKS_INBOX_RETRY_WINDOW_S`, then climbs to the master. |
+| A legacy pane on another hive got no wake | The tick reads that agent's hook heartbeat and orders its hive to type the wake; see [Inbox wakes for Codex agents on another hive](../pillars/swarm.md#inbox-wakes-for-codex-agents-on-another-hive). |
 
 ## Roll back
 
@@ -101,8 +102,11 @@ back to pending, releases no live server's quota slot and leaves `dev` alone.
    runs out, the command exits 1, the execution stays fenced from new inbox
    turns, and you run the stand-down again. A delivery receipt still `submitting`
    or `unknown` may have reached the thread. The pump's recovery pass turns
-   `submitting` into `unknown`; nothing resolves `unknown` automatically, so open
-   the thread with `agentihooks swarm <id> terminal <execution-id>` and check
+   `submitting` into `unknown`; a pump settles each `unknown` receipt against
+   the thread whenever it starts, at boot or on a reconnect, accepting one the
+   thread carries and rejecting the rest so they are submitted again. A stood
+   down execution starts no pump, so open the thread with
+   `agentihooks swarm <id> terminal <execution-id>` and check
    whether the item arrived before moving it. Transfer only items with no
    receipt, a `rejected` one, or an `unknown` one the thread shows never arrived,
    through the seat and task rules:

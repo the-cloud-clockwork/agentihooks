@@ -11,7 +11,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from scripts import ci_select
+from scripts import ci_select, locked_tests
+from tests.shard_budget import step_seconds
 
 pytestmark = pytest.mark.unit
 
@@ -202,15 +203,15 @@ def test_a_missing_record_preserves_import_selection(repo, monkeypatch, tmp_path
     assert "files_1=tests/test_sample.py\n" in output
 
 
-@pytest.mark.parametrize("path", ["scripts/config.json", "docs/notes.md", "other.py"])
-def test_main_does_not_fetch_coverage_for_changes_outside_python_sources(repo, monkeypatch, tmp_path, path):
+@pytest.mark.parametrize("path", ["docs/notes.md", "README.md"])
+def test_main_does_not_fetch_coverage_for_docs_only_changes(repo, monkeypatch, tmp_path, path):
     write(repo, {path: "{}"})
     git(repo, "add", path)
     git(repo, "commit", "-m", "change")
     monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
 
     def record(*_):
-        pytest.fail("Coverage lookup is unnecessary for a change outside Python sources")
+        pytest.fail("Coverage lookup is unnecessary for a docs only change")
 
     monkeypatch.setattr(ci_select, "find_record", record)
     run_main(repo, monkeypatch, tmp_path, "pull_request")
@@ -259,6 +260,12 @@ def test_a_changed_file_outside_python_selects_the_tests_that_name_it(repo):
     assert decide(repo, ["scripts/static/ledger.js"]) == ("selected", [["tests/test_page.py"]])
 
 
+@pytest.mark.parametrize("source", ["scripts/static/page.css", "outside/page.py"])
+def test_other_sources_do_not_select_python_tests_by_stem(repo, source):
+    write(repo, {source: "x\n"})
+    assert ci_select.selected_tests(repo, [source], False) == set()
+
+
 def test_a_changed_file_is_also_selected_by_its_full_path(repo):
     write(repo, {"tests/test_docs.py": "DOC = 'docs/guide/index.md'\n"})
     assert decide(repo, ["docs/guide/index.md"]) == ("selected", [["tests/test_docs.py"]])
@@ -285,6 +292,12 @@ def test_workflow_and_runner_changes_select_routing_contracts(repo, changed):
     scope, legs = decide(repo, [changed])
     assert scope == "selected"
     assert set().union(*map(set, legs)) == contracts
+
+
+@pytest.mark.parametrize("changed", [*locked_tests.LOCKED, locked_tests.MANIFEST.as_posix()])
+def test_locked_test_and_manifest_changes_select_the_manifest_agreement_test(repo, changed):
+    write(repo, {"tests/test_locked_tests.py": "import os\n", changed: "VALUE = 1\n"})
+    assert "tests/test_locked_tests.py" in ci_select.selected_tests(repo, [changed], False)
 
 
 def test_a_python_source_is_not_selected_by_its_bare_file_name(repo):
@@ -415,10 +428,23 @@ def test_a_selection_at_its_leg_budget_still_runs_selected(heavy):
     assert len(legs) == 3
 
 
-def test_a_selection_over_its_leg_budget_runs_the_full_suite(heavy):
+def test_a_selection_over_its_leg_budget_stays_selected_within_its_leg_limit(heavy):
     budget = ci_select.LEG_SECONDS
     durations = seconds(test_sample=1.0, test_heavy1=budget, test_heavy2=budget, test_heavy3=budget - 0.5)
-    assert decide(heavy, ["hooks/sample.py"], durations) == ("full", [])
+    scope, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert scope == "selected"
+    assert len(legs) == 3
+    assert sorted(file for leg in legs for file in leg) == [
+        "tests/test_heavy1.py",
+        "tests/test_heavy2.py",
+        "tests/test_heavy3.py",
+        "tests/test_sample.py",
+    ]
+
+
+def test_a_harness_change_runs_the_full_suite_however_large_the_selection(heavy):
+    durations = seconds(test_sample=1.0, **{f"test_heavy{index}": 10 * ci_select.LEG_SECONDS for index in range(1, 4)})
+    assert decide(heavy, ["hooks/sample.py", "pyproject.toml"], durations) == ("full", [])
 
 
 @pytest.mark.parametrize(("total", "count"), [(1.0, 1), (180.0, 1), (180.5, 2), (360.0, 2), (360.5, 3)])
@@ -450,6 +476,176 @@ def test_the_legs_balance_on_stored_time(heavy):
         "selected",
         [["tests/test_heavy1.py", "tests/test_sample.py"], ["tests/test_heavy2.py", "tests/test_heavy3.py"]],
     )
+
+
+def test_a_file_over_its_leg_share_splits_its_tests_across_legs(heavy):
+    write(
+        heavy,
+        {
+            "tests/test_heavy1.py": "from hooks import sample\ndef test_a(): pass\ndef test_b(): pass\nclass TestC:\n    def test_d(self): pass\n"
+        },
+    )
+    durations = {
+        "tests/test_heavy1.py::test_a[one]": 150.0,
+        "tests/test_heavy1.py::test_a[two]": 50.0,
+        "tests/test_heavy1.py::test_b": 180.0,
+        "tests/test_heavy1.py::TestC::test_d": 170.0,
+        **seconds(test_sample=10.0, test_heavy2=10.0, test_heavy3=10.0),
+    }
+    _, legs = decide(heavy, ["hooks/sample.py"], durations, limit=4)
+    assert sorted(unit for leg in legs for unit in leg) == [
+        "tests/test_heavy1.py::TestC",
+        "tests/test_heavy1.py::test_a",
+        "tests/test_heavy1.py::test_b",
+        "tests/test_heavy2.py",
+        "tests/test_heavy3.py",
+        "tests/test_sample.py",
+    ]
+    assert len(legs) == 4
+    assert all(sum(unit.startswith("tests/test_heavy1.py") for unit in leg) == 1 for leg in legs[:3])
+
+
+def test_a_file_over_its_leg_share_with_an_imported_test_stays_whole(heavy):
+    write(
+        heavy,
+        {
+            "tests/test_heavy1.py": "from hooks import sample\nfrom tests.shared import test_made\ndef test_a(): pass\ndef test_b(): pass\n"
+        },
+    )
+    durations = {f"tests/test_heavy1.py::{name}": 150.0 for name in ("test_a", "test_b", "test_made")}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert ["tests/test_heavy1.py"] in legs
+
+
+def test_a_split_file_keeps_its_new_tests(heavy):
+    write(
+        heavy,
+        {
+            "tests/test_heavy1.py": "from hooks import sample\ndef test_a(): pass\ndef test_b(): pass\ndef test_new(): pass\n"
+        },
+    )
+    durations = {"tests/test_heavy1.py::test_a": 200.0, "tests/test_heavy1.py::test_b": 200.0}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    units = {unit for leg in legs for unit in leg}
+    assert "tests/test_heavy1.py::test_new" in units
+    assert "tests/test_heavy1.py" not in units
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class TestNew:\n    def test_c(self): pass\n",
+        "@pytest.fixture\ndef test_value(): return 1\n",
+        "from tests.shared import test_shared\n",
+        "test_made = pytest.mark.unit(lambda: None)\n",
+        "if True:\n    def test_nested(): pass\n",
+        "from tests.shared import *\n",
+        "import unittest\nclass Relay(unittest.TestCase):\n    def test_c(self): pass\n",
+        "class TestInit:\n    def __init__(self): pass\n",
+        "pytestmark = pytest.mark.xdist_group('shared')\n",
+        "from tests.shared import TestShared\n",
+    ],
+)
+def test_a_file_over_its_leg_share_with_an_unstored_test_pytest_may_skip_stays_whole(heavy, source):
+    write(
+        heavy,
+        {
+            "tests/test_heavy1.py": "import pytest\nfrom hooks import sample\ndef test_a(): pass\ndef test_b(): pass\n"
+            + source
+        },
+    )
+    durations = {"tests/test_heavy1.py::test_a": 200.0, "tests/test_heavy1.py::test_b": 200.0}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert ["tests/test_heavy1.py"] in legs
+
+
+def test_a_split_file_ignores_stored_tests_its_source_no_longer_has(heavy):
+    write(heavy, {"tests/test_heavy1.py": "from hooks import sample\ndef test_a(): pass\ndef test_b(): pass\n"})
+    durations = {f"tests/test_heavy1.py::{name}": 200.0 for name in ("test_a", "test_b", "test_gone")}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    units = {unit for leg in legs for unit in leg}
+    assert {"tests/test_heavy1.py::test_a", "tests/test_heavy1.py::test_b"} <= units
+    assert not any("test_gone" in unit or unit == "tests/test_heavy1.py" for unit in units)
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["class TestInit:\n    def __init__(self): pass\n", "class TestInit(metaclass=type):\n"],
+)
+def test_a_file_over_its_leg_share_with_a_stored_class_pytest_may_refuse_stays_whole(heavy, header):
+    write(
+        heavy,
+        {
+            "tests/test_heavy1.py": "from hooks import sample\ndef test_a(): pass\n"
+            + header
+            + "    def test_b(self): pass\n"
+        },
+    )
+    durations = {"tests/test_heavy1.py::test_a": 200.0, "tests/test_heavy1.py::TestInit::test_b": 200.0}
+    _, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert ["tests/test_heavy1.py"] in legs
+
+
+def test_a_split_file_sums_each_top_level_test_over_its_nodes(tmp_path):
+    write(
+        tmp_path,
+        {
+            "tests/test_heavy1.py": "import pytest\ndef test_a(): pass\n@pytest.mark.unit\ndef test_b(): pass\n"
+            "class TestC:\n    flag = 1\n    def test_d(self): pass\n    class TestE:\n        def test_f(self): pass\n"
+        },
+    )
+    durations = {
+        "tests/test_heavy1.py::test_a[one]": 3.0,
+        "tests/test_heavy1.py::test_a[two]": 4.0,
+        "tests/test_heavy1.py::TestC::test_d": 5.0,
+        "tests/test_heavy1.py::TestC::TestE::test_f": 6.0,
+        "tests/test_other.py::test_a": 9.0,
+    }
+    assert ci_select.file_units(tmp_path, "tests/test_heavy1.py", durations) == {
+        "tests/test_heavy1.py::test_a": 7.0,
+        "tests/test_heavy1.py::test_b": 0.0,
+        "tests/test_heavy1.py::TestC": 11.0,
+    }
+
+
+def test_a_file_holding_all_the_selected_time_stays_whole_on_one_leg(tmp_path):
+    write(tmp_path, {"tests/test_heavy1.py": "def test_a(): pass\ndef test_b(): pass\n"})
+    durations = {"tests/test_heavy1.py::test_a": 100.0, "tests/test_heavy1.py::test_b": 100.0}
+    assert ci_select.legs_for(tmp_path, {"tests/test_heavy1.py"}, durations, 1) == [["tests/test_heavy1.py"]]
+
+
+def test_an_unmeasured_file_weighs_nothing_on_its_leg(tmp_path):
+    write(tmp_path, {f"tests/test_{name}.py": "def test_case(): pass\n" for name in ("a", "b", "x", "u")})
+    durations = seconds(test_a=100.0, test_b=99.0, test_x=0.5)
+    tests = {f"tests/test_{name}.py" for name in ("a", "b", "x", "u")}
+    assert ci_select.legs_for(tmp_path, tests, durations, 4) == [
+        ["tests/test_a.py"],
+        ["tests/test_b.py", "tests/test_u.py", "tests/test_x.py"],
+    ]
+
+
+def test_the_split_units_of_one_file_share_its_collection_on_a_leg(tmp_path):
+    padding = "#" + "x" * 2_000_000 + "\n"
+    write(
+        tmp_path,
+        {
+            "tests/test_heavy1.py": padding + "def test_a(): pass\ndef test_b(): pass\n",
+            "tests/test_heavy2.py": padding + "def test_case(): pass\n",
+            "tests/test_heavy3.py": padding + "def test_case(): pass\n",
+        },
+    )
+    durations = {
+        "tests/test_heavy1.py::test_a": 120.0,
+        "tests/test_heavy1.py::test_b": 40.0,
+        "tests/test_heavy2.py::TestCase::test_one": 30.0,
+        "tests/test_heavy2.py::TestCase::test_two": 30.0,
+        **seconds(test_heavy3=50.0),
+    }
+    tests = {"tests/test_heavy1.py", "tests/test_heavy2.py", "tests/test_heavy3.py"}
+    assert ci_select.legs_for(tmp_path, tests, durations, 4) == [
+        ["tests/test_heavy1.py::test_a", "tests/test_heavy1.py::test_b"],
+        ["tests/test_heavy2.py", "tests/test_heavy3.py"],
+    ]
 
 
 def test_the_live_codex_file_runs_on_the_first_leg(repo):
@@ -695,6 +891,22 @@ def test_the_workflow_selects_nine_legs_for_a_large_change(repo):
     assert len(legs) == 9
 
 
+def test_the_workflow_caps_a_selection_at_the_unit_shard_count(repo):
+    write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 31)})
+    durations = seconds(test_sample=15.0, **{f"test_tick{index}": ci_select.LEG_SECONDS for index in range(1, 31)})
+    scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
+    assert scope == "selected"
+    assert len(legs) == workflow_legs() == len(jobs()["unit"]["strategy"]["matrix"]["shard"])
+    assert sorted(file for leg in legs for file in leg) == sorted(
+        ["tests/test_sample.py", *(f"tests/test_tick{index}.py" for index in range(1, 31))]
+    )
+
+
+def test_a_selected_leg_has_the_time_of_a_full_suite_shard():
+    assert step_seconds("unit-selected") >= step_seconds("unit")
+    assert jobs()["unit-selected"]["timeout-minutes"] >= jobs()["unit"]["timeout-minutes"]
+
+
 def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, capsys):
     write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 10)})
     durations = seconds(test_sample=15.0, **{f"test_tick{index}": 160.0 for index in range(1, 10)})
@@ -721,3 +933,60 @@ def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, cap
         given = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path), "LEG": str(leg)}
         subprocess.run(["bash", "-e", "-c", read["run"]], check=True, env=given | {"GITHUB_ENV": str(environment)})
         assert environment.read_text() == f"FILES={expected[f'files_{leg}']}\n"
+
+
+def test_a_recorded_read_selects_the_tests_that_read_the_changed_file_as_data(repo):
+    write(
+        repo,
+        {
+            ".github/workflows/deploy.yml": "name: deploy\n",
+            "hooks/scanned.py": "VALUE = 3\n",
+            "tests/test_workflows.py": "import os\n",
+            "tests/test_boundary.py": "import os\n",
+        },
+    )
+    manifest = {
+        "units": ["hooks/sample.py::<module>"],
+        "tests": {
+            "tests/test_workflows.py::test_scan": {
+                "units": [],
+                "files": [".test_durations", ".github/workflows/deploy.yml"],
+            },
+            "tests/test_boundary.py::test_boundary": {"units": [], "files": [".test_durations", "hooks/scanned.py"]},
+            "tests/test_other.py::test_other": {"units": [], "files": [".test_durations"]},
+        },
+    }
+    for changed, expected in (
+        ([".github/workflows/deploy.yml"], {"tests/test_workflows.py"}),
+        (["hooks/scanned.py"], {"tests/test_boundary.py"}),
+        ([".test_durations"], set()),
+    ):
+        assert ci_select.selected_tests(repo, changed, False, manifest) == expected
+
+
+def test_a_recorded_method_unit_selects_its_test_by_the_file_before_the_first_separator():
+    manifest = {
+        "units": ["hooks/sample.py::Box::size"],
+        "tests": {"tests/test_box.py::test_size": {"units": [0]}, "tests/test_other.py::test_other": {"units": []}},
+    }
+    assert ci_select.recorded_tests(manifest, ["hooks/sample.py"]) == {"tests/test_box.py"}
+
+
+def test_main_reads_the_recorded_reads_for_a_change_without_python_source(repo, monkeypatch, tmp_path):
+    write(repo, {"tests/test_workflows.py": "import os\n", "deploy/values.yaml": "a: 1\n"})
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "baseline")
+    write(repo, {"deploy/values.yaml": "a: 2\n"})
+    git(repo, "commit", "-am", "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+    manifest = {
+        "units": [],
+        "tests": {
+            "tests/test_workflows.py::test_scan": {"units": [], "files": ["deploy/values.yaml"]},
+            "tests/test_other.py::test_other": {"units": [], "files": []},
+        },
+    }
+    monkeypatch.setattr(ci_select, "find_record", lambda *_: ({"id": 7}, manifest))
+    output = run_main(repo, monkeypatch, tmp_path, "pull_request")
+    assert "scope=selected" in output
+    assert "files_1=tests/test_workflows.py" in output

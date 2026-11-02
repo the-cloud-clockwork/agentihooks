@@ -68,6 +68,13 @@ def test_an_unseated_session_stays_refused_even_with_an_open_window(unseated):
     assert not master_coding.is_open(SID)
 
 
+def test_the_typed_phrases_match_in_any_case(master):
+    assert master_coding.observe(SID, "Allow-Master-Coding", typed=True, now=1000) == "open"
+    assert master_coding.is_open(SID)
+    assert master_coding.observe(SID, "DENY-master-coding", typed=True) == "closed"
+    assert not master_coding.is_open(SID)
+
+
 def test_only_the_typed_phrase_in_the_master_pane_opens_the_window(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=False) == ""
     assert not master_coding.is_open(SID)
@@ -346,3 +353,25 @@ def test_the_shell_guard_blocks_a_master_ruleset_call(master, monkeypatch):
     monkeypatch.setattr("hooks.context.branch_guard.check_commit_on_main", Mock())
     with pytest.raises(hook_manager.BlockAction, match="never changes rulesets or branch protection"):
         hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": {"command": "gh ruleset list"}})
+
+
+def test_the_shell_guard_blocks_a_sustained_blocker(master, monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import blockers
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: redis)
+    store = RedisStore(redis)
+    store.create(SwarmConfig("rig", "/repo", max_eng=1, max_ci=1))
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    seconds, microseconds = store.redis.time()
+    now_ms = seconds * 1000 + microseconds // 1000
+    blockers.record(store, "rig", "cat", "boom", now_ms - blockers.SUSTAINED_MS)
+    blockers.record(store, "rig", "cat", "boom", now_ms)
+    monkeypatch.setattr("hooks.context.local_test_guard.check_local_tests", Mock())
+    monkeypatch.setattr("hooks.context.swarm_wait_nudge.check_github_watch", Mock())
+    with pytest.raises(hook_manager.BlockAction) as excinfo:
+        hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "session_id": SID})
+    assert "cat" in str(excinfo.value)

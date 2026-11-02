@@ -197,6 +197,7 @@ def graph_errors(head: dict, stages: dict[str, dict]) -> list[str]:
     errors = []
     if isinstance(head["head"], str) and head["head"] not in stages:
         errors.append(f"workflow.head: {head['head']} is not a stage")
+    errors.extend(unreachable_errors(head["head"], stages))
     match = STAGE_PASS.match(head["exit"]) if isinstance(head["exit"], str) else None
     if match and match.group(1) not in stages:
         errors.append(f"workflow.exit: {match.group(1)} is not a stage")
@@ -212,6 +213,25 @@ def graph_errors(head: dict, stages: dict[str, dict]) -> list[str]:
             if outcome in OUTCOMES and target not in (None, EXIT) and not (isinstance(target, str) and target in stages)
         )
     return errors
+
+
+def unreachable_errors(head: Any, stages: dict[str, dict]) -> list[str]:
+    if not isinstance(head, str) or head not in stages:
+        return []
+    seen = reachable(head, stages)
+    return [f"stages.{stage_id}: not reachable from the head {head}" for stage_id in stages if stage_id not in seen]
+
+
+def reachable(head: str, stages: dict[str, dict]) -> set[str]:
+    seen = {head}
+    for _ in stages:
+        seen |= {
+            target
+            for stage_id in seen
+            for target in stages[stage_id]["next"].values()
+            if isinstance(target, str) and target in stages
+        }
+    return seen
 
 
 def build_stage(stage_id: str, fields: dict) -> Stage:

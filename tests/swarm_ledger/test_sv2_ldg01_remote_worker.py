@@ -279,10 +279,38 @@ def test_a_launch_token_server_error_is_not_an_auth_failure(remote):
     with (
         patch.dict(os.environ, {"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "hive-credential"}),
         patch("scripts.swarm_ledger.api.client.ResourceClient", client),
+        patch.object(ledger.time, "sleep"),
         pytest.raises(urllib.error.HTTPError),
     ):
         ledger.launch_token(SLUG, WORKER)
     assert ledger.ledger_remote_auth_failures_total() == before
+    assert client.return_value.request.call_count == ledger.REMOTE_READ_ATTEMPTS
+
+
+@pytest.mark.parametrize("stall", [TimeoutError("timed out"), urllib.error.URLError(TimeoutError("timed out"))])
+def test_a_launch_token_fetch_retries_a_transient_stall(remote, stall):
+    client = Mock()
+    client.return_value.request.side_effect = [stall, {"data": {"token": "hive.issued"}}]
+    with (
+        patch.dict(os.environ, {"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "hive-credential"}),
+        patch("scripts.swarm_ledger.api.client.ResourceClient", client),
+        patch.object(ledger.time, "sleep"),
+    ):
+        assert ledger.launch_token(SLUG, WORKER) == "hive.issued"
+    assert client.return_value.request.call_count == 2
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_a_refused_hive_credential_is_asked_once(remote, code):
+    client = Mock()
+    client.return_value.request.side_effect = refusal(code, "Missing or wrong hive credential")[0]
+    with (
+        patch.dict(os.environ, {"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "hive-credential"}),
+        patch("scripts.swarm_ledger.api.client.ResourceClient", client),
+        pytest.raises(ledger.Unauthenticated),
+    ):
+        ledger.launch_token(SLUG, WORKER)
+    assert client.return_value.request.call_count == 1
 
 
 def test_unauthenticated_refusals_count_each_refusal(remote):

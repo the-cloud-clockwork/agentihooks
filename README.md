@@ -105,7 +105,7 @@ include:
 |---|---|
 | Secrets | Blocks Write, Edit and file redirects that contain a secret; scans prompts and inline commands |
 | Credential files | Blocks reads of `.env` files, shell rc files and credential stores, and names a leak free alternative |
-| Branch and PR guard | Agents never open or merge pull requests into `main`, `master` or `v1` |
+| Branch and PR guard | A pull request into `main`, `master` or `v1` needs the operator's PR phrase; agents never merge into them |
 | Production lockdown | Only CI creates releases and merges promotion pull requests |
 | Retry breaker | Directs research after 5 identical failures, blocks at 10 |
 | Kubernetes mutation guard | Blocks live behavior changes such as `kubectl edit`, `patch` and `set`, and Helm upgrades outside CI |

@@ -1,10 +1,13 @@
 """The fleet dashboard sample, read each tick from the sources this tick can reach, exported as panel series."""
 
 import json
+import time
 from collections.abc import Callable
 from pathlib import Path
 
 from hooks.context import project_cache
+from scripts.events import state
+from scripts.events.bus import StateConflict
 from scripts.swarm import metrics_outbox
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import fleet_dashboard, quota
@@ -82,27 +85,44 @@ def _quota(store: RedisStore, now_ms: int) -> list[dict]:
     return found
 
 
+def _checkpoint_rows(store, slug, active, found=None):
+    saved = state.for_store(store, CHECKPOINTS)
+    for _ in range(16):
+        now_ms = int(time.time() * 1000)
+        entry = saved.get(slug)
+        rows = json.loads(entry.value) if entry is not None else {}
+        rows = {key: row for key, row in rows.items() if row["expires_at_ms"] > now_ms}
+        for execution_id in active:
+            if execution_id in rows:
+                rows[execution_id]["expires_at_ms"] = now_ms + CHECKPOINT_TTL_MS
+        if found is not None:
+            rows[found["execution_id"]] = {"checkpoint": found, "expires_at_ms": now_ms + CHECKPOINT_TTL_MS}
+        value = json.dumps(rows).encode()
+        try:
+            if entry is None:
+                saved.create(slug, value)
+            else:
+                saved.update(slug, value, entry.revision)
+        except StateConflict:
+            continue
+        return {key: row["checkpoint"] for key, row in rows.items()}
+    raise StateConflict("metrics checkpoints remained busy")
+
+
 def record_checkpoint(store: RedisStore, slug: str, execution_id: str, seat: str, taken_at_ms: int) -> None:
     found = {"execution_id": execution_id, "seat": seat, "taken_at_ms": taken_at_ms}
-    store.redis.set(store.key(slug, CHECKPOINTS, execution_id), json.dumps(found), px=CHECKPOINT_TTL_MS)
+    _checkpoint_rows(store, slug, (), found)
 
 
 def _checkpoints(store: RedisStore, slug: str) -> list[dict]:
-    """An execution with no checkpoint yet ages from its start."""
     agents = sorted(store.execution_occupants(slug).items())
-    if not agents:
-        return []
-    keys = [store.key(slug, CHECKPOINTS, agent.execution_id) for _, agent in agents]
-    taken = store.redis.mget(keys)
-    with store.redis.pipeline() as pipe:
-        for key in keys:
-            pipe.pexpire(key, CHECKPOINT_TTL_MS)
-        pipe.execute()
+    taken = _checkpoint_rows(store, slug, [agent.execution_id for _, agent in agents])
     return [
-        json.loads(taken[index])
-        if taken[index]
-        else {"execution_id": agent.execution_id, "seat": seat, "taken_at_ms": agent.started_at}
-        for index, (seat, agent) in enumerate(agents)
+        taken.get(
+            agent.execution_id,
+            {"execution_id": agent.execution_id, "seat": seat, "taken_at_ms": agent.started_at},
+        )
+        for seat, agent in agents
     ]
 
 

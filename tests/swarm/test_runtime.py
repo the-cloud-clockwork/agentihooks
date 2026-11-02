@@ -862,6 +862,7 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
             monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{key}", raising=False)
     for key, value in (env or {}).items():
         monkeypatch.setenv(key, value)
+    task = {**task, **({"seat": "master-2@sw"} if lane == "master" else {})}
     seen = {}
 
     def run(argv, **kwargs):
@@ -970,6 +971,26 @@ def test_spawn_passes_the_pinned_claim_to_the_shared_launcher(tmp_path):
     assert json.loads(args[args.index("--claim-fence") + 1]) == fence
 
 
+@pytest.mark.parametrize(
+    ("task", "flag"),
+    [({"launch_until_ms": 1793300000000}, ["1793300000000"]), ({"launch_until_ms": 0}, ["0"]), ({}, [])],
+)
+def test_spawn_passes_the_order_launch_end_to_the_shared_launcher(tmp_path, task, flag):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="swarm-buildout", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    runtime.spawn(config, "eng", "swarm-buildout-eng-4", {"id": "t4", "title": "x", **task})
+    args = seen["argv"]
+    assert (args[args.index("--launch-until") + 1 :][:1] if "--launch-until" in args else []) == flag
+
+
 SEAT_TASKS = {
     "eng": {"id": "t1", "title": "x"},
     "ci": {"id": "t1", "title": "x"},
@@ -1055,7 +1076,13 @@ def test_a_master_handoff_successor_launches_at_high_effort_whatever_its_saved_l
         effort_max=bounds[1],
     )
     launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "medium"}
-    task = {"id": "master", "peer": "", "handoff": "# Handoff", "handoff_envelope": {"launch": launch}}
+    task = {
+        "id": "master",
+        "peer": "",
+        "seat": "master-2@sw",
+        "handoff": "# Handoff",
+        "handoff_envelope": {"launch": launch},
+    }
     runtime.spawn(config, "master", "master@a1b2c3-0002", task)
     assert _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
     assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
@@ -1069,7 +1096,15 @@ def test_a_resumed_master_launches_at_high_effort_whatever_its_previous_agent_or
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
     config.effort_min, config.effort_max = bounds
-    master = replace(agent, name="master@a1b2c3-0001", lane="master", task="master", profile="master", effort="medium")
+    master = replace(
+        agent,
+        name="master@a1b2c3-0001",
+        lane="master",
+        task="master",
+        profile="master",
+        seat="master-2@sw",
+        effort="medium",
+    )
     runtime.resume(config, master, "you were restored")
     assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "opus", "--effort", "high"]
     assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed

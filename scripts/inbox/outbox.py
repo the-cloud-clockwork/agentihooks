@@ -160,6 +160,12 @@ def locked(blocking=True):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+def holds(item: str) -> bool:
+    if not path().exists():
+        return False
+    return any((entry := parse(line)) and entry["item"] == item for line in path().read_text().splitlines())
+
+
 def append(entry: dict) -> None:
     line = json.dumps(entry) + "\n"
     limit, warn = bounds()

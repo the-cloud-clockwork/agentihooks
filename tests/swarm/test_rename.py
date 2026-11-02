@@ -24,7 +24,7 @@ def store():
 def test_old_address_delivers_existing_and_new_mail_to_the_new_name(store):
     inbox = InboxStore(store.redis)
     old = "sw-eng-1"
-    before = inbox.send("operator", old, "before rename")
+    before = inbox.send("sw-master-1", old, "before rename")
     new = store.next_name("sw", "eng")
     store.names.alias(old, new)
     after = inbox.send("operator", old, "after rename")

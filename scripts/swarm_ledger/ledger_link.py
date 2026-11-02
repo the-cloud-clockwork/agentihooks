@@ -9,12 +9,14 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 
 from scripts.swarm_ledger import hosted_probe, ledger_route
 
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
+CLUSTER_SUFFIXES = (".svc", ".svc.cluster.local")
 USER_AGENT = "agentihooks-swarm"
 CREDENTIAL_HEADERS = (
     "X-Controller-Credential",
@@ -81,6 +83,14 @@ def guard(url: str, headers: dict) -> None:
             f"a ledger credential off loopback travels only over https, not to {parts.scheme}://{parts.netloc}: "
             f"serve the ledger with {TLS_CERT_ENV} and {TLS_KEY_ENV} and address it as https"
         )
+
+
+def reachable(url: str, environ: Mapping[str, str] = os.environ) -> bool:
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname
+    if str(host).endswith(CLUSTER_SUFFIXES) and not environ.get("KUBERNETES_SERVICE_HOST"):
+        return False
+    return parts.scheme == "https" or loopback(host)
 
 
 def transport(environ=os.environ) -> dict:

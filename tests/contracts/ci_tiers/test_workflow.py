@@ -32,8 +32,11 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "reuse",
     "coverage-ratchet",
     "coverage-baseline",
+    "dep-manifest",
     "promote",
+    "promotion-ready",
     "refresh-durations",
+    "mutation-stats-seed",
     "count-record",
     "flake-budget",
     "swarm-image",
@@ -99,6 +102,7 @@ def jobs_for(event, base_ref="dev", scope="full"):
                     analysis="A1" if runs else "",
                     shards="[0, 1]",
                     stats_parts="[0, 1]",
+                    sonar="run",
                 ),
             )
             del pending[name]
@@ -107,24 +111,62 @@ def jobs_for(event, base_ref="dev", scope="full"):
     return {name for name, job in completed.items() if job.result == "success"}
 
 
+def _planned_jobs(event: str) -> set[str]:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    additions = {"pull_request": {"type-gate"}, "push": {"feature-suite"}}
+    return additions.get(event, set()) & jobs.keys()
+
+
 @pytest.mark.parametrize(
     "event,expected", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST), ("push", PROMOTION)]
 )
-def test_each_event_runs_only_its_tier_jobs(event, expected):
+def test_each_event_runs_only_its_tier_jobs(event: str, expected: set[str]) -> None:
+    expected = expected | _planned_jobs(event)
     if event == "push" and (ROOT / ".github/workflows/count-record.yml").exists():
         expected = expected - {"count-record"}
-    assert jobs_for(event) == expected
+    if event == "push":
+        assert jobs_for(event) in (expected, expected | {"install-smoke"})
+    else:
+        assert jobs_for(event) == expected
 
 
-def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards():
-    assert jobs_for("pull_request", scope="selected") == SELECTED
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
+def test_planned_jobs_keep_their_event_tiers(event: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    baseline = jobs_for(event)
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    jobs = workflow["jobs"]
+    jobs["type-gate"] = {"if": "github.event_name == 'pull_request'", "runs-on": "ubuntu-latest"}
+    jobs["gate-required"]["needs"].append("type-gate")
+    jobs["feature-suite"] = {"if": "github.event_name == 'push'", "runs-on": "ubuntu-latest"}
+    for job_id in ("promotion-ready", "promote"):
+        jobs[job_id]["needs"].append("feature-suite")
+    path = tmp_path / ".github/workflows/test.yml"
+    path.parent.mkdir(parents=True)
+    path.write_text(yaml.safe_dump(workflow))
+    monkeypatch.setitem(globals(), "ROOT", tmp_path)
+    additions = {"pull_request": {"type-gate"}, "merge_group": set(), "push": {"feature-suite"}}
+    assert jobs_for(event) == baseline | additions[event]
 
 
-def test_main_pull_requests_keep_their_nonmutation_checks():
-    assert jobs_for("pull_request", "main") == PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}
+def test_planned_jobs_are_wired_to_their_required_consumers() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    consumers = {"type-gate": ("gate-required",), "feature-suite": ("promotion-ready", "promote")}
+    for job_id, required in consumers.items():
+        if job_id in jobs:
+            for consumer in required:
+                assert job_id in jobs[consumer]["needs"]
 
 
-def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_promotion_form():
+def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards() -> None:
+    assert jobs_for("pull_request", scope="selected") == SELECTED | _planned_jobs("pull_request")
+
+
+def test_main_pull_requests_keep_their_nonmutation_checks() -> None:
+    expected = PULL_REQUEST | _planned_jobs("pull_request")
+    assert jobs_for("pull_request", "main") == expected - {"mutation-plan", "mutation-stats", "mutation"}
+
+
+def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_promotion_form() -> None:
     from scripts import ci_reuse
 
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
@@ -132,16 +174,25 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
     steps = jobs["gate-required"]["steps"]
-    steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
+    assert "type-gate" in jobs["gate-required"]["needs"]
+    steps[0]["run"] = steps[0]["run"].replace('"docs", "semgrep"', '"semgrep"')
     assert steps in [
-        ci_reuse.selection_diagnostic(
-            forward(
-                finish(
-                    rerun(
-                        ci_reuse.inline_mutation(
-                            ci_reuse.postgres_required(
-                                ci_reuse.gate_steps(
-                                    queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True
+        ci_reuse.typing_required(
+            ci_reuse.test_only_sonar(
+                ci_reuse.selection_diagnostic(
+                    forward(
+                        finish(
+                            rerun(
+                                ci_reuse.inline_mutation(
+                                    ci_reuse.postgres_required(
+                                        ci_reuse.gate_steps(
+                                            queue_tier=True,
+                                            promotion=True,
+                                            **options,
+                                            summary=summary,
+                                            watcher_loss=True,
+                                        )
+                                    )
                                 )
                             )
                         )
@@ -194,9 +245,15 @@ def _concurrency(event, run_id, number=None):
     )
 
 
-def test_dev_pushes_preserve_the_running_promotion_and_replace_only_the_pending_run():
-    first, second = _concurrency("push", 1000), _concurrency("push", 1061)
-    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": False}
+def test_dev_pushes_share_three_promotion_lanes_without_cancelling_a_running_run():
+    expected = {"queue": "single", "cancel-in-progress": False}
+    groups = {run_id: _concurrency("push", run_id) for run_id in (1000, 1061, 1004, 1009)}
+    assert groups == {
+        1000: dict(expected, group="promotion-dev-a"),
+        1061: dict(expected, group="promotion-dev-a"),
+        1004: dict(expected, group="promotion-dev-b"),
+        1009: dict(expected, group="promotion-dev-c"),
+    }
 
 
 @pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])

@@ -35,6 +35,9 @@ class MasterTasks:
     def reopen(self, event: Envelope) -> None:
         return None
 
+    def failed(self, event: Envelope, harness: str, reason: str) -> None:
+        return None
+
 
 def spokes(store, bus, runtime, hive: str, held: dict[str, Spoke]) -> list[Spoke]:
     slugs = store.slugs()

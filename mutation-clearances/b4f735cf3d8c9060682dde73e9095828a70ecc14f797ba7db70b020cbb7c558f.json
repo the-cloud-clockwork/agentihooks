@@ -1,0 +1,6 @@
+{
+  "scripts/ci_frozen.py:scripts.ci_frozen.x_land__mutmut_18:165ba8fa57c9ab41d3224e2a7092558e60952de05aff1c96e46aaba409ae796d": {
+    "reader": "standards-reader",
+    "reason": "Only the ValueError diagnostic payload changes. The identical invalid candidate is rejected before writing the workflow, with the same exception type; no candidate acceptance or integrity condition changes. Exact error wording is not the persistence contract."
+  }
+}

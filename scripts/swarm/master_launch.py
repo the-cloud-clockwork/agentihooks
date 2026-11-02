@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
+from typing import Any
 
 from scripts import agent_choice
 from scripts.handoff import transfers
@@ -20,7 +21,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
-from scripts.swarm.store import MASTER, AgentRecord, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import SUSPECT, placed_record, primed
 from scripts.swarm_v2 import master_fill
@@ -47,7 +48,7 @@ LEAD_STARTING = ("starting", SUSPECT)
 STARTING = (
     "the front door master {name} is {state} and every master seat is held (master seat count {count}), so no "
     "other master starts; "
-    "the tick binds or replaces it, or run master up --replace to retire it first"
+    "raise the count with set masters=N, or run master up --replace to retire it first"
 )
 
 
@@ -237,22 +238,25 @@ def _beside(store, slug, runtime, at, live):
     return Launched(record.name, record.pane_id, record.seat, NEW)
 
 
-def _fresh(store, slug, runtime, at, live, replace_live=False):
+def _fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool = False) -> Launched:
+    from scripts.swarm import tick_master
+
+    tick_master.finish_dead_starting(store, slug, runtime, at)
     front = _front_doors(store, slug, live)
-    starting = _starting_leads(store, slug)
-    if starting and not replace_live:
+    leads = front or _starting_leads(store, slug)
+    if leads and not replace_live:
         count = master_seats.MasterSeats(store.redis).count(slug)
         if _free_seat(store, slug, live) > count:
-            raise SwarmError(STARTING.format(name=starting[0].name, state=starting[0].state, count=count))
-    if (front or starting) and not replace_live:
+            raise SwarmError(STARTING.format(name=leads[0].name, state=leads[0].state, count=count))
         return _beside(store, slug, runtime, at, live)
     take_master.retired(store, slug, runtime, front)
     return _new(store, slug, runtime, at)
 
 
 def up(store, slug, runtime, at, choice, ask, say):
-    """Launch the chosen master; ask last or new when no choice is given. Never refuses because a master is live:
-    a new master takes its own seat beside a live front door, and a replacing one retires the front door first."""
+    """Launch the chosen master; ask last or new when no choice is given. Refuses beside a live master only when
+    every counted master seat is held: a new master takes a free counted seat beside a live front door, and a
+    replacing one retires the front door first."""
     replace_live = choice == REPLACE
     choice = NEW if replace_live else choice
     live = runtime.live_names()

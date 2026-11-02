@@ -11,7 +11,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scripts.swarm import ci_speed
+from scripts.swarm import ci_speed, github_reads
 from scripts.swarm.store import SwarmError
 
 EVENTS = ("pull_request", "merge_group", "push")
@@ -160,7 +160,9 @@ def render(repo: str, found: dict) -> str:
 def _gh(args: list[str], repo_dir: str, run: Callable) -> str:
     for pause in [*(RETRY_S * attempt for attempt in range(1, ATTEMPTS)), None]:
         try:
-            done = run(["gh", *args], cwd=repo_dir, capture_output=True, text=True, timeout=60)
+            done = github_reads.rest(
+                "swarm.merge_path", args, run, cwd=repo_dir, capture_output=True, text=True, timeout=60
+            )
         except (OSError, subprocess.SubprocessError) as exc:
             raise SwarmError(f"GitHub API: {exc}") from exc
         if not done.returncode:

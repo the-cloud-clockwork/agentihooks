@@ -1,0 +1,26 @@
+{
+  "task": "pb10",
+  "now_ms": 1791300000000,
+  "pack": {
+    "brain": "swarm:rig",
+    "purpose": "task start",
+    "receipt": {"receipt_id": "rcpt-pb10-1", "issued_at_ms": 1791299700000, "expires_at_ms": 1791300300000},
+    "delivery": {"claude": "delivered", "codex": "unsupported_event"},
+    "items": [
+      {"ref": "arc:merge-queue", "kind": "arc", "brain": "swarm:rig", "trust": "synthesized", "state": "current", "summary": "Queue a pull request the moment its own checks pass"},
+      {"ref": "lesson:operator-intent-7", "kind": "lesson", "brain": "swarm:rig", "trust": "inferred", "state": "current", "summary": "The operator wants hosted compute used before the workstation"},
+      {"ref": "decision:queue-v1", "kind": "decision", "brain": "swarm:rig", "trust": "synthesized", "state": "superseded", "superseded_by": "decision:queue-v2", "summary": "Merge dev into a branch before queueing it"},
+      {"ref": "session:s-41", "kind": "session", "brain": "swarm:rig", "trust": "archive", "state": "current", "summary": "Engineer transcript where the queue refused a stale head"},
+      {"ref": "session:p-7", "kind": "session", "brain": "personal:operator", "trust": "archive", "state": "current", "summary": "A personal session about the operator's own plans"}
+    ],
+    "omitted": ["arc:old-ci-speed"]
+  },
+  "evidence": {
+    "arc:merge-queue": {"brain": "swarm:rig", "kind": "arc", "state": "available", "revision": 3, "text": "Queue on green checks and closed review; the queue retests against the newest dev"},
+    "lesson:operator-intent-7": {"brain": "swarm:rig", "kind": "lesson", "state": "available", "revision": 2, "text": "Inferred from three operator messages: Anton compute first"},
+    "decision:queue-v1": {"brain": "swarm:rig", "kind": "decision", "state": "available", "revision": 1, "text": "Merge dev into the branch before queueing"},
+    "session:s-41": {"brain": "swarm:rig", "kind": "session", "state": "available", "session": "s-41", "first": 120, "last": 124, "records": ["queue refused: head is stale", "merged dev and pushed"]},
+    "session:p-7": {"brain": "personal:operator", "kind": "session", "state": "available", "session": "p-7", "first": 1, "last": 3, "records": ["private planning notes"]}
+  },
+  "revoked": {"session:s-41": "the session was deleted by its owner"}
+}

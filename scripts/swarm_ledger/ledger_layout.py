@@ -13,6 +13,7 @@ ROWS = {
     "agents-box": ("height",),
     "handoff-box": ("height",),
     "recovery-box": ("height",),
+    "context-box": ("height",),
 }
 LIMITS = {"height": (48, 4000, 0), "split": (15, 85, 1)}
 COLUMNS = "columns"

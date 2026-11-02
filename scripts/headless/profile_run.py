@@ -7,9 +7,10 @@ from pathlib import Path
 
 import jsonschema
 
+from hooks.context import worker_mode
 from scripts.headless import runner, tiers
 
-WORKER_RUN = "AGENTIHOOKS_WORKER_RUN"
+WORKER_RUN = worker_mode.FLAG
 WORKER_RUN_ID = "AGENTIHOOKS_WORKER_RUN_ID"
 TRANSCRIPT = "transcript.jsonl"
 STDERR = "stderr.txt"
@@ -55,7 +56,7 @@ def claude_args(run: ProfileRun) -> list[str]:
 
 
 def codex_args(run: ProfileRun) -> list[str]:
-    args = ["exec", "--json", "-o", str(run.run_dir / CODEX_LAST_MESSAGE)]
+    args = ["exec", "--json", "--skip-git-repo-check", "-o", str(run.run_dir / CODEX_LAST_MESSAGE)]
     if run.schema is not None:
         args += ["--output-schema", str(run.run_dir / CODEX_OUTPUT_SCHEMA)]
     return [*args, "--", run.input]

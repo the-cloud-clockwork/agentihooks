@@ -1,0 +1,52 @@
+{
+  "authoritative_objects": "The stored packs and evidence records are authoritative for the ledger; the swarm view cards and any evidence the page opened are projections recomputed on each read. Rollback deletes none of them.",
+  "authority": "The viewer's scope is the task's own brain, taken from the stored pack and the stored evidence, never from a display label. The ledger credential check in the v1 API admits the reader; the page grants nothing and every expansion reads the store again.",
+  "cases": {
+    "a": "evidence/SV2-UX-04/a-result.json",
+    "b": "evidence/SV2-UX-04/b-result.json",
+    "c": "evidence/SV2-UX-04/c-result.json"
+  },
+  "compatibility": "Additive: the swarm view gains a context key, the v1 API gains one read path, and the page gains one panel; no earlier response or refusal text changed",
+  "dependencies": {
+    "SV2-CTX-05": "merged into agentibrain-kernel dev (agentibrain-kernel#180)",
+    "SV2-UX-03": "merged into dev (#6657)"
+  },
+  "evidence_class": "mocked: a fakeredis swarm store holding the fixture's delivered pack and its evidence records, read through the ledger page projection and the evidence expand path a ledger API read calls; no ledger HTTP server, browser, brain or cluster runs",
+  "integration_gate": "G10",
+  "interfaces": [
+    "scripts.swarm.context_view.record(store, slug, task, pack) stores the delivered pack per task and refuses a pack whose brain is not a swarm brain; put_evidence(store, slug, ref, evidence) stores one source's record range or lesson revision and refuses to overwrite a revocation inside a watched Redis transaction, so a write racing a revocation retries and loses; revoke(store, slug, ref, reason) replaces the source with a tombstone naming only ref, brain, kind and reason",
+    "context_view.view(store, slug, now_ms) projects one card per task with brain, purpose, receipt id and freshness (fresh, expired, no receipt), delivery per adapter, the count of omitted references and items labelled transcript evidence, brain synthesis or inferred intent and superseded by their successor; an item from another brain shows only its trust class, with no reference, summary or successor; a revoked or missing source shows unavailable with its reason; it carries ledger_evidence_expand_failures by reason",
+    "context_view.expand(store, slug, task, ref) returns the supporting evidence for a reference in the task's pack only when both the item and the stored evidence belong to the task's brain; it refuses not_in_pack (404), forbidden_scope (403), unavailable (410) and revoked (410) and counts each refusal",
+    "GET /api/v1/ledgers/<slug>/swarm/context/<task>/<ref> serves expand behind the ledger credential check with Cache-Control no-store; the swarm view carries context; the ledger page renders a foldable, resizable Brain context panel in the Swarm tab after Recovery whose evidence buttons open the evidence inline"
+  ],
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7622",
+  "limitations": [
+    "Nothing records packs or evidence in production yet: the consultation gate that consumes brain receipts must call context_view.record and put_evidence when it delivers a pack",
+    "A ledger records only packs from a swarm brain and never expands a personal brain item; there is no grant path for a personal brain viewer on the swarm ledger"
+  ],
+  "measurements": {
+    "ledger_evidence_expand_failures": {
+      "a": {},
+      "b": {
+        "forbidden_scope": 1,
+        "not_in_pack": 1
+      },
+      "c": {
+        "revoked": 1
+      },
+      "note": "fixture-local counters by refusal reason"
+    }
+  },
+  "package": "SV2-UX-04",
+  "package_complete": false,
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7701",
+  "rollback": "Hide context inspection panels while preserving core task controls and evidence ids: AGENTIHOOKS_CONTEXT_INSPECTION=off on the ledger server makes the swarm view carry context null, the page hides the Brain context panel and its grip, and the evidence read answers 404; stored packs, evidence and every other panel stay as they were. Rehearsed by test_inspection_off_hides_the_projection_and_refuses_the_read and test_with_inspection_off_the_panel_and_its_grip_are_hidden.",
+  "states": {
+    "accepted": "Standards and Spec reviews closed in round three on the pull request with every finding fixed",
+    "committed": "Case records, manifest and result committed on the task branch; the change reaches dev only when its pull request merges",
+    "externally_verified": "Not on Anton: no rollout of this commit has been observed and no delivery path records packs yet, so no real context card has been shown; the evidence is mocked and labelled so",
+    "observed": "Cases A, B and C and every selected unit, page and layout test passed in focused Proofs run 40419395776 on 4d8ede91c (evidence/SV2-UX-04/a-result.json, b-result.json, c-result.json); the same tests failed before the change in Proofs run 40416506868 on the tests commit 9fef5f1ec; the panel was rendered at 1920 by 1080 through the page test harness and critiqued with the impeccable skill, screenshots context-1920.png and context-revoked-1920.png on the ledger task vux4 proof"
+  },
+  "status": "fixture-qualified: a task's delivered pack shows its selected brain, purpose, receipt freshness and delivery result per adapter; each item carries its trust class, inferred intent and superseded labels; an item expands to its record range or lesson revision; a copied personal brain link and a reference outside the pack are refused without mutating state or disclosing content; a revoked source shows unavailable with its reason after a restart and a replayed write cannot restore it; no Anton rollout of this commit has been observed",
+  "tested_commit": "4d8ede91c"
+}

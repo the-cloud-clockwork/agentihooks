@@ -6,6 +6,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("choice", ["resume", "fresh"])
+@pytest.mark.feature("ledger-restore-choice")
 def test_page_restore_choice_routes_to_the_matching_command(choice):
     assert control_argv({"action": "restore-decision", "agent": "engineer@abc123-0001", "choice": choice}) == [
         "restore-decision",
@@ -21,6 +22,7 @@ def test_page_restore_choice_routes_to_the_matching_command(choice):
         {"action": "restore-decision", "agent": "sw-eng-1", "choice": "automatic"},
     ],
 )
+@pytest.mark.feature("ledger-restore-choice")
 def test_bad_restore_choices_are_refused(body):
     with pytest.raises(ValueError):
         control_argv(body)

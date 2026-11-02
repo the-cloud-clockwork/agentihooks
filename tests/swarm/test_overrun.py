@@ -164,6 +164,20 @@ def test_an_agent_still_live_after_the_grace_is_ended_and_its_task_reopened():
     assert inbox.open_items(SEAT) == []
 
 
+def test_an_ask_whose_record_is_gone_still_ends_the_agent(capsys):
+    swarm = Swarm()
+    swarm.tick(PARK)
+    [ask] = swarm.agent_inbox()
+    swarm.store.redis.delete(InboxStore(swarm.store.redis).key("item", ask.id))
+    actions = swarm.tick(ENDED)
+    assert swarm.retired == [OWNER]
+    assert actions == [f"overrun: ended {OWNER} on task t1 after 165 minutes and reopened the task"]
+    assert (
+        f"agentihooks inbox: {overrun.KEY} holds message {ask.id} whose record is gone; skipped it"
+        in capsys.readouterr().err.splitlines()
+    )
+
+
 def test_an_ask_the_agent_closed_itself_does_not_hold_the_end():
     swarm = Swarm()
     swarm.tick(PARK)

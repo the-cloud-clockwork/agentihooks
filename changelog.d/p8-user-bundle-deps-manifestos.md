@@ -1,0 +1,1 @@
+The user bundle's `deps.json` and `manifestos/` combine with the root bundle's, a user entry replacing a root entry with the same id or file stem; a change to either `deps.json` re-runs the dependency checks, and the session-start manifesto reader and `agentihooks init` read the same two sources.

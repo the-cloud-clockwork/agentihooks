@@ -149,6 +149,16 @@ def test_a_stale_claude_reading_gets_no_seat(monkeypatch):
     assert seen == [capacity.Account("claude", "a", "UNKNOWN", 0, 90, 100, None)]
 
 
+def test_a_revoked_claude_account_is_closed_with_no_seat(monkeypatch):
+    result = balancer.revoked_result("a", 100)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"a": 4})
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
+    (row,) = capacity.accounts({"AH_CC_TOKEN_a": "fake"}, 100)
+    assert (row.state, row.cap, row.sessions) == ("CLOSED", 0, 4)
+    assert capacity.free_seats(row) == 0
+
+
 def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch):
     from scripts.codex_quota import CodexQuota
 
@@ -781,10 +791,11 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     )
     monkeypatch.setattr(cli, "now_ms", lambda: 3 * 60_000)
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    out = capsys.readouterr().out.splitlines()
     assert (
-        "quota capacity eng 0 of 2, ci 0 of 1, plan 0 of 1, changed 3 minutes ago, because accounts are closed"
-        in capsys.readouterr().out.splitlines()
+        "quota capacity eng 0 of 2, ci 0 of 1, plan 0 of 1, changed 3 minutes ago, because accounts are closed" in out
     )
+    assert "scaling auto, live of ceiling eng 0 of 2, ci 0 of 1, plan 0 of 1" in out
 
 
 def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp_path):
@@ -965,6 +976,26 @@ def test_master_reservation_preserves_api_capacity():
         {"index": 1, "harness": "claude", "account": "open"},
         {"index": 2, "harness": "claude", "account": "open"},
     ]
+
+
+@pytest.mark.parametrize(("declared", "expected"), [("warned", 3), ("open", 2)])
+def test_runtime_capacity_reads_the_declared_master_account(tmp_path, monkeypatch, declared, expected):
+    from scripts.routing.master_account import MasterAccount
+
+    observed = [account("open"), account("warned", left=5, sessions=1)]
+    runtime, config, _ = _runtime_probe(tmp_path, monkeypatch, observed)
+    runtime.quota_accounts = lambda *args, **kwargs: observed
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": MasterAccount("claude", declared)})
+    config = replace(
+        config,
+        max_eng=4,
+        max_plan=0,
+        scaling="manual",
+        lanes={"master": {"agent": "claude"}, "eng": {"agent": "claude"}},
+    )
+    previous = AgentRecord("previous", "master", "master", harness="claude", account="warned", state="working")
+    decision = runtime.quota_capacity(config, [replace(previous, profile="master")], 123)
+    assert decision["effective"]["eng"] == expected
 
 
 @pytest.mark.parametrize("state", ["starting", "working"])
@@ -1444,6 +1475,51 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
     assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
 
 
+@pytest.mark.parametrize("age", [0, 299_999, 300_000, 300_001])
+def test_capacity_skips_fresh_placement_refusals_before_reserving_slots(age):
+    from scripts.hive import placement_waits
+    from scripts.swarm.tick import _spawn_order
+
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger([{"id": "refused", "rank": "urgent"}, {"id": "next", "rank": "urgent"}])
+    runtime = FakeRuntime()
+    now = 1_000_000
+    placement_waits.observe(store, "sw", "eng", "refused", "no hive has room", now - age)
+    expected = ["next"] if age < placement_waits.FRESH_MS else ["refused", "next"]
+    demands = []
+    prepared = []
+
+    def requirements(cfg, ready):
+        assert cfg == config
+        prepared.extend(task["id"] for task in ready["eng"])
+        return {lane: [("claude",)] * len(tasks) for lane, tasks in ready.items()}
+
+    def calculate(cfg, agents, observed, demand, choices):
+        assert observed == now / 1000
+        demands.append(demand)
+        return capacity.calculate(cfg, [account()], agents, demand, choices)
+
+    runtime.quota_requirements = requirements
+    runtime.quota_capacity = calculate
+    actions = capacity.apply("sw", config, store, ledger, runtime, now)
+    assert prepared == expected
+    assert demands == [{"eng": len(expected), "ci": 0, "plan": 0}]
+    assert capacity.read(store, "sw")["tasks"] == {expected[0]: "claude"}
+    queue, _ = _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw"), runtime)
+    assert [(lane, task["id"]) for lane, task in queue] == [("eng", expected[0])]
+    skipped = [line for line in actions if "fresh placement refusal" in line]
+    assert skipped == (
+        ["capacity skipped eng task refused: fresh placement refusal: no hive has room"]
+        if age < placement_waits.FRESH_MS
+        else []
+    )
+    placement_waits.observe(store, "sw", "eng", "refused", "", now)
+    capacity.apply("sw", config, store, ledger, runtime, now)
+    assert capacity.read(store, "sw")["tasks"] == {"refused": "claude"}
+
+
 def test_ready_work_orders_a_lane_by_the_dispatcher_queue_at_delegate():
     store = _store()
     store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0))
@@ -1649,8 +1725,8 @@ def test_an_auto_swarm_with_an_unknown_host_scales_on_quota_alone():
     _, decision = capacity.autoscaled(config, inputs)
     free = capacity._placeable(capacity._open(inputs.observations, {}))
     previous = {"ceilings": {"eng": 1, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, None, inputs.demand, previous)
-    assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1}
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, None, inputs.demand, previous, now_ms=0)
+    assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1, "since": 0}
     assert (
         decision["reason"]
         == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 5 of 13; raise held at tick 1 of 3."
@@ -1777,7 +1853,7 @@ def test_quota_capacity_autoscales_on_the_room_left_since_it_was_first_granted(t
     assert asked == [1_000]
     assert decision["host"] == {**_granted(), "held": True, "reason": BAND_HOLDS}
     assert decision["autoscale"]["host"] == decision["host"]
-    assert decision["autoscale"]["pending_raise"] == {"target": 5, "ticks": 1}
+    assert decision["autoscale"]["pending_raise"] == {"target": 5, "ticks": 1, "since": 100_000}
 
 
 def test_a_runtime_without_a_spawn_counter_autoscales_on_the_whole_room(tmp_path, monkeypatch):
@@ -1790,7 +1866,7 @@ def test_a_runtime_without_a_spawn_counter_autoscales_on_the_whole_room(tmp_path
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto")
     agents = [AgentRecord(f"eng-{n}", "eng", "") for n in range(4)]
     decision = rt.quota_capacity(config, agents, 100, {"eng": 9, "ci": 0, "plan": 0})
-    assert decision["autoscale"]["pending_raise"] == {"target": 7, "ticks": 1}
+    assert decision["autoscale"]["pending_raise"] == {"target": 7, "ticks": 1, "since": 100_000}
 
 
 def test_apply_hands_the_runtime_the_spawn_count_the_host_gate_reads(tmp_path, monkeypatch):
@@ -1825,9 +1901,9 @@ def test_an_auto_swarm_with_quota_and_host_room_rises_above_its_configured_caps_
     rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6), account("cx", harness="codex", cap=6)])
     first = _scaling_tick(store, ledger, rt, 1000)
     assert sum(first["configured"].values()) == 2
-    assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1}
+    assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1, "since": 1000}
     second = _scaling_tick(store, ledger, rt, 61_000)
-    assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2}
+    assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2, "since": 1000}
     assert "raise held at tick 2 of 3" in second["autoscale"]["reason"]
     third = _scaling_tick(store, ledger, rt, 121_000)
     assert third["configured"] == {"eng": 3, "ci": 1, "plan": 0}
@@ -1983,7 +2059,7 @@ def test_autoscaled_uses_the_swarm_watermarks_and_the_stored_state():
     room = host_budget.room(inputs.host(), host_budget.Thresholds(2.0, 1.5, 1000), None)
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": 9, "ticks": 1}}
     free = capacity._placeable(capacity._open(inputs.observations, {}))
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous)
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous, now_ms=0)
     assert decision == {
         **expected,
         "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held, "granted_at": 0},
@@ -2012,7 +2088,7 @@ def test_autoscaled_seeds_from_the_configured_caps_and_an_idle_raise():
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
     free = capacity._placeable(capacity._open(inputs.observations, {}))
     zero = {"eng": 0, "ci": 0, "plan": 0}
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous)
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous, now_ms=0)
     assert decision == {
         **expected,
         "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held, "granted_at": 0},
@@ -2289,7 +2365,7 @@ def test_an_api_account_round_trips_through_the_route_argument(tmp_path, monkeyp
         ("codex", None, 96, "CLOSED", 0),
         ("codex", None, 92, "DRAIN", 6),
         ("codex", 0, None, "UNKNOWN", None),
-        ("claude", None, 27, "UNKNOWN", None),
+        ("claude", None, 27, "OPEN", 8),
         ("claude", 100, 27, "CLOSED", 0),
         ("claude", 92, 27, "DRAIN", 2),
     ],
@@ -2362,6 +2438,59 @@ def test_hive_workers_are_admitted_more_at_high_quota_and_fewer_near_a_limit(mon
     rows = capacity.accounts(environ, 100, refresh=False)
     assert {row.name: capacity.free_seats(row) for row in rows} == {"high": high, "near": near}
     assert high + 2 > session_bands.TOP_BAND
+
+
+@pytest.mark.parametrize("status", [balancer.REVOKED, "rejected"])
+def test_aggregate_capacity_closes_a_claude_account_the_probe_reads_refused(monkeypatch, status):
+    from scripts.routing import aggregate
+
+    quota = {
+        "observed_at": 100,
+        "five_hour": {"used": 4, "resets_at": 500},
+        "seven_day": {"used": 2, "resets_at": 600},
+    }
+    records = {
+        name: {"harness": harness, "account": "a", "kind": "pool", "sessions": 3, "quota": quota}
+        for harness, name in (("claude", "claude:a"), ("codex", "codex:a"))
+    }
+    refused = replace(balancer.revoked_result("a", 100), provider_status=status)
+    allowed = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=0)
+    )
+    env = {"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}
+    monkeypatch.setattr(
+        balancer, "cached_observations", lambda **kw: [(90, allowed), (95, refused)] if kw["environ"] is env else []
+    )
+    monkeypatch.setattr(aggregate, "current", lambda now: records)
+    rows = capacity.accounts(env, 100, refresh=False)
+    assert {row.harness: (row.state, row.cap, row.sessions, capacity.free_seats(row)) for row in rows} == {
+        "claude": ("CLOSED", 0, 3, 0),
+        "codex": ("OPEN", 6, 3, 3),
+    }
+
+
+@pytest.mark.parametrize("revoked_at,cached_first", [(90, False), (95, True)])
+def test_aggregate_capacity_reopens_a_claude_account_whose_later_probe_is_allowed(
+    monkeypatch, revoked_at, cached_first
+):
+    from scripts.routing import aggregate
+
+    quota = {
+        "observed_at": 100,
+        "five_hour": {"used": 4, "resets_at": 500},
+        "seven_day": {"used": 2, "resets_at": 600},
+    }
+    record = {"harness": "claude", "account": "a", "kind": "pool", "sessions": 3, "quota": quota}
+    allowed = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=0)
+    )
+    revoked = balancer.revoked_result("a", 100)
+    readings = [(95, allowed), (revoked_at, revoked)]
+    readings = readings[::-1] if cached_first else readings
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: readings)
+    monkeypatch.setattr(aggregate, "current", lambda now: {"claude:a": record})
+    (row,) = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
+    assert (row.state, row.cap) == ("OPEN", 11)
 
 
 def test_two_names_holding_one_token_offer_one_account(monkeypatch, tmp_path):
@@ -2450,7 +2579,8 @@ def test_a_master_snapshot_with_one_window_reads_the_other_as_unknown(monkeypatc
         "seven_day": balancer.QuotaWindow(),
         kept: balancer.QuotaWindow(20.0, 9_000),
     }
-    reading = balancer.ProbeResult("main", "allowed", "UNKNOWN", None, windows["five_hour"], windows["seven_day"])
+    state, margin = ("NORMAL", 80.0) if kept == "seven_day" else ("UNKNOWN", None)
+    reading = balancer.ProbeResult("main", "allowed", state, margin, windows["five_hour"], windows["seven_day"])
     assert capacity._master_snapshot({}, 1_100.0) == {"main": (1_050.0, reading)}
 
 

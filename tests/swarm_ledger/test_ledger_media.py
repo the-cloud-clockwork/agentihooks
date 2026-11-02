@@ -68,6 +68,27 @@ def test_cleanup_removes_old_orphans_and_keeps_references_and_pending_uploads():
     assert paths[3].exists()
 
 
+def test_sweep_scans_the_ledger_for_files_in_use_once_unless_trash_expires(monkeypatch):
+    make_ledger("scan-media")
+    kept, expired = (ledger_media.store("scan-media", png(n, n)) for n in (5, 6))
+    doc = core.sync("scan-media")[0]
+    doc["artifacts"] = [{"file": kept}]
+    doc["artifact_trash"] = []
+    scans = []
+    real = artifacts.in_use
+    monkeypatch.setattr(artifacts, "in_use", lambda doc: scans.append(1) or real(doc))
+    ctx = core.Context(doc["_meta"], core.now_ms())
+    artifacts.sweep("scan-media", doc, ctx)
+    assert len(scans) == 1
+    assert not ctx.dirty
+    doc["artifact_trash"] = [{"file": expired, "deleted_at": 0}]
+    artifacts.sweep("scan-media", doc, ctx)
+    assert len(scans) == 3
+    assert doc["artifact_trash"] == []
+    assert not (ledger_media.folder("scan-media") / expired["id"]).exists()
+    assert (ledger_media.folder("scan-media") / kept["id"]).exists()
+
+
 def test_pending_upload_expires_after_one_hour_and_nonfiles_are_kept():
     make_ledger("pending-media")
     file = ledger_media.store("pending-media", png(9, 9))

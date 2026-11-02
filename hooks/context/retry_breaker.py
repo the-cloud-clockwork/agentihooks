@@ -22,39 +22,28 @@ import re
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
 
-# In-process fallback when Redis is unavailable
-# Structure: {session_id: {op_key: {count, last_error_key, last_error_text, last_input}}}
 _memory_state: dict[str, dict[str, dict]] = {}
 
-# Prefixes to skip when extracting the base command from a Bash invocation
 _BASH_SKIP_TOKENS = frozenset({"sudo", "env", "cd", "nohup", "time", "nice"})
 
-# Tools that use subcommand-level grouping (base:sub or base:sub1:sub2).
-# Without this, `terraform plan` and `terraform apply` would share a counter.
 _SUBCOMMAND_TOOLS: dict[str, int] = {
-    # DevOps / IaC
-    "terraform": 1,  # terraform plan, terraform apply, terraform destroy
-    "tofu": 1,  # OpenTofu (same subcommands as terraform)
-    "pulumi": 1,  # pulumi up, pulumi preview, pulumi destroy
-    # Kubernetes
-    "kubectl": 1,  # kubectl apply, kubectl get, kubectl delete
-    "k": 1,  # kubectl alias
-    "helm": 1,  # helm install, helm upgrade, helm rollback
-    "kustomize": 1,  # kustomize build, kustomize edit
-    # GitOps / CD
-    "argocd": 2,  # argocd app sync, argocd app get
-    "flux": 1,  # flux reconcile, flux get
-    # Cloud CLIs
-    "aws": 2,  # aws s3 cp, aws ec2 describe-instances
-    "gcloud": 1,  # gcloud compute instances list
-    "az": 1,  # az vm list, az group create
-    # Containers
-    "docker": 1,  # docker build, docker run, docker push
-    "podman": 1,  # podman build, podman run
-    "docker-compose": 1,  # docker-compose up, docker-compose down
+    "terraform": 1,
+    "tofu": 1,
+    "pulumi": 1,
+    "kubectl": 1,
+    "k": 1,
+    "helm": 1,
+    "kustomize": 1,
+    "argocd": 2,
+    "flux": 1,
+    "aws": 2,
+    "gcloud": 1,
+    "az": 1,
+    "docker": 1,
+    "podman": 1,
+    "docker-compose": 1,
 }
 
-# Regex to strip variable content from error text for fingerprinting
 _STRIP_RE = re.compile(
     r"""
       0x[0-9a-fA-F]+        # hex addresses
@@ -66,13 +55,7 @@ _STRIP_RE = re.compile(
     re.VERBOSE,
 )
 
-# Codex shell results are plain text whose header names the exit status
 _SHELL_EXIT_RE = re.compile(r"^(?:Exit code: |Process exited with code )(-?\d+)$", re.MULTILINE)
-
-
-# ---------------------------------------------------------------------------
-# Fingerprinting
-# ---------------------------------------------------------------------------
 
 
 def _compute_operation_key(tool_name: str, tool_input: dict) -> str:
@@ -94,7 +77,6 @@ def _compute_operation_key(tool_name: str, tool_input: dict) -> str:
                 continue
             if p == "&&":
                 break
-            # Strip path prefix (e.g., /usr/bin/python -> python)
             base = p.rsplit("/", 1)[-1]
             base_idx = i
             break
@@ -102,7 +84,6 @@ def _compute_operation_key(tool_name: str, tool_input: dict) -> str:
         if not base:
             return "bash:unknown"
 
-        # Check if this tool uses subcommand-level grouping
         depth = _SUBCOMMAND_TOOLS.get(base, 0)
         if depth > 0:
             subs = []
@@ -137,14 +118,8 @@ def _compute_error_key(error_text: str) -> str:
     similar errors from successive retries produce the same key.
     """
     normalized = _STRIP_RE.sub("", error_text.lower()).strip()
-    # Collapse whitespace
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized[:80]
-
-
-# ---------------------------------------------------------------------------
-# State management (Redis + memory fallback)
-# ---------------------------------------------------------------------------
 
 
 def _redis_hash_key(session_id: str) -> str:
@@ -165,11 +140,11 @@ def _get_state(session_id: str, op_key: str) -> dict:
         except Exception as e:
             log("retry_breaker: Redis read error", {"error": str(e)})
 
-    # Memory fallback
     return _memory_state.get(session_id, {}).get(op_key, _default_state())
 
 
 def _set_state(session_id: str, op_key: str, state: dict) -> None:
+    """Store breaker state in Redis and always in memory, so a Redis drop mid-session keeps it consistent."""
     from hooks.config import RETRY_BREAKER_TTL
 
     r = get_redis()
@@ -181,7 +156,6 @@ def _set_state(session_id: str, op_key: str, state: dict) -> None:
         except Exception as e:
             log("retry_breaker: Redis write error", {"error": str(e)})
 
-    # Always update memory fallback (keeps state consistent if Redis drops mid-session)
     _memory_state.setdefault(session_id, {})[op_key] = state
 
 
@@ -196,11 +170,6 @@ def _reset_state(session_id: str, op_key: str) -> None:
     session_map = _memory_state.get(session_id)
     if session_map:
         session_map.pop(op_key, None)
-
-
-# ---------------------------------------------------------------------------
-# Injection
-# ---------------------------------------------------------------------------
 
 
 def _inject_breaker_message(tool_name: str, tool_input: dict, error_text: str, count: int) -> None:
@@ -250,17 +219,11 @@ Retry-breaker is not a suggestion. It is operator policy."""
         f"CIRCUIT BREAKER TRIPPED ({count}x) — launch error-researcher agents",
         directive,
     )
-    # Also surface on stderr for maximum visibility (Claude Code reads stderr for hook output)
     print(
         f"[retry-breaker] FAILURE #{count} on {tool_name}:{_compute_operation_key(tool_name, tool_input)} — launch 2 error-researcher agents NOW",
         file=sys.stderr,
         flush=True,
     )
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def _failure_text(payload: dict, tool_result) -> str | None:
@@ -293,22 +256,18 @@ def on_post_tool_result(payload: dict) -> None:
     error_text = _failure_text(payload, tool_result)
 
     if error_text is None:
-        # Success — reset counter for this operation
         state = _get_state(session_id, op_key)
         if state["count"] > 0:
             _reset_state(session_id, op_key)
             log("retry_breaker: counter reset on success", {"op_key": op_key})
         return
 
-    # Error detected — compute fingerprint and update counter
     error_key = _compute_error_key(error_text)
     state = _get_state(session_id, op_key)
 
     if state["last_error_key"] and state["last_error_key"] == error_key:
-        # Same error type — increment
         state["count"] += 1
     else:
-        # Different error type — reset to 1
         state["count"] = 1
 
     state["last_error_key"] = error_key
@@ -321,7 +280,6 @@ def on_post_tool_result(payload: dict) -> None:
         {"op_key": op_key, "count": state["count"], "error_key": error_key[:40]},
     )
 
-    # Trip the breaker at threshold
     if state["count"] >= RETRY_BREAKER_MAX:
         _inject_breaker_message(tool_name, tool_input, error_text, state["count"])
 
@@ -330,7 +288,8 @@ def check_hard_block(payload: dict) -> None:
     """PreToolUse handler: raise BlockAction if consecutive failures exceed hard max.
 
     Should be called from on_pre_tool_use. Raises BlockAction to prevent
-    the tool from executing.
+    the tool from executing. Half-open: after each block one trial call goes through,
+    so a success can reset the counter instead of waiting out the TTL.
     """
     from hooks.config import RETRY_BREAKER_HARD_MAX
     from hooks.hook_manager import BlockAction
@@ -344,8 +303,6 @@ def check_hard_block(payload: dict) -> None:
     state = _get_state(session_id, op_key)
 
     if state["count"] >= RETRY_BREAKER_HARD_MAX:
-        # Half-open: after each block one trial call goes through, so a
-        # success can still reset the counter instead of waiting out the TTL.
         if state.get("blocked"):
             state["blocked"] = False
             _set_state(session_id, op_key, state)

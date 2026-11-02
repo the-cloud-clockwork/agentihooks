@@ -168,6 +168,9 @@ class _Redis(dict):
     def hget(self, key, field):
         return None
 
+    def hgetall(self, key):
+        return {}
+
 
 class _Store:
     def __init__(self):

@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -12,19 +13,15 @@ def _git(*args: str, cwd) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_enforcement(tmp_path):
+def _clean_enforcement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect enforcement state files to tmp dir; disable bundle/profile loading by default."""
-    store = tmp_path / "enforcements.json"
-    counters = tmp_path / "enforcement_counters.json"
-    delivery = tmp_path / "enforcement_delivery_state.json"
-    with (
-        patch("hooks.context.enforcement._store_path", return_value=store),
-        patch("hooks.context.enforcement._counter_path", return_value=counters),
-        patch("hooks.context.enforcement._delivery_path", return_value=delivery),
-        patch("hooks.context.enforcement._get_bundle_path", return_value=None),
-        patch("hooks.context.enforcement._get_active_profile", return_value=None),
-    ):
-        yield
+    from hooks.context import enforcement
+
+    monkeypatch.setattr(enforcement, "_store_path", lambda: tmp_path / "enforcements.json")
+    monkeypatch.setattr(enforcement, "_counter_path", lambda: tmp_path / "enforcement_counters.json")
+    monkeypatch.setattr(enforcement, "_delivery_path", lambda: tmp_path / "enforcement_delivery_state.json")
+    monkeypatch.setattr(enforcement, "_get_bundle_path", lambda: None)
+    monkeypatch.setattr(enforcement, "_get_active_profile", lambda: None)
 
 
 @pytest.fixture()
@@ -430,6 +427,34 @@ def test_stamped_overlays_override_enforcements_in_render_order(bundle_dir, tmp_
         ("b-1", "bundle msg", "bundle"),
         ("p-1", winner, "profile"),
     ]
+
+
+def test_shared_login_enforcements_use_each_holders_overlay(bundle_dir, tmp_path, monkeypatch):
+    from hooks.context import enforcement, profile_chain
+    from scripts import master_claude_login as login
+
+    home = tmp_path / "login" / "claude"
+    home.mkdir(parents=True)
+    (home / profile_chain.RENDER_STAMP).write_text(json.dumps({"chain": ["testprofile", "rig"], "overlays": ["rig"]}))
+    records = {}
+    for slug in ("rig", "doctor"):
+        overlay = bundle_dir / "profiles" / slug
+        overlay.mkdir()
+        (overlay / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "holder-rule", "message": f"{slug} holder rule", "cadence": 1}]})
+        )
+        records[f"master@{slug}-1"] = {"chain": ["testprofile", slug], "overlays": [slug]}
+    (home.parent / login.RENDERS).write_text(json.dumps(records))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    monkeypatch.setattr(enforcement, "_get_bundle_path", lambda: bundle_dir)
+    monkeypatch.setattr(enforcement, "_get_active_profile", lambda: "testprofile")
+    monkeypatch.setattr(enforcement, "ENFORCEMENT_INJECTION_ENABLED", True)
+    for slug, other in (("doctor", "rig"), ("rig", "doctor")):
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", f"master@{slug}-1")
+        found = enforcement.get_pretool_enforcements(f"{slug}-holder")
+        assert f"{slug} holder rule" in (found or "")
+        assert f"{other} holder rule" not in (found or "")
 
 
 class TestThreeSourceMerge:

@@ -63,7 +63,7 @@ def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
     for n in range(1, 5):
         beat(store.redis, "prompt-proof", agent.name, "working", n)
         agent = store.agents("prompt-proof")[0]
-        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, n)
+        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, n * 60_000)
         report = status_report(store, "prompt-proof", ledger.state("prompt-proof"), runtime)
         assert report["agents"][0]["status"] == "waiting"
         assert report["agents"][0]["input_ticks"] == n
@@ -280,7 +280,7 @@ def test_status_text_shows_a_pane_held_at_a_prompt_as_waiting_and_the_finding_na
     runtime.observe = HerdrRuntime(home=tmp_path, herdr=_herdr_showing("claude-trust-prompt.txt")).observe
     for tick in range(1, 5):
         agent = store.agents("prompt-proof")[0]
-        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, tick)
+        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, tick * 60_000)
         cli.cmd_status(store, SimpleNamespace(slug="prompt-proof", json=False))
         out = capsys.readouterr().out
         row = next(line.split("\t") for line in out.splitlines() if line.startswith("engineer-one\t"))
@@ -363,6 +363,7 @@ def test_the_code_steps_start_each_review_round_with_the_review_command(kind):
     )
 
 
+@pytest.mark.feature("swarm-park-restack")
 def test_a_stacked_claim_starts_from_the_dependency_branch_builds_pushes_and_parks():
     lines = _steps({"kind": "code", "stack_base": [{"task": "t1", "branch": "engineer-a1b2c3-0001"}]})
     text = "\n".join(lines)
@@ -427,6 +428,7 @@ def test_a_stacked_claim_continues_its_predecessors_branch_over_the_dependency_b
     assert "--from origin/eng-one" not in "\n".join(lines)
 
 
+@pytest.mark.feature("swarm-park-restack")
 def test_a_parked_task_finishes_from_its_branch_after_a_restack():
     envelope = {"continue_from": "origin/eng-parked", "remote_head": "abc"}
     lines = _steps(

@@ -42,8 +42,9 @@ agentihooks bundle new ~/dev/my-tools
 ```
 
 This creates the bundle layout, initializes Git and links the bundle. A
-nonempty directory is refused. Only one bundle can be linked at a time; reuse
-it when adding more capabilities.
+nonempty directory is refused. Only one root bundle can be linked at a time; reuse
+it when adding more capabilities. `agentihooks bundle new --user DIR` lays out a
+personal bundle and links it beside the root bundle without replacing the root link.
 
 Create an overlay in the linked bundle:
 
@@ -51,6 +52,12 @@ Create an overlay in the linked bundle:
 agentihooks overlay new backtest-tuner \
   --wears engineer
 ```
+
+With a user bundle linked, `overlay new` refuses until you choose where it lands:
+add `--dest root` for the root bundle or `--dest user` for the personal one.
+`overlay check NAME --dest user` validates a personal overlay. The swarm offers the
+overlays of every linked bundle, including a linked shared bundle; a name in more
+than one resolves to the earliest of root, shared and user.
 
 The scaffold writes:
 

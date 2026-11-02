@@ -1,0 +1,6 @@
+{
+  "hooks/memory/service.py:hooks.memory.service.x_authenticate__mutmut_3:164262705ef9445bac29d6f377444b830fcb565f2044d1ac3ee6ccf44800ae2b": {
+    "reader": "standards-reader",
+    "reason": "Valid configured Bearer credentials contain no spaces. An accepted header therefore has exactly one separator and partition and rpartition yield identical scheme and token. With extra separators, rpartition yields a non-Bearer scheme while partition yields a token containing spaces that cannot match a valid configured Bearer credential. Both reject. Missing separators and empty tokens also reject. The mutant changes no observable behavior for valid configured Bearer credentials."
+  }
+}

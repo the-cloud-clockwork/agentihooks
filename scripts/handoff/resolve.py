@@ -13,15 +13,15 @@ GITHUB = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/(?:issues|pull)/(\
 NOTES = ("steering", "progress", "proof")
 
 
-def _ledger_state(slug):
+def _ledger_item(slug, path):
     from scripts.swarm.ledger_client import LedgerClient
 
-    return LedgerClient().state(slug)
+    return LedgerClient().item(slug, path)
 
 
 class Resolver:
-    def __init__(self, slug, redis, ledger_state=_ledger_state, run=subprocess.run):
-        self.slug, self.redis, self.ledger_state, self.run = slug, redis, ledger_state, run
+    def __init__(self, slug, redis, ledger_item=_ledger_item, run=subprocess.run):
+        self.slug, self.redis, self.ledger_item, self.run = slug, redis, ledger_item, run
 
     def __call__(self, address):
         scheme, _, rest = address.partition(":")
@@ -53,11 +53,13 @@ class Resolver:
     def _ledger(self, rest):
         slug, _, rest = rest.partition("/")
         kind, _, item = rest.partition("/")
+        if not kind or not item:
+            return False
         try:
-            state = self.ledger_state(slug)
+            found = self.ledger_item(slug, f"{kind}/{item}")
         except (SwarmError, OSError):
             return False
-        return any(isinstance(entry, dict) and entry.get("id") == item for entry in state.get(kind) or [])
+        return isinstance(found, dict)
 
     def _workspace(self, rest):
         task, _, note = rest.partition("/")

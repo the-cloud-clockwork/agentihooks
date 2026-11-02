@@ -43,3 +43,11 @@ def test_the_recovery_drill_requires_every_task_done_with_its_recorded_claims_an
     assert '"ledger": "done", "claim": null, "launches": %s, "jetstream": [%s]' in script
     assert '\\"agents\\": []}' in script
     assert script.index('settle "$want"') < script.index("printf 'Recovery drill passed")
+
+
+def test_the_recovery_drill_runs_each_hub_pass_inside_its_state_read_with_a_short_fetch():
+    script = drill()
+    assert "agentihooks hub run --once" not in script
+    assert 'runner.main(["run", "--once"])' in script
+    assert "timeout_ms=FETCH_MS" in script
+    assert 'found="$(drill pass)"' in script

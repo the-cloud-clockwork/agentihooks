@@ -1,0 +1,6 @@
+{
+  "scripts/routing/claude_ai.py:scripts.routing.claude_ai.x_launch_claude__mutmut_23:425e10d670fa86bd863fd16a4774d28d385712add23f27743cc61107b093cced": {
+    "reader": "standards-reader",
+    "reason": "Absent profile becomes None instead of empty string. Both differ from master, so check returns empty flags before the title regex and selects the same standalone prepare path. Present profiles are unchanged. Independently ruled from complete CI report 40631995725 on e92ec9d83."
+  }
+}

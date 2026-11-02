@@ -24,6 +24,12 @@ SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
+EQUIVALENCE_DEV_PARENT = {
+    "name": "Select the dev parent of the tested merge",
+    "id": "comparison-base",
+    "run": 'echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"',
+}
+EQUIVALENCE_DEV_PARENT_REF = "${{ steps.comparison-base.outputs.sha }}"
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
@@ -88,25 +94,27 @@ def _aggregator_problems(
             base_job.get(field) != head_job.get(field)
             or field == "steps"
             and base_id == "gate-required"
-            and "docs" in ci_wiring.needs_of(head_job)
+            and {"docs", "type-gate"} & ci_wiring.needs_of(head_job)
         )
         and not (
             field == "steps"
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                sonar(
-                    diagnostic(
-                        forward(
-                            finish(
-                                rerun(
-                                    shape(
-                                        required(
-                                            ci_reuse.gate_steps(
-                                                **form,
-                                                summary=summary,
-                                                docs="docs" in ci_wiring.needs_of(head_job),
-                                                watcher_loss=watcher_loss,
+                typing(
+                    sonar(
+                        diagnostic(
+                            forward(
+                                finish(
+                                    rerun(
+                                        shape(
+                                            required(
+                                                ci_reuse.gate_steps(
+                                                    **form,
+                                                    summary=summary,
+                                                    docs="docs" in ci_wiring.needs_of(head_job),
+                                                    watcher_loss=watcher_loss,
+                                                )
                                             )
                                         )
                                     )
@@ -115,6 +123,7 @@ def _aggregator_problems(
                         )
                     )
                 )
+                for typing in ((ci_reuse.typing_required,) if "type-gate" in ci_wiring.needs_of(head_job) else (list,))
                 for sonar in (list, ci_reuse.test_only_sonar)
                 for diagnostic, forward in (
                     (list, list),
@@ -255,10 +264,11 @@ def grade(
                 "if": "${{ always() }}",
                 "runs-on": runner,
                 "timeout-minutes": 5,
-                "steps": finish(ci_reuse.summary_steps()),
+                "steps": finish(retry(ci_reuse.summary_steps())),
             }
             for runner in runners(policy)
             for finish in (list, ci_reuse.pipefail_summary)
+            for retry in (list, ci_reuse.retried_summary)
         ]
         if summary not in canonical:
             problems.append("The test summary must use the reviewed reporting job.")
@@ -322,6 +332,20 @@ def _checkout_forms(preflight: dict) -> list[dict]:
     return forms
 
 
+def _dev_parent_form(steps: list[dict]) -> list[dict]:
+    form = deepcopy(steps)
+    if EQUIVALENCE_DEV_PARENT in form:
+        return form
+    for index, step in list(enumerate(form)):
+        settings = step.get("with") or {}
+        if settings.get("path") == "base":
+            settings["ref"] = EQUIVALENCE_DEV_PARENT_REF
+        if settings.get("path") == "head":
+            settings["fetch-depth"] = 2
+            form.insert(index + 1, EQUIVALENCE_DEV_PARENT)
+    return form
+
+
 def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
     file, job_id = EQUIVALENCE
     base, head = base_workflows.get(file) or {}, head_workflows.get(file) or {}
@@ -331,9 +355,11 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
     if not graded:
         return []
     end = graded[-1] + 1
+    forms = [base_steps[:end], _dev_parent_form(base_steps[:end])]
+    accepted = next((form for form in forms if head_steps[: len(form)] == form), None)
     if (
-        head_steps[:end] != base_steps[:end]
-        or any(word in json.dumps(step) for step in head_steps[end:] for word in EQUIVALENCE_WORDS)
+        accepted is None
+        or any(word in json.dumps(step) for step in head_steps[len(accepted) :] for word in EQUIVALENCE_WORDS)
         or {key: value for key, value in head.items() if key != "jobs"}
         != {key: value for key, value in base.items() if key != "jobs"}
         or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}

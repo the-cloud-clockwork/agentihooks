@@ -167,15 +167,13 @@ securityContext:
 {{- end -}}
 
 {{- define "swarm.healthz" -}}
-exec:
-  command:
-    - python
-    - -c
-    {{- if .Values.ledger.tls.secretName }}
-    - import os, ssl, urllib.request; c = ssl.create_default_context(cadata=os.environ["LEDGER_CA_PEM"]); c.check_hostname = False; urllib.request.urlopen("https://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2, context=c).read()
-    {{- else }}
-    - import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2).read()
-    {{- end }}
+httpGet:
+  path: /healthz
+  port: http
+  scheme: {{ if .Values.ledger.tls.secretName }}HTTPS{{ else }}HTTP{{ end }}
+  httpHeaders:
+    - name: Host
+      value: {{ printf "127.0.0.1:%v" .Values.ledger.port | quote }}
 {{- end -}}
 
 {{- define "swarm.homeSource" -}}

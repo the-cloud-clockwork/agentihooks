@@ -151,3 +151,14 @@ def test_main_fails_the_shard_when_the_restored_durations_cannot_be_adopted(tmp_
     monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
     with pytest.raises(ValueError):
         dev_durations.main(["3.12", str(restored)])
+
+
+@pytest.mark.parametrize("torn", [".test_durations", ".test_durations-3.12"])
+def test_main_splits_on_the_committed_durations_when_the_restored_file_is_torn(tmp_path, monkeypatch, capsys, torn):
+    restored = _restored(tmp_path / "restored", {"t.py::a": 2.0}, {"t.py::a": 3.0})
+    (restored / torn).write_text('{\n    "t.py::a": 2.0,\n    "t.py::b')
+    (tmp_path / ".test_durations-3.12").write_text('{"t.py::a": 1.0}')
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    dev_durations.main(["3.12", str(restored)])
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 1.0}
+    assert "::warning::Refusing the torn restored dev durations" in capsys.readouterr().out

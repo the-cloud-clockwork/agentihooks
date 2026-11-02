@@ -15,6 +15,7 @@ ca_dir=""
 prep=""
 route=""
 terminal=""
+drain_proof=""
 
 if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
   mkdir -p "$KIND_LAYER_CACHE"
@@ -25,8 +26,11 @@ sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
 python3 tests/chart_examples.py "$chart"
 python3 tests/chart_github_auth.py "$chart"
 python3 tests/chart_hive_home.py "$chart"
+python3 tests/chart_hive_rollout.py
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
+python3 tests/chart_ledger_rollout.py "$chart"
+python3 tests/chart_scheduler_state.py "$chart"
 python3 tests/chart_nats.py "$chart"
 python3 tests/chart_scratch_swarms.py "$chart"
 
@@ -43,6 +47,9 @@ finish() {
   rm -f "$load_lock" "${ledger_values:-}"
   if [[ -n $route ]]; then
     wait "$route" || true
+  fi
+  if [[ -n $drain_proof ]]; then
+    wait "$drain_proof" || true
   fi
   if [[ -n $ca_dir ]]; then
     rm -rf "$ca_dir"
@@ -105,7 +112,7 @@ keep_layers() {
   keep_layers swarm terminal
 ) &
 build=$!
-kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
+{ node="$(bash "$chart/ci/pull-kind-node.sh")" && kind create cluster --name "$cluster" --image "$node"; } &
 cluster_setup=$!
 load_lock="$(mktemp)"
 trap finish EXIT
@@ -190,11 +197,6 @@ for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
     exit 1
   fi
 done
-refusal="$(helm template "$release" "$chart" --set ledger.replicas=2 2>&1 >/dev/null || true)"
-if [[ $refusal != *"ledger.replicas must be 1"* ]]; then
-  printf 'the chart did not refuse two ledger writers: %s\n' "$refusal" >&2
-  exit 1
-fi
 refusal="$(helm template "$release" "$chart" --set controller.api.enabled=true 2>&1 >/dev/null || true)"
 if [[ $refusal != *"controller.api.swarm must name the swarm"* ]]; then
   printf 'the chart did not refuse a control API without a swarm: %s\n' "$refusal" >&2
@@ -438,6 +440,8 @@ ca_dir="$(mktemp -d)"
 prep=$!
 
 kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused', load_high=10.0, memory_per_agent_mb=1)); print('ledger and swarm $slug registered, no lease bound')"
+bash "$chart/ci/hive-drain-proof.sh" "$image" "$release" &
+drain_proof=$!
 kubectl rollout restart deployment "$release-controller"
 kubectl rollout status deployment "$release-controller" --timeout 2m
 hive="$(kubectl get deployment "$release-controller" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SWARM_HIVE_ID")].value}')"
@@ -500,11 +504,12 @@ import json
 import os
 import uuid
 
+from scripts.swarm import fencing
 from scripts.swarm.store import connect
 
 store = connect()
 slug = os.environ["SLUG"]
-epoch = int(store.redis.get(store.key(slug, "control-epoch")))
+epoch = fencing.read(store, slug)["epoch"]
 token = json.dumps({"epoch": epoch, "token": uuid.uuid4().hex, **json.loads(os.environ["HOLDER"])})
 store.redis.set(store.key(slug, "tick-lock"), token, px=600_000, nx=True)
 print(store.redis.get(store.key(slug, "tick-lock")))
@@ -519,12 +524,32 @@ if [[ $restarts != 1 ]]; then
   exit 1
 fi
 printf 'liveness probe restarted the frozen controller\n'
-terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
-current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
-if [[ $terminated != "$frozen_container" || $current == "$frozen_container" ]]; then
-  printf 'the frozen controller container has no confirmed termination record\n' >&2
+frozen_runtime_state() {
+  docker exec "$cluster-control-plane" crictl ps -a --id "${frozen_container#*://}" -o json \
+    | python3 -c 'import json, sys; found = json.load(sys.stdin).get("containers") or []; print(found[0]["state"] if found else "REMOVED")'
+}
+confirmed=""
+for _ in $(seq 60); do
+  terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
+  current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
+  if [[ $current != "$frozen_container" ]]; then
+    if [[ $terminated == "$frozen_container" ]]; then
+      confirmed="pod status"
+      break
+    fi
+    runtime="$(frozen_runtime_state)" || runtime=""
+    if [[ $runtime == CONTAINER_EXITED || $runtime == REMOVED ]]; then
+      confirmed="container runtime ($runtime)"
+      break
+    fi
+  fi
+  sleep 1
+done
+if [[ -z $confirmed ]]; then
+  printf 'the frozen controller container has no confirmed termination record (current %s, last terminated %s, runtime %s)\n' "$current" "$terminated" "${runtime:-unread}" >&2
   exit 1
 fi
+printf 'the frozen controller container terminated, confirmed by the %s\n' "$confirmed"
 kubectl exec -i "$ledger_pod" -- env SLUG="$slug" TOKEN="$frozen_lock" python - <<'RELEASE'
 import os
 
@@ -554,6 +579,10 @@ printf 'controller restarted by its liveness probe and holds the lease again: %s
 
 if ! wait "$prep"; then
   printf 'the controller setup objects for the control API were not created\n' >&2
+  exit 1
+fi
+if ! wait "$drain_proof"; then
+  printf 'a rolled hive did not wait for its agent to hand off under the roll lease\n' >&2
   exit 1
 fi
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \

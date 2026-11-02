@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/detect.py:scripts.doctor.detect.x_reported:2f7f5312a1c805b3e89fd5eb1d890b2f323283636e340e2dc966810388e3291b": {
+    "reader": "standards_reader",
+    "reason": "HOUR_MS is fixed at 3600000; // 12 gives 300000 and / 12 gives exactly representable 300000.0. The result is only an inclusive numeric comparison bound, so the mutation changes no freshness output."
+  }
+}

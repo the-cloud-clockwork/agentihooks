@@ -88,14 +88,12 @@ def test_an_inbox_read_in_small_batches_keeps_every_batch_and_registry_named_age
     assert max(len(row["history"]) for row in rows) >= 3
 
 
-def test_an_inbox_listing_whose_item_is_gone_is_refused(redis):
-    from scripts.inbox.store import InboxError
-
+def test_an_inbox_listing_whose_item_is_gone_is_skipped_and_dropped(redis):
     box = InboxStore(redis)
-    box.send(f"{SLUG}-eng-1", "operator", "kept")
+    kept = box.send(f"{SLUG}-eng-1", "operator", "kept")
     redis.zadd(box.key("address", "operator"), {"gone": 1})
-    with pytest.raises(InboxError, match="no message gone"):
-        read.inbox_items(box, SLUG)
+    assert [row["id"] for row in read.inbox_items(box, SLUG)] == [kept.id]
+    assert redis.zrange(box.key("address", "operator"), 0, -1) == [kept.id]
 
 
 def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_the_swarm(redis):
@@ -188,6 +186,11 @@ def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, mo
         expected[taker] = Receiver(seat_wait=bool(n % 2))
     items.extend([{"address": "operator", "history": []}, {"address": "stranger", "history": []}])
     expected.update(operator=Receiver(), stranger=Receiver(scoped=False))
+    from scripts.doctor.priming import doctor_slug
+    from scripts.swarm import fencing
+
+    fencing.read(store, SLUG)
+    fencing.read(store, doctor_slug(SLUG))
     trips = []
     direct, batched = redis.execute_command, Pipeline.execute
     monkeypatch.setattr(redis, "execute_command", lambda *a, **k: trips.append(a[0]) or direct(*a, **k))
@@ -280,6 +283,34 @@ def test_a_handoff_still_waiting_for_its_successor_is_read(redis, tmp_path):
         0,
         "# t2 handoff",
     )
+
+
+def test_handoff_consumed_after_key_scan_is_not_reported_as_unattributed(redis, tmp_path, monkeypatch):
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-2@{SLUG}"
+    author = f"{SLUG}-eng-2"
+    store.put_handoff(SLUG, "gone", "# gone", seat, {"agent": author})
+    store.put_handoff(SLUG, "kept", "# kept", seat, {"agent": author})
+    keys = [store.key(SLUG, "handoff", task) for task in ("gone", "kept")]
+
+    def consumed_scan(**kwargs):
+        store.clear_handoff(SLUG, "gone")
+        yield from keys
+
+    monkeypatch.setattr(redis, "scan_iter", consumed_scan)
+    rows = read.handoffs(store, box, tmp_path, SLUG, items=[])
+    assert [finding.id for finding in handoffs.findings(rows)] == [f"missing-recap/{author}"]
+    assert [(row["task"], row["seat"], row["from"], row["document"]) for row in rows] == [
+        ("kept", seat, author, "# kept")
+    ]
+
+
+def test_present_handoff_without_seat_or_sender_remains_unattributed(redis, tmp_path):
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.put_handoff(SLUG, "unattributed", "# unattributed")
+    [record] = read.handoffs(store, box, tmp_path, SLUG, items=[])
+    assert (record["seat"], record["from"], record["document"]) == ("", "", "# unattributed")
+    assert [finding.id for finding in handoffs.findings([record])] == ["unattributed-handoff/unattributed"]
 
 
 def test_a_waiting_handoff_is_authored_by_its_envelope_agent_not_the_next_seat_holder(redis, tmp_path):

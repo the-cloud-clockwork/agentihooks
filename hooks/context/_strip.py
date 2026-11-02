@@ -18,28 +18,21 @@ def strip_non_command_content(command: str) -> str:
     """
     check = command
 
-    # 1. Heredocs with any delimiter (<<WORD, <<'WORD', <<-WORD, <<-'WORD')
     check = re.sub(r"<<-?\s*'?(\w+)'?.*?\n\1\b", "", check, flags=re.DOTALL)
-    # Fallback: <<'EOF' or <<EOF to end of string (if delimiter not closed)
     check = re.sub(r"<<-?\s*'?\w+'?.*", "", check, flags=re.DOTALL)
 
-    # 2. Git commit messages (-m "..." or -m '...')
     check = re.sub(r'-m\s+"[^"]*"', "-m MSG", check)
     check = re.sub(r"-m\s+'[^']*'", "-m MSG", check)
 
-    # 3. Python -c string bodies
     check = re.sub(r"\bpython[0-9.]*\s+-c\s+'[^']*'", "python -c ''", check)
     check = re.sub(r'\bpython[0-9.]*\s+-c\s+"[^"]*"', 'python -c ""', check)
 
-    # 4. Echo/printf string arguments (double and single quoted)
     check = re.sub(r'\b(echo|printf)\s+(-[neE]+\s+)?"[^"]*"', r"\1 MSG", check)
     check = re.sub(r"\b(echo|printf)\s+(-[neE]+\s+)?'[^']*'", r"\1 MSG", check)
 
-    # 5. Curl data payloads (-d/--data/--data-raw/--data-binary)
     check = re.sub(r"(-d|--data(?:-raw|-binary)?)\s+'[^']*'", r"\1 ''", check)
     check = re.sub(r'(-d|--data(?:-raw|-binary)?)\s+"[^"]*"', r'\1 ""', check)
 
-    # 6. jq/awk program arguments (single-quoted)
     check = re.sub(r"\b(jq|awk|sed)\s+'[^']*'", r"\1 ''", check)
 
     return check

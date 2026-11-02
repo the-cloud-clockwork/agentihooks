@@ -128,9 +128,11 @@ def test_accepted_work_does_not_prevent_delivery_of_later_controls(store):
 
 
 def test_an_old_owner_cannot_hide_later_controls_or_its_pending_record(store):
+    from scripts.swarm import fencing
+
     commands.bind(store, "sw", "former")
     old = commands.submit(store, "sw", "swarm", ["pause"])
-    store.redis.delete(store.key("sw", "control-owner"))
+    fencing.write(store, "sw", lambda doc: doc.update(lease=None))
     commands.bind(store, "sw", "home")
     for _ in range(24):
         commands.submit(store, "sw", "swarm", ["start"])

@@ -19,6 +19,9 @@ for ((shard=1; shard<=shards; shard++)); do
     reused=".coverage-shards/coverage-3.12-$shard/reused-coverage/.coverage"
     if [[ -s "$reused" ]]; then reports+=("$reused"); fi
 done
+for carried in .coverage-shards/branch-*/*/.coverage*; do
+    if [[ -s "$carried" ]]; then reports+=("$carried"); fi
+done
 trap 'kill "${lcov_pid:-}" "${table_pid:-}" 2> /dev/null || true' EXIT
 lcov_log=$(mktemp)
 selected=()

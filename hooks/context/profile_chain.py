@@ -16,6 +16,8 @@ BUNDLE_PROFILES = "profiles"
 RENDER_STAMP = ".agentihooks-render.json"
 OVERLAY_CAP = 3
 HIVE_CAPABILITIES = "AGENTIHOOKS_HIVE_CAPABILITIES"
+USER_BUNDLE_ENV = "AGENTIHOOKS_USER_BUNDLE_PATH"
+SHARED_BUNDLE_ENV = "AGENTIHOOKS_SHARED_BUNDLE_PATH"
 
 
 def state_path() -> Path:
@@ -35,13 +37,61 @@ def read_state() -> dict:
     return {}
 
 
-def bundle_path(state: dict) -> Path | None:
-    bp = (state.get("bundle") or {}).get("path")
-    if bp:
-        path = Path(bp).expanduser()
-        if path.is_dir():
-            return path
+def bundle_path(state: dict, environ: Mapping[str, str] | None = None) -> Path | None:
+    return _slot_path(state, "bundle", "AGENTIHOOKS_BUNDLE_PATH", environ)
+
+
+def _slot_path(state: dict, key: str, env_name: str, environ: Mapping[str, str] | None) -> Path | None:
+    bp = (state.get(key) or {}).get("path")
+    if bp and (path := Path(bp).expanduser()).is_dir():
+        return path
+    raw = (environ or {}).get(env_name, "")
+    if raw and (path := Path(raw).expanduser().resolve()).is_dir():
+        return path
     return None
+
+
+def user_bundle_path(state: dict, environ: Mapping[str, str] | None = None) -> Path | None:
+    return _slot_path(state, "user_bundle", USER_BUNDLE_ENV, environ)
+
+
+def shared_bundle_path(state: dict, environ: Mapping[str, str] | None = None) -> Path | None:
+    return _slot_path(state, "shared_bundle", SHARED_BUNDLE_ENV, environ)
+
+
+def registered_user_bundle(state: dict, environ: Mapping[str, str]) -> Path | None:
+    raw = (state.get("user_bundle") or {}).get("path") or environ.get(USER_BUNDLE_ENV, "")
+    return Path(raw).expanduser() if raw else None
+
+
+def bundle_roots(state: dict) -> list[tuple[str, Path]]:
+    found = [("root", bundle_path(state)), ("shared", shared_bundle_path(state)), ("user", user_bundle_path(state))]
+    return [(kind, path) for kind, path in found if path is not None]
+
+
+def missing_bundle_roots(state: dict) -> list[tuple[str, Path]]:
+    found = []
+    for kind, key in (("root", "bundle"), ("shared", "shared_bundle"), ("user", "user_bundle")):
+        raw = (state.get(key) or {}).get("path")
+        if raw and not Path(raw).expanduser().is_dir():
+            found.append((kind, Path(raw).expanduser()))
+    return found
+
+
+def profile_holders(bundle: Path | None, user: Path | None, shared: Path | None = None) -> dict[str, list[str]]:
+    """Each profile name found in more than one bundle, with the bundles holding it in precedence order."""
+    holders: dict[str, list[str]] = {}
+    for kind, root in (("root", bundle), ("shared", shared), ("user", user)):
+        if root is None:
+            continue
+        for path in (root / BUNDLE_PROFILES).glob("*"):
+            if path.is_dir():
+                holders.setdefault(path.name, []).append(kind)
+    return {name: kinds for name, kinds in holders.items() if len(kinds) > 1}
+
+
+def profile_collisions(bundle: Path | None, user: Path | None, shared: Path | None = None) -> list[str]:
+    return sorted(profile_holders(bundle, user, shared))
 
 
 def active_profile(state: dict) -> str | None:
@@ -110,6 +160,22 @@ def require_capabilities(profile_dirs: list[tuple[str, Path]], available: set[st
             raise ValueError(f"overlay {name} requires hive capabilities: {', '.join(missing)}")
 
 
+def card(name: str, path: Path) -> dict:
+    """The agent card a profile declares: its description and its capabilities, each capability once."""
+    data = _manifest(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"profile {name} profile.yml must be a mapping")
+    description = data.get("description", "")
+    if not isinstance(description, str):
+        raise ValueError(f"profile {name} description must be a string")
+    capabilities = data.get("capabilities", [])
+    if not isinstance(capabilities, list) or any(
+        not isinstance(item, str) or not item.strip() for item in capabilities
+    ):
+        raise ValueError(f"profile {name} capabilities must be a list of nonempty strings")
+    return {"name": name, "description": description, "capabilities": list(dict.fromkeys(capabilities))}
+
+
 def role(profile_dirs: list[tuple[str, Path]]) -> str | None:
     return next((path.name for _, path in profile_dirs if path.parent == PACKAGE_ROLES), None)
 
@@ -135,6 +201,15 @@ def rendered_overlays(home: Path) -> list[str]:
         stamp = json.loads((Path(home) / RENDER_STAMP).read_text())
         rendered = stamp["render"] if "render" in stamp else stamp
         return [str(name) for name in rendered["overlays"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def rendered_chain(home: Path) -> list[str]:
+    try:
+        stamp = json.loads((Path(home) / RENDER_STAMP).read_text())
+        rendered = stamp["render"] if "render" in stamp else stamp
+        return [str(name) for name in rendered["chain"]]
     except (OSError, ValueError, KeyError, TypeError):
         return []
 
@@ -169,7 +244,11 @@ def expand_profiles(names: list[str], resolve: Callable[[str], Path | None]) -> 
 
 
 def profile_candidates(
-    bundle: Path | None, profile_csv: str | None, linked: dict[str, Path]
+    bundle: Path | None,
+    profile_csv: str | None,
+    linked: dict[str, Path],
+    user: Path | None = None,
+    shared: Path | None = None,
 ) -> list[tuple[str, list[Path]]]:
     """Each chained profile name with its candidate dirs, highest priority first."""
 
@@ -179,6 +258,10 @@ def profile_candidates(
         paths = [BUILT_IN_PROFILES / name]
         if bundle is not None:
             paths.append(bundle / BUNDLE_PROFILES / name)
+        if shared is not None:
+            paths.append(shared / BUNDLE_PROFILES / name)
+        if user is not None:
+            paths.append(user / BUNDLE_PROFILES / name)
         if name in linked:
             paths.append(linked[name])
         paths.append(PACKAGE_ROLES / name)
@@ -193,18 +276,30 @@ def profile_candidates(
     return [(name, candidates(name)) for name in expanded + [name for name in names if name not in found]]
 
 
-def profile_dirs(bundle: Path | None, profile_csv: str | None, linked: dict[str, Path]) -> list[tuple[str, Path]]:
+def profile_dirs(
+    bundle: Path | None,
+    profile_csv: str | None,
+    linked: dict[str, Path],
+    user: Path | None = None,
+    shared: Path | None = None,
+) -> list[tuple[str, Path]]:
     """The chain's resolved profile dirs: the first existing candidate per name."""
     out = []
-    for name, candidates in profile_candidates(bundle, profile_csv, linked):
+    for name, candidates in profile_candidates(bundle, profile_csv, linked, user, shared):
         found = next((path for path in candidates if path.is_dir()), None)
         if found is not None:
             out.append((name, found))
     return out
 
 
-def rendered_dirs(bundle: Path | None, profile_csv: str, linked: dict[str, Path]) -> list[tuple[str, Path]]:
+def rendered_dirs(
+    bundle: Path | None,
+    profile_csv: str,
+    linked: dict[str, Path],
+    user: Path | None = None,
+    shared: Path | None = None,
+) -> list[tuple[str, Path]]:
     """The chain a profile home renders: the profile's dirs plus every overlay the chain declares."""
-    dirs = profile_dirs(bundle, profile_csv, linked)
+    dirs = profile_dirs(bundle, profile_csv, linked, user, shared)
     declared = [overlay for _, path in dirs for overlay in overlays(path)]
-    return profile_dirs(bundle, ",".join([profile_csv, *declared]), linked) if declared else dirs
+    return profile_dirs(bundle, ",".join([profile_csv, *declared]), linked, user, shared) if declared else dirs

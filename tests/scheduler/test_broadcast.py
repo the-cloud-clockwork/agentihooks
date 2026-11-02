@@ -1,5 +1,7 @@
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
+
 pytestmark = pytest.mark.unit
 
 
@@ -12,7 +14,7 @@ def test_timer_broadcast_is_delivered_once_after_crash_and_clear(monkeypatch, ch
     from scripts.scheduler.slots import BroadcastSlot
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    scheduler = Scheduler(redis, machine="proof")
+    scheduler = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     timer = scheduler.timer(owner="operator", at=100, payload="fleet notice", now=90)
     timer.timeout.connect(BroadcastSlot(channel))
     timer.start(now=100)
@@ -34,7 +36,7 @@ def test_timer_broadcast_is_delivered_once_after_crash_and_clear(monkeypatch, ch
     delivery_id = messages[0]["id"]
     broadcast.clear_broadcasts()
     assert broadcast.list_broadcasts() == []
-    restarted = Scheduler(redis, machine="proof")
+    restarted = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     assert restarted.run_due(now=110) == 0
     assert restarted.get(timer.id).state == "fired"
     assert broadcast.list_broadcasts() == []
@@ -63,7 +65,7 @@ def test_scheduled_broadcast_retains_delivery_and_normal_broadcasts(monkeypatch)
     from scripts.scheduler.slots import BroadcastSlot
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    scheduler = Scheduler(redis, machine="proof")
+    scheduler = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     timer = scheduler.timer(owner="operator", delay=0, payload="scheduled", now=100)
     timer.timeout.connect(BroadcastSlot())
     timer.start(now=100)
@@ -79,7 +81,7 @@ def test_scheduled_broadcast_retains_delivery_and_normal_broadcasts(monkeypatch)
     scheduled = broadcast.list_broadcasts()[0]
     broadcast.mark_delivered("proof-session", scheduled["id"])
     broadcast.create_broadcast("ordinary")
-    Scheduler(redis, machine="proof").run_due(now=110)
+    Scheduler(RedisStateStore(redis, "scheduler"), machine="proof").run_due(now=110)
     messages = broadcast.list_broadcasts()
     assert len(messages) == 2
     recovered = next(item for item in messages if item["id"] == scheduled["id"])
@@ -96,7 +98,7 @@ def test_broadcast_recovers_a_crash_between_fire_and_publication(monkeypatch):
     from scripts.scheduler.slots import BroadcastSlot
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    scheduler = Scheduler(redis, machine="proof")
+    scheduler = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     timer = scheduler.timer(owner="operator", delay=1, payload="recovered", now=100)
     timer.timeout.connect(BroadcastSlot())
     timer.start(now=100)
@@ -108,7 +110,7 @@ def test_broadcast_recovers_a_crash_between_fire_and_publication(monkeypatch):
         fault.setattr(scheduled_broadcasts, "publish", crash)
         assert scheduler.run_due(now=101) == 1
     assert broadcast.list_broadcasts() == []
-    restarted = Scheduler(redis, machine="proof")
+    restarted = Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
     assert restarted.run_due(now=120) == 0
     messages = broadcast.list_broadcasts()
     assert len(messages) == 1

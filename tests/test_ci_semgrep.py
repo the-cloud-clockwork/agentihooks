@@ -9,7 +9,6 @@ import yaml
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[1]
-SHARED = "The-Cloud-Clockwork/.github/.github/workflows/semgrep-reusable.yml@main"
 
 
 def _semgrep():
@@ -20,16 +19,37 @@ def _jobs():
     return _semgrep()["jobs"]
 
 
-def test_wrapper_runs_the_shared_scan_feature_tests_and_chart_guard():
+def _workflow(name):
+    return yaml.safe_load((_ROOT / ".github/workflows" / name).read_text())
+
+
+def test_wrapper_runs_the_inline_scan_feature_tests_and_chart_guard():
     assert set(_jobs()) == {"scan", "feature-tests", "charts"}
 
 
-def test_scan_calls_the_shared_workflow_on_its_main_branch():
-    assert _jobs()["scan"]["uses"] == SHARED
+def test_scan_runs_inline_without_private_organization_workflow_calls():
+    assert "uses" not in _jobs()["scan"]
+    for workflow in (_ROOT / ".github/workflows").glob("*.yml"):
+        document = yaml.safe_load(workflow.read_text())
+        assert all(
+            not job.get("uses", "").lower().startswith("the-cloud-clockwork/.github/")
+            for job in document["jobs"].values()
+        )
 
 
-def test_scan_passes_exactly_the_shared_workflow_inputs():
-    assert set(_jobs()["scan"]["with"]) == {"base", "configs", "exclude_rules", "rules_dir", "runs_on"}
+def test_scan_keeps_the_reusable_workflow_steps():
+    steps = _jobs()["scan"]["steps"]
+    assert steps[0] == {"uses": "actions/checkout@v4", "with": {"ref": "${{ github.sha }}", "fetch-depth": 0}}
+    assert steps[1] == {"name": "Set up Python", "uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}}
+    assert [step.get("name") for step in steps[2:]] == [
+        "Install Semgrep",
+        "Own rules hold on their fixtures and the code",
+        "Source control exceptions only shrink",
+        "Resolve the merge base of the head and the base",
+        "Fail on findings new against the base",
+    ]
+    assert steps[2]["env"] == {"SEMGREP_VERSION": "1.177.0"}
+    assert _jobs()["scan"]["timeout-minutes"] == 5
 
 
 def test_scan_grades_new_findings_against_the_caller_base():
@@ -37,29 +57,105 @@ def test_scan_grades_new_findings_against_the_caller_base():
     base = document[True]["workflow_call"]["inputs"]["base"]
     assert base["type"] == "string"
     assert base["required"] is True
-    assert _jobs()["scan"]["with"]["base"] == "${{ inputs.base }}"
+    baseline = _jobs()["scan"]["steps"][-2]
+    assert baseline["id"] == "baseline"
+    assert baseline["env"] == {"BASE": "${{ inputs.base }}"}
+    assert 'git merge-base "$BASE" HEAD' in baseline["run"]
+    scan = _jobs()["scan"]["steps"][-1]
+    assert scan["env"]["BASE"] == "${{ steps.baseline.outputs.sha }}"
+    assert '--baseline-commit "$BASE"' in scan["run"]
 
 
-def test_scan_runs_the_registry_packs_for_ci_secrets_and_python():
-    assert set(_jobs()["scan"]["with"]["configs"].split()) == {"p/ci", "p/secrets", "p/python"}
+def test_scan_runs_the_registry_packs_and_the_outage_rules():
+    assert set(_jobs()["scan"]["steps"][-1]["env"]["CONFIGS"].split()) == {
+        "p/ci",
+        "p/secrets",
+        "p/python",
+        ".semgrep-incidents",
+    }
+
+
+def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step():
+    assert ".semgrep-incidents" in _jobs()["scan"]["steps"][-1]["env"]["CONFIGS"].split()
+    assert any(_ROOT.glob(".semgrep-incidents/*.yml"))
+    runs = [step.get("run") for step in _jobs()["feature-tests"]["steps"]]
+    assert "semgrep --metrics off --test .semgrep-incidents" in runs
+    assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
+
+
+@pytest.mark.feature("semgrep-feature-tests")
+def test_feature_fixture_command_runs_recursively():
+    job = _jobs()["feature-tests"]
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert "semgrep --metrics off --test .semgrep/features" in commands
+    assert "if" not in job and "continue-on-error" not in job
+    assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+
+
+def test_feature_map_links_are_required_alongside_feature_rule_fixtures():
+    steps = _jobs()["feature-tests"]["steps"]
+    assert any(step.get("run") == "python -m scripts.feature_map" for step in steps)
+    assert any(step.get("run") == 'python -m pip install semgrep==1.177.0 "pyyaml>=6.0"' for step in steps)
+
+
+def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -> None:
+    import json
+
+    rule = yaml.safe_load((_ROOT / ".semgrep/source-control.yml").read_text())["rules"][0]
+    assert rule["id"] == "swarm-source-control-port"
+    assert rule["languages"] == ["python"]
+    assert rule["severity"] == "ERROR"
+    assert rule["pattern-either"] == [
+        {"pattern": '["gh", ...]'},
+        {"pattern": "scripts.tick.adapters.github.command(...)"},
+    ]
+    assert rule["paths"]["include"] == ["/scripts/swarm/**", "*.test.py"]
+    allowed = json.loads((_ROOT / ".semgrep/source-control-allowlist.json").read_text())
+    assert rule["paths"]["exclude"] == allowed
+    assert "/scripts/tick/adapters/github.py" in allowed
+    assert all(path.endswith(".py") and "*" not in path for path in allowed)
+    assert "/scripts/swarm/publish.py" not in allowed
+    assert "/scripts/swarm/github_sampler.py" not in allowed
+    assert "/scripts/swarm/stack.py" not in allowed
+    assert "/scripts/swarm/panic.py" not in allowed
+    assert "/scripts/swarm/linked_issues.py" not in allowed
+    assert "/scripts/swarm/ready.py" not in allowed
+    assert "/scripts/swarm/ledger_host.py" not in allowed
+    assert "/scripts/swarm/health/checks.py" not in allowed
+    assert "/scripts/swarm/fleet_red.py" not in allowed
+    assert "/scripts/swarm/cli.py" not in allowed
+    assert "/scripts/swarm/ci_speed.py" not in allowed
+    assert "/scripts/swarm/mutation_wait.py" not in allowed
+    assert "/scripts/swarm/ledger_events.py" not in allowed
+
+
+def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
+    steps = _jobs()["scan"]["steps"]
+    step = next(step for step in steps if step.get("name") == "Source control exceptions only shrink")
+    assert step["env"]["BASE"] == "${{ inputs.base }}"
+    assert 'git show "$BASE:.semgrep/source-control-allowlist.json"' in step["run"]
+    assert "current <= previous" in step["run"]
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():
-    assert _jobs()["scan"]["with"]["exclude_rules"].split() == [
+    assert _jobs()["scan"]["steps"][-1]["env"]["EXCLUDE_RULES"].split() == [
         "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
     ]
 
 
 def test_scan_reads_the_domain_rules_folder_that_holds_rule_files():
-    rules_dir = _ROOT / _jobs()["scan"]["with"]["rules_dir"]
+    step = _jobs()["scan"]["steps"][3]
+    rules_dir = _ROOT / step["env"]["RULES"]
     assert rules_dir == _ROOT / ".semgrep"
     assert any(_ROOT.glob(".semgrep/*.yml"))
+    assert "semgrep --metrics off --test --config rules rules" in step["run"]
+    assert 'semgrep scan --error --strict --metrics off --config "$RULES" .' in step["run"]
 
 
 def test_scan_and_charts_run_on_the_select_runner_expression():
     jobs = _jobs()
     select = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["select"]
-    assert jobs["scan"]["with"]["runs_on"] == jobs["charts"]["runs-on"] == select["runs-on"]
+    assert jobs["scan"]["runs-on"] == jobs["charts"]["runs-on"] == select["runs-on"]
 
 
 def test_charts_run_the_chart_timer_guard():
@@ -128,7 +224,7 @@ def test_charts_fail_when_the_install_leaves_another_semgrep(tmp_path):
 def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
     jobs = _jobs()
     assert not {"if", "continue-on-error"} & (set(jobs["scan"]) | set(jobs["charts"]))
-    assert all("if" not in step and "continue-on-error" not in step for step in jobs["charts"]["steps"])
+    assert all("if" not in step and "continue-on-error" not in step for job in jobs.values() for step in job["steps"])
 
 
 def test_wrapper_holds_only_read_permission():
@@ -140,4 +236,60 @@ def test_feature_tests_and_charts_have_runner_classes():
     assert {key for key in classes if key.startswith("semgrep.yml/")} == {
         "semgrep.yml/charts",
         "semgrep.yml/feature-tests",
+        "semgrep.yml/scan",
     }
+
+
+def test_exactly_one_step_per_ratchet_grades_against_the_base():
+    ratchets = [
+        (job, step)
+        for job, body in _jobs().items()
+        for step in body.get("steps", [])
+        if "check --base FETCH_HEAD" in step.get("run", "") or "--baseline-commit" in step.get("run", "")
+    ]
+    assert [(job, step["name"]) for job, step in ratchets] == [
+        ("scan", "Fail on findings new against the base"),
+        ("charts", "Guard rules hold on their fixtures and at their computed floors"),
+    ]
+    assert all(not {"if", "continue-on-error"} & set(step) for _, step in ratchets)
+
+
+def test_wrapper_is_triggered_only_by_workflow_call():
+    assert set(_semgrep()[True]) == {"workflow_call"}
+
+
+def test_tests_workflow_scans_pull_requests_into_dev_and_admitted_dispatches_only():
+    tests = _workflow("test.yml")
+    assert tests[True]["pull_request"] == {"branches": ["dev"]}
+    job = tests["jobs"]["semgrep"]
+    assert job["uses"] == "./.github/workflows/semgrep.yml"
+    for clause in (
+        "(github.event_name != 'workflow_dispatch' || needs.admission.result == 'success')",
+        "github.event_name != 'merge_group'",
+        "github.event_name != 'push'",
+    ):
+        assert clause in job["if"]
+
+
+def test_proofs_workflow_scans_only_on_the_semgrep_proof_against_its_base():
+    job = _workflow("proofs.yml")["jobs"]["semgrep"]
+    assert job["uses"] == "./.github/workflows/semgrep.yml"
+    assert job["if"] == "inputs.proof == 'semgrep'"
+    assert job["with"] == {"base": "${{ inputs.base }}"}
+
+
+def test_scan_holds_the_status_the_dev_rulesets_require():
+    gate = _workflow("test.yml")["jobs"]["gate-required"]
+    assert gate["name"] == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
+    assert "semgrep" in gate["needs"]
+    grader = next(step for step in gate["steps"] if step.get("name") == "Require every gate to succeed")
+    assert '["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]' in grader["run"]
+    for ruleset in ("dev-history.json", "dev-no-delete.json"):
+        rules = json.loads((_ROOT / ".github/rulesets" / ruleset).read_text())["rules"]
+        checks = next(rule for rule in rules if rule["type"] == "required_status_checks")
+        assert [check["context"] for check in checks["parameters"]["required_status_checks"]] == ["Gate — Required"]
+
+
+def test_caller_and_wrapper_jobs_keep_their_job_id_check_names():
+    assert "name" not in _workflow("test.yml")["jobs"]["semgrep"]
+    assert all("name" not in job for job in _jobs().values())

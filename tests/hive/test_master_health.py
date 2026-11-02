@@ -25,7 +25,7 @@ def test_master_health_reports_actual_auth_and_headless_placement(kind, headless
         assert finding.id == "master-headless/master@fixture"
         assert finding.summary == "master runs on a headless hive"
         assert finding.evidence == ("hive: remote", "agent master-agent")
-        assert finding.threshold == "the master has no UI hive"
+        assert finding.threshold == "the master is not on swarm-master"
         assert finding.measure == 1
     agent.update(route_kind="interactive", profile_decision={"master_placement": {"hive": "login", "headless": False}})
     assert health.findings({}, [agent], {}, health.Limits()) == []

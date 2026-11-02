@@ -197,20 +197,17 @@ def test_controller_fences_ledger_and_spawn_writes(store):
     runtime = FakeRuntime()
     ledger = FakeLedger([])
     held = lease.acquire(store, "sw", "home")
-    guarded_ledger = controller.FencedLedger(store, "sw", held, ledger)
     guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, "local")
-    assert guarded_ledger.state("sw") == ledger.state("sw")
-    guarded_runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"})
+    with lease.held_pass(store, "sw", held):
+        assert lease.epoch_for("sw") == 1
+        guarded_runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"})
     assert runtime.tasks[0]["controller_epoch"] == 1
+    assert lease.epoch_for("sw") is None
     assert lease.release(store, "sw", held)
     lease.acquire(store, "sw", "other")
-    for write in (
-        lambda: guarded_ledger.update_task("sw", "t", {"state": "claimed"}),
-        lambda: guarded_runtime.spawn(store.config("sw"), "eng", "two", {"id": "t"}),
-    ):
-        with pytest.raises(SwarmError) as error:
-            write()
-        assert str(error.value) == "the controller lease is stale"
+    with pytest.raises(SwarmError) as error, lease.held_pass(store, "sw", held):
+        ledger.update_task("sw", "t", {"state": "claimed"})
+    assert str(error.value) == "the controller lease is stale"
     assert len(runtime.spawned) == 1
 
 
@@ -338,10 +335,6 @@ def test_fenced_adapters_preserve_arguments_and_refuse_disabled_spawn(store):
 
     held = lease.acquire(store, "sw", "home")
     calls = []
-    ledger = SimpleNamespace(update_task=lambda *args, **kwargs: calls.append((args, kwargs)) or "accepted")
-    guarded = controller.FencedLedger(store, "sw", held, ledger)
-    assert guarded.update_task("sw", "t", {"state": "claimed"}, if_state=("open",)) == "accepted"
-    assert calls == [(("sw", "t", {"state": "claimed"}), {"if_state": ("open",)})]
     config = store.config("sw")
     receiver = SimpleNamespace(
         has_capacity=lambda saved: False,
@@ -357,26 +350,21 @@ def test_fenced_adapters_preserve_arguments_and_refuse_disabled_spawn(store):
     assert str(error.value) == "controller spawning is disabled in this deployment mode"
 
 
-@pytest.mark.parametrize("operand", ["tick-lock", "control-owner"])
-def test_tick_lock_detects_writes_interleaved_with_acquisition(store, monkeypatch, operand):
+def test_tick_lock_detects_a_write_interleaved_with_acquisition(store, monkeypatch):
     import json
 
     from scripts.swarm import controller, lease
 
     held = lease.acquire(store, "sw", "home")
     pipeline = store.redis.pipeline
-    value = json.dumps(
-        {"epoch": 1, "token": "other tick"}
-        if operand == "tick-lock"
-        else {"owner": "other", "epoch": 2, "expires_at": held.expires_at}
-    )
+    value = json.dumps({"epoch": 1, "token": "other tick"})
 
     def interleaved_pipeline():
         pipe = pipeline()
         execute = pipe.execute
 
         def commit():
-            store.redis.set(store.key("sw", operand), value, px=180000)
+            store.redis.set(store.key("sw", "tick-lock"), value, px=180000)
             return execute()
 
         pipe.execute = commit
@@ -384,7 +372,44 @@ def test_tick_lock_detects_writes_interleaved_with_acquisition(store, monkeypatc
 
     monkeypatch.setattr(store.redis, "pipeline", interleaved_pipeline)
     assert controller.take_tick_lock(store, "sw", held, 10000) is None
-    assert store.redis.get(store.key("sw", operand)) == value
+    assert store.redis.get(store.key("sw", "tick-lock")) == value
+
+
+def test_tick_lock_detects_a_lease_taken_over_during_acquisition(store, monkeypatch):
+    from scripts.swarm import controller, fencing, lease
+    from scripts.swarm.store import SwarmError
+
+    held = lease.acquire(store, "sw", "home")
+    real_for_store = fencing.state.for_store
+    value = {"owner": "other", "epoch": 2, "expires_at": held.expires_at}
+    raced = []
+
+    def for_store(raced_store, bucket):
+        states = real_for_store(raced_store, bucket)
+        if raced:
+            return states
+
+        class Racing:
+            def get(self, slug):
+                raced.append(True)
+                entry = states.get(slug)
+                doc = fencing._decode(entry.value)
+                doc["lease"] = value
+                states.update(slug, fencing._encode(doc), entry.revision)
+                return states.get(slug)
+
+            def create(self, slug, raw):
+                return states.create(slug, raw)
+
+            def update(self, slug, raw, revision):
+                return states.update(slug, raw, revision)
+
+        return Racing()
+
+    monkeypatch.setattr(fencing.state, "for_store", for_store)
+    with pytest.raises(SwarmError, match=lease.STALE):
+        controller.take_tick_lock(store, "sw", held, 10000)
+    assert fencing.read(store, "sw")["lease"] == value
 
 
 def test_run_once_passes_the_supplied_tick_interfaces(store, monkeypatch):

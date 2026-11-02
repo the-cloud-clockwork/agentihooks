@@ -654,3 +654,35 @@ def test_a_malformed_packed_manifest_is_unusable(packed):
         archive.writestr(ci_test_plan.PACKED_FILE, json.dumps({"commit": "c", "units": ["u"], **packed}))
     with pytest.raises(ci_test_plan.UnusableRecord):
         ci_test_plan._manifest(buffer.getvalue())
+
+
+def test_a_files_list_shared_by_many_tests_is_checked_once(monkeypatch):
+    shared = ["tests/test_a.py"]
+    manifest = {
+        "commit": "c",
+        "units": ["hooks/a.py::a"],
+        "tests": {f"t{n}": {"units": [0], "files": shared, "escapes": False} for n in range(3)},
+    }
+    checked = []
+    strings = ci_test_plan._strings
+
+    def counted(value):
+        checked.append(value)
+        return strings(value)
+
+    monkeypatch.setattr(ci_test_plan, "_strings", counted)
+    assert ci_test_plan._valid_manifest(manifest)
+    assert checked == [manifest["units"], shared]
+
+
+@pytest.mark.parametrize(
+    ("units", "valid"),
+    [([], True), ([0, 1], True), ([1, 0], True), ([0, True], False), ([0, 2], False), ([1, -1], False)],
+)
+def test_test_units_must_be_integers_inside_the_unit_table(units, valid):
+    manifest = {
+        "commit": "c",
+        "units": ["hooks/a.py::a", "hooks/a.py::b"],
+        "tests": {"t": {"units": units, "files": [], "escapes": False}},
+    }
+    assert ci_test_plan._valid_manifest(manifest) is valid

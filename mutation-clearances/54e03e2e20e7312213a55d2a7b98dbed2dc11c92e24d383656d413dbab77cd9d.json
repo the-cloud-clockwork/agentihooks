@@ -1,0 +1,6 @@
+{
+  "hooks/observability/consultation.py:hooks.observability.consultation.x\u01c1Metrics\u01c1_insert__mutmut_13:f33de75e591951b1145c6aef9b7af496d31f84f86d08b04214a14a7e628df18f": {
+    "reader": "Standards",
+    "reason": "Only SQL keyword or unquoted identifier casing changes. SQLite is case insensitive for these tokens; execution and bound values are unchanged."
+  }
+}

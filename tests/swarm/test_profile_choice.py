@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -479,9 +480,7 @@ def test_a_later_unresolved_answer_blocks_its_task_and_the_rest_still_launch(mon
 def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
     complete = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high"}
     lost = {"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "engineer"}}}
-    with pytest.raises(tick.SpawnError) as error:
-        profile_choice.transfer(lost)
-    assert error.value.status == "unsupported"
+    assert profile_choice.transfer(lost) == {}
     assert profile_choice.transfer({**lost, profile_choice.FRESH: True}) == {}
     assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}, profile_choice.FRESH: True}) == {}
     assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}}) == complete
@@ -495,16 +494,52 @@ def test_a_handoff_whose_launch_never_reported_options_keeps_its_identity():
     assert profile_choice.transfer({**task, "handoff_envelope": {"launch": half}}) == half
 
 
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {},
+        {"launch": {}},
+        {"launch": {"profile": "", "harness": "", "model": "claude-opus-5-5", "effort": "medium"}},
+        {"launch": {"profile": "engineer", "harness": ""}},
+        {"launch": {"profile": "", "harness": "claude"}},
+    ],
+    ids=["no-envelope", "no-launch", "empty-identity", "no-harness", "no-profile"],
+)
+def test_a_handoff_without_a_complete_launch_identity_spawns_fresh(envelope):
+    task = {"id": "t962", "handoff": "## Next\nGo on\n", "handoff_envelope": envelope}
+    assert profile_choice.transfer(task) == {}
+
+
+def test_runtime_spawns_a_handoff_with_an_empty_launch_identity_fresh_with_its_text(tmp_path, asked, ledger_file):
+    asked("frontend")
+    calls = []
+
+    def launch(argv, **kwargs):
+        calls.append(argv)
+        out = "status=started\nroute_status=direct\npane_id=w:p1\nagent=claude\nprofile=frontend\nmodel=m\neffort=low\n"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
+
+    config = store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3")
+    rt = runtime.HerdrRuntime(home=tmp_path, run=launch, choose=lambda *_: ("claude", "open"))
+    empty = {"profile": "", "harness": "", "model": "claude-opus-5-5", "effort": "medium"}
+    task = {**TASK, "handoff": "## Next\nGo on from seam two\n", "handoff_envelope": {"launch": empty}}
+    placed = rt.spawn(config, "eng", "a", task)
+    argv = calls[0]
+    assert argv[argv.index("--profile") + 1] == "frontend"
+    assert placed.profile_decision["source"] == "classifier"
+    assert "Go on from seam two" in Path(argv[argv.index("--prompt-file") + 1]).read_text()
+
+
 class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
     def placement_refusal(self, lane, task):
         self.checked.append(task.get("id"))
         if task.get("id") == "t1" and self.checked.count("t1") > 2:
-            profile_choice.transfer({"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "x"}}})
+            profile_choice.transfer({"handoff_envelope": {"launch": {"profile": "x", "harness": "gemini"}}})
         return ""
 
     def spawn(self, config, lane, name, task):
         if task["id"] == "t1":
-            raise tick.SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
+            raise tick.SpawnError("unsupported handoff harness: gemini", "unsupported")
         return super(LaterUnresolvedRuntime, self).spawn(config, lane, name, task)
 
 
@@ -519,5 +554,5 @@ def test_a_failed_launch_whose_placement_check_raises_is_recorded_and_the_rest_s
     rt = UnsupportedHandoffRuntime()
     tick.tick("sw", two, ledger, rt, now_ms=1_000)
     assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
-    assert "run options are missing" in two.launch_failure("sw", "t1")
+    assert "harness: gemini" in two.launch_failure("sw", "t1")
     assert {row["state"] for row in two.launches("sw") if row["task"] == "t1"} == {"failed"}

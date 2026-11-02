@@ -1,10 +1,13 @@
 import http.client
 import json
+import types
 
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api import routes
+from scripts.swarm_ledger.repository.fragments import document
 from tests.swarm_ledger.test_api_v1 import authority_live, live
 from tests.swarm_ledger.test_ledger_authority import SLUG, send
+from tests.swarm_ledger.test_sqlite import CONTENT, chat, store
 
 __all__ = ["authority_live", "live"]
 
@@ -24,24 +27,47 @@ def test_export_sends_the_cached_view_bytes_without_copying_them(live, monkeypat
     assert type(sent[0]) is bytes and sent[0] is sent[1]
 
 
-def test_export_bytes_are_the_utf8_export_body():
-    state = {"title": "café", "_meta": {"seeds": [1], "members": ["m"]}}
-    assert routes.export_bytes(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'.encode("utf-8")
-    assert type(routes.export_bytes(state)) is bytes
+def test_export_text_hides_seeds_and_receipts_and_keeps_text_unescaped():
+    state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"], "rev": 2}}
+    expected = '{"data":{"title":"café","_meta":{"members":["m"],"rev":2}}}'
+    assert routes.export_text(document(state)) == expected.encode("utf-8")
+    assert type(routes.export_text(document(state))) is bytes
 
 
-def test_export_encoding_peak_is_bounded_by_response_size():
-    import tracemalloc
+def test_export_text_matches_the_hidden_view_of_any_ledger():
+    state = {"title": "🟣", "_meta": {"seeds": [1], "api_operations": {}, "events": [{"n": 1.5}]}, "notes": ["x"] * 3}
+    data = routes.export_text(document(state))
+    assert (
+        data
+        == json.dumps(
+            {"data": {**state, "_meta": {"events": [{"n": 1.5}]}}}, ensure_ascii=False, separators=(",", ":")
+        ).encode()
+    )
 
-    state = {"title": "🟣", "_meta": {"seeds": [1]}, "notes": ["x" * 4096] * 256}
-    tracemalloc.start()
-    try:
-        data = routes.export_bytes(state)
-        _, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
-    assert data == json.dumps({"data": {**state, "_meta": {}}}, ensure_ascii=False).encode("utf-8")
-    assert peak < len(data) * 3
+
+def test_a_later_export_reuses_the_text_of_every_section_no_write_changed():
+    first = document({"title": "t", "tasks": [{"id": "a"}, {"id": "b"}], "_meta": {"rev": 1}})
+    routes.export_text(first)
+    second = document({"title": "t", "tasks": [{"id": "a"}, {"id": "c"}], "_meta": {"rev": 2}}, first)
+    kept = second.parts["tasks"].parts[0]
+    assert kept is first.parts["tasks"].parts[0] and kept.data == b'{"id":"a"}'
+    assert second.parts["title"].data == b'"t"' and second.parts["tasks"].data is None
+    assert json.loads(routes.export_text(second)) == {
+        "data": {"title": "t", "tasks": [{"id": "a"}, {"id": "c"}], "_meta": {"rev": 2}}
+    }
+    assert second.parts["tasks"].data == b'[{"id":"a"},{"id":"c"}]'
+
+
+def test_a_plain_export_is_whole_even_when_the_change_log_reaches_back_to_generation_one(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    monkeypatch.setattr(repo.domain, "now_ms", lambda: 0)
+    repo.create("ledger", CONTENT)
+    repo.apply_ops("ledger", ops=[chat(1)])
+    repo.apply_ops("ledger", ops=[chat(2)])
+    assert repo.current("ledger").generation == 2
+    handler = types.SimpleNamespace(send_export=lambda data: data)
+    body = routes.export(handler, types.SimpleNamespace(repository=repo), "ledger", "export", {})
+    assert [item["id"] for item in json.loads(body)["data"]["chat"]][-2:] == ["m1", "m2"]
 
 
 def test_export_response_is_never_cached(live):

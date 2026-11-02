@@ -183,7 +183,7 @@ def test_an_invite_whose_member_swarms_write_fails_revokes_the_new_member(admin)
 
 
 def auth_members(admin):
-    return sorted(key.rsplit(":", 1)[1] for key in admin.keys(f"{auth.PREFIX}:member:*"))
+    return sorted(auth.members(admin))
 
 
 def test_the_hive_endpoint_checks_membership_before_rotating_the_redis_password(admin):

@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from unittest.mock import Mock, call
 
 import ledger_core
 import new_ledger
@@ -85,6 +86,67 @@ def test_init_sets_the_explicit_path_and_default_domain_cache_and_guard():
         pass
 
 
+def test_store_registers_its_reader_finalizer(monkeypatch):
+    finalize = Mock(wraps=sqlite.weakref.finalize)
+    monkeypatch.setattr(sqlite.weakref, "finalize", finalize)
+
+    store = SQLiteLedgerRepository(Path("some/ledgers.sqlite3"))
+
+    finalize.assert_called_once_with(store, sqlite.close_all, store._held)
+
+
+def test_open_forwards_connection_options_without_schema_work(tmp_path, monkeypatch):
+    connection = Mock()
+    connect = Mock(return_value=connection)
+    monkeypatch.setattr(sqlite, "sqlite3", Mock(connect=connect))
+    path = tmp_path / sqlite.DATABASE
+    store = SQLiteLedgerRepository(path)
+    store._ready.add(path)
+
+    assert store._open(check_same_thread=False) == (path, connection)
+
+    connect.assert_called_once_with(path, timeout=30, check_same_thread=False)
+    assert connection.execute.call_args_list == [
+        call("PRAGMA foreign_keys=ON"),
+        call("PRAGMA synchronous=FULL"),
+    ]
+
+
+def test_release_reader_removes_and_closes_only_its_connection():
+    connection, other = Mock(), Mock()
+    held = {connection: Mock(), other: Mock()}
+
+    sqlite.release_reader(held, connection)
+
+    assert list(held) == [other]
+    connection.close.assert_called_once_with()
+    other.close.assert_not_called()
+
+
+def test_release_reader_closes_a_connection_absent_from_the_held_map():
+    connection, other = Mock(), Mock()
+    held = {other: Mock()}
+
+    sqlite.release_reader(held, connection)
+
+    assert list(held) == [other]
+    connection.close.assert_called_once_with()
+    other.close.assert_not_called()
+
+
+def test_close_all_releases_every_reader_while_callbacks_remove_them():
+    connections = [Mock(), Mock()]
+    held = {
+        connection: lambda connection=connection: sqlite.release_reader(held, connection) for connection in connections
+    }
+
+    sqlite.close_all(held)
+
+    assert held == {}
+    for connection in connections:
+        connection.close.assert_called_once_with()
+
+
 def test_bound_returns_self_when_path_is_fixed_or_domain_already_matches():
     fixed = SQLiteLedgerRepository(Path("ledger.db"))
     other_domain = object()
@@ -125,7 +187,6 @@ def test_adopt_forwards_self_and_slug_to_legacy_adopt(tmp_path, monkeypatch):
         lambda r: r.get_document("ledger"),
         lambda r: r.read("ledger", "title"),
         lambda r: r.token("ledger"),
-        lambda r: r.events_since("ledger", 0),
         lambda r: r.export_document("ledger"),
     ],
 )
@@ -143,6 +204,19 @@ def test_exists_is_false_before_creation_and_true_after(tmp_path):
     assert r.exists("ledger") is False
     r.create("ledger", CONTENT)
     assert r.exists("ledger") is True
+
+
+def test_a_reader_connects_to_the_store_path_with_the_lock_wait_and_any_thread(tmp_path, monkeypatch):
+    calls, connect = [], sqlite3.connect
+
+    def recording(*args, **kwargs):
+        calls.append((args, kwargs))
+        return connect(*args, **kwargs)
+
+    path = tmp_path / sqlite.DATABASE
+    monkeypatch.setattr(sqlite.sqlite3, "connect", recording)
+    assert not SQLiteLedgerRepository(path).exists("ledger")
+    assert calls == [((path,), {"timeout": 30, "check_same_thread": False})]
 
 
 def test_entry_reads_fresh_when_nothing_is_cached_and_traces_the_select(tmp_path, monkeypatch):
@@ -241,7 +315,7 @@ def test_write_advances_the_generation_updates_the_row_and_appends_events(tmp_pa
             "SELECT revision, generation, touched_at FROM ledgers WHERE slug=?", ("ledger",)
         ).fetchone()
     assert row == (new_state["_meta"]["rev"], entry.generation + 1, 777777)
-    assert r.events_since("ledger", -1) == [{"id": "e1", "rev": 1}]
+    assert r.export_document("ledger")["_meta"]["events"] == [{"id": "e1", "rev": 1}]
     assert r.get_document("ledger")["title"] == "Renamed"
 
 
@@ -258,7 +332,7 @@ def test_insert_writes_the_row_seeds_and_events_then_overwrites_and_drops_the_ca
             "SELECT revision, generation, token, touched_at FROM ledgers WHERE slug=?", ("ledger",)
         ).fetchone()
     assert row == (state["_meta"]["rev"], 123456 << 20, "token-a", 123456)
-    assert r.events_since("ledger", -1) == state["_meta"]["events"]
+    assert r.export_document("ledger")["_meta"]["events"] == state["_meta"]["events"]
     assert r.export_document("ledger")["_meta"]["seeds"] == seeds
 
     r._cache[r._key("ledger")] = Entry(999999, "stale", {})
@@ -369,10 +443,10 @@ def test_token_returns_none_before_creation_and_the_stored_value_after(tmp_path)
     assert r.token("ledger") == "abc123"
 
 
-def test_events_since_raises_missing_for_an_unknown_slug(tmp_path):
+def test_export_document_raises_missing_for_an_unknown_slug(tmp_path):
     r = store(tmp_path)
     with pytest.raises(sqlite.Missing):
-        r.events_since("missing", 0)
+        r.export_document("missing")
 
 
 def test_summaries_lists_newest_first_with_exact_summary_fields(tmp_path):

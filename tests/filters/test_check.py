@@ -132,24 +132,37 @@ def test_an_allow_with_a_rewrite_is_a_rewrite(monkeypatch):
 
 def test_screen_returns_the_text_raises_on_a_deny_and_applies_a_rewrite(monkeypatch):
     seen = []
-    outcomes = iter([check.FilterOutcome("allow"), check.FilterOutcome("rewrite", "", {"text": "cut"})])
+    outcomes = iter(
+        [
+            check.FilterOutcome("allow"),
+            check.FilterOutcome("rewrite", "", {"text": "cut"}),
+            check.FilterOutcome("allow"),
+        ]
+    )
 
-    def fake(tool, tool_input):
-        seen.append((tool, tool_input))
+    def fake(tool, tool_input, cwd):
+        seen.append((tool, tool_input, cwd))
         return next(outcomes)
 
     monkeypatch.setattr(check, "check", fake)
     assert check.screen("ledger_write", TEXT) == TEXT
     assert check.screen("inbox_send", TEXT) == "cut"
-    assert seen == [("ledger_write", {"text": TEXT}), ("inbox_send", {"text": TEXT})]
-    monkeypatch.setattr(check, "check", lambda tool, tool_input: check.FilterOutcome("deny", "sent back"))
+    assert check.screen("ledger_write", TEXT, "/w") == TEXT
+    assert seen == [
+        ("ledger_write", {"text": TEXT}, None),
+        ("inbox_send", {"text": TEXT}, None),
+        ("ledger_write", {"text": TEXT}, "/w"),
+    ]
+    monkeypatch.setattr(check, "check", lambda tool, tool_input, cwd: check.FilterOutcome("deny", "sent back"))
     with pytest.raises(ValueError) as refused:
         check.screen("ledger_write", TEXT)
     assert str(refused.value) == "sent back"
 
 
 def test_screen_refuses_a_rewrite_that_leaves_no_text(monkeypatch):
-    monkeypatch.setattr(check, "check", lambda tool, tool_input: check.FilterOutcome("rewrite", "", {"text": " \n"}))
+    monkeypatch.setattr(
+        check, "check", lambda tool, tool_input, cwd: check.FilterOutcome("rewrite", "", {"text": " \n"})
+    )
     with pytest.raises(ValueError) as refused:
         check.screen("ledger_write", TEXT)
     assert str(refused.value) == "a filter stripped all of the text"
@@ -157,7 +170,7 @@ def test_screen_refuses_a_rewrite_that_leaves_no_text(monkeypatch):
 
 @pytest.mark.parametrize("patched", [{"text": 3}, {"case": "c"}])
 def test_screen_keeps_the_text_when_a_rewrite_carries_no_text(monkeypatch, patched):
-    monkeypatch.setattr(check, "check", lambda tool, tool_input: check.FilterOutcome("rewrite", "", patched))
+    monkeypatch.setattr(check, "check", lambda tool, tool_input, cwd: check.FilterOutcome("rewrite", "", patched))
     assert check.screen("ledger_write", TEXT) == TEXT
 
 

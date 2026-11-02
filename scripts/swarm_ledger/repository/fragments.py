@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import orjson
 
@@ -11,6 +11,7 @@ class Fragment:
     value: object
     parts: dict | tuple | None = None
     signature: int | None = None
+    data: bytes | None = field(default=None, compare=False)
 
 
 def encoded(fragment: Fragment) -> str:
@@ -21,7 +22,26 @@ def encoded(fragment: Fragment) -> str:
     return "{" + ",".join(encode(key) + ":" + encoded(item) for key, item in fragment.parts.items()) + "}"
 
 
+def exported(fragment: Fragment) -> bytes:
+    """The UTF-8 text of fragment, kept on it so exports of later generations that share it only join bytes."""
+    if fragment.data is None:
+        if fragment.parts is None:
+            data = encode(fragment.value).encode()
+        elif isinstance(fragment.parts, tuple):
+            data = b"[" + b",".join(exported(item) for item in fragment.parts) + b"]"
+        else:
+            data = members(fragment.parts)
+        object.__setattr__(fragment, "data", data)
+    return fragment.data
+
+
+def members(parts: dict) -> bytes:
+    return b"{" + b",".join(encode(key).encode() + b":" + exported(item) for key, item in parts.items()) + b"}"
+
+
 def leaf(value: object, previous: Fragment | None = None) -> Fragment:
+    if previous is not None and value is previous.value:
+        return previous
     try:
         signature = hash(orjson.dumps(value))
     except orjson.JSONEncodeError:
@@ -52,11 +72,18 @@ def mapping(
     return Fragment({key: item.value for key, item in parts.items()}, parts)
 
 
+def stamp(key: str, value: object, previous: Fragment | None) -> Fragment:
+    """A stamp record is replaced, never changed in place, so the writer copy's shared record is still the one stored."""
+    if previous is not None and value is previous.value:
+        return previous
+    return leaf(value, previous)
+
+
 def meta_part(key: str, value: object, previous: Fragment | None) -> Fragment:
     if key == "events" and isinstance(value, list):
         return sequence(value, previous)
     if key == "stamps" and isinstance(value, dict):
-        return mapping(value, previous, lambda key, item, old: leaf(item, old))
+        return mapping(value, previous, stamp)
     return leaf(value, previous)
 
 

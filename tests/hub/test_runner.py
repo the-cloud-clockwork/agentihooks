@@ -523,6 +523,7 @@ def stop_after(passes):
 
 
 def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_credential(monkeypatch, hive):
+    import json
     import os
 
     from scripts.hive import auth
@@ -538,17 +539,21 @@ def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_cr
     assert credential.startswith("hub-hub-0.")
     assert auth.controller(hive, credential)
     assert renewed == [(hive, credential)]
-    assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-hub-0") <= auth.SERVICE_TTL_S
+    record = json.loads(auth._store(hive).get(auth._service_key("hub-hub-0")).value)
+    assert 0 < record["expires"] - auth.time.time() <= auth.SERVICE_TTL_S
 
 
 def test_the_renewal_loop_renews_every_keep_interval_past_a_failed_renewal(monkeypatch, hive, capsys):
+    import json
+
     from redis.exceptions import ConnectionError as RedisDown
 
     from scripts.hive import auth
 
     credential = auth.issue_service(hive, "hub-a")
-    key = f"{auth.PREFIX}:controller:hub-a"
-    hive.delete(key)
+    store, key = auth._store(hive), auth._service_key("hub-a")
+    auth.hive_state.amend(store, key, lambda _: None)
+    assert not auth.controller(hive, credential)
     keep_service = auth.keep_service
     calls, waits = [], []
 
@@ -570,7 +575,7 @@ def test_the_renewal_loop_renews_every_keep_interval_past_a_failed_renewal(monke
     assert waits == [runner.KEEP_S] * 3
     assert calls == [credential, credential]
     assert auth.controller(hive, credential)
-    assert 0 < hive.ttl(key) <= auth.SERVICE_TTL_S
+    assert 0 < json.loads(store.get(key).value)["expires"] - auth.time.time() <= auth.SERVICE_TTL_S
     assert capsys.readouterr().err.startswith("hub: service credential renewal failed\nTraceback")
 
 

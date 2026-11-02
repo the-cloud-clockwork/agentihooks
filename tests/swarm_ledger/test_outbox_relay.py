@@ -51,6 +51,7 @@ def sent(repo):
         return sorted(row[0] for row in connection.execute("SELECT id FROM outbox_sent").fetchall())
 
 
+@pytest.mark.feature("ledger-event-relay")
 def test_the_relay_publishes_each_unsent_row_on_its_subject_with_the_row_id_and_marks_it_sent(repo, bus):
     created = rows(repo)
     assert outbox.relay(repo, bus.events) == 2
@@ -61,6 +62,7 @@ def test_the_relay_publishes_each_unsent_row_on_its_subject_with_the_row_id_and_
     assert sent(repo) == sorted(row_id for row_id, *_ in created)
 
 
+@pytest.mark.feature("ledger-event-relay")
 def test_a_sent_row_is_never_published_again(repo, bus):
     outbox.relay(repo, bus.events)
     assert outbox.relay(repo, bus.events) == 0
@@ -88,6 +90,7 @@ def test_the_default_batch_is_one_hundred_rows(tmp_path, bus):
     assert outbox.relay(repository, bus.events) == 2
 
 
+@pytest.mark.feature("ledger-event-relay")
 def test_a_crash_between_publish_and_mark_never_duplicates_the_event(repo, bus):
     first = rows(repo)[0]
     with pytest.raises(Crash) as caught:

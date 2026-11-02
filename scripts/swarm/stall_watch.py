@@ -7,19 +7,23 @@ one still open two more limits later reaches the operator's Priorities and ntfy.
 """
 
 import base64
+import functools
 import json
 import os
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, fields
+from typing import Any
 
 from scripts.gates.base import Who
 from scripts.gates.enforcement import STALL_WATCH
+from scripts.hive import join_report
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
-from scripts.swarm import capacity, idle, outage, ready, waits
+from scripts.swarm import capacity, freeze, idle, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.ledger_events import Mail
+from scripts.swarm.store import RedisStore
 
 KIND = "stall"
 SENDER = "swarm"
@@ -180,9 +184,15 @@ def _stall(watch, task, pull, marks, seen, agent):
         return None, None
     if pull.resolved and not pull.red and not pull.queued and not pull.draft:
         return "green", _since(watch, marks, seen, f"{tid}:green")
-    if task.get("claimed_by") not in watch.live:
+    if task.get("claimed_by") not in watch.live and not _hive_live(watch, agent):
         return "owner", _since(watch, marks, seen, f"{tid}:owner")
     return None, None
+
+
+def _hive_live(watch, agent):
+    report = join_report.read(watch.store.redis, agent) if agent is not None else {}
+    beat = report.get("heartbeat_at") if report.get("status") == "running" else None
+    return beat is not None and watch.now_ms - beat <= 2 * join_report.HEARTBEAT_MS
 
 
 def _pull_request(watch, mail, task, limit, marks, seen):
@@ -290,7 +300,7 @@ def _alert(watch, mail, task, case, minutes, action, limit):
     row["item"] = inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}").id
     watch.store.redis.hset(_key(watch, ALERTS), tid, json.dumps(row))
     for item in earlier:
-        inbox.close(item, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
+        inbox.settle(item, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
     return [f"stall: task {tid} {CASES[case]} for {minutes} minutes, {action}; told {address}"]
 
 
@@ -305,6 +315,20 @@ def _lane_full(watch, lane, decision):
 def _lane_tasks(watch, rows, lane):
     tasks = [rows.get(task["id"], task) for task in watch.claimable(lane)]
     return [task for task in tasks if task.get("state", "open") == "open" and not task.get("claimed_by")]
+
+
+def ready_lanes(
+    slug: str, store: RedisStore, ledger: Any, doc: dict[str, Any], now_ms: int
+) -> Callable[[str], list[dict[str, Any]]]:
+    """Each lane's ready tasks as the capacity decision counts its demand: a watched focus and a fresh placement
+    refusal hold the same tasks from the alert."""
+
+    @functools.cache
+    def lanes() -> dict[str, list[dict[str, Any]]]:
+        ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, doc))[1]
+        return capacity.placement_ready(store, slug, ready, now_ms)[0]
+
+    return lambda lane: lanes()[lane]
 
 
 def _unclaimed(watch, mail, rows, limit, marks, seen):
@@ -355,7 +379,7 @@ def _escalate(watch, rows):
         moot = _unclaimed_moot(watch, rows, row, task, decision) if row["case"] == UNCLAIMED else ""
         is_open = _open(inbox, row["item"])
         if moot and is_open:
-            inbox.close(row["item"], SENDER, DONE, moot)
+            inbox.settle(row["item"], SENDER, DONE, moot)
         if moot or not is_open:
             watch.store.redis.hdel(key, tid)
             continue

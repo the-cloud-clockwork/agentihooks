@@ -195,11 +195,11 @@ class ArtifactsAPI:
 
     def _checkpointed(self, scope: Registration) -> None:
         """The pointer is already committed, so a lost reading never fails the write."""
-        from redis.exceptions import RedisError
+        from scripts.events import state
 
         try:
             self.checkpointed(scope.execution_id, scope.seat_id, lease.now_ms(self.tasks.store))
-        except RedisError as error:
+        except state.unavailable() as error:
             print(json.dumps({"event": "checkpoint_reading_lost", "error": type(error).__name__}))
 
     def _read(self, key: str, start: int, length: int) -> bytes:

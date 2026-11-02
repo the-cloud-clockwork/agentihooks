@@ -12,6 +12,11 @@ runs:
         NATS_SERVER_SHA256_ARM64: e2fbab4cad7d3c76e3052eb959570393c9d73ba756b70bf8e9eea61e9ae6d49c
       run: |
         set -euo pipefail
+        if version=$(nats-server --version 2>/dev/null) && [[ "$version" == "nats-server: $NATS_SERVER_RELEASE" ]]; then
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+          echo "NATS_SERVER_REQUIRED=1" >> "$GITHUB_ENV"
+          exit 0
+        fi
         case "$(uname -m)" in
           x86_64) arch=amd64 sha="$NATS_SERVER_SHA256_AMD64" ;;
           aarch64) arch=arm64 sha="$NATS_SERVER_SHA256_ARM64" ;;
@@ -25,6 +30,7 @@ runs:
           echo "archive=$RUNNER_TEMP/$name.tar.gz"
         } >> "$GITHUB_OUTPUT"
     - name: Restore the pinned nats server archive
+      if: steps.pin.outputs.installed != 'true'
       id: cache
       uses: actions/cache/restore@v4
       env:
@@ -33,6 +39,7 @@ runs:
         path: ${{ steps.pin.outputs.archive }}
         key: ${{ steps.pin.outputs.name }}-${{ steps.pin.outputs.sha }}
     - name: Install the pinned nats server
+      if: steps.pin.outputs.installed != 'true'
       shell: bash
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
@@ -52,7 +59,7 @@ runs:
         echo "$RUNNER_TEMP/nats" >> "$GITHUB_PATH"
         echo "NATS_SERVER_REQUIRED=1" >> "$GITHUB_ENV"
     - name: Save the pinned nats server archive
-      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      if: steps.pin.outputs.installed != 'true' && steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@v4
       with:
         path: ${{ steps.pin.outputs.archive }}

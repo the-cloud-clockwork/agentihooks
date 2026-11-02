@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.shard_check import within
+
 pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -341,3 +343,13 @@ def test_an_unreadable_pull_request_plan_is_red_and_named(tmp_path):
     result = _grade(tmp_path, [ALL[1:]], "--reused", str(dev), "--reused", str(branch))
     assert result.returncode == 1
     assert f"::error::Cannot read the test plan at {branch}" in result.stdout
+
+
+def test_a_leg_given_test_nodes_grades_only_the_tests_under_them():
+    collected = ["a.py::test_a", "a.py::test_ab", "a.py::test_a[1]", "a.py::TestC::test_d", "a.py::test_e", "b.py::x"]
+    assert within(collected, ["a.py::test_a", "a.py::TestC", "b.py"]) == [
+        "a.py::test_a",
+        "a.py::test_a[1]",
+        "a.py::TestC::test_d",
+        "b.py::x",
+    ]

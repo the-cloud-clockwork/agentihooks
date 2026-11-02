@@ -1,5 +1,7 @@
 import pytest
 
+from scripts.events.redis_state import RedisStateStore
+
 pytestmark = pytest.mark.unit
 
 
@@ -8,7 +10,7 @@ def test_owned_lists_every_entry_of_one_owner_in_any_state():
 
     from scripts.scheduler.core import Scheduler
 
-    scheduler = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    scheduler = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
     ready = scheduler.interval(owner="terminal", payload="tick", every=15, now=0)
     cancelled = scheduler.timer(owner="terminal", payload="once", delay=5, now=0)
     cancelled.cancel()

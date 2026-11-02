@@ -38,7 +38,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install "coverage>=7.4"
+        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4"
 
       - name: Compare every measured line of the newest dev commit's full runs
         id: compare

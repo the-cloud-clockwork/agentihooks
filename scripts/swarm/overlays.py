@@ -1,10 +1,12 @@
 """Which overlays a swarm agent wears: the task's own list, else its base role's default in the swarm config."""
 
 import subprocess
+import sys
 
 import yaml
 
 from hooks.context import profile_chain
+from scripts.profiles import bundle_copy
 
 ROLES = ("master", "engineer", "planner", "qa", "cicd", "documentation")
 KEY = "overlays-"
@@ -44,21 +46,39 @@ def chosen(profile: str, task: dict, defaults: dict) -> tuple[str, ...]:
 
 
 def available() -> list[dict]:
-    bundle = _install()._get_bundle_path()
-    found = []
-    for manifest in sorted((bundle / "profiles").glob("*/profile.yml")) if bundle else []:
-        try:
-            roles = profile_chain.wears(manifest.parent)
-        except (AttributeError, ValueError, yaml.YAMLError):
-            continue
-        if roles:
-            found.append({"name": manifest.parent.name, "wears": roles})
-    return found
+    found: dict[str, dict] = {}
+    for _kind, bundle in _install()._bundle_roots():
+        for manifest in sorted((bundle / "profiles").glob("*/profile.yml")):
+            try:
+                roles = profile_chain.wears(manifest.parent)
+            except (AttributeError, ValueError, yaml.YAMLError):
+                continue
+            if roles and manifest.parent.name not in found:
+                found[manifest.parent.name] = {"name": manifest.parent.name, "wears": roles}
+    return sorted(found.values(), key=lambda overlay: overlay["name"])
+
+
+def _head(bundle) -> str:
+    done = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+    return done.stdout.strip() if done.returncode == 0 else ""
 
 
 def revision() -> str:
-    bundle = _install()._get_bundle_path()
+    installer = _install()
+    bundle, user = installer._get_bundle_path(), installer._get_user_bundle_path()
+    shared = installer._get_shared_bundle_path()
     if bundle is None:
         return ""
-    done = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
-    return done.stdout.strip() if done.returncode == 0 else ""
+    root = _head(bundle)
+    if not root:
+        return root
+    team = _head(shared) if shared is not None else ""
+    if shared is not None and not team:
+        print(f"WARNING: the shared bundle at {shared} has no commit to record; launching without it", file=sys.stderr)
+        team = bundle_copy.UNPINNED
+    mine = _head(user) if user is not None else ""
+    if user is not None and not mine:
+        return ""
+    if shared is not None:
+        return f"{root}:{team}:{mine}"
+    return f"{root}:{mine}" if user is not None else root

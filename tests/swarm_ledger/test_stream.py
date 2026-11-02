@@ -32,10 +32,13 @@ def live(monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: {"config": {"state": "running"}})
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.2)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd.daemon_threads = False
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     yield httpd.server_address[1], legacy_page.stored_token(html_path)
     httpd.shutdown()
+    server.HUB.drain()
     httpd.server_close()
+    assert server.HUB.watched() == []
 
 
 def connect(port, token, cursor=None, timeout=5):

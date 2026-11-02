@@ -325,3 +325,27 @@ def test_the_alert_state_is_saved_before_the_notice(store):  # noqa: F811
     with pytest.raises(SwarmError):
         master_start.observe("sw", store.config("sw"), store, Raising(), StartupRuntime(), DEADLINE)
     assert master_start.read(store, "sw")["alerted"] is True
+
+
+def test_a_refused_master_launch_restores_the_alerted_start_it_began_from(store):  # noqa: F811
+    from scripts.swarm import master_start
+    from scripts.swarm.tick import SpawnError
+
+    refused = "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more"
+    pending = {"name": "", "task": {"id": MASTER}, "attempt": 2, "retry": True, "alerted": True, "at": 0}
+    master_start.save(store, "sw", pending)
+    runtime = FakeRuntime(crash=SpawnError(refused, "unavailable"))
+    actions = tick("sw", store, tasks(), runtime, master_start.RETRY_MS + 1)
+    assert f"the master waits: {refused}" in actions
+    assert master_start.read(store, "sw") == pending
+
+
+@pytest.mark.parametrize("pending", [{}, {"name": "", "task": {"id": MASTER}, "attempt": 1, "at": 7}])
+def test_withdraw_puts_back_the_start_a_refused_launch_began_from(store, pending):  # noqa: F811
+    from scripts.swarm import master_start
+
+    master_start.save(store, "sw", {"name": "engineer@sw-1", "task": {"id": MASTER}, "attempt": 2, "at": 9})
+    master_start.save(store, "other", {"name": "engineer@other-1", "at": 9})
+    master_start.withdraw(store, "sw", pending)
+    assert master_start.read(store, "sw") == pending
+    assert master_start.read(store, "other") == {"name": "engineer@other-1", "at": 9}

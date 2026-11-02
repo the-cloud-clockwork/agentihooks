@@ -103,23 +103,31 @@ def _repo_dirs(root: Path) -> list[Path]:
 
 
 def _profile_dirs() -> list[Path]:
-    bundle = enforcement._get_bundle_path()
-    chain = profile_chain.profile_dirs(bundle, enforcement._get_active_profile(), enforcement._get_linked_profiles())
+    bundle, user = enforcement._get_bundle_path(), enforcement._get_user_bundle_path()
+    shared = enforcement._get_shared_bundle_path()
+    chain = profile_chain.profile_dirs(
+        bundle, enforcement._get_active_profile(), enforcement._get_linked_profiles(), user, shared
+    )
     dirs = [path for _name, path in chain]
-    if bundle is not None:
-        dirs.extend(sorted(p for p in (bundle / "profiles").glob("*") if p.is_dir()))
+    for root in (bundle, shared, user):
+        if root is not None:
+            dirs.extend(sorted(p for p in (root / "profiles").glob("*") if p.is_dir()))
     return list(dict.fromkeys(dirs))
 
 
 def _stores(root: Path) -> tuple[list[Path], list[Path]]:
-    bundle = enforcement._get_bundle_path()
     profiles = _profile_dirs()
     repos = _repo_dirs(root)
     stores = [enforcement._store_path()]
     condition_dirs = [conditions.runtime_dir()]
-    if bundle is not None:
-        stores.append(bundle / "enforcements.json")
-        condition_dirs.append(bundle / ".claude" / "conditions")
+    for bundle in (
+        enforcement._get_bundle_path(),
+        enforcement._get_shared_bundle_path(),
+        enforcement._get_user_bundle_path(),
+    ):
+        if bundle is not None:
+            stores.append(bundle / "enforcements.json")
+            condition_dirs.append(bundle / ".claude" / "conditions")
     stores += [p / "enforcements.json" for p in profiles] + [r / ".agentihooks" / "enforcements.json" for r in repos]
     condition_dirs += [p / ".claude" / "conditions" for p in profiles] + [
         r / ".agentihooks" / "conditions" for r in repos
@@ -216,12 +224,13 @@ def _priming_texts(correction: dict) -> list[str]:
 
 
 def _priming_hits(correction: dict) -> list[Hit]:
+    """Return priming hits; an unreadable store keeps the correction open rather than closing it unseen."""
     if correction.get("layer") not in PRIMING_LAYERS:
         return []
     hit = Hit(correction["source"], correction["layer"], correction["source"], correction["source"], "held")
     try:
         texts = _priming_texts(correction)
-    except Exception:  # an unreadable store keeps the correction open rather than closing it unseen
+    except Exception:
         return [hit]
     needle, whole = quarantine.needle(correction), _norm(correction["text"])
     found = any((needle and needle in _norm(text)) or _norm(text) == whole for text in texts)

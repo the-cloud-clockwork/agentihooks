@@ -31,6 +31,10 @@ class Hub:
         self.seen.append(("reopen", slug, request))
         return True
 
+    def failed(self, slug, request):
+        self.seen.append(("failed", slug, request))
+        return True
+
 
 @pytest.fixture
 def hub():
@@ -53,7 +57,10 @@ def hub():
 
 
 def test_lane_work_asks_the_hub_to_admit_it_and_spawns_the_admitted_task(hub):
-    configs = Mock(return_value="rig config")
+    from scripts.swarm.store import SwarmConfig
+
+    config = SwarmConfig("rig", "/repo", 1, 1)
+    configs = Mock(return_value=config)
     request = lanes.LaneTasks(hub.bus, "hive-a", configs).request(offer())
 
     assert hub.hub.seen == [
@@ -61,7 +68,7 @@ def test_lane_work_asks_the_hub_to_admit_it_and_spawns_the_admitted_task(hub):
     ]
     configs.assert_called_once_with("rig")
     assert (request.config, request.lane, request.name, request.task) == (
-        "rig config",
+        config,
         "eng",
         "eng@rig-0001",
         hub.admitted["task"],
@@ -82,6 +89,25 @@ def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
     ]
 
 
+def test_a_launch_failed_on_a_harness_is_reported_to_the_hub(hub):
+    lanes.LaneTasks(hub.bus, "hive-a", Mock()).failed(offer(), "codex", "launch failed")
+    assert hub.hub.seen == [
+        (
+            "failed",
+            "rig",
+            {
+                "op": "failed",
+                "hive": "hive-a",
+                "task": "t1",
+                "lane": "eng",
+                "generation": 2,
+                "harness": "codex",
+                "reason": "launch failed",
+            },
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     ("excluded", "taken"),
     [
@@ -97,8 +123,10 @@ def test_a_hive_runs_every_lane_spoke_it_does_not_exclude(excluded, taken):
 
 
 def configs(engines):
+    from scripts.swarm.store import SwarmConfig
+
     return SimpleNamespace(
-        slugs=lambda: list(engines), config=lambda slug: SimpleNamespace(slug=slug, engine=engines[slug])
+        slugs=lambda: list(engines), config=lambda slug: SwarmConfig(slug, "/repo", 1, 1, engine=engines[slug])
     )
 
 
@@ -153,6 +181,27 @@ def test_a_lane_spoke_takes_an_offer_without_a_ledger_read_and_spawns_what_the_h
     assert (request.lane, request.name, request.task["execution_id"]) == ("eng", "eng@rig-0001", "x1")
     claim = hub.bus.for_swarm("rig").state("spoke-work").get(spoke.claim_key(offer()))
     assert json.loads(claim.value)["state"] == "started"
+
+
+def test_a_hive_event_launch_resolves_the_origin_to_its_own_checkout(hub, tmp_path, monkeypatch):
+    from scripts.hive.daemon import local_checkout
+    from scripts.swarm.store import SwarmConfig
+
+    root = tmp_path / "hive-repos"
+    checkout = root / "project"
+    git = checkout / ".git"
+    git.mkdir(parents=True)
+    (git / "config").write_text('[remote "origin"]\n\turl = https://github.com/team/project.git\n')
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(root))
+    missing = tmp_path / "workstation-only"
+    config = SwarmConfig("rig", str(missing), 1, 1, repo_origin="github.com/team/project")
+
+    request = lanes.LaneTasks(hub.bus, "hive-a", lambda slug: config).request(offer())
+
+    assert request.config.repo == "github.com/team/project"
+    assert local_checkout(request.config.repo) == str(checkout)
+    assert config.repo == str(missing)
+    assert (request.lane, request.name, request.task) == ("eng", "eng@rig-0001", hub.admitted["task"])
 
 
 def test_the_lane_loop_waits_only_after_a_pass_with_nothing_started(monkeypatch):

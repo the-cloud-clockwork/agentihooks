@@ -116,7 +116,12 @@ class TargetAdapter(Protocol):
         ...
 
     def install_persona(
-        self, profile_dirs: list[tuple[str, Path]], profile_chain: list[str], bundle_dir: Path | None
+        self,
+        profile_dirs: list[tuple[str, Path]],
+        profile_chain: list[str],
+        bundle_dir: Path | None,
+        user_dir: Path | None = None,
+        shared_dir: Path | None = None,
     ) -> None:
         """Assemble and write the persona/system-prompt file for this target."""
         ...

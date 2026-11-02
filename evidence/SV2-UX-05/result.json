@@ -1,0 +1,64 @@
+{
+  "authoritative_objects": "The swarm store is authoritative: its configuration, execution records, published status, terminal checks, lifecycle queue and context records. The ledger page, every open tab and any cached swarm view are projections recomputed on each read. Rollback deletes none of the authoritative objects.",
+  "authority": "Every control write carries the agent, its generation and the task revision the page last read; the ledger server's lifecycle control checks them against the store and refuses a stale page. The page grants nothing: the operator role on the ledger admits the request and the store decides it.",
+  "cases": {
+    "a": "evidence/SV2-UX-05/a-result.json",
+    "b": "evidence/SV2-UX-05/b-result.json",
+    "c": "evidence/SV2-UX-05/c-result.json"
+  },
+  "compatibility": "Test and documentation only: no page, ledger server or swarm code changed. Compared with SV2-UX-03 and SV2-UX-04 as merged: the lifecycle controls keep their labels, scopes, consequences, stale refusal text and operator gate, and the execution, terminal and Brain context columns keep their text; the cases read them unchanged",
+  "dependencies": {
+    "SV2-UX-04": "merged into dev (#7701)"
+  },
+  "evidence_class": "mocked: a fake Redis swarm store is the authoritative state; the tick, the worker Pod's heartbeat and the hub's terminal checks are writes to it; real Chromium pages at 1920 by 1080 and at a 390 by 844 touch viewport render the ledger page from the swarm view the ledger server projects from that store, and their control writes enter the ledger server's lifecycle control; the hive command runner consumes the queue with its terminal commands stubbed; no ledger HTTP server, worker Pod, herdr server or cluster runs",
+  "integration_gate": "G10",
+  "interfaces": [
+    "tests.sv2_ux05_cases.run_case(case, browser) runs one package case in real Chromium against a fake Redis swarm store and returns its checks, observation and operator_workflow_acceptance counters",
+    "tests/e2e/swarm_v2/test_operator_workflow.py compares each case with its committed record and checks the manifest and this result",
+    "docs/swarm-v2/operator-guide.md names the operator workflow, the mobile scope rule, the reconnecting terminal behaviour and the rollback"
+  ],
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/8230",
+  "limitations": [
+    "No live ledger HTTP server, worker Pod, herdr server or Anton cluster runs in the cases; the page reads the swarm view through a harness route and its writes enter the ledger server lifecycle control in process",
+    "The terminal attach is consumed by the hive command runner with its terminal commands stubbed, so no terminal screen is shown",
+    "The agent is launched by a fixture write to the store, not by the swarm tick",
+    "The rollback was not rehearsed: this package changes no page build, so its own rollback is a revert of tests and docs"
+  ],
+  "measurements": {
+    "operator_workflow_acceptance": {
+      "a": {
+        "evidence_opened": 2,
+        "keyboard_controls": 1,
+        "viewers_closed": 3,
+        "viewers_opened": 3
+      },
+      "b": {
+        "controls_checked": 4,
+        "refused_controls": 1,
+        "viewers_closed": 1,
+        "viewers_opened": 1
+      },
+      "c": {
+        "keyboard_controls": 1,
+        "stale_marks": 1,
+        "stale_marks_cleared": 1,
+        "viewers_closed": 2,
+        "viewers_opened": 2
+      },
+      "note": "fixture-local counters per case"
+    }
+  },
+  "package": "SV2-UX-05",
+  "package_complete": false,
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/8254",
+  "redaction": "The fixture is synthetic: its transcript lines, session, Pod and machine names are invented for this package and hold no operator or customer content; the refusal text is checked to name no execution, Pod or identity",
+  "rollback": "Restore the previous ledger page build by reverting its pull request on dev and letting promotion republish the ledger server image; worker Pods are not restarted and the swarm store is not touched. AGENTIHOOKS_LIFECYCLE_DESTRUCTIVE=off on the ledger server withdraws only the destructive controls. This package changes no page build, so its own rollback is a revert of tests and docs.",
+  "states": {
+    "accepted": "Standards review closed in round two with every finding fixed; Spec review round two closed all but the desktop keyboard path to a destructive control, added in 17aa9b7da",
+    "committed": "Case records, manifest and result committed on the task branch; the change reaches dev only when its pull request merges",
+    "externally_verified": "Not on Anton: no ledger page was driven against a live swarm on Anton compute; the evidence is mocked and labelled so",
+    "observed": "Cases A, B and C passed in focused Proofs run 40669012713 on 17aa9b7da, A and B matching their committed records (evidence/SV2-UX-05/a-result.json, b-result.json, c-result.json); the cases failed before in Proofs run 40659191699 on f0184ec97"
+  },
+  "status": "fixture-qualified: after every viewer closed, desktop and phone views read the same running remote agent, its task and its evidence from the store; every phone control is visible with its agent and scope, a destructive tap asks first and a stale tab is refused without changing state; a reconnecting terminal shows cached and stale until a fresh check, and a lost read disables every control; no Anton rollout has been observed",
+  "tested_commit": "17aa9b7da"
+}

@@ -51,16 +51,19 @@ def test_distributed_outcomes_cannot_use_the_legacy_final_mutation_path(monkeypa
 
 @pytest.mark.parametrize("record", ["task-authority", "claim-journal"])
 def test_either_distributed_record_alone_blocks_legacy_completion(record):
+    from scripts.swarm import fencing
     from scripts.swarm.store import SwarmError
     from tests.swarm.test_merge_queue import swarm_of
 
     state = swarm_of("eng")
-    state.redis.set(state.key("sw", record, "t1"), "{}")
+    section, value = ("claims", {}) if record == "task-authority" else ("journals", [])
+    fencing.write(state, "sw", lambda doc: doc[section].update({"t1": value}))
     with pytest.raises(SwarmError, match="^distributed final mutations require the controller outcome path$"):
         done_gate.require_local(state, "sw", "t1")
 
 
 def test_merge_target_requires_the_recorded_task_and_checks_shared_links():
+    from scripts.swarm import fencing
     from scripts.swarm.store import SwarmError
     from tests.swarm.test_merge_queue import swarm_of
 
@@ -69,9 +72,29 @@ def test_merge_target_requires_the_recorded_task_and_checks_shared_links():
     assert done_gate.require_target(state, "sw", "t1", URL, rows) is None
     with pytest.raises(SwarmError, match="^final integration must target this task's recorded pull request$"):
         done_gate.require_target(state, "sw", "missing", URL, rows)
-    state.redis.set(state.key("sw", "task-authority", "t2"), "{}")
+    fencing.write(state, "sw", lambda doc: doc["claims"].update({"t2": {}}))
     with pytest.raises(SwarmError, match="controller outcome"):
         done_gate.require_target(state, "sw", "t1", URL, rows)
+
+
+def test_merge_target_accepts_a_recorded_prerequisite_and_refuses_other_pulls():
+    from scripts.swarm import fencing
+    from scripts.swarm.store import SwarmError
+    from tests.swarm.test_merge_queue import swarm_of
+
+    state = swarm_of("eng")
+    first, staged, other = (f"https://github.com/o/r/pull/{n}" for n in (7, 8, 6))
+    scopes = {first: {"kind": "prerequisite", "scope": "tests first"}, staged: {"kind": "stage", "scope": "one"}}
+    rows = [{"id": "t1", "pr_url": URL, "pull_scopes": scopes}]
+    assert done_gate.require_target(state, "sw", "t1", first, rows) is None
+    assert done_gate.require_target(state, "sw", "t1", URL, rows) is None
+    for url in (staged, other):
+        with pytest.raises(SwarmError, match="^final integration must target this task's recorded pull request$"):
+            done_gate.require_target(state, "sw", "t1", url, rows)
+    rows.append({"id": "t2", "pr_url": other, "pull_scopes": {first: {"kind": "prerequisite", "scope": "shared"}}})
+    fencing.write(state, "sw", lambda doc: doc["claims"].update({"t2": {}}))
+    with pytest.raises(SwarmError, match="controller outcome"):
+        done_gate.require_target(state, "sw", "t1", first, rows)
 
 
 def test_a_task_without_a_kind_is_gated_as_code():

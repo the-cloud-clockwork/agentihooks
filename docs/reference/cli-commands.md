@@ -63,6 +63,7 @@ downgrade cannot leave a process serving a port nothing points at. See
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
+| `--user-bundle <path>` | Path to the personal user bundle. Linked beside the root bundle, which stays linked; kept by `--force`. `AGENTIHOOKS_USER_BUNDLE_PATH` names one when none is linked. |
 | `--target claude\|codex` | Install only the selected supported harness. |
 | `--verbose`, `-v` | Show all installer output, including linked skills and configuration details. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
@@ -428,11 +429,12 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--codex-transport legacy\|app_server`, `--seat` | Select the transport and admitted seat for a managed Codex swarm launch; see [Managed Codex terminals](codex-managed-terminal.md) for configuration and viewer behavior |
 | `--start-timeout` | Seconds to wait for the terminal to start (default 30) |
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
-| `--canary-timeout` | Seconds to wait for the new session to run its profile canary (default 120 for Claude, 90 for Codex); see [Canary deadline](profile-launch-home.md#canary-deadline) |
+| `--canary-timeout` | Seconds to wait for the new session to run its profile canary (default the rest of the launch deadline); see [Canary deadline](profile-launch-home.md#canary-deadline) |
+| `--launch-until` | Epoch milliseconds by which the launch must return; bounds the launch deadline. A hive passes its launch order's expiry less an acknowledgement margin |
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
 | `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
 | `--overlay <name>` | Overlay the profile wears; repeat for up to three |
-| `--bundle-revision <commit>` | Render the profile only from this bundle commit |
+| `--bundle-revision <commit>` | Render the profile only from this bundle commit. With a shared bundle linked the value has three parts, `<root commit>:<shared commit>:<user commit>` (`<root commit>:<shared commit>:` when no user bundle is linked); with only a user bundle linked it is `<root commit>:<user commit>`. The swarm records it at launch, with `-` as the shared field when the shared bundle has no commit to record (`<root commit>:-:<user commit>`). A value that omits the user bundle's commit, or has an empty shared field, is refused rather than rendering the mutable tree. A `-` field, and a host without the recorded shared bundle, warn and render without it; a two-part value recorded before the shared bundle was linked renders with the shared bundle's current commit, warns, and stamps that commit |
 
 Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 `failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
@@ -482,7 +484,7 @@ agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/e
 | `--agent claude\|codex\|copilot` | Harness (default `claude`); per-run profiles support `claude` and `codex` |
 | `--model`, `--effort minimal\|low\|medium\|high\|xhigh\|max` | Model and effort; otherwise the profile's `profile.yml` defaults, then the harness defaults |
 | `--overlay <name>` | Wear this overlay; repeat for up to three |
-| `--bundle-revision <commit>` | Render only from this bundle commit |
+| `--bundle-revision <commit>` | Render only from this bundle commit; `<root commit>:<shared commit>:<user commit>` when a shared bundle is linked (`-` for a shared bundle with no commit), `<root commit>:<user commit>` when only a user bundle is |
 | `--home <dir>` | Mount this rendered home instead of rendering; refused unless its binding matches the profile and harness and its persona and sources are unchanged |
 | `--dry-run` | Print the selected environment and `argv=` line without starting the harness |
 
@@ -1183,7 +1185,7 @@ agentihooks --list-profiles
 Manage the linked bundle directory.
 
 ```bash
-agentihooks bundle <action> [path] [--rebase]
+agentihooks bundle <action> [path] [--rebase] [--shared | --user]
 ```
 
 ### Subcommands
@@ -1195,6 +1197,16 @@ agentihooks bundle <action> [path] [--rebase]
 | `list` | Show the linked bundle path, linked date, and available profiles. |
 | `pull` | Run `git pull` on the linked bundle directory. |
 | `pull --rebase` | Run `git pull --rebase` on the linked bundle directory. |
+
+### Slots
+
+| Flag | Slot | State key | Environment fallback |
+|------|------|-----------|----------------------|
+| none | root bundle | `bundle` | `AGENTIHOOKS_BUNDLE_PATH` |
+| `--shared` | shared bundle, between the root and the user bundle | `shared_bundle` | `AGENTIHOOKS_SHARED_BUNDLE_PATH` |
+| `--user` | personal user bundle, after the shared bundle | `user_bundle` | `AGENTIHOOKS_USER_BUNDLE_PATH` |
+
+`--shared` and `--user` are mutually exclusive, and one directory fills one slot. Each flag applies to `link`, `unlink`, `list` and `pull`. Unlinking the shared bundle removes the links it generated and keeps every bundle file. `init --force` keeps all three links. Content is later-wins in the order root, shared, user; profile names are first-wins in the same order.
 
 ### Examples
 

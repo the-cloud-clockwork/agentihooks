@@ -21,7 +21,7 @@ PRODUCERS = (
     "pyproject.toml",
     "scripts/ci_mutation/",
 )
-WAIT = 2400
+WAIT = 60
 POLL = 30
 
 

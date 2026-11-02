@@ -28,7 +28,9 @@ def test_expired_login_never_starts_a_pane(tmp_path):
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
     with pytest.raises(SpawnError, match="native Claude login is expired or missing") as raised:
-        runtime.spawn(config(tmp_path), "master", "agent", {"id": "master", "route_kind": "interactive"})
+        runtime.spawn(
+            config(tmp_path), "master", "agent", {"id": "master", "seat": "master-2@proof", "route_kind": "interactive"}
+        )
     assert raised.value.status == "unavailable"
     assert len(calls) == 1
     assert calls[0][1:] == ["auth", "status", "--text"]
@@ -52,7 +54,7 @@ def test_status_proof_is_captured_only_after_success(tmp_path, launch_ok):
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
     runtime._terminate = lambda _: None
-    task = {"id": "master", "route_kind": "interactive"}
+    task = {"id": "master", "seat": "master-2@proof", "route_kind": "interactive"}
     if launch_ok:
         runtime.spawn(config(tmp_path), "master", "agent", task)
     else:

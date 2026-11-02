@@ -1,9 +1,12 @@
 import json
 import os
+from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from scripts.swarm import launch_job
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -13,6 +16,12 @@ from tests.swarm.profile_fixture import validated
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 
+def _complete_launch(runtime, job):
+    spec = json.loads(Path(job["request"]).read_text())
+    placed = runtime._launch(SwarmConfig(**spec["config"]), spec["lane"], name=spec["name"], **spec["launch"])
+    Path(job["path"]).write_text(json.dumps({"placed": asdict(placed)}))
+
+
 @pytest.mark.parametrize("transport,harness", [("legacy", "codex"), ("app_server", "codex"), ("app_server", "claude")])
 @pytest.mark.parametrize("lane", ["eng", "master"])
 def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transport, harness, lane):
@@ -20,6 +29,7 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(codex, "connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
     config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, codex_inbox_transport=transport)
     store.create(config)
     ledger = FakeLedger([{"id": "t1", "title": "Transport", "lane": "eng"}])
@@ -60,6 +70,7 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
             returncode=0, stdout=validated(argv, output).replace('"pid": 123', f'"pid": {os.getpid()}'), stderr=""
         )
 
+    monkeypatch.setattr(launch_job, "spawn", lambda job: _complete_launch(herdr, job))
     selected_lane = lane
     herdr = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "open"))
     fake.spawn = lambda config, lane, name, task: (
@@ -68,6 +79,9 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
         else herdr.spawn(config, lane, name, task)
     )
     actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=1000)
+    if lane == "eng":
+        assert any(action.startswith("launching engineer") for action in actions), actions
+        actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=2000)
     prefix = "spawned master" if lane == "master" else "spawned engineer"
     assert any(action.startswith(prefix) for action in actions), actions
     worker = next(agent for agent in store.agents("sw") if agent.lane == lane)
@@ -97,6 +111,7 @@ def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypa
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, codex_inbox_transport=transport))
     monkeypatch.setattr(codex, "connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
     fake = FakeRuntime()
     ended = []
 
@@ -118,6 +133,8 @@ def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypa
 
     herdr = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("codex", "open"))
     monkeypatch.setattr(herdr, "_terminate", terminate)
+    monkeypatch.setattr(fake, "reap_name", terminate)
+    monkeypatch.setattr(launch_job, "spawn", lambda job: _complete_launch(herdr, job))
     selected_lane = lane
     fake.spawn = lambda config, lane, name, task: (
         herdr.spawn(config, lane, name, task)
@@ -126,6 +143,10 @@ def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypa
     )
     ledger = FakeLedger([{"id": "t1", "title": "Transport", "lane": "eng"}])
     actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=1000)
+    if lane == "eng":
+        assert any(action.startswith("launching engineer") for action in actions), actions
+        store.update("sw", state="paused")
+        actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=2000)
     assert any("spawn failed" in action for action in actions), actions
     assert not any(agent.lane == lane for agent in store.agents("sw"))
     assert not store.execution_occupants("sw")

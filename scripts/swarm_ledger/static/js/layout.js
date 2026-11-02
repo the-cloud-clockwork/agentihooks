@@ -214,7 +214,10 @@ function mirrorLayout() {
   try {
     if (Object.keys(layout).length) localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
     else localStorage.removeItem(LAYOUT_KEY);
-  } catch (e) { /* storage blocked: the server copy paints after its read */ }
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function saveLayout(delay) {
@@ -285,11 +288,7 @@ export function startLayout() {
 export function wireRail() {
   const rail = $("icon-strip");
   const railButtons = ["home", "art-fab", "bell", "alert-fab", "to-top", "sync"].map($);
-  const placeRail = () => {
-    for (const btn of railButtons) rail.append(btn);
-  };
-  placeRail();
-  window.addEventListener("resize", placeRail);
+  for (const btn of railButtons) rail.append(btn);
   const stripPanels = [[$("notif"), $("bell"), showNotifications], [$("alert-panel"), $("alert-fab"), showAlerts], [$("art-panel"), $("art-fab"), showArtifacts]];
   const anchorOpen = () => { for (const [panel, icon] of stripPanels) if (!panel.hidden) anchorPanel(panel, icon); };
   new ResizeObserver(anchorOpen).observe(rail);

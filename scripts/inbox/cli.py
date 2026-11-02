@@ -20,11 +20,18 @@ from dataclasses import asdict
 from hooks.context.conditions import INBOX_SEND
 from hooks.filters import check as filters
 from scripts.inbox import links, outbox
-from scripts.inbox.store import DuplicateItem, InboxError, InboxStore, Unreachable, close_reason, connect
+from scripts.inbox.store import (
+    OPERATOR,
+    ROW_BATCH,
+    DuplicateItem,
+    InboxError,
+    InboxStore,
+    Unreachable,
+    close_reason,
+    connect,
+)
 from scripts.swarm_ledger import ledger_comments
 from scripts.swarm_v2 import master_fence
-
-OPERATOR = "operator"
 
 SWARM = "swarm"
 
@@ -83,11 +90,21 @@ def cmd_send(store, me, args):
     submit(store, outbox.record("send", me, {"address": args.address, "text": text, "fyi": fyi}))
 
 
-def cmd_inbox(store, me, args):
+def cmd_inbox(store: InboxStore, me: str, args: argparse.Namespace) -> None:
     if args.of:
         links.check_observe(store, me, args.of)
-    for item in store.mailbox(args.of or me):
+    items = store.mailbox(args.of or me)
+    if args.page:
+        items = items[(args.page - 1) * args.size : args.page * args.size]
+    for item in items:
         print(f"{item.id}\t{item.state}\t{item.sender}\t{item.text.splitlines()[0]}")
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"{value} must be at least 1")
+    return number
 
 
 def cmd_read(store, me, args):
@@ -120,16 +137,25 @@ def _apply_send(store, me, record):
     from scripts.inbox.recipient import empty_seat
 
     args = record["args"]
-    check_address(store, me, args["address"])
-    links.check_send(store, me, args["address"])
-    status = dispatcher_status(store, args["address"]) if not args["fyi"] else {}
-    address = status.get("dispatch", {}).get("owner", args["address"])
+    address = _operator_door(store, me) if store.names.resolve(args["address"]) == OPERATOR else args["address"]
+    check_address(store, me, address)
+    links.check_send(store, me, address)
+    status = dispatcher_status(store, address) if not args["fyi"] else {}
+    address = status.get("dispatch", {}).get("owner", address)
     master_fence.check_send(store, me, address)
     hint = empty_seat(store, me, address)
     task = store.receiver_task(address)
     item = store.send(me, address, args["text"], fyi=args["fyi"], task=task, item_id=record["item"])
     result = {"id": item.id, "from": item.sender, "to": item.address, "state": item.state}
     return result | status | hint
+
+
+def _operator_door(store, me):
+    """Only the front door master writes to the operator, and never first: any other agent's message goes to it."""
+    door, holds = store.front_door_of(me)
+    if holds or not door:
+        raise InboxError(f"no agent writes to the operator first, so {me} cannot send to him; answer his item instead")
+    return door
 
 
 def _apply_reply(store, me, record):
@@ -188,6 +214,8 @@ def build_parser():
     send.set_defaults(func=cmd_send)
     inbox = sub.add_parser("inbox")
     inbox.add_argument("--of", default="", metavar="ADDRESS")
+    inbox.add_argument("--page", type=positive_int)
+    inbox.add_argument("--size", type=positive_int, default=ROW_BATCH)
     inbox.set_defaults(func=cmd_inbox)
     read = sub.add_parser("read")
     read.add_argument("id")

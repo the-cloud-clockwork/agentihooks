@@ -555,11 +555,13 @@ class TestBundleClaudeMdPrepend:
         # The persona steps live in _install_claude_persona (reached from
         # install_global via the claude target adapter).
         src = inspect.getsource(install._install_claude_persona)
-        assert "_prepend_bundle_claude_md(bundle_dir)" in src
+        assert "_prepend_bundle_claude_md(bundle_dir, user_dir, shared_dir)" in src
         # Must sit between the profile writer and the manifesto appender.
-        assert src.index("_install_system_prompt") < src.index("_prepend_bundle_claude_md(bundle_dir)")
-        assert src.index("_prepend_bundle_claude_md(bundle_dir)") < src.index(
-            "_append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs)"
+        assert src.index("_install_system_prompt") < src.index(
+            "_prepend_bundle_claude_md(bundle_dir, user_dir, shared_dir)"
+        )
+        assert src.index("_prepend_bundle_claude_md(bundle_dir, user_dir, shared_dir)") < src.index(
+            "_append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs, user_dir, shared_dir)"
         )
         # Exactly one call site — never inside the chain loop.
         assert src.count("_prepend_bundle_claude_md(") == 1
@@ -1532,3 +1534,42 @@ class TestInitDaemonLifecycle:
         assert src.index("_install_systemd_user_unit(_mcp_transport)") < src.index("_ensure_mcp_daemon(_mcp_transport)")
         # The stdio branch must stop a daemon left over from a network install.
         assert "stop()" in src
+
+
+class TestAgentienvUnderZsh:
+    FAKE_FIRST, FAKE_REST = "fake-first-line-0002", "fake-rest=line-0002"
+
+    def test_the_multiline_check_uses_no_bash_only_syntax(self):
+        assert "compgen" not in install._AGENTIENV_MULTILINE
+        assert "${!" not in install._AGENTIENV_MULTILINE
+
+    def test_zsh_sources_the_block_and_names_a_multiline_value(self, tmp_path):
+        import os
+        import shutil
+        import subprocess
+
+        zsh = shutil.which("zsh")
+        if zsh is None:
+            if os.environ.get("ZSH_REQUIRED"):
+                pytest.fail("this job installs zsh for the agentienv check, but zsh is not on PATH")
+            pytest.skip("zsh is not installed")
+        bashrc = tmp_path / ".bashrc"
+        env_file = tmp_path / ".agentihooks" / ".env"
+        env_file.parent.mkdir()
+        env_file.write_text("GOOD_NAME_0002=ok\n")
+        with patch.object(install, "_BASHRC", bashrc), patch.object(install, "_ENV_FILE_DST", env_file):
+            install._update_bashrc_block()
+        r = subprocess.run(
+            [zsh, "-f", "-c", f'. "{bashrc}"; echo "good=$GOOD_NAME_0002"'],
+            env={
+                "HOME": str(tmp_path),
+                "PATH": os.environ.get("PATH", ""),
+                "FAKE_ZSH_0002": self.FAKE_FIRST + "\n" + self.FAKE_REST,
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert "good=ok" in r.stdout
+        assert "command not found" not in r.stderr and "bad substitution" not in r.stderr, r.stderr
+        assert "FAKE_ZSH_0002" in r.stderr
+        assert self.FAKE_FIRST not in r.stdout + r.stderr and self.FAKE_REST not in r.stdout + r.stderr

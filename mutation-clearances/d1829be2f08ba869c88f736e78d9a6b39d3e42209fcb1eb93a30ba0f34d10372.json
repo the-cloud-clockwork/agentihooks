@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_mode.py:hooks.context.operator_mode.x_present__mutmut_6:5273a0879f644c5c4bc82a1496f840c378c53ca76b3c601baae0894b223b3400": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: _on ignores its now argument and returns only bool(state.get(\"on\")). Passing None instead of now preserves every output and state. Standards reader cleared fingerprint 5273a0879f644c5c4bc82a1496f840c378c53ca76b3c601baae0894b223b3400 after reviewing preflight 40661209173."
+  }
+}

@@ -166,6 +166,16 @@ def test_a_spawn_after_a_freed_seat_takes_another_harness_when_one_has_room(tmp_
     assert seen == [("p", "claude", "a"), ("q", "codex", "cx")]
 
 
+def test_an_events_admitted_task_steered_off_a_harness_takes_another_with_room(tmp_path, monkeypatch):
+    from tests.swarm.test_capacity import _runtime_probe, account
+
+    rows = [account("a", sessions=2), account("cx", harness="codex")]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, rows)
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan", "avoid_harness": "codex"})
+    runtime.spawn(config, "plan", "planner@a1b2c3-0002", {"id": "q", "title": "Plan"})
+    assert seen == [("p", "claude", "a"), ("q", "codex", "cx")]
+
+
 def test_a_spawn_after_a_freed_seat_keeps_the_same_harness_when_no_other_has_room(tmp_path, monkeypatch):
     from tests.swarm.test_capacity import _runtime_probe, account
 

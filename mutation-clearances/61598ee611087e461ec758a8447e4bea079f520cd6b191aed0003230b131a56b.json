@@ -1,0 +1,6 @@
+{
+  "scripts/hive/registry.py:scripts.hive.registry.x_update__mutmut_11:f7618c131e4e41b2db2886a0d2d4498720552208fe52cd6c14fa816bc594b289": {
+    "reader": "standards_reader",
+    "reason": "The amended record always carries id and name from _seeded, and _settle lets the record override the defaults, so the hive id passed to _settle never reaches the result."
+  }
+}

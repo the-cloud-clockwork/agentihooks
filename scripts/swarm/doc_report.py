@@ -82,7 +82,8 @@ def _answer(inbox: InboxStore, item) -> str | None:
         return None
     detail = item.reason.removeprefix(f"{item.state}: ")
     if detail.startswith(replied("")):
-        return inbox.get(detail.removeprefix(replied(""))).text
+        reply = inbox.find(detail.removeprefix(replied("")), FIELD)
+        return reply.text if reply else detail
     return detail
 
 

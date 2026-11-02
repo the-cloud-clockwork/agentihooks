@@ -362,11 +362,11 @@ def test_production_restorer_clones_the_declared_source_before_applying_checkpoi
 
 
 @pytest.fixture
-def artifact_endpoint(tmp_path):
+def artifact_endpoint(tmp_path, monkeypatch):
     from tests.test_swarm_v2_artifacts_api import storage
     from tests.test_swarm_v2_artifacts_transport import endpoint
 
-    held = storage.__wrapped__()
+    held = storage.__wrapped__(monkeypatch)
     serving = endpoint.__wrapped__(held, tmp_path)
     value = next(serving)
     try:

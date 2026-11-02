@@ -87,6 +87,7 @@ def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=F
 
 
 @pytest.mark.parametrize("case", CASES, ids=["launch1463", "launch1465"])
+@pytest.mark.feature("swarm-reclaim")
 def test_reclaimed_launch_uses_its_recorded_task_branch(store, monkeypatch, case):
     launched, rendered = _launch(store, monkeypatch, case)
     branch, foreign = case[1], case[3].replace("@", "-")

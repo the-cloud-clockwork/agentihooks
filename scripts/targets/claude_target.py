@@ -109,10 +109,12 @@ def settings_document(rendered: dict) -> dict:
     return rendered
 
 
-def enabled_plugins(operator: dict, layered: dict, bundle: Path | None) -> dict:
+def enabled_plugins(
+    operator: dict, layered: dict, bundle: Path | None, user: Path | None = None, shared: Path | None = None
+) -> dict:
     from scripts.deps_preflight import fleet_plugins
 
-    return {**operator, **dict.fromkeys(fleet_plugins(bundle), True), **layered}
+    return {**operator, **dict.fromkeys(fleet_plugins(bundle, user, shared), True), **layered}
 
 
 def _install_rule_files(dst: Path, sources: list[Path], filter_fn) -> None:
@@ -228,7 +230,11 @@ class ClaudeAdapter:
         merged.update(rendered)
         existing = _i.load_json(existing_settings_path) if existing_settings_path.exists() else {}
         merged["enabledPlugins"] = enabled_plugins(
-            existing.get("enabledPlugins") or {}, rendered.get("enabledPlugins") or {}, _i._get_bundle_path()
+            existing.get("enabledPlugins") or {},
+            rendered.get("enabledPlugins") or {},
+            _i._get_bundle_path(),
+            _i._get_user_bundle_path(),
+            _i._get_shared_bundle_path(),
         )
         merged["hooks"] = _keep_foreign_hooks(existing_settings_path, rendered.get("hooks") or {})
         if not merged["hooks"]:
@@ -255,8 +261,10 @@ class ClaudeAdapter:
         profile_dirs: list[tuple[str, Path]],
         profile_chain: list[str],
         bundle_dir: Path | None,
+        user_dir: Path | None = None,
+        shared_dir: Path | None = None,
     ) -> None:
-        _install_module()._install_claude_persona(profile_dirs, profile_chain, bundle_dir)
+        _install_module()._install_claude_persona(profile_dirs, profile_chain, bundle_dir, user_dir, shared_dir)
 
     def register_hooks_utils(self, profile_name: str) -> None:
         _install_module()._install_user_mcp(profile_name)

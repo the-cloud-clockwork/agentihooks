@@ -3,6 +3,7 @@ import json
 import pytest
 
 from hooks.mcp import scheduler as scheduler_tools
+from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import commands
 
 pytestmark = pytest.mark.unit
@@ -43,8 +44,8 @@ def scheduler(monkeypatch):
     from scripts.scheduler.core import Scheduler
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-    found = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
-    store = RedisStore(found.redis)
+    found = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
+    store = RedisStore(found.state.redis)
     store.create(SwarmConfig("sw", "/repo", 2, 1))
     for name, lane in (("sw-eng-1", "eng"), ("sw-eng-2", "eng")):
         store.put_agent("sw", AgentRecord(name, lane, "t"))
@@ -134,7 +135,7 @@ def test_a_named_agent_owns_its_schedules_and_a_swarm_fire_skips_it(tools, sched
     assert tools["cron_add"]("cron", "0 9 * * *", **named)["entry"]["owner"] == "sw-eng-1"
     assert tools["timer_add"]("stand up", delay="0", **named)["entry"]["owner"] == "sw-eng-1"
     assert scheduler.run_due(now=NOW) == 1
-    inbox = InboxStore(scheduler.redis)
+    inbox = InboxStore(scheduler.state.redis)
     assert inbox.inbox("sw-eng-1") == []
     assert [(item.sender, item.text) for item in inbox.inbox("sw-eng-2")] == [("sw-eng-1", "stand up")]
 
@@ -147,7 +148,7 @@ def test_an_agent_owns_its_schedule_by_name_and_a_swarm_fire_skips_it(tools, sch
     entry = tools["timer_add"]("stand up", delay="0", target="swarm", name="sw", session_id=session_id)["entry"]
     assert entry["owner"] == "sw-eng-1"
     assert scheduler.run_due(now=NOW) == 1
-    inbox = InboxStore(scheduler.redis)
+    inbox = InboxStore(scheduler.state.redis)
     assert inbox.inbox("sw-eng-1") == []
     assert [(item.sender, item.text) for item in inbox.inbox("sw-eng-2")] == [("sw-eng-1", "stand up")]
 

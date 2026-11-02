@@ -153,7 +153,7 @@ def test_the_order(hives, expected):
 def test_the_master_never_lands_on_a_hive_that_excludes_it():
     hives = [eng("a", agents=4), eng("b", agents=5), hive("vm", heartbeat_at=0)]
     assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live hive takes master")
-    assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live UI hive takes qa")
+    assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == Wait("no live swarm-master takes qa")
 
 
 def test_a_full_fleet_names_every_hive_refusal_in_order():
@@ -171,9 +171,13 @@ def test_a_full_master_ui_hive_keeps_the_master_without_counting_against_it():
 @pytest.mark.parametrize("role", ["frontend", "qa"])
 def test_a_ui_profile_task_waits_for_a_ui_host_instead_of_a_headless_hive(role):
     headless = [eng("anton-test"), eng("anton-stable")]
-    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(f"no live UI hive takes {role}")
+    assert place(role, "claude", "acct", "subscription", REPO, headless, NOW) == Wait(
+        f"no live swarm-master takes {role}"
+    )
     full = [hive("workstation", agents=2), *headless]
-    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(f"no UI hive for {role} has room")
+    assert place(role, "claude", "acct", "subscription", REPO, full, NOW) == Wait(
+        f"no swarm-master for {role} has room"
+    )
 
 
 def test_the_codex_harness_matches_its_own_slot_and_login():
@@ -216,3 +220,158 @@ def test_a_master_compares_a_full_one_slot_hive_with_a_partly_filled_hive():
 
     records = [hive("a", max_agents=1, agents=1), hive("b", max_agents=4, agents=3)]
     assert placement.choose("master", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice("b")
+
+
+@pytest.mark.parametrize(("used_percent", "expected"), [(79, "worker-one"), (81, "oracle")])
+def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_percent(used_percent, expected):
+    from scripts.hive import admission, placement
+
+    total = 92_000
+    reading = {"cpus": 16, "load5": 14.0, "total_mb": total, "available_mb": total * (100 - used_percent) // 100}
+    records = [
+        hive("oracle", ui="no", max_agents=24),
+        hive("worker-one", ui="no", max_agents=28, agents=20, prefer={"eng": 1, "ci": 1, "plan": 1}),
+    ]
+    found = admission.capped(admission.room(reading, first=True), 20, 28)
+    records[1].update(room=0, first_room=found.room, first_refusal=admission.refusal(found))
+
+    chosen = placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW)
+    assert chosen.hive == expected
+    refused = "ram: 17480 of 92000 MB available, 81 percent used, at or above the 80 percent line"
+    spill = None if expected == "worker-one" else {"preferred": "worker-one", "refusal": refused}
+    assert (chosen.spill and chosen.spill.record()) == spill
+
+
+def test_round_robin_keeps_at_most_the_node_limit_of_live_hives_listing_the_repo_by_id():
+    from scripts.hive import placement
+
+    records = [
+        hive("c"),
+        hive("a"),
+        hive("d", heartbeat_at=NOW - registry.LIVE_MS - 1),
+        hive("aa", repos=["other"]),
+        hive("b"),
+    ]
+
+    assert [record["id"] for record in placement.round_robin(records, 2, REPO, NOW)] == ["a", "b"]
+    assert [record["id"] for record in placement.round_robin(records, 0, REPO, NOW)] == ["a", "b", "c"]
+    assert [record["id"] for record in placement.round_robin(records, 5, REPO, NOW)] == ["a", "b", "c"]
+
+
+def test_round_robin_gives_the_agent_to_the_chosen_hive_running_the_fewest_agents():
+    from scripts.hive import placement
+
+    records = [
+        hive("worker-one", ui="no", max_agents=28, agents=3, prefer={"eng": 1}),
+        hive("oracle", ui="no", max_agents=4, agents=2),
+        hive("zeta", ui="no", max_agents=4, agents=0),
+    ]
+
+    spread = placement.round_robin(records, 2, REPO, NOW)
+    assert [record[placement.SPREAD] for record in spread] == [2, 3]
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, spread, NOW) == placement.Choice("oracle")
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW) == placement.Choice(
+        "worker-one"
+    )
+    records[1][placement.PLACED] = 2
+    spread = placement.round_robin(records, 2, REPO, NOW)
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, spread, NOW) == placement.Choice(
+        "worker-one"
+    )
+
+
+def ranked(hive_id: str, first_room: int, first_refusal: str = "", **fields) -> dict:
+    record = hive(hive_id, **{"ui": "no", "excluded": ["master"], "prefer": {"eng": 1}, "max_agents": 4, **fields})
+    return {**record, "first_room": first_room, "first_refusal": first_refusal}
+
+
+def test_a_spill_past_the_first_ranked_hive_names_it_and_its_measured_refusal():
+    from scripts.hive.placement import Choice, Spill, choose
+
+    refused = "ram: pod 3900 of 19600 MB available, 81 percent used, at or above the 80 percent line"
+    hives = [ranked("worker", 0, refused, room=4), hive("spare", ui="no", excluded=["master"], max_agents=4)]
+    assert choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Choice(
+        "spare", spill=Spill("worker", refused)
+    )
+    assert Spill("worker", refused).record() == {"preferred": "worker", "refusal": refused}
+
+
+def test_a_spill_on_a_missing_slot_names_the_slot_refusal():
+    from scripts.hive.placement import Choice, Spill, choose
+
+    hives = [ranked("worker", 4, slots=[]), hive("spare", ui="no", excluded=["master"], max_agents=4)]
+    assert choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Choice(
+        "spare", spill=Spill("worker", "no hive for eng advertises the claude slot acct")
+    )
+
+
+def test_the_first_ranked_hive_takes_the_launch_on_its_first_room_without_a_spill():
+    from scripts.hive.placement import Choice, choose
+
+    hives = [ranked("worker", 2, room=0, refusal="cpu: full"), hive("spare", ui="no", excluded=["master"])]
+    assert choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Choice("worker")
+
+
+def test_round_robin_spread_ignores_the_first_room():
+    from scripts.hive.placement import SPREAD, choose
+
+    worker = {**ranked("worker", 2, room=0, refusal="cpu: full"), SPREAD: 0}
+    spare = {**hive("spare", ui="no", excluded=["master"]), SPREAD: 1}
+    found = choose("eng", "claude", "acct", "subscription", REPO, [worker, spare], NOW)
+    assert (found.hive, found.spill) == ("spare", None)
+
+
+@pytest.mark.parametrize(
+    ("fields", "refusal"),
+    [
+        ({"draining": "yes"}, "it is draining"),
+        ({"heartbeat_at": NOW - registry.LIVE_MS - 1}, "its heartbeat is older than 90 seconds"),
+        ({"excluded": ["master", "eng"], "prefer": {"ci": 1}}, None),
+    ],
+    ids=["draining", "stale", "unranked"],
+)
+def test_a_spill_past_an_unhosted_first_ranked_hive_names_why_it_was_left_out(fields, refusal):
+    from scripts.hive.placement import choose
+
+    hives = [ranked("worker", 4, **fields), hive("spare", ui="no", excluded=["master"])]
+    found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
+    assert found.hive == "spare"
+    assert (found.spill and found.spill.record()) == (refusal and {"preferred": "worker", "refusal": refusal})
+
+
+def test_an_excluding_first_ranked_hive_names_the_excluded_role():
+    from scripts.hive.placement import choose
+
+    hives = [ranked("worker", 4, excluded=["master", "eng"]), hive("spare", ui="no", excluded=["master"])]
+    found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
+    assert found.spill.record() == {"preferred": "worker", "refusal": "it excludes eng"}
+
+
+def test_a_full_fleet_waits_naming_the_first_room_refusal_of_the_ranked_hive():
+    from scripts.hive.placement import Wait, choose
+
+    hives = [
+        ranked("worker", 0, "ram: memory at the line", room=4),
+        hive("spare", ui="no", excluded=["master"], room=0, refusal="cpu: load"),
+    ]
+    assert choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Wait(
+        "no hive for eng has room: worker ram: memory at the line; spare cpu: load"
+    )
+
+
+def test_the_spill_names_the_best_ranked_hive_even_when_it_is_the_busiest():
+    from scripts.hive.placement import choose
+
+    hives = [
+        ranked("worker", 0, "ram: memory at the line", agents=3, prefer={"eng": 1}),
+        ranked("second", 4, agents=0, prefer={"eng": 2}),
+        hive("spare", ui="no", excluded=["master"]),
+    ]
+    found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
+    assert (found.hive, found.spill.record()) == (
+        "second",
+        {"preferred": "worker", "refusal": "ram: memory at the line"},
+    )
+    hives[0] = ranked("worker", 4, agents=3, prefer={"eng": 1}, draining="yes")
+    found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
+    assert (found.hive, found.spill.record()) == ("second", {"preferred": "worker", "refusal": "it is draining"})

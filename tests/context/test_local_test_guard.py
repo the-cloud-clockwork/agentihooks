@@ -391,6 +391,89 @@ def test_unrelated_script_paths_pass(command, monkeypatch):
     check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
 
 
+PLANNER_WRAPPER = (
+    "from pathlib import Path\nimport sys\nsys.path.insert(0, str(Path.cwd()))\n"
+    "from scripts.ci_mutation import plan\nraise SystemExit(plan.main())\n"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"S=~/scratchpad/x; cat > \"$S/run_main.py\" <<'EOF'\n{PLANNER_WRAPPER}EOF\n"
+        'cd /w && timeout 400 ~/.venv/bin/python "$S/run_main.py" --base abc > "$S/log" 2>&1',
+        f"cat <<'EOF' > probe.py\n{PLANNER_WRAPPER}EOF\npython3 -X faulthandler probe.py",
+        "tee profile2.py >/dev/null <<EOF\nimport pytest\npytest.main()\nEOF\npython profile2.py",
+        f"cd /w\ncat > probe.py <<'EOF'\n{PLANNER_WRAPPER}EOF\npython probe.py",
+        f"cat > notes.py <<-EOF\n\tprint(1)\n\tEOF\ncat > probe.py <<'EOF'\n{PLANNER_WRAPPER}EOF\npython probe.py",
+    ],
+)
+def test_a_wrapper_script_written_by_a_heredoc_is_judged_by_its_source(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+def test_a_wrapper_script_on_disk_is_judged_by_its_source(tmp_path, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    monkeypatch.setenv("PROBE_DIR", str(tmp_path))
+    (tmp_path / "profile2.py").write_text(PLANNER_WRAPPER)
+    (tmp_path / "report.py").write_text("print('scripts are fine')\n")
+    for command in [
+        f"python {tmp_path}/profile2.py",
+        "python $PROBE_DIR/profile2.py",
+        f"cd {tmp_path} && python profile2.py",
+    ]:
+        with pytest.raises(BlockAction, match="draft pull request"):
+            check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": f"python {tmp_path}/report.py"}})
+
+
+def test_a_wrapper_script_is_read_from_the_payload_folder(tmp_path, monkeypatch):
+    from hooks.context import local_test_guard
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "work"
+    folder.mkdir()
+    (folder / "profile2.py").write_text(PLANNER_WRAPPER)
+    (folder / "notes.py").write_bytes(b"print('\xff')\n")
+    for command in [
+        "python profile2.py",
+        "python3@3.12 profile2.py",
+        "python profile2.py <<'EOF'\nEOF",
+        "cat > /elsewhere/profile2.py <<'EOF'\nprint(1)\nEOF\npython profile2.py",
+    ]:
+        with pytest.raises(BlockAction, match="draft pull request"):
+            local_test_guard.check_local_tests(
+                {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(folder)}
+            )
+    local_test_guard.check_local_tests(
+        {"tool_name": "Bash", "tool_input": {"command": "python notes.py"}, "cwd": str(folder)}
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cat > "$S/report.py" <<\'EOF\'\nimport json\nprint(json.dumps({}))\nEOF\npython "$S/report.py"',
+        f"cat > notes.md <<'EOF'\n{PLANNER_WRAPPER}EOF\npython report.py",
+        "python missing_script.py",
+        "cat > read_runner.py <<'EOF'\nimport inspect\nimport mutmut.__main__ as runner\n"
+        "print(inspect.getsource(runner))\nEOF\npython3 read_runner.py",
+    ],
+)
+def test_wrapper_scripts_that_run_no_tests_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
 def test_later_commands_and_substitutions_are_checked(monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
 
@@ -573,3 +656,68 @@ def test_runner_use_beside_an_inspection_is_blocked(command, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
     with pytest.raises(BlockAction, match="draft pull request"):
         check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": command}}))
+
+
+GH_JOB_READER = (
+    "import json\n"
+    "import subprocess\n"
+    "out = subprocess.run(['gh', 'api', 'repos/o/r/actions/runs/1/jobs'], capture_output=True, text=True).stdout\n"
+    "wanted = ('unit pytest shard 1', 'Tests / unit (pytest 3.12)', 'mutation stats', 'pytest shard 1', 'pytest 3.12')\n"
+    "print('Re-run locally with python -m pytest')\n"
+    "for job in json.loads(out)['jobs']:\n"
+    "    if job['name'] in wanted:\n"
+    "        print(f\"{job['name']} pytest {job['conclusion']}\")\n"
+)
+
+
+def test_a_script_that_launches_gh_and_names_a_runner_in_data_passes(tmp_path, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    (tmp_path / "measure.py").write_text(GH_JOB_READER)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": "python3 measure.py"}, "cwd": str(tmp_path)})
+    check_local_tests(
+        {"tool_name": "Bash", "tool_input": {"command": f"cat > m.py <<'EOF'\n{GH_JOB_READER}EOF\npython3 m.py"}}
+    )
+    (tmp_path / "noted.py").write_text(f"{GH_JOB_READER}subprocess.run(['ls'])  # filters pytest jobs\n")
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": "python3 noted.py"}, "cwd": str(tmp_path)})
+
+
+@pytest.mark.parametrize(
+    "launch",
+    [
+        "subprocess.run(['pytest', '-q'])",
+        "subprocess.run([sys.executable, '-m', 'pytest'])",
+        "subprocess.run(['python3', '-m', 'unittest', 'discover'])",
+        "subprocess.run(['python', '-m', 'scripts.ci_mutation'])",
+        "subprocess.run(['mutmut', 'run'])",
+        "subprocess.run('cd tests && pytest -q', shell=True)",
+        "subprocess.run('uv run pytest tests', shell=True)",
+        "os.system('timeout 60 .venv/bin/pytest -x')",
+        "subprocess.run(f'{sys.executable} -m pytest', shell=True)",
+        "subprocess.run('{} -m pytest'.format(sys.executable), shell=True)",
+        "subprocess.run(['python', '-mpytest', 'tests'])",
+        "os.system('%s -m pytest' % sys.executable)",
+        "os.system('$PY -m pytest')",
+        "os.system('bash -c pytest')",
+        "os.system('sh -lc pytest')",
+        "os.system('$(which pytest) -q')",
+        "os.system('uv run --extra dev pytest')",
+        "os.system('pytest tests/context')",
+        "os.system('pytest 2>&1')",
+        "os.system('pytest > out.log')",
+        "os.system('pytest>out.log')",
+        "os.system('pytest .')",
+        "os.system('pytest tests_unit')",
+        "os.system('pytest testdir')",
+        "os.system('python -W ignore -m pytest')",
+        "os.system('python3 -X dev -B -m unittest discover')",
+    ],
+)
+def test_a_gh_reader_that_also_launches_a_runner_is_blocked(launch, tmp_path, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    (tmp_path / "runs.py").write_text(f"import os\nimport sys\n{GH_JOB_READER}{launch}\n")
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests({"tool_name": "Bash", "tool_input": {"command": "python3 runs.py"}, "cwd": str(tmp_path)})

@@ -411,3 +411,83 @@ def test_unchanged_timer_state_reuses_the_cached_heap(monkeypatch):
     timer.fire()
     timer.fire()
     assert calls == [1]
+
+
+def test_tombstones_past_the_keep_window_leave_the_index_on_the_next_write() -> None:
+    import json
+
+    from scripts.events import deadlines
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = timers.Timers(bus, clock)
+    timer.handle(deadlines.schedule(source(key="execution-old"), "idle", 1000))
+    timer.fire()
+    cancelled = deadlines.cancel(source(2, key="execution-cancelled"), "idle")
+    clock.now = 1100
+    timer.handle(cancelled)
+    clock.now = 1000 + timers.KEEP_MS
+    fresh = deadlines.schedule(source(key="execution-fresh"), "idle", 10**9)
+    timer.handle(fresh)
+    rows = json.loads(bus.state(timers.BUCKET).get(timers.INDEX).value)
+    assert set(rows) == {fresh.key, cancelled.key}
+    clock.now = 1100 + timers.KEEP_MS
+    timer.handle(deadlines.schedule(source(2, key="execution-fresh"), "idle", 10**9))
+    rows = json.loads(bus.state(timers.BUCKET).get(timers.INDEX).value)
+    assert set(rows) == {fresh.key}
+    assert rows[fresh.key]["version"] == 2
+
+
+def test_tombstones_record_when_they_ended() -> None:
+    import json
+
+    from scripts.events import deadlines
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = timers.Timers(bus, clock)
+    request = deadlines.schedule(source(), "idle", 1000)
+    timer.handle(request)
+    clock.now = 1500
+    timer.fire()
+    rows = json.loads(bus.state(timers.BUCKET).get(timers.INDEX).value)
+    assert rows == {request.key: {"version": 1, "request": None, "ended": 1500}}
+
+
+def test_legacy_tombstones_without_an_end_time_leave_on_the_first_write() -> None:
+    import json
+
+    from scripts.events import deadlines
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    store = bus.state(timers.BUCKET)
+    store.create(timers.INDEX, json.dumps({"legacy": {"version": 3, "request": None}}).encode())
+    request = deadlines.schedule(source(), "idle", 10**9)
+    timers.Timers(bus, clock).handle(request)
+    rows = json.loads(store.get(timers.INDEX).value)
+    assert rows == {request.key: {"version": 1, "request": request.to_dict()}}
+
+
+def test_hub_versions_refuse_an_old_deadline_after_its_tombstone_left_the_index() -> None:
+    from scripts.events import deadlines
+    from scripts.hub import timers
+
+    bus, clock = open_bus(BusConfig()), Clock()
+    timer = timers.Timers(bus, clock)
+    hub = runner.HubRunner(bus, registry.Registry([timer.reactor()]), "holder", clock)
+    request = deadlines.schedule(source(), "idle", 1000)
+    bus.events.publish(deadlines.subject(request), request)
+    assert hub.run_once(timeout_ms=0) == {"timers": ["handled"]}
+    output = bus.events.consumer("expiry", "swarm.*.deadline.expired")
+    assert [delivery.event for delivery in output.fetch(10, 0)] == [deadlines.expired(request)]
+    clock.now = 1000 + timers.KEEP_MS
+    other = deadlines.schedule(source(key="execution-other"), "idle", 10**9)
+    bus.events.publish(deadlines.subject(other), other)
+    assert hub.run_once(timeout_ms=0) == {"timers": ["skipped", "handled"]}
+    replay = replace(request, id="replayed")
+    bus.events.publish(deadlines.subject(replay), replay)
+    assert hub.run_once(timeout_ms=0) == {"timers": ["skipped"]}
+    timer.fire()
+    assert output.fetch(10, 0) == []
+    hub.stop()

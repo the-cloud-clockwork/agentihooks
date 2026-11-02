@@ -149,7 +149,7 @@ def step(slug, config, store, ledger, doc, now_ms) -> list[str]:
         actions = _gate(slug, mode, store, rows, bounds, now_ms)
         _save(store, key, marks, cutoff=now_ms, mode=mode)
     if "published" not in marks:
-        actions.append(_publish(slug, marks["mode"], store, ledger, rows, bounds))
+        actions.append(_publish(slug, marks["mode"], store, ledger, rows, bounds, config.watchdog_address))
         _save(store, key, marks, published=now_ms)
     return actions
 
@@ -178,13 +178,13 @@ def final(slug, mode, bounds, rows, flying) -> str:
     )
 
 
-def notice(mode, bounds, rows, flying) -> str:
+def notice(mode, bounds, rows, flying, watchdog="") -> str:
     fields = {
         "end": _spoken(bounds[1]),
         "mode": modes.label(mode),
         "counts": _counts(rows),
         "next": SHORT[mode],
-        "watchdog": doc_report.address(),
+        "watchdog": doc_report.address(watchdog),
     }
     text = NOTICE.format(flying=", ".join(f"{a.name} on {a.task}" for a in flying) or "none", **fields)
     if len(text) <= ledger_notifications.TEXT_KEPT:
@@ -235,12 +235,15 @@ def _gate(slug, mode, store, rows, bounds, now_ms):
     return actions
 
 
-def _publish(slug, mode, store, ledger, rows, bounds):
+def _publish(slug, mode, store, ledger, rows, bounds, watchdog):
     flying = in_flight(store, slug, rows)
     _send_once(
-        store, doc_report.address(), final(slug, mode, bounds, rows, flying), f"{slug}:{KEY}:final:{_ref(bounds)}"
+        store,
+        doc_report.address(watchdog),
+        final(slug, mode, bounds, rows, flying),
+        f"{slug}:{KEY}:final:{_ref(bounds)}",
     )
-    ledger.notify(slug, notice(mode, bounds, rows, flying))
+    ledger.notify(slug, notice(mode, bounds, rows, flying, watchdog))
     return "run window: published the final state to the ledger and the watchdog"
 
 

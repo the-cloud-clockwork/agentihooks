@@ -1,20 +1,20 @@
-"""Hive credentials: a member is minted with a ledger credential and a Redis ACL user."""
+"""Hive credentials: a member is minted with a ledger credential in the hive state store and a Redis ACL user."""
 
 import hashlib
 import hmac
 import json
 import os
 import secrets
+import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
+from scripts.auth import switch
+from scripts.events import state
+from scripts.hive import hive_state, redis_acl
 from scripts.swarm.keyspace import ROOT
 
-if TYPE_CHECKING:
-    from redis import Redis
-
-# Outside the ROOT keyspace, so a member's ACL user cannot read the credential index.
+# Outside the ROOT keyspace, so a member's ACL user cannot read the credential store.
 PREFIX = f"{ROOT}-hive"
 # ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
 ACL_PATTERNS = (f"{ROOT}:*",)
@@ -23,6 +23,9 @@ ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 WORKER_KEYS = (
     "swarm:*:agents",
     "swarm:*:executions",
+    "swarm:*:lease-cache",
+    "swarm:state:fencing:*",
+    "swarm:state:counters:*",
     "swarm:*:execution-publishing",
     "swarm:*:codex-transport",
     "swarm:*:codex-endpoints",
@@ -46,18 +49,20 @@ WORKER_KEYS = (
     "swarm:*:dev-red",
     "swarm:*:prerequisite-waits",
     "swarm:*:stage-covers",
+    "swarm:*:gate-lifts:tasks:*",
+    "swarm:*:gate-lift-drops",
+    "swarm:*:ledger-ready",
     "seat:*:recaps",
     "seat:*:learned",
     "seat-of:*:exit",
 )
-INDEX = f"{ROOT}:hives"
-# A Redis started without --aclfile keeps users in memory only; there is nothing to save.
-NO_ACL_FILE = "not configured to use an ACL file"
+INDEX = hive_state.LEGACY_INDEX
 ENV_FILE = "hive.env"
 NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 SERVICE_TTL_S = 300
+_LEDGER_OF: dict[str, str] = {}
 
 
 class HiveError(Exception):
@@ -68,24 +73,62 @@ def _digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
-def mint(redis: "Redis", name: str, redis_url: str) -> dict:
-    from redis.exceptions import RedisError
+def _store(client):
+    return hive_state.credentials(client, PREFIX)
 
+
+def _legacy(client, read):
+    return lambda: read(client) if hive_state.on_redis() else None
+
+
+def _legacy_member(member_id: str):
+    def read(client) -> dict | None:
+        stored = client.hgetall(f"{PREFIX}:member:{member_id}")
+        if not stored:
+            return None
+        agents = {
+            field.removeprefix("agent:"): json.loads(value)
+            for field, value in stored.items()
+            if field.startswith("agent:")
+        }
+        return {"name": stored.get("name", ""), "ledger": stored.get("ledger", ""), "agents": agents}
+
+    return read
+
+
+def _refusals() -> tuple[type[BaseException], ...]:
+    return (*state.unavailable(), redis_acl.Refused)
+
+
+def _refused(exc: BaseException, what: str) -> HiveError:
+    source = "Redis" if hive_state.on_redis() else "the hive state store"
+    return HiveError(f"{source} refused {what} ({exc})")
+
+
+def member(client, member_id: str) -> dict | None:
+    return hive_state.read(_store(client), f"member.{member_id}", _legacy(client, _legacy_member(member_id)))
+
+
+def members(client) -> dict[str, dict]:
+    return {member_id: found for member_id in hive_state.index(client) if (found := member(client, member_id))}
+
+
+def mint(redis, name: str, redis_url: str) -> dict:
     member_id = secrets.token_hex(8)
     password = secrets.token_urlsafe()
     ledger = secrets.token_urlsafe()
-    records = (f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{_digest(ledger)}")
-    with redis.pipeline() as pipe:
-        pipe.hset(records[0], mapping={"name": name, "ledger": _digest(ledger)})
-        pipe.set(records[1], member_id)
-        pipe.sadd(INDEX, member_id)
-        _set_user(pipe, member_id, password)
-        try:
-            pipe.execute()
-            _persist(redis)
-        except RedisError as exc:
-            _forget(redis, member_id, records)
-            raise HiveError(f"Redis refused the new member ({exc})") from exc
+    digest = _digest(ledger)
+    store = _store(redis)
+    try:
+        hive_state.amend(store, f"member.{member_id}", lambda _: {"name": name, "ledger": digest, "agents": {}})
+        hive_state.amend(store, f"ledger.{digest}", lambda _: member_id)
+        hive_state.amend(store, f"holder.{member_id}", lambda _: digest)
+        hive_state.indexed(redis, member_id, True)
+        _set_user(redis, member_id, password)
+        redis_acl.save(redis)
+    except _refusals() as exc:
+        _forget(redis, member_id, digest)
+        raise _refused(exc, "the new member") from exc
     return {
         "id": member_id,
         "name": name,
@@ -94,87 +137,67 @@ def mint(redis: "Redis", name: str, redis_url: str) -> dict:
     }
 
 
-def member_of(redis: "Redis", credential: str) -> str | None:
-    from redis.exceptions import RedisError
-
+def member_of(redis, credential: str) -> str | None:
     try:
-        return redis.get(f"{PREFIX}:ledger:{_digest(credential)}")
-    except RedisError as exc:
-        raise HiveError(f"Redis refused the member lookup ({exc})") from exc
+        return ledger_member(redis, credential)
+    except state.unavailable() as exc:
+        raise _refused(exc, "the member lookup") from exc
 
 
-def refresh(redis: "Redis", credential: str, redis_url: str) -> dict:
-    from redis.exceptions import RedisError
-
+def refresh(redis, credential: str, redis_url: str) -> dict:
     password = secrets.token_urlsafe()
-    ledger_key = f"{PREFIX}:ledger:{_digest(credential)}"
-
-    def recreate(pipe):
-        member_id = pipe.get(ledger_key)
+    try:
+        member_id = ledger_member(redis, credential)
         if member_id is None:
             raise HiveError("the ledger credential belongs to no hive member")
-        pipe.multi()
-        pipe.sadd(INDEX, member_id)
-        _set_user(pipe, member_id, password)
-        return member_id
-
-    try:
-        member_id = redis.transaction(recreate, ledger_key, value_from_callable=True)
-        _persist(redis)
-    except RedisError as exc:
-        raise HiveError(f"Redis refused the refreshed member ({exc})") from exc
+        hive_state.indexed(redis, member_id, True)
+        _set_user(redis, member_id, password)
+        if ledger_member(redis, credential) != member_id:
+            hive_state.indexed(redis, member_id, False)
+            redis_acl.drop(redis, f"hive-{member_id}")
+            redis_acl.save(redis)
+            raise HiveError("the ledger credential belongs to no hive member")
+        redis_acl.save(redis)
+    except _refusals() as exc:
+        raise _refused(exc, "the refreshed member") from exc
     return {"id": member_id, "redis_url": _with_user(redis_url, f"hive-{member_id}", password)}
 
 
 def _set_user(client, member_id: str, password: str) -> None:
-    client.acl_setuser(
-        f"hive-{member_id}",
-        enabled=True,
-        reset=True,
-        hashed_passwords=[f"+{_digest(password)}"],
-        categories=ACL_CATEGORIES,
-        keys=_acl_keys(member_id),
-        channels=ACL_PATTERNS,
+    redis_acl.set_user(
+        client, f"hive-{member_id}", _digest(password), ACL_CATEGORIES, _acl_keys(member_id), ACL_PATTERNS
     )
 
 
 def _acl_keys(member_id: str) -> tuple[str, ...]:
     own = f"{ROOT}:hive:{member_id}"
-    return (f"%R~{ROOT}:*", f"~{own}", f"~{own}:*", *(f"~{ROOT}:{key}" for key in WORKER_KEYS))
+    record = f"{ROOT}:swarm:state:hive-{member_id}:*"
+    scheduler = f"~{ROOT}:swarm:state:scheduler-{member_id}:*"
+    return (
+        f"%R~{ROOT}:*",
+        f"~{own}",
+        f"~{own}:*",
+        f"~{record}",
+        scheduler,
+        *(f"~{ROOT}:{key}" for key in WORKER_KEYS),
+    )
 
 
-def regrant(redis: "Redis") -> None:
-    for member_id in redis.smembers(INDEX):
-        redis.acl_setuser(
-            f"hive-{member_id}",
-            enabled=True,
-            reset_keys=True,
-            reset_channels=True,
-            categories=ACL_CATEGORIES,
-            keys=_acl_keys(member_id),
-            channels=ACL_PATTERNS,
-        )
-    _persist(redis)
+def regrant(redis) -> None:
+    for member_id in hive_state.index(redis):
+        redis_acl.regrant(redis, f"hive-{member_id}", ACL_CATEGORIES, _acl_keys(member_id), ACL_PATTERNS)
+    redis_acl.save(redis)
 
 
-def _persist(redis: "Redis") -> None:
-    from redis.exceptions import ResponseError
-
+def _forget(redis, member_id: str, digest: str) -> None:
+    store = _store(redis)
     try:
-        redis.acl_save()
-    except ResponseError as exc:
-        if NO_ACL_FILE not in str(exc):
-            raise
-
-
-def _forget(redis: "Redis", member_id: str, records: tuple[str, ...]) -> None:
-    from redis.exceptions import RedisError
-
-    try:
-        redis.delete(*records)
-        redis.srem(INDEX, member_id)
-        redis.acl_deluser(f"hive-{member_id}")
-    except RedisError:
+        hive_state.amend(store, f"ledger.{digest}", lambda _: None)
+        hive_state.amend(store, f"holder.{member_id}", lambda _: None)
+        hive_state.amend(store, f"member.{member_id}", lambda _: None)
+        hive_state.indexed(redis, member_id, False)
+        redis_acl.drop(redis, f"hive-{member_id}")
+    except _refusals():
         pass
 
 
@@ -184,70 +207,123 @@ def _with_user(url: str, user: str, password: str) -> str:
     return urlunsplit(parts._replace(netloc=f"{user}:{password}@{host}"))
 
 
-def ledger_member(redis: "Redis", credential: str) -> str | None:
-    return redis.get(f"{PREFIX}:ledger:{_digest(credential)}")
+def ledger_member(redis, credential: str) -> str | None:
+    digest = _digest(credential)
+    return hive_state.read(
+        _store(redis), f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+    )
 
 
-def issue_agent(redis: "Redis", member_id: str, slug: str, name: str) -> str:
+def _mapped(redis: object, store: object, digest: str | None, member_id: str) -> bool:
+    """True when the ledger credential with this digest belongs to member_id."""
+    if digest is None:
+        return False
+    return (
+        hive_state.read(store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}")))
+        == member_id
+    )
+
+
+def _member_ledger(redis: object, store: object, member_id: str) -> str | None:
+    """The ledger digest of a member with no holder record, cached per process and reloaded once it is unmapped."""
+    digest = _LEDGER_OF.get(member_id)
+    if _mapped(redis, store, digest, member_id):
+        return digest
+    found = member(redis, member_id)
+    if found is None:
+        return None
+    digest = _LEDGER_OF[member_id] = found["ledger"]
+    return digest
+
+
+def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
+    """A hive agent token scoped to one ledger and agent, recorded on its own without reading the member map."""
+    store = _store(redis)
+    digest = hive_state.read(store, f"holder.{member_id}")
+    if digest is None and switch.legacy(os.environ):
+        digest = _member_ledger(redis, store, member_id)
+    if not _mapped(redis, store, digest, member_id):
+        raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
-    key = f"{PREFIX}:member:{member_id}"
-
-    def record(pipe):
-        if not pipe.exists(key):
-            raise HiveError("Hive membership was revoked")
-        pipe.multi()
-        pipe.hset(key, f"agent:{_digest(token)}", json.dumps([slug, name]))
-
-    redis.transaction(record, key)
+    key = f"agent.{member_id}.{_digest(token)}"
+    hive_state.amend(store, key, lambda _: {"ledger": digest, "scope": [slug, name]})
+    if agent_member(redis, token, slug, name) != member_id:
+        hive_state.amend(store, key, lambda _: None)
+        raise HiveError("Hive membership was revoked")
     return token
 
 
-def agent_member(redis: "Redis", token: str, slug: str, name: str) -> str | None:
+def agent_member(redis: object, token: str, slug: str, name: str) -> str | None:
     member_id = token.removeprefix("hive.").partition(".")[0]
-    scope = redis.hget(f"{PREFIX}:member:{member_id}", f"agent:{_digest(token)}")
-    return member_id if scope == json.dumps([slug, name]) else None
+    store = _store(redis)
+    scoped = hive_state.read(store, f"agent.{member_id}.{_digest(token)}")
+    if scoped is not None:
+        if scoped["scope"] != [slug, name]:
+            return None
+        digest = scoped["ledger"]
+        current = hive_state.read(
+            store, f"ledger.{digest}", _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+        )
+        return member_id if current == member_id else None
+    if not switch.legacy(os.environ):
+        return None
+    scope = (member(redis, member_id) or {}).get("agents", {}).get(_digest(token))
+    return member_id if scope == [slug, name] else None
 
 
-def issue_controller(redis: "Redis") -> str:
+def issue_controller(redis) -> str:
     credential = secrets.token_urlsafe()
-    redis.set(f"{PREFIX}:controller", _digest(credential))
+    hive_state.amend(_store(redis), "controller", lambda _: _digest(credential))
     return credential
 
 
-def issue_service(redis: "Redis", holder: str) -> str:
+def issue_service(redis, holder: str) -> str:
     credential = f"{holder}.{secrets.token_urlsafe()}"
     keep_service(redis, credential)
     return credential
 
 
-def keep_service(redis: "Redis", credential: str) -> None:
-    redis.set(f"{PREFIX}:controller:{credential.rpartition('.')[0]}", _digest(credential), ex=SERVICE_TTL_S)
+def _service_key(holder: str) -> str:
+    return f"service.{_digest(holder)}"
 
 
-def controller(redis: "Redis", credential: str) -> bool:
+def keep_service(redis, credential: str) -> None:
+    held = {"digest": _digest(credential), "expires": time.time() + SERVICE_TTL_S}
+    hive_state.amend(_store(redis), _service_key(credential.rpartition(".")[0]), lambda _: held)
+
+
+def _expected(redis, holder: str, dot: str) -> str | None:
+    if not dot:
+        return hive_state.read(_store(redis), "controller", _legacy(redis, lambda c: c.get(f"{PREFIX}:controller")))
+    legacy = _legacy(redis, lambda c: (held := c.get(f"{PREFIX}:controller:{holder}")) and {"digest": held})
+    service = hive_state.read(_store(redis), _service_key(holder), legacy)
+    return service["digest"] if service and service.get("expires", float("inf")) > time.time() else None
+
+
+def controller(redis, credential: str) -> bool:
     if not credential:
         return False
     holder, dot, _ = credential.rpartition(".")
-    expected = redis.get(f"{PREFIX}:controller:{holder}" if dot else f"{PREFIX}:controller")
+    expected = _expected(redis, holder, dot)
     return bool(expected) and hmac.compare_digest(expected, _digest(credential))
 
 
-def revoke(redis: "Redis", member_id: str) -> None:
-    from redis.exceptions import RedisError
-
-    member_key = f"{PREFIX}:member:{member_id}"
-    member = redis.hgetall(member_key)
-    if not member:
+def revoke(redis, member_id: str) -> None:
+    found = member(redis, member_id)
+    if not found:
         raise HiveError(f"no hive member {member_id}")
-    with redis.pipeline() as pipe:
-        pipe.delete(f"{PREFIX}:ledger:{member['ledger']}")
-        pipe.srem(INDEX, member_id)
-        pipe.acl_deluser(f"hive-{member_id}")
-        pipe.execute()
+    store = _store(redis)
+    digest = found["ledger"]
     try:
-        _persist(redis)
-        redis.delete(member_key)
-    except RedisError as exc:
+        hive_state.amend(
+            store, f"ledger.{digest}", lambda _: None, _legacy(redis, lambda c: c.get(f"{PREFIX}:ledger:{digest}"))
+        )
+        hive_state.indexed(redis, member_id, False)
+        redis_acl.drop(redis, f"hive-{member_id}")
+        redis_acl.save(redis)
+        hive_state.amend(store, f"holder.{member_id}", lambda _: None)
+        hive_state.amend(store, f"member.{member_id}", lambda _: None, _legacy(redis, _legacy_member(member_id)))
+    except _refusals() as exc:
         raise HiveError(
             f"revoking {member_id} is incomplete and a Redis restart before it completes revives its Redis user; "
             f"run revoke again ({exc})"
@@ -258,9 +334,28 @@ def write_env(home: Path | str, url: str, grant: dict) -> Path:
     creds = Path(home) / NATS_CREDS_FILE
     if grant.get("nats_credentials"):
         grant = {**grant, "bus_credentials": str(_write_private(creds, grant["nats_credentials"]))}
+    elif (kept := kept_bus(home, grant["id"])) is not None:
+        grant = {**grant, **kept}
     else:
         creds.unlink(missing_ok=True)
     return _write_private(Path(home) / ENV_FILE, env_text(url, grant))
+
+
+def kept_bus(home: Path | str, member_id: str) -> dict | None:
+    from dotenv import dotenv_values
+
+    creds, saved = Path(home) / NATS_CREDS_FILE, Path(home) / ENV_FILE
+    if not creds.is_file():
+        return None
+    values = dotenv_values(saved, interpolate=False)
+    if values.get("AGENTIHOOKS_HIVE_ID") != member_id:
+        return None
+    swarms = values.get("AGENTIHOOKS_BUS_SWARMS")
+    return {
+        "bus_credentials": str(creds),
+        "bus_scoped": values.get("AGENTIHOOKS_BUS_SCOPED") == "1",
+        "bus_swarms": swarms.split(",") if swarms else [],
+    }
 
 
 def env_text(url: str, grant: dict) -> str:

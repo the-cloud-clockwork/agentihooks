@@ -787,7 +787,7 @@ def test_a_red_notice_whose_close_races_stays_indexed_and_closes_next_pass(store
     red, item = red_notice(store)
     store.redis.hset(store.key("sw", "red-notices"), "gone", URL)
 
-    def changed_meanwhile(self, item_id, closer, kind, detail=""):
+    def changed_meanwhile(self, item_id, closer, kind, detail="", only_from=None):
         raise ledger_events.InboxError(f"message {item_id} changed meanwhile")
 
     with monkeypatch.context() as patched:
@@ -1189,6 +1189,27 @@ def test_dead_gate_resolution_is_red_but_reminders_still_require_actual_failure(
 def test_a_pull_request_reports_whether_checks_still_run(rollup, suites, running):
     raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": suites}
     assert ledger_events.pull_request(raw).running is running
+
+
+@pytest.mark.parametrize(
+    ("status", "conclusion", "running"),
+    [
+        ("COMPLETED", "CANCELLED", False),
+        ("QUEUED", "CANCELLED", False),
+        ("IN_PROGRESS", "CANCELLED", False),
+        ("QUEUED", None, True),
+        ("IN_PROGRESS", None, True),
+    ],
+)
+def test_cancelled_suite_conclusions_end_running_state(status, conclusion, running):
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [{"name": "unit", "status": "COMPLETED", "conclusion": "CANCELLED"}],
+        "checkSuites": [{"status": status, "conclusion": conclusion, "workflowRun": {"databaseId": 1}}],
+    }
+    found = ledger_events.pull_request(raw)
+    assert found.running is running
+    assert found.started is running
 
 
 @pytest.mark.parametrize(

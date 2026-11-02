@@ -1,0 +1,14 @@
+{
+  "fixture_inputs": {
+    "dashboard_metric_reader": "the landing sessions indexed figure read from the legacy sessions endpoint",
+    "obsolete_dispatcher": "a workforce caller of the legacy task dispatch tool",
+    "search_caller": "an agent memory call to the legacy semantic search tool"
+  },
+  "input_sha256": {
+    "fixture.json": "411cef2f1948973b6ac72f1d38f161546eb86eca40c6296ec4c48922d9a63da9",
+    "sv2_mig01_cases.py": "97c013a8e496cf25c799954f1ee47e1aa48f62ab57e60b94f083c7fcad874a9c"
+  },
+  "mocked": true,
+  "package": "SV2-MIG-01",
+  "tested_commit": "ae58d723f5500e1edd5111b57512aa0b8cd5d06e"
+}

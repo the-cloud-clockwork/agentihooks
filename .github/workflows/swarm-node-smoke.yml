@@ -52,9 +52,10 @@ jobs:
         with:
           path: ${{ env.WORKER_SCANNER_CACHE }}
           key: worker-scanner-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/swarm-node/scan.sh', 'docker/swarm-node/versions.lock') }}-${{ github.run_id }}
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/retry-upload
         if: always()
         with:
+          after-cancel: true
           name: swarm-worker-image-${{ matrix.proof }}
           path: ${{ runner.temp }}/worker-image-evidence
           retention-days: 7
@@ -63,9 +64,10 @@ jobs:
         env:
           WORKER_IMAGE: ${{ env.WORKER_PROVEN_IMAGE }}
         run: bash tests/integration/swarm_node/run_health_proof.sh "$RUNNER_TEMP/worker-health-evidence"
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/retry-upload
         if: ${{ always() && matrix.proof == 'startup' }}
         with:
+          after-cancel: true
           name: swarm-worker-health-evidence
           path: ${{ runner.temp }}/worker-health-evidence
           retention-days: 7
@@ -97,9 +99,10 @@ jobs:
           path: ${{ runner.temp }}/worker-image-evidence/profiles
       - name: Compare independent startup and rebuild inventories
         run: bash docker/swarm-node/smoke.sh "$RUNNER_TEMP/worker-image-evidence" compare "$GITHUB_SHA"
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/retry-upload
         if: always()
         with:
+          after-cancel: true
           name: swarm-worker-image-evidence
           path: ${{ runner.temp }}/worker-image-evidence
           retention-days: 7

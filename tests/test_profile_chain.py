@@ -340,6 +340,28 @@ def test_rendered_overlays_read_the_home_stamp(tmp_path, wrapped):
     assert profile_chain.rendered_overlays(tmp_path) == []
 
 
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_rendered_chain_read_the_home_stamp(tmp_path, wrapped):
+    stamp = tmp_path / profile_chain.RENDER_STAMP
+    assert profile_chain.rendered_chain(tmp_path) == []
+    data = {"chain": ["a", 2, "brain"]}
+    stamp.write_text(json.dumps({"render": data, "chain": ["other"]} if wrapped else data))
+    assert profile_chain.rendered_chain(tmp_path) == ["a", "2", "brain"]
+    for data in (
+        {},
+        {"chain": None},
+        [],
+        None,
+        {"render": {}},
+        {"render": None},
+        {"render": []},
+    ):
+        stamp.write_text(json.dumps(data))
+        assert profile_chain.rendered_chain(tmp_path) == []
+    stamp.write_text("{")
+    assert profile_chain.rendered_chain(tmp_path) == []
+
+
 def test_rendered_dirs_adds_the_overlays_the_chain_declares(tmp_path, monkeypatch):
     monkeypatch.setattr(profile_chain, "BUILT_IN_PROFILES", tmp_path / "builtin")
     monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path / "roles")
@@ -473,3 +495,38 @@ def test_require_capabilities_names_each_missing_one(tmp_path):
             ValueError, match=r"^profile headed required_capabilities must be a list of nonempty strings$"
         ):
             profile_chain.require_capabilities(dirs, {"headed"})
+
+
+def test_card_reads_description_and_capabilities_once_each(tmp_path):
+    (tmp_path / "profile.yml").write_text(
+        "description: Reviews pull requests\ncapabilities: [review, python, review]\nrequired_capabilities: [headed]\n"
+    )
+    assert profile_chain.card("reviewer", tmp_path) == {
+        "name": "reviewer",
+        "description": "Reviews pull requests",
+        "capabilities": ["review", "python"],
+    }
+
+
+@pytest.mark.parametrize("manifest", [None, "", "extends: [engineer]\n"])
+def test_card_of_a_profile_without_card_fields_is_empty(tmp_path, manifest):
+    if manifest is not None:
+        (tmp_path / "profile.yml").write_text(manifest)
+    assert profile_chain.card("plain", tmp_path) == {"name": "plain", "description": "", "capabilities": []}
+
+
+@pytest.mark.parametrize(
+    ("manifest", "message"),
+    [
+        ("description: [a]\n", r"^profile odd description must be a string$"),
+        ("description: 3\n", r"^profile odd description must be a string$"),
+        ("capabilities: review\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("capabilities: [' ']\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("capabilities: [1]\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("- review\n", r"^profile odd profile\.yml must be a mapping$"),
+    ],
+)
+def test_card_refuses_a_malformed_field(tmp_path, manifest, message):
+    (tmp_path / "profile.yml").write_text(manifest)
+    with pytest.raises(ValueError, match=message):
+        profile_chain.card("odd", tmp_path)

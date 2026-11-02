@@ -34,7 +34,7 @@ def git(root: Path, *args: str) -> str:
 
 
 def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
-    task = next((row for row in ledger.tasks(slug) if row.get("id") == agent.task), {})
+    task = ledger.task(slug, agent.task) or {}
     if task.get("claimed_by") != agent.name or task.get("state") not in ("claimed", "pr"):
         raise SwarmError("publication requires this agent's claimed task")
     if task.get("branch"):
@@ -109,6 +109,13 @@ def local_repository(value: str, repo: str) -> Path:
 
 def mapped_branch(repo: Path, task: dict) -> str | None:
     branches = task.get("repository_branches", {})
+    if (
+        task.get("pr_url")
+        and len({value for key, value in branches.items() if repository_name(key) == repository_name(str(repo))}) > 1
+    ):
+        head = publish_queue.open_head(git(repo, "remote", "get-url", "origin"), task["pr_url"])
+        if head:
+            return head
     branch = branches.get(str(repo))
     if branch is None:
         branch = next(
@@ -122,16 +129,30 @@ def refusal_branch(repo: Path, task: dict) -> str:
     return task.get("branch", "") if branch is None else branch
 
 
+def recorded_branch(repo: Path, task: dict) -> str:
+    remote = task.get("branch_repo")
+    if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
+        return ""
+    if not remote and len(task.get("repositories", [])) > 1:
+        return ""
+    return task.get("branch") or ""
+
+
 def repository_task(repo: Path, task: dict) -> dict:
     branch = mapped_branch(repo, task)
     if branch is None:
-        branch = task.get("branch", "")
-        remote = task.get("branch_repo")
-        if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
-            branch = ""
-        elif not remote and len(task.get("repositories", [])) > 1:
-            branch = ""
+        branch = recorded_branch(repo, task)
     return {**task, "branch": require_branch(branch) if branch else ""}
+
+
+def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict:
+    mapped, recorded = scoped["branch"], recorded_branch(repo, task)
+    if branch == mapped or recorded in ("", mapped):
+        return scoped
+    heads = {name for name in (mapped, recorded) if git(repo, "ls-remote", "origin", f"refs/heads/{name}")}
+    if mapped in heads or recorded not in heads:
+        return scoped
+    return {**scoped, "branch": recorded}
 
 
 def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
@@ -153,6 +174,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         if root is None:
             return existing(primary, scoped, agent), primary, scoped
         branch = require_branch(git(root, "branch", "--show-current"))
+        scoped = continuation_task(primary, task, scoped, branch)
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")
@@ -177,13 +199,26 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     return record
 
 
-def merged_record(repo: Path, task: dict) -> bool:
+def merged_record(repo: Path, task: dict[str, str]) -> bool:
     if not task.get("branch") or not task.get("pr_url"):
         return False
     if stack.repo_key(task["pr_url"].split("/pull/")[0]) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
         return False
-    pull = json.loads(execute(["gh", "pr", "view", task["pr_url"], "--json", "state,headRefName"], Path(repo)))
-    return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
+    pull = stack.change(task["pr_url"], f"cannot read pull request {task['pr_url']}")
+    return pull.merged and pull.head_branch == task["branch"]
+
+
+def open_pull_head(root: Path, task: dict, branch: str, remote: str) -> str:
+    url = task.get("pr_url", "")
+    head = publish_queue.open_head(remote, url)
+    if head and head != branch:
+        git(root, "fetch", "origin", head)
+        if not descends(root, head):
+            raise SwarmError(
+                f"open pull request {url} delivers branch {head}, but worktree {root} on branch {branch} "
+                f"does not descend from it; continue from origin/{head} or close that pull request"
+            )
+    return head
 
 
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
@@ -214,15 +249,18 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])
             checkout = checkout_fields(root)
-            delivery = target_branch(root, scoped, checkout["branch"], scoped if retired else task)
+            head = open_pull_head(root, scoped, checkout["branch"], checkout["branch_repo"])
+            delivery = head or target_branch(root, scoped, checkout["branch"], scoped if retired else task)
             if delivery != checkout["branch"]:
                 git(root, "branch", f"--set-upstream-to=origin/{delivery}")
-                if publish_queue.open_head(checkout["branch_repo"], scoped.get("pr_url", "")) == delivery:
-                    checkout["branch"] = delivery
+            checkout["branch"] = head or checkout["branch"]
             fields.append({**checkout, "repository": str(repository)})
         except SwarmError as exc:
             raise PublicationRefusal(repository, refusal_branch(repository, scoped), str(exc)) from exc
-    update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
+    registered = task
+    for entry in fields:
+        registered = drop_repository(registered, Path(entry["repository"]))
+    update = branch_record(fields[-1], Path(fields[-1]["repository"]), registered)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
     ledger.update_task(slug, agent.task, {**cleared, **update}, by=agent.name)
     result = fields[0] if len(fields) == 1 else {"worktrees": fields}
@@ -315,10 +353,36 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
     recorded = task.get("branch")
     if recorded and branch != recorded:
         remote = git(root, "remote", "get-url", "origin")
-        if publish_queue.open_head(remote, task.get("pr_url", "")) == recorded and descends(root, recorded):
+        delivered = publish_queue.open_head(remote, task.get("pr_url", ""))
+        if delivered == recorded and descends(root, recorded):
             return recorded
+        if not delivered and cut_from(root, recorded) and settled(task):
+            return branch
         raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
     return branch
+
+
+def cut_from(root: Path, recorded: str) -> bool:
+    head = remote_head(root, recorded)
+    if not head:
+        return False
+    return git(root, "merge-base", head, "HEAD") == head
+
+
+def drop_repository(task: dict, repository: Path) -> dict:
+    name = repository_name(str(repository))
+    branches = task.get("repository_branches", {})
+    return {
+        **task,
+        "repository_branches": {key: value for key, value in branches.items() if repository_name(key) != name},
+    }
+
+
+def settled(task: dict[str, object]) -> bool:
+    url = str(task.get("pr_url") or "")
+    if not url:
+        return True
+    return stack.change(url, f"cannot read pull request {url}").state == "closed"
 
 
 def gate_python(repo: Path) -> str:
@@ -373,7 +437,9 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         selected = selected_files(root, files)
         retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
         fields["branch"] = delivery_branch(root, scoped, fields["branch"])
-        ledger.update_task(slug, agent.task, branch_record(fields, primary, task), by=agent.name)
+        ledger.update_task(
+            slug, agent.task, branch_record(fields, primary, drop_repository(task, primary)), by=agent.name
+        )
         stage_files(root, selected)
         changed = bool(git(root, "diff", "--cached", "--name-only", "-z"))
         if changed:

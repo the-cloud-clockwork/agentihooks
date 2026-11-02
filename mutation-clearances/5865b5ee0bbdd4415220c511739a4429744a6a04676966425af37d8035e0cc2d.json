@@ -1,0 +1,6 @@
+{
+  "scripts/ci_branch_lanes.py:scripts.ci_branch_lanes.x_refused__mutmut_28:677ad5879c9b0f876e07fa293b40115aee4b3ff61c0dbdb0114bedf4418d38ff": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: whole-tree names strictly include the workflow names returned before; selected paths are confined to WORKFLOWS, so every later membership result and ancestor show is unchanged. Extra nonworkflow names cannot be consulted."
+  }
+}

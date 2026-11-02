@@ -34,18 +34,23 @@ def split_names(plan: dict) -> set[str]:
 
 
 def unit_tests(plan: dict, name: str, index: int) -> set[str] | None:
+    if plan.get("probe_mode"):
+        split = plan["splits"].get(function_name(name))
+        return set(split["head"]) if split else None
     assignment = plan["assignments"].get(name)
     if not isinstance(assignment, list) or index not in assignment:
         return None
     split = plan["splits"][function_name(name)]
-    return {*split["head"], *split["slices"][assignment.index(index)]}
+    head = () if name in plan.get("probe", {}).get("results", {}) else split["head"]
+    return {*head, *split["slices"][assignment.index(index)]}
 
 
 def unit_cost(plan: dict, name: str, index: int) -> float:
     assignment = plan["assignments"][name]
     if not isinstance(assignment, list):
         return plan["costs"][name]
-    return plan["splits"][function_name(name)]["costs"][assignment.index(index)]
+    costs = plan.get("unit_costs", {}).get(name, plan["splits"][function_name(name)]["costs"])
+    return costs[assignment.index(index)]
 
 
 def shard_tests(tests: list[str], name: str | None, index: int) -> list[str]:

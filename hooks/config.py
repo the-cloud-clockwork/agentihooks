@@ -794,8 +794,16 @@ def _receives(path: Path, role: str | None, choice: dict[str, bool]) -> bool:
     return roles is None or role.casefold() in roles
 
 
+def _manifesto_files(directory: Path) -> list[Path]:
+    return [path for path in directory.glob("*.md") if path.name.casefold() != "readme.md"]
+
+
 def _resolve_manifesto_paths(
-    bundle_root: str | Path | None = None, role: str | None = None, choice: dict[str, bool] | None = None
+    bundle_root: str | Path | None = None,
+    role: str | None = None,
+    choice: dict[str, bool] | None = None,
+    user_root: str | Path | None = None,
+    shared_root: str | Path | None = None,
 ) -> list[str]:
     explicit = os.getenv("CI_MANIFESTO_PATH")
     if explicit:
@@ -810,14 +818,20 @@ def _resolve_manifesto_paths(
         if root
         else Path.home() / "dev" / "tcc-ecosystem" / "agentihooks-bundle" / "manifestos"
     )
+    user_directory = Path(user_root).expanduser() / "manifestos" if user_root and not manifests_dir else None
+    shared_directory = Path(shared_root).expanduser() / "manifestos" if shared_root and not manifests_dir else None
     skip = _manifesto_skip_names()
-    if directory.is_dir():
+    layers = [layer for layer in (directory, shared_directory, user_directory) if layer and layer.is_dir()]
+    if layers:
+        merged: list[Path] = []
+        for layer in layers:
+            files = _manifesto_files(layer)
+            overridden = {path.stem.casefold() for path in files}
+            merged = [path for path in merged if path.stem.casefold() not in overridden] + files
         return [
             str(path)
-            for path in sorted(directory.glob("*.md"), key=lambda item: item.name.casefold())
-            if path.name.casefold() != "readme.md"
-            and path.stem.casefold() not in skip
-            and _receives(path, role, choice or {})
+            for path in sorted(merged, key=lambda item: item.name.casefold())
+            if path.stem.casefold() not in skip and _receives(path, role, choice or {})
         ]
     legacy = Path.home() / "dev" / "tcc-ecosystem" / "documents" / "anton" / "ANTON-CORE-CI-MANIFESTO.md"
     return [str(legacy)] if legacy.is_file() and legacy.stem.casefold() not in skip else []

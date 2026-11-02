@@ -66,15 +66,19 @@ class ClosedAfterTheTickRead(FakeLedger):
 
 def test_the_exit_sweep_settles_from_the_live_task_state_not_the_tick_snapshot(redis):
     store, inbox = RedisStore(redis), InboxStore(redis)
-    store.create(SwarmConfig("sw", "/repo", 0, 0))
-    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
-    item = inbox.send("sender", "sw-eng-1", "contract")
-    ledger = ClosedAfterTheTickRead([{"id": "t1", "state": "pr", "claimed_by": "sw-eng-1"}])
-    tick("sw", store, ledger, FakeRuntime(), 1_000)
-    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("sw-eng-1", "cancelled")
-    assert inbox.mailbox("eng-1@sw") == []
-    [notice] = inbox.pending_items("sender")
-    assert item.id in notice.text
+    for _ in range(2):
+        try:
+            store.create(SwarmConfig("sw", "/repo", 0, 0))
+            store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+            item = inbox.send("sender", "sw-eng-1", "contract")
+            ledger = ClosedAfterTheTickRead([{"id": "t1", "state": "pr", "claimed_by": "sw-eng-1"}])
+            tick("sw", store, ledger, FakeRuntime(), 1_000)
+            assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("sw-eng-1", "cancelled")
+            assert inbox.mailbox("eng-1@sw") == []
+            [notice] = inbox.pending_items("sender")
+            assert item.id in notice.text
+        finally:
+            redis.flushdb()
 
 
 def test_a_live_closed_task_withdraws_late_mail_even_after_an_exit_to_the_seat_was_recorded(redis):
@@ -613,6 +617,20 @@ def test_mail_passed_to_a_gone_successor_master_reaches_the_live_one_in_the_same
     item = inbox.send("sender", first, "late")
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).address == live
+
+
+def test_a_master_leaving_before_its_successor_spawns_keeps_its_own_mail_waiting(redis: object) -> None:
+    from scripts.swarm.naming import NameRegistry
+
+    inbox = InboxStore(redis)
+    names = NameRegistry(redis)
+    names.mint_code("sw", "sw", "/repo")
+    master = names.next("sw", "master")
+    item = inbox.send("sender", master, "for the next master")
+    assert inbox.get(item.id).address == master
+    exits.settle(inbox, master, "", "retired")
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (master, "pending")
+    assert inbox.pending_items("sender") == []
 
 
 @pytest.mark.parametrize(

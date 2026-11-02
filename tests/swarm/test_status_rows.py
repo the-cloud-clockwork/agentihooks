@@ -235,7 +235,8 @@ def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
     monkeypatch.setattr(status, "page_quota", lambda: {})
     report = status.status_report(store, "sw", {"tasks": []})
     assert report["launch_checks"] == [saved]
-    assert [f["id"] for f in report["findings"]] == ["launch-check/engineer@a1b2c3-0001/base"]
+    assert [f["id"].split("/")[1] for f in report["findings"]] == ["base"]
+    assert report["findings"][0]["evidence"][0] == "agents engineer@a1b2c3-0001"
 
 
 def test_status_reports_each_closed_failed_launch_pane_with_its_lines(store, monkeypatch):

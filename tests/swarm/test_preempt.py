@@ -92,6 +92,71 @@ def test_an_ask_is_forgotten_once_its_holder_left(store):
     assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e1": '["t3", 2]'}
 
 
+def refuse(store, task, seen_at, lane="eng"):
+    from scripts.hive import placement_waits
+
+    placement_waits.observe(store, SLUG, lane, task, "no eng hive has room: cpu", seen_at)
+
+
+def test_an_urgent_task_that_placement_refuses_asks_nobody_to_hand_off(store):
+    from scripts.hive import placement_waits
+
+    refuse(store, "t3", 1)
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
+    assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2) == []
+    assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), placement_waits.WAIT_MS) == []
+    assert asks(store, "e1") == asks(store, "e2") == []
+    assert store.redis.smembers(store.key(SLUG, preempt.WAITING)) == {"t3"}
+    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1 + placement_waits.WAIT_MS)) == 1
+
+
+def test_a_refused_urgent_task_does_not_hold_back_the_next_waiting_one(store):
+    refuse(store, "t3", 1)
+    preempt.step(SLUG, store, ROWS, doc(), full("t3", "t4"), 1)
+    preempt.step(SLUG, store, ROWS, doc(), full("t3", "t4"), 2)
+    assert [item.text.split()[6] for item in asks(store, "e2")] == ["t4"]
+
+
+def test_a_placement_refusal_in_another_lane_still_asks_and_names_the_victim(store):
+    refuse(store, "t3", 1, lane="ci")
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
+    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2)) == 1
+    assert store.redis.hgetall(store.key(SLUG, preempt.VICTIMS)) == {"e2": "t3"}
+    assert preempt.take_victim(store, SLUG, "e2")
+    assert not preempt.take_victim(store, SLUG, "e2")
+
+
+def test_an_urgent_task_whose_placement_stays_refused_asks_nobody_over_an_hour(store):
+    probed = []
+
+    def probe(lane, task):
+        probed.append((lane, task["id"]))
+        return "no eng hive has room: cpu"
+
+    refuse(store, "t3", 1)
+    for at in range(1, 60 * 60_000 + 2, 60_000):
+        assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), at, probe) == []
+    assert asks(store, "e1") == asks(store, "e2") == []
+    assert set(probed) == {("eng", "t3")}
+    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 61 * 60_000, lambda lane, task: "")) == 1
+
+
+def test_the_probe_returns_the_runtime_refusal_and_refuses_an_unresolved_profile():
+    from types import SimpleNamespace
+
+    from scripts.swarm.profile_choice import ProfileUnresolved
+
+    def unresolved(lane, task):
+        raise ProfileUnresolved(f"{lane} {task['id']} mixed")
+
+    placed = SimpleNamespace(placement_refusal=lambda lane, task: f"{lane} {task['id']} refused")
+    assert preempt.probe(placed, "eng", {"id": "t3"}) == "eng t3 refused"
+    assert preempt.probe(SimpleNamespace(), "eng", {"id": "t3"}) == ""
+    assert preempt.probe(SimpleNamespace(placement_refusal=unresolved), "eng", {"id": "t3"}) == (
+        "profile unresolved: eng t3 mixed"
+    )
+
+
 def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(store, monkeypatch):
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
 
@@ -198,11 +263,15 @@ def test_run_looks_only_at_lanes_whose_every_seat_is_held(store, monkeypatch):
         calls.append((slug, received is store, rows is ROWS, received_doc["tasks"], lane, dispatched({"id": "t1"})))
         return [ROWS["t3"]]
 
-    seats = preempt.Seats(ROWS, lambda agent, rows: agent.name == "x", lambda agent, row: True, ready)
+    probed = []
+    seats = preempt.Seats(
+        ROWS, lambda agent, rows: agent.name == "x", lambda agent, row: True, ready, lambda *a: probed.append(a)
+    )
     config = store.config(SLUG)
     preempt.run(SLUG, config, store, doc(), 1, seats)
     actions = preempt.run(SLUG, config, store, doc(), 2, seats)
     assert calls == [(SLUG, True, True, doc()["tasks"], "eng", (2, "t1"))] * 2
+    assert probed == [("eng", ROWS["t3"])]
     assert len(actions) == 1 and len(asks(store, "e2")) == 1
     store.update(SLUG, max_eng=0)
     assert preempt.run(SLUG, store.config(SLUG), store, doc(), 3, seats) == []
@@ -215,7 +284,7 @@ def test_a_seat_is_held_by_a_live_agent_that_still_owns_its_task():
     def ended(agent, received):
         return received is rows and agent.name == "x"
 
-    seats = preempt.Seats(rows, ended, lambda agent, row: row.get("claimed_by", agent.name) == agent.name, None)
+    seats = preempt.Seats(rows, ended, lambda agent, row: row.get("claimed_by", agent.name) == agent.name, None, None)
     agents = [holder("e1", "t1"), holder("x", "t1"), holder("e2", "t2"), holder("e3", "gone")]
     assert [seats.holds(a) for a in agents] == [True, False, False, True]
 

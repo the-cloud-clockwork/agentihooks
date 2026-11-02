@@ -1,0 +1,6 @@
+{
+  "scripts/ci_branch_lanes.py:scripts.ci_branch_lanes.x_refused__mutmut_35:ba81eff14d092714cbbf9f0dcdeda2dc450bd9cb0a1d85368d3351464ae68922": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: literal 'XX--XX' is an additional non-option pathspec; WORKFLOWS remains, so selected workflow membership is unchanged whether that extra path exists or not."
+  }
+}

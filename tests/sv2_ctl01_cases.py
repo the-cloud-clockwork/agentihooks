@@ -27,6 +27,8 @@ def process_race():
     from fakeredis import TcpFakeServer
     from redis import Redis
 
+    from scripts.swarm import fencing
+
     server = TcpFakeServer(("127.0.0.1", 0))
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -52,8 +54,9 @@ def process_race():
         assert all(process.exitcode == 0 for process in processes)
         winners = [outcomes.get(timeout=2) for _ in processes]
         records = store.execution_registry.records("fixture")
-        intents = store.redis.hlen(store.key("fixture", "controller-intents"))
-        changes = int(store.redis.get(store.key("fixture", "controller-leader-changes")) or 0)
+        doc = fencing.read(store, "fixture")
+        intents = len(doc["intents"])
+        changes = doc["leader_changes"]
         return {
             "passed": sum(winners) == len(records) == intents == changes == 1,
             "controller_processes": len(processes),
@@ -85,6 +88,8 @@ def case_a():
 def case_b():
     from pytest import MonkeyPatch
 
+    from scripts.swarm import fencing
+
     with MonkeyPatch.context() as patch:
         store, (former, replacement), transport, clock, _ = fixture.__wrapped__(patch)
         assert former.acquire()
@@ -93,8 +98,7 @@ def case_b():
         clock[0] += lease.ttl_ms()
         assert replacement.acquire()
         assert former.ready and former.held is not None
-        keys = [store.key("fixture", kind) for kind in ("executions", "controller-intents", "runtime-operations")]
-        before = [store.redis.hgetall(key) for key in keys]
+        before = fencing.read(store, "fixture")
         admission_refused = False
         try:
             former.admit(candidate)
@@ -112,10 +116,10 @@ def case_b():
             "passed": admission_refused
             and refused
             and transport.creations == 0
-            and before == [store.redis.hgetall(key) for key in keys],
+            and before == fencing.read(store, "fixture"),
             "cached_admission_refused": admission_refused,
             "former_leader_refused": refused,
-            "protected_state_unchanged": before == [store.redis.hgetall(key) for key in keys],
+            "protected_state_unchanged": before == fencing.read(store, "fixture"),
             "external_creations": transport.creations,
             "controller_leader_changes_total": replacement.controller_leader_changes_total(),
         }

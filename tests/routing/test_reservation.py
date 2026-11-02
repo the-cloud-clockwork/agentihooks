@@ -256,7 +256,7 @@ def test_only_workers_are_held_by_the_reservation(monkeypatch):
     )
 
 
-def test_launch_slot_reading_keeps_the_exact_decision_arguments():
+def test_launch_slot_reading_keeps_the_exact_decision_arguments(monkeypatch):
     from unittest.mock import Mock
 
     from scripts.hive import registry
@@ -264,6 +264,7 @@ def test_launch_slot_reading_keeps_the_exact_decision_arguments():
 
     redis = Mock()
     redis.eval.return_value = [0, 7]
+    monkeypatch.setattr(registry, "hives", lambda client: [{"id": "worker", "heartbeat_at": 123}])
     reading = reservation.LaunchSlots(redis).reserve_reading("codex:one", "next", 4, 1000, "old")
     assert reading == reservation.SlotReading(False, 7)
     redis.eval.assert_called_once_with(
@@ -279,6 +280,7 @@ def test_launch_slot_reading_keeps_the_exact_decision_arguments():
         1000,
         ROOT,
         "old",
+        '{"worker": 123}',
     )
 
 

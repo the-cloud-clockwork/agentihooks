@@ -242,6 +242,134 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert lease.current(store, SLUG) is None
 
 
+@pytest.fixture
+def proof_controller(tmp_path, monkeypatch):
+    monkeypatch.setattr("tests.test_swarm_v2_deployed_runtime.SLUG", "proof-123abc-t1-1")
+    store, pods = _store(), Pods("swarm-pod-proof")
+    settings = _environ(tmp_path, store)
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(deployed, "pod_api", lambda *_: pods)
+    service = _cs().host(settings, store, "hive-fixture")
+    try:
+        yield store, pods, service
+    finally:
+        service.stop()
+
+
+@pytest.mark.parametrize(
+    "selected,lane,backend",
+    [
+        ("proof-123abc-t1-1", "eng", BACKEND),
+        ("", "eng", "hive"),
+        ("proof-123abc-t2-1", "eng", "hive"),
+        ("proof-123abc-t1-1", "ci", "hive"),
+        ("proof-123abc-t1-1", "plan", "hive"),
+        ("proof-123abc-t1-1", "dispatch", "hive"),
+    ],
+)
+def test_proof_engineer_placement_preserves_other_swarms_and_lanes(
+    proof_controller, monkeypatch, selected, lane, backend
+):
+    from unittest.mock import Mock
+
+    from scripts.swarm.runtime import Placed
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    store, pods, service = proof_controller
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF", selected)
+    fenced = loop.FencedRuntime(store, SLUG, service.controller.held, service.runtime, "distributed")
+    hive = fenced.runtime.hive_launch
+    hive.select = Mock(return_value=object())
+    hive.spawn = Mock(return_value=Outcome("spawn", Status.OK, "hive", Placed("hive-pane", "claude", placement="hive")))
+    task = {"id": "t1", "title": "Fixture", "seat": f"{lane}-1@{SLUG}", "profile": "engineer"}
+    assert fenced.placement_refusal(lane, task) == ""
+    hive.select.reset_mock()
+    placed = fenced.spawn(store.config(SLUG), lane, store.next_name(SLUG, lane), task)
+    assert placed.placement == backend
+    if backend == BACKEND:
+        hive.select.assert_not_called()
+        hive.spawn.assert_not_called()
+        assert len(pods.created) == 1
+    else:
+        hive.select.assert_called_once()
+        hive.spawn.assert_called_once()
+        assert pods.created == []
+
+
+def test_proof_engineer_placement_keeps_workstation_and_disabled_backend_refusals(proof_controller, monkeypatch):
+    store, pods, service = proof_controller
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF", SLUG)
+    fenced = loop.FencedRuntime(store, SLUG, service.controller.held, service.runtime, "distributed")
+    task = {"id": "t1", "workstation": True}
+    assert fenced.placement_refusal("eng", task) == loop.WORKSTATION.format(lane="eng")
+    service.runtime.router.disabled = frozenset((BACKEND,))
+    assert fenced.placement_refusal("eng", {"id": "t1"}) == loop.WORKSTATION.format(lane="eng")
+    assert pods.created == []
+
+
+def test_ordinary_swarm_cannot_opt_into_proof_placement(proof_controller, monkeypatch):
+    store, _, service = proof_controller
+    slug = "rig-grade-swarm"
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF", slug)
+    fenced = loop.FencedRuntime(store, slug, service.controller.held, service.runtime, "distributed")
+    assert fenced.kubernetes_proof is False
+    assert loop._hive_lane("eng", {}, fenced.kubernetes_proof) is True
+    assert loop._hive_lane("master", {}, True) is True
+
+
+def test_proof_engineer_worker_launch_records_a_real_checkpoint(proof_controller, tmp_path, monkeypatch):
+    from scripts.swarm_v2 import supervision_protocol, supervision_runtime
+    from scripts.swarm_v2.checkpoints import capture, runtime
+    from scripts.swarm_v2.supervision import Launch
+    from tests.test_swarm_v2_checkpoints_capture import portable
+
+    store, pods, service = proof_controller
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF", SLUG)
+    fenced = loop.FencedRuntime(store, SLUG, service.controller.held, service.runtime, "distributed")
+    task = {"id": "t1", "title": "Fixture", "seat": f"eng-1@{SLUG}", "profile": "engineer"}
+    assert fenced.placement_refusal("eng", task) == ""
+    placed = fenced.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+    assert placed.placement == BACKEND
+    spec = json.loads(pods.maps[0]["data"]["launch.json"])
+    execution = spec["registration"]["execution_id"]
+    assert store.execution(SLUG, execution).runtime_backend == BACKEND
+    attempt, _, environ, newest = portable.__wrapped__(tmp_path, monkeypatch)
+    old_home = Path(environ["CLAUDE_CONFIG_DIR"])
+    home = attempt / "homes" / "claude"
+    home.parent.mkdir(parents=True)
+    newest_relative = newest.relative_to(old_home)
+    old_home.rename(home)
+    environ["CLAUDE_CONFIG_DIR"] = str(home)
+    newest = home / newest_relative
+    spec.pop("checkout", None)
+    (attempt / "registration.json").write_text(json.dumps(spec["authority"]))
+    (attempt / "launch.json").write_text(json.dumps(spec))
+    record = json.loads((attempt / "execution.json").read_text())
+    record["attempt"] = execution
+    (attempt / "execution.json").write_text(json.dumps(record))
+    owner = supervision_runtime.Supervisor(Launch.load(attempt, attempt / "launch.json"))
+    owner.environment.update(environ)
+    owner.root.mkdir(parents=True)
+    monkeypatch.setattr(owner, "quiesce", lambda: True)
+    monkeypatch.setattr(supervision_runtime.trees, "cleanup", lambda *_: None)
+
+    elapsed = [0]
+    monkeypatch.setattr(supervision_runtime.time, "monotonic", lambda: elapsed[0])
+
+    def export():
+        elapsed[0] += 1
+        acknowledgement = capture.publish(attempt, owner.scope, environ, newest)
+        supervision_protocol.write(owner.root / "exporter.checkpoint.json", {**owner.scope, **acknowledgement})
+
+    monkeypatch.setattr(owner, "wait", export)
+    result = owner.drain("termination")
+    assert result["checkpoint_status"] == "complete"
+    assert result["checkpoint_id"] == f"ckp-{owner.scope['incarnation']}"
+    assert result["launch_record"]["checkpoint_acknowledgement"]["status"] == "complete"
+    assert runtime.validate_export(attempt, result["checkpoint_id"], environ) is True
+
+
 def _launch_record(workers, account):
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
     task = {
