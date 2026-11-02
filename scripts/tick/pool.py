@@ -179,8 +179,8 @@ class HostLock:
         except BaseException:
             handle.close()
             raise
-        stack: list[IO[str]] = self._held.__dict__.setdefault("stack", [])
-        stack.append(handle)
+        stack: list[IO[str]] = getattr(self._held, "stack", [])
+        self._held.stack = [*stack, handle]
         with self._counting:
             self._count += 1
         return self
