@@ -9,6 +9,7 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.gates import progress, quiet
 from scripts.inbox import wake
+from scripts.recall import capture
 from scripts.swarm import (
     bottleneck_status,
     dispatcher,
@@ -103,6 +104,7 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
     monkeypatch.setattr(wake, "window_ms", lambda environ: ("window", environ is os.environ))
     monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: ("homes", slug, task))
     monkeypatch.setattr(tick_heartbeat, "write", lambda *args: calls.append(("heartbeat", *args)))
+    monkeypatch.setattr(capture, "swarm_pass", lambda *args: (calls.append(("recall", *args)), ["captured"])[1])
     return actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0))))
 
 
@@ -193,13 +195,14 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
     redis = SimpleNamespace(set=lambda key, value: calls.append(("set", key, value)))
     store = SimpleNamespace(redis=redis, key=lambda slug, mark: f"{slug}/{mark}")
     found = _run("wrapper metrics", calls, _pass(box, store=store, count=5), monkeypatch)
-    assert found == ["ran 1", "ran 2", "ran 3"]
+    assert found == ["ran 1", "ran 2", "ran 3", "captured"]
     assert calls == [
         ("call", metrics.record_pass, "sw", 7, 5, os.environ, ("input", store, DOC, ["f"], "view", "ledger")),
         ("skip", bottleneck_status.refresh, "sw", store, 7),
         ("skip", wake.maintenance, "inbox", "sw", AGENTS, 7, ("window", True)),
         ("call", snapshot_job.start, store, "sw", 7, os.environ),
         ("set", "sw/last-tick", 7),
+        ("recall", "sw", store, DOC),
     ]
     assert box == {"found": ["f"], "started": ["ran 4"]}
 
