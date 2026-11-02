@@ -21,6 +21,7 @@ GH_VALUED = frozenset({"-R", "--repo"})
 PUSH_VALUED = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
 PULL_REPO = re.compile(r"github\.com/([^/]+/[^/]+)/pull/\d+")
 MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
+REDIRECT = re.compile(r"\d*&?[<>]+&?(.*)")
 VARIABLE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 ASSIGNED = re.compile(r"[A-Za-z_]\w*=.*")
 DECLARES = frozenset({"export", "declare", "typeset", "local", "readonly"})
@@ -76,12 +77,14 @@ def unsaved(path):
     return "commits not on origin" if count(path, "HEAD", "--not", "--remotes=origin") else ""
 
 
-def positionals(args):
+def positionals(args: list[str]) -> list[str]:
+    """The push's remote and refspecs: options, their values and shell redirections with their targets left out."""
     found, words = [], iter(args)
     for word in words:
-        if word in PUSH_VALUED:
+        redirect = REDIRECT.fullmatch(word)
+        if word in PUSH_VALUED or (redirect and not redirect[1]):
             next(words, None)
-        elif not word.startswith("-"):
+        elif not (redirect or word.startswith("-")):
             found.append(word)
     return found
 
