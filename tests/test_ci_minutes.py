@@ -339,6 +339,24 @@ def test_jobs_are_read_for_every_attempt_of_every_run(monkeypatch):
     assert {key for _, key in calls} == {"jobs"}
 
 
+def test_a_run_whose_full_job_page_fails_is_read_in_small_pages(monkeypatch):
+    calls = []
+
+    def fake(path, key):
+        calls.append(path)
+        if path.endswith("per_page=100"):
+            raise subprocess.CalledProcessError(1, ["gh"])
+        return [{"path": path}]
+
+    monkeypatch.setattr(ci_minutes, "rows", fake)
+    found = ci_minutes.read_jobs("o/r", [run(7, "push")], {})
+    assert found == [{"path": "repos/o/r/actions/runs/7/jobs?filter=all&per_page=30"}]
+    assert calls == [
+        "repos/o/r/actions/runs/7/jobs?filter=all&per_page=100",
+        "repos/o/r/actions/runs/7/jobs?filter=all&per_page=30",
+    ]
+
+
 def test_merged_pull_requests_are_counted_in_the_window(monkeypatch):
     calls = []
 
