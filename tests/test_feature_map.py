@@ -778,3 +778,148 @@ def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base(
         .strip()
         .endswith('python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"')
     )
+
+
+def _junit_map(root: Path, *nodes: str) -> Path:
+    path = root / "feature-map.json"
+    path.write_text(json.dumps({"features": [{"id": "login", "tests": list(nodes)}]}))
+    return path
+
+
+def _report(root: Path, name: str, *cases: str) -> Path:
+    path = root / name
+    path.write_text(f"<testsuites><testsuite>{''.join(cases)}</testsuite></testsuites>")
+    return path
+
+
+def test_junit_passes_every_ran_mapped_test_across_reports_classes_and_parameters(tmp_path: Path) -> None:
+    path = _junit_map(tmp_path, "tests/a/test_x.py::test_one", "tests/test_y.py::TestCase::test_two")
+    first = _report(tmp_path, "a.xml", '<testcase classname="tests.a.test_x" name="test_one[p]"/>')
+    second = _report(
+        tmp_path,
+        "b.xml",
+        '<testcase classname="tests.a.test_x" name="test_one[q]"><rerunFailure/></testcase>',
+        '<testcase classname="tests.test_y.TestCase" name="test_two"/>',
+    )
+    assert feature_map.junit_problems(path, [first, second]) == []
+
+
+@pytest.mark.parametrize(
+    ("case", "problem"),
+    [
+        ('<testcase classname="tests.test_x" name="test_other"/>', "missing"),
+        ('<testcase classname="tests.test_x.test_one" name="test_one"/>', "missing"),
+        ('<testcase classname="tests.test_x" name="test_one"><skipped type="pytest.skip"/></testcase>', "skipped"),
+        ('<testcase classname="tests.test_x" name="test_one"><skipped type="pytest.xfail"/></testcase>', "skipped"),
+        ('<testcase classname="tests.test_x" name="test_one"><failure/></testcase>', "failure"),
+        ('<testcase classname="tests.test_x" name="test_one"><error/></testcase>', "error"),
+    ],
+)
+def test_junit_reports_a_mapped_test_that_did_not_pass(tmp_path: Path, case: str, problem: str) -> None:
+    path = _junit_map(tmp_path, "tests/test_x.py::test_one", "tests/test_x.py::test_two")
+    report = _report(tmp_path, "r.xml", case, '<testcase classname="tests.test_x" name="test_two"/>')
+    assert feature_map.junit_problems(path, [report]) == [f"tests/test_x.py::test_one: {problem}"]
+
+
+def test_junit_reports_one_parameter_that_did_not_pass_beside_passes(tmp_path: Path) -> None:
+    path = _junit_map(tmp_path, "tests/test_x.py::test_one")
+    report = _report(
+        tmp_path,
+        "r.xml",
+        '<testcase classname="tests.test_x" name="test_one[a]"/>',
+        '<testcase classname="tests.test_x" name="test_one[b]"><failure/></testcase>',
+        '<testcase classname="tests.test_x" name="test_one[c]"><skipped/></testcase>',
+    )
+    assert feature_map.junit_problems(path, [report]) == ["tests/test_x.py::test_one: failure, skipped"]
+
+
+def test_junit_reads_the_report_a_real_pytest_run_writes(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_real.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('n', [1, 2])\n"
+        "def test_ran(n):\n    assert n\n"
+        "class TestGroup:\n    def test_member(self):\n        assert True\n"
+        "@pytest.mark.xfail(reason='planted')\n"
+        "def test_xfailed():\n    assert False\n"
+        "@pytest.mark.skip(reason='planted')\n"
+        "def test_skipped():\n    pass\n"
+        "def test_unrun():\n    pass\n"
+    )
+    path = _junit_map(
+        tmp_path,
+        "tests/test_real.py::test_ran",
+        "tests/test_real.py::TestGroup::test_member",
+        "tests/test_real.py::test_xfailed",
+        "tests/test_real.py::test_skipped",
+        "tests/test_real.py::test_unrun",
+    )
+    report = tmp_path / "real.xml"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-k", "not unrun", f"--junitxml={report}", "tests"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+    )
+    assert feature_map.junit_problems(path, [report]) == [
+        "tests/test_real.py::test_xfailed: skipped",
+        "tests/test_real.py::test_skipped: skipped",
+        "tests/test_real.py::test_unrun: missing",
+    ]
+
+
+def test_cli_lists_the_mapped_nodes_once_in_map_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _junit_map(tmp_path, "tests/test_x.py::test_b", "tests/test_x.py::test_a")
+    data = json.loads(path.read_text())
+    data["features"].append({"id": "other", "tests": ["tests/test_x.py::test_a"], "behaviour_test": "tests/t.py::c"})
+    path.write_text(json.dumps(data))
+    monkeypatch.setattr(sys, "argv", ["feature-map", "--root", str(tmp_path), "--nodes"])
+    feature_map.main()
+    assert capsys.readouterr().out == "tests/test_x.py::test_b\ntests/test_x.py::test_a\ntests/t.py::c\n"
+
+
+def test_cli_fails_with_every_mapped_test_that_did_not_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _junit_map(tmp_path, "tests/test_x.py::test_one", "tests/test_x.py::test_two", "tests/test_x.py::test_three")
+    first = _report(tmp_path, "a.xml", '<testcase classname="tests.test_x" name="test_one"><skipped/></testcase>')
+    second = _report(tmp_path, "b.xml", '<testcase classname="tests.test_x" name="test_two"/>')
+    monkeypatch.setattr(
+        sys, "argv", ["feature-map", "--root", str(tmp_path), "--junit", str(first), "--junit", str(second)]
+    )
+    with pytest.raises(SystemExit, match="^Feature map junit: 2 mapped tests did not pass$"):
+        feature_map.main()
+    assert capsys.readouterr().out == "tests/test_x.py::test_one: skipped\ntests/test_x.py::test_three: missing\n"
+
+
+def test_cli_reports_every_mapped_test_passed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _junit_map(tmp_path, "tests/test_x.py::test_one", "tests/test_x.py::test_two")
+    report = _report(
+        tmp_path,
+        "r.xml",
+        '<testcase classname="tests.test_x" name="test_one"/>',
+        '<testcase classname="tests.test_x" name="test_two"/>',
+    )
+    monkeypatch.setattr(sys, "argv", ["feature-map", "--root", str(tmp_path), "--junit", str(report)])
+    feature_map.main()
+    assert capsys.readouterr().out == "Feature map junit: all 2 mapped tests passed\n"
+
+
+def test_feature_suite_runs_every_mapped_test_and_grades_both_reports() -> None:
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/feature-suite.yml").read_text())
+    steps = {step.get("name"): step for step in workflow["jobs"]["features"]["steps"]}
+    mapped = steps["Run the mapped tests outside the feature suite"]
+    assert mapped["if"] == "${{ !cancelled() }}"
+    assert "python -m scripts.feature_map --nodes" in mapped["run"]
+    assert '--junitxml="$RUNNER_TEMP/feature-mapped.xml"' in mapped["run"]
+    grade = steps["Fail on a mapped test missing, skipped or xfailed at run time"]
+    assert grade["if"] == "${{ !cancelled() }}"
+    assert grade["run"].strip() == (
+        'python -m scripts.feature_map --junit "$RUNNER_TEMP/feature-suite.xml" --junit "$RUNNER_TEMP/feature-mapped.xml"'
+    )

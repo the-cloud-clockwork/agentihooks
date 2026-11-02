@@ -6,6 +6,7 @@ import datetime
 import json
 import os
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import yaml
@@ -223,13 +224,56 @@ def validate(root: Path, map_path: Path, base: Path | None = None) -> int:
     return len(entries)
 
 
+def mapped(map_path: Path) -> list[str]:
+    """Every test node id the feature map lists, in map order without repeats."""
+    entries = json.loads(map_path.read_text())["features"]
+    return list(dict.fromkeys(node for entry in entries for node in _nodes(entry, entry.get("id") or "feature")))
+
+
+def _address(node_id: str) -> tuple[str, str]:
+    path, *names = node_id.split("::")
+    return ".".join([path.removesuffix(".py").replace("/", "."), *names[:-1]]), names[-1]
+
+
+def junit_problems(map_path: Path, reports: list[Path]) -> list[str]:
+    """Each mapped id no junit testcase ran, or one of whose testcases skipped, xfailed, failed or errored."""
+    outcomes: dict[tuple[str, str], set[str]] = {}
+    for report in reports:
+        for case in ET.parse(report).iter("testcase"):
+            verdicts = [child.tag for child in case if child.tag in ("skipped", "failure", "error")]
+            address = (case.get("classname", ""), case.get("name", "").split("[")[0])
+            outcomes.setdefault(address, set()).add(verdicts[0] if verdicts else "passed")
+    problems = []
+    for node_id in mapped(map_path):
+        seen = outcomes.get(_address(node_id))
+        if not seen:
+            problems.append(f"{node_id}: missing")
+        elif bad := sorted(seen - {"passed"}):
+            problems.append(f"{node_id}: {', '.join(bad)}")
+    return problems
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--base", type=Path)
+    parser.add_argument("--nodes", action="store_true")
+    parser.add_argument("--junit", type=Path, action="append")
     args = parser.parse_args()
+    map_path = args.root / "feature-map.json"
+    if args.nodes:
+        print("\n".join(mapped(map_path)))
+        return
+    if args.junit:
+        problems = junit_problems(map_path, args.junit)
+        for problem in problems:
+            print(problem)
+        if problems:
+            raise SystemExit(f"Feature map junit: {len(problems)} mapped tests did not pass")
+        print(f"Feature map junit: all {len(mapped(map_path))} mapped tests passed")
+        return
     base = args.base / "feature-map.json" if args.base else None
-    count = validate(args.root, args.root / "feature-map.json", base)
+    count = validate(args.root, map_path, base)
     print(f"Feature map: {count} features, all rule, test and live check links exist")
 
 

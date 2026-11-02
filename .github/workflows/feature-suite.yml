@@ -52,6 +52,23 @@ jobs:
         run: |
           python -m pytest tests/features --confcutdir=tests/features -m feature -n 0 -v -rs --tb=long --basetemp="$RUNNER_TEMP/feature-suite" --junitxml="$RUNNER_TEMP/feature-suite.xml"
 
+      - name: Install the browser that mapped page tests drive
+        if: ${{ !cancelled() }}
+        timeout-minutes: 6
+        uses: ./.github/actions/browser-cache
+
+      - name: Run the mapped tests outside the feature suite
+        if: ${{ !cancelled() }}
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+        run: |
+          mapfile -t nodes < <(python -m scripts.feature_map --nodes | grep -v '^tests/features/')
+          env -u AGENTIHOOKS_FEATURE_SUITE -u AGENTIHOOKS_SWARM_REDIS_URL -u AGENTIHOOKS_SWARM_DATABASE_URL python -m pytest "${nodes[@]}" -n "$(python -m scripts.ci_cpu_quota)" --dist loadgroup -rs --reruns 2 --tb=short --timeout=60 --timeout-method=thread -p no:cacheprovider --junitxml="$RUNNER_TEMP/feature-mapped.xml"
+
+      - name: Fail on a mapped test missing, skipped or xfailed at run time
+        if: ${{ !cancelled() }}
+        run: python -m scripts.feature_map --junit "$RUNNER_TEMP/feature-suite.xml" --junit "$RUNNER_TEMP/feature-mapped.xml"
+
       - name: Print the service, ledger server and scripted agent logs
         if: failure()
         run: |
