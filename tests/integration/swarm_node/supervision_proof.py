@@ -42,16 +42,17 @@ def snapshot(container):
 
 def ready(container: str) -> dict:
     deadline = time.monotonic() + 30
-    observed: object = None
+    last: object = None
     while time.monotonic() < deadline:
         if not state(container)["Running"]:
             raise AssertionError("container exited before readiness: " + docker("logs", container)[-1000:])
         try:
             observed = snapshot(container)
+            last = observed
             if observed["running"] and observed["grandchildren"] == 2:
                 return observed
         except (subprocess.CalledProcessError, ValueError, IndexError) as exc:
-            observed = getattr(exc, "output", None) or exc
+            last = getattr(exc, "output", None) or exc
         time.sleep(0.1)
     evidence = {}
     for name, args in (
@@ -65,7 +66,7 @@ def ready(container: str) -> dict:
         except (subprocess.SubprocessError, OSError) as exc:
             evidence[name] = f"unavailable: {exc}"
     raise AssertionError(
-        f"container readiness timeout: last={observed!r}\nprocesses:\n{evidence['processes']}\nlogs:\n{evidence['logs']}"
+        f"container readiness timeout: last={last!r}\nprocesses:\n{evidence['processes']}\nlogs:\n{evidence['logs']}"
     )
 
 
