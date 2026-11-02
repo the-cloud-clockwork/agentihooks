@@ -46,15 +46,18 @@ def merge_reports(reports: list[dict], cleared: dict | None = None) -> dict:
         **({"shards": measurements} if measurements else {}),
         "files": list(files.values()),
         "not_mutated": list(not_mutated.values()),
-        "failed": any(report["failed"] for report in reports)
-        or any(entry["failures"] for entry in graded)
-        or bool(short_shards(measurements)),
+        "failed": any(report["failed"] for report in reports) or any(entry["failures"] for entry in graded),
     }
 
 
-def short_shards(measurements: list[dict]) -> list[int]:
-    """Return the index of every shard that graded fewer mutants than it owns."""
-    return [measurement["index"] for measurement in measurements if measurement["graded"] < measurement["expected"]]
+def short_shards(reports: dict[int, dict]) -> list[str]:
+    """Return every shard whose report carries no owned and graded counts or graded fewer mutants than it owns."""
+    return [
+        str(shard)
+        for shard, report in reports.items()
+        if not {"expected", "graded"} <= (measurement := report.get("shard", {})).keys()
+        or measurement["graded"] < measurement["expected"]
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,18 +67,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     found = {shard: args.folder / f"mutation-preflight-shard-{shard}" / "report.json" for shard in range(args.shards)}
-    missing = [str(shard) for shard, path in found.items() if not path.is_file()]
-    reports = [json.loads(path.read_text()) for path in found.values() if path.is_file()]
+    present = {shard: json.loads(path.read_text()) for shard, path in found.items() if path.is_file()}
+    missing = [str(shard) for shard in found if shard not in present]
+    short = short_shards(present)
+    reports = list(present.values())
     cleared = load_clearances(Path.cwd()) if any(report.get("units") for report in reports) else {}
     merged = merge_reports(reports, cleared)
-    merged["failed"] = merged["failed"] or bool(missing)
+    merged["failed"] = merged["failed"] or bool(missing) or bool(short)
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "report.json").write_text(json.dumps(merged) + "\n")
     print(f"Merged {args.shards - len(missing)} of {args.shards} mutation shard reports")
     if missing:
         print(f"missing mutation shard reports: {', '.join(missing)}")
-    if short := short_shards(merged.get("shards", [])):
-        print(f"mutation shards graded fewer mutants than they own: {', '.join(map(str, short))}")
+    if short:
+        print(f"mutation shards unmeasured or graded fewer mutants than they own: {', '.join(short)}")
     for entry in merge_units(reports, cleared):
         if entry["failures"]:
             print(survivor_text(entry))
