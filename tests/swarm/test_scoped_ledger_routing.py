@@ -1,6 +1,7 @@
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from unittest.mock import patch
 
 import pytest
@@ -56,8 +57,11 @@ def test_only_the_selected_tick_uses_the_hosted_ledger(store, monkeypatch):
     monkeypatch.setattr(controller, "keep_tick", lambda *_: None)
     monkeypatch.setattr(controller, "release_tick_lock", lambda *_: None)
 
+    both = Barrier(2)
+
     def probe(slug, _now, _check):
         seen[slug] = (ledger.base(), ledger_link.remote())
+        both.wait(10)
         return False
 
     monkeypatch.setattr(cli.outage, "ledger_health", probe)
