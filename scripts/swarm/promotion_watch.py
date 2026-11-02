@@ -2,7 +2,8 @@
 raises a ledger alert; the failed jobs that failed on CI infrastructure (a lost runner, a fetch timeout, a server
 outage), and the failed jobs whose own error is the missing output of such a unit shard, share one infrastructure
 outage that the alert names and that files no task. The next green run whose promote job succeeded closes those
-tasks and the alert. A run whose only failure is the Sonar job finding dev already moved
+tasks and the alert when a fixer's merged pull request added or changed a mapped test, and files a pinning task
+for each fixer without one. A run whose only failure is the Sonar job finding dev already moved
 past its commit is reported as superseded and files nothing.
 
 The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks are filed from the machine that can.
@@ -10,13 +11,14 @@ The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
 import re
 import subprocess
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.ci_budget import GATE
 from scripts.inbox.store import InboxStore
@@ -27,6 +29,8 @@ from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 if TYPE_CHECKING:
+    from redis import Redis
+
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import RedisStore, SwarmConfig
 
@@ -91,6 +95,23 @@ NEWER_RUNS = f"repos/{{owner}}/{{repo}}/actions/workflows/{dev_red.WORKFLOW}/run
 NEWER_JQ = ".workflow_runs[] | {id, head_sha} | @json"
 CONTAINS = ("ahead", "identical")
 REPAIRED = "dev push run {run_id} failed only on checks a newer dev push run already passed"
+PIN_PREFIX = "pin-"
+PIN_UNNAMED = "Pin a test for a promotion red"
+FEATURE_MAP = "feature-map.json"
+PULL = re.compile(r"/pull/(\d+)")
+PULL_JQ = "{merged_at, merge_commit_sha} | @json"
+FILES_JQ = ".[] | {filename, status} | @json"
+CONTENT_JQ = "{content} | @json"
+PIN_WAIT = (
+    "A later dev push run of Tests passed, but no merged pull request on this task added or changed a mapped test, "
+    "so the swarm filed a pinning task and closes this one once that task is done."
+)
+PIN_DESCRIPTION = (
+    "The promotion fixer {task_id} for dev push run failures went green at dev push run {run_id} without a merged "
+    "pull request that added or changed a test mapped in {map}. Add a test that fails on that cause, map it in "
+    "{map}, and close with swarm done and the feature it proved."
+)
+PIN_NOT_DUPLICATE = "The promotion watch files one pinning task per fixer that went green without a mapped test."
 
 
 def key(slug: str, part: str) -> str:
@@ -346,9 +367,17 @@ def _lane(store, slug: str) -> str:
     return "eng" if seats == 0 else "ci"
 
 
-def _green(slug, ledger, doc, last):
+def _green(slug: str, ledger: Any, doc: Any, last: Any, repo: str, run: Callable[..., Any]) -> list[str]:
     run_id, actions = last["id"], []
+    known = {t["id"]: t for t in doc.get("tasks", [])}
     for task in [t for t in _promotion_tasks(doc) if t.get("state") in CLOSABLE]:
+        pin = known.get(PIN_PREFIX + task["id"], {})
+        proven = pin.get("state") == "done" or pinned(repo, task.get("pr_url"), run)
+        if proven is None:
+            continue
+        if not proven:
+            actions += _pin(slug, ledger, task, pin, run_id)
+            continue
         live = ledger.update_task(slug, task["id"], {"state": "done"}, by=SENDER, if_state=CLOSABLE)
         if live.get("state") == "done":
             ledger.comment(slug, task["id"], CLEARED, by=SENDER)
@@ -359,12 +388,58 @@ def _green(slug, ledger, doc, last):
     return actions
 
 
-def _recover(slug, redis, ledger, doc, last, repo):
-    actions = _green(slug, ledger, doc, last)
+def pinned(repo_dir: str, url: str | None, run: Callable[..., Any] = subprocess.run) -> bool | None:
+    """Whether the merged pull request at url added or changed a test file feature-map.json maps; None when unread."""
+    number = PULL.search(url) if url else None
+    if number is None:
+        return False
+    pulls = f"repos/{{owner}}/{{repo}}/pulls/{number.group(1)}"
+    try:
+        pull = _read(repo_dir, pulls, PULL_JQ, run, pages=())[0]
+        if not pull.get("merged_at"):
+            return False
+        files = _read(repo_dir, f"{pulls}/files?per_page=100", FILES_JQ, run)
+        mapped = _mapped_files(repo_dir, pull["merge_commit_sha"], run)
+    except dev_red.READ_ERRORS:
+        return None
+    return any(f["filename"] in mapped for f in files if f.get("status") != "removed")
+
+
+def _mapped_files(repo_dir: str, ref: str, run: Callable[..., Any]) -> set[str]:
+    endpoint = f"repos/{{owner}}/{{repo}}/contents/{FEATURE_MAP}?ref={ref}"
+    content = _read(repo_dir, endpoint, CONTENT_JQ, run, pages=())[0]["content"]
+    found = json.loads(base64.b64decode(content))
+    return {test.split("::")[0] for feature in found["features"] for test in feature.get("tests", [])}
+
+
+def _pin(slug: str, ledger: Any, task: Any, pin: Any, run_id: int) -> list[str]:
+    if pin:
+        return []
+    pin_id = PIN_PREFIX + task["id"]
+    named = "Pin a test for " + task["title"].removeprefix("Promotion red: ")
+    fields = {
+        "task": pin_id,
+        "title": PIN_UNNAMED if ledger_comments.problems(named, "item") else named,
+        "lane": "eng",
+        "kind": "code",
+        "contract": {"feature": "yes"},
+        "description": PIN_DESCRIPTION.format(task_id=task["id"], run_id=run_id, map=FEATURE_MAP),
+        "not_duplicate": PIN_NOT_DUPLICATE,
+    }
+    ledger.add_task(slug, fields, SENDER)
+    ledger.update_task(slug, task["id"], {"depends_on": [pin_id]}, by=SENDER, if_state=CLOSABLE)
+    ledger.comment(slug, task["id"], PIN_WAIT, by=SENDER)
+    return [f"filed {pin_id} to pin a test for {task['id']}, dev push run {run_id} passed"]
+
+
+def _recover(
+    slug: str, redis: Redis, ledger: Any, doc: Any, last: Any, repo: str, run: Callable[..., Any]
+) -> list[str]:
+    actions = _green(slug, ledger, doc, last, repo, run)
     _release(redis, slug, doc)
     for previous in promotion_owner.history(repo, redis) - {slug}:
         state = pass_state(ledger, previous)
-        actions.extend(_green(previous, ledger, state, last))
+        actions.extend(_green(previous, ledger, state, last, repo, run))
         _release(redis, previous, state)
     return actions
 
@@ -414,7 +489,7 @@ def _refresh(
     elif not promoted(found):
         actions = [HELD.format(run_id=last["id"])]
     else:
-        actions = _recover(slug, redis, ledger, doc, last, config.repo)
+        actions = _recover(slug, redis, ledger, doc, last, config.repo, run)
     redis.set(key(slug, "seen"), last["id"])
     return actions
 
