@@ -92,6 +92,25 @@ def test_fan_out_copies_context_bounds_workers_and_preserves_results() -> None:
     assert marker.get() == "swarm"
 
 
+def test_fan_out_waits_for_running_siblings_before_raising() -> None:
+    from scripts.tick import pool
+
+    started, finished = Event(), Event()
+
+    def action(index: int) -> int:
+        if index == 0:
+            assert started.wait(1)
+            raise RuntimeError("first agent failed")
+        started.set()
+        assert not finished.wait(0.2)
+        finished.set()
+        return index
+
+    with pool.running(workers=2), pytest.raises(RuntimeError, match="first agent failed"):
+        pool.fan_out(action, range(2))
+    assert finished.is_set()
+
+
 def test_sequential_mode_retains_order_and_does_not_fan_out() -> None:
     from scripts.tick import pool
 

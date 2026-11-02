@@ -2,7 +2,7 @@
 
 import fcntl
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
@@ -125,6 +125,7 @@ def fan_out(action: Callable[[Item], Found], items: Iterable[Item]) -> list[Foun
     executor = ThreadPoolExecutor(max_workers=min(found.workers, len(values)), thread_name_prefix="tick-fan-out")
     try:
         futures = [executor.submit(copy_context().run, action, value) for value in values]
+        wait(futures)
         return [future.result() for future in futures]
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
