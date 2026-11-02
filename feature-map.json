@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "operator-dead-starting-front-door",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2335",
+      "behaviour": "Operator master up finishes an expired starting front door whose process is gone and launches its replacement while preserving refusal for a live starting front door when no seat is free.",
+      "seam": "agentihooks swarm master up --new",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_dead_starting_front_door_is_finished_and_replaced",
+        "tests/swarm/test_master_launch.py::test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master"
+      ]
+    },
+    {
       "id": "swarm-tick-real-backends",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",

@@ -198,7 +198,7 @@ the step checks it and returns no actions when it does not hold.
 | `placement` | 40 | spawn | `_spawn` under the placement pass, only when the swarm is `running`, `readiness.tick_places` allows the engine to place and no panic is set. After it spawns, it deletes the `spawn-due` marker |
 
 The `spawn-due` marker pairs the spawn step with the `spawn due` step of the
-`observe` group (`scripts.tick.steps.observe`, calling `tick.step_spawn_due`).
+`observe` group (`step_spawn_due` in `scripts.tick.steps.observe`).
 When the swarm is `running`, not on the events engine and not sleeping, the
 spawn due step runs `_spawn` under the `PLACING` lock and the placement pass if
 the marker exists, then sets the marker to the pass time. The spawn step
