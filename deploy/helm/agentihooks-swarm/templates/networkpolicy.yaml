@@ -71,6 +71,9 @@ spec:
         - port: api
 {{- with .Values.controller.api.tls }}
 {{- if .secretName }}
+{{- if not .ingressFrom }}
+{{- fail "controller.api.tls.ingressFrom must admit the callers outside the cluster; an empty list admits every source" }}
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -85,7 +88,7 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        {{- toYaml (required "controller.api.tls.ingressFrom admits the callers outside the cluster" .ingressFrom) | nindent 8 }}
+        {{- toYaml .ingressFrom | nindent 8 }}
       ports:
         - port: api-tls
 {{- end }}

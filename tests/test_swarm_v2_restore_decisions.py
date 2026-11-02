@@ -3,6 +3,7 @@ import ssl
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 
@@ -565,7 +566,7 @@ def test_a_malformed_caller_is_rejected_before_the_credential_store(pending, mon
 
 
 @pytest.fixture
-def cert(tmp_path):
+def cert(tmp_path: Path) -> tuple[str, str]:
     import subprocess
 
     subprocess.run(
@@ -593,7 +594,9 @@ def cert(tmp_path):
     return str(tmp_path / "cert.pem"), str(tmp_path / "key.pem")
 
 
-def published_environ(cert, port="8781", url="https://localhost:8781/"):
+def published_environ(
+    cert: tuple[str, str], port: str = "8781", url: str = "https://localhost:8781/"
+) -> dict[str, str]:
     from scripts.swarm_v2 import control_service
 
     return {
@@ -604,7 +607,7 @@ def published_environ(cert, port="8781", url="https://localhost:8781/"):
     }
 
 
-def test_published_listener_needs_a_port_an_https_address_and_a_certificate(cert):
+def test_published_listener_needs_a_port_an_https_address_and_a_certificate(cert: tuple[str, str]) -> None:
     from scripts.swarm_v2 import control_service
     from scripts.swarm_v2.control_service import ControlError, published
 
@@ -624,7 +627,7 @@ def test_published_listener_needs_a_port_an_https_address_and_a_certificate(cert
         published(without)
 
 
-def test_published_listener_serves_only_recovery_over_tls(pending, cert):
+def test_published_listener_serves_only_recovery_over_tls(pending: SimpleNamespace, cert: tuple[str, str]) -> None:
     from scripts.swarm_v2.control_service import published
 
     listen, _ = published(published_environ(cert, port="1"))
@@ -649,7 +652,7 @@ def test_published_listener_serves_only_recovery_over_tls(pending, cert):
     assert pending.service.secure.socket.fileno() == -1
 
 
-def test_controller_publishes_its_public_address_beside_the_worker_address(pending):
+def test_controller_publishes_its_public_address_beside_the_worker_address(pending: SimpleNamespace) -> None:
     store, slug = pending.world.store, pending.recovery.slug
     pending.service.api_url = "http://controller.swarm.svc:8780"
     pending.service.control_url = "https://swarm.example:8780"
@@ -662,7 +665,9 @@ def test_controller_publishes_its_public_address_beside_the_worker_address(pendi
     assert store.config(slug).control_url == "https://moved.example:8780"
 
 
-def test_restore_decision_prefers_the_published_address_and_trusts_the_ledger_ca(pending, cert, monkeypatch):
+def test_restore_decision_prefers_the_published_address_and_trusts_the_ledger_ca(
+    pending: SimpleNamespace, cert: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.gates import Who
     from scripts.swarm_ledger import ledger_link
     from scripts.swarm_v2 import control_service

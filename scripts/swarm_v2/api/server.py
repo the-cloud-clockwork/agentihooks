@@ -117,6 +117,12 @@ class TLSHandler(ExecutionsHandler):
         self.request.settimeout(None)
         super().setup()
 
+    def finish(self) -> None:
+        try:
+            super().finish()
+        finally:
+            self.request.close()
+
 
 def serve(api: ExecutionsAPI | Routes, host: str, port: int) -> ThreadingHTTPServer:
     return ThreadingHTTPServer((host, port), type(ExecutionsHandler.__name__, (ExecutionsHandler,), {"api": api}))
