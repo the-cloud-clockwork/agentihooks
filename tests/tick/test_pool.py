@@ -189,6 +189,8 @@ def test_expired_lane_drops_late_result_and_does_not_start_dependent() -> None:
         assert all(row.outcome == engine.LATE for row in rows)
         assert not dependent.is_set()
         assert all(row.result is None for row in rows)
+        assert 0.0 < rows[0].wall_s < 1.0
+        assert rows[1].wall_s == 0.0
     finally:
         release.set()
 
