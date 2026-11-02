@@ -25,23 +25,26 @@ API's `export` route. The feature map entry is `swarm-tick-delta-reads`.
 
 ## When a pass reads the view
 
-`scripts.swarm.cli.run_tick` starts the view once per pass, inline after the
-ledger health probe, which reads the ledger's metadata, and before any tick
-step reads the ledger:
+`scripts.swarm.cli.run_tick` starts the view once per pass, before any tick
+step reads the ledger. A running swarm starts it after the `wrapper probes`
+group, which holds the ledger health probe that reads the ledger's metadata:
 
-1. The pass enters `view.holding()`, which clears any view a previous pass in
+1. The `wrapper probes` group passes. A failed ledger health probe ends the
+   pass as before and reads no view.
+2. The pass enters `view.holding()`, which clears any view a previous pass in
    the same process left in the context variables, and drops the pass's view
    when the pass ends.
-2. The ledger health probe passes. A failed probe ends the pass as before and
-   reads no view.
 3. `view.reads(ledger)` is true only when the pass's ledger is exactly
    `scripts.swarm.ledger_client.LedgerClient`. A subclass or any other ledger
    object, such as the test fakes, reads no view.
 4. `view.start(slug, ledger.service)` refreshes the stored view, holds it
    in the context variable `view.CURRENT` and records its refresh in
    `view.REFRESH` for the rest of the pass.
-5. The pass then wraps the ledger in the controller lease fence and runs its
+5. The pass then wraps the runtime in `controller.FencedRuntime` and runs its
    steps.
+
+A stopped swarm runs no `wrapper probes`: its pass enters `view.holding()` and
+starts the view right after the `before` group, then runs the stopped branch.
 
 `view.CURRENT` holds a `LedgerView` with `generation`, `tasks`, `meta`,
 `phases` and `document`, the whole patched state of the eight parts.
@@ -228,12 +231,13 @@ It fails when:
   records for it (a file absent from the base allowlist allows zero);
 - the head's allowlist differs from the head's own measurement, in either
   direction. Removing a read therefore requires lowering or deleting its
-  entry in the same change, which is how the list only shrinks.
+  entry in the same change, which is how the list only shrinks;
+- the base has no allowlist file, with the error
+  `tests/WHOLE_LEDGER_ALLOWLIST.json is missing from the base`.
 
-A base without an allowlist file grades the head against the head's recorded
-allowlist. A file that does not parse fails the gate with
-`cannot parse <file>`. The output is one summary line and one `::error::` line
-per error:
+A graded file that does not parse fails the gate with only
+`::error::cannot parse <file>: <parser error>` and no summary line. Otherwise
+the output is one summary line and one `::error::` line per error:
 
 ```
 6 files read the whole ledger state, 5 on the base allowlist, 2 errors
