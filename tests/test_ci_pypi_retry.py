@@ -290,7 +290,7 @@ def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
     take = steps[names.index("Take the helper scripts from the workflow revision")]
     install = steps[names.index("Install dependencies")]
     assert names.index("Take the helper scripts from the workflow revision") < names.index("Install dependencies")
-    assert take["if"] == install["if"]
+    assert take.get("if") == install.get("if")
     assert take["run"].splitlines() == [
         'git fetch --no-tags origin "$GITHUB_SHA"',
         'mkdir -p "$RUNNER_TEMP/workflow"',
