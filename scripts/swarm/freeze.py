@@ -2,8 +2,8 @@
 
 import operator
 import sys
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Callable, Iterable
+from typing import Any, cast
 
 from scripts.doctor import loop, priming
 from scripts.swarm import notice_text
@@ -81,22 +81,67 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     records: list[dict[str, Any]] = doc.get("freezes") or []
     tasks: list[dict[str, Any]] = doc.get("tasks") or []
     focus: list[str] = [r["target"] for r in records if r["verb"] == "focus"]
+    if not focus:
+        return None
     rows = {task["id"]: task for task in tasks}
-    phases: list[dict[str, Any]] = doc.get("phases") or []
-    waits: dict[str, list[str]] = {p["id"]: p.get("depends_on") or [] for p in phases}
-    members: dict[str, list[str]] = {}
-    for task in tasks:
-        members.setdefault(task.get("phase") or "", []).append(task["id"])
-    queue = [task["id"] for task in tasks if focus and _open_focus(task, records, focus, graph)]
+    waits_on = _waits(doc, tasks)
+    cold: set[str] = _cold(tasks, records, graph) if any(r["verb"] == "freeze" for r in records) else set()
+    stuck: dict[str, bool] = {}
+    queue = [
+        task["id"]
+        for task in tasks
+        if _open_focus(task, records, focus, graph) and not _stuck(task["id"], rows, cold, waits_on, stuck)
+    ]
     seen: set[str] = set()
     while queue:
         task_id = queue.pop()
-        if task_id not in seen:
+        if task_id not in seen and task_id not in cold:
             seen.add(task_id)
-            row = rows.get(task_id) or {}
-            queue += [*(row.get("depends_on") or []), *(row.get("parked_on") or [])]
-            queue += [member for phase in waits.get(row.get("phase") or "", []) for member in members.get(phase, [])]
+            queue += waits_on(rows.get(task_id) or {})
     return frozenset(seen) if seen else None
+
+
+def _cold(tasks: list[dict[str, Any]], records: list[dict[str, Any]], graph: dict[str, Any]) -> set[str]:
+    found: set[str] = set()
+    for task in tasks:
+        chain = cast("list[str]", ancestry(task, graph))
+        if task.get("state") != "done" and frozen(task, records, chain):
+            found.add(task["id"])
+    return found
+
+
+def _waits(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[str, Any]], list[str]]:
+    """What a task waits on: its dependencies, the tasks it is parked on and every task of each phase its phase
+    waits on."""
+    phases: list[dict[str, Any]] = doc.get("phases") or []
+    after: dict[str, list[str]] = {p["id"]: p.get("depends_on") or [] for p in phases}
+    members: dict[str, list[str]] = {}
+    for task in tasks:
+        members.setdefault(task.get("phase") or "", []).append(task["id"])
+
+    def waits_on(row: dict[str, Any]) -> list[str]:
+        named: list[str] = [*(row.get("depends_on") or []), *(row.get("parked_on") or [])]
+        return named + [member for phase in after.get(row.get("phase") or "", []) for member in members.get(phase, [])]
+
+    return waits_on
+
+
+def _stuck(
+    task_id: str,
+    rows: dict[str, dict[str, Any]],
+    cold: set[str],
+    waits_on: Callable[[dict[str, Any]], list[str]],
+    memo: dict[str, bool],
+) -> bool:
+    """Whether the task waits, directly or through other open work, on a frozen task, so it can never run."""
+    if task_id in memo:
+        return memo[task_id]
+    row = rows.get(task_id) or {}
+    memo[task_id] = False
+    if row.get("state") == "done":
+        return False
+    memo[task_id] = any(dep in cold or _stuck(dep, rows, cold, waits_on, memo) for dep in waits_on(row))
+    return memo[task_id]
 
 
 def _open_focus(task: dict[str, Any], records: list[dict[str, Any]], focus: list[str], graph: dict[str, Any]) -> bool:

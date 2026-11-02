@@ -105,6 +105,33 @@ def test_the_tasks_of_a_phase_the_focused_phase_waits_on_join_the_focus() -> Non
     assert freeze.admitted(found, hierarchy.project(found)[0]) == {"late", "middle", "early"}
 
 
+def test_a_focused_task_waiting_on_frozen_work_never_holds_the_queue_open() -> None:
+    focused = task("hot", phase="p2", depends_on=["middle"])
+    middle, cold = task("middle", depends_on=["cold"]), task("cold")
+    rows = [focused, middle, cold]
+    assert freeze.admitted(doc(record("tasks/hot", "focus"), record("tasks/cold"), tasks=rows), {}) is None
+    assert not gate(task("free"), record("tasks/hot", "focus"), record("tasks/cold"), tasks=rows)
+    assert freeze.admitted(doc(record("tasks/hot", "focus"), tasks=rows), {}) == {"hot", "middle", "cold"}
+    done = [focused, middle, {**cold, "state": "done"}]
+    assert freeze.admitted(doc(record("tasks/hot", "focus"), record("tasks/cold"), tasks=done), {}) == {
+        "hot",
+        "middle",
+        "cold",
+    }
+
+
+def test_focus_weight_never_lets_free_work_take_a_seat_from_focused_work(store: RedisStore) -> None:
+    store.update("sw", max_eng=3, focus_weight=50, autonomy="delegate")
+    ledger = FrozenLedger(
+        [{"id": "f1", "phase": "p1"}, {"id": "f2", "phase": "p1"}, {"id": "free", "phase": "p2", "rank": "urgent"}],
+        record("phases/p1", "focus"),
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert sorted(spawned(runtime)) == ["f1", "f2"]
+    assert ledger.rows["free"]["state"] == "open"
+
+
 def test_the_focus_queue_order_sets_the_claim_order(store: RedisStore) -> None:
     store.update("sw", max_eng=1)
     rows = [{"id": "bottom", "phase": "p1"}, {"id": "top", "phase": "p2"}]
