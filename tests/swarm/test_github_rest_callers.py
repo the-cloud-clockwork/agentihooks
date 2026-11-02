@@ -95,12 +95,12 @@ def test_the_required_view_graph_charges_graphql_and_runs_the_exact_query(
 
     monkeypatch.setattr(merge_queue.time, "time", lambda: 50.0)
     with github_reads.calling("swarm.checks.view"):
-        body = merge_queue._RunGraph(read).graph("{q}", {"url": PR}, deadline=Deadline(10.0, lambda: 0.0))
-    assert body == {"data": {"p0": 1}}
+        body = merge_queue.graphql("{q}", {"url": PR}, read)
+    assert body == {"p0": 1}
     assert seen == [
         (
             command(["api", "graphql", "-f", "query={q}", "-f", f"url={PR}"]),
-            {"capture_output": True, "text": True, "timeout": 10},
+            {"capture_output": True, "text": True, "timeout": 20},
         )
     ]
     assert [(row["caller"], row["endpoint"], row["at"]) for row in charged()] == [
