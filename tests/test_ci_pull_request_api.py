@@ -207,6 +207,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/design_rules.py",
         "scripts/locked_tests.py",
         "scripts/no_comments.py",
+        "scripts/no_whole_ledger.py",
         "scripts/size_limits.py",
         "scripts/swallowed_exceptions.py",
         "scripts/threshold_pins.py",

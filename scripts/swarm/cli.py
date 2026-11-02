@@ -298,6 +298,13 @@ def _bin_stop(store, slug, ledger, runtime):
     ]
 
 
+def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
+    """Hold the pass's ledger view until beating closes, started with one delta read when the client reads it."""
+    beating.enter_context(ledger_view.holding())
+    if ledger_view.reads(ledger):
+        ledger_view.start(slug, ledger.service)
+
+
 def _stopped_tick(store, slug, ledger, runtime, held):
     from scripts.swarm import command_runner, controller
 
@@ -368,6 +375,7 @@ def run_tick(
         timing.keep()
         run_group("before")
         if store.config(slug).state == "stopped":
+            _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
         box: dict[str, Any] = PassBox()
@@ -376,9 +384,7 @@ def run_tick(
         host_steps.raise_held(box)
         if "stop" in box:
             return box["stop"]
-        beating.enter_context(ledger_view.holding())
-        if ledger_view.reads(ledger):
-            ledger_view.start(slug, ledger.service)
+        _hold_view(beating, slug, ledger)
         runtime = controller.FencedRuntime(
             store,
             slug,
