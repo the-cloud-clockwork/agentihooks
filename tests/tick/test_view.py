@@ -134,6 +134,14 @@ def test_each_server_and_swarm_keeps_its_own_view_file(tmp_path: Path) -> None:
     assert all(name.suffix == ".json" and len(name.stem) == 32 for name in names)
 
 
+def test_a_view_requesting_more_parts_does_not_reuse_an_older_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = view.view_file("http://a", "s", tmp_path)
+    monkeypatch.setattr(view, "PARTS", (*view.PARTS, "extra"))
+    assert view.view_file("http://a", "s", tmp_path) != before
+
+
 @pytest.mark.feature("swarm-tick-delta-reads")
 def test_start_reads_through_the_ledger_client_and_holds_the_view(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -210,7 +218,18 @@ def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.Mo
 
 @pytest.mark.feature("swarm-tick-delta-reads")
 def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> None:
-    assert view.PARTS == ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+    assert view.PARTS == (
+        "tasks",
+        "_meta",
+        "phases",
+        "freezes",
+        "priorities",
+        "followups",
+        "alerts",
+        "overview",
+        "plans",
+        "slices",
+    )
     state = {
         **STATE,
         "freezes": [{"verb": "focus", "target": "p1"}],
