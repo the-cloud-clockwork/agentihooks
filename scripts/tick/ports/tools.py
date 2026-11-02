@@ -45,6 +45,7 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 SourceControl.open_changes.__name__,
                 SourceControl.workflow_runs.__name__,
                 SourceControl.download.__name__,
+                SourceControl.graph.__name__,
             ]
         ),
         frozenset(

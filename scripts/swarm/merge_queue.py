@@ -1,12 +1,16 @@
 import json
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, cast
 
 from scripts import gh_audit
 from scripts.swarm import github_reads, ledger_events, mutation_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
 from scripts.tick.adapters.github import command
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
@@ -69,6 +73,21 @@ def rest(path: str, run) -> dict | list | str:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
+@dataclass(frozen=True)
+class _RunGraph:
+    """Answer the source control graph tool through a refusing gh runner, as the charged reader."""
+
+    read: Callable[..., Any]
+
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any:
+        """Run one GraphQL document through the runner and decode its body."""
+        flags = [word for name, value in variables.items() for word in ("-f", f"{name}={value}")]
+        argv = command(["api", "graphql", "-f", f"query={document}", *flags])
+        github_reads.charge(github_reads.CALLER.get(), "graphql", time.time())
+        done = self.read(argv, capture_output=True, text=True, timeout=round(deadline.remaining))
+        return json.loads(done.stdout)
+
+
 def required_view(url: str, run) -> "ledger_events.PullRequest | None":
     def read(command, **kwargs):
         try:
@@ -96,7 +115,7 @@ def required_view(url: str, run) -> "ledger_events.PullRequest | None":
         if rule["type"] == "required_status_checks"
         for check in rule["parameters"]["required_status_checks"]
     )
-    return ledger_events.view(url, read, required_checks=expected)
+    return ledger_events.view(url, cast(SourceControl, _RunGraph(read)), required_checks=expected)
 
 
 def refuse(pull: "ledger_events.PullRequest | None") -> None:
