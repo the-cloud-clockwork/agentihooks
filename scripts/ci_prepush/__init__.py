@@ -72,9 +72,19 @@ def _comment_step(root: Path, revision: str, grade: Path) -> list[tuple[str, lis
     return [("Python comments", [sys.executable, "-I", str(grader), "--base", str(snapshot), "--head", str(root)])]
 
 
-def _type_step(root: Path, revision: str, grade: Path) -> list[tuple[str, list[str]]]:
-    """Return the strict type gate step, graded by the revision's type gate in the CI matched environment."""
-    if not _git(root, "ls-tree", revision, TYPE_GRADER):
+def _type_step(root: Path, base: str, revision: str, grade: Path) -> list[tuple[str, list[str]]]:
+    """Return the strict type gate step in the CI matched environment, graded as CI grades it.
+
+    The baseline comes from the merge base and the grader from the base tip, falling back to the head's own gate
+    when the base tip has none.
+    """
+    if _git(root, "ls-tree", base, TYPE_GRADER):
+        grader = grade / "types-grader" / TYPE_GRADER
+        grader.parent.mkdir(parents=True, exist_ok=True)
+        grader.write_text(_git(root, "show", f"{base}:{TYPE_GRADER}") + "\n")
+    elif (root / TYPE_GRADER).is_file():
+        grader = root / TYPE_GRADER
+    else:
         return []
     snapshot = _snapshot(root, revision, grade / "types-base")
     return [
@@ -85,7 +95,7 @@ def _type_step(root: Path, revision: str, grade: Path) -> list[tuple[str, list[s
                 "-m",
                 "scripts.type_env",
                 "--grader",
-                str(snapshot / TYPE_GRADER),
+                str(grader),
                 "--root",
                 str(root),
                 "--base",
@@ -110,7 +120,7 @@ def plan(root: Path, base: str, grade: Path) -> list[tuple[str, list[str]]]:
         ("size limits", [python, "-I", str(grade / GRADER), "--base", str(grade), "--head", str(root)]),
     ]
     steps.extend(_comment_step(root, merge_base, grade))
-    steps.extend(_type_step(root, merge_base, grade))
+    steps.extend(_type_step(root, base, merge_base, grade))
     from hooks.context.local_test_guard import local_tests_allowed
 
     if local_tests_allowed() and (tests := tests_for(root, changed(root, base))):
