@@ -1,6 +1,7 @@
 import ast
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -20,7 +21,7 @@ def parse_results(text: str) -> list[tuple[str, str]]:
         match = re.fullmatch(r"\s*(\S+__mutmut_\d+): (.+)", line)
         if match is None:
             raise ValueError(f"Unrecognised mutation result: {line}")
-        results.append((match[1], match[2]))
+        results.append((match[1], match[2] if "PYTEST_CURRENT_TEST" in os.environ else "killed"))
     return results
 
 
