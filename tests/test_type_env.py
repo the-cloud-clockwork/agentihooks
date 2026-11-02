@@ -1,4 +1,6 @@
+import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +25,8 @@ class _Uv:
         assert check
         self.calls.append((command, env))
         if command[1] == "venv":
-            Path(command[-1], "bin").mkdir(parents=True)
+            Path(command[-1], "bin").mkdir(parents=True, exist_ok=True)
+            Path(command[-1], "bin", "python").touch()
         return subprocess.CompletedProcess(command, 0)
 
 
@@ -47,7 +50,7 @@ def test_the_environment_is_built_with_the_ci_install_command(tmp_path: Path) ->
     target = home / type_env.key(root)
     assert python == target / "bin" / "python"
     assert uv.calls == [
-        (["uv", "venv", "-q", "--python", "3.12", str(target)], None),
+        (["uv", "venv", "-q", "--clear", "--python", "3.12", str(target)], None),
         (
             [
                 "uv",
@@ -82,23 +85,40 @@ def test_a_built_environment_is_reused(tmp_path: Path) -> None:
     assert uv.calls == []
 
 
-def test_a_lock_change_replaces_the_older_environment(tmp_path: Path) -> None:
+def test_a_build_removes_only_environments_unused_for_a_week(tmp_path: Path) -> None:
     root = _root(tmp_path)
     home = tmp_path / "home"
     type_env.environment(root, home, _Uv())
-    old = type_env.key(root)
+    old = home / type_env.key(root)
+    (root / type_env.LOCK).write_text("recent\n")
+    type_env.environment(root, home, _Uv())
+    recent = home / type_env.key(root)
+    aged = time.time() - type_env.STALE_SECONDS - 60
+    os.utime(old / type_env.READY, (aged, aged))
     (root / type_env.LOCK).write_text("moved\n")
 
     type_env.environment(root, home, _Uv())
 
-    assert sorted(path.name for path in home.iterdir()) == [type_env.key(root)]
-    assert type_env.key(root) != old
+    assert sorted(path.name for path in home.iterdir()) == sorted([recent.name, type_env.key(root)])
 
 
-def test_an_unfinished_build_is_rebuilt(tmp_path: Path) -> None:
+def test_reuse_marks_the_environment_used(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    type_env.environment(root, home, _Uv())
+    ready = home / type_env.key(root) / type_env.READY
+    os.utime(ready, (0, 0))
+
+    type_env.environment(root, home, _Uv())
+
+    assert ready.stat().st_mtime > 0
+
+
+def test_an_environment_without_its_interpreter_is_rebuilt(tmp_path: Path) -> None:
     root = _root(tmp_path)
     home = tmp_path / "home"
     (home / type_env.key(root) / "bin").mkdir(parents=True)
+    (home / type_env.key(root) / type_env.READY).write_text("ready\n")
     uv = _Uv()
 
     type_env.environment(root, home, uv)
@@ -132,4 +152,4 @@ def test_main_fails_when_the_environment_cannot_be_built(
     monkeypatch.setattr(type_env, "environment", refuse)
 
     assert type_env.main(["--root", str(tmp_path)]) == 1
-    assert "The CI type environment could not be built" in capsys.readouterr().out
+    assert "The CI type environment could not run the type gate" in capsys.readouterr().out

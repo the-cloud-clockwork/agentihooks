@@ -10,6 +10,7 @@ import hashlib
 import os
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +22,7 @@ INPUTS = ("pyproject.toml", LOCK, CONSTRAINTS, EXCLUDES)
 EXTRAS = ("dev", "all")
 HOME = Path.home() / ".cache" / "agentihooks" / "type-env"
 READY = "ready"
+STALE_SECONDS = 7 * 24 * 3600
 
 
 def key(root: Path) -> str:
@@ -36,16 +38,19 @@ def key(root: Path) -> str:
 def environment(
     root: Path, home: Path = HOME, execute: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run
 ) -> Path:
-    """Return the interpreter of the environment for root's lock, building it and removing older ones when missing."""
+    """Return the interpreter of the environment for root's lock, building it when missing.
+
+    Each use marks its environment, and a build removes only environments unused for STALE_SECONDS, so a concurrent
+    run on another lock keeps its own.
+    """
     target = home / key(root)
     python = target / "bin" / "python"
-    if (target / READY).is_file():
+    ready = target / READY
+    if ready.is_file() and python.is_file():
+        ready.touch()
         return python
     home.mkdir(parents=True, exist_ok=True)
-    for stale in home.iterdir():
-        if stale.is_dir():
-            shutil.rmtree(stale)
-    execute(["uv", "venv", "-q", "--python", PYTHON, str(target)], check=True)
+    execute(["uv", "venv", "-q", "--clear", "--python", PYTHON, str(target)], check=True)
     execute(
         [
             "uv",
@@ -64,22 +69,28 @@ def environment(
         env={**os.environ, "UV_CONSTRAINT": str(root / CONSTRAINTS)},
         check=True,
     )
-    (target / READY).write_text(key(root) + "\n")
+    ready.write_text(key(root) + "\n")
+    cutoff = time.time() - STALE_SECONDS
+    for stale in home.iterdir():
+        marker = stale / READY
+        if stale != target and not stale.is_symlink() and stale.is_dir():
+            if (marker.stat().st_mtime if marker.is_file() else stale.stat().st_mtime) < cutoff:
+                shutil.rmtree(stale)
     return python
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run a type gate copy with the CI matched interpreter, forwarding every argument it does not own."""
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--grader", type=Path, default=Path("scripts/type_gate.py"))
     parser.add_argument("--root", type=Path, default=Path.cwd())
     args, forwarded = parser.parse_known_args(argv)
     try:
         python = environment(args.root)
+        return subprocess.run([str(python), "-I", str(args.grader.resolve()), *forwarded], cwd=args.root).returncode
     except (OSError, subprocess.CalledProcessError) as exc:
-        print(f"::error::The CI type environment could not be built: {exc}")
+        print(f"::error::The CI type environment could not run the type gate: {exc}")
         return 1
-    return subprocess.run([str(python), "-I", str(args.grader.resolve()), *forwarded], cwd=args.root).returncode
 
 
 if __name__ == "__main__":
