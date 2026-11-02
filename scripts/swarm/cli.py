@@ -1414,12 +1414,17 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     else:
         inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
     _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs)
-    slots = local_slots.maximum(store, args.slug, config.local_max_agents) if args.slug in store.slugs() else 0
+    known = args.slug in store.slugs()
+    slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     if args.json:
-        applied = config.scaling == AUTO_SCALING
-        print(json.dumps({"scaling": config.scaling, "applied": applied, **decision, "local_slots": slots}, indent=2))
+        print(
+            json.dumps(
+                {"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision, **slots}, indent=2
+            )
+        )
         return
-    print("\n".join([*autoscale_lines(config, decision), f"local slots {slots}, host room guard applies"]))
+    local = [f"local slots {slots['local_slots']}, host room guard applies"] if known else []
+    print("\n".join([*autoscale_lines(config, decision), *local]))
 
 
 def cmd_names(store, args):
