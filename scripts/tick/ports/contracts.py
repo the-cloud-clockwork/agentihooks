@@ -1,6 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import (
@@ -96,6 +96,8 @@ class SourceControl(Protocol):
     ) -> tuple[WorkflowRun, ...]: ...
 
     def download(self, path: str, *, deadline: Deadline) -> bytes: ...
+
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any: ...
 
 
 @runtime_checkable
