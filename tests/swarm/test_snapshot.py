@@ -148,6 +148,15 @@ def test_export_reads_no_key_of_another_swarm() -> None:
     assert theirs and not read & theirs
     assert [arg for arg in read if "sw-b" in arg or re.search(rf"\b{other}\b", arg)] == []
     assert Recording.scans and all("COUNT" in words[-2] and words[-1] == str(SCAN_PAGE) for words in Recording.scans)
+    assert all(any("MATCH" in word for word in words) for words in Recording.scans)
+
+
+def test_export_keeps_the_mail_of_a_named_agent_without_a_seat(store: RedisStore) -> None:
+    seed(store, "sw")
+    name = store.next_name("sw", "eng")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", name, "start on the parser")
+    assert inbox.key("item", item.id) in store.export("sw")["keys"]
 
 
 def test_export_keeps_the_mail_of_a_seat_that_holds_only_memory(store: RedisStore) -> None:
