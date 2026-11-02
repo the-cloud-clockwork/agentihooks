@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -25,6 +26,7 @@ class RunPort:
         args = ["api", "graphql", "-f", f"query={document}", *flags]
         caller = github_reads.CALLER.get("tick.source_control")
         options = {"capture_output": True, "text": True, "timeout": round(deadline.remaining)}
+        github_reads.charge(caller, "graphql", time.time())
         done = github_reads.rest(caller, args, run=self.run, **options)
         if done.returncode:
             raise subprocess.CalledProcessError(done.returncode, args, done.stdout, getattr(done, "stderr", None))

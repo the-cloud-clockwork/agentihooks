@@ -602,10 +602,12 @@ def test_github_graph_returns_the_whole_body_under_the_named_reader(
         return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(body), "")
 
     monkeypatch.setattr(github.github_reads, "rest", rest)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
 
     with github.github_reads.calling("swarm.checks"):
         assert provider.graph("{q}", {"url": "u", "id": "c"}, deadline=_deadline()) == body
+    assert github.github_reads.counts(0, float("inf")) == {"swarm.checks": 1}
     assert seen == [
         (
             "swarm.checks",

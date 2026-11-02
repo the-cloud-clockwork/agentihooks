@@ -84,6 +84,7 @@ class _RunGraph:
         flags = [word for name, value in variables.items() for word in ("-f", f"{name}={value}")]
         args = ["api", "graphql", "-f", f"query={document}", *flags]
         options = {"capture_output": True, "text": True, "timeout": round(deadline.remaining)}
+        github_reads.charge(github_reads.CALLER.get(), "graphql", time.time())
         done = github_reads.rest(github_reads.CALLER.get(), args, run=self.read, **options)
         return json.loads(done.stdout)
 
