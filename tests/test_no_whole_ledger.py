@@ -115,10 +115,15 @@ def test_a_file_past_its_allowance_names_the_allowance(
     )
 
 
-def test_a_base_without_an_allowlist_takes_the_heads_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize("source", [CLEAN, WHOLE])
+def test_a_base_without_an_allowlist_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str
+) -> None:
     base = _tree(tmp_path / "base", {"scripts/swarm/job.py": CLEAN})
-    head = _recorded(tmp_path / "head", {"scripts/swarm/job.py": WHOLE})
-    assert _grade(base, head, capsys) == (0, "1 files read the whole ledger state, 0 on the base allowlist, 0 errors\n")
+    head = _recorded(tmp_path / "head", {"scripts/swarm/job.py": source})
+    code, output = _grade(base, head, capsys)
+    assert code == 1
+    assert f"::error::{no_whole_ledger.ALLOWLIST} is missing from the base\n" in output
 
 
 def test_a_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
