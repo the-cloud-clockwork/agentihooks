@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.591 · 2026-11-02
+
+### 2026-11-02 · dff7ec2ddcd3 · #9416 · @agenticore-app
+
+**Clear comments in the install target adapters**
+
+This change sweeps all whole-line comments out of the five install target adapter modules (`scripts/targets`), relocating their content into the docstrings of the units they describe, dropping section banners, and trimming stray history like dates and ticket numbers; the two cold-path import comments are kept per prior precedent. No executable lines changed, confirmed by syntax-tree comparison. One test was strengthened to pin the copilot hook's `timeoutSeconds` value at 30, and the comment-free-paths registry now covers these modules, keeping the codebase's comment-free standard enforced going forward.
+
 ## v2.17.589 · 2026-11-02
 
 ### 2026-11-02 · 68b6af7aa7c1 · #9412 · @agenticore-app
