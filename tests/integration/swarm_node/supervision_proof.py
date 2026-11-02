@@ -61,7 +61,7 @@ def ready(container: str) -> dict:
         try:
             evidence[name] = docker(*args, timeout=EVIDENCE_SECONDS)
         except (subprocess.SubprocessError, OSError) as exc:
-            evidence[name] = f"unavailable: {exc}"
+            evidence[name] = getattr(exc, "output", None) or f"unavailable: {exc}"
     raise AssertionError(
         f"container readiness timeout: last={observed!r}\nprocesses:\n{evidence['processes']}\nlogs:\n{evidence['logs']}"
     )
