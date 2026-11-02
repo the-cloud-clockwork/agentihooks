@@ -306,7 +306,7 @@ jobs:
           BAKED_VENV: /opt/agentihooks-venv
           WHEELHOUSE: /opt/wheelhouse
         run: |
-          if [[ -x "$BAKED_VENV/bin/python" ]] && uv pip install --offline --no-index --find-links "$WHEELHOUSE" --python "$BAKED_VENV/bin/python" --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'; then
+          if [[ -x "$BAKED_VENV/bin/python" ]] && uv pip install --offline --no-index --no-build-isolation --find-links "$WHEELHOUSE" --python "$BAKED_VENV/bin/python" --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'; then
             echo "$BAKED_VENV/bin" >> "$GITHUB_PATH"
             echo "::notice title=Baked venv hit::The runner venv served the install offline"
           else
