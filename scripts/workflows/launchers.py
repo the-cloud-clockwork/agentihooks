@@ -29,8 +29,7 @@ def evidence_items(inputs: dict) -> list:
     """Every evidence item in the earlier stage outputs, in input order."""
     return [
         item
-        for key, outputs in inputs.items()
-        if key != CASE
+        for outputs in inputs.values()
         for output in outputs
         if isinstance(output, dict)
         for item in output.get("items", [])
