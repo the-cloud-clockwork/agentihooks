@@ -2051,7 +2051,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
 
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     jobs = _mutation_workflow()["jobs"]
-    plan, mutation = jobs["mutation-plan"], jobs["mutation"]
+    plan, mutation = jobs["mutation-plan"], jobs["mutation-shard"]
     assert plan.get("needs", []) in ([], ["admission"])
     assert (plan["if"], mutation["if"]) in (
         (
@@ -2060,7 +2060,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         ),
         (
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') }}",
         ),
     )
     assert (
@@ -2099,7 +2099,9 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
     assert mutation["strategy"] == {
         "fail-fast": False,
-        "matrix": {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"},
+        "matrix": {
+            "shard": "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+        },
     }
     for name in ("Mutate changed Python files", "Mutate dispatched Python files"):
         run = next(step for step in mutation["steps"] if step.get("name") == name)
@@ -2114,7 +2116,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
 
 def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     jobs = _mutation_workflow()["jobs"]
-    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
+    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation-shard"]
     assert (
         plan["outputs"]["stats_parts"]
         == "${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}"
@@ -2127,7 +2129,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         ),
         (
             "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.forwarded != 'true' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') }}",
         ),
     )
     assert stats["strategy"] == {
@@ -2139,6 +2141,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         "Download the shared mutation stats",
         "Download the reused preflight report",
         "Download every part's test stats cache",
+        "Download the measured mutation plan",
     )
     setup = [
         step
@@ -2373,7 +2376,7 @@ def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pin
 
 def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_protected_grader():
     jobs = _mutation_workflow()["jobs"]
-    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
+    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation-shard"]
     assert plan["outputs"]["reused"] == "${{ steps.reuse.outputs.reused || 'false' }}"
     names = [step.get("name") for step in plan["steps"]]
     grader = plan["steps"][names.index("Check out the protected grader")]
@@ -2428,6 +2431,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         " && steps.merged-stats.outputs.found == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
+        "needs.mutation-refine.result == 'success'",
     )
     for job in (stats, mutation):
         guarded = {step.get("id") for step in job["steps"] if step["if"] == skipped or step["if"] in unguarded}
@@ -2453,7 +2457,13 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         for name, job in jobs.items()
         if name.startswith("mutation") and any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
     }
-    assert {"mutation-plan", "mutation-stats", "mutation"} == set(local)
+    assert {"mutation-plan", "mutation-stats", "mutation-refine", "mutation-shard", "mutation"} == set(local)
+    for name in ("mutation-refine", "mutation"):
+        steps = jobs[name]["steps"]
+        names = [step.get("name") for step in steps]
+        take = steps[names.index("Take the upload action from the workflow revision")]
+        assert {step["uses"] for step in local[name]} == {"./.workflow-revision/.github/actions/retry-upload"}
+        assert all(steps.index(take) < steps.index(step) for step in local[name])
     plan = jobs["mutation-plan"]["steps"]
     take = next(step for step in plan if step.get("name") == "Take the upload action from the workflow revision")
     assert take["run"].splitlines() == [
@@ -2463,7 +2473,7 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
     ]
     assert {step["uses"] for step in local["mutation-plan"]} == {"./.workflow-revision/.github/actions/retry-upload"}
     assert all(plan.index(take) < plan.index(step) for step in local["mutation-plan"])
-    for name in ("mutation-stats", "mutation"):
+    for name in ("mutation-stats", "mutation-shard"):
         steps = jobs[name]["steps"]
         names = [step.get("name") for step in steps]
         take = steps[names.index("Take the local actions from the workflow revision")]
