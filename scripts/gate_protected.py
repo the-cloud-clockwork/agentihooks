@@ -22,6 +22,7 @@ FULL_PREFLIGHT_CHECKOUT = {"fetch-depth": 0}
 PREFLIGHT_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
 SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
+MUTATION_STAGES = ("mutation-refine", "mutation-shard")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
 EQUIVALENCE_DEV_PARENT = {
@@ -216,6 +217,19 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
     return problems
 
 
+def _mutation_stage_entries(file: str, gate: dict, jobs: dict, head_config: dict) -> dict[str, dict]:
+    """Return the head's non gate entries for mutation stages whose results the required mutation job merges."""
+    mutation = jobs.get("mutation") or {}
+    if "mutation" not in ci_wiring.needs_of(gate):
+        return {}
+    declared = head_config.get("not_gates", {})
+    return {
+        f"{file}/{stage}": declared[f"{file}/{stage}"]
+        for stage in MUTATION_STAGES
+        if f"{file}/{stage}" in declared and stage in ci_wiring.needs_of(mutation)
+    }
+
+
 def grade(
     base_workflows: dict[str, dict],
     base_config: dict,
@@ -276,6 +290,7 @@ def grade(
             key = f"{file}/test-summary"
             if key in head_config.get("not_gates", {}):
                 config["not_gates"].setdefault(key, head_config["not_gates"][key])
+    config["not_gates"].update(_mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config))
     return problems + ci_wiring.check(head_workflows, config, today)
 
 

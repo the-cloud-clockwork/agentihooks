@@ -1483,6 +1483,25 @@ def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on
         assert "The test summary must use the reviewed reporting job." in problems
 
 
+@pytest.mark.parametrize("gated", [False, True])
+@pytest.mark.parametrize("merged", [False, True])
+@pytest.mark.parametrize("stage", ["mutation-refine", "mutation-shard", "audit"])
+def test_a_mutation_stage_runs_outside_required_grading_only_when_the_required_mutation_job_merges_it(
+    gated, merged, stage
+):
+    base, head = _aggregators()
+    head["jobs"][stage] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["mutation"] = {"needs": [stage] if merged else [], "runs-on": "ubuntu-latest"}
+    if gated:
+        head["jobs"]["gate-required"]["needs"].append("mutation")
+    else:
+        head["jobs"]["mutation"]["if"] = "github.event_name == 'push'"
+    config = {"not_gates": {f"test.yml/{stage}": _entry()}}
+    accepted = gated and merged and stage != "audit"
+    expected = [] if accepted else [f"test.yml/{stage} runs on pull requests but is not a need of Gate — Required."]
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _TODAY, _POLICY) == expected
+
+
 def _separate_summary(head, steps):
     head["jobs"]["test-summary"] = {
         "needs": ["unit", "unit-selected"],
