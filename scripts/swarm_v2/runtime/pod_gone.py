@@ -5,6 +5,7 @@ Any failure, timeout or listed pod leaves the pod unconfirmed."""
 import json
 import subprocess
 from collections.abc import Callable
+from typing import cast
 
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL
 
@@ -31,4 +32,5 @@ def absent(execution_id: str, run: Runner = subprocess.run) -> bool:
         answer = json.loads(done.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return False
-    return done.returncode == 0 and isinstance(answer, dict) and answer.get("items") == []
+    listing = cast(dict[str, object], answer) if isinstance(answer, dict) else {}
+    return done.returncode == 0 and listing.get("items") == []

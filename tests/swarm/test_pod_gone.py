@@ -1,9 +1,11 @@
 import json
 import subprocess
+from typing import cast
 
 import pytest
 
 from scripts.swarm import cli
+from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2.runtime import pod_gone
 from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
@@ -37,7 +39,7 @@ def store() -> RedisStore:
     import fakeredis
 
     made = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    made.create(SwarmConfig("sw", "/repo"))
+    made.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     return made
 
 
@@ -88,7 +90,7 @@ def _runtime(absent: bool) -> tuple[RoutedRuntime, list]:
         asked.append(execution_id)
         return absent
 
-    herdr = Herdr()
+    herdr = cast(HerdrRuntime, Herdr())
     router = RuntimeRouter([LocalHerdrRuntime(herdr)], LOCAL)
     return RoutedRuntime(herdr, router, pod_absent=probe), asked
 
@@ -114,7 +116,7 @@ def test_an_unavailable_local_agent_never_asks_kubernetes() -> None:
 
 
 def test_the_default_probe_is_the_kubectl_listing() -> None:
-    herdr = FakeHerdr()
+    herdr = cast(HerdrRuntime, FakeHerdr())
     runtime = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)], LOCAL))
     assert runtime.pod_absent is pod_gone.absent
 
@@ -134,7 +136,7 @@ def test_stop_now_drops_a_kubernetes_agent_whose_pod_is_gone(store: RedisStore) 
     config, left = cli.stop_now(store, "sw", runtime, ledger)
     assert (config.state, left, store.agents("sw")) == ("stopped", [], [])
     assert ledger.updated == ("sw", "t1", {"state": "open", "claimed_by": ""})
-    assert runtime.herdr_runtime.calls == [("close_space", "sw")]
+    assert cast(Herdr, runtime.herdr_runtime).calls == [("close_space", "sw")]
     store.remove("sw")
     assert "sw" not in store.slugs()
 
