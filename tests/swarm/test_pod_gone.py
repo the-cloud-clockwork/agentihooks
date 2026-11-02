@@ -1,4 +1,3 @@
-import json
 import subprocess
 from dataclasses import replace
 from typing import cast
@@ -26,7 +25,7 @@ LISTING = [
     "--selector",
     "swarm.agentihooks.io/execution-id=exe-1",
     "--output",
-    "json",
+    "jsonpath={.items[*].metadata.name}",
 ]
 
 
@@ -46,7 +45,7 @@ def store() -> RedisStore:
 
 
 class Runner:
-    def __init__(self, code: int = 0, out: bytes = b'{"items": []}', error: Exception | None = None) -> None:
+    def __init__(self, code: int = 0, out: bytes = b"\n", error: Exception | None = None) -> None:
         self.code, self.out, self.error, self.calls = code, out, error, []
 
     def __call__(self, command: list, **options: object) -> subprocess.CompletedProcess:
@@ -65,15 +64,12 @@ def test_no_listed_pod_confirms_the_execution_is_gone() -> None:
 @pytest.mark.parametrize(
     "runner",
     [
-        Runner(out=json.dumps({"items": [{"metadata": {"name": "p"}}]}).encode()),
+        Runner(out=b"agent-pod-1"),
         Runner(code=1),
-        Runner(out=b"not json"),
-        Runner(out=b"[]"),
-        Runner(out=b"{}"),
         Runner(error=OSError("no kubectl")),
         Runner(error=subprocess.TimeoutExpired("kubectl", 10)),
     ],
-    ids=["pod", "failed", "garbled", "list", "no-items", "missing", "timeout"],
+    ids=["pod", "failed", "missing", "timeout"],
 )
 def test_anything_but_an_empty_listing_leaves_the_pod_unconfirmed(runner: Runner) -> None:
     assert pod_gone.absent("exe-1", runner) is False

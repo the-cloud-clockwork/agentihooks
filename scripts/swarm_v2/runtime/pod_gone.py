@@ -2,10 +2,8 @@
 
 Any failure, timeout or listed pod leaves the pod unconfirmed."""
 
-import json
 import subprocess
 from collections.abc import Callable
-from typing import cast
 
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL
 
@@ -14,7 +12,7 @@ Runner = Callable[..., subprocess.CompletedProcess[bytes]]
 
 
 def absent(execution_id: str, run: Runner = subprocess.run) -> bool:
-    """True only when kubectl answers an empty pod listing for the execution in every namespace."""
+    """True only when kubectl succeeds and names no pod for the execution in any namespace."""
     if not execution_id:
         return False
     command = [
@@ -25,12 +23,10 @@ def absent(execution_id: str, run: Runner = subprocess.run) -> bool:
         "--selector",
         f"{EXECUTION_LABEL}={execution_id}",
         "--output",
-        "json",
+        "jsonpath={.items[*].metadata.name}",
     ]
     try:
         done = run(command, capture_output=True, timeout=TIMEOUT_SECONDS, check=False)
-        answer = json.loads(done.stdout)
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+    except (OSError, subprocess.TimeoutExpired):
         return False
-    listing = cast(dict[str, object], answer) if isinstance(answer, dict) else {}
-    return done.returncode == 0 and listing.get("items") == []
+    return done.returncode == 0 and done.stdout.strip() == b""
