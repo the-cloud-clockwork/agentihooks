@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.codex_session.binding import TransportRecord
+from scripts.swarm import session_model
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -254,13 +255,20 @@ def unobserved(agent: AgentRecord, facts: dict) -> dict:
 def compare(agent: AgentRecord, facts: dict) -> dict:
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
-    expected = {**assignment(agent), "hooks": True}
+    expected: dict[str, object] = {**assignment(agent), "hooks": True}
+    observed: dict[str, object] = facts
     missing = [*_unheld(agent), *unobserved(agent, facts)]
     return {
-        field: {"expected": value, "actual": facts.get(field)}
+        field: {"expected": value, "actual": observed.get(field)}
         for field, value in expected.items()
-        if field not in missing and facts.get(field) != value
+        if field not in missing and not _same(field, value, observed.get(field))
     }
+
+
+def _same(field: str, expected: object, actual: object) -> bool:
+    if field == "model":
+        return session_model.same(str(expected), str(actual))
+    return actual == expected
 
 
 def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms: int) -> dict:
