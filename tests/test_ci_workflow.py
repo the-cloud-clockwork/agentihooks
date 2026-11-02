@@ -2017,13 +2017,26 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
 
 
 @pytest.mark.parametrize(
-    ("job", "mutate", "upload"),
+    ("job", "mutate", "upload", "guard"),
     [
-        ("mutation", "Mutate changed Python files", "Upload complete mutation evidence"),
-        ("mutation-stats", "Mutate the only shard in the statistics job", "Upload complete inline mutation evidence"),
+        (
+            "mutation",
+            "Mutate changed Python files",
+            "Upload complete mutation evidence",
+            "needs.mutation-plan.outputs.forwarded != 'true'",
+        ),
+        (
+            "mutation-stats",
+            "Mutate the only shard in the statistics job",
+            "Upload complete inline mutation evidence",
+            "needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]'"
+            " && needs.mutation-plan.outputs.forwarded != 'true'",
+        ),
     ],
 )
-def test_mutation_shards_grade_their_rows_with_the_protected_grader(job: str, mutate: str, upload: str) -> None:
+def test_mutation_shards_grade_their_rows_with_the_protected_grader(
+    job: str, mutate: str, upload: str, guard: str
+) -> None:
     steps = _mutation_workflow()["jobs"][job]["steps"]
     names = [step.get("name") for step in steps]
     checkout = steps[names.index("Check out the protected mutation grader")]
@@ -2034,7 +2047,7 @@ def test_mutation_shards_grade_their_rows_with_the_protected_grader(job: str, mu
     assert checkout["run"] == (
         'git fetch --no-tags origin "$GRADER"\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
     )
-    assert checkout["if"] == steps[names.index(mutate)]["if"]
+    assert checkout["if"] == guard
     assert grade["if"] == steps[names.index(upload)]["if"]
     assert grade["run"] == (
         'grader="$RUNNER_TEMP/grader"\n'
