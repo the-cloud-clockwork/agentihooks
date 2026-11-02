@@ -64,11 +64,7 @@ class ProtectedFinder(importlib.abc.MetaPathFinder):
         source = location / "__init__.py" if package else location.with_suffix(".py")
         if not source.is_file():
             return None
-        return importlib.util.spec_from_file_location(
-            fullname,
-            loader=ProtectedLoader(fullname, str(source)),
-            submodule_search_locations=[str(location)] if package else None,
-        )
+        return importlib.util.spec_from_file_location(fullname, loader=ProtectedLoader(fullname, str(source)))
 
 
 def install(root: Path) -> ProtectedFinder:
