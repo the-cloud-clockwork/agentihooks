@@ -16,7 +16,7 @@ NOW_MS = 1_791_540_000_000
 URL = "https://github.com/o/r/actions/runs/{}/job/9"
 TEXT = (
     "A pull request Tests run took 16 minutes 8 seconds from push to Gate Required, over the 15 minute budget."
-    " Its slowest stage mutation took 14 minutes 4 seconds against 8 minutes."
+    " Its slowest stage mutation-shard took 14 minutes 4 seconds against 6 minutes."
 )
 
 
@@ -44,7 +44,7 @@ def _job(name, created, completed, run_id=1):
 
 def _jobs(run_id, gate_end):
     return [
-        _job("mutation", "00:05", "14:09", run_id),
+        _job("mutation-shard", "00:05", "14:09", run_id),
         _job("split", "00:05", "00:20", run_id),
         _job("Gate — Required", "14:10", gate_end, run_id),
     ]
@@ -104,7 +104,7 @@ def test_a_run_over_fifteen_minutes_updates_one_standing_ci_overrun_finding_in_p
         "threshold": 15.0,
         "unit": "minutes from push to Gate Required",
         "detail": TEXT,
-        "evidence": ["mutation: 1 run over budget; worst 14 minutes 4 seconds."],
+        "evidence": ["mutation-shard: 1 run over budget; worst 14 minutes 4 seconds."],
         "links": [{"label": "Slow run 1", "url": URL.format(1)}],
         "fired": 1,
         "episodes": ["1"],
@@ -147,7 +147,7 @@ def test_standing_finding_groups_each_slow_stage_with_count_worst_time_and_run_l
         JOBS,
         6,
         [
-            _job("mutation (1)", "01:00", "15:00", 6),
+            _job("mutation-shard (1)", "01:00", "15:00", 6),
             _job("lint", "00:00", "05:00", 6),
             _job("Gate — Required", "17:30", "17:30", 6),
         ],
@@ -156,7 +156,7 @@ def test_standing_finding_groups_each_slow_stage_with_count_worst_time_and_run_l
         JOBS,
         7,
         [
-            _job("mutation (1)", "01:00", "16:00", 7),
+            _job("mutation-shard (1)", "01:00", "16:00", 7),
             _job("Gate — Required", "18:00", "18:00", 7),
         ],
     )
@@ -164,7 +164,7 @@ def test_standing_finding_groups_each_slow_stage_with_count_worst_time_and_run_l
     defects.refresh("sw", config, store, NOW_MS, run=_gh([], runs))
     found = standing.findings(store.redis, "sw", NOW_MS)
     assert len(found) == 1
-    assert "mutation: 2 runs over budget; worst 15 minutes." in found[0].evidence
+    assert "mutation-shard: 2 runs over budget; worst 15 minutes." in found[0].evidence
     assert "lint: 1 run over budget; worst 5 minutes." in found[0].evidence
     assert found[0].as_dict()["links"] == [
         {"label": "Slow run 6", "url": URL.format(6)},
@@ -192,7 +192,7 @@ def test_a_slow_run_sample_keeps_only_stages_strictly_over_a_budget_and_the_run_
         JOBS,
         8,
         [
-            _job("mutation (1)", "01:00", "09:00", 8),
+            _job("mutation-shard (1)", "01:00", "07:00", 8),
             _job("unbudgeted", "00:00", "16:40", 8),
             _job("lint", "00:00", "05:00", 8),
             _job("Gate — Required", "17:00", "17:00", 8),
