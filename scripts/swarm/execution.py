@@ -218,6 +218,7 @@ class ExecutionRegistry:
                     "generation": current.generation,
                     "controller_epoch": epoch,
                 }
+            self.store.forget_hosts(slug, current.name, *((previous.name,) if previous else ()))
             return current, previous
 
         current, previous = self._fenced(slug, admit, history=True)
@@ -255,6 +256,8 @@ class ExecutionRegistry:
             self.check_uid(slug, written, doc)
             if written != current:
                 doc["executions"][written.execution_id] = asdict(written)
+            if written.hive != current.hive:
+                self.store.forget_hosts(slug, written.name)
             return written, current
 
         written, current = self._fenced(slug, change)

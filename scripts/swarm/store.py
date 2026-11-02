@@ -514,6 +514,10 @@ class RedisStore:
 
         self._projection(slug, write, PROJECTION_CONTENTION)
 
+    def forget_hosts(self, slug: str, *names: str) -> None:
+        """Drop host projections before a placement commit so a lost projection leaves readers on the registry."""
+        self.redis.hdel(self.key(slug, "hosts"), *names)
+
     def project_legacy(self, slug: str, agent: AgentRecord, managed: Callable[[], bool]) -> bool:
         def write(pipe: Any) -> bool:
             if managed():

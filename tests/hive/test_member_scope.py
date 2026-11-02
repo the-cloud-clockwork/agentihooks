@@ -458,6 +458,49 @@ def test_removing_an_agent_removes_its_host(redis: Any, swarm: Any) -> None:
     assert scope.host(redis, "fixture", name) == ""
 
 
+def lost_projection(*args: object, **kwargs: object) -> None:
+    """Stand in for a writer that dies between the fenced commit and the host projection."""
+    raise RuntimeError("writer died before the projection")
+
+
+def test_a_hive_move_that_loses_its_projection_reads_the_registry_host(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    join(redis, "m2")
+    name = place(swarm, "m1")
+    current = swarm.agents("fixture")[0]
+    monkeypatch.setattr(swarm, "project_agent", lost_projection)
+    with pytest.raises(RuntimeError):
+        swarm.execution_registry.update("fixture", replace(current, hive="m2"))
+    assert redis.hget(swarm.key("fixture", "hosts"), name) is None
+    assert scope.host(redis, "fixture", name) == "m2"
+
+
+def test_a_replacement_that_loses_its_projection_leaves_no_host_for_either_name(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import scope
+    from scripts.swarm.store import AgentRecord
+
+    join(redis, "m1")
+    join(redis, "m2")
+    old = place(swarm, "m1")
+    previous = swarm.agents("fixture")[0]
+    new = swarm.next_name("fixture", "eng")
+    monkeypatch.setattr(swarm, "project_agent", lost_projection)
+    with pytest.raises(RuntimeError):
+        swarm.execution_registry.start(
+            "fixture", AgentRecord(new, "eng", "task", seat="eng-1@fixture", hive="m2"), previous.execution_id
+        )
+    assert redis.hmget(swarm.key("fixture", "hosts"), [old, new]) == [None, None]
+    assert scope.host(redis, "fixture", old) == swarm.execution_registry.hive("fixture", old)
+
+
 @pytest.mark.parametrize("off", ["false", "0", "no", " OFF "])
 @pytest.mark.parametrize("legacy_change", ["remove", "move"])
 def test_host_projection_off_switch_keeps_the_legacy_registry_lookup(
