@@ -59,10 +59,10 @@ class _Marker:
     ran: list[str] = field(default_factory=list)
     name: str = "marker"
     lane: Lane = Lane("eng")
-    order: int = 0
     budget_s: float = 5.0
     interval_s: float = 0.0
     needs: frozenset[str] = frozenset()
+    reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
 
     def run(self, ctx: Context) -> Result:

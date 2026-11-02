@@ -48,11 +48,14 @@ def _refuse(*_args: object, **_kwargs: object) -> NoReturn:
     raise TypeError(READ_ONLY)
 
 
+def _refuse_changes(cls: type, names: tuple[str, ...]) -> None:
+    """Make every method of ``cls`` named in ``names`` refuse the change."""
+    for name in names:
+        setattr(cls, name, staticmethod(_refuse))
+
+
 class FrozenDict(dict[str, Any]):
     """A mapping of the view that refuses every change and copies to a plain dict."""
-
-    __setitem__ = __delitem__ = __ior__ = staticmethod(_refuse)  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
-    clear = pop = popitem = setdefault = update = staticmethod(_refuse)  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
 
     def __reduce__(self) -> tuple[type[dict[str, Any]], tuple[dict[str, Any]]]:
         """Copy and pickle as a plain dict."""
@@ -62,12 +65,19 @@ class FrozenDict(dict[str, Any]):
 class FrozenList(list[Any]):
     """A list of the view that refuses every change and copies to a plain list."""
 
-    __setitem__ = __delitem__ = __iadd__ = __imul__ = staticmethod(_refuse)  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
-    append = extend = insert = pop = remove = clear = sort = reverse = staticmethod(_refuse)  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
-
     def __reduce__(self) -> tuple[type[list[Any]], tuple[list[Any]]]:
         """Copy and pickle as a plain list."""
         return list, (list(self),)
+
+
+_refuse_changes(
+    FrozenDict, ("__setitem__", "__delitem__", "__ior__", "clear", "pop", "popitem", "setdefault", "update")
+)
+_refuse_changes(
+    FrozenList,
+    ("__setitem__", "__delitem__", "__iadd__", "__imul__", "append", "extend", "insert", "pop", "remove", "clear")
+    + ("sort", "reverse"),
+)
 
 
 def freeze(value: object) -> object:
