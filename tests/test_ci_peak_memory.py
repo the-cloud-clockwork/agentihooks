@@ -115,7 +115,7 @@ def test_pull_request_tests_record_and_upload_the_step_peak(
         assert steps[extract]["if"] == measured["if"]
 
 
-LIGHT_CANONICAL = {"admission", "reuse", "gate-required", "test-summary"}
+LIGHT_CANONICAL = {"admission", "reuse", "gate-required", "queue-fail-fast", "test-summary"}
 
 
 def test_every_light_runner_job_records_its_whole_job_peak_memory() -> None:
