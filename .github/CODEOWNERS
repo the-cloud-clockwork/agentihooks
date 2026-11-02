@@ -34,7 +34,7 @@
 /tests/registry/ @nestorcolt
 /tests/*MANIFEST* @nestorcolt
 /tests/*BASELINE* @nestorcolt
-/tests/swarm/tick_scenarios/goldens.json @nestorcolt
+/tests/swarm/tick_scenarios/ @nestorcolt
 /tests/*ALLOWLIST* @nestorcolt
 /tests/branch_record.py @nestorcolt
 /tests/count_floor.py @nestorcolt

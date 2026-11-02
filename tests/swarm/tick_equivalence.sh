@@ -45,7 +45,7 @@ for side in base head; do
   [[ "${#records[@]}" == 24 ]] || { echo "::error::Expected twenty four $side observations, found ${#records[@]}"; exit 1; }
 done
 if [[ "$declared" == 1 ]]; then
-  echo "::notice::The head regenerates the tick goldens; base and head each match their own goldens and review confirms the change."
+  echo "::notice::The head regenerates the tick goldens; base and head each match their own goldens, the observation diff below does not block, and code owner review of the goldens gates the change."
   status=0
   diff -ru tick-evidence/base tick-evidence/head > tick-evidence/declared.diff || status=$?
   cat tick-evidence/declared.diff

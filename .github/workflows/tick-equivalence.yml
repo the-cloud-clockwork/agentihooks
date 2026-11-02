@@ -54,11 +54,11 @@ jobs:
           git -C head fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev
           cd head
           python -m pytest tests/swarm/test_tick_load.py -n 0 --tb=short
-      - name: Record the advisory run for the move pull request
+      - name: Record the tick equivalence proof
         if: always()
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: echo "Tick equivalence advisory proof $RUN_URL" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Tick equivalence proof $RUN_URL" >> "$GITHUB_STEP_SUMMARY"
       - uses: ./head/.github/actions/retry-upload
         if: always()
         with:
