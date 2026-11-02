@@ -194,11 +194,11 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     assert fenced.placement_refusal("eng", {"id": "task"}) == capped(2, 2, 2, cpus=3)
 
 
-def test_the_local_machine_cap_defaults_to_eight(setup):
+def test_the_local_machine_cap_defaults_to_fifteen(setup):
     from scripts.swarm.store import SwarmConfig
 
-    assert setup.store.config(setup.config.slug).local_max_agents == 8
-    assert SwarmConfig("s", "r", 1, 1).local_max_agents == 8
+    assert setup.store.config(setup.config.slug).local_max_agents == 15
+    assert SwarmConfig("s", "r", 1, 1).local_max_agents == 15
 
 
 def test_the_swarm_setting_refuses_local_launches_even_with_spare_cpu(setup, monkeypatch):

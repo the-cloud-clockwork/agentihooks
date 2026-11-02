@@ -55,7 +55,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "ephemeral": "no",
         "excluded": ["master"] if headless else [],
         "prefer": {},
-        "max_agents": 20 if headless else 10,
+        "max_agents": 20 if headless else 15,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
