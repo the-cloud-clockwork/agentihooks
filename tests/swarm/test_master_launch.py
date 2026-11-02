@@ -434,6 +434,7 @@ def test_a_finished_front_door_still_running_keeps_its_seat(up, monkeypatch, cap
     assert printed(capsys)["seat"] == "master-2@sw"
 
 
+@pytest.mark.feature("operator-dead-starting-front-door")
 def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(
     up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -450,6 +451,7 @@ def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(
     assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
 
 
+@pytest.mark.feature("operator-dead-starting-front-door")
 def test_a_dead_starting_front_door_is_finished_and_replaced(
     up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -459,8 +461,7 @@ def test_a_dead_starting_front_door_is_finished_and_replaced(
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     assert printed(capsys)["seat"] == "master@sw"
-    assert store.agents("sw")[0].name == front.name
-    assert store.agents("sw")[0].state == "finished"
+    assert next(a for a in store.agents("sw") if a.name == front.name).state == "finished"
     assert len(rt.masters) == 1
     assert {a.seat for a in masters(store) if a.state != "finished"} == {"master@sw"}
 
@@ -479,12 +480,15 @@ def test_a_live_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypa
     assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
 
 
-def test_a_starting_front_door_with_a_free_counted_seat_gets_its_master_in_that_seat(up, monkeypatch, capsys):
+def test_a_starting_front_door_with_a_free_counted_seat_gets_its_master_in_that_seat(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.swarm_v2 import masters as master_seats
 
     store, _, rt = up
     front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
     store.put_agent("sw", front)
+    rt.live.add(front.name)
     master_seats.MasterSeats(store.redis).set_count("sw", 2)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
