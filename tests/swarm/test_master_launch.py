@@ -456,6 +456,7 @@ def test_a_dead_starting_front_door_is_finished_and_replaced(
     up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     store, _, rt = up
+    assert False, "planted failing mapped test"
     front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
     store.put_agent("sw", front)
     answers(monkeypatch)
