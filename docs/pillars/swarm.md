@@ -414,7 +414,7 @@ the seat's current execution. On a master seat this showed as forced launches th
 with `replacement does not match the current execution`, then as
 `master launch refused: startup pending for <name>` in the tick journal.
 
-Each tick, before step 1 of [the minute tick](#the-minute-tick), the execution reconcile ends such an orphan. It ends the current execution of
+In the observe group of each pass of [the minute tick](#the-minute-tick), the execution reconcile step ends such an orphan. It ends the current execution of
 a seat when all of these hold:
 
 | Condition | Read from |
@@ -4349,7 +4349,7 @@ the place each group runs in the pass are listed in
 them, the two lanes, the declared budgets and intervals, the records a pass leaves, the ports steps reach outside
 systems through, and the cadence the passes run at.
 
-Before the first group the tick ends any orphan execution still holding a seat (see
+In the observe group the execution reconcile step ends any orphan execution still holding a seat (see
 [Orphan executions on a seat](#orphan-executions-on-a-seat)). An outage holds the affected idle and delivery
 decisions until recovery (see [Outage holds and recovery](#outage-holds-and-recovery)).
 
@@ -4358,7 +4358,7 @@ decisions until recovery (see [Outage holds and recovery](#outage-holds-and-reco
 | Part | What it does |
 |---|---|
 | Step | Declares a name, a group, a lane, a budget, an interval, the steps it `needs`, and the domains it `reads` and `writes`. A step reads the pass state through a view and returns its writes; it never changes shared pass state in place. |
-| Registry | `scripts.tick.registry` holds every step. It refuses duplicate names, unknown or cyclic needs, a budget that is not a finite positive number, a negative interval, and two steps in one lane that write the same domain with no need between them. |
+| Registry | `scripts.tick.registry` holds every step. It refuses duplicate names, unknown or cyclic needs, a budget that is not a finite positive number, a negative interval, and two steps in one lane that write the same domain, or where one reads a domain the other writes, with no need between them. |
 | Group run | `scripts.tick.engine.run_group` runs one group. Each step runs in its own daemon thread under a copied context and a child deadline of its budget. |
 | Step record | Every step run ends as `ok`, `late` (it ran past its budget, or was left running), `failed` (it raised) or `held` (its previous run is still alive, so no new thread starts). A late or failed step never stops the next one. |
 
@@ -4398,10 +4398,11 @@ fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed num
 ### Budgets and intervals
 
 Each step's budget is its measured p95 from a tick report over 60 passes with fifty percent headroom, rounded up to
-a whole second, and at least one second. Its interval is 60 seconds for a step that belongs in every pass, 120
-seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
-`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused at registration. The registry
-validates the interval; the engine runs every registered step on every pass. Timing changes, overlap limits and the
+a whole second, and at least one second. Its declared interval is 60 seconds for a step that belongs in every pass,
+120 seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
+`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built.
+Intervals are declared and validated; no step is skipped because its interval has not elapsed, and the engine runs
+every registered step on every pass. Timing changes, overlap limits and the
 forty second spawn bound are covered in
 [Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals).
 
@@ -4421,9 +4422,10 @@ spawns and sends the master one notice. The hold clears on the first pass whose 
 
 The ports in `scripts.tick.ports` name every outside system a step reaches: the ledger server, the swarm store's
 coordination keys, source control, the inbox, the decision classifier, metrics, the host, the agent runtime, the
-process table and the fenced records store. Each port has one adapter and one fake, every call takes a deadline
-and is refused once it has passed, and a CI check refuses a module under `scripts/tick` that imports an adapted
-implementation directly. Most registered steps still run a call of the tick module, which reaches those systems
+process table and the fenced records store. The first nine each have one adapter and one fake, and every call takes
+a deadline and is refused once it has passed; the records port has its Redis adapter. A unit test refuses a module
+under `scripts/tick` outside the adapters that imports an adapted implementation directly (see
+[The import check](../reference/tick-adapters.md#the-import-check)). Most registered steps still run a call of the tick module, which reaches those systems
 itself; every pass already scans processes through the processes adapter and holds one lease heartbeat. See
 [Tick adapters](../reference/tick-adapters.md) and [Fencing records](../reference/fencing-records.md).
 

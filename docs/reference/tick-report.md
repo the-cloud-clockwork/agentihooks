@@ -11,10 +11,11 @@ leaves in Redis. It is the measurement behind the step budgets, the pass budget 
 
 ```bash
 agentihooks swarm <id> tick-report               # the newest 100 passes
-agentihooks swarm <id> tick-report --passes 60   # the window the step budgets and stage checks use
+agentihooks swarm <id> tick-report --passes 60   # the window the step budgets use
 ```
 
-`--passes` takes 1 to 50,000; any other value is refused before Redis is read.
+`--passes` takes 1 to 50,000; any other value is refused before Redis is read. The pass budget hold reads its own
+window of the newest 10 passes.
 
 ## Output
 
@@ -37,7 +38,7 @@ CPU share uses summed own and reaped child CPU of retained steps, excluding the 
 | Passes without retained steps | Passes in the window whose step records were already trimmed from `tick:steps`. |
 | Step rows | One per step name, sorted by name: how many times it ran in the window, its median and p95 wall time, and its share of the CPU all retained steps used. The whole pass measurement, `run_tick`, is left out. |
 
-Values print with three decimals; `n/a` means the window held no value. CPU share sums each step's own thread CPU
+Times print with three decimals and CPU share with two; `n/a` means the window held no value. CPU share sums each step's own thread CPU
 and the CPU of child processes it reaped. Step measurements can nest, so their shares can overlap.
 
 ## Where the numbers come from
