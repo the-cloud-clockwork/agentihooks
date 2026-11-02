@@ -218,7 +218,7 @@ def test_stalled_or_missing_heartbeat_fails_before_termination(container, tmp_pa
     assert container.calls[-1][0] == ("rm", "--force", "container")
 
 
-def test_a_readiness_timeout_names_the_last_snapshot_processes_and_logs(monkeypatch):
+def test_a_readiness_timeout_names_the_last_snapshot_processes_and_logs(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = itertools.count(0, 10)
     monkeypatch.setattr(proof.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(proof.time, "sleep", lambda _: None)
@@ -236,16 +236,18 @@ def test_a_readiness_timeout_names_the_last_snapshot_processes_and_logs(monkeypa
     assert "exporter waiting" in message
 
 
-def test_a_readiness_timeout_keeps_the_snapshot_error_and_unavailable_evidence(monkeypatch):
+def test_a_readiness_timeout_keeps_the_snapshot_error_and_unavailable_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     clock = itertools.count(0, 10)
     monkeypatch.setattr(proof.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(proof.time, "sleep", lambda _: None)
     monkeypatch.setattr(proof, "state", lambda _: {"Running": True})
 
-    def snapshot(_):
+    def snapshot(_: str) -> dict:
         raise subprocess.CalledProcessError(1, "docker", output="no context.json")
 
-    def docker(*args, timeout=30):
+    def docker(*args: str, timeout: float = 30) -> str:
         raise subprocess.TimeoutExpired(["docker", *args], timeout)
 
     monkeypatch.setattr(proof, "snapshot", snapshot)
