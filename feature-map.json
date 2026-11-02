@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "operator-dead-starting-front-door",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2335",
+      "behaviour": "Operator master up finishes an expired starting front door whose process is gone and launches its replacement while preserving refusal for a live starting front door when no seat is free.",
+      "seam": "agentihooks swarm master up --new",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_dead_starting_front_door_is_finished_and_replaced",
+        "tests/swarm/test_master_launch.py::test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master"
+      ]
+    },
+    {
       "id": "swarm-tick-real-backends",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
@@ -100,6 +111,17 @@
       ]
     },
     {
+      "id": "swarm-tick-late-view",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2334",
+      "behaviour": "The tick view step budget comes from the measured ledger read time, and a late or held view refresh keeps the earlier view so events, metrics and the heartbeat still run in that pass.",
+      "seam": "the tick view step in scripts.tick.steps.host with its budget from scripts.tick.steps.budgets, and the wrapper pass in scripts.swarm.cli.run_tick",
+      "tests": [
+        "tests/tick/test_late_view.py::test_the_view_budget_covers_the_measured_ledger_read",
+        "tests/tick/test_late_view.py::test_a_late_view_keeps_events_metrics_and_heartbeat_running"
+      ]
+    },
+    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
@@ -173,6 +195,8 @@
         "tests/tick/test_source_control.py::test_github_workflow_runs_read_every_page_of_one_workflow_since_a_time",
         "tests/tick/test_source_control.py::test_github_download_reads_raw_bytes_under_the_named_reader",
         "tests/tick/test_source_control.py::test_github_download_outside_a_named_reader_counts_as_the_port",
+        "tests/tick/test_source_control.py::test_github_graph_returns_the_whole_body_under_the_named_reader",
+        "tests/tick/test_source_control.py::test_github_graph_outside_a_named_reader_counts_as_the_port",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
       ]
     },

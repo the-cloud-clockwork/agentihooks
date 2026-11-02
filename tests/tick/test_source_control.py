@@ -590,6 +590,52 @@ def test_github_download_outside_a_named_reader_counts_as_the_port(
     assert callers == [github.CALLER]
 
 
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_graph_returns_the_whole_body_under_the_named_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen: list[tuple[str, list[str], dict[str, object]]] = []
+    body = {"data": {"p0": None}, "errors": [{"path": ["p0"]}]}
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        seen.append((caller, args, options))
+        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(body), "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    with github.github_reads.calling("swarm.checks"):
+        assert provider.graph("{q}", {"url": "u", "id": "c"}, deadline=_deadline()) == body
+    assert github.github_reads.counts(0, float("inf")) == {"swarm.checks": 1}
+    charged = (github.github_reads.home() / "charged.jsonl").read_text().splitlines()
+    assert [json.loads(row)["endpoint"] for row in charged] == ["graphql"]
+    assert seen == [
+        (
+            "swarm.checks",
+            ["api", "graphql", "-f", "query={q}", "-f", "url=u", "-f", "id=c"],
+            {"cwd": tmp_path, "timeout": 9, **REST},
+        )
+    ]
+
+
+@pytest.mark.feature("swarm-tick-source-control-port")
+def test_github_graph_outside_a_named_reader_counts_as_the_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    callers: list[str] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        callers.append(caller)
+        return subprocess.CompletedProcess(["gh", *args], 0, "{}", "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    assert provider.graph("{q}", {}, deadline=_deadline()) == {}
+    assert callers == [github.CALLER]
+
+
 @pytest.mark.parametrize("body", ["", "{}"])
 def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, body: str
@@ -626,6 +672,7 @@ def test_github_cancel_run_posts_the_cancel_without_reading_a_body(
         ("open_changes", (), (port.OpenChange("u", (port.RollupCheck("Tests", "FAILURE", "t"),)),)),
         ("workflow_runs", ("test.yml", "push", "success", "2026-10-07T10:06:40Z"), ()),
         ("download", ("repos/owner/project/actions/artifacts/3/zip",), b"PK"),
+        ("graph", ("{q}", {"url": "u"}), {"data": {}}),
     ],
 )
 def test_fake_issue_and_rate_limit_tools_record_and_answer(
