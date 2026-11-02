@@ -4,7 +4,7 @@ import re
 import subprocess
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, cast
 
 
 @dataclass(frozen=True)
@@ -92,7 +92,7 @@ def _project_aliases(document: Mapping[str, object] | None) -> Mapping[str, str]
     aliases = document["aliases"]
     if not isinstance(aliases, dict):
         raise ValueError("Invalid project alias map")
-    for source, target in aliases.items():
+    for source, target in cast(dict[object, object], aliases).items():
         if not isinstance(source, str) or not isinstance(target, str):
             raise ValueError("Invalid project alias map")
         if (
@@ -101,9 +101,9 @@ def _project_aliases(document: Mapping[str, object] | None) -> Mapping[str, str]
             or canonical_remote(f"https://{target}") != target
         ):
             raise ValueError("Invalid project alias map")
-    for source in aliases:
-        _aliased_project(source, aliases)
-    return aliases
+    for source in cast(dict[str, str], aliases):
+        _aliased_project(source, cast(dict[str, str], aliases))
+    return cast(dict[str, str], aliases)
 
 
 def _aliased_project(project_id: str, aliases: Mapping[str, str]) -> str:

@@ -2,9 +2,13 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import Any, Protocol, cast
 
-from hooks.context.brain_adapter import BrainEntry, BrainSourceUnavailable, _parse_frontmatter
+from hooks.context.brain_adapter import (
+    BrainEntry,
+    BrainSourceUnavailable,
+    _parse_frontmatter,  # pyright: ignore[reportPrivateUsage]
+)
 from hooks.context.project_identity import ProjectIdentity
 from hooks.context.project_sessions import lookup
 
@@ -12,7 +16,7 @@ from hooks.context.project_sessions import lookup
 @dataclass
 class ProjectMemory:
     project: str
-    arcs: list[dict] = field(default_factory=list)
+    arcs: list[dict[str, Any]] = field(default_factory=list)
     lessons: list[str] = field(default_factory=list)
     revision: str = ""
 
@@ -28,10 +32,10 @@ class ProjectMemorySource(Protocol):
     def fetch(self, identity: ProjectIdentity) -> ProjectMemory: ...
 
 
-def _arc_rows(entries: list[BrainEntry]) -> list[dict]:
+def _arc_rows(entries: list[BrainEntry]) -> list[dict[str, Any]]:
     from hooks.config import BRAIN_HOT_ARCS_TOP_N
 
-    rows = {}
+    rows: dict[str, dict[str, Any]] = {}
     for entry in entries:
         if not entry.id.startswith("hot-arcs"):
             continue
@@ -43,20 +47,20 @@ def _arc_rows(entries: list[BrainEntry]) -> list[dict]:
     return sorted(rows.values(), key=lambda arc: (-arc["heat"], arc["id"]))[:BRAIN_HOT_ARCS_TOP_N]
 
 
-def _read_arc(row: dict) -> dict | None:
+def _read_arc(row: dict[str, Any]) -> dict[str, Any] | None:
     from hooks._brain_http import get
 
     found = get("/vault/search", params={"q": f"cluster_id: {row['id']}", "limit": 10, "context_lines": 0})
     if found is None:
         raise BrainSourceUnavailable("project arc lookup unavailable")
-    for hit in found.get("results", []):
+    for hit in cast(list[dict[str, Any]], found.get("results", [])):
         path = hit.get("path", "")
         if path.rsplit("/", 1)[-1] != row["id"] + ".md":
             continue
         result = get("/vault/read", params={"path": path})
         if result is None:
             raise BrainSourceUnavailable("project arc read unavailable")
-        attrs, _ = _parse_frontmatter(result.get("content", ""))
+        attrs, _ = cast(tuple[dict[str, Any], str], _parse_frontmatter(result.get("content", "")))
         if attrs.get("cluster_id") == row["id"]:
             return attrs
     return None
@@ -65,7 +69,7 @@ def _read_arc(row: dict) -> dict | None:
 def _lessons(identity: ProjectIdentity) -> list[str]:
     from hooks._brain_http import get
 
-    lessons = []
+    lessons: list[str] = []
     today = datetime.now(timezone.utc).date()
     days = int(os.getenv("BRAIN_STALE_LESSON_DAYS", "14"))
     for age in range(max(0, days)):
@@ -104,14 +108,14 @@ class VaultProjectSource:
         return memory
 
 
-def _own_rows(found: dict, kind: str, project_id: str) -> list[dict]:
-    rows = found.get(kind)
+def _own_rows(found: dict[str, Any], kind: str, project_id: str) -> list[dict[str, Any]]:
+    rows: object = found.get(kind)
     if not isinstance(rows, list):
         return []
     return [row for row in rows if isinstance(row, dict) and row.get("projects") == [project_id]]
 
 
-def _kernel_memory(identity: ProjectIdentity, found: dict) -> ProjectMemory:
+def _kernel_memory(identity: ProjectIdentity, found: dict[str, Any]) -> ProjectMemory:
     if found.get("scope") != "project" or found.get("project_id") != identity.project_id:
         raise ScopedFeedRefused("project feed answered outside the requested project")
     arcs = [
@@ -140,7 +144,7 @@ class KernelProjectSource:
             return ProjectMemory(identity.project)
         from hooks._brain_http import get
 
-        found = get("/feed", params={"project": identity.project_id}, surface_http_errors=True)
+        found: dict[str, Any] | None = get("/feed", params={"project": identity.project_id}, surface_http_errors=True)
         if found is None:
             raise BrainSourceUnavailable("project feed unavailable")
         status = found.get("__http_status__")

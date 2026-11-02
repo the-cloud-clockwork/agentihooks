@@ -8,6 +8,7 @@ the sync up- and downgrades packages the other repos depend on.
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from hooks.hook_manager import BlockAction
 
@@ -21,11 +22,11 @@ def _project_root(cwd: Path) -> Path | None:
     return None
 
 
-def check_venv_guard(payload: dict) -> None:
+def check_venv_guard(payload: dict[str, Any]) -> None:
     from hooks.context._strip import strip_non_command_content
-    from hooks.context.branch_guard import _resolve_cwd
+    from hooks.context.branch_guard import _resolve_cwd  # pyright: ignore[reportPrivateUsage]
 
-    command = payload.get("tool_input", {}).get("command", "")
+    command: str = payload.get("tool_input", {}).get("command", "")
     venv = os.environ.get("VIRTUAL_ENV", "")
     if not command or not venv or not _ACTIVE_SYNC_RE.search(strip_non_command_content(command)):
         return

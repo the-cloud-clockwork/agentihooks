@@ -24,11 +24,11 @@ import fnmatch
 import os
 import re
 import shlex
-from typing import Optional
+from typing import Any, Optional, cast
 
 _RE_FLAGS = re.IGNORECASE | re.DOTALL
 
-_WHOLE_CMD_PATTERNS: list[tuple[re.Pattern, str, str]] = [
+_WHOLE_CMD_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (
         re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?edit\b", _RE_FLAGS),
         "kubectl-edit",
@@ -70,7 +70,7 @@ _KUBECTL_EXEC_RE = re.compile(
     _RE_FLAGS,
 )
 
-_EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern, str, str]] = [
+_EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern[str], str, str | None]] = [
     (re.compile(r"^\s*tee\b", _RE_FLAGS), "exec-tee", "kubectl exec ... -- tee (writes a file inside the pod)"),
     (
         re.compile(r"^\s*sed\s+-i\b", _RE_FLAGS),
@@ -102,7 +102,7 @@ _EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     ),
 ]
 
-_INNER_SHELL_PATTERNS: list[tuple[re.Pattern, str]] = [
+_INNER_SHELL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r">\s*['\"]?(?:/|\$|~)", _RE_FLAGS), "redirect-to-fs-path"),
     (re.compile(r">>\s*['\"]?(?:/|\$|~)", _RE_FLAGS), "append-to-fs-path"),
     (re.compile(r"<<\s*['\"]?[A-Z_]+", _RE_FLAGS), "heredoc-to-file"),
@@ -155,7 +155,7 @@ _SSH_RE = re.compile(
     _RE_FLAGS,
 )
 
-_SSH_WRITE_PATTERNS: list[tuple[re.Pattern, str]] = [
+_SSH_WRITE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bsed\s+-i\b", _RE_FLAGS), "ssh-sed-i"),
     (re.compile(r"\b(?:vi|vim|nano|emacs)\s+['\"]?/", _RE_FLAGS), "ssh-editor"),
     (re.compile(r">\s*['\"]?(?:/etc|/var|/opt|/srv|/usr|/root|/home|~)", _RE_FLAGS), "ssh-redirect"),
@@ -208,7 +208,7 @@ _DOCKER_EXEC_RE = re.compile(
     _RE_FLAGS,
 )
 
-_DOCKER_EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern, str]] = [
+_DOCKER_EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\btee\b", _RE_FLAGS), "docker-exec-tee"),
     (re.compile(r"\bsed\s+-i\b", _RE_FLAGS), "docker-exec-sed-i"),
     (
@@ -362,7 +362,10 @@ def _violation_or_allow(rule: str, description: str, namespace: Optional[str], p
 
         otel.emit_event(
             _OTEL_KUBECTL_MUTATION,
-            {"rule": rule, "namespace": namespace or "", "pod": pod, "action": "allow", "allowlisted": True},
+            cast(
+                "dict[str, str]",
+                {"rule": rule, "namespace": namespace or "", "pod": pod, "action": "allow", "allowlisted": True},
+            ),
         )
         return None
     return _violation(rule, description)
@@ -463,7 +466,7 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
     return None
 
 
-def check_kubectl_mutation(payload: dict) -> None:
+def check_kubectl_mutation(payload: dict[str, Any]) -> None:
     """PreToolUse Bash hook entrypoint. Raises BlockAction on violation.
 
     When bypass mode is active (operator said ``disable controls``), the
@@ -476,7 +479,10 @@ def check_kubectl_mutation(payload: dict) -> None:
     if _controls_disabled(session_id):
         from hooks.observability import otel
 
-        otel.emit_event(_OTEL_KUBECTL_MUTATION, {"session.id": session_id, "action": "allow", "bypass": True})
+        otel.emit_event(
+            _OTEL_KUBECTL_MUTATION,
+            cast("dict[str, str]", {"session.id": session_id, "action": "allow", "bypass": True}),
+        )
         return
 
     tool_input = payload.get("tool_input", {}) or {}

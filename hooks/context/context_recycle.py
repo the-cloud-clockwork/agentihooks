@@ -2,8 +2,10 @@ import json
 import os
 import re
 import shlex
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, cast
 
 from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT, HANDOFF_MARGIN
 from hooks.context.context_usage import used_tokens
@@ -52,7 +54,7 @@ def _used(session_id: str) -> int | None:
     return used
 
 
-def _overrun(session_id: str, environ) -> tuple[str, int] | None:
+def _overrun(session_id: str, environ: Mapping[str, str] | None) -> tuple[str, int] | None:
     slug = _swarm_of(os.environ if environ is None else environ, session_id)
     used = _used(session_id) if slug and session_id else None
     if used is None or used < _gate_limit() * 1000:
@@ -68,21 +70,29 @@ def _marker(session_id: str, stage: str) -> Path:
     return AGENTIHOOKS_HOME / "context_usage" / f"{session_id}.{stage}"
 
 
-def _swarm_of(environ, session_id: str = "") -> str:
+def _swarm_of(environ: Mapping[str, str], session_id: str = "") -> str:
     if environ.get("AGENTIHOOKS_SWARM_LANE") == naming.OPERATOR:
         return ""
     name = environ.get("AGENTIHOOKS_AGENT_NAME")
-    slug = (naming.legacy_slug(name) or environ.get("AGENTIHOOKS_SWARM")) if naming.lane_of(name) else ""
+    slug = cast(
+        str,
+        (
+            cast("str | None", naming.legacy_slug(name))  # pyright: ignore[reportUnknownMemberType]
+            or environ.get("AGENTIHOOKS_SWARM")
+        )
+        if naming.lane_of(cast(str, name))
+        else "",
+    )
     if not session_id:
         return slug
     if not slug:
-        return _pinned_swarm(session_id).get("swarm")
+        return cast(str, _pinned_swarm(session_id).get("swarm"))
     if _used(session_id) is not None:
         pin_swarm(session_id, slug)
     return slug
 
 
-def _pinned_swarm(session_id: str) -> dict:
+def _pinned_swarm(session_id: str) -> dict[str, Any]:
     try:
         return json.loads(_marker(session_id, "swarm").read_bytes())
     except (OSError, ValueError):
@@ -98,12 +108,12 @@ def pin_swarm(session_id: str, slug: str, compact_limit: int | None = None) -> N
         )
 
 
-def over_limit(session_id: str, environ=None) -> str | None:
+def over_limit(session_id: str, environ: Mapping[str, str] | None = None) -> str | None:
     overrun = _overrun(session_id, environ)
     return overrun[0] if overrun else None
 
 
-def directive(session_id: str, environ=None, now: datetime | None = None) -> str | None:
+def directive(session_id: str, environ: Mapping[str, str] | None = None, now: datetime | None = None) -> str | None:
     slug = _swarm_of(os.environ if environ is None else environ, session_id)
     used = _used(session_id) if slug and session_id else None
     if used is None or used < COMPACT_LIMIT * 1000:
@@ -126,7 +136,7 @@ def directive(session_id: str, environ=None, now: datetime | None = None) -> str
 
 def unmarked_overrun(session_id: str, compact_limit: int) -> int | None:
     used = _used(session_id)
-    limit = _pinned_swarm(session_id).get("compact_limit", compact_limit)
+    limit = cast(int, _pinned_swarm(session_id).get("compact_limit", compact_limit))
     if used is None or used < _gate_limit(limit) * 1000:
         return None
     return None if any(_marker(session_id, stage).exists() for stage in ("prepare", "recycle")) else used
@@ -137,7 +147,7 @@ def _in_scratchpad(path: str) -> bool:
     return os.path.realpath(os.path.expanduser(path)).startswith(root + os.sep)
 
 
-def _handoff_write(tool_input: dict) -> bool:
+def _handoff_write(tool_input: dict[str, Any]) -> bool:
     paths = [str(tool_input.get("file_path") or "")]
     paths += [added or moved for added, moved in _PATCH_TARGET.findall(str(tool_input.get("content") or ""))]
     return all(path and _in_scratchpad(path.strip()) for path in paths)
@@ -197,7 +207,9 @@ def _swarm_step(args: list[str], slug: str) -> bool:
     return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 
-def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str | None:
+def gate(
+    tool_name: str, tool_input: dict[str, Any], session_id: str, environ: Mapping[str, str] | None = None
+) -> str | None:
     overrun = _overrun(session_id, environ)
     if overrun is None or tool_name in _READ_TOOLS:
         return None
@@ -210,15 +222,15 @@ def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str
     return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=_gate_limit(), slug=slug)
 
 
-def _resolver(slug: str):
+def _resolver(slug: str) -> Any:
     from scripts.handoff.resolve import Resolver
-    from scripts.swarm.store import SwarmError, connect
+    from scripts.swarm.store import SwarmError, connect  # pyright: ignore[reportUnknownVariableType]
 
     try:
-        redis = connect().redis
+        redis: Any = connect().redis  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType]
     except SwarmError:
         redis = None
-    return Resolver(slug, redis)
+    return Resolver(slug, redis)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _handoff_refusal(command: str, slug: str) -> str | None:
@@ -229,5 +241,5 @@ def _handoff_refusal(command: str, slug: str) -> str | None:
         text = Path(tokens[4]).expanduser().read_text(encoding="utf-8")
     except OSError:
         return None
-    found = handoff_check.problems(text, _resolver(slug))
-    return "BLOCKED: " + handoff_check.refusal(found) if found else None
+    found = cast("list[str]", handoff_check.problems(text, _resolver(slug)))  # pyright: ignore[reportUnknownMemberType]
+    return "BLOCKED: " + handoff_check.refusal(found) if found else None  # pyright: ignore[reportUnknownMemberType]

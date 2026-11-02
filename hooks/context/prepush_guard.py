@@ -3,8 +3,9 @@ import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
-from hooks.common import log
+from hooks.common import log  # pyright: ignore[reportUnknownVariableType]
 from hooks.hook_manager import BlockAction
 
 _PASS_ARGS = frozenset({"--delete", "-d", "--dry-run", "-n"})
@@ -14,7 +15,7 @@ _VALUE_OPTIONS = frozenset({"-o", "--push-option", "--exec", "--receive-pack", "
 def _push(tokens: list[str]) -> tuple[list[str], list[str]] | None:
     if not tokens or Path(tokens[0]).name != "git":
         return None
-    dirs, rest = [], tokens[1:]
+    dirs, rest = cast("list[str]", []), tokens[1:]
     while rest and rest[0].startswith("-"):
         if rest[0] in ("-C", "-c"):
             dirs += rest[1:2] if rest[0] == "-C" else []
@@ -53,7 +54,7 @@ def _path(word: str) -> str:
 
 
 def _own_worktree(cwd: Path, name: str) -> Path | None:
-    from scripts.gates.push_stop import default_root, trees
+    from scripts.gates.push_stop import default_root, trees  # pyright: ignore[reportUnknownVariableType]
 
     checkout = _toplevel(cwd)
     if checkout is None:
@@ -62,29 +63,35 @@ def _own_worktree(cwd: Path, name: str) -> Path | None:
     return found[0] if len(found) == 1 else None
 
 
-def _branch_worktree(cwd: Path, task: dict) -> Path | None:
+def _branch_worktree(cwd: Path, task: dict[str, Any]) -> Path | None:
     from scripts.gates.push_stop import default_root
-    from scripts.swarm.snapshot import worktrees
+    from scripts.swarm.snapshot import worktrees  # pyright: ignore[reportUnknownVariableType]
 
-    branch = task["branch"]
+    branch: str = task["branch"]
     candidates = [cwd]
     if task.get("worktree"):
         candidates.append(Path(task["worktree"]))
     candidates.extend(path for path in Path(default_root()).glob("*/*") if (path / ".git").is_file())
-    found = {Path(target) for candidate in candidates if (target := worktrees(str(candidate), [branch])[branch])}
+    found = {
+        Path(target)
+        for candidate in candidates
+        if (target := cast("str | None", worktrees(str(candidate), [branch])[branch]))
+    }
     return found.pop() if len(found) == 1 else None
 
 
 def _swarm_cwd(cwd: Path) -> tuple[Path | None, str]:
     from scripts.gates.base import Who
-    from scripts.swarm_ledger.storage import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger  # pyright: ignore[reportUnknownVariableType]
 
-    who = Who.from_env()
+    who = Who.from_env()  # pyright: ignore[reportUnknownMemberType]
     if not (who.pinned and who.task):
         return None, "identity binding"
     folder = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    doc = read_ledger(folder, who.swarm, f"tasks/{who.task}") or {}
-    task = next((row for row in doc.get("tasks", []) if row.get("id") == who.task), {})
+    doc: dict[str, Any] = read_ledger(folder, who.swarm, f"tasks/{who.task}") or {}
+    task: dict[str, Any] = next(
+        (cast("dict[str, Any]", row) for row in doc.get("tasks", []) if row.get("id") == who.task), {}
+    )
     if not task:
         return None, "ledger task"
     if task.get("claimed_by") != who.name or task.get("state") not in ("claimed", "pr"):
@@ -124,11 +131,11 @@ def _folder(cwd: Path, folders: list[str]) -> Path:
     return cwd
 
 
-def _pushes(payload: dict) -> Iterator[tuple[Path, list[str]]]:
+def _pushes(payload: dict[str, Any]) -> Iterator[tuple[Path, list[str]]]:
     from hooks.context.shell_commands import located
 
-    tool_input = payload["tool_input"]
-    command = tool_input.get("command") or tool_input.get("cmd")
+    tool_input: dict[str, Any] = payload["tool_input"]
+    command = cast("str | None", tool_input.get("command") or tool_input.get("cmd"))
     if not command:
         return
     cwd = Path(payload.get("cwd") or os.getcwd(), _path(tool_input.get("workdir") or ""))
@@ -154,7 +161,7 @@ def _unpassed(pushes: Iterator[tuple[Path, list[str]]], seen: list[tuple[Path, l
 
 
 def _branches(root: Path, args: list[str]) -> tuple[str, list[str]]:
-    words, rest = [], iter(args)
+    words, rest = cast("list[str]", []), iter(args)
     for arg in rest:
         if arg in _VALUE_OPTIONS:
             next(rest, None)
@@ -214,7 +221,7 @@ def _crowded(pushes: list[tuple[Path, list[str]]], now: float) -> str | None:
     return None
 
 
-def check_prepush(payload: dict) -> None:
+def check_prepush(payload: dict[str, Any]) -> None:
     import shlex
 
     try:
