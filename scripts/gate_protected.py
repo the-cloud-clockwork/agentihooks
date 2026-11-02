@@ -294,7 +294,8 @@ def grade(
             key = f"{file}/test-summary"
             if key in head_config.get("not_gates", {}):
                 config["not_gates"].setdefault(key, head_config["not_gates"][key])
-    config["not_gates"].update(_mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config))
+    for key, entry in _mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config).items():
+        config["not_gates"].setdefault(key, entry)
     return problems + ci_wiring.check(head_workflows, config, today)
 
 
