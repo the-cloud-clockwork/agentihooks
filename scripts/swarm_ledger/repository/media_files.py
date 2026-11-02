@@ -4,7 +4,7 @@ TABLE = "media_files"
 
 SAVE = "INSERT INTO media_files VALUES (?, ?, ?, ?) ON CONFLICT(slug,id) DO UPDATE SET saved_at=excluded.saved_at"
 LOAD = "SELECT data FROM media_files WHERE slug=? AND id=?"
-AGES = LIST = "SELECT id, saved_at FROM media_files WHERE slug=?"
+AGES = "SELECT id, saved_at FROM media_files WHERE slug=?"
 DROP = "DELETE FROM media_files WHERE slug=? AND id=?"
 
 

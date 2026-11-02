@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
+from scripts.inbox.seats import SCAN_PAGE, SeatMemory, SeatRegistry, SwarmCulture
 from scripts.inbox.store import InboxStore
 from scripts.swarm import default_models, effort_range, timing
 from scripts.swarm.execution import ExecutionRegistry, _finished_life, occupants_of, records_of
@@ -40,6 +40,8 @@ DEFAULT_LOCAL_MAX_AGENTS = 8
 EVENTS_ENGINE = "events"
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
+SEQUENTIAL_TICK = "sequential"
+TICK_MODES = (SEQUENTIAL_TICK, "parallel")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
 PLACEMENT_MODES = ("anton-first", "round-robin")
 ANTON_FIRST, ROUND_ROBIN = PLACEMENT_MODES
@@ -98,8 +100,11 @@ class SwarmConfig:
     placement_mode: str = ANTON_FIRST
     placement_nodes: int = 0
     repo_origin: str = ""
+    tick_mode: str = SEQUENTIAL_TICK
 
     def __post_init__(self) -> None:
+        if self.tick_mode not in TICK_MODES:
+            raise SwarmError(f"tick mode must be one of {', '.join(TICK_MODES)}")
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
         if self.placement_mode not in PLACEMENT_MODES:
@@ -222,7 +227,7 @@ class RedisStore:
         self.redis.hset(self.key(config.slug, "config"), mapping=_fields(config))
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
-    def config(self, slug):
+    def config(self, slug: str) -> SwarmConfig:
         raw = self.redis.hgetall(self.key(slug, "config"))
         if not raw:
             raise SwarmError(f"no swarm {slug}")
@@ -270,6 +275,7 @@ class RedisStore:
             raw.get("placement_mode") or ANTON_FIRST,
             int(raw.get("placement_nodes") or 0),
             raw.get("repo_origin", ""),
+            raw.get("tick_mode") or SEQUENTIAL_TICK,
         )
 
     def update(self, slug, **changes):
@@ -789,16 +795,20 @@ class RedisStore:
         self.redis.srem(f"{PREFIX}:index", slug)
         self.names.release(slug)
 
-    def export(self, slug):
+    def export(self, slug: str) -> dict[str, Any]:
         """Everything the swarm holds: its own keys, its fencing document, its seats and memory, its inbox addresses."""
         from scripts.swarm import fencing
 
         self.config(slug)
-        own = [key for key in self.redis.scan_iter(match=self.key(slug, "*")) if key != self.key(slug, "tick-lock")]
-        inbox, members = InboxStore(self.redis).keys_for(lambda address: of_swarm(address, slug, self.names))
-        keys = (
-            sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
-        )
+        scanned = self.redis.scan_iter(match=self.key(slug, "*"), count=SCAN_PAGE)
+        own = [key for key in scanned if key != self.key(slug, "tick-lock")]
+        seats = self.seats.swarm_keys(slug)
+        named = set(self.seats.agent_names(slug)) | {row["name"] for row in self.names.names(slug)}
+        named |= {alias for name in list(named) for alias in self.names.aliases(name)}
+        held = (key[len(self.seats.key("")) :].split(":")[0] for key in seats if key.startswith(self.seats.key("")))
+        seated = {address for address in held if address.endswith(f"@{slug}")}
+        inbox, members = InboxStore(self.redis).keys_at(sorted(named | seated))
+        keys = sorted(own) + seats + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
         return {
             "keys": _dump(self.redis, keys),
             "members": {f"{PREFIX}:index": [slug], **members},

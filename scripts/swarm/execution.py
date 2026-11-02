@@ -84,16 +84,19 @@ class ExecutionRegistry:
         fencing.bump(self.store, slug, fencing.IDENTITY_CONFLICTS)
         raise SwarmError(message)
 
-    def _fenced(self, slug: str, change: Callable[[dict[str, Any]], Any]) -> Any:
+    def _fenced(self, slug: str, change: Callable[[dict[str, Any]], Any], *, history: bool = False) -> Any:
         from scripts.swarm import lease
 
-        return lease.fenced(self.store, slug, lease.EPOCH.get(), change)
+        def archived(doc: dict[str, Any]) -> Any:
+            return fencing.change_with_archive(self.store, slug, doc, change)
+
+        return lease.fenced(self.store, slug, lease.EPOCH.get(), archived if history else change)
 
     def records(self, slug: str) -> list[AgentRecord]:
         return records_of(fencing.read(self.store, slug))
 
     def occupants(self, slug: str) -> dict[str, AgentRecord]:
-        return occupants_of(fencing.read(self.store, slug))
+        return occupants_of({"executions": fencing.read_executions(self.store, slug)})
 
     def managed(self, slug: str, name: str) -> bool:
         doc = fencing.read(self.store, slug)
@@ -110,8 +113,13 @@ class ExecutionRegistry:
                 for key, row in rows.items()
                 if row["generation"] < heads[row["seat"]]["generation"] and row["name"] not in listed
             ]
+            if not old and "archive_ref" in doc:
+                return 0
+            fencing.hydrate_archive(self.store, doc)
             for key in old:
                 doc["archive"][key] = doc["executions"].pop(key)
+            for row in doc["archive"].values():
+                row.get("profile_decision", {}).get("validation", {}).pop("source_blobs", None)
             return len(old)
 
         return self._fenced(slug, move)
@@ -119,13 +127,13 @@ class ExecutionRegistry:
     def hive(self, slug: str, name: str) -> str:
         if name not in self.store.listed(slug):
             return ""
-        rows = [row for row in fencing.read(self.store, slug)["executions"].values() if row["name"] == name]
+        rows = [row for row in fencing.read_executions(self.store, slug).values() if row["name"] == name]
         hive = max(rows, key=lambda row: row["generation"]).get("hive") if rows else None
         return hive if isinstance(hive, str) else ""
 
     def agents(self, slug: str) -> list[AgentRecord]:
         projections, desired = self.store.projections(slug)
-        attempts = [row for row in fencing.read(self.store, slug)["executions"].values() if row["name"] in projections]
+        attempts = [row for row in fencing.read_executions(self.store, slug).values() if row["name"] in projections]
         heads = latest(attempts, "name")
         result = []
         for name, row in sorted(projections.items()):
@@ -204,13 +212,15 @@ class ExecutionRegistry:
                 }
             return current, previous
 
-        current, previous = lease.fenced(self.store, slug, epoch, admit)
+        current, previous = self._fenced(slug, admit, history=True)
         removed = previous.name if previous and previous.name != current.name else ""
         self.store.project_agent(slug, current, removed=removed)
         return current
 
     def check_uid(self, slug: str, agent: AgentRecord, doc: dict) -> None:
         uid = agent.runtime_target.get("pod_uid")
+        if uid:
+            fencing.hydrate_archive(self.store, doc)
         if uid and any(
             row.execution_id != agent.execution_id and row.runtime_target.get("pod_uid") == uid
             for row in records_of(doc)
@@ -260,7 +270,7 @@ class ExecutionRegistry:
             doc["executions"][execution_id] = asdict(updated)
             return (updated, current) if execution_id in heads and current.name in listed else None
 
-        shown = self._fenced(slug, change)
+        shown = self._fenced(slug, change, history=True)
         if shown is not None:
             self.store.project_agent(slug, *shown, listed_only=True)
 

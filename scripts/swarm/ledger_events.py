@@ -16,13 +16,16 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage
+from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage, stack
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
 from scripts.swarm_v2 import masters
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
 
 MINUTE_MS = 60_000
 TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
@@ -34,6 +37,7 @@ MERGED_MASTER_MS = 20 * MINUTE_MS
 RED_QUIET_MS = 20 * MINUTE_MS
 SENT_TTL_S = 30 * 24 * 3600
 SENDER = "swarm"
+READ_SECONDS = 20
 EVENTS_CURSOR = "events-cursor"
 RELAYED = "agent follow ups, questions and task changes"
 OPERATOR = "operator"
@@ -318,26 +322,25 @@ def _gate_files(tree):
     ]
 
 
-def view(url, run=subprocess.run, required_checks=None):
+def view(
+    url: str, source: SourceControl | None = None, required_checks: dict[str, int] | None = None
+) -> "PullRequest | None":
     number = _number(url)
     if mutation_wait.backing_off():
         return None
+    port = source or stack.login_source_control()
     try:
-        github_reads.charge("swarm.checks.fresh", "graphql", time.time())
-        done = run(
-            ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        if done.returncode != 0 and mutation_wait.rate_limited(getattr(done, "stderr", None)):
-            mutation_wait.hold("graphql")
-            return None
-        if done.returncode != 0:
-            return _merged_without_rollup(json.loads(done.stdout))
-        return _view_resource(
-            json.loads(done.stdout)["data"]["resource"], number, run=run, required_checks=required_checks
-        )
+        try:
+            with github_reads.calling("swarm.checks.fresh"):
+                body = port.graph(
+                    PULL_QUERY.replace("$number", number), {"url": url}, deadline=Deadline.after(READ_SECONDS)
+                )
+        except subprocess.CalledProcessError as error:
+            if mutation_wait.rate_limited(error.stderr):
+                mutation_wait.hold("graphql")
+                return None
+            return _merged_without_rollup(json.loads(error.stdout))
+        return _view_resource(body["data"]["resource"], number, None, port, required_checks)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -403,7 +406,14 @@ def _required_pull_request(raw, required_checks):
     )
 
 
-def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=None, gate_workflows=None):
+def _view_resource(
+    raw: Any,
+    number: str,
+    gated: bool | None,
+    source: SourceControl,
+    required_checks: dict[str, int] | None = None,
+    gate_workflows: list[str] | None = None,
+) -> "PullRequest | None":
     try:
         raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
@@ -411,8 +421,8 @@ def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=
         contexts = (commit.get("statusCheckRollup") or {}).get("contexts") or {}
         contexts = {"nodes": contexts.get("nodes") or [], "pageInfo": contexts.get("pageInfo") or {}}
         suites = commit["checkSuites"] if commits else {"nodes": [], "pageInfo": {}}
-        checks = _paged(commit.get("id"), "contexts", contexts, run, number)
-        suites = _paged(commit.get("id"), "checkSuites", suites, run, number)
+        checks = _paged(commit.get("id"), "contexts", contexts, source, number)
+        suites = _paged(commit.get("id"), "checkSuites", suites, source, number)
         if checks is None or suites is None:
             return None
         raw["commits"] = commits
@@ -428,7 +438,7 @@ def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=
         return None
 
 
-def _paged(commit, field, page, run, number):
+def _paged(commit: str | None, field: str, page: Any, source: SourceControl, number: str) -> list[Any] | None:
     nodes, info = list(page["nodes"]), page["pageInfo"]
     for _ in range(MAX_PAGES):
         if not info.get("hasNextPage"):
@@ -436,7 +446,7 @@ def _paged(commit, field, page, run, number):
         if not commit:
             return None
         query, path = PAGES[field]
-        page = _graphql(query.replace("$number", number), run, id=commit, after=info["endCursor"]).get("node")
+        page = _graphql(query.replace("$number", number), source, id=commit, after=info["endCursor"]).get("node")
         for key in path:
             page = page[key]
         nodes, info = nodes + list(page["nodes"]), page["pageInfo"]
@@ -444,8 +454,9 @@ def _paged(commit, field, page, run, number):
 
 
 def views(
-    urls: list[str], run: Callable = subprocess.run, cache: object | None = None
+    urls: list[str], source: SourceControl | None = None, cache: object | None = None
 ) -> dict[str, PullRequest | None]:
+    port = source or stack.login_source_control()
     urls = list(dict.fromkeys(urls))
     found = dict.fromkeys(urls)
     selection = PULL_QUERY.partition("{")[2][:-1].replace(
@@ -460,36 +471,26 @@ def views(
         ]
         query = "{" + " ".join(fields) + "}"
         data = (
-            github_reads.snapshot(query, time.time(), lambda: _graphql(query, run))
+            github_reads.snapshot(query, time.time(), lambda: _graphql(query, port))
             if cache is not None
-            else _graphql(query, run)
+            else _graphql(query, port)
         )
-        gates = _workflow_gates(data, run, cache)
+        gates = _workflow_gates(data, port, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
             declaration = gates.get(_workflow_id(raw))
             found[url] = (
-                _view_resource(raw, _number(url), declaration["gated"], run, gate_workflows=declaration["workflows"])
+                _view_resource(raw, _number(url), declaration["gated"], port, gate_workflows=declaration["workflows"])
                 if declaration is not None
                 else None
             )
     return found
 
 
-def _graphql(query, run, **variables):
-    github_reads.charge("swarm.checks", "graphql", time.time())
+def _graphql(query: str, source: SourceControl, **variables: str) -> dict[str, Any]:
     try:
-        done = run(
-            ["gh", "api", "graphql", "-f", f"query={query}"]
-            + [arg for name, value in variables.items() for arg in ("-f", f"{name}={value}")],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        result = json.loads(done.stdout)
+        result = _graph_body(query, source, variables)
         errors = result.get("errors", [])
-        if done.returncode and not errors:
-            return {}
         data = result["data"]
         if not isinstance(data, dict):
             return {}
@@ -503,6 +504,16 @@ def _graphql(query, run, **variables):
         return {}
 
 
+def _graph_body(query: str, source: SourceControl, variables: dict[str, str]) -> Any:
+    """Read one batched document as the checks reader, keeping a refused answer only when it names its errors."""
+    with github_reads.calling("swarm.checks"):
+        try:
+            return source.graph(query, variables, deadline=Deadline.after(READ_SECONDS))
+        except subprocess.CalledProcessError as error:
+            result = json.loads(error.stdout)
+            return result if result.get("errors") else {}
+
+
 def _workflow_id(raw):
     try:
         commits = raw["commits"]["nodes"]
@@ -512,7 +523,7 @@ def _workflow_id(raw):
         return ""
 
 
-def _workflow_gates(data, run, cache):
+def _workflow_gates(data: dict[str, Any], source: SourceControl, cache: Any) -> dict[str | None, Any]:
     trees = {_workflow_id(raw) for raw in data.values()} - {None, ""}
     gates = {None: {"gated": False, "workflows": []}, **dict.fromkeys(trees)}
     pending = []
@@ -524,7 +535,7 @@ def _workflow_gates(data, run, cache):
             pending.append(tree)
     if pending:
         query = "{nodes(ids:" + json.dumps(pending) + "){id ...on Tree{entries{name object{...on Blob{text}}}}}}"
-        for node in _graphql(query, run).get("nodes") or []:
+        for node in _graphql(query, source).get("nodes") or []:
             if node is None or "entries" not in node:
                 continue
             tree = node["id"]

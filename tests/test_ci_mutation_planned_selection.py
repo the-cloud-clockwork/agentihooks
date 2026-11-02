@@ -232,7 +232,13 @@ def test_refine_grades_the_planned_selection_without_selecting_again(tmp_path, m
 
     def refine(root, selected, stats):
         refined.append(selected)
-        return {"shards": 1, "estimated_worker_seconds": 0.0, "assignments": {}}
+        return {
+            "shards": 1,
+            "estimated_worker_seconds": 0.0,
+            "assignments": {},
+            "shard_worker_seconds": [0.0],
+            "workers": 3,
+        }
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
@@ -455,6 +461,69 @@ def test_the_plan_names_the_tests_whose_recorded_lines_reach_each_changed_line(t
     del manifest["lines"]
     plan.estimate(tmp_path, {"scripts/core.py": {4 + shift}}, {}, manifest, direct=direct)
     assert direct == {}
+
+
+def test_the_plan_names_direct_tests_when_the_record_drifted_past_its_narrowing(tmp_path, monkeypatch):
+    manifest, source = _line_project(tmp_path, monkeypatch, "line")
+    (tmp_path / "scripts/core.py").write_text(source.replace("value - 1", "value - 2"))
+    _commit(tmp_path, "edited branch")
+    del manifest["lines"]["tests/test_core.py::test_other"]["scripts/core.py"]
+    monkeypatch.setattr(plan, "record_drift", lambda *args: None)
+    changes = {"scripts/core.py": {4}}
+    direct = {}
+    plan.estimate(tmp_path, changes, {}, manifest, direct=direct)
+    assert direct == {}
+    assert plan.recorded_direct(tmp_path, manifest, changes) == {
+        "scripts/core.py": ["tests/test_core.py::test_g", "tests/test_helper.py::test_helper"]
+    }
+    assert plan.recorded_direct(tmp_path, None, changes) == {}
+    assert plan.recorded_direct(tmp_path, {**manifest, "commit": None}, changes) == {}
+    assert (
+        plan.recorded_direct(tmp_path, {key: value for key, value in manifest.items() if key != "lines"}, changes) == {}
+    )
+
+
+def test_the_plan_publishes_direct_tests_the_estimate_left_unnamed(tmp_path, monkeypatch):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/sample.py").write_text("def sample(value):\n    return value + 1\n")
+    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
+    manifest = {"commit": "recorded", "lines": {}}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "touches_code", lambda *args: True)
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    monkeypatch.setattr(plan, "select_tests", lambda *args: ["tests/test_sample.py"])
+    monkeypatch.setattr(plan, "read_record", lambda repository: (({"id": 7}, manifest), ""))
+    monkeypatch.setattr(plan, "estimate", lambda *args: (0.0, 0, []))
+    calls = []
+
+    def recorded(root, manifest, changes):
+        calls.append((root, manifest, changes))
+        return {"scripts/sample.py": ["tests/test_sample.py::test_sample"]}
+
+    monkeypatch.setattr(plan, "recorded_direct", recorded)
+    assert plan.main() == 0
+    assert json.loads((tmp_path / ".mutation-direct.json").read_text()) == {
+        "scripts/sample.py": ["tests/test_sample.py::test_sample"]
+    }
+    assert calls == [(tmp_path, manifest, {"scripts/sample.py": {2}})]
+
+
+def test_a_changed_file_without_recorded_direct_tests_names_the_test_modules_importing_it(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_steps.py").write_text("from scripts import steps\n")
+    (tmp_path / "tests/helper.py").write_text("from scripts import steps\n")
+    (tmp_path / "tests/test_tick.py").write_text("from tests import helper\n")
+    changes = {"scripts/steps.py": {1}, "scripts/tick.py": {2}}
+    direct = {"scripts/steps.py": [], "scripts/tick.py": ["tests/test_tick.py::test_run"]}
+    assert plan.first_tests(tmp_path, changes, direct) == {
+        "scripts/steps.py": ["tests/test_steps.py"],
+        "scripts/tick.py": ["tests/test_tick.py::test_run"],
+    }
+    assert plan.first_tests(tmp_path, {"scripts/steps.py": {1}}, {}) == {"scripts/steps.py": ["tests/test_steps.py"]}
 
 
 def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path, monkeypatch):

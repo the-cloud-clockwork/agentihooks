@@ -109,6 +109,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import ledger_route
 
@@ -223,15 +224,21 @@ def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
 
 
 def resource(
-    slug: str, path: str, service: bool = False, collection: bool = False, headers: dict | None = None
+    slug: str,
+    path: str,
+    service: bool = False,
+    collection: bool = False,
+    headers: dict | None = None,
+    timeout: float = REQUEST_TIMEOUT,
+    attempts: int = REMOTE_READ_ATTEMPTS,
 ) -> dict | list:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
+        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
+    return retried(read, attempts) if ledger_link.remote(slug=slug) else read()
 
 
 def export(slug: str, service: bool = False) -> dict:
@@ -262,7 +269,7 @@ def ledger_remote_auth_failures_total() -> int:
     return sum(AUTH_FAILURES.values())
 
 
-def call(slug: str, ops: list[dict] | None = None, service: bool = False) -> dict:
+def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
@@ -296,7 +303,7 @@ def call(slug: str, ops: list[dict] | None = None, service: bool = False) -> dic
         sys.exit(f"ledger server not answering on {base()}: {exc}")
 
 
-def talk(ops):
+def talk(ops: list[dict[str, Any]] | None) -> bool:
     return bool(ops) and all(
         o["op"] in TALK_OPS or (o["op"] == "add" and "by" in o and not o.get("attachments")) for o in ops
     )

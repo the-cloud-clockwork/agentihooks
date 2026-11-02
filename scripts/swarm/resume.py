@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.swarm import deliberate_exit, fencing, idle, outage, profile_choice
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 
@@ -339,7 +340,7 @@ def recovery_blocker(store: RedisStore, slug: str, agent: AgentRecord) -> str:
 
 
 def _recovery_current(store, slug, agent, context):
-    rows = {task["id"]: task for task in context.ledger.state(slug)["tasks"]}
+    rows = {task["id"]: task for task in pass_state(context.ledger, slug)["tasks"]}
     record = _recovery_record(store, slug, agent)
     return (
         record.get("state") == "pending"

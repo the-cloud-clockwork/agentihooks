@@ -26,6 +26,7 @@ import os
 import re
 import signal
 import socket
+import socketserver
 import ssl
 import subprocess
 import sys
@@ -34,9 +35,16 @@ import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
+from scripts.swarm_ledger import server_code  # noqa: E402
+
+LOADED_CODE = server_code.LoadedCode()
+if __name__ == "__main__":
+    LOADED_CODE.install(sys._getframe().f_code)
+
 import ledger_alerts  # noqa: E402
 import ledger_artifacts  # noqa: E402
 import ledger_authority as authority  # noqa: E402
@@ -57,7 +65,6 @@ from scripts.swarm_ledger import (  # noqa: E402
     ports,
     request_body,
     request_metrics,
-    server_code,
     server_compose,
     server_handoff,
     server_lifetime,
@@ -833,6 +840,8 @@ class Handshake(Exception):
 
 
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    daemon_threads = socketserver.ThreadingMixIn.daemon_threads
+
     def __init__(self, *args, **kwargs):
         self.active = 0
         self.idle = threading.Condition()
@@ -1306,9 +1315,20 @@ def container_main(proc=Path("/proc")) -> bool:
         return False
 
 
-def reload_if_changed(started, server, code_dirs=CODE_DIRS, hand_off=server_handoff.hand_off, force=False, loaded=None):
+def reload_if_changed(
+    started: int,
+    server: ThreadingHTTPServer,
+    code_dirs: tuple[Path, ...] = CODE_DIRS,
+    hand_off: Callable[..., bytes | None] = server_handoff.hand_off,
+    force: bool = False,
+    loaded: str | None = None,
+) -> int | None:
     """None once a successor took the socket and this server stopped accepting, else the code stamp to compare
     next; with loaded, code whose content still hashes to it reads as unchanged."""
+    if code_dirs is CODE_DIRS and loaded is not None and not force:
+        if not LOADED_CODE.changed():
+            return started
+        force = True
     stamp = code_stamp(code_dirs)
     if stamp == started and not force:
         return started
@@ -1317,13 +1337,9 @@ def reload_if_changed(started, server, code_dirs=CODE_DIRS, hand_off=server_hand
         return stamp
     argv = [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"]
     if container_main():
-        metrics_journal(request_metrics.stop)
-        try:
-            os.execv(sys.executable, argv)
-        except OSError as exc:
-            sys.stderr.write(f"reload: could not restart in place: {exc}; this server keeps serving\n")
-            metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
-            return stamp
+        HANDOFF["exec"] = argv
+        server.shutdown()
+        return None
     try:
         held = hand_off(server.socket, argv, extra={WATCHED: ",".join(HUB.watched()), MODULES: loaded_modules()})
     except OSError as exc:
@@ -1382,10 +1398,10 @@ def hand_over(started: int, server: ThreadingHTTPServer, force: bool = False) ->
     with HANDING:
         if HANDED.is_set():
             return None
-        started = reload_if_changed(started, server, force=force, loaded=LOADED_DIGEST)
-        if started is None:
+        next_started = reload_if_changed(started, server, force=force, loaded=LOADED_DIGEST)
+        if next_started is None:
             HANDED.set()
-        return started
+        return next_started
 
 
 def answer_reloads(server: ThreadingHTTPServer, requested: threading.Event = RELOAD) -> None:
@@ -1414,14 +1430,17 @@ def scheduled_wait(interval: float) -> None:
     time.sleep(interval)
 
 
-def watch_ledgers(server=None, interval=2.0, stopping=NEVER):
+def watch_ledgers(
+    server: ThreadingHTTPServer | None = None, interval: float = 2.0, stopping: threading.Event = NEVER
+) -> None:
     started = LOADED_STAMP
     reloads = reloading()
     for passes in itertools.count():
         if reloads:
-            started = hand_over(started, server)
-            if started is None:
+            next_started = hand_over(started, cast(ThreadingHTTPServer, server))
+            if next_started is None:
                 return
+            started = next_started
         with WATCH_PASS:
             if stopping.is_set():
                 return
@@ -1439,6 +1458,7 @@ def watch_ledgers(server=None, interval=2.0, stopping=NEVER):
                         replay_unrelayed()
                 except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
                     sys.stderr.write(f"unrelayed replay: {exc}\n")
+            refresh_loaded_code()
             sample_streams()
             metrics_journal(request_metrics.persist)
         scheduled_wait(interval)
@@ -1488,6 +1508,13 @@ def warm_modules(environ=os.environ, load=importlib.import_module) -> None:
             load(name)
         except Exception:  # a module the new code no longer has stays unloaded
             continue
+
+
+def refresh_loaded_code() -> None:
+    count = len(LOADED_CODE.files)
+    LOADED_CODE.capture()
+    if len(LOADED_CODE.files) != count:
+        server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST, files=LOADED_CODE.files)
 
 
 def warm_streams(environ=os.environ) -> list[str]:
@@ -1551,7 +1578,20 @@ def take_lease(writer, ledger_writer, listener, predecessor=os.getppid) -> None:
             sys.stderr.write(f"reload: predecessor pid {held} still holds the writer lease; waiting\n")
 
 
-def serve():
+def finish_reload() -> None:
+    argv = HANDOFF.pop("exec", None)
+    if argv is not None:
+        os.execv(sys.executable, argv)
+
+
+def close_server(server: ThreadingHTTPServer, drained: bool) -> None:
+    if not drained and not HANDOFF:
+        os._exit(0)
+    server.server_close()
+
+
+def serve() -> None:
+    predecessor = os.getppid()
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     listener = server_handoff.inherited()
     warmed, carried = [], []
@@ -1560,9 +1600,11 @@ def serve():
         warm()
         warmed = warm_streams()
         server_handoff.announce(json.dumps(stored.generations()).encode())
+        if storage.shared():
+            server_handoff.wait_predecessor(predecessor)
     ledger_writer = ports.swarm().ledger_writer
     writer = ledger_writer.WriterLease(core.LEDGER_DIR)
-    if not (storage.shared() or storage.api()):
+    if not storage.shared():
         take_lease(writer, ledger_writer, listener)
     if listener is not None:
         carried = take_carry()
@@ -1575,10 +1617,11 @@ def serve():
     threading.Thread(target=retrying(watch_ledgers), args=(server,), kwargs={"stopping": watching}, daemon=True).start()
     threading.Thread(target=answer_reloads, args=(server,), daemon=True).start()
     threading.Thread(target=refresh_streams, args=(warmed if carried is None else carried,), daemon=True).start()
-    if storage.shared() or storage.api():
+    if storage.shared():
         threading.Thread(target=retrying(follow_shared), daemon=True).start()
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
-    server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST)
+    LOADED_CODE.capture()
+    server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST, files=LOADED_CODE.files)
     PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
     drained = True
@@ -1594,7 +1637,7 @@ def serve():
                 HUB.drain()
                 drained = server.drained(DRAIN_S)
     finally:
-        server.server_close()
+        close_server(server, drained)
         with WATCH_PASS:
             watching.set()
         metrics_journal(request_metrics.stop)
@@ -1606,6 +1649,7 @@ def serve():
                 writer.release()
         else:
             sys.stderr.write("drain: requests still ran at the bound; the lease ends with this process\n")
+        finish_reload()
 
 
 def port_held() -> bool:

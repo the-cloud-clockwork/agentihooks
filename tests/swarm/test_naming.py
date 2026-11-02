@@ -120,7 +120,7 @@ def test_the_swarm_space_is_repo_dash_code():
     assert naming.space("/home/x/dev/agentihooks/", "a1b2c3") == "agentihooks-a1b2c3"
 
 
-def test_a_pending_item_passes_to_the_successor_of_the_same_type(store):
+def test_a_pending_item_passes_to_the_successor_of_the_same_type(store: RedisStore) -> None:
     old = store.next_name("sw", MASTER, at=1)
     store.put_agent("sw", AgentRecord(old, MASTER, MASTER, seat=seat_address("sw", MASTER)))
     store.seats.occupy(seat_address("sw", MASTER), old, 1)
@@ -129,9 +129,10 @@ def test_a_pending_item_passes_to_the_successor_of_the_same_type(store):
     store.drop_agent("sw", old, at=2)
     new = store.next_name("sw", MASTER, at=3)
     store.put_agent("sw", AgentRecord(new, MASTER, MASTER, seat=seat_address("sw", MASTER)))
+    store.seats.occupy(seat_address("sw", MASTER), new, 3)
     store.next_name("sw", "eng", at=3)
     exits.settle(inbox, old, "", "exited")
-    assert inbox.get(item.id).address == new
+    assert inbox.get(item.id).address == seat_address("sw", MASTER)
     assert store.names.successor(old) == new
 
 

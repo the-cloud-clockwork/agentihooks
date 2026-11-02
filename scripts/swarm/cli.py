@@ -59,17 +59,20 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from contextvars import copy_context
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
+import scripts.tick.steps.report  # noqa: F401
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
-from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
+from scripts.gates import Who, catalog, intent, lift, modes, quiet
 from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
@@ -78,14 +81,16 @@ from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
 from scripts.hive import scope
-from scripts.inbox import exits, outbox, relay, wake
+from scripts.inbox import exits, outbox
+from scripts.inbox import relay as relay
+from scripts.inbox import wake as wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import (
     affinity,
     agent_up,
+    blockers,
     bottleneck,
     bottleneck_status,
     claim_lost,
@@ -95,25 +100,19 @@ from scripts.swarm import (
     delivery,
     dev_red,
     dispatch_seat,
-    dispatcher,
     doc_report,
     done_gate,
     failed_panes,
-    hive_ledger,
     idle,
     launch_check,
-    ledger_client,
     ledger_events,
-    ledger_probe,
-    ledger_watchdog,
     master_launch,
     master_move,
     merge_queue,
-    metrics,
     naming,
     outage,
     overlays,
-    overrun,
+    panic,
     phase_planning,
     phase_state,
     phases,
@@ -127,15 +126,12 @@ from scripts.swarm import (
     ready,
     reaper,
     reboot,
-    release_wait,
     remote_control,
     review_rounds,
     run_window,
     snapshot,
-    snapshot_job,
     stack,
     stages,
-    stall_watch,
     take_master,
     templates,
     tick_heartbeat,
@@ -146,6 +142,9 @@ from scripts.swarm import (
     trace_plan,
     waits,
 )
+from scripts.swarm import ledger_client as ledger_client
+from scripts.swarm import refresh_job as refresh_job
+from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
@@ -177,7 +176,7 @@ from scripts.swarm.store import (
     Unreachable,
     connect,
 )
-from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
+from scripts.swarm.tick import agent_status, primed, run_group, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import (
     ledger_creator,
     ledger_kinds,
@@ -189,6 +188,12 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
+from scripts.tick import view as ledger_view
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.source_control import ChangeRef
+from scripts.tick.steps import Left, PassBox
+from scripts.tick.steps import host as host_steps
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -225,6 +230,7 @@ CONFIG_KEYS = {
     **TRANSPORT_KEYS,
     HIVE_PLACEMENT: "hive_placement",
     "engine": "engine",
+    "tick-mode": "tick_mode",
     "watchdog-address": "watchdog_address",
     "placement-mode": "placement_mode",
     PLACEMENT_NODES: "placement_nodes",
@@ -253,10 +259,11 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-def _publish_tick_status(store, slug, doc, view=None):
+def _publish_tick_status(
+    store: Any, slug: str, doc: Any, view: Any = None, failure: BaseException | None = None
+) -> None:
     from scripts.swarm import command_runner
 
-    failure = sys.exception()
     try:
         timing.call(command_runner.publish, store, slug, doc, view)
     except Exception:
@@ -267,7 +274,7 @@ def _publish_tick_status(store, slug, doc, view=None):
 def _phase_steps(inbox, store, slug, doc, ledger):
     actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
     if actions:
-        doc = timing.call(ledger.state, slug)
+        doc = timing.call(ledger_client.pass_state, ledger, slug)
     ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
     actions += ticked
     if ticked:
@@ -276,7 +283,7 @@ def _phase_steps(inbox, store, slug, doc, ledger):
             inbox,
             store,
             slug,
-            timing.call(ledger.state, slug),
+            timing.call(ledger_client.pass_state, ledger, slug),
             ledger,
             store.config(slug),
         )
@@ -291,17 +298,23 @@ def _bin_stop(store, slug, ledger, runtime):
     ]
 
 
+def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
+    """Hold the pass's ledger view until beating closes, started with one delta read when the client reads it."""
+    beating.enter_context(ledger_view.holding())
+    if ledger_view.reads(ledger):
+        ledger_view.start(slug, ledger.service)
+
+
 def _stopped_tick(store, slug, ledger, runtime, held):
     from scripts.swarm import command_runner, controller
 
-    ledger = controller.FencedLedger(store, slug, held, ledger)
     runtime = controller.FencedRuntime(
         store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
     )
     controls = timing.call(command_runner.consume, store, slug)
     if timing.call(ledger.binned, slug):
         return controls + _bin_stop(store, slug, ledger, runtime), {}
-    doc = timing.call(ledger.state, slug)
+    doc = timing.call(ledger_client.pass_state, ledger, slug)
     store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
     return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
@@ -335,7 +348,7 @@ def run_tick(
     messenger: object | None = None,
     scheduled: bool = False,
 ) -> list[str]:
-    from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
+    from scripts.swarm import commands, controller, lease, tick_activity
 
     if not ledger_link.local_mode(os.environ) and not scheduled:
         return [CONTROLLER_TICKS]
@@ -356,21 +369,22 @@ def run_tick(
         tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc, view = {}, None
+    doc, view, beating = {}, None, ExitStack()
     try:
+        beating.enter_context(lease.held_pass(store, slug, held))
         timing.keep()
+        run_group("before")
         if store.config(slug).state == "stopped":
+            _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
-        timing.call(relay.relay, store.redis)
-        timing.call(LaunchSlots(store.redis).refresh_reported, now_ms())
-        outage.providers(store, slug, runtime, now_ms())
-        hive_ledger.observe(store, slug, now_ms())
-        if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
-            slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
-        ):
-            return ["Ledger health probe failed"]
-        ledger = controller.FencedLedger(store, slug, held, ledger)
+        box: dict[str, Any] = PassBox()
+        passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
+        run_group("wrapper probes", **passing)
+        host_steps.raise_held(box)
+        if "stop" in box:
+            return box["stop"]
+        _hold_view(beating, slug, ledger)
         runtime = controller.FencedRuntime(
             store,
             slug,
@@ -378,111 +392,71 @@ def run_tick(
             runtime or routed(herdr=HerdrRuntime()),
             controller.deployment_for(store.config(slug), os.environ),
         )
-        from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
+        from scripts.swarm.health import spawn_stall
 
-        pressured = skip_refused(incidents.host_pressure, store, slug)
-        restarted = pressured + timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
-        probed = restarted + timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
-        timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)
+        passing |= {"ledger": ledger, "runtime": runtime}
+        probed = run_group("wrapper health", **passing)
+        host_steps.raise_held(box)
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
-            controls = timing.call(command_runner.consume, store, slug)
+            controls = run_group("wrapper commands", **passing)
+            host_steps.raise_held(box)
             if timing.call(ledger.binned, slug):
                 return _bin_stop(store, slug, ledger, runtime)
             inbox = InboxStore(store.redis)
             try:
-                doc = timing.call(ledger.state, slug)
+                doc = timing.call(ledger_client.pass_state, ledger, slug)
             except LedgerGone as exc:
                 first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
                 return (
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
             store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
-            timing.call(urgent_hold.observe, store, slug, doc, now_ms())
-            actions = _phase_steps(inbox, store, slug, doc, ledger)
-            doc, config = timing.call(ledger.state, slug), store.config(slug)
+            actions = run_group("wrapper phases", **passing, inbox=inbox, doc=doc)
+            host_steps.raise_held(box)
+            run_group("wrapper refresh", **passing, scheduled=scheduled)
+            host_steps.raise_held(box)
+            doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
+            judging: dict[str, Any] = PassBox()
             with ThreadPoolExecutor(max_workers=1) as worker:
-                judged = worker.submit(copy_context().run, _intent_pass, inbox, store, slug, doc, ledger, config)
+                judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
+                judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
                 try:
-                    actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
-                    actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+                    actions += run_group("wrapper reboot", **passing)
+                    host_steps.raise_held(box)
                 finally:
-                    view, checked = judged.result()
+                    judged.result()
+                    host_steps.raise_held(judging)
+                    view, checked = judging["judged"]
             actions += checked
-            timing.call(delivery.migrate_outbox, store, slug, inbox)
-            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
-            doc, config = timing.call(ledger.state, slug), store.config(slug)
-            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc, view)
-            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
-            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
-            actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
+            run_group("wrapper relay", **passing, inbox=inbox)
+            host_steps.raise_held(box)
+            agents = box["agents"]
+            doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
+            run_group("wrapper view", **passing, inbox=inbox, doc=doc, view=view)
+            host_steps.raise_held(box)
+            view = box.get("view", view)
             rows = {t["id"]: t for t in doc["tasks"]}
-            actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
-            actions += skip_refused(
-                ready.merge_pass, ready.Pass(store, slug, ledger, view, ledger_events.view, now_ms()), rows
-            )
-            live = runtime.live_names() | {a.name for a in agents if a.runtime_backend != "local"}
-            actions += skip_refused(
-                stall_watch.stall_pass,
-                stall_watch.Watch(
-                    store,
-                    slug,
-                    ledger,
-                    view,
-                    frozenset(live),
-                    lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
-                    lambda lane: ready_in_order(slug, store, rows, doc, lane),
-                    now_ms(),
-                    released=release_wait.checker(config.repo),
-                    reread=ledger_events.view,
-                ),
-                doc,
-            )
-            actions += skip_refused(
-                overrun.overrun_pass,
-                overrun.Watch(
-                    store,
-                    slug,
-                    ledger,
-                    frozenset(live),
-                    lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
-                    now_ms(),
-                ),
-                doc,
-            )
-            actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
-            actions += skip_refused(
-                doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms(), config.watchdog_address
-            )
-            actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
-            if scheduled:
-                from scripts.swarm import refresh_job
-
-                timing.call(refresh_job.start, store, slug)
-            found = timing.call(
-                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
-            )
-            actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found, doc)
-            actions += timing.call(
-                metrics.record_pass,
-                slug,
-                now_ms(),
-                len(actions),
-                os.environ,
-                metrics.metrics_swarm.TickInput(store, doc, found, view, ledger),
-            )
-            actions += skip_refused(bottleneck_status.refresh, slug, store, now_ms())
-            window = wake.window_ms(os.environ)
-            actions += skip_refused(wake.maintenance, inbox, slug, agents, now_ms(), window)
-            started = timing.call(snapshot_job.start, store, slug, now_ms(), os.environ)
-            store.redis.set(store.key(slug, "last-tick"), now_ms())
-            doc = timing.call(ledger.state, slug)
-            tick_heartbeat.write(store, slug, now_ms(), doc)
+            passing |= {"inbox": inbox, "doc": doc, "config": config, "view": view, "rows": rows, "agents": agents}
+            actions += run_group("wrapper events", **passing)
+            host_steps.raise_held(box)
+            actions += run_group("wrapper metrics", **passing, count=len(actions))
+            host_steps.raise_held(box)
+            doc = timing.call(ledger_client.pass_state, ledger, slug)
+            run_group("after", **(passing | {"doc": doc}))
+            host_steps.raise_held(box)
+            started = box["started"]
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
+    except Left:
+        return []
     finally:
         try:
-            _publish_tick_status(store, slug, doc, view)
+            published: dict[str, Any] = PassBox()
+            run_group(
+                "wrapper status", store=store, slug=slug, doc=doc, view=view, box=published, failure=sys.exception()
+            )
+            host_steps.raise_held(published)
         finally:
+            beating.close()
             timing.BEFORE_STEP.reset(keeping)
             tick_stop.drop(token)
             controller.release_tick_lock(store, slug, token)
@@ -518,17 +492,20 @@ class _Firsts:
                 self.settled.set()
 
 
-def _tick_while_others_run(store, slug, firsts, until):
+def _tick_while_others_run(store: RedisStore, slug: str, firsts: _Firsts, until: float) -> None:
+    """An extra pass starts only when this swarm's longest pass so far still ends by the extra pass cutoff."""
     started = time.monotonic()
     try:
         _tick_one(store, slug)
     finally:
         firsts.done()
+    longest = time.monotonic() - started
     while not firsts.settled.wait(max(0.0, started + TICK_SECONDS - time.monotonic())):
         started = time.monotonic()
-        if started > until or tick_stop.STOP.is_set():
+        if started + longest > until or tick_stop.STOP.is_set():
             return
         _tick_one(store, slug)
+        longest = max(longest, time.monotonic() - started)
 
 
 def _reconcile_services():
@@ -563,7 +540,7 @@ def _end_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     ):
         return []
     ledger = ledger or LedgerClient()
-    doc = ledger.state(slug)
+    doc = ledger_client.pass_state(ledger, slug)
     inbox = InboxStore(store.redis)
     view = ledger_events.tick_view(inbox, store, slug, doc)
     lease.require(store, slug, held)
@@ -1068,7 +1045,11 @@ def api_address(value):
 
 
 def config_value(key, value):
-    if key in default_models.KEYS or key in TRANSPORT_KEYS or key in ("engine", "watchdog-address", "placement-mode"):
+    if (
+        key in default_models.KEYS
+        or key in TRANSPORT_KEYS
+        or key in ("engine", "tick-mode", "watchdog-address", "placement-mode")
+    ):
         return value
     if key == HIVE_PLACEMENT:
         return on_off(value)
@@ -1169,7 +1150,7 @@ def cmd_set(store, args):
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
-                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events"
+                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events, tick-mode=sequential|parallel"
             )
         changes[SETTABLE[key]] = int(value)
     changes = _engine_origin(store.config(args.slug), changes)
@@ -1210,6 +1191,7 @@ def cmd_set(store, args):
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "engine": config.engine,
+                "tick_mode": config.tick_mode,
                 "window": run_window.report(config.window, now_ms()),
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
@@ -1513,6 +1495,63 @@ def cmd_verdict(store, args):
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
 
 
+def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
+    if args.action == "clear":
+        if not args.category:
+            raise SwarmError("blockers clear needs a category")
+        blockers.clear(store, args.slug, args.category)
+        print(json.dumps({"cleared": args.category}))
+        return
+    found = sorted(blockers.active(store, args.slug, now_ms()).values(), key=lambda row: row.category)
+    print(
+        json.dumps(
+            [
+                {
+                    "category": row.category,
+                    "first_seen": row.first_seen,
+                    "last_seen": row.last_seen,
+                    "count": row.count,
+                    "detail": row.detail,
+                }
+                for row in found
+            ]
+        )
+    )
+
+
+def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
+    """The panic button: on stops agent starts and cancels CI runs but the fixes, off clears it once stable."""
+    now = now_ms()
+    if args.action == "on":
+        found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
+        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.port)
+        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
+        return
+    if args.action == "off":
+        if not panic.release(store, now):
+            raise SwarmError(
+                f"panic holds: business as usual is at {panic.level(store, now):.2f} with "
+                f"{panic.errors_since(store, now - panic.WINDOW_MS)} errors in the last 15 minutes; it clears at "
+                f"{panic.RELEASE_LEVEL:.2f} with fewer than {panic.RELEASE_ERRORS}"
+            )
+        print(json.dumps({"panic": "off"}))
+        return
+    current = panic.state(store)
+    print(
+        json.dumps(
+            {
+                "panic": "on" if current else "off",
+                "since": current.since if current else None,
+                "reason": current.reason if current else "",
+                "fixes": list(current.fixes) if current else [],
+                "errors_last_hour": panic.errors_by_category(store, now - panic.HOUR_MS),
+                "threshold": panic.THRESHOLD,
+                "level": round(panic.level(store, now), 3),
+            }
+        )
+    )
+
+
 def cmd_classify(store, args):
     from scripts.swarm_v2.runtime import observe
 
@@ -1642,23 +1681,20 @@ def _tracks(run, recorded):
     return done.returncode == 0 and done.stdout.strip() == f"origin/{recorded}"
 
 
-PULL_HEAD = "headRefName,headRepository,headRepositoryOwner"
+PULL_SECONDS = 20
 
 
-def pull_branch(url, run=subprocess.run):
+def pull_branch(
+    url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control
+) -> tuple[str, str]:
+    """Read a pull request's head branch and the url of the repository holding it, both empty when unreadable."""
     try:
-        done = run(["gh", "pr", "view", url, "--json", PULL_HEAD], capture_output=True, text=True, timeout=20)
-        found = json.loads(done.stdout) if done.returncode == 0 else {}
-        return found["headRefName"], _head_repo(url, found)
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        provider, reference = ports(url)
+        change = provider.change(reference, deadline=Deadline.after(PULL_SECONDS))
+    except stack.PORT_ERRORS:
         return "", ""
-
-
-def _head_repo(url, found):
-    owner, repo = found.get("headRepositoryOwner") or {}, found.get("headRepository") or {}
-    if not (owner.get("login") and repo.get("name")):
-        return ""
-    return f"{url.split('/pull/')[0].rsplit('/', 2)[0]}/{owner['login']}/{repo['name']}"
+    host = url.split("/pull/")[0].rsplit("/", 2)[0]
+    return change.head_branch, f"{host}/{change.head_repository}" if change.head_repository else ""
 
 
 def origin_repo(run=subprocess.run):
@@ -1802,6 +1838,15 @@ def _hotfix_master(store, args) -> bool:
     return _me(store, args).lane == MASTER and master_coding.is_open(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
 
+def _require_target(store: object, args: argparse.Namespace, task_id: str) -> None:
+    """Refuse a final integration this task does not target, reading only its own task and the tasks naming the pull
+    request, never the whole tasks collection."""
+    ledger = LedgerClient()
+    own = ledger.task(args.slug, task_id)
+    rows: list[dict[str, object]] = [own] if own else []
+    done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
+
+
 def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
@@ -1814,7 +1859,7 @@ def cmd_merge(store, args):
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
-            done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
+            _require_target(store, args, agent.task)
         if args.action == "queue":
             result = merge_queue.operate(
                 args.action,
@@ -2358,7 +2403,9 @@ def cmd_terminal(store, args):
     print(json.dumps(operator_terminal.command(store, args.slug, args.execution, os.environ, Who.from_env())))
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
+    from scripts.swarm import tick_report
+
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -2394,6 +2441,9 @@ def build_parser():
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("probe").set_defaults(handler=probe_command)
+    report = sub.add_parser("tick-report")
+    report.add_argument("--passes", type=tick_report.pass_count, default=100)
+    report.set_defaults(handler=tick_report.command)
     sub.add_parser("ledger-ready")
     for verb in ("freeze", "focus", "unfreeze"):
         frozen = sub.add_parser(verb)
@@ -2439,6 +2489,14 @@ def build_parser():
     merge.add_argument(
         "--lift", action="store_true", help="operator: prioritize immediately despite a running head group"
     )
+    blockers_cmd = sub.add_parser("blockers")
+    blockers_cmd.add_argument("action", nargs="?", default="list", choices=("list", "clear"))
+    blockers_cmd.add_argument("category", nargs="?", default="")
+    blockers_cmd.set_defaults(handler=cmd_blockers)
+    panic_cmd = sub.add_parser("panic")
+    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status"))
+    panic_cmd.add_argument("--fix", action="append", default=[])
+    panic_cmd.set_defaults(handler=cmd_panic)
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)

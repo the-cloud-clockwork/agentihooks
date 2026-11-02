@@ -26,6 +26,31 @@ def test_the_window_lasts_until_typed_denial(master, monkeypatch, signal):
     assert not master_coding.is_open(SID)
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "fix it now ALLOW-master-Coding and hurry",
+        "we are in Troubleshooting Mode, go",
+        "troubleshoot mode please",
+        "TROUBLESHOOTING-MODE",
+    ],
+)
+def test_a_key_phrase_opens_the_window_inside_a_longer_prompt_in_any_case(master, prompt):
+    assert master_coding.observe(SID, prompt, typed=True) == "open"
+    assert master_coding.is_open(SID)
+
+
+def test_a_denial_inside_a_longer_prompt_closes_the_window_and_beats_an_open_phrase(master):
+    master_coding.observe(SID, "troubleshooting mode", typed=True)
+    assert master_coding.observe(SID, "stop, DENY-master-coding, troubleshooting mode is over", typed=True) == "closed"
+    assert not master_coding.is_open(SID)
+
+
+def test_troubleshooting_mode_in_text_nobody_typed_never_opens_the_window(master):
+    assert master_coding.observe(SID, "troubleshooting mode", typed=False) == ""
+    assert not master_coding.is_open(SID)
+
+
 @pytest.mark.parametrize("source", ["startup", "resume", "clear", "compact", None, "unknown"])
 def test_session_start_revokes_the_window_except_during_compaction(master, monkeypatch, source):
     from hooks import hook_manager

@@ -11,6 +11,7 @@ from scripts.handoff import transfers
 from scripts.handoff.transfers import first_next
 from scripts.hive import auth, cli, create, machine, registry, remove
 from scripts.hive.placement import choose, place_master
+from scripts.inbox.seats import SeatRegistry
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger.ledger_workspace import folder
@@ -310,6 +311,24 @@ def test_the_drain_names_every_agent_it_waits_for_and_every_agent_that_handed_of
     ]
 
 
+def test_a_hive_remove_drain_records_its_owner_reason_and_deadline(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@1")
+    member = _member(store)
+    plan = remove.Plan(member, "anton-9", "p", wait_s=600)
+
+    remove.drain(store, plan, _host(Clock(store, member, 1), Run(), tmp_path))
+
+    record = registry.show(store.redis, member)
+    assert record is not None
+    [entry] = record["drains"]
+    assert (entry["draining"], entry["owner"], entry["reason"], entry["deadline_at"]) == (
+        "yes",
+        "engineer@1",
+        "hive remove",
+        2_393_500,
+    )
+
+
 def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     member, run, bao, plan = _removal(store, tmp_path)
     host = _host(Clock(store, member, 99), run, tmp_path)
@@ -451,6 +470,56 @@ def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_
     assert settled == f"hive {member} drained: every agent handed off, 2 ordered to hand off"
     assert (clock.now, clock.slept) == (remove.POLL_S, 1)
     assert remove.hosted(store, member) == []
+
+
+class Answering(Successor):
+    def sleep(self, seconds):
+        for item in _orders(self.store, SEAT):
+            InboxStore(self.store.redis).close(item.id, SEAT, "done", "handed off")
+        super().sleep(seconds)
+
+
+def _withdrawn(member):
+    return f"cancelled: {remove.WITHDRAWN.format(hive=member)}"
+
+
+def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_a_later_occupant_reads_none(
+    store, tmp_path
+):
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
+
+    remove.settle(store, member, 3600, _host(Successor(store), Run(), tmp_path))
+
+    for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
+        assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _withdrawn(member))]
+        SeatRegistry(store.redis).occupy(seat, successor, 1)
+        assert InboxStore(store.redis).open_mail(successor) == []
+
+
+def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, tmp_path):
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
+
+    remove.settle(store, member, 3600, _host(Answering(store), Run(), tmp_path))
+
+    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("done", "done: handed off")]
+    assert [(item.state, item.reason) for item in _orders(store, f"ci-1@{SLUG}")] == [("cancelled", _withdrawn(member))]
+
+
+def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(store, tmp_path, monkeypatch):
+    from scripts.handoff import envelope
+
+    member = _member(store)
+    _agent(store, member)
+    monkeypatch.setattr(envelope, "build", lambda swarm, slug, agent, reason, rows, at, run: {"agent": agent.name})
+
+    settled = remove.settle(store, member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
+
+    assert settled.startswith(f"hive {member} stops after 30 seconds; engineer@1 did not hand off")
+    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("cancelled", _withdrawn(member))]
 
 
 def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(

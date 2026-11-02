@@ -1027,6 +1027,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Message to every live agent's inbox; never posts to chat. |
 | `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it shows again, with its earlier verdict attached, only when its measure is above the measure recorded at the verdict. A standing `bottleneck-stage/<stage>` finding measures the stage's latest value in the unit of the writer that owns it, not how many times it fired: task hours for the stage detector, task hours in the window for Grafana alerts, minutes from push to `Gate Required` for the ci budget pass, which counts pull request Tests runs over fifteen minutes, and for a `bottleneck-stage/langfuse_account_<account>` finding the highest value to threshold ratio across that account's error rate breaches. A stage that keeps firing while its value holds or falls stays hidden after its verdict and returns once the value rises past the one judged. For example, `bottleneck-stage/merge_queue` judged `established` at 1.5 task hours stays hidden when it fires again at 1.2 and returns when it fires at 2.0. The `Fired N times` evidence line on the finding counts firings and never brings it back. Over monitoring fires past `AGENTIHOOKS_HEALTH_WATCH_MIN` (20) watch calls since the agent's last action and over `AGENTIHOOKS_HEALTH_WATCH_RATIO` (5) per action; the master, whose job is mostly watching, gets `AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN` (60) and `AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO` (15). Working on drain fires when a working agent that is not idle stays on an account the quota capacity decision marks closed, or one at or under `AGENTIHOOKS_HEALTH_DRAIN_LEFT` (10) percent routing left, the quota balancer's drain line where the tick may still place work, over `AGENTIHOOKS_HEALTH_DRAIN_MINUTES` (10) after its early quota handoff warning. The `watch` gate (`python -m scripts.gates watch`) refuses the watch call that would cross the same limits, so this finding means the gate leaked; a ledger watch re-arm with no live watcher always passes. |
+| `agentihooks swarm <id> blockers [list]`, `agentihooks swarm <id> blockers clear CATEGORY` | Lists this swarm's active blocker categories (error or stall kind, first and last seen, count, detail), or clears one. Fed from the tick-pass failure callback and the stale-tick watcher with no new polling; a category stuck an hour or more, still recurring in the last fifteen minutes, is sustained and opens the master's hotfix window automatically until each sustained category is cleared. |
+| `agentihooks swarm <id> panic [status]`, `agentihooks swarm <id> panic on --fix PR_URL`, `agentihooks swarm <id> panic off` | Fleet panic mode. Every failed tick step and stale tick adds one to the OpenTelemetry counter `agentihooks.swarm.errors` (attributes `swarm`, `category`) and to a fleet one hour window; 60 errors in the last hour, three times the busiest measured hour, engage panic automatically, and `on` engages it by hand. While it holds, every swarm opens its master's hotfix window and spawns no agent, the tick cancels queued and running Actions runs in agentihooks, agentihooks-bundle and antoncore once a minute except merge queue runs and the `--fix` pull requests, and every other session's `git push`, `gh run rerun`, `gh workflow run`, `kubectl apply|rollout`, `helm upgrade|install` and `argocd app sync` are denied. It clears only at business as usual: at least 90 percent of tick passes in the last fifteen minutes without a failed step and fewer than 15 errors in that window; an automatic panic clears itself, `off` clears either. `status` prints the counter by category, the threshold and the level. |
 | `swarm tick` Grafana alerts | See [Grafana bottleneck alerts](../reference/grafana-bottleneck-alerts.md) for setup, an example and troubleshooting. Each scheduled tick reads the swarm bottleneck alert state history from Grafana through the gateway Grafana tools, with the gateway key in `MCP_KEY_GATEWAY` at the gateway endpoint in `LANGFUSE_MCP_URL`, the same encrypted path the [Langfuse summary pass](../reference/observability-langfuse.md#the-swarm-langfuse-summary-pass) uses; with either unset it reads nothing. It asks `grafana-get_annotations` for the alert state annotations of the last day, at most 1000, bounded at ten seconds; a failed read changes nothing. Nothing listens for Grafana pushes: the swarm timer install disables and deletes the old `agentihooks-alert-intake` user service. For each known `stage` on a `swarm=bottleneck` alert whose `ledger` label names this ledger, the latest transition decides: `Alerting` with a `threshold_hours` label and an `hours` value keeps one standing `bottleneck-stage/<stage>` health finding, its hours from that transition and each new firing, keyed by its time, counted once; `Normal` clears the finding its alert raised, never one in another unit; any other state changes nothing. Only the labels inside the braces and the `hours` value are read, never the alert text. The ci budget pass alone owns the `ci_overrun` finding, which the alert read ignores: it updates that finding for each Tests run over fifteen minutes instead of adding a follow up per run. A standing finding not updated for six hours stops showing. The rules live in antoncore's Grafana provisioning. Build, ci run and launch are productive work: the alert read ignores their alerts and the stage detector never raises a finding for them, though status still ranks them. The detector opens a finding only when a stage's task hours in its window pass that stage's threshold in `stage_detector.THRESHOLD_HOURS` (seat wait and review 4, quota and host hold 2, merge queue, intent fix and ci queue 1, ci overrun and launch failure 0.25). A task's claim wait starts at the latest event that made it claimable: its add, reopen or return to scope, the unfreeze or focus that admits it, its phase opening, or a dependency done. It is split into `seat_wait`, ready while every seat of its lane was busy, counting at most as many waiting tasks as the lane has seats in ready order, and `queue_wait`, every other ready instant, which raises no finding. The detector clears a finding it opened once the stage falls back under it; an alert's finding is left to its alert. Each tick, every standing stage finding over a nonzero threshold runs its remedy once per four hour window. `seat_wait` has no mechanical remedy, because the dispatcher never moves seats between lanes. At `delegate` or `full`, `launch_failure` moves the first eng or ci lane pinned to the one harness the detector saw fail to the other harness and `quota_hold` does the same for the one harness its finding names as held, which each host sample records as `held_harness` when every quota held lane is pinned to that harness; a stage whose remedy is refused or has none raises its open task titled `Bottleneck fix for the <stage> stage` to `urgent`, which the dispatcher queue orders first, and an urgent one needs nothing more. Otherwise, and for every stage below `delegate`, the master gets one proposed task carrying the hours: to add that task, or to raise the open one. Each action goes to the gate log as rule `bottleneck-remedy` with the hours it targeted and is kept as the stage's last action. |
 | `agentihooks swarm <id> classify EXECUTION RULING --reason TEXT` | The master or the operator rules `lost` or `working` on an execution attempt the observer flagged for the operator under `AGENTIHOOKS_OBSERVATION_MODE=conservative`. The reason, author and time are kept on its observation. `lost` holds the attempt lost and writes the audit record; `working` holds it working until a newer loss reading (pod gone or ended, supervisor exited) flags it again, or it recovers on its own. Only a registered master record or the operator acts: any other name, an empty reason or an attempt that is not flagged is refused. `verdict` follows the same authority rule. |
 | `agentihooks swarm <id> terminal EXECUTION` | For a local managed Codex execution, reopen a native viewer on its recorded thread; see [Managed Codex terminals](../reference/codex-managed-terminal.md). For Kubernetes, the operator opens the worker terminal in herdr. The command takes only the swarm and the execution: the host, the generation and the host key come from the record the controller wrote when it launched the Pod. It signs a short lived certificate with the user CA key named by `AGENTIHOOKS_TERMINAL_CA_KEY`, reads the worker namespace from the Pod policy in `AGENTIHOOKS_POD_POLICY_FILE`, writes the SSH material under the operator's own home and saves the machine in herdr. The Kubernetes path refuses a master or any agent session, and an execution with no recorded host key. |
@@ -3065,8 +3067,8 @@ the bottleneck remedy read that record.
 | A lane with held spawns has an open hive placement wait | `host` | empty | `hive placement: <wait reason>`, for example `hive placement: no hive for eng has room` |
 | Neither | `quota` | The harness every held lane is pinned to, else empty | The capacity reason, then one note per held lane pinned to a harness |
 
-A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to
-<harness>`, plural `spawns` above one, in lane name order and joined with
+A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to <harness>`,
+plural `spawns` above one, in lane name order and joined with
 `; `. A lane set to `auto` gets no note. Example:
 
 ```text
@@ -3442,8 +3444,8 @@ count too.
 When one or more such launches exist it raises one finding, kind `unclaimed local launch`, id
 `unclaimed-local-launch/<slug>`, summary `<n> local launches of <slug> in the last hour held a pane with no local slot
 claim: <names>`, evidence `<name> on task <task> started at <ms> on <hive>` per launch, with `the workstation` for
-an empty hive, and the launch count as its number. An unreadable journal fails it with `local slot claims unavailable:
-<error>`. Measure it with `agentihooks doctor rig-grade-swarm measure unclaimed-local-launch`.
+an empty hive, and the launch count as its number. An unreadable journal fails it with
+`local slot claims unavailable: <error>`. Measure it with `agentihooks doctor rig-grade-swarm measure unclaimed-local-launch`.
 
 ### Doctor handoff detectors
 
@@ -4340,6 +4342,31 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 
 ## The minute tick
 
+Registered steps have measured budgets and declared intervals. A step still
+running at its budget is recorded late and the pass continues; its worker
+keeps running. See [Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals)
+for timing configuration, overlap limits and the conditional forty second
+spawn prerequisite bound.
+
+`agentihooks swarm <id> tick-report --passes 100` reports the latest retained
+passes with per step count, median, p95 and CPU share, plus pass p95 and the
+idle gaps between consecutive passes. CPU share uses the sum of own and reaped
+child CPU across retained steps, excluding the whole pass measurement. Nested
+step measurements can overlap. The report identifies passes with no retained
+steps; a partially trimmed pass can contain only its last steps.
+
+The same report holds a simulated pass to a budget in CI: one tick over fifteen
+working agents and nine hundred tasks on a virtual clock must finish within
+384 seconds, a budget a pull request may only lower. See
+[Tick load budget](../reference/tick-load-budget.md).
+
+The tick retains at most 50,000 finished step records in its per swarm
+`tick:steps` stream and 50,000 pass records in `tick:passes`. Pass records carry
+start and end times, elapsed duration, active agent count, failed steps and
+outcome. Recording runs in the tick's instrumentation finally context, including
+early returns and exceptions. Redis recording failures leave a journal event
+and preserve the tick's result or exception.
+
 An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
 registers it and starts the scheduler runner; each tick pass re-registers it if it is gone. The
 `agentihooks-swarm` systemd timer and service an older install left are deleted only after a scheduler running the
@@ -4353,7 +4380,7 @@ An outage holds the affected idle and delivery decisions until recovery (see
 execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)), then:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
-2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
+2. Free the tasks of agents whose pane is gone, or that stayed eligible for idle retirement for nineteen minutes since the first idle observation. A stale agent is nudged through its inbox
    (see Stale nudge).
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
@@ -5027,22 +5054,34 @@ to another hive`.
 ### Controller lease during long steps
 
 A tick pass can run longer than its lease: the lease lasts three ticks (180 seconds by default), and a pass is
-stopped only at its 450 second deadline, with 30 seconds of grace. The pass keeps the lease in two ways.
+stopped only at its 450 second deadline, with 30 seconds of grace. The pass keeps the lease in three ways.
 
+- **At the start of the pass.** The pass renews the lease once and refuses to start with
+  `the controller lease is stale` when another controller holds it.
+- **For the whole pass.** One lease heartbeat runs from the start of the pass to its end: a background thread renews
+  the lease once per tick interval, so a single step longer than the lease keeps it. The thread stops for good when
+  a renewal finds the lease stale, because a higher epoch took over or the lease expired, and on a
+  [hosted ledger](../reference/hosted-ledger-auth.md#hosted-server), whose server holds the controller lease (see
+  [Coordination adapter](../reference/tick-adapters.md#coordination-adapter)), when that server cannot be reached or
+  refuses the renewal. It tries again at the next beat after a Redis
+  error. The master placement path under the tick lock holds its own heartbeat the same way.
 - **Before every step.** Each timed step of the pass, including every step wrapped to skip a refused ledger write,
-  first renews the lease, extends the tick lock and records the swarm's last tick activity. Renewal happens only at
-  step boundaries, so a single step longer than the lease still loses it.
-- **During a step that can outlast the lease.** Such a step runs inside a lease heartbeat: a background thread renews
-  the lease once per tick interval until the step returns. The thread stops for good when the lease is no longer
-  this controller's (a higher epoch took over) and tries again at the next beat after a Redis error. Today the
-  Doctor timer of a `doctor` swarm runs this way.
+  first renews the lease, extends the tick lock and records the swarm's last tick activity.
+
+Ledger writes in the pass carry the epoch of the ledger they write to, and the ledger server refuses a stale one. A
+launch, a hive launch collect and a hive launch expire each check the lease epoch first, with one read and no
+renewal. No ledger or runtime call renews the lease or starts a heartbeat of its own; the members involved are listed
+in [One lease heartbeat per tick pass](../reference/tick-adapters.md#one-lease-heartbeat-per-tick-pass).
+The refresh job, which runs the GitHub, Langfuse and Grafana refreshes and, for a `doctor` swarm, the Doctor timer,
+keeps its own heartbeat for the length of its run.
 
 The automatic snapshot never runs inside the pass. Step 12 of the list above only starts the detached snapshot job
 and returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
 most 30 minutes once it starts; a tick that finds the lock held starts no second job. Two jobs started before
 either holds the lock race for it: the first to take it writes the snapshot, the other exits without one.
 
-A lease that expires mid pass ends the pass at its next step, fenced ledger call or spawn with this journal line:
+A lease taken over mid pass ends the pass at its next step boundary or launch with this journal line, and a ledger
+write in between is refused:
 
 ```text
 rig-grade-swarm: SwarmError: the controller lease is stale
@@ -5055,26 +5094,32 @@ journalctl --user -t agentihooks-swarm --since "-12h" | grep "controller lease i
 journalctl --user -t agentihooks-swarm --since "-12h" | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
 ```
 
-The finished step records carry each step's name, outcome and `wall_s` duration. The step that
-ran longer than the lease before the error is the one to move inside a heartbeat. Any tick step that can run longer than the lease
-belongs inside the heartbeat, the way the Doctor timer does:
+The finished step records carry each step's name, outcome and `wall_s` duration. The pass lease heartbeat keeps
+the lease through a long step, so a stale lease inside a pass means another controller took over, the heartbeat
+could not reach Redis for three ticks, or on a hosted ledger the heartbeat stopped when it could not reach the ledger
+server.
+Work that runs outside a tick pass and can outlast the lease holds its own heartbeat, the way the refresh job does:
 
 ```python
-with lease.kept(store, slug, held):
-    actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
+with lease.kept(store, slug, held), timing.tick(slug):
+    for refresh in refreshes(store, slug, ledger, now_ms):
+        actions += refresh()
 ```
 
 The next pass acquires a new lease with a higher epoch when no other controller holds it, so one stale pass loses
 only the rest of that pass's work.
 
+Passes that stop at the deadline in every swarm at once point at a read that grew with the swarm's history rather
+than at one long step. Hive routing and roster reads used to load every archived execution on each read. How they now
+read current executions only, and how to measure `scope.readings` and stopped passes, is in
+[Current execution reads](../swarm-v2/execution-identity.md#current-execution-reads).
+
 ### Doctor timer pass
 
-A `doctor` swarm runs the Doctor timer, `scripts.doctor.cli.timer`, as one step of its own tick pass, inside the
-lease heartbeat above. The step counts against the same limits as every other step of that pass: the 450 second pass
-deadline and the scheduler holder's nine minute stop. When the tick still ran as the `agentihooks-swarm` systemd
-service, a Doctor step of 216 to 291 seconds pushed the whole tick past the service start timeout, so the service
-killed it and both swarms on the machine got about one pass every ten minutes. The step has to finish well inside a
-minute so the tick of the watched swarm and of the Doctor keep their minute cadence.
+A `doctor` swarm runs the Doctor timer, `scripts.doctor.cli.timer`, in the refresh job, which keeps its own
+heartbeat. The tick starts that job as a detached process and does not wait for it, so the timer is outside the 450
+second pass deadline. The job holds the swarm's refresh lock for at most 15 minutes (`LOCK_MS` in
+`scripts.swarm.refresh_job`), and the tick starts it at most once every five minutes (`START_EVERY_MS`).
 
 #### What one timer step does
 
@@ -5273,7 +5318,7 @@ by fast forwarding the main checkout at 09:37:59 UTC on 18 October 2026. On 22 O
 | A `doctor.<name>` record with `"outcome": "error"` | Its `error` field, and the Doctor tick's action line `the <name> detector failed: ...` | That detector raised; the other detectors of the pass still reported |
 | `doctor.inbox` takes tens of seconds again | The receiver check under [Inbox receiver read](#inbox-receiver-read) and the inbox size it prints | Under a second for the receivers means the time is spent elsewhere in the inbox step; seconds there means a per address read came back |
 | An `inbox past window` finding on mail to an empty seat | The seat swarm's `state`, `max_eng`, `max_ci` and `max_plan` in its stored configuration | A seat waits for its next occupant unless its swarm is stopped or the seat number is above the lane cap |
-| `controller lease is stale` after a Doctor step | [Controller lease during long steps](#controller-lease-during-long-steps) | The heartbeat lost the lease to a higher epoch; the next pass takes a new one |
+| `controller lease is stale` after a Doctor step | [Controller lease during long steps](#controller-lease-during-long-steps) | The refresh job heartbeat lost the lease to a higher epoch; the next pass takes a new one |
 | Tick runs killed by the service start timeout | The timeout count above and the timer step walls in the same window | A step past the timeout ends the whole tick; bound the slowest step |
 
 ### Worker execution lease through a controller rollout
@@ -6137,8 +6182,10 @@ no nudge.
 
 ### Safe retire
 
-The tick retires an agent for idleness only after 20 idle ticks, and a tick counts as idle only when all three
-say idle:
+The tick retires an agent for idleness after nineteen eligible idle minutes since its first observation,
+at the next pass that reaches the limit with thirty seconds of scheduling slack. At a one minute cadence this
+is the twentieth observation. [Elapsed thresholds](../reference/swarm-thresholds.md) explains slower passes,
+holds, health settings and compatibility counts. An observation counts as idle only when all three say idle:
 
 - its herdr pane, read by its pane id, never by its name, reads idle;
 - its session heartbeat does not say `working` (hooks write `working` on each prompt and tool call and `idle` at

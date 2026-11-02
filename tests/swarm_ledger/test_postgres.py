@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
+from typing import Any
 from unittest.mock import MagicMock, call
 
 import psycopg2
@@ -513,16 +514,11 @@ def test_a_snapshot_reads_one_repeatable_read_transaction(opened):
     assert opened.raws[0].commits == 1
 
 
-def test_events_since_reads_one_snapshot_and_relay_holds_take_the_writer_lock(opened):
+def test_relay_holds_take_the_writer_lock(opened: Any) -> None:
     repository = postgres.PostgresLedgerRepository(ADDRESS)
     repository._ready.add(ADDRESS)
-    with pytest.raises(sqlite.Missing):
-        repository.events_since("s", 3)
+    repository.hold_revision("inbox", "s", 4)
     raw = opened.raws[0]
-    assert raw.log == [
-        ("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", ()),
-        ("SELECT 1 FROM ledgers WHERE slug=%s", ("s",)),
-    ]
     lock = "SELECT pg_advisory_xact_lock(1279607879)"
     for write, arguments, statement in (
         (

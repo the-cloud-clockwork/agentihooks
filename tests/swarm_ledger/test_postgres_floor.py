@@ -6,8 +6,10 @@ import pytest
 
 from scripts.swarm_ledger import ledger_alerts
 from scripts.swarm_ledger.repository import postgres, sqlite
+from scripts.swarm_ledger.repository.entry import Entry
 
 ADDRESS = "postgresql://ledger@db.test/ledger"
+OLD = Entry(1, None, {"_meta": {"rev": 2}})
 
 
 class Answer:
@@ -43,7 +45,7 @@ def repository():
 def written(monkeypatch):
     calls = []
 
-    def write(self, connection, slug, entry, state, events, summary=None):
+    def write(self, connection, slug, entry, state, events):
         calls.append((connection, slug, entry, state, events))
         return "entry"
 
@@ -97,7 +99,7 @@ def test_a_writer_below_the_stored_version_marks_its_session_refused_and_writes_
     calls = written(monkeypatch)
     connection = Statements({postgres.FLOOR: [(postgres.VERSION + 1,)]})
     with pytest.raises(postgres.Refused) as refused:
-        repository()._write(connection, "s", "old", {"_meta": {"rev": 3}}, [])
+        repository()._write(connection, "s", OLD, {"_meta": {"rev": 3}}, [])
     assert str(refused.value) == postgres.refusal(postgres.VERSION, postgres.VERSION + 1)
     marked = (postgres.REFUSED_LOCK, postgres.VERSION * 65536 + postgres.VERSION + 1)
     assert connection.log == [(postgres.FLOOR, ()), (postgres.MARK_REFUSED, marked)]
@@ -109,25 +111,9 @@ def test_a_writer_at_or_above_the_stored_version_writes(monkeypatch, floor):
     calls = written(monkeypatch)
     connection = Statements({postgres.FLOOR: floor})
     state = {"_meta": {"rev": 3}}
-    assert repository()._write(connection, "s", "old", state, ["e"]) == "entry"
+    assert repository()._write(connection, "s", OLD, state, ["e"]) == "entry"
     assert connection.log == [(postgres.FLOOR, ()), (postgres.REFUSED_WRITERS, (postgres.REFUSED_LOCK,))]
-    assert calls == [(connection, "s", "old", {"_meta": {"rev": 3}}, ["e"])]
-
-
-def test_a_write_hands_the_summary_it_was_given_to_the_stored_write(monkeypatch: pytest.MonkeyPatch) -> None:
-    summaries = []
-
-    def write(
-        self: object, connection: object, slug: str, entry: object, state: dict, events: list, summary: dict | None
-    ) -> str:
-        summaries.append(summary)
-        return "entry"
-
-    monkeypatch.setattr(sqlite.SQLiteLedgerRepository, "_write", write)
-
-    repository()._write(Statements({postgres.FLOOR: []}), "s", "old", {"_meta": {"rev": 3}}, [], {"slug": "s"})
-
-    assert summaries == [{"slug": "s"}]
+    assert calls == [(connection, "s", OLD, {"_meta": {"rev": 3}}, ["e"])]
 
 
 def test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_write(monkeypatch):
@@ -135,7 +121,7 @@ def test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_w
     refused = [("10.0.0.5", 0, 1), ("an unseen client", 1, 2)]
     connection = Statements({postgres.REFUSED_WRITERS: refused})
     state = {"_meta": {"rev": 7}, "alerts": [{"id": "al-1-0", "text": "kept", "state": "done"}]}
-    repository()._write(connection, "s", "old", state, [])
+    repository()._write(connection, "s", OLD, state, [])
     alerts = calls[0][3]["alerts"]
     texts = [
         f"The ledger writer at 10.0.0.5 was refused: {postgres.refusal(0, 1)}",
@@ -151,7 +137,7 @@ def test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_w
 def test_a_refusal_alert_starts_the_alert_list_on_a_ledger_without_one(monkeypatch):
     calls = written(monkeypatch)
     connection = Statements({postgres.REFUSED_WRITERS: [("10.0.0.5", 0, 1)]})
-    repository()._write(connection, "s", "old", {"_meta": {"rev": 2}}, [])
+    repository()._write(connection, "s", OLD, {"_meta": {"rev": 2}}, [])
     assert [alert["text"] for alert in calls[0][3]["alerts"]] == [
         f"The ledger writer at 10.0.0.5 was refused: {postgres.refusal(0, 1)}"
     ]
@@ -162,5 +148,5 @@ def test_a_closed_refusal_alert_is_not_raised_again_while_its_writer_stays_conne
     text = f"The ledger writer at 10.0.0.5 was refused: {postgres.refusal(0, 1)}"
     connection = Statements({postgres.REFUSED_WRITERS: [("10.0.0.5", 0, 1)]})
     closed = {"id": "al-1-0", "text": text, "source": "writer", "state": "done"}
-    repository()._write(connection, "s", "old", {"_meta": {"rev": 7}, "alerts": [closed]}, [])
+    repository()._write(connection, "s", OLD, {"_meta": {"rev": 7}, "alerts": [closed]}, [])
     assert calls[0][3]["alerts"] == [closed]

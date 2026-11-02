@@ -4,8 +4,10 @@ import secrets
 import sqlite3
 import threading
 import weakref
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
@@ -50,8 +52,7 @@ STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
 TASK_REVISION = "SELECT path, value FROM fields WHERE slug=? AND path IN (?, ?)"
-TASK_REVISION_FIELDS = ("task_revision", "rev")
-TASK_REVISION_PATHS = tuple(encode(["_meta", name]) for name in TASK_REVISION_FIELDS)
+TASK_REVISION_PATHS = (encode(["_meta", "task_revision"]), encode(["_meta", "rev"]))
 TASKS_PATH = encode(["tasks"])
 TASKS_PREFIX = TASKS_PATH[:-1] + ","
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
@@ -81,14 +82,6 @@ UNFENCED = ("hosted_fences", "relay_journal")
 
 class Missing(KeyError, ValueError):
     pass
-
-
-class Conflict(ValueError):
-    """A commit ruled against a revision the ledger has moved past."""
-
-    def __init__(self, slug: str, revision: int) -> None:
-        super().__init__(f"ledger {slug} is at revision {revision}")
-        self.slug, self.revision = slug, revision
 
 
 def summarize(slug: str, state: dict) -> dict:
@@ -412,7 +405,6 @@ class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
     adopts = True
-    remote = False
 
     def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)
@@ -562,8 +554,6 @@ class SQLiteLedgerRepository:
                 self._remember(slug, Entry(generation, None, fragments.value, fragments))
 
     def _adopt(self, slug: str | None = None) -> None:
-        if not self.adopts:
-            return
         from . import legacy
 
         legacy.adopt(self, slug)
@@ -601,9 +591,12 @@ class SQLiteLedgerRepository:
                     heap.release()
         return entry.views[view]
 
-    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
-        """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
-        change after generation since, else view(fragments) of the stored ledger, built as encoded_view builds."""
+    def export_since(
+        self, slug: str, since: int, view: Callable[..., Any], changes: Callable[..., Any], parts: tuple[str, ...] = ()
+    ) -> tuple[int, str | bytes]:
+        """(generation, text) of the stored ledger: changes(state, paths, parts) when the database recorded every
+        row change after generation since, else view(fragments, parts) of the stored ledger, built once per part
+        set as encoded_view builds."""
         self._adopt(slug)
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
@@ -613,15 +606,16 @@ class SQLiteLedgerRepository:
                 if 0 < since <= entry.generation
                 else None
             )
-        text = None if paths is None else changes(entry.state, paths)
+        text = None if paths is None else changes(entry.state, paths, parts)
         if text is not None:
             return entry.generation, text
-        if view not in entry.views:
+        key = (view, parts)
+        if key not in entry.views:
             with VIEW_BUILD:
-                if view not in entry.views:
-                    entry.views[view] = view(entry.fragments)
+                if key not in entry.views:
+                    entry.views[key] = view(entry.fragments, parts)
                     heap.release()
-        return entry.generation, entry.views[view]
+        return entry.generation, entry.views[key]
 
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
@@ -685,34 +679,7 @@ class SQLiteLedgerRepository:
             self._remember(slug, written)
         return (written.mutable() if copy_state else written.state), rejected
 
-    def commit(self, slug: str, revision: int, changed: dict, dropped: list, events: list, summary: dict) -> Entry:
-        """Store state another process ruled against revision: its changed top level values, its dropped keys and
-        its events, refusing with Conflict once the ledger has moved past that revision."""
-        self._adopt(slug)
-        with request_metrics.locked(self.domain.LOCK.ledger(slug)), self.connect() as connection:
-            with connection:
-                request_metrics.begin_ledger(connection, slug, BEGIN_IMMEDIATE)
-                entry = self._entry(connection, slug)
-                stored = entry.state["_meta"]["rev"]
-                if stored != revision:
-                    raise Conflict(slug, stored)
-                state = entry.for_write()
-                for key in dropped:
-                    state.pop(key, None)
-                state.update(changed)
-                written = self._write(connection, slug, entry, state, events, summary)
-            self._remember(slug, written)
-        return written
-
-    def _write(
-        self,
-        connection: sqlite3.Connection,
-        slug: str,
-        entry: Entry,
-        state: dict,
-        events: list,
-        summary: dict | None = None,
-    ) -> Entry:
+    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         meta, previous = state["_meta"], entry.state["_meta"]
         meta["task_revision"] = (
             meta["rev"]
@@ -731,10 +698,9 @@ class SQLiteLedgerRepository:
         outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
         generation = entry.generation + 1
         refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
-        ruled = summarize(slug, state) if summary is None else summary
         connection.execute(
             UPDATE,
-            (state["_meta"]["rev"], generation, encode(ruled), self.domain.now_ms(), slug),
+            (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
         return Entry(generation, None, state, fragments, writer)
 
@@ -822,14 +788,6 @@ class SQLiteLedgerRepository:
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
             return hierarchy.read(connection, slug, read, node)
-
-    def events_since(self, slug: str, revision: int) -> list:
-        self._adopt(slug)
-        with self.connect() as connection:
-            connection.execute(BEGIN)
-            if connection.execute(STORED, (slug,)).fetchone() is None:
-                raise Missing(slug)
-            return read_events(connection, slug, revision)
 
     def summaries(self, connection=None) -> list:
         """Every stored ledger's summary with its bin facts, newest write first."""

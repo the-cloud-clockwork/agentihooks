@@ -23,6 +23,7 @@ ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 WORKER_KEYS = (
     "swarm:*:agents",
     "swarm:*:executions",
+    "swarm:*:lease-cache",
     "swarm:state:fencing:*",
     "swarm:state:counters:*",
     "swarm:*:execution-publishing",

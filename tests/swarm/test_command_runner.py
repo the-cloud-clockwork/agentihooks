@@ -197,20 +197,17 @@ def test_controller_fences_ledger_and_spawn_writes(store):
     runtime = FakeRuntime()
     ledger = FakeLedger([])
     held = lease.acquire(store, "sw", "home")
-    guarded_ledger = controller.FencedLedger(store, "sw", held, ledger)
     guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, "local")
-    assert guarded_ledger.state("sw") == ledger.state("sw")
-    guarded_runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"})
+    with lease.held_pass(store, "sw", held):
+        assert lease.epoch_for("sw") == 1
+        guarded_runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"})
     assert runtime.tasks[0]["controller_epoch"] == 1
+    assert lease.epoch_for("sw") is None
     assert lease.release(store, "sw", held)
     lease.acquire(store, "sw", "other")
-    for write in (
-        lambda: guarded_ledger.update_task("sw", "t", {"state": "claimed"}),
-        lambda: guarded_runtime.spawn(store.config("sw"), "eng", "two", {"id": "t"}),
-    ):
-        with pytest.raises(SwarmError) as error:
-            write()
-        assert str(error.value) == "the controller lease is stale"
+    with pytest.raises(SwarmError) as error, lease.held_pass(store, "sw", held):
+        ledger.update_task("sw", "t", {"state": "claimed"})
+    assert str(error.value) == "the controller lease is stale"
     assert len(runtime.spawned) == 1
 
 
@@ -338,10 +335,6 @@ def test_fenced_adapters_preserve_arguments_and_refuse_disabled_spawn(store):
 
     held = lease.acquire(store, "sw", "home")
     calls = []
-    ledger = SimpleNamespace(update_task=lambda *args, **kwargs: calls.append((args, kwargs)) or "accepted")
-    guarded = controller.FencedLedger(store, "sw", held, ledger)
-    assert guarded.update_task("sw", "t", {"state": "claimed"}, if_state=("open",)) == "accepted"
-    assert calls == [(("sw", "t", {"state": "claimed"}), {"if_state": ("open",)})]
     config = store.config("sw")
     receiver = SimpleNamespace(
         has_capacity=lambda saved: False,

@@ -15,6 +15,7 @@ PINS = (
     ("scripts/dead_code.py", "SCOPE", "covers"),
     ("scripts/swallowed_exceptions.py", "RULES", "covers"),
     ("scripts/swallowed_exceptions.py", "SCOPE", "covers"),
+    ("scripts/no_whole_ledger.py", "SCOPE", "covers"),
     ("scripts/locked_tests.py", "DISABLING", "covers"),
     ("scripts/locked_tests.py", "CHECKING_CALLS", "covers"),
     ("scripts/locked_tests.py", "FIELDS", "covers"),
@@ -29,6 +30,7 @@ SHRINK_ONLY = (
     "tests/SIZE_ALLOWLIST.json",
     "tests/SWALLOWED_EXCEPTIONS_ALLOWLIST.json",
     "tests/TYPE_BASELINE.json",
+    "tests/WHOLE_LEDGER_ALLOWLIST.json",
 )
 # Each of these moves only with its own gate's evidence, which that gate checks against the base.
 GRADED_BY = (
@@ -36,6 +38,8 @@ GRADED_BY = (
     ("tests/LOCKED_MANIFEST.json", "scripts.locked_tests"),
     ("tests/DEAD_CODE_ALLOWLIST.json", "scripts.dead_code"),
     ("tests/registry/FROZEN_GATES.json", "scripts.gate_protected"),
+    ("tests/TYPE_BASELINE.json", "scripts.type_gate"),
+    ("tests/WHOLE_LEDGER_ALLOWLIST.json", "scripts.no_whole_ledger"),
 )
 MUTATORS = ("update", "setdefault", "pop", "popitem", "clear", "append", "extend", "insert", "remove", "add", "discard")
 REGISTERED = ("*ALLOWLIST*.json", "*floors*.json", "*FLOOR*.json", "*MANIFEST*.json", "*BASELINE*.json")
@@ -148,10 +152,13 @@ def shrunk(base: object, head: object, where: str) -> list[str]:
     return [] if base == head else [f"{where}changed from {base!r} to {head!r}"]
 
 
-def allowlist_errors(base: Path, head: Path, allowlists: tuple[str, ...] = SHRINK_ONLY) -> tuple[list[str], int]:
+def allowlist_errors(
+    base: Path, head: Path, allowlists: tuple[str, ...] = SHRINK_ONLY, graded: tuple[tuple[str, str], ...] = GRADED_BY
+) -> tuple[list[str], int]:
     errors, compared = [], 0
+    graded_paths = {path for path, _ in graded}
     for path in allowlists:
-        if not (base / path).is_file():
+        if path in graded_paths or not (base / path).is_file():
             continue
         compared += 1
         if not (head / path).is_file():

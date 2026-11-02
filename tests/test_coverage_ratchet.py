@@ -6,7 +6,7 @@ import pytest
 from coverage import CoverageData
 from coverage.exceptions import NotPython
 
-from tests import coverage_history
+from tests import coverage_history, coverage_summary
 from tests import coverage_ratchet as ratchet
 from tests.coverage_grade import HISTORY
 
@@ -58,6 +58,111 @@ def test_a_shard_that_measured_nothing_cannot_be_graded(tmp_path):
     empty = _shard(tmp_path / "empty", {"tests/t.py": [1]})
     with pytest.raises(ratchet.Unmeasured, match="empty"):
         ratchet.executed([one, empty])
+
+
+def _arc_shard(path: Path, arcs: dict[str, list[tuple[int, int]]]) -> Path:
+    data = CoverageData(basename=str(path))
+    data.add_arcs(arcs)
+    data.write()
+    return path
+
+
+def test_a_summary_holds_the_same_executed_lines_as_its_databases(tmp_path):
+    one = _shard(tmp_path / "one", {"hooks/a.py": [1, 2], "tests/t.py": [1], "hooks/b.py": []})
+    two = _arc_shard(tmp_path / "two", {"hooks/a.py": [(-1, 1), (1, 3), (3, -1)], "scripts/b.py": [(-1, 5)]})
+    summary = tmp_path / "executed-lines.json"
+    coverage_summary.write([one, two], summary)
+    assert coverage_summary.executed([summary]) == ratchet.executed([one, two])
+
+
+def test_a_summarized_database_that_measured_nothing_cannot_be_graded(tmp_path):
+    one = _shard(tmp_path / "one", {"hooks/a.py": [1]})
+    empty = _shard(tmp_path / "empty", {"tests/t.py": [1]})
+    summary = tmp_path / "executed-lines.json"
+    coverage_summary.write([one, empty], summary)
+    with pytest.raises(ratchet.Unmeasured, match="empty"):
+        coverage_summary.executed([summary])
+
+
+def test_the_grade_from_summaries_matches_the_grade_from_databases_byte_for_byte(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    sources = {"hooks/a.py": SOURCE, "hooks/b.py": "value = 1\nother = 2\n", "scripts/c.py": SOURCE}
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
+    _repo(tmp_path, sources)
+    base = coverage_history.git("rev-parse", "HEAD", cwd=tmp_path).strip()
+    runs = [_measure(base, {"hooks/a.py": {1, 2, 3}, "hooks/b.py": {1}, "scripts/c.py": {1, 2, 4}}, sources)]
+    monkeypatch.setattr(ratchet, "_cached_runs", lambda *args: iter(runs))
+    databases = tmp_path / "databases"
+    summaries = tmp_path / "summaries"
+    measured = [
+        [_shard, {"hooks/a.py": [1, 2], "tests/t.py": [1]}, None],
+        [_arc_shard, {"scripts/c.py": [(-1, 1), (1, 2), (2, 4)]}, {"hooks/b.py": [1, 2]}],
+    ]
+    for n, (make, lines, reused) in enumerate(measured, start=1):
+        shard = databases / f"coverage-3.12-{n}"
+        (shard / "reused-coverage").mkdir(parents=True)
+        written = [make(shard / ".coverage", lines)]
+        if reused:
+            written.append(_shard(shard / "reused-coverage" / ".coverage", reused))
+        (summaries / f"executed-lines-3.12-{n}").mkdir(parents=True)
+        monkeypatch.chdir(shard)
+        coverage_summary.main(
+            [
+                "--out",
+                str(summaries / f"executed-lines-3.12-{n}" / coverage_summary.NAME),
+                *[str(path.relative_to(shard)) for path in written],
+            ]
+        )
+    for n in (1, 2):
+        coverage_summary.write_statements(
+            tmp_path, n, 2, summaries / f"executed-lines-3.12-{n}" / coverage_summary.STATEMENTS
+        )
+    monkeypatch.chdir(tmp_path)
+    reports = []
+    for flag, folder in (("--head-shards", databases), ("--head-summaries", summaries)):
+        if flag == "--head-summaries":
+            monkeypatch.setattr(ratchet, "_analysed", lambda *args: pytest.fail("summarized modules were analysed"))
+        out = tmp_path / f"out{flag}"
+        status = ratchet.main(
+            [
+                "--base",
+                base,
+                "--head",
+                str(tmp_path),
+                "--shards",
+                "2",
+                flag,
+                str(folder),
+                "--out",
+                str(out),
+                "--base-baseline",
+                "fixture.json",
+            ]
+        )
+        reports.append((status, (out / "report.txt").read_bytes()))
+    assert reports[0] == reports[1]
+    assert b"hooks/a.py:3 ran on base" in reports[0][1]
+
+
+def test_a_missing_shard_summary_cannot_be_graded(tmp_path, monkeypatch):
+    summaries = tmp_path / "summaries" / "executed-lines-3.12-1"
+    summaries.mkdir(parents=True)
+    coverage_summary.write([_shard(tmp_path / "one", {"hooks/a.py": [1]})], summaries / coverage_summary.NAME)
+    status = ratchet.main(
+        [
+            "--base",
+            "HEAD",
+            "--head",
+            str(tmp_path),
+            "--shards",
+            "2",
+            "--head-summaries",
+            str(summaries.parent),
+            "--out",
+            str(tmp_path / "out"),
+        ]
+    )
+    assert status == 1
 
 
 def test_a_line_the_base_ran_and_the_head_no_longer_runs_is_lost():
@@ -229,6 +334,15 @@ def test_a_move_rewritten_below_git_rename_similarity_is_followed(tmp_path):
     head_source = {"scripts/b.py": REWRITTEN}.get
     moved = coverage_history.renamed(tmp_path, "HEAD~1")
     assert ratchet.grade({"scripts/b.py": {4, 5}}, head_source, iter([base]), moved).lost == {"hooks/a.py": [3]}
+
+
+def test_a_graded_path_holding_a_space_is_listed_whole(tmp_path: Path) -> None:
+    source = _module({"first": "return 1", "second": "return 2"})
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    _repo(tmp_path, {"hooks/old.py": source})
+    (tmp_path / "hooks/old.py").unlink()
+    _repo(tmp_path, {"hooks/with space.py": source})
+    assert coverage_history.renamed(tmp_path, "HEAD~1") == {"hooks/old.py": "hooks/with space.py"}
 
 
 @pytest.mark.parametrize("missing", [None, "first", "second"])

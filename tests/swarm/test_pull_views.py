@@ -4,9 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm.ledger_events import GATE, ROLLUP_FALLBACK, SENT_TTL_S, PullRequest, views
-from scripts.swarm.ledger_events import view as single_view
+from scripts.swarm.ledger_events import GATE, ROLLUP_FALLBACK, SENT_TTL_S, PullRequest
 from scripts.swarm.store import PREFIX
+from tests.swarm.graph_port import view as single_view
+from tests.swarm.graph_port import views
 
 
 def resource(head="h1", state="OPEN"):

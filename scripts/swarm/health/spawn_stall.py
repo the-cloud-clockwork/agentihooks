@@ -1,15 +1,18 @@
 import json
 import os
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from scripts.hive import admission, placement_waits
 from scripts.hive.placement import LOCAL_FULL
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import capacity, freeze, timing
+from scripts.swarm import blockers, capacity, freeze, master_pin, panic, timing
 from scripts.swarm.health.findings import Finding
-from scripts.swarm.ledger_client import LedgerGone
+from scripts.swarm.ledger_client import LedgerGone, pass_state
+from scripts.swarm.store import RedisStore
 
 STALL_MS = 600_000
 REF = "spawn-stall:"
@@ -27,14 +30,14 @@ def save(store, slug: str, state: dict) -> None:
     store.redis.set(store.key(slug, "spawn-stall"), json.dumps(state))
 
 
-def eligible(store, slug: str, ledger, at: int, runtime, since: int | None = None) -> bool:
+def eligible(store: RedisStore, slug: str, ledger: Any, at: int, runtime: Any, since: int | None = None) -> bool:
     from scripts.swarm.tick import _ended
 
     config = store.config(slug)
     if config.state != "running":
         return False
     try:
-        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
     except LedgerGone:
         return False
     ready = placeable(store, slug, ready, at if since is None else since)
@@ -53,7 +56,12 @@ def eligible(store, slug: str, ledger, at: int, runtime, since: int | None = Non
         host = capacity.granted(capacity.host_room(config, inputs), inputs.previous, inputs.now_ms)
         config, _ = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
-            config, inputs.observations, inputs.agents, demand, requirements, warned=inputs.warned
+            master_pin.with_declared(config, os.environ),
+            inputs.observations,
+            inputs.agents,
+            demand,
+            requirements,
+            warned=inputs.warned,
         )
         decision["host"] = host
     if (decision.get("host") or {}).get("room") == 0:
@@ -168,7 +176,7 @@ def deliver(store, slug: str, ledger, at: int) -> None:
 
 
 @contextmanager
-def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterator[None]:
+def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], runtime: Any) -> Iterator[None]:
     previous = None
 
     def failed(step, error):
@@ -179,11 +187,17 @@ def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterat
         failure = {"step": step, "error": f"{type(error).__name__}: {error}", "at": clock()}
         timing.keep()
         store.redis.set(store.key(slug, "tick-failure"), json.dumps(failure))
+        blockers.record(store, slug, type(error).__name__, f"{step}: {error}", clock())
+        panic.count_error(store, slug, type(error).__name__, clock())
 
     token = timing.ON_FAILURE.set(failed)
     try:
         yield
     finally:
         timing.ON_FAILURE.reset(token)
+        for line in panic.tick_pass(store, previous is None, clock()):
+            timing.emit(sys.stdout, json.dumps({"event": "swarm_panic", "slug": slug, "action": line}))
         observe(store, slug, ledger, clock(), runtime)
         deliver(store, slug, ledger, clock())
+        if found := findings(store, slug):
+            blockers.record(store, slug, found[0].kind, found[0].summary, clock())

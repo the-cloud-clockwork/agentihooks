@@ -28,6 +28,7 @@ from scripts.swarm import (
     host_budget,
     launches,
     live_binding,
+    master_pin,
     model_pick,
     naming,
     overlays,
@@ -398,7 +399,7 @@ class HerdrRuntime:
         host = capacity.granted(capacity.host_room(config, inputs), previous, inputs.now_ms)
         config, scaled = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
-            replace(config, lanes={"master": {}, **config.lanes}),
+            master_pin.with_declared(replace(config, lanes={"master": {}, **config.lanes}), os.environ),
             self._quota_accounts,
             agents,
             demand,

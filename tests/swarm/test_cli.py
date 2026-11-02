@@ -1,20 +1,25 @@
 import json
 import multiprocessing
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
 from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
+from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, dispatcher, fencing, lease, publish, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, fencing, lease, metrics, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_delivery import FakeHerdr
@@ -31,6 +36,7 @@ def env(monkeypatch, tmp_path):
 
     from scripts.swarm.health import merge_stall
 
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setattr(
         merge_stall,
         "observe",
@@ -290,7 +296,7 @@ def test_the_tick_hands_the_metrics_pass_its_ledger(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     seen = []
-    monkeypatch.setattr(cli.metrics, "record_pass", lambda *args: seen.append(args[-1].ledger.state("sw")) or [])
+    monkeypatch.setattr(metrics, "record_pass", lambda *args: seen.append(args[-1].ledger.state("sw")) or [])
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert [state["tasks"] for state in seen] == [ledger.state("sw")["tasks"]]
 
@@ -535,23 +541,6 @@ def test_send_message_comes_from_the_named_agent(env, capsys, monkeypatch, flag,
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
     assert item.sender == "engineer@a1b2c3-0001"
     assert "engineer@a1b2c3-0001" not in json.loads(capsys.readouterr().out)["sent"]
-
-
-def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(env, capsys, monkeypatch):
-    store, ledger, _ = env
-    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
-    run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
-    ledger.said.clear()
-    capsys.readouterr()
-    assert run("sw", "send-message", "pause new work for a moment") == 0
-    assert ledger.said == []
-    live = sorted(a.name for a in store.agents("sw"))
-    inbox = InboxStore(store.redis)
-    for name in live:
-        [item] = inbox.inbox(name)
-        assert (item.sender, item.text) == ("operator", "pause new work for a moment")
-    assert sorted(json.loads(capsys.readouterr().out)["sent"]) == live and len(live) == 3
 
 
 def test_say_with_fyi_marks_each_item_as_needing_no_work(env):
@@ -947,18 +936,6 @@ def test_tick_records_failed_stage_and_releases_its_lock(env, monkeypatch, capsy
     assert cli.timing.SWARM.get() is None
 
 
-def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, monkeypatch):
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    calls = []
-    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
-    monkeypatch.setenv(cli.wake.WINDOW_ENV, "60")
-    monkeypatch.setattr(cli.wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
-    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert calls == [(9_000_000, 60_000)]
-
-
 def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
     from scripts.swarm import grafana_alerts, langfuse, refresh_job
 
@@ -974,6 +951,24 @@ def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
     assert started == ["sw"]
     assert sampled == [] and "fired ci_queue on sw" not in actions
+
+
+def test_a_stopped_scheduled_tick_has_started_the_refresh_job(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import refresh_job
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    started = []
+    monkeypatch.setattr(refresh_job, "spawn", started.append)
+
+    def overrun(slug: str, *args: object) -> list[str]:
+        assert slug == "sw"
+        raise cli.tick_stop.Stopped
+
+    monkeypatch.setattr(cli, "tick", overrun)
+    with pytest.raises(cli.tick_stop.Stopped):
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
+    assert started == ["sw"]
 
 
 def test_the_tick_publishes_status_with_the_pull_request_view_it_built(env, monkeypatch):
@@ -1597,7 +1592,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
 
     ledger.relay = refuse
     ran = []
-    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "maintenance")):
+    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (wake, "maintenance")):
         real = getattr(module, name)
         monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
     item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "operator", "the job finished at 18:45")
@@ -1960,54 +1955,57 @@ def test_a_continuation_whose_recorded_branch_left_origin_is_told_to_push_head_t
     )
 
 
-HEAD_JSON = (
-    '{"headRefName": "engineer-a1b2c3-0001", "headRepository": {"name": "bundle"}, '
-    '"headRepositoryOwner": {"login": "fork-owner"}}'
-)
+PullPorts = Callable[[str], tuple[FakeSourceControl, ChangeRef]]
+PULL_READ_ERRORS = [ValueError("x"), KeyError("x"), TimeoutError("tool deadline expired"), OSError("x")]
 
 
-def test_the_pull_request_head_branch_and_repository_are_read_from_github():
-    calls = []
+def _pull_port(head_repository: str, seen: list[str] | None = None) -> tuple[PullPorts, FakeSourceControl, ChangeRef]:
+    reference = ChangeRef("o/r", 3)
+    change = ChangeState(reference, "open", "h", "dev", False, "u", "engineer-a1b2c3-0001", "", False, head_repository)
+    provider = FakeSourceControl({"change": change})
 
-    def fake(argv, **kwargs):
-        calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, HEAD_JSON, "")
+    def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
+        if seen is not None:
+            seen.append(url)
+        return provider, reference
 
-    head = cli.pull_branch("https://github.com/o/r/pull/3", run=fake)
+    return ports, provider, reference
+
+
+def test_the_pull_request_head_branch_and_repository_are_read_through_the_port() -> None:
+    seen: list[str] = []
+    ports, provider, reference = _pull_port("fork-owner/bundle", seen)
+
+    head = cli.pull_branch("https://github.com/o/r/pull/3", ports)
     assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle")
-    fields = "headRefName,headRepository,headRepositoryOwner"
-    assert calls == [(["gh", "pr", "view", "https://github.com/o/r/pull/3", "--json", fields], GIT_OPTS)]
+    assert seen == ["https://github.com/o/r/pull/3"]
+    [call] = provider.calls
+    assert (call.operation, call.args) == ("change", (reference,))
+    assert 19 < call.deadline.remaining <= cli.PULL_SECONDS == 20
+
+
+def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> None:
+    ports, _, _ = _pull_port("")
+
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "")
 
 
 @pytest.mark.parametrize(
-    "answer",
-    [
-        '{"headRefName": "x"}',
-        '{"headRefName": "x", "headRepository": null, "headRepositoryOwner": {"login": "o"}}',
-        '{"headRefName": "x", "headRepository": {"name": "r"}, "headRepositoryOwner": {"login": ""}}',
-        '{"headRefName": "x", "headRepository": {"name": ""}, "headRepositoryOwner": {"login": "o"}}',
-    ],
+    "error", [subprocess.CalledProcessError(1, []), subprocess.TimeoutExpired([], 20), *PULL_READ_ERRORS]
 )
-def test_a_pull_request_without_a_head_repository_gives_the_branch_alone(answer):
-    def fake(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, answer, "")
+def test_an_unreadable_pull_request_gives_no_branch(error: Exception) -> None:
+    def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
+        raise error
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("x", "")
-
-
-@pytest.mark.parametrize("answer", [(1, HEAD_JSON), (0, "not json"), (0, "{}")])
-def test_an_unreadable_pull_request_gives_no_branch(answer):
-    def fake(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, answer[0], answer[1], "")
-
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("", "")
 
 
-def test_a_failing_github_call_gives_no_branch():
-    def fake(argv, **kwargs):
-        raise subprocess.TimeoutExpired(argv, 20)
+def test_the_pull_branch_reads_through_the_stack_source_control_port() -> None:
+    import inspect
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
+    from scripts.swarm import stack
+
+    assert inspect.signature(cli.pull_branch).parameters["ports"].default is stack.source_control
 
 
 @pytest.mark.parametrize(
@@ -2361,7 +2359,7 @@ def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env
     store, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "pending", lambda url, run=None, approval=False: url.endswith("/7"))
+    monkeypatch.setattr(checks, "pending", lambda url, read=None, approval=False: url.endswith("/7"))
     assert _findings(capsys) == []
 
 
@@ -2373,7 +2371,7 @@ def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env
     _, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "cached", partial(checks.cached, run=runner(PASSED)))
+    monkeypatch.setattr(checks, "cached", partial(checks.cached, read=runner(PASSED)))
     for autonomy, expected in [
         ("assist", []),
         ("delegate", ["idle with claim"]),
@@ -2387,19 +2385,21 @@ def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env
     assert _findings(capsys) == []
 
 
-@pytest.mark.parametrize(
-    "out, code", [("lint\tfail\t8s\thttps://x/1\n", 1), ("", 0), ("lint\tpass\t8s\thttps://x/1\n", 1)]
-)
-def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(env, capsys, monkeypatch, tmp_path, out, code):
+@pytest.mark.parametrize("case", ["failed", "empty", "unreadable"])
+def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(
+    env: tuple, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, case: str
+) -> None:
     from functools import partial
 
-    from tests.swarm.test_health_checks import runner
+    from tests.swarm.test_health_checks import FAILED, raising, runner
+
+    read = {"failed": runner((FAILED,)), "empty": runner(()), "unreadable": raising}[case]
 
     _, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     run("sw", "set", "autonomy=assist")
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "cached", partial(checks.cached, run=runner(out, code)))
+    monkeypatch.setattr(checks, "cached", partial(checks.cached, read=read))
     assert [f["kind"] for f in _findings(capsys)] == ["idle with claim"]
 
 

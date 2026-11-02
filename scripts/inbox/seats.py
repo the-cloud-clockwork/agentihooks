@@ -8,6 +8,7 @@ Each swarm keeps one culture text that every occupant of every seat reads.
 import json
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.swarm import naming
 from scripts.swarm.keyspace import ROOT
@@ -58,7 +59,7 @@ def master_of(address, names=None):
 
 
 class SeatRegistry:
-    def __init__(self, redis):
+    def __init__(self, redis: Any) -> None:
         self.redis = redis
 
     def key(self, address):
@@ -90,12 +91,18 @@ class SeatRegistry:
     def occupant(self, address):
         return _occupancy(self.redis.hgetall(self.key(address)))
 
-    def seat_of(self, name, reader=None):
+    def seat_of(self, name: str, reader: Any = None) -> str:
         reader = reader if reader is not None else self.redis
         name = naming.NameRegistry(self.redis).resolve(name, reader)
         address = reader.get(f"{PREFIX}-of:{name}") or ""
         occupant = _occupancy(reader.hgetall(self.key(address))) if address else None
         return address if occupant and occupant.occupant == name else ""
+
+    def recipient(self, address: str) -> str:
+        address = naming.NameRegistry(self.redis).resolve(address)
+        if naming.lane_of(address) == "master":
+            return self.seat_of(address) or address
+        return address
 
     def known_seat(self, name: str) -> str:
         return self.redis.get(f"{PREFIX}-of:{name}") or ""
@@ -146,10 +153,11 @@ class SeatRegistry:
         entry = {"generation": seat.generation, "occupant": seat.occupant, "at": at, "event": event, "detail": detail}
         self.redis.rpush(f"{self.key(address)}:history", json.dumps(entry))
 
-    def swarm_keys(self, slug):
+    def swarm_keys(self, slug: str) -> list[str]:
         """The swarm's seats with their history and memory, and the seat pointers of its agents."""
         seat = re.compile(rf"{re.escape(PREFIX)}:[^:@]+@{re.escape(slug)}(:({'|'.join(MEMORY_KINDS)}))?")
-        keys = [key for key in self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*") if seat.fullmatch(key)]
+        found = self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*", count=SCAN_PAGE)
+        keys = [key for key in found if seat.fullmatch(key)]
         agents = sorted(f"{PREFIX}-of:{name}" for name in self.agent_names(slug))
         return sorted(keys) + agents + [f"{key}:exit" for key in agents if self.redis.exists(f"{key}:exit")]
 
