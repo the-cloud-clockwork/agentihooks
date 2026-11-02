@@ -232,7 +232,7 @@ def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(env, ca
 @pytest.mark.parametrize(
     "declared,subjects", [("alpha", ["engineer@abc-0001"]), ("beta", ["master@abc-0000", "engineer@abc-0001"])]
 )
-def test_a_front_door_master_on_the_reserved_account_at_ten_percent_is_no_finding_while_a_worker_is(
+def test_a_front_door_master_on_the_declared_master_account_at_ten_percent_is_no_finding_while_a_worker_is(
     monkeypatch: pytest.MonkeyPatch, declared: str, subjects: list[str]
 ) -> None:
     from scripts.swarm import master_pin

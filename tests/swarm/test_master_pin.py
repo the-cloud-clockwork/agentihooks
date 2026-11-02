@@ -153,4 +153,4 @@ def test_only_a_front_door_master_on_the_declared_account_stays(
     monkeypatch.setattr(master_pin, "declared", found)
     environ = {"AGENTIHOOKS_HOME": "/x"}
     assert master_pin.stays("sw", agent, environ) is expected
-    assert seen in ([], [environ])
+    assert seen == ([environ] if agent is FRONT else [])
