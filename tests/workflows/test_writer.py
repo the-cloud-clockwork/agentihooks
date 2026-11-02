@@ -101,6 +101,32 @@ def test_a_checkout_without_a_readable_pyproject_is_not_agentihooks(tmp_path):
     assert writer.target(root, state, {}) == bundle / "workflows"
 
 
+@pytest.mark.parametrize(
+    "pyproject",
+    [None, 'project = "agentihooks"\n', '[project]\nversion = "1.0"\n', '[tool.agentihooks]\nname = "agentihooks"\n'],
+)
+def test_a_checkout_that_does_not_name_agentihooks_as_its_project_targets_the_bundle(tmp_path, pyproject):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".git").mkdir()
+    if pyproject is not None:
+        (root / "pyproject.toml").write_text(pyproject)
+    bundle, state = bundle_state(tmp_path)
+
+    assert writer.project_name(root) is None
+    assert writer.target(root, state, {}) == bundle / "workflows"
+
+
+def test_write_inside_an_agentihooks_checkout_creates_the_package_folder(tmp_path):
+    root = checkout(tmp_path / "agentihooks", "agentihooks")
+    _, state = bundle_state(tmp_path)
+
+    written = writer.write(draft(tmp_path), root, state, {})
+
+    assert written == root / "profiles" / "package" / "workflows" / "review-loop.yaml"
+    assert loader.read(written).head == "build"
+
+
 def test_write_puts_a_block_style_file_named_after_the_workflow(tmp_path):
     root = checkout(tmp_path / "other", "other-project")
     bundle, state = bundle_state(tmp_path)
@@ -143,8 +169,9 @@ def test_write_refuses_to_overwrite_unless_asked(tmp_path):
     existing.parent.mkdir()
     existing.write_text("old\n")
 
-    with pytest.raises(writer.WriterError, match="already exists"):
+    with pytest.raises(writer.WriterError) as caught:
         writer.write(draft(tmp_path), root, state, {})
+    assert str(caught.value) == f"{existing} already exists: pass --replace to overwrite it"
     assert existing.read_text() == "old\n"
 
     assert writer.write(draft(tmp_path), root, state, {}, replace=True) == existing
@@ -167,13 +194,32 @@ def test_main_reports_every_error_and_exits_one(tmp_path, monkeypatch, capsys):
     _, state = bundle_state(tmp_path)
     monkeypatch.chdir(root)
     monkeypatch.setattr(writer.profile_chain, "read_state", lambda: state)
-    bad = DRAFT.replace("profile: engineer", "persona: engineer")
+    bad = DRAFT.replace("profile: engineer", "persona: engineer").replace("profile: judge", "persona: judge")
+    path = draft(tmp_path, bad)
+    with pytest.raises(schema.WorkflowError) as caught:
+        schema.parse(bad)
 
-    assert writer.main([str(draft(tmp_path, bad))]) == 1
+    assert writer.main([str(path)]) == 1
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "persona" in captured.err
+    assert len(caught.value.errors) > 1
+    assert captured.err == "".join(f"{path}: {error}\n" for error in caught.value.errors)
+
+
+def test_main_replaces_an_existing_file_when_asked(tmp_path, monkeypatch, capsys):
+    root = checkout(tmp_path / "other", "other-project")
+    bundle, state = bundle_state(tmp_path)
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(writer.profile_chain, "read_state", lambda: state)
+    existing = bundle / "workflows" / "review-loop.yaml"
+    existing.parent.mkdir()
+    existing.write_text("old\n")
+
+    assert writer.main([str(draft(tmp_path)), "--replace"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {"written": str(existing)}
+    assert loader.read(existing).name == "review-loop"
 
 
 def test_main_reports_a_missing_bundle(tmp_path, monkeypatch, capsys):
@@ -184,7 +230,7 @@ def test_main_reports_a_missing_bundle(tmp_path, monkeypatch, capsys):
 
     assert writer.main([str(draft(tmp_path))]) == 1
 
-    assert "no linked bundle" in capsys.readouterr().err
+    assert capsys.readouterr().err == f"write_workflow.py: {writer.NO_BUNDLE}\n"
 
 
 def test_the_skill_passes_the_skill_gate():

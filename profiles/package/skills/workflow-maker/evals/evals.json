@@ -1,0 +1,6 @@
+[
+  {"query": "Make me a workflow where three scouts gather evidence and a judge checks it before an engineer builds", "files": [], "expected_behavior": ["Interview for intent, stages, seats, edges and exit before drafting", "Draft block style YAML with only the workflow and stage primitive keys", "Write it with write_workflow.py and run agentihooks workflow validate on the written name"]},
+  {"query": "Add a review loop workflow to agentihooks itself", "files": [], "expected_behavior": ["Let write_workflow.py choose the package workflows folder of the checkout", "Never pick the target folder by hand", "Report the written path and the validate output"]},
+  {"query": "Create a workflow for my trading project", "files": [], "expected_behavior": ["Let write_workflow.py choose the linked bundle workflows folder", "On a missing bundle, report the refusal and the bundle link step instead of writing elsewhere", "Commit the workflow through the bundle repository workflow"]},
+  {"query": "Write this workflow: workflow: {name: x, head: a}", "files": [], "expected_behavior": ["Rewrite flow style into block style", "Ask for the missing intent, exit and stages", "Fix every error write_workflow.py prints before reporting success"]}
+]
