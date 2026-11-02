@@ -55,7 +55,7 @@ def step_stopped_branch(
 
     actions: list[str] = []
     if config.state == "stopped":
-        doc = tick.timing.call(ledger.state, slug)
+        doc = tick.timing.call(tick.pass_state, ledger, slug)
         rows = {t["id"]: t for t in doc["tasks"]}
         actions = automated_gc.run(
             slug, store, ledger, runtime, now_ms, partial(tick._collected, slug, store, ledger, rows)
@@ -90,7 +90,7 @@ def step_recover_master(slug: str, config: SwarmConfig, store: Any, runtime: Any
 
 
 def step_ledger_state(slug: str, store: Any, ledger: Any, box: dict[str, Any]) -> list[str]:
-    doc = tick.freeze.watched(slug, store, ledger, tick.timing.call(ledger.state, slug))
+    doc = tick.freeze.watched(slug, store, ledger, tick.timing.call(tick.pass_state, ledger, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     box.update(doc=doc, rows=rows)
     return []
@@ -139,7 +139,7 @@ def step_exits_sweep(slug: str, store: Any, ledger: Any) -> list[str]:
         tick.InboxStore(store.redis),
         slug,
         store,
-        lambda: {t["id"]: t for t in tick.timing.call(ledger.state, slug)["tasks"]},
+        lambda: {t["id"]: t for t in tick.timing.call(tick.pass_state, ledger, slug)["tasks"]},
     )
 
 

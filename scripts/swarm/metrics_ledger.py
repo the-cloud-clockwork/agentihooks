@@ -4,7 +4,7 @@ import logging
 from collections import Counter
 
 from scripts.swarm import metrics_outbox
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import LedgerClient, pass_state
 from scripts.swarm_ledger.api.resources import node_state
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -171,7 +171,7 @@ def snapshot_nodes(doc: dict) -> list:
 
 
 def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerClient, doc: dict | None = None) -> None:
-    doc = ledger.state(slug) if doc is None else doc
+    doc = pass_state(ledger, slug) if doc is None else doc
     nodes = snapshot_nodes(doc)
     box.db.execute(CHECKPOINT)
     box.db.execute(PATHS)
