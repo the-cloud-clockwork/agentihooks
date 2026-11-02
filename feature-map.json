@@ -1232,6 +1232,7 @@
       "behaviour": "Each tick pass patches a stored view of the ledger's tasks, metadata and phases with one export read of the changes since the view's generation, and reads those parts in full only when the server's change window no longer covers the gap.",
       "seam": "The export parts of the ledger API and the tick ledger view",
       "tests": [
+        "tests/swarm/test_freeze_peer_view.py::test_peer_changes_use_a_retained_view_and_restore_the_swarm_view",
         "tests/swarm_ledger/test_export_parts.py::test_parts_limit_the_full_export_to_the_named_parts",
         "tests/swarm_ledger/test_export_parts.py::test_parts_limit_the_changes_to_the_named_parts",
         "tests/swarm_ledger/test_export_parts.py::test_parts_without_meta_carry_no_events",
