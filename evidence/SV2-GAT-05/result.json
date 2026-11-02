@@ -26,9 +26,11 @@
     "learning_outcomes_by_kind",
     "brain_bypass_total"
   ],
-  "rollback": "Authenticated operator sends brain_policy with observe mode; genuine outcome records, emergency history and counters remain",
+  "rollback": "Edit enforcement reverts through the existing brain gate mode in the swarm gate config, set to observe by the operator; the completion requirement reverts when an authenticated operator sends brain_policy with observe mode. Genuine outcome records, emergency history and counters remain",
   "limitations": [
     "Original evidence references are retained, not independently fetched or certified by this package",
+    "Lesson and decision outcomes are accepted as explicit ledger operations; conversion of transcript brain markers into task outcomes is not implemented and stays a named gap",
+    "The harmless read policy is the brain gate's covered tool set: reads are never covered, so they pass during an outage while covered edits need a receipt or a scoped operator emergency grant",
     "Live rollout verification belongs to the applicable integration gate"
   ],
   "case_results": [

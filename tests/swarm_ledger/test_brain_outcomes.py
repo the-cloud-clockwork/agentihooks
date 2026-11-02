@@ -121,6 +121,18 @@ def test_gat05_forged_operator_text_and_display_names_never_grant_authority(fixt
     assert ledger_authority.refusal("", op) == ""
 
 
+def test_gat05_agent_authored_policy_never_changes_the_required_mode(fixture):
+    from scripts.swarm_ledger import ledger_brain
+
+    doc, task, ctx, _, _ = fixture
+    policy = {"op": "brain_policy", "id": "policy", "item": "tasks/work", "mode": "observe", "brain": "swarm-brain"}
+    before = copy.deepcopy(doc)
+    assert not ledger_brain.apply(doc, {**policy, "by": "engineer"}, ctx)
+    assert ctx.refused == ["brain policy needs authenticated operator authority"]
+    assert doc == before
+    assert task["brain_policy"]["mode"] == "required"
+
+
 def test_gat05_observe_rollback_retains_outcomes_and_emergency_history(fixture):
     from scripts.swarm_ledger import ledger_brain
 
@@ -166,6 +178,29 @@ def test_gat05_hook_bypasses_only_the_authenticated_current_record(fixture, monk
     gate.clock = lambda: 160
     assert not gate.decide(call, who, None).allowed
     assert not gate.matches(SimpleNamespace(tool="Read"))
+
+
+def test_gat05_brain_outage_keeps_reads_and_the_scoped_emergency_path_only(fixture, monkeypatch):
+    from hooks.context import task_context
+    from scripts.gates.brain import FAILED_RESULT, BrainGate
+    from scripts.swarm_ledger import ledger_brain
+
+    doc, task, ctx, scope, _ = fixture
+    failed = {**scope, "result": "failed", "expires": 500}
+    monkeypatch.setattr(task_context, "binding", lambda *a: dict(scope))
+    gate = BrainGate(receipts=lambda _: failed, clock=lambda: 100)
+    who = SimpleNamespace(swarm="swarm", task="work")
+    edit = SimpleNamespace(session="session", tool="Edit")
+    assert not gate.matches(SimpleNamespace(tool="Read"))
+    assert gate.matches(edit)
+    denied = gate.decide(edit, who, None)
+    assert not denied.allowed
+    assert FAILED_RESULT in denied.reason
+    assert ledger_brain.apply(doc, operation("brain_emergency", scope, expires=160, reason="outage"), ctx)
+    monkeypatch.setattr(task_context, "binding", lambda *a: {**scope, "bypass": task["brain_bypass"]})
+    assert gate.decide(edit, who, None).allowed
+    monkeypatch.setattr(task_context, "binding", lambda *a: {**scope, "generation": 3, "bypass": task["brain_bypass"]})
+    assert not gate.decide(edit, who, None).allowed
 
 
 @pytest.mark.parametrize("principal", ["engineer", "operator", "master"])

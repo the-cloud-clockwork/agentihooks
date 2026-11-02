@@ -10,6 +10,7 @@
     "test_gat05_repository_reloads_outcomes_and_audit_without_replaying_effects",
     "test_gat05_observe_rollback_retains_outcomes_and_emergency_history",
     "test_gat05_hook_bypasses_only_the_authenticated_current_record",
+    "test_gat05_brain_outage_keeps_reads_and_the_scoped_emergency_path_only",
     "test_gat05_emergency_is_scoped_expiring_and_idempotently_audited"
   ],
   "authoritative_state": "Assertions inspect task records, protected state snapshots, retained audit and counters; recovery case reloads SQLite"
