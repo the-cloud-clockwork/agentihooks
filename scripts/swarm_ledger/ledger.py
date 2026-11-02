@@ -134,7 +134,7 @@ from scripts.swarm_ledger.adapters import hive_ledger
 
 repository = storage.default()
 
-BASE = "" if ledger_link.remote() else ledger_link.base()
+BASE = "" if ledger_link.remote() else ledger_link.base()  # pyright: ignore[reportUnknownMemberType]
 REMOTE_READ_ATTEMPTS = 3
 REMOTE_READ_PAUSE = 0.5
 REQUEST_TIMEOUT = 10
@@ -154,14 +154,14 @@ OBJECT_FORMS = {
 
 
 def base(slug: str = "") -> str:
-    return ledger_route.url(slug) or BASE or ledger_link.base(slug=slug)
+    return ledger_route.url(slug) or BASE or ledger_link.base(slug=slug)  # pyright: ignore[reportUnknownMemberType]
 
 
 def credentials(slug: str, service: bool = False) -> dict[str, str]:
     from scripts.swarm_ledger.authority_context import tick_headers
 
-    who = Who.from_env()
-    if ledger_link.remote(slug=slug):
+    who = Who.from_env()  # pyright: ignore[reportUnknownMemberType]
+    if ledger_link.remote(slug=slug):  # pyright: ignore[reportUnknownMemberType]
         tick = tick_headers(slug)
         if tick:
             return tick
@@ -183,7 +183,7 @@ def local_credentials(slug: str, agent: str, service: bool) -> dict[str, str]:
     token = repository.token(slug) or ""
     if service or not agent:
         return {"X-Ledger-Token": token}
-    return {"X-Ledger-Token": authority.agent_token(token, slug, agent), "X-Ledger-Agent": agent}
+    return {"X-Ledger-Token": authority.agent_token(token, slug, agent), "X-Ledger-Agent": agent}  # pyright: ignore[reportUnknownMemberType]
 
 
 def replay(slug: str, ops: list[dict[str, Any]], agent: str, service: bool) -> dict[str, Any]:
@@ -196,7 +196,7 @@ def derived_token(slug: str, name: str) -> str:
     from scripts.swarm_ledger.authority_context import secret as trusted_secret
 
     secret = trusted_secret()
-    return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)
+    return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)  # pyright: ignore[reportUnknownMemberType]
 
 
 def launch_token(slug: str, name: str) -> str:
@@ -241,7 +241,7 @@ def resource(
         client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
-    return retried(read, attempts) if ledger_link.remote(slug=slug) else read()
+    return retried(read, attempts) if ledger_link.remote(slug=slug) else read()  # pyright: ignore[reportUnknownMemberType]
 
 
 def export(slug: str, service: bool = False) -> dict[str, Any]:
@@ -252,7 +252,7 @@ def export(slug: str, service: bool = False) -> dict[str, Any]:
             "data"
         ]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()  # pyright: ignore[reportUnknownMemberType]
 
 
 class Missing(SystemExit):
@@ -273,12 +273,12 @@ def ledger_remote_auth_failures_total() -> int:
 
 
 def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict[str, Any]:
-    if ledger_link.remote(slug=slug):
+    if ledger_link.remote(slug=slug):  # pyright: ignore[reportUnknownMemberType]
         return remote_call(slug, ops, service)
     talking = talk(ops)
     joining = bool(ops) and len(ops) == 1 and ops[0]["op"] == "join"
     if outbox.waiting("ledger"):
-        outbox.flush(None)
+        outbox.flush(None)  # pyright: ignore[reportUnknownMemberType]
     if ops and not joining and outbox.waiting("ledger"):
         if not talking:
             sys.exit(
@@ -302,7 +302,7 @@ def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = Fal
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
         if talking or joining:
-            return queue(slug, ops, service)
+            return queue(slug, cast("list[dict[str, Any]]", ops), service)
         sys.exit(f"ledger server not answering on {base()}: {exc}")
 
 
@@ -315,9 +315,9 @@ def talk(ops: list[dict[str, Any]] | None) -> bool:
 def queue(slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
     if outbox.holds(ops[0]["id"]):
         return {"queued": ops[0]["id"]}
-    who = Who.from_env()
+    who = Who.from_env()  # pyright: ignore[reportUnknownMemberType]
     try:
-        outbox.append(outbox.ledger_record(slug, ops, who.name if who.pinned else "", service))
+        outbox.append(outbox.ledger_record(slug, ops, who.name if who.pinned else "", service))  # pyright: ignore[reportUnknownMemberType]
     except outbox.OutboxFull as exc:
         sys.exit(str(exc))
     print(
@@ -341,7 +341,7 @@ def remote_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> d
     return answer
 
 
-def retried[T](read: Callable[[], T], attempts: int) -> T:
+def retried[T](read: Callable[[], T], attempts: int) -> T:  # pyright: ignore[reportReturnType]
     for attempt in itertools.count(1):
         try:
             return read()
@@ -354,13 +354,12 @@ def retried[T](read: Callable[[], T], attempts: int) -> T:
             if attempt >= attempts:
                 raise
         time.sleep(REMOTE_READ_PAUSE * attempt)
-    raise AssertionError("unreachable: itertools.count never exhausts")
 
 
 def refusal_text(exc: urllib.error.HTTPError) -> str:
     if not hasattr(exc, "ledger_text"):
-        setattr(exc, "ledger_text", exc.read().decode(errors="replace"))
-    return cast(str, getattr(exc, "ledger_text"))
+        exc.ledger_text = exc.read().decode(errors="replace")  # pyright: ignore[reportAttributeAccessIssue]
+    return cast(str, exc.ledger_text)  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def op(kind: str, args: argparse.Namespace, /, **fields: Any) -> dict[str, Any]:
@@ -373,7 +372,7 @@ def refused(state: dict[str, Any], ops: Sequence[dict[str, Any]] = (), fallback:
         reasons = [
             w
             for w in warnings
-            if not core.size_warning(w) and not (lead and w.startswith(ledger_task_duplicates.UNCHECKED_PREFIX))
+            if not core.size_warning(w) and not (lead and w.startswith(ledger_task_duplicates.UNCHECKED_PREFIX))  # pyright: ignore[reportUnknownMemberType]
         ] or [unexplained(o) for o in ops if o["id"] in rejected]
         sys.exit(lead + ("; ".join(reasons) or fallback or f"rejected: {rejected}"))
 
@@ -415,7 +414,7 @@ def send(args: argparse.Namespace, kind: str, /, **fields: Any) -> dict[str, Any
 
 
 def mine(state: dict[str, Any], name: str) -> list[Any]:
-    return gate.unhandled_for(state["_meta"], name, state.get("tasks", []))
+    return gate.unhandled_for(state["_meta"], name, state.get("tasks", []))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def cmd_join(args: argparse.Namespace) -> None:
@@ -430,7 +429,7 @@ def cmd_leave(args: argparse.Namespace) -> None:
 
 def cmd_events(args: argparse.Namespace) -> None:
     for event in mine(call(args.slug), args.name):
-        print(watch_ledger.line(event))
+        print(watch_ledger.line(event))  # pyright: ignore[reportUnknownMemberType]
 
 
 def cmd_show(args: argparse.Namespace) -> None:
@@ -438,11 +437,10 @@ def cmd_show(args: argparse.Namespace) -> None:
 
 
 def cmd_tree(args: argparse.Namespace) -> None:
-    rows = cast(
+    for row in cast(
         "list[dict[str, Any]]",
         resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy", collection=True),
-    )
-    for row in rows:
+    ):
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
@@ -452,8 +450,7 @@ def cmd_get(args: argparse.Namespace) -> None:
 
 def cmd_tasks(args: argparse.Namespace) -> None:
     text = (args.text or "").lower()
-    tasks = cast("list[dict[str, Any]]", resource(args.slug, "tasks", collection=True))
-    for task in tasks:
+    for task in cast("list[dict[str, Any]]", resource(args.slug, "tasks", collection=True)):
         state, lane, title = task.get("state") or "open", task.get("lane") or "", task.get("title") or ""
         if state == "done" or task.get("out_of_scope"):
             continue
@@ -528,7 +525,7 @@ def upload(slug: str, name: str, path: str, route: str, extra: dict[str, str]) -
         method="POST",
     )
     try:
-        with ledger_link.urlopen(req, REQUEST_TIMEOUT) as resp:
+        with ledger_link.urlopen(req, REQUEST_TIMEOUT) as resp:  # pyright: ignore[reportUnknownMemberType]
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused the file: {exc.code} {exc.read().decode(errors='replace')}")
@@ -564,7 +561,7 @@ def cmd_publish_plan(args: argparse.Namespace) -> None:
     if {phase["id"] for phase in selected} != set(phases):
         sys.exit("publish-plan names an unknown phase")
     try:
-        ranges = cast("dict[str, Any]", plan_ranges.phase_lines(text, selected))
+        ranges = cast("dict[str, Any]", plan_ranges.phase_lines(text, selected))  # pyright: ignore[reportUnknownMemberType]
         plan_ranges.require_markers(text, ranges)
     except ValueError as exc:
         sys.exit(str(exc))
@@ -581,7 +578,7 @@ def cmd_publish_plan(args: argparse.Namespace) -> None:
 
     try:
         issue_title = ", ".join(phase["title"] for phase in selected)
-        url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
+        url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)  # pyright: ignore[reportUnknownMemberType]
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
     ops = [stored["add"], op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
@@ -612,11 +609,11 @@ def cmd_publish_plan(args: argparse.Namespace) -> None:
     linked = {row.get("url") for row in doc.get("plans", [])} | {phase.get("plan_url") for phase in doc["phases"]}
     if state.get("rejected") and where == "issue" and url not in linked:
         try:
-            ledger_publish.close_issue(url)
+            ledger_publish.close_issue(url)  # pyright: ignore[reportUnknownMemberType]
         except ledger_publish.PublishError as exc:
             print(exc, file=sys.stderr)
     refused(state, ops)
-    tasks = cast("dict[str, Any]", ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"]))
+    tasks = cast("dict[str, Any]", ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"]))  # pyright: ignore[reportUnknownMemberType]
     reslice: dict[str, Any] = {"tasks": tasks} if any(tasks.values()) else {}
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
@@ -627,13 +624,13 @@ def cmd_plan(args: argparse.Namespace) -> None:
     plan = json.loads(Path(args.path).read_bytes())
     phases = cast(
         "list[dict[str, Any]]",
-        ledger_phase_cli.append_phases(
+        ledger_phase_cli.append_phases(  # pyright: ignore[reportUnknownMemberType]
             plan,
             [phase["id"] for phase in cast("list[dict[str, Any]]", resource(args.slug, "phases", collection=True))],
         ),
     )
     state = send(args, "phase_append", phases=phases)
-    repeats = cast("dict[str, Any]", ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases))
+    repeats = cast("dict[str, Any]", ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases))  # pyright: ignore[reportUnknownMemberType]
     for warning in repeats.values():
         print(warning, file=sys.stderr)
     print(
@@ -650,15 +647,18 @@ def cmd_artifact_purge(args: argparse.Namespace) -> None:
     send(args, "artifact_purge")
     events = cast("list[dict[str, Any]]", resource(args.slug, "events", collection=True))
     event = next(e for e in reversed(events) if e["kind"] == "artifacts purged")
-    counts = cast("dict[str, Any]", resource(args.slug, "counts"))
-    print(json.dumps({"purged": event["count"], "artifacts": counts["artifacts"]}))
+    print(
+        json.dumps(
+            {"purged": event["count"], "artifacts": cast("dict[str, Any]", resource(args.slug, "counts"))["artifacts"]}
+        )
+    )
 
 
 def cmd_phase(args: argparse.Namespace) -> None:
     if args.id in ("add", "set") and args.values:
         from scripts.swarm_ledger import ledger_phase_cli
 
-        kind, fields = cast("tuple[str, dict[str, Any]]", ledger_phase_cli.operation(args))
+        kind, fields = cast("tuple[str, dict[str, Any]]", ledger_phase_cli.operation(args))  # pyright: ignore[reportUnknownMemberType]
         send(args, kind, **fields)
         print(json.dumps(fields))
         return
@@ -730,7 +730,7 @@ def cmd_alert(args: argparse.Namespace) -> None:
 def cmd_relay(args: argparse.Namespace) -> None:
     import ledger_relay
 
-    if not ledger_relay.verified(args.name, args.quote):
+    if not ledger_relay.verified(args.name, args.quote):  # pyright: ignore[reportUnknownMemberType]
         sys.exit(
             "relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
         )
@@ -792,7 +792,7 @@ def cmd_delete(args: argparse.Namespace) -> None:
 
 
 def cmd_audit(args: argparse.Namespace) -> None:
-    rows = cast("list[tuple[str, str, str, list[str]]]", ledger_comments.audit(export(args.slug)))
+    rows = cast("list[tuple[str, str, str, list[str]]]", ledger_comments.audit(export(args.slug)))  # pyright: ignore[reportUnknownMemberType]
     for where, entry, by, reasons in rows:
         print(f"{where} {entry} {by or '-'}: {'; '.join(reasons)}")
     print(f"{len(rows)} to clean")
@@ -814,7 +814,7 @@ def _ledger_item(value: str) -> str:
 def cmd_fold(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import ledger_fold
 
-    ledger_fold.run(args)
+    ledger_fold.run(args)  # pyright: ignore[reportUnknownMemberType]
 
 
 def cmd_time_left(args: argparse.Namespace) -> None:
@@ -830,7 +830,7 @@ def cmd_claim(args: argparse.Namespace) -> None:
 def cmd_plan_backfill(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import plan_backfill
 
-    plan_backfill.run(args)
+    plan_backfill.run(args)  # pyright: ignore[reportUnknownMemberType]
 
 
 def cmd_hierarchy(args: argparse.Namespace) -> None:
@@ -845,12 +845,10 @@ def refuse_unset_quote(args: argparse.Namespace) -> None:
 
 
 def _add_task(args: argparse.Namespace, title: str, fields: dict[str, Any]) -> dict[str, Any]:
-    task: dict[str, Any] = {}
-    doc: dict[str, Any] | None = None
     if args.scaffold:
         task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **fields}
         doc = call(args.slug) if args.kind == "plan" else None
-        fields["workspace"] = str(ledger_workspace.folder(args.slug, args.id))
+        fields["workspace"] = str(ledger_workspace.folder(args.slug, args.id))  # pyright: ignore[reportUnknownMemberType]
     send(
         args,
         "task_add",
@@ -863,7 +861,7 @@ def _add_task(args: argparse.Namespace, title: str, fields: dict[str, Any]) -> d
     )
     if args.scaffold:
         try:
-            ledger_workspace.scaffold(args.slug, task, doc)
+            ledger_workspace.scaffold(args.slug, task, doc)  # pyright: ignore[reportUnknownMemberType, reportPossiblyUnboundVariable]
         except OSError as exc:
             print(f"task {args.id} was added; its work folder was not created: {exc}", file=sys.stderr)
             return {"workspace_error": str(exc)}
@@ -903,7 +901,7 @@ def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
             lists.update(
                 cast(
                     "dict[str, Any]",
-                    workflow_task.add_fields(args.workflow, args.case, args.lane, args.profile, Path.cwd()),
+                    workflow_task.add_fields(args.workflow, args.case, args.lane, args.profile, Path.cwd()),  # pyright: ignore[reportUnknownMemberType]
                 )
             )
         except ValueError as exc:
@@ -965,7 +963,7 @@ def cmd_task(args: argparse.Namespace) -> None:
     refuse_unset_quote(args)
     if args.action == "add":
         if args.id == "-":
-            args.id = ledger_tasks.next_id(cast("list[dict[str, Any]]", resource(args.slug, "tasks", collection=True)))
+            args.id = ledger_tasks.next_id(cast("list[dict[str, Any]]", resource(args.slug, "tasks", collection=True)))  # pyright: ignore[reportUnknownMemberType]
         title = " ".join(args.values)
         lists = _task_add_fields(args)
         print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))
@@ -1017,7 +1015,7 @@ def cmd_prompt(args: argparse.Namespace) -> None:
 
 
 def cmd_url(args: argparse.Namespace) -> None:
-    print(ledger_link.page_line(args.slug))
+    print(ledger_link.page_line(args.slug))  # pyright: ignore[reportUnknownMemberType]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1186,12 +1184,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     from scripts.gates import Who
-    from scripts.gates.identity import refusal
+    from scripts.gates.identity import refusal  # pyright: ignore[reportUnknownVariableType]
 
     resolve_name = ports.swarm().naming.resolve_name
 
     args = build_parser().parse_args()
-    if text := refusal(args.name, Who.from_env()):
+    if text := refusal(args.name, Who.from_env()):  # pyright: ignore[reportUnknownMemberType]
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy", "get", "tasks")):

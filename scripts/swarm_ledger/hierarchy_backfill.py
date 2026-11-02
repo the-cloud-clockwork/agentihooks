@@ -1,11 +1,13 @@
-import argparse
 import copy
 import hashlib
 import json
 import os
 from pathlib import PurePosixPath
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    import argparse
 
 from scripts.swarm_ledger import ledger_plans, storage
 from scripts.swarm_ledger.repository import LedgerRepository, hierarchy
@@ -201,11 +203,10 @@ def commit(repo: LedgerRepository, slug: str, by: str) -> dict[str, Any]:
         )
         if after != entry.state or report["repaired"]["drift"]:
             meta = after["_meta"]
-            domain = cast(Any, repo.domain)
-            ctx = domain.Context(meta, domain.now_ms())
+            ctx = cast(Any, repo.domain).Context(meta, cast(Any, repo.domain).now_ms())
             ctx.record(by, "backfilled", "hierarchy")
             meta.update(rev=ctx.rev, updated_at=ctx.at)
-            keep_events(meta, ctx.events, domain, ctx.at)
+            keep_events(meta, ctx.events, cast(Any, repo.domain), ctx.at)
             transaction.write(slug, entry, after, ctx.events)  # pyright: ignore[reportUnknownMemberType]
         report["applied"] = True
         report["drift"] = cast(
@@ -230,7 +231,7 @@ def backfill(repo: LedgerRepository, slug: str, by: str, apply: bool = False) ->
     return report
 
 
-def run(args: argparse.Namespace) -> None:
+def run(args: "argparse.Namespace") -> None:
     from scripts.swarm_ledger import ledger_link
 
     if ledger_link.remote():  # pyright: ignore[reportUnknownMemberType]

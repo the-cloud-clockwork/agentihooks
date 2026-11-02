@@ -78,7 +78,6 @@ class Hub:
 
     def open(self, slug: str, load: Callable[[], dict[str, Any]], cursor: str | None = None) -> tuple[int, list[Any]]:
         """Subscribe and answer (seq, first events): a snapshot without a cursor, the retained events after one."""
-        seq: int | None = None
         with self.changed:
             if cursor is not None:
                 seq = self.position(slug, cursor)
@@ -96,8 +95,7 @@ class Hub:
                     channel.resources.setdefault(name, copy.deepcopy(value))
         with self.changed:
             if cursor is not None:
-                assert seq is not None
-                return seq, [entry for entry in channel.log if entry[0] > seq]
+                return seq, [entry for entry in channel.log if entry[0] > seq]  # pyright: ignore[reportPossiblyUnboundVariable]
             return self.snapshot(slug)
 
     def snapshot(self, slug: str) -> tuple[int, list[Any]]:

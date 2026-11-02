@@ -2,12 +2,13 @@
 
 import json
 from collections.abc import Callable, Generator, Iterable
-from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any
 
 from .hub import Closed, Expired
 
 if TYPE_CHECKING:
+    from http.server import BaseHTTPRequestHandler
+
     from .hub import Hub
 
 HEARTBEAT_S = 5.0
@@ -43,7 +44,7 @@ def parse(lines: Iterable[str]) -> Generator[tuple[str, Any, str | None]]:
             cursor = value
 
 
-def serve(handler: BaseHTTPRequestHandler, hub: "Hub", slug: str, load: Callable[[], Any]) -> None:
+def serve(handler: "BaseHTTPRequestHandler", hub: "Hub", slug: str, load: Callable[[], Any]) -> None:
     """Answer one events request until the client goes away or the hub drains; raises Expired before any byte is
     sent."""
     seq, first = hub.open(slug, load, handler.headers.get("Last-Event-ID"))
