@@ -85,7 +85,13 @@ def test_a_pull_request_cannot_allowlist_its_own_read(tmp_path: Path, capsys: py
 
 
 def test_an_allowlisted_read_kept_or_removed_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    base = _recorded(tmp_path / "base", {"scripts/swarm/job.py": WHOLE + WHOLE.replace("step", "other")})
+    both = WHOLE + WHOLE.replace("step", "other")
+    base = _recorded(tmp_path / "base", {"scripts/swarm/job.py": both})
+    same = _recorded(tmp_path / "same", {"scripts/swarm/job.py": both})
+    assert _grade(base, same, capsys) == (
+        0,
+        "1 files read the whole ledger state, 1 on the base allowlist, 0 errors\n",
+    )
     kept = _recorded(tmp_path / "kept", {"scripts/swarm/job.py": WHOLE})
     assert _grade(base, kept, capsys) == (
         0,
