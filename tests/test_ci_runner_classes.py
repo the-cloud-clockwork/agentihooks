@@ -241,3 +241,7 @@ def test_every_standard_test_job_sends_merge_group_runs_to_the_queue_pool():
         )
         for name in standard
     }
+
+
+def test_plant_probe_moves_up() -> None:
+    assert ci_runner_classes.plant_probe(1) >= 1
