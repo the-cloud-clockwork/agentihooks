@@ -99,7 +99,7 @@ def test_selection_upload_and_downloads_follow_the_contract():
     assert upload["if"] == "steps.reuse.outputs.reused != 'true' && steps.contract.outputs.selection == 'true'"
     assert upload["with"]["if-no-files-found"] == "error"
     assert plan["outputs"]["selection"] == "${{ steps.contract.outputs.selection || 'false' }}"
-    for name in ("mutation-stats", "mutation"):
+    for name in ("mutation-stats", "mutation-shard"):
         download = next(
             step for step in jobs[name]["steps"] if step.get("name") == "Download planned mutation test selection"
         )
