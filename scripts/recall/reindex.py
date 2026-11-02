@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm_ledger.storage import read_document, read_registry, read_slugs
 
@@ -53,16 +53,18 @@ def reindex(store: RecallStore, folder: Path, home: Path, slugs: list[str], incl
         if slug in hidden:
             result["skipped_binned"].append(slug)
             continue
+        swarm_slug = slug if (home / "swarm" / slug).is_dir() else ""
         document = read_document(folder, slug)
         if document is None:
             result["unreadable"].append(slug)
             continue
         try:
-            counts = sync_ledger(store, slug, cast(Any, document), home)
+            records = extract_ledger(slug, document, swarm_slug=swarm_slug)
+            deleted = deleted_refs(document)
         except (ValueError, AttributeError, KeyError, TypeError):
             result["unreadable"].append(slug)
             continue
-        result["indexed"][slug] = asdict(counts)
+        result["indexed"][slug] = asdict(store.sync(f"ledger/{slug}", records, deleted))
     return result
 
 

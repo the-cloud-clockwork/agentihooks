@@ -76,9 +76,9 @@ class LedgerCapture:
                 raise TimeoutError(f"recall capture still pending after {timeout} s")
 
 
-def capture_swarm(store: RedisStore, slug: str, document: dict[str, Any] | None = None) -> SyncCounts:
+def capture_swarm(store: RedisStore, slug: str) -> SyncCounts:
     """Write the recall records of one swarm's seats, transfers, inbox and task folders to the archive."""
-    return archive().sync(f"swarm/{slug}", extract_swarm(slug, store, document))
+    return archive().sync(f"swarm/{slug}", extract_swarm(slug, store))
 
 
 def swarm_pass(slug: str, store: RedisStore, document: dict[str, Any]) -> list[str]:
