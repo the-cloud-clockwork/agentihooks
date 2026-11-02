@@ -33,7 +33,7 @@ class RunPort:
         return json.loads(done.stdout)
 
 
-def view(url: str, run: Callable[..., Any], required_checks: dict[str, int] | None = None) -> Any:
+def view(url: str, run: Callable[..., Any], required_checks: dict[str, Any] | None = None) -> Any:
     """Read one pull request through the port double over ``run``."""
     return read_view(url, cast(SourceControl, RunPort(run)), required_checks)
 
