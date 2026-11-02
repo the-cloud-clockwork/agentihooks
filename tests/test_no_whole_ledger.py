@@ -116,9 +116,7 @@ def test_a_file_past_its_allowance_names_the_allowance(
 
 
 @pytest.mark.parametrize("source", [CLEAN, WHOLE])
-def test_a_base_without_an_allowlist_is_red(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str
-) -> None:
+def test_a_base_without_an_allowlist_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str) -> None:
     base = _tree(tmp_path / "base", {"scripts/swarm/job.py": CLEAN})
     head = _recorded(tmp_path / "head", {"scripts/swarm/job.py": source})
     code, output = _grade(base, head, capsys)
