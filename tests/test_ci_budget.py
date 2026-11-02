@@ -67,7 +67,7 @@ def test_a_stage_spans_first_job_creation_to_last_job_end():
         "select": 35,
         "unit": 270,
         "swarm-image": 95,
-        "mutation": 600,
+        "mutation-shard": 600,
         "brand-new": 10,
     }
 
