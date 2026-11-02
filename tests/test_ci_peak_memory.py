@@ -61,13 +61,13 @@ def test_refuses_a_call_without_label_and_command(tmp_path: Path, arguments: lis
             "select",
             "Select the tests the change reaches",
             "select",
-            '"$GITHUB_WORKSPACE/.github/scripts/peak_memory.py"',
+            '-I "$RUNNER_TEMP/grader/.github/scripts/peak_memory.py"',
         ),
         (
             "mutation-plan",
             "Size mutation shards from stored timings",
             "mutation-plan",
-            '"$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py"',
+            '-I "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py"',
         ),
     ],
 )
@@ -75,7 +75,8 @@ def test_pull_request_tests_record_and_upload_the_step_peak(job: str, step: str,
     steps = yaml.safe_load(WORKFLOW.read_text())["jobs"][job]["steps"]
     names = [entry.get("name") for entry in steps]
     measured = steps[names.index(step)]
-    assert f"{helper} {label} -- " in measured["run"]
+    assert f"{helper} {label} --" in measured["run"]
+    assert "$GITHUB_WORKSPACE/.github/scripts/peak_memory.py" not in measured["run"]
     upload = steps[names.index(f"Upload the {label} step peak memory")]
     assert names.index(step) < names.index(upload["name"])
     assert upload["if"].startswith("always() && github.event_name == 'pull_request'")

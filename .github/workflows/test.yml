@@ -706,7 +706,9 @@ jobs:
           cd "$RUNNER_TEMP/grader"
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/selection"
-          "$RUNNER_TEMP/provenance-python/bin/python" -I "$GITHUB_WORKSPACE/.github/scripts/peak_memory.py" select -- "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 20 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+          measure=()
+          [[ -f "$RUNNER_TEMP/grader/.github/scripts/peak_memory.py" ]] && measure=("$RUNNER_TEMP/provenance-python/bin/python" -I "$RUNNER_TEMP/grader/.github/scripts/peak_memory.py" select --)
+          "${measure[@]}" "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 20 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
 
       - name: Upload the select step peak memory
         if: always() && github.event_name == 'pull_request'
@@ -3889,7 +3891,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           MUTATION_SHARD_CPU_QUOTA: "3"
           PYTHONUNBUFFERED: "1"
-        run: python "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py" mutation-plan -- python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+        run: python -I "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py" mutation-plan -- python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       - name: Upload the mutation-plan step peak memory
         if: always() && github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
