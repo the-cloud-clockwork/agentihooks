@@ -40,8 +40,9 @@ def snapshot(container):
     return json.loads(docker("exec", container, "python", "-c", code))
 
 
-def ready(container):
+def ready(container: str) -> dict:
     deadline = time.monotonic() + 30
+    observed: object = None
     while time.monotonic() < deadline:
         if not state(container)["Running"]:
             raise AssertionError("container exited before readiness: " + docker("logs", container)[-1000:])
@@ -49,10 +50,21 @@ def ready(container):
             observed = snapshot(container)
             if observed["running"] and observed["grandchildren"] == 2:
                 return observed
-        except (subprocess.CalledProcessError, ValueError, IndexError):
-            pass
+        except (subprocess.CalledProcessError, ValueError, IndexError) as exc:
+            observed = getattr(exc, "output", None) or exc
         time.sleep(0.1)
-    raise AssertionError("container readiness timeout")
+    evidence = {}
+    for name, args in (
+        ("processes", ("top", container, "-eo", "pid,ppid,stat,etime,args")),
+        ("logs", ("logs", "--tail", "40", container)),
+    ):
+        try:
+            evidence[name] = docker(*args, timeout=EVIDENCE_SECONDS)
+        except (subprocess.SubprocessError, OSError) as exc:
+            evidence[name] = f"unavailable: {exc}"
+    raise AssertionError(
+        f"container readiness timeout: last={observed!r}\nprocesses:\n{evidence['processes']}\nlogs:\n{evidence['logs']}"
+    )
 
 
 def heartbeats(container: str, root: str, initial: dict | None = None) -> dict:

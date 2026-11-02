@@ -216,3 +216,44 @@ def test_stalled_or_missing_heartbeat_fails_before_termination(container, tmp_pa
 
     assert not any(args[0] == "kill" for args, _ in container.calls)
     assert container.calls[-1][0] == ("rm", "--force", "container")
+
+
+def test_a_readiness_timeout_names_the_last_snapshot_processes_and_logs(monkeypatch):
+    clock = itertools.count(0, 10)
+    monkeypatch.setattr(proof.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(proof.time, "sleep", lambda _: None)
+    monkeypatch.setattr(proof, "state", lambda _: {"Running": True})
+    monkeypatch.setattr(proof, "snapshot", lambda _: {"root": "/r", "running": False, "grandchildren": 1})
+    output = {"top": "1 0 Ss 00:31 supervisor", "logs": "exporter waiting"}
+    monkeypatch.setattr(proof, "docker", lambda *args, timeout=30: output[args[0]])
+
+    with pytest.raises(AssertionError) as raised:
+        proof.ready("container")
+
+    message = str(raised.value)
+    assert message.startswith("container readiness timeout: last={'root': '/r', 'running': False, 'grandchildren': 1}")
+    assert "1 0 Ss 00:31 supervisor" in message
+    assert "exporter waiting" in message
+
+
+def test_a_readiness_timeout_keeps_the_snapshot_error_and_unavailable_evidence(monkeypatch):
+    clock = itertools.count(0, 10)
+    monkeypatch.setattr(proof.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(proof.time, "sleep", lambda _: None)
+    monkeypatch.setattr(proof, "state", lambda _: {"Running": True})
+
+    def snapshot(_):
+        raise subprocess.CalledProcessError(1, "docker", output="no context.json")
+
+    def docker(*args, timeout=30):
+        raise subprocess.TimeoutExpired(["docker", *args], timeout)
+
+    monkeypatch.setattr(proof, "snapshot", snapshot)
+    monkeypatch.setattr(proof, "docker", docker)
+
+    with pytest.raises(AssertionError) as raised:
+        proof.ready("container")
+
+    message = str(raised.value)
+    assert "last='no context.json'" in message
+    assert message.count("unavailable: ") == 2
