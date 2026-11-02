@@ -30,15 +30,17 @@ if TYPE_CHECKING:
     from hooks.classifier.result import Answer, DecisionResult
     from scripts.swarm.store import SwarmConfig
 
-    class _Ledger(Protocol):
-        def update_task(self, slug: str, task_id: str, fields: dict[str, Any]) -> object: ...
-        def comment(self, slug: str, task_id: str, text: str, by: str = "") -> object: ...
 
-    class _Mail(Protocol):
-        master: str
+class _Ledger(Protocol):
+    def update_task(self, slug: str, task_id: str, fields: dict[str, Any]) -> object: ...
+    def comment(self, slug: str, task_id: str, text: str, by: str = "") -> object: ...
 
-        def engineer(self, task: dict[str, Any]) -> str: ...
-        def send(self, key: str, to: str, text: str, ref: str = "") -> list[str]: ...
+
+class _Mail(Protocol):
+    master: str
+
+    def engineer(self, task: dict[str, Any]) -> str: ...
+    def send(self, key: str, to: str, text: str, ref: str = "") -> list[str]: ...
 
 
 type _Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -810,8 +812,8 @@ class Check:
     slug: str
     mode: str
     now_ms: int
-    ledger: "_Ledger"
-    mail: "_Mail"
+    ledger: _Ledger
+    mail: _Mail
     view: Callable[[str], dict[str, Any] | None]
     ask: Callable[[dict[str, Any]], dict[str, Any] | tuple[str, str]]
     home: str | Path | None = None
