@@ -840,6 +840,36 @@ def test_junit_reports_one_parameter_that_did_not_pass_beside_passes(tmp_path: P
     assert feature_map.junit_problems(path, [report]) == ["tests/test_x.py::test_one: failure, skipped"]
 
 
+@pytest.mark.parametrize(("entry", "name"), [({"id": "login", "tests": []}, "login"), ({"tests": []}, "feature")])
+def test_mapped_names_the_entry_that_lists_no_tests(tmp_path: Path, entry: dict, name: str) -> None:
+    path = tmp_path / "feature-map.json"
+    path.write_text(json.dumps({"features": [entry]}))
+    with pytest.raises(ValueError, match=f"^{name}: requires tests$"):
+        feature_map.mapped(path)
+
+
+def test_junit_counts_only_testcase_elements(tmp_path: Path) -> None:
+    path = _junit_map(tmp_path, "tests/test_x.py::test_one")
+    report = tmp_path / "r.xml"
+    report.write_text('<testsuites><testsuite classname="tests.test_x" name="test_one"/></testsuites>')
+    assert feature_map.junit_problems(path, [report]) == ["tests/test_x.py::test_one: missing"]
+
+
+def test_junit_reads_an_absent_classname_or_name_as_empty(tmp_path: Path) -> None:
+    path = _junit_map(tmp_path, "::test_one", "tests/test_x.py::")
+    report = _report(tmp_path, "r.xml", '<testcase name="test_one"/>', '<testcase classname="tests.test_x"/>')
+    assert feature_map.junit_problems(path, [report]) == []
+
+
+def test_cli_hands_the_junit_reports_over_as_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _junit_map(tmp_path, "tests/test_x.py::test_one")
+    seen: list[object] = []
+    monkeypatch.setattr(feature_map, "junit_problems", lambda map_path, reports: seen.extend(reports) or [])
+    monkeypatch.setattr(sys, "argv", ["feature-map", "--root", str(tmp_path), "--junit", "r.xml"])
+    feature_map.main()
+    assert seen == [Path("r.xml")]
+
+
 def test_junit_reads_the_report_a_real_pytest_run_writes(tmp_path: Path) -> None:
     (tmp_path / "pytest.ini").write_text("[pytest]\n")
     tests = tmp_path / "tests"
