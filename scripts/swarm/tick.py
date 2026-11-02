@@ -354,7 +354,7 @@ def step_verify(
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
-    box: dict[str, Any] = {}
+    box: dict[str, Any] = steps.PassBox()
     passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
     actions = run_group("start", **passing)
     observe_steps.raise_held(box)

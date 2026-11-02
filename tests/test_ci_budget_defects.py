@@ -72,15 +72,32 @@ def _found(store):
     return standing.read(store.redis, "sw").get("ci_overrun")
 
 
+LISTED = {"answer": lambda event: [], "broken": {}}
+
+
+@pytest.fixture(autouse=True)
+def listing(monkeypatch):
+    reads = []
+
+    def read_runs(repo_dir, since_s, event="pull_request"):
+        reads.append((repo_dir, since_s, event))
+        if event in LISTED["broken"]:
+            raise LISTED["broken"][event]
+        return LISTED["answer"](event)
+
+    monkeypatch.setattr(defects.ci_speed, "read_runs", read_runs)
+    monkeypatch.setitem(LISTED, "broken", {})
+    monkeypatch.setitem(LISTED, "answer", LISTED["answer"])
+    return reads
+
+
 def _gh(calls, runs=RUNS):
+    LISTED["answer"] = lambda event: [r for r in runs if r.get("conclusion") in ("success", "failure")]
+
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        if "/jobs" in command[2]:
-            run_id = int(command[2].split("/runs/")[1].split("/")[0])
-            return subprocess.CompletedProcess(command, 0, "".join(json.dumps(j) + "\n" for j in JOBS[run_id]), "")
-        status = command[2].split("status=")[1].split("&")[0]
-        lines = [json.dumps(r) for r in runs if r.get("conclusion") == status]
-        return subprocess.CompletedProcess(command, 0, "\n".join(lines), "")
+        run_id = int(command[2].split("/runs/")[1].split("/")[0])
+        return subprocess.CompletedProcess(command, 0, "".join(json.dumps(j) + "\n" for j in JOBS[run_id]), "")
 
     return run
 
@@ -206,13 +223,11 @@ def test_a_slow_run_sample_keeps_only_stages_strictly_over_a_budget_and_the_run_
     assert _found(store)["links"] == [{"label": "Slow run 8", "url": run_url}]
 
 
-def test_github_is_read_from_the_repository_over_the_window(swarm):
+def test_github_is_read_from_the_repository_over_the_window(swarm, listing):
     store, config = swarm
     calls = []
     defects.refresh("sw", config, store, NOW_MS, run=_gh(calls))
-    since = datetime.fromtimestamp(NOW_MS / 1000 - defects.WINDOW_S, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    runs = [(command, kwargs) for command, kwargs in calls if "/jobs" not in command[2]]
-    assert runs and all(f"created=>={since}&" in command[2] and kwargs["cwd"] == "/repo" for command, kwargs in runs)
+    assert listing == [("/repo", NOW_MS / 1000 - defects.WINDOW_S, "pull_request")]
     command, kwargs = next((command, kwargs) for command, kwargs in calls if "/jobs" in command[2])
     assert command == [
         "gh",
@@ -262,13 +277,11 @@ def test_a_skipped_gate_still_ends_the_measured_run():
 
 def test_a_failed_read_files_nothing_and_retries_next_interval(swarm, capsys):
     store, config = swarm
-
-    def broken(command, **kwargs):
-        raise subprocess.CalledProcessError(1, command, "", "HTTP 502")
-
-    assert defects.refresh("sw", config, store, NOW_MS, run=broken) == []
+    LISTED["broken"]["pull_request"] = subprocess.CalledProcessError(1, ["gh"], "", "HTTP 502")
+    assert defects.refresh("sw", config, store, NOW_MS, run=_gh([])) == []
     assert _found(store) is None
     assert "ci budget skipped reading Tests runs: HTTP 502" in capsys.readouterr().err
+    del LISTED["broken"]["pull_request"]
     defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=_gh([]))
     assert _found(store)["fired"] == 1
 
@@ -332,18 +345,17 @@ METERED_JOBS = {
 
 
 def _metered_gh(calls):
+    LISTED["answer"] = lambda event: [
+        r for r in METERED_RUNS if r["event"] == event and r["conclusion"] in ("success", "failure")
+    ]
+
     def run(command, **kwargs):
         endpoint = command[2]
         calls.append(endpoint)
         if endpoint.endswith("/logs"):
             return subprocess.CompletedProcess(command, 0, FAILED_LOG, "")
-        if "/jobs" in endpoint:
-            run_id = int(endpoint.split("/runs/")[1].split("/")[0])
-            return subprocess.CompletedProcess(command, 0, "\n".join(json.dumps(j) for j in METERED_JOBS[run_id]), "")
-        event = endpoint.split("event=")[1].split("&")[0]
-        status = endpoint.split("status=")[1].split("&")[0]
-        lines = [json.dumps(r) for r in METERED_RUNS if r["event"] == event and r["conclusion"] == status]
-        return subprocess.CompletedProcess(command, 0, "\n".join(lines), "")
+        run_id = int(endpoint.split("/runs/")[1].split("/")[0])
+        return subprocess.CompletedProcess(command, 0, "\n".join(json.dumps(j) for j in METERED_JOBS[run_id]), "")
 
     return run
 
@@ -386,21 +398,22 @@ def test_with_the_sink_set_each_finished_pull_request_and_dev_push_run_is_metere
     assert [c for c in calls[reads:] if "/jobs" in c] == []
 
 
-def test_a_run_over_budget_reads_its_jobs_once_for_the_defect_and_the_rows(swarm, sink):
+def test_a_run_over_budget_reads_its_jobs_once_for_the_defect_and_the_rows(swarm, sink, listing):
     store, config = swarm
     calls = []
     actions = defects.refresh("sw", config, store, NOW_MS, run=_gh(calls), environ=SINK)
     assert _job_reads(calls).count("repos/{owner}/{repo}/actions/runs/1/jobs?per_page=100") == 1
     assert actions == ["updated the standing ci overrun finding for a pull request Tests run over fifteen minutes"]
-    pushes = [kwargs["cwd"] for command, kwargs in calls if "event=push" in command[2]]
-    assert pushes and set(pushes) == {"/repo"}
+    since_s = NOW_MS / 1000 - defects.WINDOW_S
+    assert [read for read in listing if read[2] == "push"] == [("/repo", since_s, "push")]
 
 
-def test_without_the_sink_no_push_runs_or_logs_are_read(swarm):
+def test_without_the_sink_no_push_runs_or_logs_are_read(swarm, listing):
     store, config = swarm
     calls = []
     defects.refresh("sw", config, store, NOW_MS, run=_metered_gh(calls), environ={})
-    assert [c for c in calls if "event=push" in c or c.endswith("/logs") or "/runs/22/" in c] == []
+    assert [read[2] for read in listing] == ["pull_request"]
+    assert [c for c in calls if c.endswith("/logs") or "/runs/22/" in c] == []
     assert not store.redis.keys(defects.key("sw", "metered", "*"))
 
 
@@ -451,14 +464,8 @@ def test_a_failed_job_log_is_read_from_the_repository(swarm, sink):
 
 def test_dev_push_runs_that_cannot_be_read_leave_pull_request_runs_metered(swarm, sink, capsys):
     store, config = swarm
-    healthy = _metered_gh([])
-
-    def run(command, **kwargs):
-        if "event=push" in command[2]:
-            raise subprocess.CalledProcessError(1, command, stderr="HTTP 503")
-        return healthy(command, **kwargs)
-
-    defects.refresh("sw", config, store, NOW_MS, run=run, environ=SINK)
+    LISTED["broken"]["push"] = subprocess.CalledProcessError(1, ["gh"], stderr="HTTP 503")
+    defects.refresh("sw", config, store, NOW_MS, run=_metered_gh([]), environ=SINK)
     assert "ci budget skipped reading dev push Tests runs: HTTP 503" in capsys.readouterr().err
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
 
@@ -491,17 +498,11 @@ def test_with_the_sink_set_finished_merge_group_runs_are_metered_as_the_queue_ti
     assert (24, "gate-required") in [(r["run_id"], r["stage"]) for r in _inserted(sink, "ci_stages")]
 
 
-def test_merge_group_runs_are_read_from_the_swarm_repo_and_a_failed_read_is_named(swarm, sink, capsys):
+def test_merge_group_runs_are_read_from_the_swarm_repo_and_a_failed_read_is_named(swarm, sink, capsys, listing):
     store, config = swarm
-    healthy, folders = _metered_gh([]), []
-
-    def run(command, **kwargs):
-        if "event=merge_group" in command[2]:
-            folders.append(kwargs["cwd"])
-            raise subprocess.CalledProcessError(1, command, stderr="HTTP 503")
-        return healthy(command, **kwargs)
-
-    defects.refresh("sw", config, store, NOW_MS, run=run, environ=SINK)
-    assert folders and set(folders) == {"/repo"}
+    LISTED["broken"]["merge_group"] = subprocess.CalledProcessError(1, ["gh"], stderr="HTTP 503")
+    defects.refresh("sw", config, store, NOW_MS, run=_metered_gh([]), environ=SINK)
+    since_s = NOW_MS / 1000 - defects.WINDOW_S
+    assert [read for read in listing if read[2] == "merge_group"] == [("/repo", since_s, "merge_group")]
     assert "ci budget skipped reading merge queue Tests runs: HTTP 503" in capsys.readouterr().err
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22, 21]
