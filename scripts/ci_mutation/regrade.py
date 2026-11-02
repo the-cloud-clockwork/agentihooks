@@ -49,10 +49,11 @@ def recollect(output: Path, wanted: set[str], shard: tuple[int, int]) -> dict[st
         paths = sorted(wanted.intersection(json.loads(listing.read_text())))
         if not paths:
             continue
-        target = listing.parent / "protected-results.json"
+        folder = listing.parent.resolve()
+        target = folder / "protected-results.json"
         command = [sys.executable, "-m", "scripts.ci_mutation.report", str(target), *map(str, shard), *paths]
         env = {**os.environ, "PYTHONPATH": str(GRADER), "PYTHONSAFEPATH": "1"}
-        subprocess.run(command, cwd=listing.parent, env=env, check=True)
+        subprocess.run(command, cwd=folder, env=env, check=True)
         rows.update(json.loads(target.read_text()))
     return rows
 

@@ -167,10 +167,11 @@ def test_recollect_runs_this_copys_collector_in_each_work_folder(
         Path(command[3]).write_text(json.dumps({PATH: [SURVIVOR]}))
 
     monkeypatch.setattr(module.subprocess, "run", run)
-    assert module.recollect(tmp_path, {PATH}, (1, 3)) == {PATH: [SURVIVOR]}
-    target = tmp_path / "0-a" / "protected-results.json"
-    command = [module.sys.executable, "-m", "scripts.ci_mutation.report", str(target), "1", "3", PATH]
-    assert calls == [(command, tmp_path / "0-a", str(module.GRADER), "1", True)]
+    monkeypatch.chdir(tmp_path)
+    assert module.recollect(Path("."), {PATH}, (1, 3)) == {PATH: [SURVIVOR]}
+    folder = tmp_path.resolve() / "0-a"
+    command = [module.sys.executable, "-m", "scripts.ci_mutation.report", str(folder / "protected-results.json")]
+    assert calls == [([*command, "1", "3", PATH], folder, str(module.GRADER), "1", True)]
     assert module.GRADER == Path(module.__file__).resolve().parents[2]
 
 
