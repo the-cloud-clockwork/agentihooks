@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.574 · 2026-11-02
+
+### 2026-11-02 · 1d6375b61a05 · #9322 · @nestorcolt
+
+**Hold a tick step whose earlier run is still alive**
+
+Previously, if a tick step ran past its time budget, the next pass could start that same step again while the old run was still going, which for a step like placement meant it could spawn twice. The engine now tracks each step's running thread by name under a lock; if an earlier run is still alive when the next pass starts, it returns a new `held` outcome instead of starting a second thread, and resumes normal runs once the earlier one finishes. This closes a real race that let a slow step overlap itself across passes.
+
 ## v2.17.572 · 2026-11-02
 
 ### 2026-11-02 · e8753f43f9f9 · #9321 · @agenticore-app
