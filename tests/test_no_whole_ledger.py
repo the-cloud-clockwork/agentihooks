@@ -1,6 +1,7 @@
 """Tests for the gate that refuses new whole ledger state reads in the swarm and tick packages."""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -121,6 +122,7 @@ def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
     assert "grading needs --base" in capsys.readouterr().err
 
 
+@pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy duplicates every function body")
 def test_the_recorded_allowlist_matches_the_repository() -> None:
     assert no_whole_ledger.load(_ROOT) == no_whole_ledger.measure(_ROOT)
 

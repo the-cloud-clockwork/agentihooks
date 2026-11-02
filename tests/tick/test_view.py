@@ -271,10 +271,13 @@ def test_without_a_held_view_the_ledger_is_read_whole() -> None:
 
 def test_holding_drops_the_view_the_block_started() -> None:
     outer = view.LedgerView(1, STATE)
+    outer_refresh = ("outer", lambda: outer)
     view.CURRENT.set(outer)
+    view.REFRESH.set(outer_refresh)
     with view.holding():
         assert (view.CURRENT.get(), view.REFRESH.get()) == (None, None)
         view.CURRENT.set(view.LedgerView(2, STATE))
         view.REFRESH.set(("sw", lambda: view.LedgerView(3, STATE)))
-    assert (view.CURRENT.get(), view.REFRESH.get()) == (outer, None)
+    assert (view.CURRENT.get(), view.REFRESH.get()) == (outer, outer_refresh)
     view.CURRENT.set(None)
+    view.REFRESH.set(None)
