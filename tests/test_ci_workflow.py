@@ -1204,7 +1204,7 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
 def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
     jobs = _workflow()["jobs"]
     job = jobs["shard-check"]
-    assert set(job["needs"]) == {"split", "select", "reuse", "admission"}
+    assert set(job["needs"]) == {"split", "select", "reuse", "admission", "unit", "unit-lost", "unit-rerun"}
     stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     mint = next(step for step in job["steps"] if step.get("id") == "app-token")
@@ -1227,6 +1227,15 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
     assert "REUSED" in check
     assert job["timeout-minutes"] == "${{ github.event_name == 'merge_group' && 42 || 60 }}"
     assert job["permissions"] == {"contents": "read"}
+
+
+def test_queue_verifier_and_shard_check_wait_for_the_units_instead_of_holding_a_runner() -> None:
+    jobs = _workflow()["jobs"]
+    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], deferred=True)
+    condition = jobs["shard-check"]["if"]
+    assert "(needs.unit-lost.result == 'success' || needs.unit-lost.result == 'skipped')" in condition
+    assert "(needs.unit-rerun.result == 'success' || needs.unit-rerun.result == 'skipped')" in condition
+    assert jobs["queue-fail-fast"]["if"].startswith("${{ !cancelled() ")
 
 
 def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue_runs():
