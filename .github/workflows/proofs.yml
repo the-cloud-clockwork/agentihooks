@@ -299,10 +299,19 @@ jobs:
         with:
           version: '0.12.23'
           checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            .github/test-requirements.lock
+            .github/test-constraints.txt
+            .github/test-excludes.txt
+          cache-suffix: focused-proof-probe
+          prune-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: |
+          du -sh "$(uv cache dir)" || true
+          time uv pip install --system --offline --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]' || { echo OFFLINE_FAILED; time uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'; }
 
       - name: Install the pinned nats server for the bus backend tests
         timeout-minutes: 3
