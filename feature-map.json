@@ -74,7 +74,7 @@
     },
     {
       "id": "swarm-tick-step-overlap-hold",
-      "origin": "plan",
+      "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-overlap-hold",
       "behaviour": "A tick step still running from an earlier pass is held, not started again: the engine records it as held while its earlier run is alive, so placement runs once across two overlapping passes, and the step runs again once that earlier run ends.",
       "seam": "scripts.tick.engine.run_step and scripts.tick.engine.run_group",
