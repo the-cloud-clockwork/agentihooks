@@ -35,5 +35,8 @@
     "36835a6f3abb51f660443015407532dfc20bcbae",
     "51bdee4f8ea604c3af9bfa2daa35a9acf6cf2a22",
     "ca165e0127c1e07780c4dc82e065d3288ea908a3"
+  ],
+  "scripts/ci_gate_units_steps.yml": [
+    "6fd6272698703dc1ea96d03c25700c907fa1ffed"
   ]
 }
