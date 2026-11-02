@@ -50,12 +50,21 @@ def actions_of(name: str) -> Domain:
 
 
 def actions(records: Iterable[StepRecord]) -> list[str]:
-    """Return the actions the recorded steps wrote to their own domains, in step order."""
-    return [
+    """Return the actions the recorded steps wrote to their own domains, then each write they dropped, in step order."""
+    return [action for record in records for action in _step_actions(record)]
+
+
+def _step_actions(record: StepRecord) -> list[str]:
+    """Return one step's actions followed by a line naming each write the engine dropped and why."""
+    if not record.result:
+        return []
+    found = [
         action
-        for record in records
-        if record.result
         for write in record.result.writes
         if write.domain == actions_of(record.name)
         for action in cast(list[str], write.value)
+    ]
+    return found + [
+        f"dropped write {write.domain} {write.key} of step {record.name}: {why}; the next pass recomputes it"
+        for write, why in zip(record.dropped, record.conflicts, strict=True)
     ]

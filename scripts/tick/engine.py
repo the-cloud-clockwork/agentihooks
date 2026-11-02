@@ -2,10 +2,10 @@
 
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextvars import Context as ContextCopy
 from contextvars import copy_context
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Thread
 from typing import Any
 from uuid import uuid4
@@ -13,9 +13,12 @@ from uuid import uuid4
 from scripts.swarm import tick_report, timing
 from scripts.tick import registry
 from scripts.tick.adapters.inbox import notify_pass_budget
-from scripts.tick.step import Context, Result, Step
+from scripts.tick.ports.records import RevisionConflict
+from scripts.tick.step import Context, Domain, Result, Step, Write
 
-__all__ = ["FAILED", "LATE", "OK", "StepRecord", "group_steps", "run_group", "run_step"]
+__all__ = ["FAILED", "LATE", "OK", "Appliers", "StepRecord", "group_steps", "run_group", "run_step"]
+
+Appliers = Mapping[Domain, Callable[[Write], object]]
 
 OK = "ok"
 LATE = "late"
@@ -32,6 +35,8 @@ class StepRecord:
     error: str = ""
     result: Result | None = None
     abandoned: bool = False
+    dropped: tuple[Write, ...] = ()
+    conflicts: tuple[str, ...] = ()
 
     @property
     def outcome(self) -> str:
@@ -88,9 +93,34 @@ def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: St
         outcome.append(exc)
 
 
-def run_group(name: str, ctx: Context, steps: Iterable[Step] | None = None) -> tuple[StepRecord, ...]:
-    """Run every step of group ``name`` in group order; a failed or late step never stops the next."""
-    return tuple(run_step(step, ctx) for step in group_steps(name, steps))
+def run_group(
+    name: str, ctx: Context, steps: Iterable[Step] | None = None, apply: Appliers | None = None
+) -> tuple[StepRecord, ...]:
+    """Run every step of group ``name`` in group order, applying each step's writes through ``apply`` as it ends.
+
+    A failed or late step never stops the next.
+    """
+    return tuple(_applied(run_step(step, ctx), apply or {}) for step in group_steps(name, steps))
+
+
+def _applied(record: StepRecord, apply: Appliers) -> StepRecord:
+    """Apply the record's writes through the applier of their domain, dropping each one whose compare and set failed.
+
+    Writes for a domain with no applier pass through untouched. A dropped write is recomputed by the next pass.
+    """
+    if record.result is None:
+        return record
+    dropped: list[Write] = []
+    conflicts: list[str] = []
+    for write in record.result.writes:
+        if (applier := apply.get(write.domain)) is None:
+            continue
+        try:
+            applier(write)
+        except RevisionConflict as exc:
+            dropped.append(write)
+            conflicts.append(str(exc))
+    return replace(record, dropped=tuple(dropped), conflicts=tuple(conflicts)) if dropped else record
 
 
 PASS_BUDGET_HOLD = "tick:budget-hold"
