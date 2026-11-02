@@ -20,6 +20,53 @@ def test_proof_dependencies_use_the_baked_playwright_constraint():
     assert "uv pip install --system" in install["run"]
 
 
+@pytest.mark.parametrize(
+    ("baked", "offline_code", "expected"),
+    [(True, 0, ["--offline"]), (True, 1, ["--offline", "--system"]), (False, 0, ["--system"])],
+)
+def test_proof_dependencies_install_offline_into_the_baked_venv(
+    tmp_path: Path, baked: bool, offline_code: int, expected: list[str]
+) -> None:
+    """Prefer the runner's baked venv offline and fall back to a PyPI install into the system interpreter."""
+    install = next(step for step in _job()["steps"] if step.get("name") == "Install dependencies")
+    venv = tmp_path / "venv"
+    if baked:
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin/python").write_text("#!/usr/bin/env bash\n")
+        (venv / "bin/python").chmod(0o755)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "uv").write_text(
+        '#!/usr/bin/env bash\necho "$*" >> "$CALLS"\n[[ "$*" != *--offline* ]] || exit "$OFFLINE_CODE"\n'
+    )
+    (tools / "uv").chmod(0o755)
+    calls = tmp_path / "calls"
+    github_path = tmp_path / "github_path"
+    github_path.touch()
+    result = subprocess.run(
+        ["bash", "-e", "-c", install["run"]],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "BAKED_VENV": str(venv),
+            "WHEELHOUSE": install["env"]["WHEELHOUSE"],
+            "CALLS": str(calls),
+            "OFFLINE_CODE": str(offline_code),
+            "GITHUB_PATH": str(github_path),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = calls.read_text().splitlines()
+    assert [next(flag for flag in ("--offline", "--system") if flag in line) for line in lines] == expected
+    assert all("--constraint .github/test-requirements.lock" in line for line in lines)
+    assert all("-e .[dev,all]" in line for line in lines)
+    assert github_path.read_text() == (f"{venv}/bin\n" if expected == ["--offline"] else "")
+    assert install["env"]["BAKED_VENV"] == "/opt/agentihooks-venv"
+
+
 @pytest.mark.parametrize("isolated", [False, True])
 def test_proof_home_cannot_import_a_shadow_playwright(tmp_path, isolated):
     job = _job()

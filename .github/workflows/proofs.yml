@@ -302,7 +302,16 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
-        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+        env:
+          BAKED_VENV: /opt/agentihooks-venv
+          WHEELHOUSE: /opt/wheelhouse
+        run: |
+          if [[ -x "$BAKED_VENV/bin/python" ]] && uv pip install --offline --no-index --find-links "$WHEELHOUSE" --python "$BAKED_VENV/bin/python" --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'; then
+            echo "$BAKED_VENV/bin" >> "$GITHUB_PATH"
+            echo "::notice title=Baked venv hit::The runner venv served the install offline"
+            exit 0
+          fi
+          uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Install the pinned nats server for the bus backend tests
         timeout-minutes: 3
