@@ -1,7 +1,6 @@
 import json
 import subprocess
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 
@@ -98,12 +97,10 @@ def test_the_required_view_graph_charges_graphql_and_runs_the_exact_query(
     with github_reads.calling("swarm.checks.view"):
         body = merge_queue.graphql("{q}", {"url": PR}, read)
     assert body == {"p0": 1}
-    timeout = seen[0][1].pop("timeout")
-    assert isinstance(timeout, float) and 19 < timeout <= 20
     assert seen == [
         (
             command(["api", "graphql", "-f", "query={q}", "-f", f"url={PR}"]),
-            {"cwd": Path(), "capture_output": True, "text": True, "check": True},
+            {"capture_output": True, "text": True, "timeout": 20},
         )
     ]
     assert [(row["caller"], row["endpoint"], row["at"]) for row in charged()] == [
