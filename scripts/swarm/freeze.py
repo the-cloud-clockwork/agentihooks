@@ -105,7 +105,7 @@ def _cold(tasks: list[dict[str, Any]], records: list[dict[str, Any]], graph: dic
     found: set[str] = set()
     for task in tasks:
         chain = cast("list[str]", ancestry(task, graph))
-        if task.get("state") != "done" and frozen(task, records, chain):
+        if task.get("state") == "open" and frozen(task, records, chain):
             found.add(task["id"])
     return found
 
@@ -148,7 +148,8 @@ def _open_focus(task: dict[str, Any], records: list[dict[str, Any]], focus: list
     if task.get("state") == "done" or task.get("out_of_scope"):
         return False
     chain = ancestry(task, graph)
-    return any(covers(target, task, chain) for target in focus) and not frozen(task, records, chain)
+    cold = task.get("state") == "open" and frozen(task, records, chain)
+    return any(covers(target, task, chain) for target in focus) and not cold
 
 
 def exempt(task: dict[str, Any], fix_phase: str) -> bool:

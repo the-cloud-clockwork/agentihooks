@@ -239,10 +239,10 @@ class TestFrozenSplit:
         assert (result["remaining"], result["work"], result["chain"]) == (4, 105, 90)
         assert (result["frozen"], result["frozen_work"]) == (1, 15)
 
-    def test_a_frozen_dependency_still_holds_the_focused_work_waiting_on_it(self):
+    def test_focused_work_waiting_on_a_frozen_dependency_releases_the_focus(self):
         d = self.ledger(("focus", "tasks/c"), ("freeze", "tasks/a"))
         result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
-        assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (1, 15, 4, 105)
+        assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (2, 30, 3, 90)
 
     @pytest.mark.timeout(10)
     def test_a_dependency_cycle_under_focused_work_is_counted_once(self):
