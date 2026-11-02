@@ -18,7 +18,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.ci_budget import GATE
 from scripts.inbox.store import InboxStore
@@ -367,7 +367,7 @@ def _lane(store, slug: str) -> str:
     return "eng" if seats == 0 else "ci"
 
 
-def _green(slug: str, ledger: LedgerClient, doc: dict, last: dict, repo: str, run: Callable) -> list[str]:
+def _green(slug: str, ledger: Any, doc: Any, last: Any, repo: str, run: Callable[..., Any]) -> list[str]:
     run_id, actions = last["id"], []
     known = {t["id"]: t for t in doc.get("tasks", [])}
     for task in [t for t in _promotion_tasks(doc) if t.get("state") in CLOSABLE]:
@@ -388,7 +388,7 @@ def _green(slug: str, ledger: LedgerClient, doc: dict, last: dict, repo: str, ru
     return actions
 
 
-def pinned(repo_dir: str, url: str | None, run: Callable = subprocess.run) -> bool | None:
+def pinned(repo_dir: str, url: str | None, run: Callable[..., Any] = subprocess.run) -> bool | None:
     """Whether the merged pull request at url added or changed a test file feature-map.json maps; None when unread."""
     number = PULL.search(url) if url else None
     if number is None:
@@ -405,14 +405,14 @@ def pinned(repo_dir: str, url: str | None, run: Callable = subprocess.run) -> bo
     return any(f["filename"] in mapped for f in files if f.get("status") != "removed")
 
 
-def _mapped_files(repo_dir: str, ref: str, run: Callable) -> set[str]:
+def _mapped_files(repo_dir: str, ref: str, run: Callable[..., Any]) -> set[str]:
     endpoint = f"repos/{{owner}}/{{repo}}/contents/{FEATURE_MAP}?ref={ref}"
     content = _read(repo_dir, endpoint, CONTENT_JQ, run, pages=())[0]["content"]
     found = json.loads(base64.b64decode(content))
     return {test.split("::")[0] for feature in found["features"] for test in feature.get("tests", [])}
 
 
-def _pin(slug: str, ledger: LedgerClient, task: dict, pin: dict, run_id: int) -> list[str]:
+def _pin(slug: str, ledger: Any, task: Any, pin: Any, run_id: int) -> list[str]:
     if pin:
         return []
     pin_id = PIN_PREFIX + task["id"]
@@ -433,7 +433,7 @@ def _pin(slug: str, ledger: LedgerClient, task: dict, pin: dict, run_id: int) ->
 
 
 def _recover(
-    slug: str, redis: Redis, ledger: LedgerClient, doc: dict, last: dict, repo: str, run: Callable
+    slug: str, redis: Redis, ledger: Any, doc: Any, last: Any, repo: str, run: Callable[..., Any]
 ) -> list[str]:
     actions = _green(slug, ledger, doc, last, repo, run)
     _release(redis, slug, doc)

@@ -849,7 +849,7 @@ def test_a_former_owner_fixer_reads_its_pull_request_in_the_watched_repo(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls, former, ledger = [], Ledger([fixer(pr_url=PR_URL)]), Ledger()
-    ledger.state = lambda slug: former.doc()
+    monkeypatch.setattr(ledger, "state", lambda slug: former.doc())
     ledger.update_task, ledger.comment = former.update_task, former.comment
     monkeypatch.setattr(promotion_watch.promotion_owner, "history", lambda repo, redis: {SLUG, "former"})
     refresh(store, ledger, gh([GREEN], calls=calls))
