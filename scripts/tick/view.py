@@ -124,9 +124,9 @@ def document(slug: str) -> dict[str, Any] | None:
 @contextmanager
 def holding() -> Iterator[None]:
     """Hold no view on entry and drop whatever view the block started on exit."""
-    current, refresh = CURRENT.set(None), REFRESH.set(None)
+    current_token, refresh_token = CURRENT.set(None), REFRESH.set(None)
     try:
         yield
     finally:
-        REFRESH.reset(refresh)
-        CURRENT.reset(current)
+        REFRESH.reset(refresh_token)
+        CURRENT.reset(current_token)
