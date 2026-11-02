@@ -108,9 +108,9 @@ the file untouched.
 
 | Stored view | Request | Reply | Result |
 | --- | --- | --- | --- |
-| None, or unreadable | `since` 0 | The three parts in full | Stored as read |
+| None, or unreadable | `since` 0 | The eight parts in full | Stored as read |
 | At generation `g` | `since` `g` | The changes since `g` | Patched onto the stored state, stored at the new generation |
-| At generation `g`, beyond the change window | `since` `g` | The three parts in full | Replaces the stored state |
+| At generation `g`, beyond the change window | `since` `g` | The eight parts in full | Replaces the stored state |
 | At generation `g`, patch does not apply | `since` `g`, then `since` 0 | Changes, then the parts in full | The full read replaces the stored state |
 
 A patch does not apply when the stored state lacks a key or list item the
