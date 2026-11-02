@@ -162,6 +162,7 @@ def test_export_leaves_out_the_tick_lock_and_keeps_its_other_keys(store: RedisSt
     seed(store, "sw")
     store.redis.set(store.key("sw", "tick-lock"), "held")
     store.redis.set(store.key("sw", ""), "bare")
+    store.culture.set("sw", "ship small")
     keys = store.export("sw")["keys"]
     assert store.key("sw", "tick-lock") not in keys
     assert store.key("sw", "") in keys
