@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # Purpose:  Generate docs/00-INDEX.md from a TSV mapping.
 # Inputs:   TSV via stdin: filename<TAB>section_name<TAB>topic_description
 #           Lines must be sorted by section number.
 # Outputs:  Writes docs/00-INDEX.md
 # Idempotency: Overwrites 00-INDEX.md completely — regeneration is the intent.
+set -euo pipefail
 
 INDEX="docs/00-INDEX.md"
 mkdir -p docs

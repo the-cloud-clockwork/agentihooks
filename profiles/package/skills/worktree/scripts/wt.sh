@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # wt.sh — the one worktree lifecycle for every repo and every agentic session.
-#
 # Every worktree lives at  $WORKTREE_ROOT/<repo>/<name>  (default ~/dev/worktrees),
 # on branch <name>, cut from fresh origin/<base>, where <base> is WT_BASE_BRANCH (default dev). The repo is the primary checkout
 # of the git repo containing the current directory (or --repo DIR), so running
 # it from inside another worktree still resolves the real repo.
-#
 # Usage:
 #   wt.sh new  [name] [--repo DIR] [--from REF]  # worktree + branch <name> off fresh origin/<base> (or REF); prints the path
 #   wt.sh tmp  [name] [--repo DIR] [--from REF]  # throwaway detached worktree under <repo>/_tmp/; prints the path
@@ -14,12 +12,10 @@
 #              [--pushed]                    # parked work: drop a clean worktree and its local branch once origin holds its head; keep the remote branch
 #                                             # (<name> may be a _tmp path printed by 'tmp'; those are removed even if dirty)
 #   wt.sh root                                # print the worktree root
-#
 # When free space (the smaller of the worktree filesystem and, on WSL, /mnt/c) is below WT_MIN_FREE_GB (50) or
 # the repo already has WT_MAX_PER_REPO (60) worktrees, new and tmp first evict the oldest safe worktrees through
 # 'agentihooks gc --make-room' and refuse only when nothing safe is left. Both record the calling agent session
 # as owner through 'agentihooks lease' when agentihooks is installed.
-#
 # Names come from code: with agentihooks installed, new and tmp take the name 'agentihooks name' builds for the
 # calling session when none is given, and refuse a given name it did not build. Without agentihooks or outside an
 # agent session, the given name stands.

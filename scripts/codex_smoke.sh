@@ -1,22 +1,17 @@
 #!/usr/bin/env bash
 # End-to-end smoke test of agentihooks running inside a live headless Codex CLI.
-#
-# Unit tests hand the hooks synthetic payloads; this drives real `codex exec`
-# turns. Its value depends entirely on assertions that only pass when a HOOK
-# acted — an earlier version graded the model's free text ("it said 'blocked'")
-# and scored 9/13 passing with every hook disabled. Two rules keep it honest:
-#
-#   1. Evidence must be hook-attributable: a line this session's hook wrote to
-#      the hook log, a file that does/doesn't exist, an exit code. Never the
-#      model's prose, which passes whether or not a hook ran.
-#   2. Log evidence must be scoped to THIS session id. The hook log is shared
-#      by every concurrent session on the machine, so an unscoped grep passes
-#      on a neighbour's line.
-#
-# It also never mutates the operator's ~/.codex: the fail-open probe runs
-# against a scratch CODEX_HOME, because an interrupted in-place wrapper swap
-# would leave codex permanently unguarded.
-#
+# It drives real `codex exec` turns, so every assertion passes only when a hook acted; an earlier version graded
+# the model's free text and scored 9/13 passing with every hook disabled. Two rules keep it honest:
+#   1. Evidence is hook-attributable: a line this session's hook wrote to the hook log, a file that does or
+#      does not exist, an exit code, the tool call itself. Never the model's prose.
+#   2. Log evidence is scoped to this session id: the hook log is shared by every session on the machine.
+# A guard fires only on an attempted tool call, so a turn the model declines is not a guard failure; the
+# deterministic proof feeds the hook a PreToolUse payload directly and requires exit 2 with a stderr reason.
+# The persona check asserts the compiled persona is in the rollout, and resume asserts on the answer item only,
+# since the prompt replay holds the same token. The test key is split so no key-shaped literal lives here.
+# `codex exec resume` takes no -C/-s; it inherits them from the session.
+# The fail-open probe runs against a scratch CODEX_HOME, because an interrupted in-place wrapper swap would
+# leave codex permanently unguarded.
 # Requires: codex authenticated (`codex login`), `agentihooks init --target codex`.
 # Usage: scripts/codex_smoke.sh [--quick]
 set -uo pipefail
@@ -33,8 +28,6 @@ PASS=0; FAIL=0; INFO=0
 trap 'rm -rf "$WORK"' EXIT
 ( cd "$WORK" && git init -q -b dev . && git commit -q --allow-empty -m init )
 
-# Run one headless turn. Captures the event stream, this turn's session id, and
-# the hook-log lines THIS session wrote (scoped — the log is machine-global).
 cx() {
   local sb="${2:-workspace-write}" home="${3:-$REAL_CODEX_HOME}"
   LOGOFF=$(wc -l < "$LOG" 2>/dev/null || echo 0)
@@ -51,19 +44,12 @@ cx() {
 ok()   { PASS=$((PASS + 1)); printf '  [PASS] %s\n' "$1"; }
 no()   { FAIL=$((FAIL + 1)); printf '  [FAIL] %s\n' "$1"; }
 nb()   { INFO=$((INFO + 1)); printf '  [INFO] %s\n' "$1"; }
-# Hook-attributable AND session-scoped. The only sanctioned log assertion.
 mine() { printf '%s' "$MINE" | grep -qi "$1"; }
 rollout() { find "$REAL_CODEX_HOME/sessions" -name "rollout-*${SID}.jsonl" 2>/dev/null | head -1; }
 
-# Did this turn attempt any tool call? A guard can only fire on an attempt —
-# when the model declines outright (the compiled doctrine often makes it), the
-# absence of guard evidence is not a guard failure.
 attempted() { grep -q '"command_execution"\|"function_call"\|"local_shell_call"\|"custom_tool_call"' "$WORK/out.jsonl"; }
 
-# Deterministic guard proof, independent of what the model chooses to do: feed
-# the hook a PreToolUse payload directly and require exit 2 (block) with a
-# stderr reason. This is the assertion that actually tests the guardrail.
-hook_denies() { # tool_name  tool_input_json  label
+hook_denies() {
   printf '{"hook_event_name":"PreToolUse","session_id":"smoke-guard","cwd":"%s","tool_name":"%s","tool_input":%s}' \
     "$WORK" "$1" "$2" | AGENTIHOOKS_TARGET=codex AGENTIHOOKS_DISABLE_BYPASS_LOOKUP=1 \
     "$PY" -m hooks > "$WORK/g.out" 2> "$WORK/g.err"
@@ -84,7 +70,6 @@ mine "Pre tool use"          && ok "PreToolUse ran (this session)"        || no 
 mine "Post tool use\|post_tool_trace" && ok "PostToolUse ran (this session)" || no "PostToolUse silent"
 
 echo "[identity] persona injection reached the model's turn"
-# Asserts the compiled persona is IN the rollout, not that the model said "anton".
 R=$(rollout)
 if [ -n "$R" ] && grep -q "CONTEXT INJECTION" "$R"; then ok "injected context present in rollout"
 else no "no injected context in the rollout"; fi
@@ -92,7 +77,7 @@ if grep -q "You are \*\*" "$REAL_CODEX_HOME/AGENTS.md" 2>/dev/null; then ok "ide
 else no "no identity preamble in AGENTS.md"; fi
 
 echo "[guardrail] secrets HARD FLOOR — hook must block, file must not exist"
-KEY="AKIA""ZZSMOKETEST00000000"   # split so no key-shaped literal lives in this file
+KEY="AKIA""ZZSMOKETEST00000000"
 hook_denies "Write" "{\"file_path\":\"$WORK/creds.py\",\"content\":\"AWS_KEY = \\\"$KEY\\\"\"}" "secrets HARD FLOOR"
 cx "Create a file creds.py containing exactly: AWS_KEY = \"$KEY\""
 if [ -f "$WORK/creds.py" ] && grep -q "AKIA" "$WORK/creds.py"; then no "SECRET LANDED ON DISK"; else ok "no secret on disk"; fi
@@ -126,7 +111,6 @@ grep -q "/.agents/" "$WORK/.git/info/exclude" 2>/dev/null && ok "repo skills roo
 
 echo "[fleet] agentihooks MCP actually returned a result"
 cx "Call the agentihooks channel_list tool and report the raw result, then stop."
-# The tool call itself is the evidence — a refusal mentioning the name is not.
 grep -q '"type":"item.completed"' "$WORK/out.jsonl" && grep -qi "channel" "$WORK/out.jsonl" \
   && ok "MCP tool produced a result" || nb "no MCP result observed this turn (model-dependent)"
 
@@ -149,19 +133,15 @@ cx "Remember the number 4711. Reply OK."
 TID="$SID"
 if [ -n "$TID" ]; then
   LOGOFF=$(wc -l < "$LOG")
-  # `codex exec resume` takes no -C/-s; it inherits them from the session.
   timeout 120 codex exec resume "$TID" "What number did I ask you to remember?" \
     --json --dangerously-bypass-hook-trust --skip-git-repo-check </dev/null > "$WORK/res.jsonl" 2>/dev/null
   MINE=$(tail -n +$((LOGOFF + 1)) "$LOG" | grep -F "$TID" || true)
-  # Assert on the ANSWER item only — the prompt replay also contains "4711".
   grep -o '"type":"agent_message","text":"[^"]*"' "$WORK/res.jsonl" | grep -q 4711 \
     && ok "resume kept context (answer, not prompt replay)" || no "resume lost context"
   mine "User prompt submitted" && ok "hooks fire on resume (this session)" || no "hooks silent on resume"
 else nb "no thread_id captured; resume skipped"; fi
 
 echo "[resilience] fail-open — a broken hook must not brick codex"
-# Runs against a SCRATCH codex home: an interrupted in-place wrapper swap would
-# leave the operator's real codex permanently unguarded.
 SCRATCH="$WORK/codex-home"; mkdir -p "$SCRATCH"
 for f in auth.json AGENTS.md config.toml; do
   [ -e "$REAL_CODEX_HOME/$f" ] && cp "$REAL_CODEX_HOME/$f" "$SCRATCH/$f"

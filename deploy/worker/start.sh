@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Worker hive container entry point.
+# sshd StrictModes is off: the keys come from a read-only Secret mount the worker cannot write.
+# hive refresh retires the mounted password, so a restart keeps the saved refresh of the same member.
+# hive refresh from an ssh shell has no pod environment, so it reads the endpoint from hive.env.
+# Join and agents trust the system roots beside the mounted CA; init rewrites the file, so it is placed twice.
 set -euo pipefail
 
 if [[ -n "${HIVE_READY_FILE:-}" ]]; then
@@ -84,7 +89,6 @@ if [[ -n "${HIVE_SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
   elif [[ ! -f "$ssh_state/host_key" ]]; then
     ssh-keygen -q -t ed25519 -N '' -f "$ssh_state/host_key"
   fi
-  # StrictModes off: the keys come from a read-only Secret mount the worker cannot write.
   cat > "$ssh_state/sshd_config" <<EOF
 Port ${HIVE_SSH_PORT:-2222}
 ListenAddress 0.0.0.0
@@ -117,7 +121,6 @@ ledger_credential() {
   grep -m1 '^AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=' "$1" 2>/dev/null || true
 }
 if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
-  # hive refresh retires the mounted password, so a restart keeps the saved refresh of the same member.
   if [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]] \
     || [[ "$(ledger_credential "$HIVE_CREDENTIAL_FILE")" != "$(ledger_credential "$AGENTIHOOKS_HOME/hive.env")" ]]; then
     install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
@@ -134,7 +137,6 @@ elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
   done
 fi
 if [[ -n "${AGENTIHOOKS_HIVE_URL:-}" ]]; then
-  # hive refresh from an ssh shell has no pod environment, so it reads the endpoint from hive.env.
   python3 - <<'PY'
 import os
 from pathlib import Path
@@ -144,7 +146,6 @@ kept = [line for line in saved.read_text().splitlines() if not line.startswith('
 saved.write_text('\n'.join([f"AGENTIHOOKS_HIVE_URL={os.environ['AGENTIHOOKS_HIVE_URL']}", *kept]) + '\n')
 PY
 fi
-# Join and agents trust the system roots beside the mounted CA; init rewrites the file, so it is placed twice.
 place_ledger_ca() {
   if [[ -n "${LEDGER_CA_PEM:-}" ]]; then
     python3 - <<'PY'

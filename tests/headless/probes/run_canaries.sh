@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # Manual probe, never run in CI: spends real Claude and Codex quota.
 # Usage: run_canaries.sh <out dir> [run name ...]
+set -euo pipefail
 
 OUT="$(readlink -f "$1")"
 shift

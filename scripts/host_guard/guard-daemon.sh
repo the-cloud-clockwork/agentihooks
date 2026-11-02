@@ -2,6 +2,7 @@
 # guard-daemon.sh — Process Guard Daemon v3 (WSL/Linux)
 # Ghost detector: only kills processes with N+ instances hanging for timeout+.
 # One-pass: load config, group processes, flag ghosts, kill if timed out, exit.
+# State keeps each flagged process name's first flagged time; killed groups are dropped from it.
 # Triggered every 60s by the agentihooks scheduler (agentihooks host-guard install).
 
 set -euo pipefail
@@ -14,13 +15,11 @@ STATE_PATH="$SCRIPT_DIR/guard-daemon-state.json"
 LOG_MAX_SIZE_MB=10
 DRY_RUN="${1:-}"
 
-# --- Dependencies check ---
 if ! command -v jq &>/dev/null; then
     echo "ERROR: jq required. Install with: sudo apt install jq" >&2
     exit 1
 fi
 
-# --- Log helper ---
 guard_log() {
     local msg="$1"
     echo "$(date '+%Y-%m-%d %H:%M:%S') $msg" >> "$LOG_PATH"
@@ -34,7 +33,6 @@ guard_log() {
     fi
 }
 
-# --- Parse timeout to seconds ---
 parse_timeout() {
     local val="$1"
     if [[ "$val" == "null" || -z "$val" ]]; then
@@ -54,7 +52,6 @@ parse_timeout() {
     fi
 }
 
-# --- Load config ---
 if [[ ! -f "$CONFIG_PATH" ]]; then
     guard_log "ERROR config_missing path=$CONFIG_PATH"
     exit 1
@@ -76,7 +73,6 @@ THRESHOLD=$(echo "$CONFIG" | jq -r '.threshold // 30')
 TIMEOUT_RAW=$(echo "$CONFIG" | jq -r '.timeout // "1h"')
 TIMEOUT_SEC=$(parse_timeout "$TIMEOUT_RAW")
 
-# Build excludes set (lowercase)
 declare -A EXCLUDES
 while IFS= read -r name; do
     [[ -z "$name" || "$name" == "null" ]] && continue
@@ -109,7 +105,6 @@ excluded_command() {
     return 1
 }
 
-# --- Load state (per process-name: firstFlagged timestamp) ---
 declare -A STATE_FLAGGED
 declare -A STATE_COUNT
 if [[ -f "$STATE_PATH" ]]; then
@@ -138,7 +133,6 @@ declare -A NEW_STATE_COUNT
 
 MY_PID=$$
 
-# --- Group processes by name and count ---
 declare -A PROC_COUNTS
 while IFS= read -r line; do
     count=$(echo "$line" | awk '{print $1}')
@@ -151,13 +145,10 @@ for name in "${!PROC_COUNTS[@]}"; do
     count=${PROC_COUNTS[$name]}
     name_lower=$(echo "$name" | tr '[:upper:]' '[:lower:]')
 
-    # Skip if below threshold
     (( count < THRESHOLD )) && continue
 
-    # Skip excluded
     [[ -v "EXCLUDES[$name_lower]" ]] && continue
 
-    # This group is over threshold
     ((flag_count++)) || true
 
     if [[ -v "STATE_FLAGGED[$name_lower]" ]]; then
@@ -166,7 +157,6 @@ for name in "${!PROC_COUNTS[@]}"; do
         elapsed=$(( NOW - first_flagged_epoch ))
 
         if (( elapsed >= TIMEOUT_SEC )); then
-            # Ghost confirmed — kill all instances
             hrs=$(awk "BEGIN{printf \"%.1f\", $elapsed/3600}")
             while IFS= read -r pid; do
                 [[ "$pid" == "$MY_PID" ]] && continue
@@ -186,23 +176,19 @@ for name in "${!PROC_COUNTS[@]}"; do
                     fi
                 fi
             done < <(pgrep -u "$(whoami)" -x "$name" 2>/dev/null || true)
-            # Don't carry to new state — they're dead
         else
-            # Still within grace period
             mins=$(( elapsed / 60 ))
             guard_log "FLAGGED name=$name count=$count first_flagged=${mins}m_ago"
             NEW_STATE_FLAGGED["$name_lower"]="$first_flagged"
             NEW_STATE_COUNT["$name_lower"]="$count"
         fi
     else
-        # First time over threshold
         guard_log "FLAGGED name=$name count=$count first_flagged=now"
         NEW_STATE_FLAGGED["$name_lower"]="$NOW_ISO"
         NEW_STATE_COUNT["$name_lower"]="$count"
     fi
 done
 
-# --- Save state ---
 {
     echo "{"
     first=true

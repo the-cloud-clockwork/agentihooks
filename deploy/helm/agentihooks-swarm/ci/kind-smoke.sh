@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Kind smoke of the agentihooks swarm chart.
+# The probe execution has no Pod, so the deployed controller's Pod reading is not_found and a beating worker is suspect.
+# fsGroup adds group read to a Secret file, so 0400 lands as 440 owned by root and the controller's group.
 set -euo pipefail
 
 cd "$(dirname "$0")/../../../.."
@@ -707,7 +710,6 @@ print(json.dumps({
 }, sort_keys=True))
 EOF
 )"
-# The probe execution has no Pod, so the deployed controller's Pod reading is not_found and a beating worker is suspect.
 if [[ $registered != *'"heartbeat": 200'* || $registered != *'"register": 200'* || $registered != *'"observed": "suspect"'* || $registered != *'"pod": "not_found"'* ]]; then
   printf 'a worker did not register, heartbeat and get observed through the deployed controller: %s\n' "$registered" >&2
   exit 1
@@ -1049,7 +1051,6 @@ printf 'controller recorded the host pressure off reason without an incident, ma
 
 mounted="$(kubectl exec "deployment/$release-controller" -c controller -- sh -c \
   'ls /run/secrets/terminal-ca && stat -L -c "%a %u:%g" "$AGENTIHOOKS_TERMINAL_CA_KEY" && echo "$AGENTIHOOKS_TERMINAL_CA_KEY"')"
-# fsGroup adds group read to a Secret file, so 0400 lands as 440 owned by root and the controller's group.
 if [[ $mounted != $'user_ca\n440 0:10001\n/run/secrets/terminal-ca/user_ca' && $mounted != $'user_ca\n400 '*$'\n/run/secrets/terminal-ca/user_ca' ]]; then
   printf 'the controller does not hold only the user CA key, read only, at its setting path: %s\n' "$mounted" >&2
   exit 1

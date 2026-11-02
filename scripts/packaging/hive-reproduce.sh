@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
+# Run on the UI hive after the hive's GitOps values are synced into their own namespace.
 set -euo pipefail
 
-# Run on the UI hive after the hive's GitOps values are synced into their own namespace.
 label="${1:?usage: hive-reproduce.sh LABEL [NAMESPACE]}"
 namespace="${2:-agentihooks-hive-$label}"
 record="${HIVE_RECORD:-k8s/agentihooks-hive-$label}"

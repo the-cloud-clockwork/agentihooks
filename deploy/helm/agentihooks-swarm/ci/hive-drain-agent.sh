@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # Main process of the kind proof worker hive: keeps the hive ready and runs one scripted agent on it.
 # The first hive pod registers its hive, seats a working agent with a task on it and, once the hive's roll order
 # reaches that agent's inbox, records the agent's own handoff after a short delay, the way a real agent writes its
 # document. Every pod records the moment its container is told to stop, which comes only after the chart's preStop
 # drain returns, so the proof can order the handoff against the stop.
+set -euo pipefail
 
 exec python - <<'EOF'
 import json
