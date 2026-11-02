@@ -3422,7 +3422,6 @@ jobs:
         uses: actions/download-artifact@v4
         with: *gate-required-download-every-shards-mutation-report
 
-      # A split unit's slices run in different shards, so the protected copy grades it once every shard reports.
       - name: Grade the split mutation units from the protected grader
         if: needs.mutation.result == 'success'
         env:
@@ -3434,7 +3433,7 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
           grader="$RUNNER_TEMP/grader"
           grep -qs 'add_parser("units")' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"
-          PYTHONPATH="$grader" python3 -P -m scripts.ci_mutation.regrade units .mutation-reports "$(jq length <<< "$PLANNED")" . "$BASES"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade units .mutation-reports "$(jq length <<< "$PLANNED")" . "$BASES"
 
   test-summary:
     needs: [unit, unit-selected]

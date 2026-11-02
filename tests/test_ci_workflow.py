@@ -2117,7 +2117,7 @@ def test_the_gate_grades_split_units_from_every_shard_with_the_protected_grader(
         'git fetch --no-tags origin "$GRADER"\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
         'grader="$RUNNER_TEMP/grader"\n'
         'grep -qs \'add_parser("units")\' "$grader/scripts/ci_mutation/regrade.py" || grader="$GITHUB_WORKSPACE"\n'
-        'PYTHONPATH="$grader" python3 -P -m scripts.ci_mutation.regrade units .mutation-reports'
+        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade units .mutation-reports'
         ' "$(jq length <<< "$PLANNED")" . "$BASES"\n'
     )
     assert names.index("Require every gate to succeed") < names.index(download["name"]) < names.index(grade["name"])

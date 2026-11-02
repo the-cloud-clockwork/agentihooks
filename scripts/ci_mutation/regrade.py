@@ -54,7 +54,8 @@ def recollect(output: Path, wanted: set[str], shard: tuple[int, int]) -> dict[st
         command = [sys.executable, "-m", "scripts.ci_mutation.report", str(target), *map(str, shard), *paths]
         env = {**os.environ, "PYTHONPATH": str(GRADER), "PYTHONSAFEPATH": "1"}
         subprocess.run(command, cwd=folder, env=env, check=True)
-        rows.update(json.loads(target.read_text()))
+        for path, found in json.loads(target.read_text()).items():
+            rows.setdefault(path, []).extend(found)
     return rows
 
 

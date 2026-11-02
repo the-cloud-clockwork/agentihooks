@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -163,25 +164,30 @@ def test_rebuild_refuses_a_graded_file_with_functions_the_collector_did_not_read
 def test_recollect_runs_this_copys_collector_in_each_work_folder(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    for name, paths in (("0-a", ["tests/test_x.py"]), ("1-b", [PATH, "hooks/other.py"])):
+    folders = {"0-a": ["tests/test_x.py"], "1-b": [PATH, "hooks/other.py"], "2-c": [PATH]}
+    for name, paths in folders.items():
         (tmp_path / name).mkdir()
         (tmp_path / name / "changed-lines.json").write_text(json.dumps(dict.fromkeys(paths, {})))
     calls = []
+    found = {"1-b": [SURVIVOR], "2-c": [KILLED]}
 
     def run(command: list[str], cwd: Path, env: dict[str, str], check: bool) -> None:
         calls.append((command, cwd, env["PYTHONPATH"], env["PYTHONSAFEPATH"], check))
-        Path(command[3]).write_text(json.dumps({PATH: [SURVIVOR]}))
+        Path(command[3]).write_text(json.dumps({PATH: found[cwd.name]}))
 
     monkeypatch.setattr(module.subprocess, "run", run)
     monkeypatch.chdir(tmp_path)
-    assert module.recollect(Path("."), {PATH}, (1, 3)) == {PATH: [SURVIVOR]}
-    folder = tmp_path.resolve() / "1-b"
-    command = [module.sys.executable, "-m", "scripts.ci_mutation.report", str(folder / "protected-results.json")]
-    assert calls == [([*command, "1", "3", PATH], folder, str(module.GRADER), "1", True)]
+    assert module.recollect(Path("."), {PATH}, (1, 3)) == {PATH: [SURVIVOR, KILLED]}
+    expected = []
+    for name in ("1-b", "2-c"):
+        folder = tmp_path.resolve() / name
+        command = [module.sys.executable, "-m", "scripts.ci_mutation.report", str(folder / "protected-results.json")]
+        expected.append(([*command, "1", "3", PATH], folder, str(module.GRADER), "1", True))
+    assert calls == expected
     assert module.GRADER == Path(module.__file__).resolve().parents[2]
 
 
-def _shard(folder: Path, shard: int, rows: list[dict]) -> None:
+def _shard(folder: Path, shard: int, rows: list[dict[str, Any]]) -> None:
     target = folder / f"mutation-report-{shard}" / "report.json"
     target.parent.mkdir(parents=True)
     target.write_text(
@@ -194,7 +200,7 @@ def test_units_grade_every_shards_slices_together_on_the_protected_lines(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
-    second: dict,
+    second: dict[str, Any],
     status: int,
 ) -> None:
     calls = []
