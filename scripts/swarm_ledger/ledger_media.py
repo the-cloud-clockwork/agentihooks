@@ -4,7 +4,9 @@ import hashlib
 import re
 import shutil
 import struct
+from _thread import LockType
 from pathlib import Path
+from typing import Any, cast
 
 import ledger_core as core
 
@@ -20,16 +22,16 @@ JPEG_SOF = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0x
 
 
 class Refused(ValueError):
-    def __init__(self, status, message):
+    def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
         self.status = status
 
 
-def folder(slug):
+def folder(slug: str) -> Path:
     return core.LEDGER_DIR / f"{slug}.media"
 
 
-def _jpeg_size(data):
+def _jpeg_size(data: bytes) -> tuple[int, int]:
     i = 2
     while i + 9 <= len(data) and data[i] == 0xFF:
         marker = data[i + 1]
@@ -40,7 +42,7 @@ def _jpeg_size(data):
     return 0, 0
 
 
-def _webp_size(data):
+def _webp_size(data: bytes) -> tuple[int, int]:
     kind = data[12:16]
     if kind == b"VP8 " and len(data) >= 30:
         width, height = struct.unpack("<HH", data[26:30])
@@ -53,7 +55,7 @@ def _webp_size(data):
     return 0, 0
 
 
-def inspect(data):
+def inspect(data: bytes) -> tuple[str, int, int]:
     """(type, width, height) from the first bytes; Refused(415) for anything but PNG, JPEG, WebP or GIF."""
     size = (0, 0)
     if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
@@ -75,7 +77,7 @@ def write_file(path: Path, data: bytes) -> None:
     from scripts.swarm_ledger.storage_migration.hosted import media_mutation
 
     with (
-        request_metrics.locked(core.LOCK),
+        request_metrics.locked(cast(LockType, core.LOCK)),
         media_mutation(path.parent.parent, path.parent.name.removesuffix(".media")) as writable,
     ):
         if not writable:
@@ -88,7 +90,7 @@ def write_file(path: Path, data: bytes) -> None:
         path.touch()
 
 
-def store(slug, data):
+def store(slug: str, data: bytes) -> dict[str, str | int]:
     if len(data) > MAX_BYTES:
         raise Refused(413, f"an image may be at most {MAX_BYTES >> 20} MB")
     kind, width, height = inspect(data)
@@ -99,7 +101,7 @@ def store(slug, data):
     return {"id": media_id, "type": kind, "size": len(data), "width": width, "height": height}
 
 
-def path_of(slug, media_id):
+def path_of(slug: str, media_id: object) -> Path:
     if not isinstance(media_id, str) or not ID_RE.match(media_id):
         raise ValueError("not a media id")
     path = folder(slug) / media_id
@@ -108,7 +110,7 @@ def path_of(slug, media_id):
     return path
 
 
-def read(slug, media_id, adopt=False):
+def read(slug: str, media_id: str, adopt: bool = False) -> bytes:
     data = media_files.load(slug, media_id)
     if data is None:
         data = path_of(slug, media_id).read_bytes()
@@ -117,25 +119,28 @@ def read(slug, media_id, adopt=False):
     return data
 
 
-def served(slug, media_id):
+def served(slug: str, media_id: str) -> bytes:
     return read(slug, media_id, adopt=True)
 
 
-def entry(slug, media_id):
+def entry(slug: str, media_id: str) -> dict[str, str | int]:
     data = read(slug, media_id)
     kind, width, height = inspect(data)
     return {"id": media_id, "type": kind, "size": len(data), "width": width, "height": height}
 
 
-def check(attachments):
-    if not isinstance(attachments, list) or not 1 <= len(attachments) <= MAX_PER_ENTRY:
+def check(attachments: object) -> None:
+    if not isinstance(attachments, list):
         raise ValueError(f"attachments must list 1 to {MAX_PER_ENTRY} images")
-    for att in attachments:
-        if not isinstance(att, dict) or not ID_RE.match(str(att.get("id"))):
+    items = cast("list[object]", attachments)
+    if not 1 <= len(items) <= MAX_PER_ENTRY:
+        raise ValueError(f"attachments must list 1 to {MAX_PER_ENTRY} images")
+    for att in items:
+        if not isinstance(att, dict) or not ID_RE.match(str(cast("dict[str, object]", att).get("id"))):
             raise ValueError("each attachment needs a media id")
 
 
-def resolve(slug, ops):
+def resolve(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Each attachment rebuilt from the stored file, so the JSON holds only what the server measured."""
     for op in ops:
         if "attachments" in op:
@@ -143,7 +148,7 @@ def resolve(slug, ops):
     return ops
 
 
-def attach_paths(slug: str, doc: dict, events: list[dict]) -> None:
+def attach_paths(slug: str, doc: dict[str, Any], events: list[dict[str, Any]]) -> None:
     for event in events:
         target = event.get("target", "")
         thread = core.get_thread(doc, "chat" if target == "chat" else f"{target}/comments")
@@ -155,7 +160,7 @@ def attach_paths(slug: str, doc: dict, events: list[dict]) -> None:
             event["image_paths"] = paths
 
 
-def purge(slug):
+def purge(slug: object) -> None:
     from scripts.swarm_ledger.storage_migration.hosted import media_mutation
 
     if not isinstance(slug, str) or not core.SLUG_RE.match(slug):

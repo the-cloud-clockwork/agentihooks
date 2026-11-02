@@ -4,7 +4,7 @@ The lead lists `group_members`; each member carries `merged_into` and leaves the
 """
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm_ledger import ledger_kinds, ports
 
@@ -34,9 +34,11 @@ def check(op: dict[str, Any]) -> None:
     if set(op) != {"op", "id", "by", "item", "members"} or not ITEM_RE.match(str(op["item"])):
         raise ValueError("task_group takes only an id, by, an item tasks/<lead id> and members")
     members, lead = op["members"], op["item"].split("/")[1]
+    if not isinstance(members, list):
+        raise ValueError("members must list distinct task ids other than the lead")
+    members = cast("list[Any]", members)
     if (
-        not isinstance(members, list)
-        or not members
+        not members
         or not all(isinstance(m, str) and ID_RE.match(m) for m in members)
         or len(set(members)) != len(members)
         or lead in members
@@ -63,7 +65,8 @@ def refusal(tasks: list[dict[str, Any]], known: dict[str, dict[str, Any]], ceili
     for t in tasks:
         if reached := _upstream(t, known) & ids:
             return f"task {t['id']} depends on task {sorted(reached)[0]}"
-        if waiting := sorted(d for d in t.get("depends_on") or [] if known.get(d, {}).get("state") != "done"):
+        depends_on = cast("list[str]", t.get("depends_on") or [])
+        if waiting := sorted(d for d in depends_on if known.get(d, {}).get("state") != "done"):
             return f"task {t['id']} waits on task {waiting[0]}"
     if len(tasks) > MAX_TASKS:
         return f"a group holds at most {MAX_TASKS} tasks"
@@ -74,9 +77,10 @@ def refusal(tasks: list[dict[str, Any]], known: dict[str, dict[str, Any]], ceili
 
 
 def _upstream(task: dict[str, Any], known: dict[str, dict[str, Any]]) -> set[str]:
-    seen = list(dict.fromkeys(task.get("depends_on") or []))
+    seen: list[str] = list(dict.fromkeys(cast("list[str]", task.get("depends_on") or [])))
     for dep in seen:
-        seen += [d for d in known.get(dep, {}).get("depends_on") or [] if d not in seen]
+        more = cast("list[str]", known.get(dep, {}).get("depends_on") or [])
+        seen += [d for d in more if d not in seen]
     return set(seen)
 
 

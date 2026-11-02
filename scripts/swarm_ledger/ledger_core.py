@@ -155,7 +155,7 @@ def _reject_constant(name: str) -> None:
     raise ValueError(f"{name} is not valid JSON")
 
 
-def loads(text: str) -> Any:
+def loads(text: str | bytes) -> Any:
     return json.loads(text, parse_constant=_reject_constant)
 
 
@@ -236,7 +236,10 @@ def normalize(doc: Any) -> Any:
 
 
 def validate_thread(where: str, entries: Any) -> None:
-    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+    if not isinstance(entries, list):
+        raise ValueError(f"{where} must be a list of entries")
+    entries = cast("list[Any]", entries)
+    if not all(isinstance(e, dict) for e in entries):
         raise ValueError(f"{where} must be a list of entries")
     entries = cast("list[dict[str, Any]]", entries)
     ids = [e.get("id") for e in entries]
@@ -267,8 +270,11 @@ def validate(doc: Any) -> None:
     if "policy" in doc and not isinstance(doc["policy"], dict):
         raise ValueError("policy must be an object")
     for name, fields in LISTS.items():
-        items = doc.get(name, [])
-        if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
+        items: Any = doc.get(name, [])
+        if not isinstance(items, list):
+            raise ValueError(f"{name} must be a list of objects")
+        items = cast("list[Any]", items)
+        if not all(isinstance(i, dict) for i in items):
             raise ValueError(f"{name} must be a list of objects")
         items = cast("list[dict[str, Any]]", items)
         ids = [item.get("id") for item in items]
@@ -282,10 +288,10 @@ def validate(doc: Any) -> None:
             for thread in THREADS[name]:
                 validate_thread(f"{name}/{item['id']}/{thread}", item.get(thread, []))
             if name == "tasks":
-                ledger_tasks.check_task(item)
+                cast(Any, ledger_tasks).check_task(item)
 
-    ledger_phases.validate(doc.get("phases", []))
-    ledger_plans.validate(doc)
+    cast(Any, ledger_phases).validate(doc.get("phases", []))
+    cast(Any, ledger_plans).validate(doc)
 
 
 def thread_paths(doc: dict[str, Any]) -> Generator[tuple[str, Any], None, None]:
@@ -464,7 +470,7 @@ def record_sync(doc: dict[str, Any], op: dict[str, Any], ctx: Context) -> bool:
     if op["op"] == "sync":
         text = ledger_gate.sync_summary(doc, ctx.meta)
     else:
-        text = ledger_stats.refresh(doc, ctx, op["id"])
+        text = cast(Any, ledger_stats).refresh(doc, ctx, op["id"])
     ctx.record("operator", kind, "", id=op["id"], text=text)
     return True
 
@@ -475,7 +481,7 @@ def apply_op(doc: dict[str, Any], op: dict[str, Any], ctx: Context) -> bool:
     if op["op"] in AGENT_OPS:
         import ledger_agent_ops
 
-        return ledger_agent_ops.apply(doc, op, ctx)
+        return cast(Any, ledger_agent_ops).apply(doc, op, ctx)
     if op["op"] in SYNC_KINDS:
         return record_sync(doc, op, ctx)
     if op["op"] in EXTENSION_OPS:
@@ -483,7 +489,7 @@ def apply_op(doc: dict[str, Any], op: dict[str, Any], ctx: Context) -> bool:
     if op["op"] in ARTIFACT_OPS:
         import ledger_artifacts
 
-        return ledger_artifacts.apply(doc, op, ctx)
+        return cast(Any, ledger_artifacts).apply(doc, op, ctx)
     thread = get_thread(doc, op["thread"])
     if thread is None:
         return False
@@ -542,7 +548,10 @@ def _check_chat_address(op: dict[str, Any], chat_add: bool) -> None:
 
 
 def check_op(op: Any, task_ids: tuple[Any, ...] = ()) -> None:
-    if not isinstance(op, dict) or op.get("op") not in (
+    if not isinstance(op, dict):
+        raise ValueError("each op needs op add, edit, delete, clear, sync or an agent op")
+    op = cast("dict[str, Any]", op)
+    if op.get("op") not in (
         "add",
         "edit",
         "delete",
@@ -553,7 +562,6 @@ def check_op(op: Any, task_ids: tuple[Any, ...] = ()) -> None:
         *ARTIFACT_OPS,
     ):
         raise ValueError("each op needs op add, edit, delete, clear, sync or an agent op")
-    op = cast("dict[str, Any]", op)
     if not isinstance(op.get("id"), str) or not op["id"]:
         raise ValueError("each op needs a string id")
     if op["op"] in SYNC_KINDS:
@@ -565,11 +573,11 @@ def check_op(op: Any, task_ids: tuple[Any, ...] = ()) -> None:
     if op["op"] in ARTIFACT_OPS:
         import ledger_artifacts
 
-        return ledger_artifacts.check(op)
+        return cast(Any, ledger_artifacts).check(op)
     if op["op"] in AGENT_OPS:
         import ledger_agent_ops
 
-        return ledger_agent_ops.check(op, task_ids)
+        return cast(Any, ledger_agent_ops).check(op, task_ids)
     if not isinstance(op.get("thread"), str) or not op["thread"]:
         raise ValueError("each op needs a string thread")
     if op["op"] in ("add", "edit") and (not isinstance(op.get("text"), str) or len(op["text"]) > MAX_TEXT):
@@ -616,8 +624,9 @@ def check_body(body: Any, task_ids: tuple[Any, ...] = ()) -> tuple[list[dict[str
 
 
 def load_state(json_path: Path, seed: dict[str, Any]) -> Any:
-    from scripts.swarm_ledger.repository.legacy import load_state as read_state
+    from scripts.swarm_ledger.repository import legacy
 
+    read_state = cast(Any, legacy).load_state
     return read_state(json_path, seed, sys.modules[__name__])
 
 

@@ -7,9 +7,15 @@ import uuid
 from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm_ledger import ledger_groups, ledger_kinds, ledger_rank, ledger_stats
+
+_live = cast("Callable[[dict[str, Any], str], list[dict[str, Any]]]", ledger_stats.live)
+_finished = cast("Callable[[dict[str, Any]], bool]", ledger_stats.finished)
+_tick_inputs = cast("Callable[[dict[str, Any]], dict[str, Any]]", ledger_stats.tick_inputs)
+_frozen = cast("Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], set[str]]", ledger_stats.frozen)
+_order = cast("Callable[[dict[str, Any]], int]", ledger_rank.order)
 
 NUMBERS = ("One", "Two", "Three", "Four", "Five")
 # Titles sharing this share of their significant words read as one change.
@@ -38,12 +44,12 @@ CARD_KEYS = ("id", "title", "description", "territory", "difficulty", "lane", "p
 
 
 def pool(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    live: list[dict[str, Any]] = ledger_stats.live(doc, "tasks")
+    live: list[dict[str, Any]] = _live(doc, "tasks")
     pending: dict[str, dict[str, Any]] = {
-        t["id"]: t for t in live if not ledger_stats.finished(t) and not t.get("merged_into")
+        t["id"]: t for t in live if not _finished(t) and not t.get("merged_into")
     }
-    inputs: dict[str, Any] = ledger_stats.tick_inputs(doc.get("_meta") or {}) or {}
-    held: set[str] = ledger_stats.frozen(doc, pending, inputs)
+    inputs: dict[str, Any] = _tick_inputs(doc.get("_meta") or {}) or {}
+    held: set[str] = _frozen(doc, pending, inputs)
     chained: set[str] = _chained(pending)
     kept: list[dict[str, Any]] = []
     skipped = {"frozen": 0, "in flight": 0, "planner chain": 0, "grouped": 0, "not code": 0}
@@ -52,8 +58,7 @@ def pool(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
             skipped[reason] += 1
         else:
             kept.append(task)
-    order: Callable[[dict[str, Any]], int] = ledger_rank.order
-    return sorted(kept, key=order), skipped
+    return sorted(kept, key=_order), skipped
 
 
 def _left_out(task: dict[str, Any], held: bool, chained: bool) -> str:
@@ -70,7 +75,7 @@ def _left_out(task: dict[str, Any], held: bool, chained: bool) -> str:
 
 def _chained(pending: dict[str, dict[str, Any]]) -> set[str]:
     sliced = {tid for tid, t in pending.items() if t.get("slice") or t.get("plan_slice")}
-    linked = set()
+    linked: set[str] = set()
     for tid in sliced:
         if upstream := sliced & set(pending[tid].get("depends_on") or []):
             linked |= upstream | {tid}
@@ -87,7 +92,7 @@ def words(title: str) -> set[str]:
 
 
 def signals(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
-    found = []
+    found: list[str] = []
     if shared := sorted(set(a.get("territory") or []) & set(b.get("territory") or [])):
         found.append(f"territory {', '.join(shared)}")
     if shared := sorted(names(a) & names(b)):
@@ -101,11 +106,13 @@ def signals(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
 def candidates(doc: dict[str, Any]) -> dict[str, Any]:
     tasks, skipped = pool(doc)
     known = {t["id"]: t for t in doc["tasks"]}
-    used, groups = set(), []
+    used: set[str] = set()
+    groups: list[dict[str, Any]] = []
     for lead in tasks:
         if lead["id"] in used:
             continue
-        group, links = [lead], []
+        group: list[dict[str, Any]] = [lead]
+        links: list[dict[str, Any]] = []
         for other in tasks:
             if len(group) == ledger_groups.MAX_TASKS:
                 break
@@ -126,7 +133,7 @@ def _card(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def problems(doc: dict[str, Any], plan: Any) -> list[str]:
-    groups = plan.get("groups") if isinstance(plan, dict) else None
+    groups: list[Any] | None = cast("dict[str, Any]", plan).get("groups") if isinstance(plan, dict) else None
     if not isinstance(groups, list) or not groups:
         return ['the plan needs {"groups": [{"lead", "members", "seams", "done"}]} with at least one group']
     known: dict[str, dict[str, Any]] = {t["id"]: t for t in doc["tasks"]}
@@ -140,9 +147,11 @@ def problems(doc: dict[str, Any], plan: Any) -> list[str]:
 def _group_problems(group: Any, known: dict[str, dict[str, Any]], seen: set[str]) -> list[str]:
     if not isinstance(group, dict):
         return ["each group is an object with a lead, members, seams and done"]
+    group = cast("dict[str, Any]", group)
     lead, members = group.get("lead"), group.get("members")
     if not isinstance(lead, str) or not isinstance(members, list) or not members:
         return ["needs a lead id and at least one member id"]
+    members = cast("list[Any]", members)
     if not all(isinstance(m, str) for m in members):
         return ["members must be task ids"]
     ids = [lead, *members]
@@ -153,10 +162,15 @@ def _group_problems(group: Any, known: dict[str, dict[str, Any]], seen: set[str]
     if reason := ledger_groups.refusal([known[i] for i in ids], known, ledger_groups.FOLD_CEILING):
         found.append(reason)
     seams = group.get("seams")
-    if not isinstance(seams, list) or len(seams) != len(ids) or not all(isinstance(s, str) and s for s in seams):
+    if (
+        not isinstance(seams, list)
+        or len(seams) != len(ids)
+        or not all(isinstance(s, str) and s for s in cast("list[Any]", seams))
+    ):
         found.append(f"seams must list {len(ids)} plain sentences, one per folded task")
     else:
-        found += [f"seam {NUMBERS[i]} {p}" for i, s in enumerate(seams) for p in plain_problems(s, known)]
+        typed_seams = cast("list[Any]", seams)
+        found += [f"seam {NUMBERS[i]} {p}" for i, s in enumerate(typed_seams) for p in plain_problems(s, known)]
     done = group.get("done")
     if done is None:
         return found
@@ -165,7 +179,7 @@ def _group_problems(group: Any, known: dict[str, dict[str, Any]], seen: set[str]
 
 
 def plain_problems(text: str, known: dict[str, dict[str, Any]]) -> list[str]:
-    found = []
+    found: list[str] = []
     if ids := sorted(i for i in known if re.search(rf"(?<![\w-]){re.escape(i)}(?![\w-])", text)):
         found.append(f"names task id {ids[0]}; describe the change in plain words")
     if path := _path(text):
@@ -184,7 +198,9 @@ def _path(text: str) -> str:
 
 
 def description(doc: dict[str, Any], lead: dict[str, Any], group: dict[str, Any]) -> str:
-    phase = next((p for p in doc.get("phases") or [] if p.get("id") == lead.get("phase")), {})
+    phase = next(
+        (p for p in doc.get("phases") or [] if p.get("id") == lead.get("phase")), cast("dict[str, Any]", {})
+    )
     mission = ": ".join(filter(None, (phase.get("title"), _sentence(phase.get("description")))))
     lines = [
         f"Parent intent: {_sentence(doc.get('overview')) or UNSTATED}.",
@@ -201,7 +217,7 @@ def _sentence(text: str | None) -> str:
 
 
 def territory(known: dict[str, dict[str, Any]], ids: list[str]) -> list[str]:
-    return list(dict.fromkeys(area for i in ids for area in known[i].get("territory") or []))
+    return list(dict.fromkeys(area for i in ids for area in known[i].get("territory") or cast("list[str]", [])))
 
 
 def status(lead: dict[str, Any], known: dict[str, dict[str, Any]]) -> str:
@@ -238,21 +254,25 @@ def _checked(doc: dict[str, Any], plan: dict[str, Any]) -> None:
 def _apply(args: Namespace, doc: dict[str, Any], plan: dict[str, Any]) -> None:
     from scripts.swarm_ledger import ledger
 
+    send = cast("Callable[..., None]", ledger.send)
+    call = cast("Callable[..., dict[str, Any]]", ledger.call)
+    refused = cast("Callable[..., None]", ledger.refused)
     for group in plan["groups"]:
         planned = writes(doc, group)
-        ledger.send(args, "task_group", **planned["group"])
-        ledger.send(args, "task_update", item=planned["group"]["item"], fields=planned["lead"])
+        send(args, "task_group", **planned["group"])
+        send(args, "task_update", item=planned["group"]["item"], fields=planned["lead"])
         for member, text in planned["statuses"].items():
             entry = {"op": "add", "thread": f"tasks/{member}/comments", "id": f"c-{uuid.uuid4().hex[:10]}"}
             entry |= {"text": text, "by": args.name}
-            ledger.refused(ledger.call(args.slug, [entry]), [entry])
+            refused(call(args.slug, [entry]), [entry])
         print(json.dumps({"lead": group["lead"], "folded": group["members"]}))
 
 
 def run(args: Namespace) -> None:
     from scripts.swarm_ledger import ledger
 
-    doc = ledger.call(args.slug)
+    call = cast("Callable[..., dict[str, Any]]", ledger.call)
+    doc = call(args.slug)
     if args.action == "candidates":
         print(json.dumps(candidates(doc), indent=2))
         return

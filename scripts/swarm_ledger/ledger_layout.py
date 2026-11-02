@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import ledger_core as core
 
@@ -40,14 +40,20 @@ def size(row: str, key: str, value: Any) -> int | float:
 
 
 def columns(tables: Any) -> dict[str, list[int]]:
-    if not isinstance(tables, dict) or len(tables) > MAX_TABLES:
+    if not isinstance(tables, dict):
+        raise ValueError(f"columns must be an object of at most {MAX_TABLES} tables")
+    tables = cast("dict[str, Any]", tables)
+    if len(tables) > MAX_TABLES:
         raise ValueError(f"columns must be an object of at most {MAX_TABLES} tables")
     low, high = COLUMN_WIDTH
     found: dict[str, list[int]] = {}
     for table, widths in tables.items():
         if not TABLE.match(table):
             raise ValueError(f"unknown column table {table}")
-        if not isinstance(widths, list) or not 0 < len(widths) <= MAX_COLUMNS:
+        if not isinstance(widths, list):
+            raise ValueError(f"{table} needs 1 to {MAX_COLUMNS} column widths")
+        widths = cast("list[Any]", widths)
+        if not 0 < len(widths) <= MAX_COLUMNS:
             raise ValueError(f"{table} needs 1 to {MAX_COLUMNS} column widths")
         if any(isinstance(w, bool) or not isinstance(w, (int, float)) or not low <= w <= high for w in widths):
             raise ValueError(f"{table} column widths must be numbers from {low} to {high}")
@@ -56,17 +62,21 @@ def columns(tables: Any) -> dict[str, list[int]]:
 
 
 def stats(keys: Any) -> list[str]:
-    if not isinstance(keys, list) or len(keys) > MAX_STATS:
+    if not isinstance(keys, list):
+        raise ValueError(f"stats must list at most {MAX_STATS} rows")
+    keys = cast("list[Any]", keys)
+    if len(keys) > MAX_STATS:
         raise ValueError(f"stats must list at most {MAX_STATS} rows")
     if not all(isinstance(key, str) and TABLE.match(key) for key in keys) or len(set(keys)) != len(keys):
         raise ValueError("stats must list distinct row keys")
-    return keys
+    return cast("list[str]", keys)
 
 
-def check(body):
+def check(body: Any) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise ValueError("layout must be an object of rows")
-    layout = {}
+    body = cast("dict[str, Any]", body)
+    layout: dict[str, Any] = {}
     for row, sizes in body.items():
         if row == COLUMNS:
             layout[COLUMNS] = columns(sizes)
@@ -78,13 +88,14 @@ def check(body):
             raise ValueError(f"unknown row {row}")
         if not isinstance(sizes, dict) or not sizes:
             raise ValueError(f"{row} must be an object of sizes")
+        sizes = cast("dict[str, Any]", sizes)
         if set(sizes) - set(ROWS[row]):
             raise ValueError(f"{row} takes only {', '.join(ROWS[row])}")
         layout[row] = {key: size(row, key, value) for key, value in sizes.items()}
     return layout
 
 
-def read():
+def read() -> dict[str, Any]:
     try:
         saved = core.loads(path().read_bytes())
         return check({row: sizes for row, sizes in saved.items() if row in ROWS or row in (COLUMNS, STATS)})
@@ -92,14 +103,14 @@ def read():
         return {}
 
 
-def loads(data):
+def loads(data: bytes | None) -> Any:
     try:
         return core.loads(data or b"{}")
     except json.JSONDecodeError:
         raise ValueError("body is not JSON") from None
 
 
-def write(body):
+def write(body: Any) -> dict[str, Any]:
     layout = check(body)
     core.atomic_write(path(), json.dumps(layout))
     return layout

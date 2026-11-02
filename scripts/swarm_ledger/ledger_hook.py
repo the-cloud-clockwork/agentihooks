@@ -13,7 +13,9 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -25,7 +27,7 @@ SHOWN = 5
 CLI = "agentihooks ledger"
 
 
-def log(message):
+def log(message: str) -> None:
     import ledger_core as core
 
     try:
@@ -34,38 +36,38 @@ def log(message):
         pass
 
 
-def read_json(path):
+def read_json(path: Path) -> dict[str, Any] | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
 
-def write_session(path, data):
+def write_session(path: Path, data: dict[str, Any]) -> None:
     SESSIONS.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(data), encoding="utf-8")
     os.replace(tmp, path)
 
 
-def tokens_of(command):
+def tokens_of(command: str | None) -> list[str]:
     try:
         return shlex.split(command or "")
     except ValueError:
         return []
 
 
-def is_ledger_cli(tokens):
+def is_ledger_cli(tokens: list[str]) -> bool:
     return any(Path(t).name == "ledger.py" for t in tokens) or any(
         a.endswith("agentihooks") and b == "ledger" for a, b in zip(tokens, tokens[1:])
     )
 
 
-def join_from_command(command):
+def join_from_command(command: str | None) -> tuple[str, str, str] | None:
     tokens = tokens_of(command)
     if not is_ledger_cli(tokens) or "join" not in tokens:
         return None
-    opts = {}
+    opts: dict[str, str] = {}
     for i, token in enumerate(tokens[:-1]):
         if token in ("--slug", "--as", "--role"):
             opts[token] = tokens[i + 1]
@@ -73,23 +75,27 @@ def join_from_command(command):
     return (slug, name, opts.get("--role", "member")) if slug and name else None
 
 
-def join_from_new(command, response):
+def join_from_new(command: str | None, response: Any) -> tuple[str, str, str] | None:
     tokens = tokens_of(command)
     if not is_ledger_cli(tokens) or "new" not in tokens:
         return None
     if isinstance(response, dict):
-        response = response.get("stdout") or response.get("textResultForLlm")
+        typed_response = cast("dict[str, Any]", response)
+        response = typed_response.get("stdout") or typed_response.get("textResultForLlm")
     for text in str(response).splitlines():
         try:
-            out = json.loads(text)
+            raw_out = json.loads(text)
         except ValueError:
             continue
-        if isinstance(out, dict) and isinstance(out.get("slug"), str) and isinstance(out.get("joined"), str):
+        if not isinstance(raw_out, dict):
+            continue
+        out = cast("dict[str, Any]", raw_out)
+        if isinstance(out.get("slug"), str) and isinstance(out.get("joined"), str):
             return out["slug"], out["joined"], "member"
     return None
 
 
-def new_session(slug, name, role):
+def new_session(slug: str, name: str, role: str) -> dict[str, Any]:
     return {
         "slug": slug,
         "name": name,
@@ -102,7 +108,7 @@ def new_session(slug, name, role):
     }
 
 
-def bind(payload, sid):
+def bind(payload: dict[str, Any], sid: str) -> None:
     event = payload.get("hook_event_name")
     found = None
     if (
@@ -110,16 +116,18 @@ def bind(payload, sid):
         and payload.get("tool_name") == "Bash"
         and '"joined"' in str(payload.get("tool_response"))
     ):
-        command = (payload.get("tool_input") or {}).get("command")
+        tool_input = cast("dict[str, Any]", payload.get("tool_input") or {})
+        command = tool_input.get("command")
         found = join_from_command(command) or join_from_new(command, payload.get("tool_response"))
     if found:
         write_session(SESSIONS / f"{sid}.json", new_session(*found))
 
 
-def context_text(session, owed, extra=""):
+def context_text(session: dict[str, Any], owed: list[dict[str, Any]], extra: str = "") -> str:
     import watch_ledger
 
-    lines = [watch_ledger.line(e) for e in owed[:SHOWN]]
+    line = cast("Callable[[dict[str, Any]], str]", watch_ledger.line)
+    lines = [line(e) for e in owed[:SHOWN]]
     if len(owed) > SHOWN:
         lines.append(
             f"... and {len(owed) - SHOWN} more (run: {CLI} --slug {session['slug']} --as {session['name']} events)"
@@ -133,31 +141,36 @@ def context_text(session, owed, extra=""):
     return "\n".join(x for x in [head, *lines, extra, tail] if x)
 
 
-def first_shown(session, owed):
+def first_shown(session: dict[str, Any], owed: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The owed events no other path (inbox, watch) has shown this agent yet; all of them when that is unknown."""
     try:
         from scripts.inbox import seen
     except ImportError:
         return owed
-    return seen.first_showing(seen.marks_for(session["slug"]), session["name"], session["slug"], owed)
+    marks_for = cast("Callable[[str], Any]", seen.marks_for)
+    first_showing = cast(
+        "Callable[[Any, str, str, list[dict[str, Any]]], list[dict[str, Any]]]", seen.first_showing
+    )
+    marks = marks_for(session["slug"])
+    return first_showing(marks, session["name"], session["slug"], owed)
 
 
-def emit(event, text):
+def emit(event: str, text: str) -> None:
     print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
 
 
-def touched(command):
+def touched(command: str | None) -> bool:
     import ledger_gate
 
     tokens = tokens_of(command)
     return is_ledger_cli(tokens) and any(t in ledger_gate.WRITE_COMMANDS for t in tokens)
 
 
-def restart(session):
+def restart(session: dict[str, Any]) -> None:
     session.update(calls=0, nudge_calls=0, blocks=0, bypass_posted=False)
 
 
-def progress_of(session):
+def progress_of(session: dict[str, Any]) -> Any:
     from scripts.gates.progress import Progress
     from scripts.swarm_ledger import ports
 
@@ -166,14 +179,14 @@ def progress_of(session):
     return Progress(redis_client(), session["slug"])
 
 
-def note_outcome(session, kind):
+def note_outcome(session: dict[str, Any], kind: str) -> None:
     try:
         progress_of(session).outcome(session["name"], kind)
     except Exception as exc:  # the tool call stands whatever Redis does
         log(f"outcome not recorded: {exc}")
 
 
-def wait_seen(session: dict) -> bool:
+def wait_seen(session: dict[str, Any]) -> bool:
     from scripts.swarm_ledger import ports
 
     idle = ports.swarm().idle
@@ -189,7 +202,7 @@ def wait_seen(session: dict) -> bool:
     return True
 
 
-def outcome_seen(session):
+def outcome_seen(session: dict[str, Any]) -> bool:
     try:
         at = progress_of(session).read(session["name"]).outcome_at
     except Exception as exc:  # no signal reads as no outcome
@@ -202,12 +215,13 @@ def outcome_seen(session):
     return True
 
 
-def on_tool(payload, session, state, sfile):
+def on_tool(payload: dict[str, Any], session: dict[str, Any], state: dict[str, Any], sfile: Path) -> None:
     import ledger_gate
+    from scripts.gates import progress
 
-    from scripts.gates.progress import outcome_of
-
-    command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None
+    outcome_of = cast("Callable[[str | None], str]", progress.outcome_of)
+    tool_input = cast("dict[str, Any]", payload.get("tool_input") or {})
+    command = tool_input.get("command") if payload.get("tool_name") == "Bash" else None
     kind = outcome_of(command)
     if kind:
         note_outcome(session, kind)
@@ -231,7 +245,7 @@ def on_tool(payload, session, state, sfile):
     write_session(sfile, session)
 
 
-def on_prompt(payload, session, state, sfile):
+def on_prompt(payload: dict[str, Any], session: dict[str, Any], state: dict[str, Any], sfile: Path) -> None:
     import ledger_gate
 
     owed = first_shown(session, ledger_gate.unhandled_for(state["_meta"], session["name"], state.get("tasks", [])))
@@ -239,12 +253,12 @@ def on_prompt(payload, session, state, sfile):
         emit("UserPromptSubmit", context_text(session, owed))
 
 
-def stop_reasons(session, state):
+def stop_reasons(session: dict[str, Any], state: dict[str, Any]) -> tuple[list[str], int, dict[str, Any]]:
     import ledger_gate
 
     pol = ledger_gate.policy(state)
     owed = ledger_gate.unhandled_for(state["_meta"], session["name"], state.get("tasks", []))
-    reasons = []
+    reasons: list[str] = []
     if owed:
         reasons.append(f"{len(owed)} operator event(s) are unhandled")
     if session["calls"] >= pol["stop_after_calls"] and not wait_seen(session) and not outcome_seen(session):
@@ -252,17 +266,18 @@ def stop_reasons(session, state):
     return reasons, len(owed), pol
 
 
-def post_bypass(session, unhandled):
+def post_bypass(session: dict[str, Any], unhandled: int) -> None:
     try:
         import ledger
 
         op = {"op": "gate_bypass", "id": f"gb-{uuid.uuid4().hex[:8]}", "by": session["name"], "unhandled": unhandled}
-        ledger.request(session["slug"], [op], service=True, timeout=2)
+        request = cast("Callable[..., dict[str, Any]]", ledger.request)
+        request(session["slug"], [op], service=True, timeout=2)
     except Exception as exc:  # the stop must go through whatever the server does
         log(f"bypass not recorded: {exc}")
 
 
-def on_stop(payload, session, state, sfile):
+def on_stop(payload: dict[str, Any], session: dict[str, Any], state: dict[str, Any], sfile: Path) -> None:
     reasons, unhandled, pol = stop_reasons(session, state)
     if not reasons or payload.get("permission_mode") == "plan":
         write_session(sfile, session)
@@ -282,7 +297,7 @@ def on_stop(payload, session, state, sfile):
 HANDLERS = {"PostToolUse": on_tool, "UserPromptSubmit": on_prompt, "Stop": on_stop}
 
 
-def serve_ledgers():
+def serve_ledgers() -> None:
     import ledger_link
 
     from scripts.swarm_ledger import server_lifetime, storage
@@ -295,21 +310,22 @@ def serve_ledgers():
         )
     ):
         return
+    address: tuple[str, int] = ledger_link.address()
     try:
-        address = ledger_link.address()
         socket.create_connection(address, timeout=0.3).close()
     except OSError:
+        environment = cast("Callable[[Path, int], dict[str, str]]", server_lifetime.environment)
         subprocess.Popen(
             [sys.executable, str(HERE / "ledger_server.py"), "--ensure"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
-            env=server_lifetime.environment(LEDGER_DIR, address[1]),
+            env=environment(LEDGER_DIR, address[1]),
         )
 
 
-def dispatch(payload):
+def dispatch(payload: dict[str, Any]) -> None:
     global LEDGER_DIR, SESSIONS
     LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
     SESSIONS = LEDGER_DIR / ".sessions"
@@ -342,7 +358,7 @@ def dispatch(payload):
     handler(payload, session, state, sfile)
 
 
-def main():
+def main() -> int:
     try:
         payload = json.load(sys.stdin)
         dispatch(payload if isinstance(payload, dict) else {})
