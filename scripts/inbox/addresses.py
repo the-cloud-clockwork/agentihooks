@@ -1,23 +1,25 @@
-from hooks.context.broadcast import get_active_sessions
+from typing import Any, cast
+
+from hooks.context.broadcast import get_active_sessions  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.seats import is_seat, of_swarm
 from scripts.inbox.store import InboxError, InboxStore
 
 
 def check_address(inbox: InboxStore, sender: str, address: str) -> None:
     resolved = inbox.seats.recipient(address)
-    if resolved == "operator" or inbox.names.entry(resolved):
+    if resolved == "operator" or inbox.names.entry(resolved):  # pyright: ignore[reportUnknownMemberType]
         return
     if is_seat(resolved) and inbox.seats.occupant(resolved).generation:
         return
-    sessions = get_active_sessions(cleanup=True)
+    sessions = cast("dict[str, dict[str, Any]]", get_active_sessions(cleanup=True))
     live = {name for sid, row in sessions.items() for name in (sid, row.get("name", "")) if name}
     if resolved in live:
         return
     seat = sender if is_seat(sender) else inbox.seats.seat_of(sender)
-    slug = seat.split("@", 1)[1] if seat else inbox.names.slug_of(sender)
-    valid = {"operator"}
+    slug: str = seat.split("@", 1)[1] if seat else cast(str, inbox.names.slug_of(sender))  # pyright: ignore[reportUnknownMemberType]
+    valid: set[str] = {"operator"}
     if slug:
-        valid.update(row["name"] for row in inbox.names.names(slug))
+        valid.update(cast(str, row["name"]) for row in inbox.names.names(slug))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         valid.update(name for name in live if of_swarm(name, slug, inbox.names))
         prefix = inbox.seats.key("")
         valid.update(
@@ -30,7 +32,7 @@ def check_address(inbox: InboxStore, sender: str, address: str) -> None:
     raise InboxError(f"unknown inbox address {address}; valid addresses: {', '.join(sorted(valid))}")
 
 
-def dispatcher_status(inbox: InboxStore, address: str) -> dict:
+def dispatcher_status(inbox: InboxStore, address: str) -> dict[str, Any]:
     from scripts.swarm.store import DISPATCH, FULL, RedisStore
 
     seat = address if is_seat(address) else inbox.seats.known_seat(address)
@@ -38,9 +40,12 @@ def dispatcher_status(inbox: InboxStore, address: str) -> dict:
         return {}
     slug = seat.removeprefix("dispatcher@")
     store = RedisStore(inbox.redis)
-    owner = next((a.name for a in store.agents(slug) if a.lane == DISPATCH and a.state != "finished"), "")
+    owner = next(
+        (a.name for a in cast("list[Any]", store.agents(slug)) if a.lane == DISPATCH and a.state != "finished"),  # pyright: ignore[reportUnknownMemberType]
+        "",
+    )
     activation = "recorded consumer" if owner else "pending lifecycle checks"
-    if raw := inbox.redis.hgetall(store.key(slug, "config")):
+    if raw := inbox.redis.hgetall(store.key(slug, "config")):  # pyright: ignore[reportUnknownMemberType]
         if raw["state"] in ("stopping", "stopped") or (raw["state"] == "paused" and not owner):
             activation = raw["state"]
         elif raw.get("autonomy") != FULL:
@@ -54,7 +59,7 @@ def resolves(inbox: InboxStore, address: str, live: set[str]) -> bool:
         return True
     if is_seat(address):
         return bool(inbox.seats.occupant(address).generation)
-    entry = inbox.names.entry(address)
+    entry = inbox.names.entry(address)  # pyright: ignore[reportUnknownMemberType]
     if entry and not entry.get("retired_at"):
         return True
     seat = inbox.seats.known_seat(address)
@@ -62,15 +67,18 @@ def resolves(inbox: InboxStore, address: str, live: set[str]) -> bool:
     return bool(seat and (not outcome or outcome["seat"]))
 
 
-def settle_unresolved(inbox: InboxStore, names: set[str], items: list, now_ms: int, window: int) -> list[str]:
-    live, actions, known = None, [], set()
-    resolved = inbox.names.resolve_many(list(dict.fromkeys(item.address for item in items)))
+def settle_unresolved(inbox: InboxStore, names: set[str], items: list[Any], now_ms: int, window: int) -> list[str]:
+    live, actions, known = cast("set[str] | None", None), cast("list[str]", []), cast("set[str]", set())
+    resolved = cast(
+        "dict[str, str]",
+        inbox.names.resolve_many(list(dict.fromkeys(item.address for item in items))),  # pyright: ignore[reportUnknownMemberType]
+    )
     for item in items:
-        address = resolved[item.address]
+        address: str = resolved[item.address]
         if now_ms - item.created_at < window:
             continue
         if live is None:
-            sessions = get_active_sessions(cleanup=True)
+            sessions = cast("dict[str, dict[str, Any]]", get_active_sessions(cleanup=True))
             live = names | {n for sid, row in sessions.items() for n in (sid, row.get("name", "")) if n}
         if address in known:
             continue
