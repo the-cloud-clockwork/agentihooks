@@ -560,9 +560,10 @@ def _under_managed_source(target: str) -> bool:
 def _state_links() -> dict[str, dict]:
     """Return the managed-link ledger keyed by link path.
 
-    The ledger lives under state.json['managed_links'] (``_LINKS_KEY``). Ownership is RECORDED at creation, never inferred at deletion. Every symlink install writes into
-    ~/.claude/{skills,agents,commands,rules} lands here, and nothing outside this ledger is ever removed. Path-prefix
-    guessing is the legacy fallback only, and only for installs that predate the ledger.
+    The ledger lives under state.json['managed_links'] (``_LINKS_KEY``). Ownership is RECORDED at creation, never
+    inferred at deletion. Every symlink install writes into ~/.claude/{skills,agents,commands,rules} lands here, and
+    nothing outside this ledger is ever removed. Path-prefix guessing is the legacy fallback only, and only for
+    installs that predate the ledger.
     """
     raw = _load_state().get(_LINKS_KEY, [])
     if not isinstance(raw, list):
