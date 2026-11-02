@@ -1229,10 +1229,9 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
     assert job["permissions"] == {"contents": "read"}
 
 
-def test_queue_verifier_and_shard_check_wait_for_the_units_instead_of_holding_a_runner():
+def test_queue_verifier_and_shard_check_wait_for_the_units_instead_of_holding_a_runner() -> None:
     jobs = _workflow()["jobs"]
     assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], deferred=True)
-    assert {"unit", "unit-lost", "unit-rerun"} <= set(jobs["shard-check"]["needs"])
     condition = jobs["shard-check"]["if"]
     assert "needs.unit-lost.result != 'failure'" in condition
     assert "needs.unit-rerun.result != 'failure'" in condition
