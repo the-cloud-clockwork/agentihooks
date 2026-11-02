@@ -168,6 +168,33 @@ def test_plan_skips_tests_when_the_change_touches_none(repo, tmp_path):
     ]
 
 
+def test_plan_grades_types_with_the_merge_base_gate_in_the_ci_environment(repo, tmp_path):
+    _commit(repo, {"scripts/type_gate.py": "GATE = 1\n"}, "gate")
+    _git(repo, "branch", "-f", "base")
+    _commit(repo, {"scripts/type_gate.py": "GATE = 2\n", "scripts/beta.py": "B = 2\n"}, "change")
+    grade = tmp_path / "grade"
+    grade.mkdir()
+
+    steps = dict(ci_prepush.plan(repo, "base", grade))
+
+    snapshot = grade / "types-base"
+    assert steps["strict types"] == [
+        sys.executable,
+        "-m",
+        "scripts.type_env",
+        "--grader",
+        str(snapshot / "scripts/type_gate.py"),
+        "--root",
+        str(repo),
+        "--base",
+        str(snapshot),
+        "--head",
+        str(repo),
+    ]
+    assert (snapshot / "scripts/type_gate.py").read_text() == "GATE = 1\n"
+    assert (snapshot / "scripts/beta.py").read_text() == "B = 1\n"
+
+
 def test_run_stamps_head_when_every_step_passes(repo, monkeypatch, capsys):
     _commit(repo, {"scripts/alpha.py": "A = 3\n"}, "change")
     (repo / "notes.txt").write_text("untracked\n")
