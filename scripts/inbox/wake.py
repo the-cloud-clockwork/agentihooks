@@ -8,17 +8,19 @@ count survives restarts.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from typing import Any, cast
 
 from scripts.hive import reports
 from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import CLOSED, Item, redelivery_ms
+from scripts.inbox.store import CLOSED, InboxStore, Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
-from scripts.swarm.delivery import READY, post
-from scripts.swarm.store import MASTER, RedisStore, SwarmError
+from scripts.swarm.delivery import READY
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 MAX_WAKES = 3
@@ -37,15 +39,15 @@ PASSED, FROZEN = "passed_master", "frozen"
 ALERTED = "alerted"
 
 
-def window_ms(environ):
+def window_ms(environ: Mapping[str, str]) -> int:
     return int(environ.get(WINDOW_ENV) or DEFAULT_WINDOW_S) * 1000
 
 
-def quiet_ms(environ):
+def quiet_ms(environ: Mapping[str, str]) -> int:
     return int(environ.get(QUIET_ENV) or DEFAULT_QUIET_S) * 1000
 
 
-def typed_wake(inbox, agent):
+def typed_wake(inbox: InboxStore, agent: AgentRecord) -> bool:
     return (
         bool(agent.pane_id)
         and agent.lane != MASTER
@@ -54,7 +56,15 @@ def typed_wake(inbox, agent):
     )
 
 
-def decide(item, pane, history, now_ms, window, slug, since=0):
+def decide(
+    item: Item,
+    pane: str | None,
+    history: list[dict[str, Any]],
+    now_ms: int,
+    window: int,
+    slug: str,
+    since: int | None = 0,
+) -> str | None:
     """pane is the receiver's herdr status, None when it sits outside herdr, FROZEN for a master waiting on an input
     prompt while another master is live; the window clock skips the swarm's outage time since the item's last step,
     and starts no earlier than since. since None holds the item."""
@@ -79,7 +89,7 @@ def raised_note(master: str, raised_id: str) -> str:
     return f"raised to {master} as message {raised_id}"
 
 
-def raised_id(entry: dict) -> str:
+def raised_id(entry: dict[str, Any]) -> str:
     """The master item a history entry raised, '' for any other entry."""
     return entry["reason"].rpartition(" ")[2] if entry.get("event") == TO_MASTER else ""
 

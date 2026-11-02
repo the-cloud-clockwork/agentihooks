@@ -4,12 +4,13 @@ import json
 import os
 import uuid
 from pathlib import Path
+from typing import Any, cast
 
-from scripts.events.bus import Bus, StateConflict
+from scripts.events.bus import Bus, StateConflict, StateEntry
 from scripts.events.config import BusConfig
 from scripts.events.factory import open_bus
 from scripts.inbox.bus import Message, SeatInbox
-from scripts.inbox.store import CLOSED, PREFIX, STATES, _item
+from scripts.inbox.store import CLOSED, PREFIX, STATES, _item  # pyright: ignore[reportPrivateUsage]
 
 BUCKET = "inbox_legacy"
 
@@ -22,7 +23,7 @@ def digest(value: object) -> str:
     return hashlib.sha256(_encode(value)).hexdigest()
 
 
-def snapshot(client) -> list[dict]:
+def snapshot(client) -> list[dict[str, Any]]:
     root = PREFIX.removesuffix(":inbox")
     keys = set(client.scan_iter(match=f"{PREFIX}:item:*"))
     keys.update(client.scan_iter(match=f"{root}:hive:*:inbox:item:*"))
@@ -50,18 +51,18 @@ def snapshot(client) -> list[dict]:
     return records
 
 
-def _key(record: dict) -> str:
+def _key(record: dict[str, Any]) -> str:
     return digest([record["world"], record["item"]["id"]])
 
 
-def _message(record: dict) -> tuple[str, Message]:
+def _message(record: dict[str, Any]) -> tuple[str, Message]:
     item = _item(record["item"], record["item"]["id"])
     if item.state not in STATES or item.state in CLOSED:
         raise ValueError("migration requires an open inbox item")
     return item.address, Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
 
 
-def _report(records: list[dict]) -> dict:
+def _report(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "items": len(records),
         "history_entries": sum(len(record["history"]) for record in records),
@@ -69,7 +70,7 @@ def _report(records: list[dict]) -> dict:
     }
 
 
-def read_records(records: list[dict], bus: Bus) -> list[dict]:
+def read_records(records: list[dict[str, Any]], bus: Bus) -> list[dict[str, Any]]:
     state = bus.state(BUCKET)
     found = []
     for record in records:
@@ -80,7 +81,7 @@ def read_records(records: list[dict], bus: Bus) -> list[dict]:
     return found
 
 
-def import_snapshot(records: list[dict], bus: Bus) -> dict:
+def import_snapshot(records: list[dict[str, Any]], bus: Bus) -> dict[str, Any]:
     messages = [_message(record) for record in records]
     ids = [message.id for _, message in messages]
     if len(ids) != len(set(ids)):
@@ -108,12 +109,12 @@ def _destination(bus: Bus) -> str:
     return value.decode()
 
 
-def rehearse(records: list[dict], bus: Bus, destination: str) -> dict:
+def rehearse(records: list[dict[str, Any]], bus: Bus, destination: str) -> dict[str, Any]:
     copied = json.loads(_encode(records))
     return {"version": 1, "copy": digest(destination), "store": _destination(bus), **import_snapshot(copied, bus)}
 
 
-def apply(client, bus: Bus, proof: dict, destination: str, *, enabled: bool = False) -> dict:
+def apply(client, bus: Bus, proof: dict, destination: str, *, enabled: bool = False) -> dict[str, Any]:
     if not enabled:
         raise ValueError("live inbox migration is disabled")
     if proof["version"] != 1:

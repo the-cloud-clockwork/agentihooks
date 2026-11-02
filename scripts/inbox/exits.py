@@ -3,11 +3,10 @@ sender told."""
 
 import re
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing import Any
 
     from scripts.inbox.store import InboxStore, Item
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -235,7 +234,7 @@ class _WorldPass:
         self.up = list(worlds)
         self.skipped: list[str] = []
 
-    def run(self, world: "InboxStore", function):
+    def run(self, world: "InboxStore", function: "Callable[[InboxStore], Any]") -> "Any | None":
         from redis.exceptions import ConnectionError as RedisConnectionError
         from redis.exceptions import TimeoutError as RedisTimeoutError
 
