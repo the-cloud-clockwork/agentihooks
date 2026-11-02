@@ -77,7 +77,7 @@ def test_a_write_with_nothing_to_relay_holds_nothing_and_wakes_no_worker(
     worker = Mock()
     monkeypatch.setattr(ledger_server, "EFFECTS", worker)
     state, _ = core.sync(SLUG, ops=[{"op": "join", "id": "j-1", "by": "ro-eng-1"}])
-    for kind in (ledger_server.RELAY, ledger_server.DOCTOR, ledger_server.ALERTS):
+    for kind in (ledger_server.RELAY, ledger_server.PHRASE, ledger_server.ALERTS):
         assert ledger_server.deferred(kind)(SLUG, state) == []
     worker.wake.assert_not_called()
     assert ledger_server.unrelayed() == {}
@@ -96,9 +96,9 @@ def test_without_a_worker_the_side_effect_runs_in_place(monkeypatch: pytest.Monk
     ("kind", "state", "expected"),
     [
         (ledger_server.RELAY, {"_meta": {"rev": 3, "events": [{"rev": 3, "by": "operator"}]}}, True),
-        (ledger_server.DOCTOR, {"_meta": {"rev": 3, "events": [{"rev": 3, "by": "operator", "target": "chat"}]}}, True),
+        (ledger_server.PHRASE, {"_meta": {"rev": 3, "events": [{"rev": 3, "by": "operator", "target": "chat"}]}}, True),
         (
-            ledger_server.DOCTOR,
+            ledger_server.PHRASE,
             {"_meta": {"rev": 3, "events": [{"rev": 3, "by": "operator", "target": "notes"}]}},
             False,
         ),
@@ -120,11 +120,11 @@ def test_each_side_effect_kind_runs_its_own_function(monkeypatch: pytest.MonkeyP
     ran = []
     for name in ("relay_to_inbox", "doctor_phrase", "deliver_alerts"):
         monkeypatch.setattr(ledger_server, name, lambda slug, state, name=name: ran.append((name, slug, state)))
-    for kind in (ledger_server.RELAY, ledger_server.DOCTOR, ledger_server.ALERTS):
+    for kind in (ledger_server.RELAY, ledger_server.PHRASE, ledger_server.ALERTS):
         ledger_server.SIDE_EFFECTS[kind](SLUG, {"k": kind})
     assert ran == [
         ("relay_to_inbox", SLUG, {"k": ledger_server.RELAY}),
-        ("doctor_phrase", SLUG, {"k": ledger_server.DOCTOR}),
+        ("doctor_phrase", SLUG, {"k": ledger_server.PHRASE}),
         ("deliver_alerts", SLUG, {"k": ledger_server.ALERTS}),
     ]
 
@@ -150,7 +150,7 @@ def test_page_and_api_writes_hold_every_side_effect_and_wake_the_worker(monkeypa
     services.ledger.relay_to_inbox(SLUG, state)
     services.swarm.doctor_phrase(SLUG, state)
     services.ledger.deliver_alerts(SLUG, state)
-    order = [(kind, SLUG, 4) for kind in (ledger_server.RELAY, ledger_server.DOCTOR, ledger_server.ALERTS)]
+    order = [(kind, SLUG, 4) for kind in (ledger_server.RELAY, ledger_server.PHRASE, ledger_server.ALERTS)]
     assert holds == order * 2
     assert worker.wake.call_count == 6
 
@@ -164,7 +164,7 @@ def test_a_replayed_doctor_phrase_stops_the_swarm_once_after_later_writes(
     monkeypatch.setattr(ledger_server, "EFFECTS", Mock())
     phrase = {"op": "add", "thread": "chat", "id": "m-9", "text": f" {ledger_server.DOCTOR_PHRASE.upper()} "}
     state, _ = core.sync(SLUG, ops=[phrase])
-    ledger_server.deferred(ledger_server.DOCTOR)(SLUG, state)
+    ledger_server.deferred(ledger_server.PHRASE)(SLUG, state)
     core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-10", "text": "carry on"}])
     monkeypatch.setattr(ledger_server, "relay_to_inbox", Mock())
     ledger_server.replay_unrelayed()
@@ -180,7 +180,7 @@ def test_a_doctor_phrase_before_the_held_revisions_is_not_replayed(
     monkeypatch.setattr(ledger_server, "swarm_control", control)
     early, _ = core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-8", "text": ledger_server.DOCTOR_PHRASE}])
     late, _ = core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-9", "text": "carry on"}])
-    ledger_server.unrelayed_on(ledger_server.DOCTOR, SLUG, late["_meta"]["rev"])
+    ledger_server.unrelayed_on(ledger_server.PHRASE, SLUG, late["_meta"]["rev"])
     ledger_server.doctor_phrase(SLUG, late)
     control.assert_not_called()
     assert early["_meta"]["rev"] < late["_meta"]["rev"]

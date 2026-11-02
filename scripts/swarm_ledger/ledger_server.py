@@ -661,7 +661,7 @@ def deliver_alerts(slug, state):
     return sent
 
 
-RELAY, ALERTS, DOCTOR = "relay", "alerts", "doctor"
+RELAY, ALERTS, PHRASE = "relay", "alerts", "doctor"
 UNRELAYED = "ledger-unrelayed.json"
 REPLAY_EVERY = 5
 
@@ -718,7 +718,7 @@ def replay_unrelayed() -> None:
 
 SIDE_EFFECTS = {
     RELAY: lambda slug, state: relay_to_inbox(slug, state),
-    DOCTOR: lambda slug, state: doctor_phrase(slug, state),
+    PHRASE: lambda slug, state: doctor_phrase(slug, state),
     ALERTS: lambda slug, state: deliver_alerts(slug, state),
 }
 EFFECTS = None
@@ -752,6 +752,9 @@ def deferred(kind: str) -> Callable[[str, dict], object]:
     return run
 
 
+relay_later, alerts_later, phrase_later = deferred(RELAY), deferred(ALERTS), deferred(PHRASE)
+
+
 @contextlib.contextmanager
 def side_effects() -> Iterator[None]:
     """Run held write side effects on the outbox host's effects worker for as long as the server serves."""
@@ -778,7 +781,7 @@ def expire_alerts() -> None:
 
 def doctor_phrase(slug: str, state: dict) -> None:
     meta = state["_meta"]
-    since = unrelayed_since(DOCTOR, slug, meta["rev"])
+    since = unrelayed_since(PHRASE, slug, meta["rev"])
     said = [
         e
         for e in meta.get("events", [])
@@ -786,7 +789,7 @@ def doctor_phrase(slug: str, state: dict) -> None:
     ]
     if any(e.get("text", "").strip().lower() == DOCTOR_PHRASE for e in said):
         swarm_control(slug, ["stop"], "doctor")
-    relayed(DOCTOR, slug, since, meta["rev"])
+    relayed(PHRASE, slug, since, meta["rev"])
 
 
 def stream_resources(slug):
@@ -834,8 +837,8 @@ def api_services():
         layout=ledger_layout.read,
         write_layout=ledger_layout.write,
         write_gate=write_gate,
-        relay_to_inbox=deferred(RELAY),
-        deliver_alerts=deferred(ALERTS),
+        relay_to_inbox=relay_later,
+        deliver_alerts=alerts_later,
     )
     swarm: SwarmService = services.Swarm(
         doctor=DOCTOR,
@@ -846,7 +849,7 @@ def api_services():
         lifecycle=lifecycle_control,
         refresh_quota=refresh_quota,
         control_argv=control_argv,
-        doctor_phrase=deferred(DOCTOR),
+        doctor_phrase=phrase_later,
     )
     media: MediaService = services.Media(
         media_store=ledger_media,
@@ -1030,9 +1033,9 @@ class Handler(BaseHTTPRequestHandler):
         if gate:
             gate.publish(rejected)
         if changes or ops:
-            deferred(RELAY)(slug, state)
-            deferred(DOCTOR)(slug, state)
-        deferred(ALERTS)(slug, state)
+            relay_later(slug, state)
+            phrase_later(slug, state)
+        alerts_later(slug, state)
         warnings = [*state["_meta"].get("warnings", []), *refusals.values(), *screen.warnings.values()]
         reply = {
             "applied": [op["id"] for op in ops or [] if op["id"] not in rejected],

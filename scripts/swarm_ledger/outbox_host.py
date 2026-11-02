@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import sys
-import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from threading import Event, Thread
 
 from scripts.events import factory
 from scripts.events.config import BusConfig
@@ -58,9 +58,9 @@ class Effects:
 
     def __init__(self, drain: Callable[[], object]) -> None:
         self.drain = drain
-        self.due = threading.Event()
+        self.due = Event()
         self.stopping = False
-        self.thread = threading.Thread(target=self.run, name="ledger-side-effects", daemon=True)
+        self.thread = Thread(target=self.run, name="ledger-side-effects", daemon=True)
 
     def wake(self) -> None:
         self.due.set()
