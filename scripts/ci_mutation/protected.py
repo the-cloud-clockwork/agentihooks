@@ -10,10 +10,9 @@ import importlib.abc
 import importlib.machinery
 import importlib.util
 import os
-import runpy
 import sys
 from pathlib import Path
-from types import CodeType
+from types import ModuleType
 
 PACKAGE = "mutation_grader"
 DRIVER = f"{PACKAGE}.ci_mutation.selection"
@@ -42,9 +41,9 @@ def protected_name(name: str) -> str:
 class ProtectedLoader(importlib.machinery.SourceFileLoader):
     """Compiles a protected module from its source with its scripts imports renamed."""
 
-    def get_code(self, fullname: str) -> CodeType:
-        """Return the renamed module code, never reading the checkout's cached bytecode."""
-        return compile(renamed(ast.parse(self.get_data(self.path))), self.path, "exec")
+    def exec_module(self, module: ModuleType) -> None:
+        """Run the module from its source with its scripts imports renamed, never from the checkout's cached bytecode."""
+        exec(compile(renamed(ast.parse(self.get_data(self.path))), self.path, "exec"), module.__dict__)
 
 
 class ProtectedFinder(importlib.abc.MetaPathFinder):
@@ -75,10 +74,15 @@ def install(root: Path) -> ProtectedFinder:
 
 
 def main(root: Path = Path(__file__).resolve().parents[2]) -> None:
-    """Run the driver of the checkout at root, keeping the grader setting from the tests it runs."""
+    """Run the driver of the checkout at root as the main module, keeping the grader setting from the tests it runs."""
     os.environ.pop("MUTATION_GRADER", None)
     install(root)
-    runpy.run_module(DRIVER, run_name="__main__", alter_sys=True)
+    source = str(root / "scripts/ci_mutation/selection.py")
+    loader = ProtectedLoader(DRIVER, source)
+    driver = importlib.util.module_from_spec(importlib.machinery.ModuleSpec(DRIVER, loader, origin=source))
+    driver.__name__ = "__main__"
+    sys.modules["__main__"] = sys.modules[DRIVER] = driver
+    loader.exec_module(driver)
 
 
 if __name__ == "__main__":

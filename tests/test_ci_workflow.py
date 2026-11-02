@@ -2462,7 +2462,10 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "steps.plan.outputs.changed == '0'",
         "steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'",
     )
-    assert empty["env"] == {"BASES": "${{ steps.plan.outputs.bases }}"}
+    assert empty["env"] == {
+        "BASES": "${{ steps.plan.outputs.bases }}",
+        "MUTATION_GRADER": "${{ runner.temp }}/grader",
+    }
     assert empty["run"] == (
         'python -m scripts.ci_mutation --bases "$BASES" --budget 1080\n'
         'grader="$RUNNER_TEMP/grader"\n'

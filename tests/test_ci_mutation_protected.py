@@ -100,6 +100,7 @@ def test_a_planted_head_driver_edit_cannot_change_the_kill_record(
     monkeypatch.setenv("MUTATION_GRADER", str(grader))
     record = tmp_path / "record"
     monkeypatch.setattr(sys, "argv", ["protected.py", str(record)])
+    monkeypatch.setitem(sys.modules, "__main__", sys.modules["__main__"])
     protected.main(grader)
     assert record.read_text() == f"killed unset {protected.DRIVER}"
     assert sys.argv == ["protected.py", str(record)]
