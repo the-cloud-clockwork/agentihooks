@@ -1008,8 +1008,8 @@ class CopilotAdapter:
         """Start every configured MCP server disabled, per ``_agentihooks.mcpDefaultDisabled``.
 
         Copilot connects every configured server when a session opens and opens
-        a browser OAuth tab for each one that 401s; there is no lazy-connect key
-        (copilot-cli #1938, #2026, #3462). A server named in ``disabledMcpServers``
+        a browser OAuth tab for each one that 401s; there is no lazy-connect key.
+        A server named in ``disabledMcpServers``
         stays fully configured but is not connected, so ``/mcp enable <name>``
         becomes the on-demand switch.
 

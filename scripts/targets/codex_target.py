@@ -14,8 +14,8 @@ Writes the Codex-shaped install surface (docs/reference/CODEX-COMPAT.md §5):
 - ``[mcp_servers.*]`` — MCP registration (stdio + http url; SSE entries are
   skipped with a warning until the server side exposes streamable HTTP).
 
-Codex facts this file encodes were verified against codex-cli 0.147.0 on
-2026-08-10 (docs/reference/CODEX-COMPAT.md §10 evidence table).
+Codex facts this file encodes are recorded in the docs/reference/CODEX-COMPAT.md
+§10 evidence table.
 """
 
 from __future__ import annotations
