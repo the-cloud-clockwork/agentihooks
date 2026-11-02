@@ -144,6 +144,7 @@ def test_a_local_cap_refusal_is_recorded_for_the_spawn_stall_alarm(setup, monkey
     else:
         fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     since = lease.now_ms(setup.store)
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", {"id": "task"})
@@ -234,6 +235,7 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
     fill_anton(setup)
     workstation(monkeypatch, 40)
     setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8, slug="other-swarm", harness="codex")
     task = {"id": "task", "seat": f"{lane}-1@fixture", "launch_assignment": {"harness": "codex"}}
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal(lane, task)
@@ -254,6 +256,7 @@ def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(s
     fill_anton(setup)
     workstation(monkeypatch, 40)
     setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8, slug="other-swarm", harness="codex")
     task = {"id": "task", "seat": "eng-1@fixture", "launch_assignment": {"harness": "codex"}}
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", task)
