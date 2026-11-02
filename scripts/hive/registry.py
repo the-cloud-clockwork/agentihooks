@@ -280,7 +280,7 @@ def hives(client) -> list[dict]:
     return [record for hive_id in hive_state.index(client) if (record := show(client, hive_id))]
 
 
-def live(record: dict[str, Any], now_ms: int) -> bool:
+def live(record: Any, now_ms: int) -> bool:
     """A fresh heartbeat counts only while the last finished beat, where the record carries one, is within the window."""
     finished_at: int = record.get("beat_at", record["heartbeat_at"])
     return (
