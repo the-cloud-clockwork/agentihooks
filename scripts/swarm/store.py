@@ -805,7 +805,7 @@ class RedisStore:
         seats = self.seats.swarm_keys(slug)
         named = set(self.seats.agent_names(slug)) | {row["name"] for row in self.names.names(slug)}
         named |= {alias for name in list(named) for alias in self.names.aliases(name)}
-        held = (key[len(self.seats.key("")) :].split(":", 1)[0] for key in seats if key.startswith(self.seats.key("")))
+        held = (key[len(self.seats.key("")) :].split(":")[0] for key in seats if key.startswith(self.seats.key("")))
         seated = {address for address in held if address.endswith(f"@{slug}")}
         inbox, members = InboxStore(self.redis).keys_at(sorted(named | seated))
         keys = sorted(own) + seats + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)

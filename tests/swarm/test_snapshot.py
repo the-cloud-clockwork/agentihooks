@@ -158,6 +158,15 @@ def test_export_keeps_the_mail_of_a_seat_that_holds_only_memory(store: RedisStor
     assert inbox.key("item", item.id) in store.export("sw")["keys"]
 
 
+def test_export_leaves_out_the_tick_lock_and_keeps_its_other_keys(store: RedisStore) -> None:
+    seed(store, "sw")
+    store.redis.set(store.key("sw", "tick-lock"), "held")
+    store.redis.set(store.key("sw", ""), "bare")
+    keys = store.export("sw")["keys"]
+    assert store.key("sw", "tick-lock") not in keys
+    assert store.key("sw", "") in keys
+
+
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
     seed(store, "sw")
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
