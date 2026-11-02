@@ -212,10 +212,10 @@ def document(slug: str) -> dict[str, Any] | None:
 @contextmanager
 def holding() -> Generator[None]:
     """Hold no view on entry and drop whatever view the block started on exit."""
-    current, refresh, kept = CURRENT.set(None), REFRESH.set(None), HELD.set(None)
+    current_token, refresh_token, held_token = CURRENT.set(None), REFRESH.set(None), HELD.set(None)
     try:
         yield
     finally:
-        HELD.reset(kept)
-        REFRESH.reset(refresh)
-        CURRENT.reset(current)
+        HELD.reset(held_token)
+        REFRESH.reset(refresh_token)
+        CURRENT.reset(current_token)
