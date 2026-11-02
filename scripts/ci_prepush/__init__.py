@@ -79,12 +79,9 @@ def _type_step(root: Path, base: str, revision: str, grade: Path) -> list[tuple[
     when the base tip has none.
     """
     if _git(root, "ls-tree", base, TYPE_GRADER):
-        grader = grade / "types-grader" / TYPE_GRADER
-        grader.parent.mkdir(parents=True, exist_ok=True)
+        grader = grade / "type_gate.py"
         grader.write_bytes(
-            subprocess.run(
-                ["git", "-C", str(root), "show", f"{base}:{TYPE_GRADER}"], capture_output=True, check=True
-            ).stdout
+            subprocess.run(["git", "-C", str(root), "show", f"{base}:{TYPE_GRADER}"], capture_output=True).stdout
         )
     elif (root / TYPE_GRADER).is_file():
         grader = root / TYPE_GRADER

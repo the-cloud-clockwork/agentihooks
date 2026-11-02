@@ -33,7 +33,7 @@ def key(root: Path) -> str:
     for name in INPUTS:
         path = root / name
         digest.update(f"\0{name}\0".encode())
-        digest.update(path.read_bytes() if path.is_file() else b"")
+        digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 
 
@@ -102,8 +102,8 @@ def _prune(home: Path, keep: Path) -> None:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 continue
-            shutil.rmtree(stale, ignore_errors=True)
-            lock_path.unlink(missing_ok=True)
+            shutil.rmtree(stale)
+            lock_path.unlink()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     The run holds a shared lock on its environment, so a concurrent prune leaves it in place.
     """
-    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser = argparse.ArgumentParser()
     parser.add_argument("--grader", type=Path, default=Path("scripts/type_gate.py"))
     parser.add_argument("--root", type=Path, default=Path.cwd())
     args, forwarded = parser.parse_known_args(argv)

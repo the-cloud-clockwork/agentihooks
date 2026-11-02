@@ -199,7 +199,7 @@ def test_plan_grades_types_with_the_base_tip_gate_against_the_merge_base(repo: P
     steps = dict(ci_prepush.plan(repo, "base", grade))
 
     snapshot = grade / "types-base"
-    grader = grade / "types-grader/scripts/type_gate.py"
+    grader = grade / "type_gate.py"
     assert steps["strict types"] == _type_command(repo, grader, snapshot)
     assert grader.read_text() == "GATE = 3\n"
     assert (snapshot / "scripts/type_gate.py").read_text() == "GATE = 1\n"

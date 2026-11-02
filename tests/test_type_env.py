@@ -47,7 +47,7 @@ def test_the_key_follows_every_input_that_decides_the_packages(tmp_path: Path, n
 
 def test_the_environment_is_built_with_the_ci_install_command(tmp_path: Path) -> None:
     root = _root(tmp_path)
-    home = tmp_path / "home"
+    home = tmp_path / "cache" / "home"
     uv = _Uv()
 
     python = type_env.environment(root, home, uv)
@@ -137,6 +137,23 @@ def test_a_build_keeps_an_environment_whose_lock_another_run_holds(tmp_path: Pat
     assert _environments(home) == sorted([held.name, type_env.key(root)])
 
 
+def test_a_build_keeps_an_environment_used_exactly_at_the_cutoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    type_env.environment(root, home, _Uv())
+    edge = home / type_env.key(root)
+    now = 10 * type_env.STALE_SECONDS
+    os.utime(edge / type_env.READY, (now - type_env.STALE_SECONDS, now - type_env.STALE_SECONDS))
+    monkeypatch.setattr(type_env.time, "time", lambda: now)
+    (root / type_env.LOCK).write_text("moved\n")
+
+    type_env.environment(root, home, _Uv())
+
+    assert _environments(home) == sorted([edge.name, type_env.key(root)])
+
+
 def test_reuse_marks_the_environment_used(tmp_path: Path) -> None:
     root = _root(tmp_path)
     home = tmp_path / "home"
@@ -161,21 +178,46 @@ def test_an_environment_without_its_interpreter_is_rebuilt(tmp_path: Path) -> No
     assert [command[1] for command, _ in uv.calls] == ["venv", "pip"]
 
 
-def test_main_runs_the_grader_with_the_environment_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_runs_the_grader_with_the_environment_python_under_its_shared_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = _root(tmp_path)
-    python = tmp_path / "env/bin/python"
+    python = tmp_path / "home" / "env" / "bin" / "python"
+    python.parent.mkdir(parents=True)
     seen: list[tuple[list[str], Path]] = []
+
+    def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[bytes]:
+        with (tmp_path / "home" / "env.lock").open("a") as lock:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        seen.append((command, cwd))
+        return subprocess.CompletedProcess(command, 3)
+
     monkeypatch.setattr(type_env, "environment", lambda given: python if given == root else None)
-    monkeypatch.setattr(
-        type_env.subprocess,
-        "run",
-        lambda command, cwd: seen.append((command, cwd)) or subprocess.CompletedProcess(command, 3),
-    )
+    monkeypatch.setattr(type_env.subprocess, "run", run)
 
     code = type_env.main(["--grader", str(tmp_path / "gate.py"), "--root", str(root), "--base", "b", "--head", "h"])
 
     assert code == 3
     assert seen == [([str(python), "-I", str(tmp_path / "gate.py"), "--base", "b", "--head", "h"], root)]
+
+
+def test_main_defaults_to_the_current_repository_and_its_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path.resolve())
+    python = tmp_path / "home" / "env" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    seen: list[list[str]] = []
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(type_env, "environment", lambda given: python if given == root else None)
+    monkeypatch.setattr(
+        type_env.subprocess,
+        "run",
+        lambda command, cwd: seen.append(command) or subprocess.CompletedProcess(command, 0),
+    )
+
+    assert type_env.main(["--write"]) == 0
+
+    assert seen == [[str(python), "-I", str(root / "scripts" / "type_gate.py"), "--write"]]
 
 
 def test_main_fails_when_the_environment_cannot_be_built(
