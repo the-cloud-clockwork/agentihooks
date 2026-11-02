@@ -2016,6 +2016,34 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     )
 
 
+@pytest.mark.parametrize(
+    ("job", "mutate", "upload"),
+    [
+        ("mutation", "Mutate changed Python files", "Upload complete mutation evidence"),
+        ("mutation-stats", "Mutate the only shard in the statistics job", "Upload complete inline mutation evidence"),
+    ],
+)
+def test_mutation_shards_grade_their_rows_with_the_protected_grader(job: str, mutate: str, upload: str) -> None:
+    steps = _mutation_workflow()["jobs"][job]["steps"]
+    names = [step.get("name") for step in steps]
+    checkout = steps[names.index("Check out the protected mutation grader")]
+    grade = steps[names.index("Grade the shard report from the protected grader")]
+    assert checkout["env"] == {
+        "GRADER": "${{ github.event.pull_request.base.sha || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
+    }
+    assert checkout["run"] == (
+        'git fetch --no-tags origin "$GRADER"\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
+    )
+    assert checkout["if"] == steps[names.index(mutate)]["if"]
+    assert grade["if"] == steps[names.index(upload)]["if"]
+    assert grade["run"] == (
+        'grader="$RUNNER_TEMP/grader"\n'
+        '[[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"\n'
+        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json .\n'
+    )
+    assert names.index(checkout["name"]) < names.index(mutate) < names.index(grade["name"]) < names.index(upload)
+
+
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     jobs = _mutation_workflow()["jobs"]
     plan, mutation = jobs["mutation-plan"], jobs["mutation"]

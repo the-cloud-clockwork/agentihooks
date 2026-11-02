@@ -4083,6 +4083,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # The protected copy grades the shard's rows, so a pull request cannot loosen how its own survivors grade.
+      - name: Check out the protected mutation grader
+        if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          GRADER: ${{ github.event.pull_request.base.sha || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
       - name: Mutate the only shard in the statistics job
         id: mutate
         if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
@@ -4090,6 +4099,15 @@ jobs:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats
+
+      # Clearance files come from the pull request, since each survivor's clearance lands with its change.
+      # Until dev carries the regrader, the head's copy grades.
+      - name: Grade the shard report from the protected grader
+        if: always() && steps.mutate.outcome != 'skipped'
+        run: |
+          grader="$RUNNER_TEMP/grader"
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json .
 
       - name: Upload complete inline mutation evidence
         if: always() && steps.mutate.outcome != 'skipped'
@@ -4278,6 +4296,15 @@ jobs:
         uses: actions/download-artifact@v4
         with: *mutation-download-the-shared-mutation-stats
 
+      # The protected copy grades the shard's rows, so a pull request cannot loosen how its own survivors grade.
+      - name: Check out the protected mutation grader
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          GRADER: ${{ github.event.pull_request.base.sha || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
       - name: Mutate changed Python files
         if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
         env:
@@ -4295,6 +4322,15 @@ jobs:
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
+
+      # Clearance files come from the pull request, since each survivor's clearance lands with its change.
+      # Until dev carries the regrader, the head's copy grades.
+      - name: Grade the shard report from the protected grader
+        if: always() && needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          grader="$RUNNER_TEMP/grader"
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json .
 
       - name: Upload complete mutation evidence
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'

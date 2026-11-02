@@ -425,7 +425,9 @@ def grade_shard_rows(
 ) -> dict:
     if units := [row for row in rows if row["name"] in split]:
         report.setdefault("units", []).append({"path": path, "lines": sorted(lines), "rows": units})
-    return evaluate(path, [row for row in rows if row["name"] not in split], lines, cleared)
+    graded = [row for row in rows if row["name"] not in split]
+    report.setdefault("graded", []).append({"path": path, "lines": sorted(lines), "rows": graded})
+    return evaluate(path, graded, lines, cleared)
 
 
 def split_plan_names(stats: SharedStats | None) -> set[str]:
