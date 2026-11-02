@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "operator-dead-starting-front-door",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2335",
+      "behaviour": "Operator master up finishes an expired starting front door whose process is gone and launches its replacement while preserving refusal for a live starting front door when no seat is free.",
+      "seam": "agentihooks swarm master up --new",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_dead_starting_front_door_is_finished_and_replaced",
+        "tests/swarm/test_master_launch.py::test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master"
+      ]
+    },
+    {
       "id": "swarm-tick-real-backends",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
@@ -70,6 +81,44 @@
         "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
         "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
         "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-overlap-hold",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-overlap-hold",
+      "behaviour": "A tick step still running from an earlier pass is held, not started again: the engine records it as held while its earlier run is alive, so placement runs once across two overlapping passes, and the step runs again once that earlier run ends.",
+      "seam": "scripts.tick.engine.run_step and scripts.tick.engine.run_group",
+      "tests": [
+        "tests/tick/test_step_overlap.py::test_a_step_whose_earlier_run_is_alive_is_held_without_running",
+        "tests/tick/test_step_overlap.py::test_a_step_runs_again_once_its_earlier_run_ended",
+        "tests/tick/test_step_overlap.py::test_another_step_is_not_held_by_a_running_one",
+        "tests/tick/test_step_overlap.py::test_placement_runs_once_across_two_overlapping_passes",
+        "tests/tick/test_step_overlap.py::test_a_held_record_reads_held_unless_it_failed"
+      ]
+    },
+    {
+      "id": "swarm-tick-left-pass-value",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2329",
+      "behaviour": "A tick step held or left running past its budget leaves its pass value unset; a later step reading that value is skipped instead of holding an error, so the pass completes.",
+      "seam": "scripts.tick.steps.PassBox and the step wrappers host.held, tasks.held, masters._held and observe._run",
+      "tests": [
+        "tests/tick/test_left_value.py::test_a_writer_left_past_its_budget_skips_its_reader_and_the_pass_completes",
+        "tests/tick/test_left_value.py::test_a_held_writer_skips_its_reader_and_the_pass_completes",
+        "tests/tick/test_left_value.py::test_an_observe_step_missing_a_pass_value_is_skipped_without_holding_an_error",
+        "tests/tick/test_left_value.py::test_a_pass_box_names_the_left_value_as_a_key_error"
+      ]
+    },
+    {
+      "id": "swarm-tick-late-view",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2334",
+      "behaviour": "The tick view step budget comes from the measured ledger read time, and a late or held view refresh keeps the earlier view so events, metrics and the heartbeat still run in that pass.",
+      "seam": "the tick view step in scripts.tick.steps.host with its budget from scripts.tick.steps.budgets, and the wrapper pass in scripts.swarm.cli.run_tick",
+      "tests": [
+        "tests/tick/test_late_view.py::test_the_view_budget_covers_the_measured_ledger_read",
+        "tests/tick/test_late_view.py::test_a_late_view_keeps_events_metrics_and_heartbeat_running"
       ]
     },
     {
@@ -143,6 +192,11 @@
         "tests/tick/test_source_control.py::test_a_change_record_defaults_to_no_body_and_not_a_draft",
         "tests/tick/test_source_control.py::test_github_merged_at_reads_the_first_merged_change_carrying_a_commit",
         "tests/tick/test_source_control.py::test_github_open_changes_reads_each_open_pull_request_check_rollup",
+        "tests/tick/test_source_control.py::test_github_workflow_runs_read_every_page_of_one_workflow_since_a_time",
+        "tests/tick/test_source_control.py::test_github_download_reads_raw_bytes_under_the_named_reader",
+        "tests/tick/test_source_control.py::test_github_download_outside_a_named_reader_counts_as_the_port",
+        "tests/tick/test_source_control.py::test_github_graph_returns_the_whole_body_under_the_named_reader",
+        "tests/tick/test_source_control.py::test_github_graph_outside_a_named_reader_counts_as_the_port",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
       ]
     },
@@ -1192,7 +1246,12 @@
         "tests/tick/test_view.py::test_a_full_read_at_the_stored_generation_replaces_a_view_that_does_not_fit",
         "tests/tick/test_view.py::test_an_unchanged_generation_leaves_the_stored_file",
         "tests/tick/test_view.py::test_start_reads_through_the_ledger_client_and_holds_the_view",
-        "tests/swarm/test_tick_view_start.py::test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read"
+        "tests/swarm/test_tick_view_start.py::test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read",
+        "tests/swarm_ledger/test_export_parts.py::test_the_tick_view_parts_are_accepted",
+        "tests/tick/test_view.py::test_the_view_holds_every_top_level_part_the_pass_reads",
+        "tests/tick/test_view.py::test_a_pass_holding_a_view_reads_each_document_through_one_delta_read",
+        "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
+        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
       ]
     }
   ],

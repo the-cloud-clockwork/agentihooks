@@ -32,6 +32,14 @@ def _family(model):
     return re.sub(r"-[\d.-]+$", "", re.sub(r"\[.*\]$", "", model.removeprefix("claude-")))
 
 
+def same(expected: str, actual: str) -> bool:
+    """Whether two model names name one model, a launch alias such as opus matching any model of its family."""
+    alias = re.compile(r"\[.*\]$")
+    return (
+        expected == actual or alias.sub("", expected) == _family(actual) or alias.sub("", actual) == _family(expected)
+    )
+
+
 def apply(agent, reported):
     """The agent record with the reported model and effort; unchanged when the report predates the agent's start or
     names what the record already says, a launch alias such as opus matching any model of its family."""

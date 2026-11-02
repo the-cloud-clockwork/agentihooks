@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ from scripts.tick.ports.source_control import (
     RollupCheck,
     Run,
     Tag,
+    WorkflowRun,
 )
 
 __all__ = ["CALLER", "GitHubSourceControl", "command"]
@@ -104,6 +106,22 @@ def _open_change(node: dict[str, Any]) -> OpenChange:
     rollup = node["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
     contexts: list[dict[str, Any]] = rollup["contexts"]["nodes"] if rollup else []
     return OpenChange(node["url"], tuple(_rollup_check(context) for context in contexts))
+
+
+def _workflow_run(row: dict[str, Any]) -> WorkflowRun:
+    """Read one workflow run's identity, outcome and timing."""
+    return WorkflowRun(
+        row["id"],
+        row["event"],
+        row["status"],
+        row["conclusion"],
+        row["head_branch"],
+        row["head_sha"],
+        row["created_at"],
+        row["run_started_at"],
+        row["updated_at"],
+        row["run_attempt"],
+    )
 
 
 @dataclass(frozen=True)
@@ -287,3 +305,43 @@ class GitHubSourceControl:
                 break
             variables = {**variables, "after": pulls["pageInfo"]["endCursor"]}
         return tuple(changes)
+
+    def workflow_runs(
+        self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline
+    ) -> tuple[WorkflowRun, ...]:
+        """List one workflow's runs for an event that finished with a conclusion since a UTC stamp, every page."""
+        path = (
+            f"repos/{self.repository}/actions/workflows/{workflow}/runs"
+            f"?event={event}&status={conclusion}&exclude_pull_requests=true&created=>={since}&"
+        )
+        return tuple(_workflow_run(row) for row in self._pages(path, "workflow_runs", deadline))
+
+    def download(self, path: str, *, deadline: Deadline) -> bytes:
+        """Read one API resource as raw bytes under the reader the caller names, refusing a failed read."""
+        result = github_reads.rest(
+            github_reads.CALLER.get(CALLER),
+            ["api", path],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=_live(deadline),
+            capture_output=True,
+        )
+        result.check_returncode()
+        return result.stdout
+
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any:
+        """Run one GraphQL document under the reader the caller names and return its whole body, errors included."""
+        flags = [word for name, value in variables.items() for word in ("-f", f"{name}={value}")]
+        caller = github_reads.CALLER.get(CALLER)
+        github_reads.charge(caller, "graphql", time.time())
+        result = github_reads.rest(
+            caller,
+            ["api", "graphql", "-f", f"query={document}", *flags],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=_live(deadline),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return json.loads(result.stdout)
