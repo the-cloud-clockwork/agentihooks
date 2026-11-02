@@ -6,6 +6,7 @@ import stat
 import time
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_v2.supervision_protocol import acknowledge, context, matches, read, write
 
@@ -19,7 +20,7 @@ from scripts.swarm_v2.worker import completion
 
 
 def _sessions(root: Path) -> list[Path]:
-    found = []
+    found: list[Path] = []
     for folder, _, names in os.walk(root):
         for name in names:
             path = Path(folder) / name
@@ -36,7 +37,7 @@ def _copy(raw: bytes, target: Path) -> None:
         os.fsync(stream.fileno())
 
 
-def export(attempt: Path, scope: dict, environ: Mapping[str, str]) -> dict:
+def export(attempt: Path, scope: dict[str, Any], environ: Mapping[str, str]) -> dict[str, Any]:
     home = Path(environ["HOME"])
     variable, folder = SESSIONS[home.name]
     root = Path(environ[variable]) / folder
@@ -51,7 +52,7 @@ def export(attempt: Path, scope: dict, environ: Mapping[str, str]) -> dict:
     if portable_capture.enabled(environ):
         return {**portable_capture.publish(attempt, scope, environ, newest=newest), "transcript_end": end}
     checkpoint = Path("checkpoints") / scope["incarnation"]
-    files = []
+    files: list[dict[str, Any]] = []
     for source in found:
         relative = source.relative_to(root)
         raw = source.read_bytes()
@@ -82,7 +83,7 @@ def main() -> int:
             return 1
         time.sleep(0.05)
     if quiesced.get("status") == "quiesced":
-        fields = export(Path.cwd(), scope, os.environ)
+        fields: dict[str, Any] = export(Path.cwd(), scope, os.environ)
     else:
         fields = {"status": "incomplete", "reason": "forced_quiescence"}
     completion.report(scope, fields)

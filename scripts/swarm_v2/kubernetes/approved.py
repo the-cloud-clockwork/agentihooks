@@ -1,5 +1,6 @@
 import os
 from collections.abc import Callable, Collection, Mapping
+from typing import Any
 
 from scripts import session_bands
 from scripts.account_names import CODEX_TOKEN_PREFIX, codex_token_env
@@ -27,7 +28,7 @@ class SecretKeys:
                 flush=True,
             )
             return frozenset()
-        data = (secret or {}).get("data") or {}
+        data: dict[str, Any] = (secret or {}).get("data") or {}
         if self.harness == "codex":
             return frozenset(
                 account

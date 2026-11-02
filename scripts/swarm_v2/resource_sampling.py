@@ -8,6 +8,8 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from resource import struct_rusage
+from typing import Any
 
 PROC = Path("/proc")
 MIB = 1024 * 1024
@@ -15,7 +17,7 @@ PAGE = os.sysconf("SC_PAGE_SIZE")
 TICKS = os.sysconf("SC_CLK_TCK")
 CORE_WINDOW = 1.0
 GONE = (FileNotFoundError, ProcessLookupError, PermissionError)
-QUIET = {"start_new_session": True, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+QUIET: dict[str, Any] = {"start_new_session": True, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
 UNREAPED = os.WEXITED | os.WNOHANG | os.WNOWAIT
 
 
@@ -164,7 +166,7 @@ def _exited(pid: int) -> bool:
     return os.waitid(os.P_PID, pid, UNREAPED) is not None
 
 
-def summary(peaks: Peaks, usage, wall_seconds: float, status: int, timed_out: bool) -> dict:
+def summary(peaks: Peaks, usage: struct_rusage, wall_seconds: float, status: int, timed_out: bool) -> dict[str, Any]:
     cpu_seconds = max(usage.ru_utime + usage.ru_stime, sum(peaks.ticks.values()) / TICKS)
     parent_cpu_seconds = peaks.ticks.get(peaks.root, 0) / TICKS
     children_cpu_seconds = cpu_seconds - parent_cpu_seconds
@@ -191,7 +193,7 @@ def summary(peaks: Peaks, usage, wall_seconds: float, status: int, timed_out: bo
 
 def measure(
     command: Sequence[str], workdir: Path, env: Mapping[str, str], interval: float, timeout: float, proc: Path = PROC
-) -> dict:
+) -> dict[str, Any]:
     """Run command in its own session under workdir, sampling its tree until it exits or the timeout kills it.
 
     The leader is checked without being reaped, so its process group still exists when stragglers are killed.

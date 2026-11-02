@@ -4,6 +4,7 @@ import argparse
 import json
 import time
 from collections.abc import Callable
+from typing import Any
 
 from hooks.memory.catalog import Catalog
 from hooks.memory.migrations import DIMENSION, OPERATOR, Approval, Migrator
@@ -23,7 +24,7 @@ def approval(who: Who, domain: str, generation: str) -> Approval:
     return Approval(OPERATOR, OPERATOR, DIMENSION, domain, generation)
 
 
-def _run(migrator: Migrator, args: argparse.Namespace, now: float, who: Who | None) -> dict:
+def _run(migrator: Migrator, args: argparse.Namespace, now: float, who: Who | None) -> dict[str, Any]:
     if args.command == "status":
         return {**migrator.status(), "blocked": migrator.dimensions.blocked()}
     if args.command == "startup":

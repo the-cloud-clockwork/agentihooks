@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from hooks.memory.api.ingest import Grant
 from hooks.memory.catalog import Catalog
@@ -20,9 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run(args: argparse.Namespace, plan: ImportPlan, catalog: Catalog, imports: ImportLedger) -> tuple[dict, bool]:
+def _run(
+    args: argparse.Namespace, plan: ImportPlan, catalog: Catalog, imports: ImportLedger
+) -> tuple[dict[str, Any], bool]:
     if args.retire:
-        report = imports.retire(catalog, args.corpus, Path(args.retire))
+        report: dict[str, Any] = imports.retire(catalog, args.corpus, Path(args.retire))
         return report, report["state"] == "retired"
     grant = Grant(args.principal, args.corpus, frozenset(args.project))
     report = import_sessions(catalog, imports, grant, plan, dry_run=args.dry_run)
@@ -38,7 +41,7 @@ def _split(parser: argparse.ArgumentParser, value: str, name: str) -> list[str]:
 
 
 def _aliases(parser: argparse.ArgumentParser, values: list[str]) -> dict[str, str]:
-    aliases = {}
+    aliases: dict[str, str] = {}
     for value in values:
         folder, separator, project = value.partition("=")
         if not (separator and folder and project):

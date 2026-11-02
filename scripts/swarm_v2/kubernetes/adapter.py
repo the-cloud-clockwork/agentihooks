@@ -1,6 +1,7 @@
 """The Kubernetes backend behind the runtime protocol: an admitted spawn becomes one journaled Pod create."""
 
 from collections.abc import Callable
+from typing import Any
 
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm.tick import Placed
@@ -20,7 +21,7 @@ class KubernetesRuntime:
     def __init__(
         self,
         execute: Callable[[OperationRequest], Operation],
-        launch: Callable[[SpawnRequest], dict],
+        launch: Callable[[SpawnRequest], dict[str, Any]],
         prompts: TerminalPrompts | None = None,
     ):
         self.execute, self.launch, self.prompts = execute, launch, prompts
@@ -28,11 +29,12 @@ class KubernetesRuntime:
             self.capabilities = self.capabilities | {Capability.COMMAND}
 
     def spawn(self, request: SpawnRequest) -> Outcome:
-        execution_id, generation = request.task.get("execution_id"), request.task.get("generation")
+        execution_id: str | None = request.task.get("execution_id")
+        generation: int | None = request.task.get("generation")
         if not execution_id or not generation:
             return Outcome(SPAWN, Status.REFUSED, BACKEND, detail=Unqualified.NO_EXECUTION.value)
         try:
-            payload = {**self.launch(request), "execution_id": execution_id, "generation": generation}
+            payload: dict[str, Any] = {**self.launch(request), "execution_id": execution_id, "generation": generation}
             operation = self.execute(OperationRequest(execution_id, generation, SPAWN, payload, CREATE))
         except (SwarmError, OperationConflict) as error:
             return Outcome(SPAWN, Status.REFUSED, BACKEND, detail=str(error))
@@ -62,7 +64,7 @@ class KubernetesRuntime:
     def drain(self, agent: AgentRecord) -> Outcome:
         return self._unsupported("drain")
 
-    def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome:
+    def terminate(self, agent: AgentRecord, homes: tuple[Any, ...] = ()) -> Outcome:
         return self._unsupported("terminate")
 
     def recover(self, agent: AgentRecord, mode: Recovery, config: object, text: str) -> Outcome:

@@ -1,6 +1,7 @@
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
@@ -81,7 +82,7 @@ def attach(
     return operator_attach(build(), HostKeys(store), caller, slug, execution_id)
 
 
-def command(store: RedisStore, slug: str, execution_id: str, environ: Mapping[str, str], who: Who) -> dict:
+def command(store: RedisStore, slug: str, execution_id: str, environ: Mapping[str, str], who: Who) -> dict[str, Any]:
     caller = principal(store, slug, who, environ)
     home = client_home(environ)
 

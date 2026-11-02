@@ -5,6 +5,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from typing import Any
 
 from scripts.swarm.store import SwarmError
 
@@ -21,7 +22,7 @@ TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 COMMIT = re.compile(r"[0-9a-f]{40}")
 TIMEOUT_SECONDS = 10
 
-Opener = Callable[..., object]
+Opener = Callable[..., http.client.HTTPResponse]
 
 
 class ImageUnresolved(SwarmError):
@@ -48,7 +49,7 @@ def _grant(challenge: str, host: str, image: str, opener: Opener) -> str:
     if (where.scheme, where.hostname) != ("https", host):
         raise ImageUnresolved(f"the registry for {image} names a token service other than https://{host}")
     with opener(urllib.request.Request(f"{realm}?{urllib.parse.urlencode(fields)}"), timeout=TIMEOUT_SECONDS) as answer:
-        body = json.loads(answer.read())
+        body: dict[str, Any] | list[Any] | str | int | float | bool | None = json.loads(answer.read())
     if not isinstance(body, dict):
         return ""
     return body.get("token") or body.get("access_token") or ""

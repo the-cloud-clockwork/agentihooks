@@ -4,6 +4,7 @@ import json
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from scripts import openbao_kv
 from scripts.hive import auth, registry
@@ -37,7 +38,9 @@ def _linked(home: Path) -> str:
         return ""
 
 
-def write(environ: Mapping[str, str], path: str, entries: Mapping[str, str], opener: Callable | None = None) -> int:
+def write(
+    environ: Mapping[str, str], path: str, entries: Mapping[str, str], opener: Callable[..., Any] | None = None
+) -> int:
     bao = openbao_kv.from_env(environ, opener)
     if bao is None:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
@@ -47,7 +50,7 @@ def write(environ: Mapping[str, str], path: str, entries: Mapping[str, str], ope
         raise auth.HiveError(str(exc)) from None
 
 
-def publish(environ: Mapping[str, str], path: str, opener: Callable | None = None) -> str:
+def publish(environ: Mapping[str, str], path: str, opener: Callable[..., Any] | None = None) -> str:
     entries = origin(registry.home(environ), environ)
     total = write(environ, path, entries, opener)
     linked = f"bundle {entries[URL_KEY]} at {entries[REF_KEY]}" if entries[URL_KEY] else "no bundle is linked"

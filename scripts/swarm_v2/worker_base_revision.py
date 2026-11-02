@@ -1,6 +1,7 @@
 import json
 import sys
 import urllib.request
+from typing import Any
 
 ACCEPT = ", ".join(
     f"application/vnd.{kind}+json"
@@ -13,7 +14,7 @@ ACCEPT = ", ".join(
 )
 
 
-def get(url: str, token: str | None = None) -> tuple[dict, str | None]:
+def get(url: str, token: str | None = None) -> tuple[dict[str, Any], str | None]:
     request = urllib.request.Request(url, headers={"Accept": ACCEPT})
     if token:
         request.add_unredirected_header("Authorization", f"Bearer {token}")
@@ -25,7 +26,7 @@ def pinned_revision(image: str) -> tuple[str, str]:
     name, _, tag = image.rpartition(":")
     registry, _, repository = name.partition("/")
     v2 = f"https://{registry}/v2/{repository}"
-    token = get(f"https://{registry}/token?scope=repository:{repository}:pull")[0]["token"]
+    token: str = get(f"https://{registry}/token?scope=repository:{repository}:pull")[0]["token"]
     manifest, digest = get(f"{v2}/manifests/{tag}", token)
     if "manifests" in manifest:
         digest = next(
@@ -36,7 +37,8 @@ def pinned_revision(image: str) -> tuple[str, str]:
             sys.exit(f"{image} has no amd64 image")
         manifest = get(f"{v2}/manifests/{digest}", token)[0]
     config = get(f"{v2}/blobs/{manifest['config']['digest']}", token)[0]
-    revision = (config["config"].get("Labels") or {}).get("org.opencontainers.image.revision")
+    labels: dict[str, Any] = config["config"].get("Labels") or {}
+    revision: str | None = labels.get("org.opencontainers.image.revision")
     if config.get("architecture") != "amd64" or not digest or not revision:
         sys.exit(f"{image} has no amd64 image with a revision label")
     return f"{name}@{digest}", revision

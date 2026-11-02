@@ -43,7 +43,7 @@ class OperationRequest:
     execution_id: str
     generation: int
     action: str
-    payload: dict
+    payload: dict[str, Any]
     key: str
 
 
@@ -55,13 +55,13 @@ class Operation:
     action: str
     backend: str
     payload_digest: str
-    target: dict
+    target: dict[str, Any]
     phase: Phase = Phase.ACCEPTED
-    result: dict = field(default_factory=dict)
+    result: dict[str, Any] = field(default_factory=dict)
     controller_epoch: int | None = None
     attempted: bool = False
     spec_digest: str = ""
-    refusal: dict = field(default_factory=dict)
+    refusal: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -71,8 +71,8 @@ class Observation:
     generation: int = 0
     backend: str = ""
     payload_digest: str = ""
-    result: dict = field(default_factory=dict)
-    refusal: dict = field(default_factory=dict, compare=False)
+    result: dict[str, Any] = field(default_factory=dict)
+    refusal: dict[str, Any] = field(default_factory=dict, compare=False)
 
 
 class OperationTransport(Protocol):
@@ -82,18 +82,20 @@ class OperationTransport(Protocol):
         """ABSENT proves no effect or in-flight request; UNKNOWN cannot authorize replay."""
         ...
 
-    def apply_operation(self, operation: Operation, payload: dict) -> Observation:
+    def apply_operation(self, operation: Operation, payload: dict[str, Any]) -> Observation:
         """Atomically deduplicate operation and execution identity and fence its generation."""
         ...
 
 
-def digest(payload: dict) -> str:
+def digest(payload: dict[str, Any]) -> str:
     encoded = _CANONICAL.encode(payload).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _decode(row: dict) -> Operation:
-    return Operation(**{**row, "phase": Phase(row["phase"])})
+def _decode(row: dict[str, Any]) -> Operation:
+    row = dict(row)
+    row["phase"] = Phase(row["phase"])
+    return Operation(**row)
 
 
 class OperationJournal:
@@ -158,7 +160,7 @@ class OperationJournal:
             if not raw:
                 raise OperationConflict(_ERRORS["missing"])
             current = _decode(raw)
-            settled = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False, "refusal": {}}
+            settled: dict[str, Any] = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False, "refusal": {}}
             if replace(current, **settled) != replace(operation, **settled):
                 raise OperationConflict(_ERRORS["identity"])
             if current.phase in (Phase.APPLIED, Phase.SUPERSEDED):
@@ -188,7 +190,7 @@ class OperationJournal:
 
         return self._write(slug, update)
 
-    def _current(self, execution_id: str, generation: int, doc: dict) -> Any:
+    def _current(self, execution_id: str, generation: int, doc: dict[str, Any]) -> Any:
         from scripts.swarm import fencing
         from scripts.swarm.execution import occupants_of
 
@@ -258,7 +260,7 @@ class Operations:
         ]
 
     def recover(self, slug: str) -> list[Operation]:
-        recovered = []
+        recovered: list[Operation] = []
         for operation in self.unresolved(slug):
             transport = self.transports.get(operation.backend)
             observed = self._observe(transport, operation) if transport else Observation(Phase.UNKNOWN)
@@ -280,8 +282,6 @@ class Operations:
 
     def _qualified(self, operation: Operation, observation: Observation) -> Observation:
         refused = Observation(Phase.REFUSED, refusal={"reason": "identity", "field": ""})
-        if not isinstance(observation.phase, Phase):
-            return refused
         if observation.phase is Phase.APPLIED and (
             type(observation.generation) is not int
             or (

@@ -5,7 +5,7 @@ import json
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.hive import registry
 
@@ -30,19 +30,24 @@ def herdr(binary: str, *args: str) -> object | None:
 def agent_panes(listing: object) -> dict[str, int] | None:
     if not isinstance(listing, dict) or "result" not in listing:
         return None
-    counts = dict.fromkeys(HARNESSES, 0)
+    counts: dict[str, int] = dict.fromkeys(HARNESSES, 0)
     for pane in listing["result"].get("panes", []):
         if pane.get("agent") in counts:
             counts[pane["agent"]] += 1
     return counts
 
 
-def measure(binary: str) -> dict:
+def measure(binary: str) -> dict[str, Any]:
     """Agent panes by harness on this herdr client and each enabled machine saved on it, read in parallel; a machine
     that does not answer is named as silent."""
     saved = herdr(binary, "machine", "list", "--json")
-    labels = [machine["label"] for machine in saved if machine.get("enabled")] if isinstance(saved, list) else []
-    targets = [(MASTER, ()), *((label, ("--machine", label)) for label in labels)]
+    labels: list[str] = (
+        [machine["label"] for machine in saved if machine.get("enabled")] if isinstance(saved, list) else []
+    )
+    targets: list[tuple[str, tuple[str, ...]]] = [
+        (MASTER, ()),
+        *((label, ("--machine", label)) for label in labels),
+    ]
     with ThreadPoolExecutor() as pool:
         counted = list(pool.map(lambda target: agent_panes(herdr(binary, *target[1], "pane", "list")), targets))
     machines = {name: counts for (name, _), counts in zip(targets, counted) if counts is not None}
@@ -60,7 +65,7 @@ def publish(redis: "Redis", hive: str, now_ms: int, binary: str | None = None) -
         redis.set(key(hive), json.dumps({**measure(binary), "measured_at": now_ms}), px=STALE_MS)
 
 
-def read(redis: "Redis", hive: str, now_ms: int) -> dict | None:
+def read(redis: "Redis", hive: str, now_ms: int) -> dict[str, Any] | None:
     raw = redis.get(key(hive))
     if raw is None:
         return None

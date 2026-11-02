@@ -5,6 +5,7 @@ import re
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from scripts.hive import auth
 from scripts.hive.config import _installed
@@ -15,7 +16,7 @@ ENV_KEY = "HIVE_LINKED_PROFILES"
 def sources(home: Path) -> str:
     from scripts.hive.daemon import origin
 
-    found = []
+    found: list[dict[str, Any]] = []
     for profile in _installed(home / "state.json").get("linked_profiles", []):
         path = Path(profile["path"]).resolve()
         root = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"], capture_output=True, text=True)

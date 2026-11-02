@@ -7,6 +7,7 @@ import os
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
+from typing import Any
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.accounts import (
@@ -85,6 +86,7 @@ class AccountReconciler:
         self.stale_exits = store.key(slug, "account-stale-exits")
 
     def _rows(self) -> dict[str, dict[str, Slot]]:
+        rows: dict[str, dict[str, Slot]]
         mine, rows = f"{self.slug}/", {}
         for account in stored_accounts(self.store):
             found = {name: slot for name, slot in self.capacity.rows(account).items() if name.startswith(mine)}
@@ -125,10 +127,12 @@ class AccountReconciler:
         seen = self._observed(slot)
         state = seen.state if seen is not None else None
         if state is observe.State.LOST:
+            assert seen is not None
             return ORPHAN_OCCUPANCY, RELEASE, _evidence(seen)
         if state is observe.State.SUSPECT or not current:
             return ORPHAN_OCCUPANCY, KEEP, _evidence(seen) if seen is not None else "unobserved"
         if state is observe.State.WAITING_QUOTA:
+            assert seen is not None
             return WAITING_QUOTA, KEEP, _evidence(seen)
         if seen is not None and seen.failure is observe.Failure.TERMINAL_LOSS:
             return TERMINAL_LOSS, KEEP, _evidence(seen)
@@ -196,7 +200,8 @@ class AccountReconciler:
 
     def reconcile(self) -> list[Finding]:
         found = [
-            self._release(finding, slot) if finding.action == RELEASE else finding for finding, slot in self._assess()
+            self._release(finding, slot) if finding.action == RELEASE and slot is not None else finding
+            for finding, slot in self._assess()
         ]
         counts = Counter(finding.kind for finding in found if finding.kind in DISCREPANCIES)
         with self.store.redis.pipeline() as pipe:
@@ -232,7 +237,7 @@ class AccountReconciler:
         return int(self.store.redis.get(self.stale_exits) or 0)
 
 
-def page(store: RedisStore, slug: str) -> dict:
+def page(store: RedisStore, slug: str) -> dict[str, Any]:
     reconciler = AccountReconciler(store, slug)
     found = reconciler.report()
     return {

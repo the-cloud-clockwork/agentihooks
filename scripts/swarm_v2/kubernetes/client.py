@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from scripts.swarm_v2.kubernetes.watch import CursorExpired
 
@@ -43,27 +43,27 @@ class ApiRefused(Exception):
 class PodApi(Protocol):
     namespace: str
 
-    def create_pod(self, body: dict) -> dict: ...
+    def create_pod(self, body: dict[str, Any]) -> dict[str, Any]: ...
 
-    def read_pod(self, name: str) -> dict | None: ...
+    def read_pod(self, name: str) -> dict[str, Any] | None: ...
 
     def pod_logs(self, name: str, container: str) -> str: ...
 
-    def list_pods(self, selector: str) -> list[dict]: ...
+    def list_pods(self, selector: str) -> list[dict[str, Any]]: ...
 
-    def snapshot(self, selector: str) -> tuple[list[dict], str]: ...
+    def snapshot(self, selector: str) -> tuple[list[dict[str, Any]], str]: ...
 
-    def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict]]: ...
+    def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict[str, Any]]]: ...
 
     def ready_nodes(self) -> list[str] | None: ...
 
-    def list_quotas(self) -> list[dict]: ...
+    def list_quotas(self) -> list[dict[str, Any]]: ...
 
-    def create_config_map(self, body: dict) -> dict: ...
+    def create_config_map(self, body: dict[str, Any]) -> dict[str, Any]: ...
 
-    def create_object(self, body: dict) -> dict: ...
+    def create_object(self, body: dict[str, Any]) -> dict[str, Any]: ...
 
-    def read(self, kind: str, name: str) -> dict | None: ...
+    def read(self, kind: str, name: str) -> dict[str, Any] | None: ...
 
     def delete(self, kind: str, name: str, uid: str) -> bool: ...
 
@@ -84,7 +84,7 @@ class KubeHttp:
         return cls(f"https://{host}:{environ['KUBERNETES_SERVICE_PORT']}", account / "token", context, opener)
 
     def send(
-        self, method: str, path: str, body: dict | None = None, read: Callable[[bytes], Any] = json.loads
+        self, method: str, path: str, body: dict[str, Any] | None = None, read: Callable[[bytes], Any] = json.loads
     ) -> tuple[int, Any]:
         try:
             token = self.token_path.read_text().strip()
@@ -116,26 +116,31 @@ class KubeHttp:
             raise ConnectionError("the API server answer is unreadable") from None
 
 
-def _answer(status: int, body: dict) -> dict:
+AnswerBody = TypeVar("AnswerBody")
+
+
+def _answer(status: int, body: AnswerBody) -> AnswerBody:
     if status in (200, 201):
         return body
     if status == 429 or status >= 500:
         raise ConnectionError(f"API server answered {status}")
-    raise ApiRefused(status, body.get("reason", ""))
+    mapping: dict[str, Any] = body if isinstance(body, dict) else {}
+    reason: str = mapping.get("reason", "")
+    raise ApiRefused(status, reason)
 
 
-def _items(answer: object) -> list[dict]:
-    items = answer.get("items") if isinstance(answer, dict) else None
+def _items(answer: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[Any] | None = answer.get("items")
     if not isinstance(items, list):
         raise ConnectionError("the API server list answer carries no items")
     return items
 
 
-def _events(raw: bytes) -> list[dict]:
+def _events(raw: bytes) -> list[dict[str, Any]]:
     return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
 
-def _ready(node: dict) -> bool:
+def _ready(node: dict[str, Any]) -> bool:
     conditions = node.get("status", {}).get("conditions", [])
     return any(condition["type"] == "Ready" and condition["status"] == "True" for condition in conditions)
 
@@ -150,25 +155,25 @@ class PodClient:
         path = f"/api/v1/namespaces/{self.namespace}/{kind}"
         return f"{path}/{name}" if name else path
 
-    def create_pod(self, body: dict) -> dict:
+    def create_pod(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._create("pods", body)
 
-    def _create(self, kind: str, body: dict) -> dict:
+    def _create(self, kind: str, body: dict[str, Any]) -> dict[str, Any]:
         return self._post(self._path(kind=kind), body)
 
-    def _post(self, path: str, body: dict) -> dict:
+    def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         status, answer = self.http.send("POST", path, body)
         if status == 409 and answer.get("reason") == "AlreadyExists":
             raise AlreadyExists(body["metadata"]["name"])
         return _answer(status, answer)
 
-    def create_object(self, body: dict) -> dict:
+    def create_object(self, body: dict[str, Any]) -> dict[str, Any]:
         if body.get("kind") not in OBJECTS:
             raise ValueError("the controller creates only Secret, Service and NetworkPolicy objects")
         group, plural = OBJECTS[body["kind"]]
         return self._post(f"/{group}/namespaces/{self.namespace}/{plural}", body)
 
-    def read_pod(self, name: str) -> dict | None:
+    def read_pod(self, name: str) -> dict[str, Any] | None:
         return self.read("pods", name)
 
     def pod_logs(self, name: str, container: str) -> str:
@@ -180,16 +185,16 @@ class PodClient:
         )
         return _answer(status, answer)
 
-    def list_pods(self, selector: str) -> list[dict]:
+    def list_pods(self, selector: str) -> list[dict[str, Any]]:
         return self.snapshot(selector)[0]
 
-    def snapshot(self, selector: str) -> tuple[list[dict], str]:
+    def snapshot(self, selector: str) -> tuple[list[dict[str, Any]], str]:
         """The resource version is empty when the answer names none, so the caller lists again instead of watching."""
         query = urllib.parse.urlencode({"labelSelector": selector})
         answer = _answer(*self.http.send("GET", f"{self._path()}?{query}"))
         return _items(answer), answer.get("metadata", {}).get("resourceVersion", "")
 
-    def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict]]:
+    def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict[str, Any]]]:
         """Raises CursorExpired when the API server no longer holds events after `version`."""
         query = urllib.parse.urlencode(
             {"labelSelector": selector, "watch": "1", "resourceVersion": version, "timeoutSeconds": WATCH_SECONDS}
@@ -213,14 +218,14 @@ class PodClient:
             return None
         return [node["metadata"]["name"] for node in nodes if _ready(node)]
 
-    def list_services(self, selector: str) -> list[dict]:
+    def list_services(self, selector: str) -> list[dict[str, Any]]:
         query = urllib.parse.urlencode({"labelSelector": selector})
         return _items(_answer(*self.http.send("GET", f"{self._path(kind='services')}?{query}")))
 
-    def list_quotas(self) -> list[dict]:
+    def list_quotas(self) -> list[dict[str, Any]]:
         return _items(_answer(*self.http.send("GET", self._path(kind="resourcequotas"))))
 
-    def read(self, kind: str, name: str) -> dict | None:
+    def read(self, kind: str, name: str) -> dict[str, Any] | None:
         status, answer = self.http.send("GET", self._path(name, kind))
         return None if status == 404 else _answer(status, answer)
 
@@ -238,5 +243,5 @@ class PodClient:
             _answer(status, answer)
         return True
 
-    def create_config_map(self, body: dict) -> dict:
+    def create_config_map(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._create("configmaps", body)

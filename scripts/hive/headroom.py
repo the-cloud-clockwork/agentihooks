@@ -5,7 +5,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import account_sessions
 from scripts.hive import registry
@@ -27,7 +27,9 @@ def key(hive: str) -> str:
     return f"{registry.key(hive)}:headroom"
 
 
-def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dict | None = None) -> dict | None:
+def measure(
+    pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     try:
         load5 = float((proc / "loadavg").read_text().split()[1])
         available_mb = host_budget._memory_mb(proc)[0]
@@ -63,8 +65,8 @@ def _free_gb(root: Path) -> int:
     return min(shutil.disk_usage(target).free for target in (root, WINDOWS) if target.is_dir()) // 2**30
 
 
-def _pod(cgroup: Path, now_ms: int, previous: dict | None) -> dict:
-    pod = {}
+def _pod(cgroup: Path, now_ms: int, previous: dict[str, Any] | None) -> dict[str, Any]:
+    pod: dict[str, Any] = {}
     memory = _limit(cgroup / "memory.max")
     if memory is not None:
         total = int(memory[0])
@@ -79,7 +81,7 @@ def _pod(cgroup: Path, now_ms: int, previous: dict | None) -> dict:
     return pod
 
 
-def _load(usage: int, now_ms: int, previous: dict | None) -> dict:
+def _load(usage: int, now_ms: int, previous: dict[str, Any] | None) -> dict[str, Any]:
     if previous is None or "pod_cpu_usec" not in previous:
         return {}
     used, elapsed_ms = usage - previous["pod_cpu_usec"], now_ms - previous["measured_at"]
@@ -105,15 +107,15 @@ def publish(redis: "Redis", hive: str, now_ms: int, proc: Path = Path("/proc")) 
         redis.set(key(hive), json.dumps(measured), px=STALE_MS)
 
 
-def read(redis: "Redis", hive: str, now_ms: int) -> dict | None:
+def read(redis: "Redis", hive: str, now_ms: int) -> dict[str, Any] | None:
     raw = redis.get(key(hive))
     if raw is None:
         return None
-    measured = json.loads(raw)
+    measured: dict[str, Any] = json.loads(raw)
     return measured if now_ms - measured["measured_at"] <= STALE_MS else None
 
 
-def summary(measured: dict | None) -> str:
+def summary(measured: dict[str, Any] | None) -> str:
     if measured is None:
         return MISSING
     available, pod = measured["available_mb"], ""

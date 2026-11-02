@@ -6,7 +6,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import openbao_kv
 from scripts.events import nkey, subjects
@@ -107,7 +107,7 @@ class Signer:
     member_swarms: Mapping[str, tuple[str, ...]] | None = None
 
 
-def member_swarms(value) -> dict[str, tuple[str, ...]]:
+def member_swarms(value: dict[str, Any]) -> dict[str, tuple[str, ...]]:
     if not isinstance(value, dict) or any(not isinstance(swarms, (list, tuple)) for swarms in value.values()):
         raise auth.HiveError("member_swarms must map member ids to lists of swarm names")
     try:
@@ -193,7 +193,7 @@ def _trusted(environ: Mapping[str, str]) -> str:
     return trusted
 
 
-def _signer(record: Mapping, trusted: str) -> Signer:
+def _signer(record: Mapping[str, Any], trusted: str) -> Signer:
     return Signer(
         nkey.from_seed(record["operator_seed"]),
         nkey.from_seed(record["account_seed"]),
@@ -215,11 +215,11 @@ def _from_file(path: str, environ: Mapping[str, str]) -> Signer:
         raise auth.HiveError(f"the NATS signer file {path} cannot be used ({exc})") from None
 
 
-def user_claims() -> dict:
+def user_claims() -> dict[str, Any]:
     return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
 
 
-def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str = ANY_HIVE) -> dict:
+def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str = ANY_HIVE) -> dict[str, Any]:
     own = [] if member == ANY_HIVE else scheduler_publish(member, swarms)
     if swarms is None:
         return {
@@ -236,7 +236,7 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str 
     }
 
 
-def controller_claims() -> dict:
+def controller_claims() -> dict[str, Any]:
     return {
         **user_claims(),
         "pub": {"allow": list(CONTROLLER_PUBLISH)},

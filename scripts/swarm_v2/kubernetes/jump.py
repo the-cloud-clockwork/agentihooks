@@ -65,7 +65,10 @@ def _write(path: Path, data: bytes) -> None:
 
 def _host_key(path: Path) -> Ed25519PrivateKey:
     if path.exists():
-        return serialization.load_ssh_private_key(path.read_bytes(), None)
+        loaded = serialization.load_ssh_private_key(path.read_bytes(), None)
+        if not isinstance(loaded, Ed25519PrivateKey):
+            raise SwarmError(f"{path} does not hold an Ed25519 private key")
+        return loaded
     key = Ed25519PrivateKey.generate()
     _write(
         path,

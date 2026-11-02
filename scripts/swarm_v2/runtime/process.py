@@ -57,10 +57,14 @@ def reopened_process(agent: AgentRecord) -> Process | None:
     return None
 
 
-def launch_target(pid: object, namespace: str, table: Mapping[int, Process]) -> dict:
+def launch_target(pid: object, namespace: str, table: Mapping[int, Process]) -> dict[str, int | str]:
     number = max(pid, 0) if type(pid) is int else 0
     found = table.get(number)
-    target = {"process_namespace": namespace, "pid": number, "pid_start": found.start_time if found else 0}
+    target: dict[str, int | str] = {
+        "process_namespace": namespace,
+        "pid": number,
+        "pid_start": found.start_time if found else 0,
+    }
     missing = [LAUNCH_LABELS[field] for field in IDENTITY if not target[field]]
     if missing:
         named = f"{', '.join(missing[:-1])} and {missing[-1]}" if len(missing) > 1 else missing[0]
@@ -73,14 +77,15 @@ def resolve(agent: AgentRecord, namespace: str, table: Mapping[int, Process]) ->
     PID was reused, or why the record cannot name a local process."""
     if not agent.execution_id:
         return Unqualified.NO_EXECUTION
-    target = agent.runtime_target
+    target: dict[str, int | str] = agent.runtime_target
     if not all(target.get(field) for field in IDENTITY):
         return Unqualified.NO_PROCESS
     if not namespace:
         return Unqualified.NO_NAMESPACE
     if target["process_namespace"] != namespace:
         return Unqualified.FOREIGN_NAMESPACE
-    found = table.get(target["pid"])
+    pid = target["pid"]
+    found = table.get(pid) if isinstance(pid, int) else None
     if found is None or found.start_time != target["pid_start"]:
         return None
     return found.pid

@@ -3,6 +3,7 @@
 import ipaddress
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from scripts import openbao_kv
@@ -47,6 +48,8 @@ def _reason(name: str, value: str) -> str:
 
 
 def entries(environ: Mapping[str, str], home: Path) -> tuple[dict[str, str], dict[str, str]]:
+    kept: dict[str, str]
+    left_out: dict[str, str]
     kept, left_out = {}, {}
     for name in names(home):
         value = environ.get(name)
@@ -65,7 +68,7 @@ def entries(environ: Mapping[str, str], home: Path) -> tuple[dict[str, str], dic
     }, left_out
 
 
-def publish(environ: Mapping[str, str], path: str, dry_run: bool, opener: Callable | None = None) -> str:
+def publish(environ: Mapping[str, str], path: str, dry_run: bool, opener: Callable[..., Any] | None = None) -> str:
     kept, left_out = entries(environ, registry.home(environ))
     skipped = ", ".join(f"{name} ({reason})" for name, reason in sorted(left_out.items())) or "nothing"
     linked = "a bundle is linked" if kept[bundle_origin.URL_KEY] else "no bundle is linked"

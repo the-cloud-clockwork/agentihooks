@@ -5,7 +5,7 @@ import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.hive import registry
 from scripts.swarm.keyspace import ROOT
@@ -13,7 +13,7 @@ from scripts.swarm.keyspace import ROOT
 if TYPE_CHECKING:
     from redis import Redis
 
-PASS = ContextVar("hive_members_pass", default=None)
+PASS: ContextVar[dict[Any, list[str]] | None] = ContextVar("hive_members_pass", default=None)
 
 
 def member(environ: Mapping[str, str] | None = None) -> str:

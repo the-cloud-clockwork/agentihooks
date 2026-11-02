@@ -8,6 +8,13 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from typing import Protocol
+
+    class _SeatBroadcastSource(Protocol):
+        def claim(self, token: str, channels: list[str], claim_id: str = "") -> list["Delivery"]: ...
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError
@@ -50,7 +57,7 @@ class Broadcast:
     published_ms: int
     expires_ms: int
 
-    def content(self) -> tuple:
+    def content(self) -> tuple[str, ...]:
         return _content(asdict(self))
 
 
@@ -69,7 +76,7 @@ def decode(raw: str) -> Broadcast:
     return Broadcast(**json.loads(raw))
 
 
-def _delivery(found: dict) -> Delivery:
+def _delivery(found: dict[str, Any]) -> Delivery:
     return Delivery(Broadcast(**found["broadcast"]), found["delivered_ms"], found["lag_seconds"])
 
 
@@ -82,7 +89,7 @@ def owner_of(author: str) -> str:
     return "operator" if author.startswith("operator:") else author.partition("/")[0]
 
 
-def _content(fields: dict) -> tuple:
+def _content(fields: dict[str, Any]) -> tuple[str, ...]:
     names = ("brain_id", "project_id", "target_role", "channel", "severity", "policy", "message")
     return tuple(fields[name] for name in names)
 
@@ -97,7 +104,7 @@ def _optional(value: object) -> str:
     return "" if value == "" else _name(value)
 
 
-def _draft(draft: object) -> dict:
+def _draft(draft: object) -> dict[str, Any]:
     if not isinstance(draft, dict) or not REQUIRED <= set(draft) <= DRAFT:
         raise SwarmError("invalid_request")
     message, severity, ttl = draft["message"], draft["severity"], draft["ttl_seconds"]
@@ -134,7 +141,7 @@ class FleetBroadcasts:
         clock: Callable[[], int] | None = None,
     ) -> None:
         self.store, self.slug, self.authorize, self.operator = store, slug, authorize, operator
-        self.redis = store.redis
+        self.redis: Any = store.redis
         self.clock = clock or (lambda: lease.now_ms(store))
 
     def key(self, *parts: str) -> str:
@@ -146,7 +153,7 @@ class FleetBroadcasts:
             raise SwarmError("forbidden_scope")
         return grant
 
-    def _transact(self, keys: list[str], decide: Callable) -> object:
+    def _transact(self, keys: list[str], decide: Callable[..., Any]) -> object:
         from redis.exceptions import WatchError
 
         for _ in range(WRITE_ATTEMPTS):
@@ -183,7 +190,7 @@ class FleetBroadcasts:
         fields["brain_id"] = _name(fields["brain_id"])
         return self._commit(fields, f"operator:{name}", operation_id)
 
-    def _commit(self, fields: dict, author: str, operation_id: str) -> Broadcast:
+    def _commit(self, fields: dict[str, Any], author: str, operation_id: str) -> Broadcast:
         if operation_id:
             _name(operation_id)
         canonical, operations, frozen = (
@@ -197,7 +204,7 @@ class FleetBroadcasts:
         explicit = fields["broadcast_id"]
         fields["broadcast_id"] = explicit or f"bc-{uuid.uuid4().hex[:16]}"
 
-        def decide(pipe):
+        def decide(pipe: Any) -> tuple[Callable[[Any], None] | None, Broadcast]:
             if pipe.exists(frozen):
                 raise SwarmError("distribution_disabled")
             done = pipe.hget(operations, operation) if operation_id else None
@@ -223,10 +230,10 @@ class FleetBroadcasts:
                 **fields,
             )
             unchanged = stored and stored.expires_ms - stored.published_ms == ttl * 1000
-            if unchanged and stored.content() == built.content() and now < stored.expires_ms:
+            if stored is not None and unchanged and stored.content() == built.content() and now < stored.expires_ms:
                 return None, stored
 
-            def writes(pipe):
+            def writes(pipe: Any) -> None:
                 pipe.hset(canonical, built.broadcast_id, encode(built))
                 pipe.rpush(self.key("broadcast-history"), encode(built))
                 if operation_id:
@@ -255,24 +262,28 @@ class FleetBroadcasts:
         seat, now = grant.seat_id, self.clock()
         records, claims = self.key("broadcast-deliveries", seat), self.key("broadcast-claims")
 
-        def decide(pipe):
+        def decide(pipe: Any) -> tuple[Callable[[Any], None] | None, list[Delivery]]:
             admitted = self._fence(pipe, grant)
-            last = json.loads(pipe.hget(claims, seat) or "{}")
+            last: dict[str, Any] = json.loads(pipe.hget(claims, seat) or "{}")
             if claim_id and last.get("claim_id") == claim_id and last.get("generation") == grant.generation:
                 return None, [_delivery(found) for found in last["deliveries"]]
-            held = {name: json.loads(raw) for name, raw in pipe.hgetall(records).items()}
-            current = [decode(raw) for raw in pipe.hvals(self.key("broadcasts"))]
-            found, changed = [], {}
+            held: dict[str, dict[str, Any]] = {name: json.loads(raw) for name, raw in pipe.hgetall(records).items()}
+            current: list[Broadcast] = [decode(raw) for raw in pipe.hvals(self.key("broadcasts"))]
+            found: list[Delivery] = []
+            changed: dict[str, dict[str, Any]] = {}
             for broadcast in sorted(current, key=lambda item: (item.published_ms, item.broadcast_id)):
                 if not self._matches(broadcast, grant, channels, now):
                     continue
-                record = held.get(broadcast.broadcast_id)
+                record: dict[str, Any] | None = held.get(broadcast.broadcast_id)
                 same = record is not None and record["revision"] == broadcast.revision
-                if same and (record["acked"] or broadcast.policy == ONCE):
+                if same and record is not None and (record["acked"] or broadcast.policy == ONCE):
                     continue
-                first = record["delivered_ms"] if same else now
+                if same and record is not None:
+                    first = record["delivered_ms"]
+                else:
+                    first = now
                 found.append(Delivery(broadcast, first, (first - broadcast.published_ms) / 1000))
-                if not same or record["generation"] != grant.generation:
+                if not same or record is None or record["generation"] != grant.generation:
                     changed[broadcast.broadcast_id] = {
                         "revision": broadcast.revision,
                         "delivered_ms": first,
@@ -280,9 +291,13 @@ class FleetBroadcasts:
                         "execution_id": grant.execution_id,
                         "generation": grant.generation,
                     }
-            answer = {"claim_id": claim_id, "generation": grant.generation, "deliveries": [asdict(d) for d in found]}
+            answer: dict[str, Any] = {
+                "claim_id": claim_id,
+                "generation": grant.generation,
+                "deliveries": [asdict(d) for d in found],
+            }
 
-            def writes(pipe):
+            def writes(pipe: Any) -> None:
                 for name, record in changed.items():
                     pipe.hset(records, name, json.dumps(record))
                 if claim_id:
@@ -293,7 +308,7 @@ class FleetBroadcasts:
 
         return self._transact([records, claims, self.key("broadcasts"), self.key("broadcast-generations")], decide)
 
-    def _fence(self, pipe, grant: Registration) -> int:
+    def _fence(self, pipe: Any, grant: Registration) -> int:
         """The highest generation this seat has claimed with; an older attempt is refused before it reads anything."""
         admitted = int(pipe.hget(self.key("broadcast-generations"), grant.seat_id) or 0)
         if admitted > grant.generation:
@@ -305,22 +320,22 @@ class FleetBroadcasts:
         grant = self._grant(token)
         records = self.key("broadcast-deliveries", grant.seat_id)
 
-        def decide(pipe):
+        def decide(pipe: Any) -> tuple[Callable[[Any], Any], bool]:
             self._fence(pipe, grant)
             raw = pipe.hget(records, broadcast_id)
-            record = json.loads(raw) if raw else None
+            record: dict[str, Any] | None = json.loads(raw) if raw else None
             if record is None or record["revision"] < revision:
                 raise SwarmError("not_delivered")
             if record["revision"] > revision:
                 raise SwarmError("stale_revision")
             if record["acked"]:
                 return (lambda pipe: pipe.hincrby(self.key("broadcast-duplicate-acks"), grant.seat_id)), False
-            acked = {**record, "acked": True, "execution_id": grant.execution_id, "generation": grant.generation}
+            acked: dict[str, Any] = {**record, "acked": True, "execution_id": grant.execution_id, "generation": grant.generation}
             return (lambda pipe: pipe.hset(records, broadcast_id, json.dumps(acked))), True
 
         return self._transact([records, self.key("broadcast-generations")], decide)
 
-    def delivery(self, seat: str, broadcast_id: str) -> dict | None:
+    def delivery(self, seat: str, broadcast_id: str) -> dict[str, Any] | None:
         raw = self.redis.hget(self.key("broadcast-deliveries", seat), broadcast_id)
         return json.loads(raw) if raw else None
 
@@ -355,10 +370,10 @@ def _iso(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def local_entry(delivery: Delivery, session_id: str) -> dict:
+def local_entry(delivery: Delivery, session_id: str) -> dict[str, Any]:
     """The local broadcast file shape of a revision claimed for one session; the hook delivers it to that session only."""
     broadcast = delivery.broadcast
-    entry = {
+    entry: dict[str, Any] = {
         "id": f"{broadcast.fleet}:{broadcast.broadcast_id}:{broadcast.revision}:{session_id}",
         "message": broadcast.message,
         "severity": broadcast.severity,
@@ -384,7 +399,7 @@ def local_entry(delivery: Delivery, session_id: str) -> dict:
 
 
 def sync_local(
-    fleet: FleetBroadcasts,
+    fleet: "FleetBroadcasts | _SeatBroadcastSource",
     token: str,
     session_id: str,
     channels: list[str],
@@ -400,7 +415,7 @@ def sync_local(
     return cache_fleet_broadcasts([local_entry(delivery, session_id) for delivery in found])
 
 
-def acknowledge_local(fleet: FleetBroadcasts, token: str, entry: dict) -> bool:
+def acknowledge_local(fleet: FleetBroadcasts, token: str, entry: dict[str, Any]) -> bool:
     """Carry a local acknowledgement of a cached fleet entry back to the fleet."""
     tag = entry.get("fleet")
     if not tag or tag["swarm"] != fleet.slug:

@@ -11,6 +11,7 @@ import tempfile
 import time
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 LOCK = ".ledger-writer.lock"
 CONFLICTS = ".ledger-writer-conflicts.jsonl"
@@ -19,7 +20,7 @@ LEASE_POLL_S = 0.01
 
 
 class WriterConflict(RuntimeError):
-    def __init__(self, directory: Path, holder: dict):
+    def __init__(self, directory: Path, holder: dict[str, Any]):
         self.directory, self.holder = directory, holder
         super().__init__(
             f"ledger folder {directory} already has an active writer, pid {holder.get('pid')} on "
@@ -27,19 +28,21 @@ class WriterConflict(RuntimeError):
         )
 
 
-def owner() -> dict:
+def owner() -> dict[str, Any]:
     return {"pid": os.getpid(), "host": socket.gethostname(), "started_at": int(time.time() * 1000)}
 
 
-def holder(directory: Path) -> dict:
+def holder(directory: Path) -> dict[str, Any]:
     try:
-        found = json.loads((Path(directory) / LOCK).read_text())
+        found: dict[str, Any] | list[Any] | str | int | float | bool | None = json.loads(
+            (Path(directory) / LOCK).read_text()
+        )
     except (OSError, ValueError):
         return {}
     return found if isinstance(found, dict) else {}
 
 
-def record_conflict(directory: Path, held: dict, claimant: dict) -> None:
+def record_conflict(directory: Path, held: dict[str, Any], claimant: dict[str, Any]) -> None:
     line = json.dumps({"holder": held.get("pid"), "claimant": claimant.get("pid"), "at": claimant.get("started_at")})
     with (Path(directory) / CONFLICTS).open("a") as log:
         log.write(line + "\n")
@@ -61,7 +64,7 @@ class WriterLease:
     def held(self) -> bool:
         return self._fd is not None
 
-    def acquire(self, claimant: dict, wait: float = 0.0) -> "WriterLease":
+    def acquire(self, claimant: dict[str, Any], wait: float = 0.0) -> "WriterLease":
         self.directory.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.directory / LOCK, os.O_RDWR | os.O_CREAT, 0o600)
         deadline = time.monotonic() + wait

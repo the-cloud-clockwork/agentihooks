@@ -2,11 +2,15 @@
 
 import json
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from scripts.inbox.seats import SeatRegistry
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import PREFIX
 from scripts.swarm_v2.masters import MasterError, MasterSeats, seats
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 SWARM = "swarm"
 
@@ -21,7 +25,7 @@ class Post:
 
 
 class MastersChannel:
-    def __init__(self, redis) -> None:
+    def __init__(self, redis: "Redis") -> None:
         self.redis = redis
 
     def key(self, slug: str) -> str:
@@ -61,7 +65,7 @@ class MastersChannel:
 
     def _append(self, slug: str, seat: str, by: str, text: str, at: float) -> Post:
         fields = {"seat": seat, "by": by, "text": text, "at": at}
-        return Post(self.redis.rpush(self.key(slug), json.dumps(fields)), **fields)
+        return Post(self.redis.rpush(self.key(slug), json.dumps(fields)), seat=seat, by=by, text=text, at=at)
 
     def read(self, slug: str, name: str) -> list[Post]:
         self.member(slug, name)

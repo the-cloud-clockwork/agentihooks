@@ -2,13 +2,14 @@ import json
 import os
 import urllib.error
 import urllib.request
+from typing import Any
 
 from scripts.gates import Who
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2 import operator_auth
 
 
-def decide(store: RedisStore, slug: str, agent: AgentRecord, choice: str, who: Who) -> dict:
+def decide(store: RedisStore, slug: str, agent: AgentRecord, choice: str, who: Who) -> dict[str, Any]:
     from scripts.swarm_ledger import ledger
     from scripts.swarm_v2.control_service import page_credential
 
@@ -16,7 +17,7 @@ def decide(store: RedisStore, slug: str, agent: AgentRecord, choice: str, who: W
     if not address:
         raise SwarmError("the Anton controller API address is unavailable")
     if who.pinned:
-        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or ledger.launch_token(slug, who.name)
+        token: str | None = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or ledger.launch_token(slug, who.name)
     else:
         token = operator_auth.credential(slug, page_credential, who)
     if not token:

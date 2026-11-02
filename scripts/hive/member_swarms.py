@@ -1,7 +1,7 @@
 """The member_swarms entry of the hub NATS signer record: hive invite lists each member it mints, hive scope the rest."""
 
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import openbao_kv
 from scripts.hive import auth, nats_grant, scope
@@ -38,7 +38,7 @@ def assign(
 ) -> list[str]:
     added: list[str] = []
 
-    def change(record: Mapping) -> dict:
+    def change(record: Mapping[str, Any]) -> dict[str, Any]:
         added.clear()
         if FIELD not in record and not create:
             return {}

@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 from dataclasses import replace
+from typing import Any
 
 from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
@@ -55,7 +56,7 @@ def started(bus: Bus, event: Envelope) -> None:
     emit(bus, event)
 
 
-def initial(bus: Bus, hive: str, execution: str, record: dict, now: int) -> Envelope | None:
+def initial(bus: Bus, hive: str, execution: str, record: dict[str, Any], now: int) -> Envelope | None:
     bus = bus.for_swarm(record["slug"])
     stored = bus.state(STARTS).get(identity(record["slug"], record["name"], record["generation"]))
     if stored is not None:
@@ -75,7 +76,7 @@ def initial(bus: Bus, hive: str, execution: str, record: dict, now: int) -> Enve
     )
 
 
-def publish(bus: Bus, hive: str, report: dict) -> None:
+def publish(bus: Bus, hive: str, report: dict[str, Any]) -> None:
     for execution, record in report["executions"].items():
         observed = record["pane"]["state"]
         if observed not in LIVE and observed not in ENDED:
@@ -92,7 +93,7 @@ def publish(bus: Bus, hive: str, report: dict) -> None:
             emit(bus, event)
 
 
-def observe(hive: str, report: dict) -> None:
+def observe(hive: str, report: dict[str, Any]) -> None:
     config = BusConfig.from_environ()
     if config.backend == "memory" or not report["executions"]:
         return

@@ -9,6 +9,7 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 KEY_FORMAT = "2"
@@ -37,7 +38,7 @@ class Namespace:
     policy: str = POLICY_VERSION
     generation: str = ""
 
-    def document(self) -> dict:
+    def document(self) -> dict[str, Any]:
         return {"format": KEY_FORMAT, **asdict(self)}
 
 
@@ -50,6 +51,8 @@ def _canonical(value: object) -> str:
 
 
 def instant(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
     try:
         moment = datetime.fromisoformat(value)
     except (TypeError, ValueError):
@@ -71,7 +74,7 @@ def installation(home: Path, now: datetime | None = None) -> Installation:
             pass
         finally:
             temp.unlink()
-    record = json.loads(path.read_text())
+    record: dict[str, Any] | list[Any] | str | int | float | bool | None = json.loads(path.read_text())
     if (
         not isinstance(record, dict)
         or not INSTALLATION_ID.fullmatch(str(record.get("installation_id")))
@@ -103,11 +106,11 @@ def key(namespace: Namespace, kind: str, *parts: str) -> str:
     return f"k{KEY_FORMAT}-{kind}-{_digest(_canonical([namespace.document(), kind, list(parts)]))[:32]}"
 
 
-def stamp(namespace: Namespace, kind: str, payload: dict) -> dict:
+def stamp(namespace: Namespace, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "namespace": namespace.document(), "kind": kind}
 
 
-def admits(document: object, namespace: Namespace, kind: str) -> bool:
+def admits(document: dict[str, Any], namespace: Namespace, kind: str) -> bool:
     return (
         isinstance(document, dict)
         and document.get("namespace") == namespace.document()
@@ -117,7 +120,8 @@ def admits(document: object, namespace: Namespace, kind: str) -> bool:
 
 def current(at: object, record: Installation) -> bool:
     moment = instant(at)
-    return moment is not None and moment >= instant(record.created_at)
+    created = instant(record.created_at)
+    return moment is not None and created is not None and moment >= created
 
 
 def legacy_marker_key(session_id: str, marker_type: str, content: str) -> str:
@@ -129,7 +133,7 @@ def marker_key(namespace: Namespace, session_id: str, marker_type: str, task: st
     return uuid.uuid5(uuid.NAMESPACE_URL, f"k{KEY_FORMAT}:{raw}").hex
 
 
-def _files(directory: Path, pattern: re.Pattern, limit: int | None) -> list[Path]:
+def _files(directory: Path, pattern: re.Pattern[str], limit: int | None) -> list[Path]:
     if not Path(directory).is_dir():
         return []
     found = sorted(path for path in Path(directory).iterdir() if path.is_file() and pattern.fullmatch(path.name))

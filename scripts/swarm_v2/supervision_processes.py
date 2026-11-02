@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from hooks.proc import _process, processes
+from hooks.proc import Process, _process, processes
 
 
 def subreaper() -> None:
@@ -13,7 +13,7 @@ def subreaper() -> None:
         raise OSError("child reaping unavailable")
 
 
-def descendants(root: int, table: dict | None = None) -> dict:
+def descendants(root: int, table: dict[int, Process] | None = None) -> dict[int, Process]:
     table = processes() if table is None else table
     owned = {root}
     while True:
@@ -23,13 +23,13 @@ def descendants(root: int, table: dict | None = None) -> dict:
         owned.update(found)
 
 
-def living(root: int, exclude: int | None = None) -> dict:
+def living(root: int, exclude: int | None = None) -> dict[int, Process]:
     table = processes()
     ignored = set(descendants(exclude, table)) | {exclude} if exclude else set()
     return {pid: item for pid, item in descendants(root, table).items() if pid not in ignored and item.state != "Z"}
 
 
-def send(table: dict, signum: int) -> None:
+def send(table: dict[int, Process], signum: int) -> None:
     for pid, observed in table.items():
         current = _process(pid, Path("/proc"))
         if current is not None and current.start_time == observed.start_time:

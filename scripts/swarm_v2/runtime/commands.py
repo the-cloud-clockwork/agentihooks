@@ -87,7 +87,7 @@ class _GuardedTransport:
     def observe_operation(self, operation: Operation) -> Observation:
         return self.transport.observe_operation(operation)
 
-    def apply_operation(self, operation: Operation, payload: dict) -> Observation:
+    def apply_operation(self, operation: Operation, payload: dict[str, Any]) -> Observation:
         if not self.admitted():
             return Observation(Phase.REFUSED)
         return self.transport.apply_operation(operation, payload)
@@ -142,7 +142,7 @@ class Commands:
 
     def _actor(self, slug: str, credential: str) -> Principal | None:
         principal = self.authenticate(slug, credential)
-        if not isinstance(principal, Principal) or not isinstance(principal.name, str) or not principal.name:
+        if not isinstance(principal, Principal) or not principal.name:
             return None
         if principal.role is Role.OPERATOR:
             return principal
@@ -206,7 +206,7 @@ class Commands:
             pipe.hincrby(self.store.key(slug, "runtime-command-outcomes"), dimension, 1)
             pipe.execute()
 
-    def audit(self, slug: str) -> list[dict]:
+    def audit(self, slug: str) -> list[dict[str, Any]]:
         return [
             json.loads(row) for row in self.store.redis.lrange(self.store.key(slug, "runtime-command-audit"), 0, -1)
         ]
@@ -220,13 +220,9 @@ class Commands:
 
 def _valid(request: Request) -> bool:
     return (
-        isinstance(request.action, Action)
-        and isinstance(request.execution_id, str)
-        and bool(request.execution_id)
+        bool(request.execution_id)
         and type(request.generation) is int
         and request.generation > 0
-        and isinstance(request.key, str)
         and bool(request.key)
-        and isinstance(request.text, str)
         and (bool(request.text) if request.action is Action.ANSWER else request.text == "")
     )

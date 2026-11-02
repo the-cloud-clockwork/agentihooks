@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from types import FrameType
 
 from hooks.proc import _process
 from scripts.swarm_v2.supervision_protocol import acknowledge, context
@@ -19,13 +20,15 @@ def main(argv: list[str] | None = None) -> int:
         return 75
     child = subprocess.Popen(command, stdin=None)
 
-    def forward(signum, _frame):
+    def forward(signum: int, _frame: FrameType | None) -> None:
         if child.poll() is None:
             child.send_signal(signum)
 
     signal.signal(signal.SIGTERM, forward)
     signal.signal(signal.SIGINT, forward)
     identity = _process(os.getpid(), Path("/proc"))
+    if identity is None:
+        raise RuntimeError("could not read own /proc entry")
     acknowledge("agent", pid=os.getpid(), pid_start=identity.start_time, child_pid=child.pid, status="ready")
     code = child.wait()
     acknowledge("agent.exit", exit_code=code)

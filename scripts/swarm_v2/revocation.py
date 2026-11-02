@@ -5,12 +5,13 @@ import json
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from hooks.memory.catalog import Catalog
 from hooks.memory.revocation import Propagator
 
 
-def _register(propagator: Propagator, domain: str, document: dict) -> dict:
+def _register(propagator: Propagator, domain: str, document: dict[str, Any]) -> dict[str, Any]:
     for pack in document.get("packs", []):
         propagator.put_pack(domain, pack["pack_id"], pack["body"], pack["sessions"])
     for lesson in document.get("lessons", []):
@@ -33,7 +34,7 @@ def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None
     catalog = Catalog(args.catalog)
     propagator = Propagator(catalog)
     if args.command == "catch-up":
-        answer = {"notices": propagator.catch_up(args.domain, time.time() if clock is None else clock())}
+        answer: dict[str, Any] = {"notices": propagator.catch_up(args.domain, time.time() if clock is None else clock())}
     elif args.command == "exposures":
         answer = {"exposures": propagator.exposures(args.domain, args.session)}
     elif args.command == "lags":

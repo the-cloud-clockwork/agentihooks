@@ -1,12 +1,14 @@
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from redis import Redis
+
     from scripts.hive.orders import Consumer
 
 LIMIT = 32
-_workers: dict[tuple[str, str], subprocess.Popen] = {}
+_workers: dict[tuple[str, str], subprocess.Popen[bytes]] = {}
 
 
 def poll(consumer: "Consumer") -> None:
@@ -33,11 +35,11 @@ def run(hive: str, item: str, pod: str) -> None:
     from scripts.hive.orders import Consumer
     from scripts.swarm.store import redis_client
 
-    redis = redis_client()
+    redis: "Redis" = redis_client()
     try:
         consumer = Consumer.local(redis, hive)
         consumer.pod = pod
-        entries = redis.xrange(consumer.orders.stream(hive), min=item, max=item)
+        entries: Any = redis.xrange(consumer.orders.stream(hive), min=item, max=item)
         for entry, fields in entries:
             poll_orders(consumer, lambda: consumer.consume(entry, fields))
     finally:

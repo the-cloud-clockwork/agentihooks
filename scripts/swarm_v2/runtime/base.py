@@ -13,6 +13,7 @@ BACKEND_VARIABLE = "AGENTIHOOKS_RUNTIME_BACKEND"
 DISABLED_VARIABLE = "AGENTIHOOKS_RUNTIME_DISABLED"
 LOCAL_PROFILES = frozenset(("frontend",))
 HIVE_LANES = frozenset(("eng", "ci", "plan", "dispatch"))
+_EMPTY_TASK: dict[str, Any] = {}
 
 
 class Capability(StrEnum):
@@ -51,7 +52,7 @@ class SpawnRequest:
     config: Any
     lane: str
     name: str
-    task: dict
+    task: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -61,10 +62,10 @@ class Placement:
     local_profiles: frozenset[str] = LOCAL_PROFILES
     master_seats: Callable[[], frozenset[str]] = frozenset
 
-    def backend_for(self, lane: str, task: dict) -> str:
+    def backend_for(self, lane: str, task: dict[str, Any]) -> str:
         if lane == "master":
             return self.backend if task.get("id") in self.master_seats() else LOCAL
-        profile = (task.get("profile_decision") or {}).get("profile") or task.get("profile")
+        profile: Any = (task.get("profile_decision") or _EMPTY_TASK).get("profile") or task.get("profile")
         anywhere = not task.get("workstation") and (self.backend == "hive" or not task.get("needs"))
         placed = anywhere and profile not in self.local_profiles and lane in self.lanes
         return self.backend if placed else LOCAL
@@ -95,7 +96,7 @@ class Runtime(Protocol):
 
     def drain(self, agent: AgentRecord) -> Outcome: ...
 
-    def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome: ...
+    def terminate(self, agent: AgentRecord, homes: tuple[Any, ...] = ()) -> Outcome: ...
 
     def recover(self, agent: AgentRecord, mode: Recovery, config: Any, text: str) -> Outcome: ...
 
@@ -130,7 +131,8 @@ class RuntimeRouter:
     ):
         self.runtimes = {runtime.backend: runtime for runtime in runtimes}
         self.default, self.disabled, self.placement = default, frozenset(disabled), placement
-        self.failures, self.rejected = Counter(), Counter()
+        self.failures: Counter[tuple[str, str]] = Counter()
+        self.rejected: Counter[tuple[str, Unqualified]] = Counter()
 
     @classmethod
     def from_environ(
@@ -139,7 +141,7 @@ class RuntimeRouter:
         disabled = [name.strip() for name in environ.get(DISABLED_VARIABLE, "").split(",") if name.strip()]
         return cls(runtimes, environ.get(BACKEND_VARIABLE) or LOCAL, disabled, placement)
 
-    def placed_backend(self, lane: str, task: dict) -> str:
+    def placed_backend(self, lane: str, task: dict[str, Any]) -> str:
         return self.default if self.placement is None else self.placement.backend_for(lane, task)
 
     def enabled_backend(self, wanted: str) -> str:
@@ -164,7 +166,7 @@ class RuntimeRouter:
     def drain(self, agent: AgentRecord) -> Outcome:
         return self._own(agent, "drain", Capability.DRAIN, agent)
 
-    def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome:
+    def terminate(self, agent: AgentRecord, homes: tuple[Any, ...] = ()) -> Outcome:
         backend, reason = agent.runtime_backend, Unqualified.NO_EXECUTION
         outcome = self._unavailable(agent, "terminate")
         if outcome is None and not agent.execution_id and not legacy(agent):
@@ -184,7 +186,7 @@ class RuntimeRouter:
     def unqualified_process_actions_rejected_total(self) -> int:
         return sum(self.rejected.values())
 
-    def _own(self, agent: AgentRecord, operation: str, need: Capability, *args) -> Outcome:
+    def _own(self, agent: AgentRecord, operation: str, need: Capability, *args: Any) -> Outcome:
         return self._unavailable(agent, operation) or self._call(agent.runtime_backend, operation, (need,), *args)
 
     def _unavailable(self, agent: AgentRecord, operation: str) -> Outcome | None:
@@ -195,7 +197,7 @@ class RuntimeRouter:
             return Outcome(operation, Status.UNAVAILABLE, backend, detail=f"runtime {backend} is disabled")
         return None
 
-    def _call(self, backend: str, operation: str, needs: tuple, *args) -> Outcome:
+    def _call(self, backend: str, operation: str, needs: tuple[Capability, ...], *args: Any) -> Outcome:
         runtime = self.runtimes[backend]
         missing = [need for need in needs if need not in runtime.capabilities]
         if missing:
