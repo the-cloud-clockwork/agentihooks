@@ -713,10 +713,14 @@ def replay_unrelayed() -> None:
             except KeyError:
                 stored.drop_revisions(kind, slug)
                 continue
-            globals()[SIDE_EFFECTS[kind]](slug, state)
+            SIDE_EFFECTS[kind](slug, state)
 
 
-SIDE_EFFECTS = {RELAY: "relay_to_inbox", DOCTOR: "doctor_phrase", ALERTS: "deliver_alerts"}
+SIDE_EFFECTS = {
+    RELAY: lambda slug, state: relay_to_inbox(slug, state),
+    DOCTOR: lambda slug, state: doctor_phrase(slug, state),
+    ALERTS: lambda slug, state: deliver_alerts(slug, state),
+}
 EFFECTS = None
 
 
@@ -726,7 +730,11 @@ def pending(kind: str, state: dict) -> bool:
     if kind == ALERTS:
         rows = [a for a in state.get("alerts", []) if a["state"] == ledger_alerts.OPEN]
     else:
-        rows = [e for e in meta.get("events", []) if e.get("by") == "operator"]
+        rows = [
+            e
+            for e in meta.get("events", [])
+            if e.get("by") == "operator" and (kind == RELAY or e.get("target") == "chat")
+        ]
     return any(row.get("rev") == meta["rev"] for row in rows)
 
 
@@ -735,7 +743,7 @@ def deferred(kind: str) -> Callable[[str, dict], object]:
 
     def run(slug: str, state: dict) -> object:
         if EFFECTS is None:
-            return globals()[SIDE_EFFECTS[kind]](slug, state)
+            return SIDE_EFFECTS[kind](slug, state)
         if pending(kind, state):
             unrelayed_on(kind, slug, state["_meta"]["rev"])
             EFFECTS.wake()
@@ -750,11 +758,12 @@ def side_effects() -> Iterator[None]:
     from scripts.swarm_ledger import outbox_host
 
     global EFFECTS
-    with outbox_host.effects(replay_unrelayed) as worker:
-        EFFECTS = worker
-        try:
+    try:
+        with outbox_host.effects(replay_unrelayed) as worker:
+            EFFECTS = worker
             yield
-        finally:
+    finally:
+        if EFFECTS is not None and not EFFECTS.thread.is_alive():
             EFFECTS = None
 
 
