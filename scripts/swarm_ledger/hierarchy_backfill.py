@@ -1,13 +1,15 @@
+import argparse
 import copy
 import hashlib
 import json
 import os
 from pathlib import PurePosixPath
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from scripts.swarm_ledger import ledger_plans, storage
 from scripts.swarm_ledger.repository import LedgerRepository, hierarchy
-from scripts.swarm_ledger.repository.events import keep_events
+from scripts.swarm_ledger.repository.events import keep_events  # pyright: ignore[reportUnknownVariableType]
 
 STANDALONE_DESCRIPTION = (
     "Tasks that belonged to no phase, moved here by the hierarchy backfill so every task sits under one plan."
@@ -18,12 +20,15 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:12]
 
 
-def conflict(rows: list, kind: str, item: str, before: object, after: object) -> None:
+def conflict(rows: list[dict[str, Any]], kind: str, item: str, before: object, after: object) -> None:
     rows.append({"kind": kind, "item": item, "before": before, "after": after})
 
 
-def counts(doc: dict) -> dict:
-    nodes, dependencies = hierarchy.project(doc)
+def counts(doc: dict[str, Any]) -> dict[str, Any]:
+    nodes, dependencies = cast(
+        tuple[dict[str, Any], set[Any]],
+        hierarchy.project(doc),  # pyright: ignore[reportUnknownMemberType]
+    )
     phases = {row["id"] for row in doc.get("phases", [])}
     return {
         **{key: len(doc.get(key, [])) for key in ("plans", "phases", "slices", "tasks")},
@@ -35,9 +40,11 @@ def counts(doc: dict) -> dict:
     }
 
 
-def phase_plan(doc: dict, phase: dict, slug: str, conflicts: list) -> dict:
+def phase_plan(
+    doc: dict[str, Any], phase: dict[str, Any], slug: str, conflicts: list[dict[str, Any]]
+) -> dict[str, Any]:
     plans = doc["plans"]
-    artifact = (phase.get("plan_ref") or {}).get("artifact", "")
+    artifact = cast(dict[str, Any], phase.get("plan_ref") or {}).get("artifact", "")
     url = phase.get("plan_url", "")
     current = next((row for row in plans if f"plans/{row['id']}" == phase.get("plan")), None)
     if current is not None and (
@@ -52,9 +59,9 @@ def phase_plan(doc: dict, phase: dict, slug: str, conflicts: list) -> dict:
     if existing is not None:
         return existing
     identifier = (
-        ledger_plans.plan_id(PurePosixPath(urlsplit(artifact).path).stem)
+        ledger_plans.plan_id(PurePosixPath(urlsplit(cast(str, artifact)).path).stem)
         if artifact
-        else ledger_plans.plan_id(digest(url))
+        else ledger_plans.plan_id(digest(cast(str, url)))
         if url
         else f"standalone-{digest(slug)}"
     )
@@ -68,8 +75,10 @@ def phase_plan(doc: dict, phase: dict, slug: str, conflicts: list) -> dict:
     return plan
 
 
-def assign_phases(doc: dict, slug: str, conflicts: list) -> None:
-    ordered = sorted(doc["phases"], key=lambda row: not bool((row.get("plan_ref") or {}).get("artifact")))
+def assign_phases(doc: dict[str, Any], slug: str, conflicts: list[dict[str, Any]]) -> None:
+    ordered = sorted(
+        doc["phases"], key=lambda row: not bool(cast(dict[str, Any], row.get("plan_ref") or {}).get("artifact"))
+    )
     for phase in ordered:
         plan = phase_plan(doc, phase, slug, conflicts)
         address = f"plans/{plan['id']}"
@@ -82,7 +91,9 @@ def assign_phases(doc: dict, slug: str, conflicts: list) -> None:
             phase["plan_url"] = plan["artifact"]
 
 
-def task_slice(doc: dict, phase: dict, task: dict, conflicts: list) -> None:
+def task_slice(
+    doc: dict[str, Any], phase: dict[str, Any], task: dict[str, Any], conflicts: list[dict[str, Any]]
+) -> None:
     anchor = task.get("plan_slice")
     if not anchor:
         if task.get("slice"):
@@ -115,7 +126,7 @@ def task_slice(doc: dict, phase: dict, task: dict, conflicts: list) -> None:
     task["slice"] = target
 
 
-def assign_tasks(doc: dict, conflicts: list) -> None:
+def assign_tasks(doc: dict[str, Any], conflicts: list[dict[str, Any]]) -> None:
     phases = {row["id"]: row for row in doc["phases"]}
     plans = {f"plans/{row['id']}": row for row in doc["plans"]}
     for task in doc.get("tasks", []):
@@ -131,7 +142,7 @@ def assign_tasks(doc: dict, conflicts: list) -> None:
         task_slice(doc, phase, task, conflicts)
 
 
-def assign_unphased(doc: dict, slug: str, conflicts: list) -> None:
+def assign_unphased(doc: dict[str, Any], slug: str, conflicts: list[dict[str, Any]]) -> None:
     identifier = f"standalone-{digest(slug)}"
     phases = doc.setdefault("phases", [])
     for task in doc.get("tasks", []):
@@ -151,11 +162,11 @@ def assign_unphased(doc: dict, slug: str, conflicts: list) -> None:
         task["phase"] = identifier
 
 
-def preview(doc: dict, slug: str) -> tuple[dict, dict]:
+def preview(doc: dict[str, Any], slug: str) -> tuple[dict[str, Any], dict[str, Any]]:
     after = copy.deepcopy(doc)
     after.setdefault("plans", [])
     after.setdefault("slices", [])
-    conflicts = []
+    conflicts: list[dict[str, Any]] = []
     assign_unphased(after, slug, conflicts)
     assign_phases(after, slug, conflicts)
     assign_tasks(after, conflicts)
@@ -172,49 +183,59 @@ def preview(doc: dict, slug: str) -> tuple[dict, dict]:
         "refused": "; ".join(dangling),
     }
     try:
-        ledger_plans.validate(after)
+        ledger_plans.validate(after)  # pyright: ignore[reportUnknownMemberType]
     except ValueError as refused:
         report["refused"] = report["refused"] or str(refused)
     return after, report
 
 
-def commit(repo: LedgerRepository, slug: str, by: str) -> dict:
+def commit(repo: LedgerRepository, slug: str, by: str) -> dict[str, Any]:
     with repo.transaction() as transaction:
         entry = transaction.entry(slug)
-        after, report = preview(entry.state, slug)
+        after, report = preview(cast(dict[str, Any], entry.state), slug)
         if report["refused"]:
             raise ValueError(json.dumps(report, sort_keys=True))
-        report["repaired"] = hierarchy.drift(transaction.hierarchy(slug), hierarchy.project(after))
+        report["repaired"] = cast(
+            dict[str, Any],
+            hierarchy.drift(transaction.hierarchy(slug), hierarchy.project(after)),  # pyright: ignore[reportUnknownMemberType]
+        )
         if after != entry.state or report["repaired"]["drift"]:
             meta = after["_meta"]
-            ctx = repo.domain.Context(meta, repo.domain.now_ms())
+            domain = cast(Any, repo.domain)
+            ctx = domain.Context(meta, domain.now_ms())
             ctx.record(by, "backfilled", "hierarchy")
             meta.update(rev=ctx.rev, updated_at=ctx.at)
-            keep_events(meta, ctx.events, repo.domain, ctx.at)
-            transaction.write(slug, entry, after, ctx.events)
+            keep_events(meta, ctx.events, domain, ctx.at)
+            transaction.write(slug, entry, after, ctx.events)  # pyright: ignore[reportUnknownMemberType]
         report["applied"] = True
-        report["drift"] = hierarchy.drift(transaction.hierarchy(slug), hierarchy.project(after))
+        report["drift"] = cast(
+            dict[str, Any],
+            hierarchy.drift(transaction.hierarchy(slug), hierarchy.project(after)),  # pyright: ignore[reportUnknownMemberType]
+        )
     return report
 
 
-def backfill(repo: LedgerRepository, slug: str, by: str, apply: bool = False) -> dict:
+def backfill(repo: LedgerRepository, slug: str, by: str, apply: bool = False) -> dict[str, Any]:
     if apply:
         return commit(repo, slug, by)
     with repo.snapshot() as snapshot:
         if snapshot is None:
             raise storage.Missing(slug)
-        doc = snapshot.document(slug)
+        doc = cast(dict[str, Any], snapshot.document(slug))  # pyright: ignore[reportUnknownMemberType]
         _, report = preview(doc, slug)
-        report["drift"] = hierarchy.drift(snapshot.hierarchy(slug), hierarchy.project(doc))
+        report["drift"] = cast(
+            dict[str, Any],
+            hierarchy.drift(snapshot.hierarchy(slug), hierarchy.project(doc)),  # pyright: ignore[reportUnknownMemberType]
+        )
     return report
 
 
-def run(args) -> None:
+def run(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import ledger_link
 
-    if ledger_link.remote():
+    if ledger_link.remote():  # pyright: ignore[reportUnknownMemberType]
         raise SystemExit("hierarchy backfill must run on the local ledger host")
     by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME")
     if args.apply and not by:
         raise SystemExit("--as is required to apply the hierarchy backfill")
-    print(json.dumps(backfill(storage.default(), args.slug, by, args.apply), sort_keys=True))
+    print(json.dumps(backfill(storage.default(), args.slug, cast(str, by), args.apply), sort_keys=True))

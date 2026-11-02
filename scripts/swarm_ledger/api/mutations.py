@@ -1,3 +1,5 @@
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 from urllib.parse import unquote
 
 from scripts.swarm_ledger import ledger_task_duplicates, ports
@@ -8,30 +10,46 @@ from .services import LedgerCore, Services
 
 WRITES = ("add", "edit", "add_item", "retext")
 
+_target = cast(Callable[[dict[str, Any]], str], schemas.target)
+_check_operations = cast(
+    Callable[[dict[str, Any], LedgerCore, tuple[Any, ...]], list[dict[str, Any]]],
+    schemas.check_operations,
+)
+_receipts_find = cast(Callable[[Any, str], tuple[str | None, dict[str, Any] | None]], receipts.find)
+_receipts_store = cast(Callable[[Any, str, str, dict[str, Any]], None], receipts.store)
+_screen = cast(Callable[[dict[str, Any], list[dict[str, Any]]], Any], ledger_task_duplicates.screen)
+
 
 class GuardedOperations:
-    def __init__(self, payload: dict, budget: object, core: LedgerCore, fence=None, slug: str = "") -> None:
+    def __init__(
+        self,
+        payload: dict[str, Any],
+        budget: Any,
+        core: LedgerCore,
+        fence: Callable[[int], None] | None = None,
+        slug: str = "",
+    ) -> None:
         self.payload = payload
         self.budget = budget
         self.core = core
         self.fence = fence
         self.slug = slug
         self.checked = False
-        self.results = {}
+        self.results: dict[str, bool] = {}
         self.digest = resources.revision({"ops": payload["ops"], "changes": payload.get("changes", [])})
 
-    def changes_for(self, op: dict) -> list:
+    def changes_for(self, op: dict[str, Any]) -> list[Any]:
         return self.payload.get("changes", []) if op["id"] == self.payload.get("id") else []
 
-    def check(self, doc: dict, ctx: object) -> None:
-        _, known = receipts.find(ctx.meta, self.payload["operation_id"])
+    def check(self, doc: dict[str, Any], ctx: Any) -> None:
+        _, known = _receipts_find(ctx.meta, self.payload["operation_id"])
         if known is not None:
             if known["digest"] != self.digest:
                 raise APIError(409, "operation_conflict", "Operation identifier was already used for different content")
             self.results = dict(known["results"])
         pending = [op for op in self.payload["ops"] if op["id"] not in self.results]
         targets = {
-            schemas.target(op)
+            _target(op)
             for op in pending
             if op["op"] not in schemas.UNGUARDED and not self.changes_for(op) and "worker_claim" not in op
         }
@@ -46,61 +64,66 @@ class GuardedOperations:
                 raise APIError(409, "revision_conflict", "Resource changed since the expected revision", {"path": path})
         self.checked = True
 
-    def check_controller(self, op: dict) -> None:
+    def check_controller(self, op: dict[str, Any]) -> None:
         SwarmError = ports.swarm().store.SwarmError
 
         if "controller_epoch" in op:
             try:
-                self.fence(op["controller_epoch"])
+                if self.fence is not None:
+                    self.fence(op["controller_epoch"])
             except SwarmError as exc:
                 raise APIError(409, "stale_controller", str(exc)) from None
 
-    def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
+    def apply(self, doc: dict[str, Any], op: dict[str, Any], ctx: Any, apply_op: Any) -> bool:
         self.check_controller(op)
         from . import worker_writes
 
-        worker_writes.check(self.slug, doc, op)
+        check_worker_writes = cast(Callable[[str, dict[str, Any], dict[str, Any]], None], worker_writes.check)
+        check_worker_writes(self.slug, doc, op)
         if not self.checked:
             self.check(doc, ctx)
         if op["id"] in self.results:
             return self.results[op["id"]]
         changes = self.changes_for(op)
-        accepted = (
-            not self.core.apply_changes(doc, changes, ctx) if changes else self.budget.apply(doc, op, ctx, apply_op)
-        )
+        apply_changes = cast(Callable[[dict[str, Any], list[Any], Any], bool], self.core.apply_changes)
+        accepted = not apply_changes(doc, changes, ctx) if changes else self.budget.apply(doc, op, ctx, apply_op)
         self.check_controller(op)
-        worker_writes.check(self.slug, doc, op)
+        check_worker_writes(self.slug, doc, op)
         self.results[op["id"]] = bool(accepted)
-        receipts.store(ctx.meta, self.payload["operation_id"], self.digest, dict(self.results))
+        _receipts_store(ctx.meta, self.payload["operation_id"], self.digest, dict(self.results))
         ctx.dirty = True
         return accepted
 
 
-def writer(headers) -> str:
+def writer(headers: Mapping[str, str]) -> str:
     return unquote(headers.get(schemas.WORKTREE_HEADER, ""))
 
 
-def _stamp(op, worktree: str):
-    if not isinstance(op, dict) or op.get("op") not in WRITES:
+def _stamp(op: object, worktree: str) -> object:
+    if not isinstance(op, dict):
         return op
-    bare = {key: value for key, value in op.items() if key != "worktree"}
+    mapping = cast(dict[str, Any], op)
+    if mapping.get("op") not in WRITES:
+        return mapping
+    bare = {key: value for key, value in mapping.items() if key != "worktree"}
     return {**bare, "worktree": worktree} if worktree else bare
 
 
-def stamped(payload: dict, worktree: str) -> dict:
+def stamped(payload: dict[str, Any], worktree: str) -> dict[str, Any]:
     if not isinstance(payload.get("ops"), list):
         return payload
     return {**payload, "ops": [_stamp(op, worktree) for op in payload["ops"]]}
 
 
-def apply(services: Services, slug: str, principal: str, payload: dict, worktree: str = "") -> dict:
-    doc = services.repository.current(slug).state
+def apply(services: Services, slug: str, principal: str, payload: dict[str, Any], worktree: str = "") -> dict[str, Any]:
+    doc = cast(dict[str, Any], services.repository.current(slug).state)
     task_ids = tuple(t["id"] for t in doc.get("tasks", []))
     operations = [
         {key: value for key, value in op.items() if key != "worktree"}
-        for op in schemas.check_operations(stamped(payload, worktree), services.ledger.core, task_ids)
+        for op in _check_operations(stamped(payload, worktree), services.ledger.core, task_ids)
     ]
-    refusals = [reason for op in operations if (reason := services.ledger.authority.refusal(principal, op))]
+    refusal = cast(Callable[[str, dict[str, Any]], str | None], services.ledger.authority.refusal)
+    refusals = [reason for op in operations if (reason := refusal(principal, op))]
     if principal and payload.get("changes"):
         raise APIError(403, "forbidden", "Checkbox changes need the operator")
     payload = {**payload, "ops": operations}
@@ -110,24 +133,30 @@ def apply(services: Services, slug: str, principal: str, payload: dict, worktree
             "_meta": {"warnings": [*doc["_meta"].get("warnings", [])[:10], *refusals]},
         }
         raise APIError(403, "forbidden", "Caller cannot perform this operation as its author", details)
-    services.media.resolve_media(slug, operations)
-    services.media.resolve_artifacts(slug, operations)
-    screen = ledger_task_duplicates.screen(doc, operations)
-    fence = services.ledger.write_gate(slug)
+    resolve_media = cast(Callable[[str, list[dict[str, Any]]], None], services.media.resolve_media)
+    resolve_artifacts = cast(Callable[[str, list[dict[str, Any]]], None], services.media.resolve_artifacts)
+    resolve_media(slug, operations)
+    resolve_artifacts(slug, operations)
+    screen = _screen(doc, operations)
+    fence = cast(Any, services.ledger.write_gate(slug))
     gate = ledger_task_duplicates.Gate(
         screen,
         GuardedOperations(
             payload, fence, services.ledger.core, lambda epoch: services.ledger.authority.fence(slug, epoch), slug
         ),
     )
-    state, rejected = services.repository.apply_ops(slug, ops=operations, gate=gate, copy_state=False)
+    apply_ops = cast(Callable[..., tuple[dict[str, Any], list[Any]]], services.repository.apply_ops)
+    state, rejected = apply_ops(slug, ops=operations, gate=gate, copy_state=False)
     fence.publish(rejected)
-    services.ledger.relay_to_inbox(slug, state)
-    services.swarm.doctor_phrase(slug, state)
-    services.ledger.deliver_alerts(slug, state)
+    relay_to_inbox = cast(Callable[[str, dict[str, Any]], object], services.ledger.relay_to_inbox)
+    doctor_phrase = cast(Callable[[str, dict[str, Any]], object], services.swarm.doctor_phrase)
+    deliver_alerts = cast(Callable[[str, dict[str, Any]], object], services.ledger.deliver_alerts)
+    relay_to_inbox(slug, state)
+    doctor_phrase(slug, state)
+    deliver_alerts(slug, state)
     tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
     rows = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
-    reply = {
+    reply: dict[str, Any] = {
         **({"tasks": rows} if tasks else {}),
         "applied": [op["id"] for op in operations if op["id"] not in rejected],
         "rejected": rejected,
@@ -141,7 +170,7 @@ def apply(services: Services, slug: str, principal: str, payload: dict, worktree
     return bounded_ack(reply)
 
 
-def bounded_ack(reply: dict) -> dict:
+def bounded_ack(reply: dict[str, Any]) -> dict[str, Any]:
     if resources.reply_size(reply) > resources.MAX_REPLY and "tasks" in reply:
         fields = ("id", "state", "claimed_by", "issue_url", "pr_url", "done", "out_of_scope")
         reply["tasks"] = [{key: row[key] for key in fields if key in row} for row in reply["tasks"]]

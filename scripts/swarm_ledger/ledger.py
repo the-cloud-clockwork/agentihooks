@@ -141,7 +141,7 @@ REQUEST_TIMEOUT = 10
 TALK_OPS = ("answer", "add_item", "relay")
 TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
-AUTH_FAILURES = collections.Counter()
+AUTH_FAILURES: collections.Counter[str] = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 LEDGER_ITEM = re.compile(r"(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
 OBJECT_FORMS = {
@@ -438,7 +438,11 @@ def cmd_show(args: argparse.Namespace) -> None:
 
 
 def cmd_tree(args: argparse.Namespace) -> None:
-    for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy", collection=True):
+    rows = cast(
+        "list[dict[str, Any]]",
+        resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy", collection=True),
+    )
+    for row in rows:
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
@@ -448,7 +452,8 @@ def cmd_get(args: argparse.Namespace) -> None:
 
 def cmd_tasks(args: argparse.Namespace) -> None:
     text = (args.text or "").lower()
-    for task in resource(args.slug, "tasks", collection=True):
+    tasks = cast("list[dict[str, Any]]", resource(args.slug, "tasks", collection=True))
+    for task in tasks:
         state, lane, title = task.get("state") or "open", task.get("lane") or "", task.get("title") or ""
         if state == "done" or task.get("out_of_scope"):
             continue
@@ -496,11 +501,11 @@ def cmd_say(args: argparse.Namespace) -> None:
     posted(call(args.slug, [op]), [op])
 
 
-def upload_image(slug: str, name: str, path: str) -> dict:
+def upload_image(slug: str, name: str, path: str) -> dict[str, Any]:
     return upload(slug, name, path, "media", {})
 
 
-def upload_artifact(slug: str, name: str, path: str, request: dict) -> dict:
+def upload_artifact(slug: str, name: str, path: str, request: dict[str, Any]) -> dict[str, Any]:
     return upload(
         slug,
         name,
@@ -510,7 +515,7 @@ def upload_artifact(slug: str, name: str, path: str, request: dict) -> dict:
     )
 
 
-def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
+def upload(slug: str, name: str, path: str, route: str, extra: dict[str, str]) -> dict[str, Any]:
     req = urllib.request.Request(
         f"{base()}/api/v1/ledgers/{slug}/uploads/{route}",
         data=Path(path).read_bytes(),
@@ -559,12 +564,12 @@ def cmd_publish_plan(args: argparse.Namespace) -> None:
     if {phase["id"] for phase in selected} != set(phases):
         sys.exit("publish-plan names an unknown phase")
     try:
-        ranges = plan_ranges.phase_lines(text, selected)
+        ranges = cast("dict[str, Any]", plan_ranges.phase_lines(text, selected))
         plan_ranges.require_markers(text, ranges)
     except ValueError as exc:
         sys.exit(str(exc))
     title = args.title or ledger_publish.title_of(text, phases)
-    stored = {}
+    stored: dict[str, Any] = {}
 
     def artifact(path: str, title: str) -> str:
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
@@ -611,8 +616,8 @@ def cmd_publish_plan(args: argparse.Namespace) -> None:
         except ledger_publish.PublishError as exc:
             print(exc, file=sys.stderr)
     refused(state, ops)
-    tasks = ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"])
-    reslice = {"tasks": tasks} if any(tasks.values()) else {}
+    tasks = cast("dict[str, Any]", ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"]))
+    reslice: dict[str, Any] = {"tasks": tasks} if any(tasks.values()) else {}
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
 
@@ -620,11 +625,15 @@ def cmd_plan(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import ledger_phase_cli
 
     plan = json.loads(Path(args.path).read_bytes())
-    phases = ledger_phase_cli.append_phases(
-        plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
+    phases = cast(
+        "list[dict[str, Any]]",
+        ledger_phase_cli.append_phases(
+            plan,
+            [phase["id"] for phase in cast("list[dict[str, Any]]", resource(args.slug, "phases", collection=True))],
+        ),
     )
     state = send(args, "phase_append", phases=phases)
-    repeats = ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases)
+    repeats = cast("dict[str, Any]", ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases))
     for warning in repeats.values():
         print(warning, file=sys.stderr)
     print(
@@ -639,16 +648,17 @@ def cmd_plan(args: argparse.Namespace) -> None:
 
 def cmd_artifact_purge(args: argparse.Namespace) -> None:
     send(args, "artifact_purge")
-    events = resource(args.slug, "events", collection=True)
+    events = cast("list[dict[str, Any]]", resource(args.slug, "events", collection=True))
     event = next(e for e in reversed(events) if e["kind"] == "artifacts purged")
-    print(json.dumps({"purged": event["count"], "artifacts": resource(args.slug, "counts")["artifacts"]}))
+    counts = cast("dict[str, Any]", resource(args.slug, "counts"))
+    print(json.dumps({"purged": event["count"], "artifacts": counts["artifacts"]}))
 
 
 def cmd_phase(args: argparse.Namespace) -> None:
     if args.id in ("add", "set") and args.values:
         from scripts.swarm_ledger import ledger_phase_cli
 
-        kind, fields = ledger_phase_cli.operation(args)
+        kind, fields = cast("tuple[str, dict[str, Any]]", ledger_phase_cli.operation(args))
         send(args, kind, **fields)
         print(json.dumps(fields))
         return
@@ -782,7 +792,7 @@ def cmd_delete(args: argparse.Namespace) -> None:
 
 
 def cmd_audit(args: argparse.Namespace) -> None:
-    rows = ledger_comments.audit(export(args.slug))
+    rows = cast("list[tuple[str, str, str, list[str]]]", ledger_comments.audit(export(args.slug)))
     for where, entry, by, reasons in rows:
         print(f"{where} {entry} {by or '-'}: {'; '.join(reasons)}")
     print(f"{len(rows)} to clean")
@@ -823,7 +833,7 @@ def cmd_plan_backfill(args: argparse.Namespace) -> None:
     plan_backfill.run(args)
 
 
-def cmd_hierarchy(args) -> None:
+def cmd_hierarchy(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import hierarchy_backfill
 
     hierarchy_backfill.run(args)
@@ -861,7 +871,7 @@ def _add_task(args: argparse.Namespace, title: str, fields: dict[str, Any]) -> d
 
 
 def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
-    lists = {
+    lists: dict[str, Any] = {
         k: comma_list(v)
         for k, v in (
             ("depends_on", args.depends_on),
@@ -890,14 +900,19 @@ def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
     lists.update((key, value) for key, value in options if value)
     if args.kind == "workflow":
         try:
-            lists.update(workflow_task.add_fields(args.workflow, args.case, args.lane, args.profile, Path.cwd()))
+            lists.update(
+                cast(
+                    "dict[str, Any]",
+                    workflow_task.add_fields(args.workflow, args.case, args.lane, args.profile, Path.cwd()),
+                )
+            )
         except ValueError as exc:
             sys.exit(f"task {args.id} was not added: {exc}")
     return lists
 
 
 def _task_set_fields(values: list[str]) -> dict[str, Any]:
-    fields = dict(value.split("=", 1) for value in values if "=" in value)
+    fields: dict[str, Any] = dict(value.split("=", 1) for value in values if "=" in value)
     if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
     for key in (
@@ -929,7 +944,7 @@ def _task_set_fields(values: list[str]) -> dict[str, Any]:
     return fields
 
 
-def task_branch_fields(args: argparse.Namespace, fields: dict) -> dict:
+def task_branch_fields(args: argparse.Namespace, fields: dict[str, Any]) -> dict[str, Any]:
     if "branch" not in fields:
         return fields
     swarm = ports.swarm()
@@ -937,7 +952,7 @@ def task_branch_fields(args: argparse.Namespace, fields: dict) -> dict:
         repo = swarm.store.connect().config(args.slug).repo
     except swarm.store.SwarmError:
         return fields
-    task = resource(args.slug, f"tasks/{args.id}")
+    task = cast("dict[str, Any]", resource(args.slug, f"tasks/{args.id}"))
     branches = {**task.get("repository_branches", {}), **fields.get("repository_branches", {})}
     if fields["branch"]:
         branches[repo] = fields["branch"]
@@ -950,7 +965,7 @@ def cmd_task(args: argparse.Namespace) -> None:
     refuse_unset_quote(args)
     if args.action == "add":
         if args.id == "-":
-            args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
+            args.id = ledger_tasks.next_id(cast("list[dict[str, Any]]", resource(args.slug, "tasks", collection=True)))
         title = " ".join(args.values)
         lists = _task_add_fields(args)
         print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))

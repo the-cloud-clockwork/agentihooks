@@ -1,12 +1,9 @@
 """Alerts: the server raises one from each new ledger warning and sends it to its target's inbox; anyone claims it
 and closes it done with an outcome."""
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable, cast
 
 from scripts.inbox import outbox
-
-if TYPE_CHECKING:
-    import ledger_core
 
 OPS = ("alert_claim", "alert_close", "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
@@ -55,9 +52,7 @@ def check_raise(op: dict[str, Any]) -> None:
         )
 
 
-def raise_source(
-    doc: dict[str, Any], ctx: "ledger_core.Context", source: str, text: str, item: str | None = None
-) -> bool:
+def raise_source(doc: dict[str, Any], ctx: Any, source: str, text: str, item: str | None = None) -> bool:
     rows = doc.setdefault("alerts", [])
     if any(a["source"] == source and a.get("item") == item and a["state"] != DONE for a in rows):
         return True
@@ -85,7 +80,7 @@ def check(op: dict[str, Any]) -> None:
             raise ValueError(f"alert_close needs an outcome of up to {MAX_OUTCOME} characters")
 
 
-def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     if op["op"] == "alert_raise":
         return raise_source(doc, ctx, op["source"], op["text"].strip(), op.get("item"))
     if "item" in op:
@@ -106,7 +101,7 @@ def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -
     return True
 
 
-def close_item(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
+def close_item(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     who, outcome = op.get("by", OPERATOR), op["outcome"].strip()
     for alert in doc.setdefault("alerts", []):
         if alert["source"] in ITEMIZED and alert.get("item") == op["item"] and alert["state"] != DONE:
@@ -121,17 +116,17 @@ def item(op: dict[str, Any]) -> str:
     return op.get("item") or op.get("thread") or op.get("target") or op["op"]
 
 
-def writer(op: dict[str, Any], ctx: "ledger_core.Context") -> str | None:
+def writer(op: dict[str, Any], ctx: Any) -> str | None:
     return ctx.author(op["by"]) if op.get("by") else None
 
 
-def close_refusal(alert: dict[str, Any], ctx: "ledger_core.Context", outcome: str) -> None:
+def close_refusal(alert: dict[str, Any], ctx: Any, outcome: str) -> None:
     who = alert.get("writer") or SENDER
     alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
     ctx.record(who, "alert closed", f"alerts/{alert['id']}", text=outcome)
 
 
-def recovered(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> None:
+def recovered(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> None:
     by, target_item = writer(op, ctx), item(op)
     for alert in doc.get("alerts", []):
         if (
@@ -151,7 +146,7 @@ def expired(alert: dict[str, Any], at: int) -> bool:
     )
 
 
-def raise_warning(doc: dict[str, Any], ctx: "ledger_core.Context", warning: tuple[Any, ...], before: list[str]) -> None:
+def raise_warning(doc: dict[str, Any], ctx: Any, warning: tuple[Any, ...], before: list[str]) -> None:
     source, text, *owner = warning
     writer, target_item = owner if owner else (None, None)
     rows = doc["alerts"]
@@ -173,7 +168,7 @@ def raise_warning(doc: dict[str, Any], ctx: "ledger_core.Context", warning: tupl
         alert.update(writer=writer, item=target_item, last_refused_at=ctx.at)
 
 
-def new_alert(doc: dict[str, Any], ctx: "ledger_core.Context", source: str, text: str, target: str) -> dict[str, Any]:
+def new_alert(doc: dict[str, Any], ctx: Any, source: str, text: str, target: str) -> dict[str, Any]:
     rows = doc["alerts"]
     alert = {
         "id": f"al-{ctx.rev}-{len(rows)}",
@@ -189,7 +184,7 @@ def new_alert(doc: dict[str, Any], ctx: "ledger_core.Context", source: str, text
     return alert
 
 
-def derive(doc: dict[str, Any], ctx: "ledger_core.Context", raised: list[tuple[Any, ...]], before: list[str]) -> None:
+def derive(doc: dict[str, Any], ctx: Any, raised: list[tuple[Any, ...]], before: list[str]) -> None:
     rows = doc.setdefault("alerts", [])
     for warning in raised:
         raise_warning(doc, ctx, warning, before)
@@ -206,8 +201,8 @@ def message(slug: str, alert: dict[str, Any], tier: str = "", doc: dict[str, Any
     from scripts.swarm_ledger import ledger_blockers
 
     item = alert.get("item") or "<the item it concerns>"
-    row = ledger_blockers.find(doc, item) if doc and ledger_blockers.ITEM_RE.match(item) else None
-    step = ledger_blockers.notice(slug, tier, item, ledger_blockers.record(row))
+    row = cast(Any, ledger_blockers).find(doc, item) if doc and cast(Any, ledger_blockers).ITEM_RE.match(item) else None
+    step = cast(Any, ledger_blockers).notice(slug, tier, item, cast(Any, ledger_blockers).record(row))
     return (
         f"On ledger {slug}: alert {alert['id']} ({alert['source']}): {alert['text']}. Claim it with agentihooks "
         f"ledger --slug {slug} --as <you> alert claim {alert['id']}, then close it with alert close "
@@ -226,7 +221,7 @@ def deliver(
 ) -> list[Any]:
     """Send each alert raised from since through rev to its target's inbox, once."""
     since = rev if since is None else since
-    sent = []
+    sent: list[Any] = []
     for alert in alerts:
         if alert["state"] != OPEN or not since <= alert.get("rev", -1) <= rev:
             continue
@@ -235,7 +230,7 @@ def deliver(
             continue
         address = master if alert["target"] in ("master", OPERATOR) else alert["target"]
         notice = outbox.Post(SENDER, address, render(slug, alert), item=outbox.stable_id("alert", slug, alert["id"]))
-        item = outbox.post(inbox, notice)
+        item = cast(Any, outbox).post(inbox, notice)
         inbox.redis.set(mark, 1, ex=SENT_TTL_S)
         sent += [item] if item else []
     return sent

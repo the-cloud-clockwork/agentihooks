@@ -4,8 +4,8 @@ import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
-from pathlib import Path, PurePath
-from typing import Any
+from pathlib import PurePath
+from typing import TYPE_CHECKING, Any, cast
 
 import ledger_comments
 import ledger_core as core
@@ -13,6 +13,9 @@ import ledger_media as media
 
 from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.repository import artifact_files
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 TRASH = "artifact_trash"
@@ -86,21 +89,21 @@ def store(slug: str, name: str, data: bytes) -> dict[str, Any]:
     if len(data) > MAX_BYTES:
         raise media.Refused(413, f"an artifact may be at most {MAX_BYTES >> 20} MB")
     try:
-        kind, width, height = media.inspect(data)
+        kind, width, height = cast(Any, media).inspect(data)
         ext, fields = media.EXTENSIONS[kind], {"type": kind, "width": width, "height": height}
     except media.Refused:
         ext, data, fields = _text(name, data)
     artifact_id = f"{hashlib.sha256(data).hexdigest()}.{ext}"
-    path = media.folder(slug) / artifact_id
+    path = cast(Any, media).folder(slug) / artifact_id
     media.write_file(path, data)
     artifact_files.save(slug, artifact_id, data)
     return {"id": artifact_id, **fields, "size": len(data)}
 
 
-def path_of(slug: str, artifact_id: str) -> Path:
+def path_of(slug: str, artifact_id: object) -> "Path":
     if not isinstance(artifact_id, str) or not ID_RE.match(artifact_id):
         raise ValueError("not an artifact id")
-    path = media.folder(slug) / artifact_id
+    path = cast(Any, media).folder(slug) / artifact_id
     if not path.is_file():
         raise ValueError(f"no stored artifact {artifact_id}")
     return path
@@ -121,7 +124,7 @@ def served(slug: str, artifact_id: str) -> bytes:
 
 def adopt_disk(slug: str) -> None:
     """Every stored file only this host's disk holds, copied into the shared database so any host serves it."""
-    paths = sorted(media.folder(slug).glob("*"))
+    paths = sorted(cast(Any, media).folder(slug).glob("*"))
     if not paths:
         return
     stored, imaged = artifact_files.ids(slug), media.media_files.ages(slug)
@@ -137,7 +140,7 @@ def entry(slug: str, artifact_id: str) -> dict[str, Any]:
     ext = artifact_id.rsplit(".", 1)[1]
     if ext in TEXT_TYPES:
         return {"id": artifact_id, "type": TEXT_TYPES[ext], "size": len(data)}
-    kind, width, height = media.inspect(data)
+    kind, width, height = cast(Any, media).inspect(data)
     return {"id": artifact_id, "type": kind, "width": width, "height": height, "size": len(data)}
 
 
@@ -174,9 +177,9 @@ def check_add(op: dict[str, Any]) -> None:
         raise ValueError("request must be the id of the operator message that asked for the file")
     if not isinstance(op["title"], str) or not op["title"].strip() or len(op["title"]) > MAX_TITLE:
         raise ValueError(f"title must be text of at most {MAX_TITLE} characters")
-    if not isinstance(op["file"], dict) or not ID_RE.match(str(op["file"].get("id"))):
+    if not isinstance(op["file"], dict) or not ID_RE.match(str(cast(dict[str, Any], op["file"]).get("id"))):
         raise ValueError("file needs a stored artifact id")
-    ledger_comments.check(op["title"], "item")
+    cast(Any, ledger_comments).check(op["title"], "item")
 
 
 def operator_asked(doc: dict[str, Any], entry_id: str | None) -> bool:
@@ -184,12 +187,12 @@ def operator_asked(doc: dict[str, Any], entry_id: str | None) -> bool:
         return False
     return any(
         entry.get("id") == entry_id and entry.get("by") == "operator" and not entry.get("deleted")
-        for _, thread in core.thread_paths(doc)
+        for _, thread in cast(Any, core).thread_paths(doc)
         for entry in thread
     )
 
 
-def refusal(doc: dict, op: dict, members: dict) -> str:
+def refusal(doc: dict[str, Any], op: dict[str, Any], members: dict[str, Any]) -> str:
     lane_of = ports.swarm().naming.lane_of
 
     member = members.get(op["by"], {})
@@ -204,7 +207,7 @@ def refusal(doc: dict, op: dict, members: dict) -> str:
     return "" if requested or operator_asked(doc, op.get("request")) else REFUSED
 
 
-def _add(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool:
+def _add(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     rows = doc.setdefault("artifacts", [])
     if any(row["id"] == op["id"] for row in rows):
         return True
@@ -234,7 +237,7 @@ def _add(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool:
     return True
 
 
-def _move(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context", source: str, dest: str) -> bool:
+def _move(doc: dict[str, Any], op: dict[str, Any], ctx: Any, source: str, dest: str) -> bool:
     row = next((r for r in doc[source] if r["id"] == op["target"]), None)
     if row is None:
         return any(r["id"] == op["target"] for r in doc[dest])
@@ -249,7 +252,7 @@ def _move(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context", source: 
     return True
 
 
-def _purge(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool:
+def _purge(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     if op["by"] not in ctx.meta["members"]:
         return False
     rows = doc["artifacts"] + doc[TRASH]
@@ -259,7 +262,7 @@ def _purge(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool
     return True
 
 
-def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool:
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     if op["op"] == "artifact_add":
         return _add(doc, op, ctx)
     if op["op"] == "artifact_purge":
@@ -271,18 +274,18 @@ def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool:
 
 def in_use(doc: dict[str, Any]) -> set[str]:
     used = {row["file"]["id"] for key in ("artifacts", TRASH) for row in doc[key]}
-    for _, thread in core.thread_paths(doc):
+    for _, thread in cast(Any, core).thread_paths(doc):
         for entry in thread:
             used.update(att["id"] for att in entry.get("attachments", []))
     return used
 
 
-def sweep(slug: str, doc: dict[str, Any], ctx: "core.Context") -> None:
+def sweep(slug: str, doc: dict[str, Any], ctx: Any) -> None:
     from scripts.swarm_ledger.storage_migration.hosted import media_mutation
 
     used = in_use(doc)
-    stale = media.sweep(slug, used, ctx.at)
-    with media_mutation(media.core.LEDGER_DIR, slug) as writable:
+    stale = cast(Any, media).sweep(slug, used, ctx.at)
+    with media_mutation(cast(Any, media).core.LEDGER_DIR, slug) as writable:
         if not writable:
             return
         trash = doc[TRASH]
@@ -293,5 +296,5 @@ def sweep(slug: str, doc: dict[str, Any], ctx: "core.Context") -> None:
             used = in_use(doc)
         dropped = {row["file"]["id"] for row in expired} | set(ctx.dropped)
         for file_id in dropped - used:
-            (media.folder(slug) / file_id).unlink(missing_ok=True)
+            (cast(Any, media).folder(slug) / file_id).unlink(missing_ok=True)
         ctx.unstored = (dropped - used) | stale
