@@ -3395,6 +3395,12 @@ jobs:
             exit 1
           fi
 
+      - name: Turn off automatic git maintenance
+        run: |
+          echo "GIT_CONFIG_COUNT=1" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_KEY_0=maintenance.auto" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=false" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
         if: needs.mutation.result == 'success'
         with:
