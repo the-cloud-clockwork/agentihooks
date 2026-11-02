@@ -202,7 +202,8 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     assert "queue-baseline" not in jobs
     assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
-    steps = jobs["gate-required"]["steps"]
+    assert jobs["gate-required"]["steps"][-1] == ci_reuse.PEAK_MEMORY
+    steps = ci_reuse.without_peak_memory(jobs["gate-required"]["steps"])
     assert "type-gate" in jobs["gate-required"]["needs"]
     steps[0]["run"] = steps[0]["run"].replace('"docs", "semgrep"', '"semgrep"')
     assert steps in [

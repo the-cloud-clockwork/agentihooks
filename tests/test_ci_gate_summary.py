@@ -83,11 +83,16 @@ def test_required_summary_writes_current_artifact_counts_even_after_gate_failure
 
 
 def test_test_summary_never_delays_required_grading():
+    from scripts import ci_reuse
+
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     gate = jobs["gate-required"]
-    assert len(gate["steps"]) == 1, "Required grading must not check out or download summary artifacts"
-    assert gate["steps"][0]["name"] == "Require every gate to succeed"
+    assert gate["steps"][-1] == ci_reuse.PEAK_MEMORY
+    grading = ci_reuse.without_peak_memory(gate["steps"])
+    assert len(grading) == 1, "Required grading must not check out or download summary artifacts"
+    assert grading[0]["name"] == "Require every gate to succeed"
     summary = jobs["test-summary"]
+    assert summary["steps"][-1] == ci_reuse.PEAK_MEMORY
     assert summary["if"] == "${{ always() }}"
     assert set(summary["needs"]) == {"unit", "unit-selected"}
     assert summary.get("name", "test-summary") != "Gate — Required"
