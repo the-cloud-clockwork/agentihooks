@@ -210,7 +210,7 @@ def _heartbeat(cli: Any, get: Get) -> None:
 
 
 def _status_publish(cli: Any, get: Get) -> None:
-    cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"))
+    cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"))
 
 
 STEPS = (

@@ -54,6 +54,25 @@
       ]
     },
     {
+      "id": "swarm-tick-step-isolation",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-b9",
+      "behaviour": "Every registered tick step declares a budget from its tick report p95 and an interval from the plan's interval table; the engine waits on a step for at most its budget, records a step still running then as late and goes on, so a 300 second step before spawn no longer delays it, and spawn, needing only judge, orphans and preempt, starts by forty seconds into the pass.",
+      "seam": "scripts.tick.engine.run_group with step budgets from scripts.tick.steps.budgets.timing_of and the start bound from scripts.tick.registry.latest_start",
+      "tests": [
+        "tests/tick/test_step_isolation.py::test_a_300_second_step_before_spawn_no_longer_delays_spawn",
+        "tests/tick/test_step_isolation.py::test_a_step_that_ends_within_its_budget_is_kept_with_its_result",
+        "tests/tick/test_step_isolation.py::test_an_abandoned_step_keeps_its_wall_time_and_a_daemon_thread",
+        "tests/tick/test_step_isolation.py::test_an_abandoned_record_reads_late_even_inside_its_budget",
+        "tests/tick/test_step_isolation.py::test_budgets_come_from_the_p95_with_headroom_in_whole_seconds",
+        "tests/tick/test_step_isolation.py::test_an_undeclared_step_is_refused",
+        "tests/tick/test_step_isolation.py::test_every_registered_call_step_declares_its_measured_timing",
+        "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
+        "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
+        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path"
+      ]
+    },
+    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
