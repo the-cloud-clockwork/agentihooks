@@ -1,4 +1,5 @@
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -139,8 +140,7 @@ def test_the_job_peak_step_reports_the_cgroup_figures(tmp_path: Path) -> None:
     env = {"PATH": "/usr/bin:/bin", "GITHUB_JOB": "select", "GITHUB_STEP_SUMMARY": str(summary)}
     done = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True, check=False)
     assert done.returncode == 0
-    line = done.stdout.strip()
-    assert line.startswith("Job peak memory of select: ")
-    assert ", limit " in line
-    assert ", out of memory kills " in line
+    figure = r"(\d+ MiB|unknown)"
+    pattern = rf"Job peak memory of select: {figure}, limit {figure}, out of memory kills (\d+|unknown)"
+    assert re.fullmatch(pattern, done.stdout.strip())
     assert summary.read_text() == done.stdout

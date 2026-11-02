@@ -3337,8 +3337,6 @@ jobs:
           retention-days: 7
           after-cancel: true
 
-  # Reports only: it fails when it cannot read the run, never because a stage ran slow.
-
       - name: Record the job peak memory
         if: always()
         shell: bash
@@ -3350,6 +3348,8 @@ jobs:
           [[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"
           [[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"
           echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
     needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
