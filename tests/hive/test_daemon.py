@@ -578,6 +578,94 @@ def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
     assert calls[:3] == [(connection, "local")] * 3
 
 
+def test_the_ready_marker_stays_fresh_while_a_slow_launch_blocks_the_beat(monkeypatch, tmp_path):
+    import os
+    import time
+
+    from scripts.hive import headroom, orders, rollout
+
+    marker = tmp_path / "ready"
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "publish_headroom", PUBLISH_HEADROOM)
+    monkeypatch.setattr(daemon, "scheduled_wait", lambda seconds, state, timeout: threading.Event().wait(0.001))
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(orders, "alive", lambda client, hive: None)
+    beats, fresh = [], []
+
+    def beat(redis, hive):
+        beats.append(hive)
+        if len(beats) == 1:
+            return
+        stale = time.time() - 120
+        os.utime(marker, (stale, stale))
+        for _ in range(500):
+            if rollout.ready(marker, time.time()):
+                fresh.append(True)
+                break
+            threading.Event().wait(0.01)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "beat", beat)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(_once(object()))
+    assert beats == ["local", "local"]
+    assert fresh == [True]
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_headroom_refreshes_the_ready_marker_only_once_a_beat_created_it(monkeypatch, tmp_path, exists):
+    import os
+
+    from scripts.hive import headroom
+
+    marker = tmp_path / "ready"
+    if exists:
+        marker.touch()
+        os.utime(marker, (5, 5))
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    stop, _, beats = _paced(monkeypatch, 2)
+    PUBLISH_HEADROOM(object(), object(), "local", stop)
+    assert len(beats) == 1
+    assert marker.exists() is exists
+    if exists:
+        assert marker.stat().st_mtime > 5
+
+
+def test_headroom_leaves_the_ready_marker_alone_when_its_publish_fails(monkeypatch, tmp_path):
+    import os
+
+    from redis.exceptions import ConnectionError
+
+    from scripts.hive import headroom
+
+    marker = tmp_path / "ready"
+    marker.touch()
+    os.utime(marker, (5, 5))
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    monkeypatch.setattr(headroom, "publish", Mock(side_effect=ConnectionError("gone")))
+    stop, _, _ = _paced(monkeypatch, 2)
+    PUBLISH_HEADROOM(object(), object(), "local", stop)
+    assert marker.stat().st_mtime == 5
+
+
+def test_headroom_ignores_an_unset_ready_marker(monkeypatch, tmp_path):
+    from scripts.hive import headroom
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("HIVE_READY_FILE", raising=False)
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    stop, _, beats = _paced(monkeypatch, 2)
+    PUBLISH_HEADROOM(object(), object(), "local", stop)
+    assert len(beats) == 1
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect(monkeypatch):
     from redis.exceptions import ConnectionError
 
