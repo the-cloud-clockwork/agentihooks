@@ -184,6 +184,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_input_key.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/plan.py",
+        "scripts/ci_mutation/regrade.py",
         "scripts/ci_mutation/reuse.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
