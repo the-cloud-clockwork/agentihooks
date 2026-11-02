@@ -671,7 +671,7 @@ def test_published_listener_serves_only_recovery_over_tls(pending: SimpleNamespa
 
 
 def test_controller_publishes_its_public_address_beside_the_worker_address(
-    pending: SimpleNamespace, cert: tuple[str, str]
+    pending: SimpleNamespace, cert: tuple[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.swarm_v2.control_service import published
 
@@ -680,6 +680,11 @@ def test_controller_publishes_its_public_address_beside_the_worker_address(
     pending.service.listen = ("127.0.0.1", 0)
     pending.service._open()
     assert (store.config(slug).control_url, pending.service.secure) == ("", None)
+    writes = []
+    monkeypatch.setattr(store, "update", lambda *args, **fields: writes.append(fields))
+    pending.service._open()
+    assert writes == []
+    monkeypatch.undo()
     listen, _ = published(published_environ(cert, port="1"))
     pending.service.published = ("127.0.0.1", 0, listen[2])
     pending.service.control_url = "https://swarm.example:8780"

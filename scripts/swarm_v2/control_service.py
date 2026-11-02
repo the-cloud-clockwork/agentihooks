@@ -230,7 +230,8 @@ class ControlService:
     def serve_published(self, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
         """Serve the recovery endpoints over TLS for callers outside the cluster."""
         self.secure = serve_tls(RecoveryRoutes(self.recovery_api), host, port, context)
-        threading.Thread(target=self.secure.serve_forever, name=f"{THREAD}-tls", daemon=True).start()
+        self.secure_thread = threading.Thread(target=self.secure.serve_forever, name=f"{THREAD}-tls", daemon=True)
+        self.secure_thread.start()
         return self.secure
 
     def mount_ledger(self, folder: Path) -> None:
@@ -248,7 +249,8 @@ class ControlService:
                 self.server.shutdown()
             self.server.server_close()
         if self.secure is not None:
-            self.secure.shutdown()
+            if self.secure_thread.is_alive():
+                self.secure.shutdown()
             self.secure.server_close()
         if self.writer is not None:
             self.writer.release()
