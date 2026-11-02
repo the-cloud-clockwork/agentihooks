@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.569 · 2026-11-02
+
+### 2026-11-02 · 6644444ff98a · #9278 · @nestorcolt
+
+**Bound each tick step by its measured budget so spawn starts by forty seconds**
+
+This change gives every registered tick step a measured time budget (derived from real p95 run times, with intervals from the plan table) and runs each step in an isolated daemon thread capped at that budget, so a slow or hung step gets recorded as late or abandoned instead of blocking the pass. Spawn's needs are trimmed to just judge, orphans, and preempt, guaranteeing it starts within forty seconds even if an unrelated step runs long. This closes issue 9220 and ensures spawn can no longer be starved by slow steps, unblocking stage two of the rollout.
+
 ## v2.17.566 · 2026-11-01
 
 ### 2026-11-01 · 67fb3d888da3 · #9299 · @agenticore-app
