@@ -88,3 +88,5 @@ def test_tick_equivalence_runs_characterisation_equivalence_and_load_budget() ->
     script = (ROOT / "tests/swarm/tick_equivalence.sh").read_text()
     assert "test_tick_matches_golden" in script
     assert "diff -ru tick-evidence/base tick-evidence/head" in script
+    assert "|| true" not in script
+    assert '[[ "$status" -le 1 ]]' in script

@@ -46,7 +46,10 @@ for side in base head; do
 done
 if [[ "$declared" == 1 ]]; then
   echo "::notice::The head regenerates the tick goldens; base and head each match their own goldens and review confirms the change."
-  diff -ru tick-evidence/base tick-evidence/head || true
+  status=0
+  diff -ru tick-evidence/base tick-evidence/head > tick-evidence/declared.diff || status=$?
+  cat tick-evidence/declared.diff
+  [[ "$status" -le 1 ]] || { echo "::error::Comparing base and head observations failed with status $status"; exit 1; }
 else
   diff -ru tick-evidence/base tick-evidence/head
 fi
