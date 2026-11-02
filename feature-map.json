@@ -73,6 +73,33 @@
       ]
     },
     {
+      "id": "swarm-tick-step-overlap-hold",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-overlap-hold",
+      "behaviour": "A tick step still running from an earlier pass is held, not started again: the engine records it as held while its earlier run is alive, so placement runs once across two overlapping passes, and the step runs again once that earlier run ends.",
+      "seam": "scripts.tick.engine.run_step and scripts.tick.engine.run_group",
+      "tests": [
+        "tests/tick/test_step_overlap.py::test_a_step_whose_earlier_run_is_alive_is_held_without_running",
+        "tests/tick/test_step_overlap.py::test_a_step_runs_again_once_its_earlier_run_ended",
+        "tests/tick/test_step_overlap.py::test_another_step_is_not_held_by_a_running_one",
+        "tests/tick/test_step_overlap.py::test_placement_runs_once_across_two_overlapping_passes",
+        "tests/tick/test_step_overlap.py::test_a_held_record_reads_held_unless_it_failed"
+      ]
+    },
+    {
+      "id": "swarm-tick-left-pass-value",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2329",
+      "behaviour": "A tick step held or left running past its budget leaves its pass value unset; a later step reading that value is skipped instead of holding an error, so the pass completes.",
+      "seam": "scripts.tick.steps.PassBox and the step wrappers host.held, tasks.held, masters._held and observe._run",
+      "tests": [
+        "tests/tick/test_left_value.py::test_a_writer_left_past_its_budget_skips_its_reader_and_the_pass_completes",
+        "tests/tick/test_left_value.py::test_a_held_writer_skips_its_reader_and_the_pass_completes",
+        "tests/tick/test_left_value.py::test_an_observe_step_missing_a_pass_value_is_skipped_without_holding_an_error",
+        "tests/tick/test_left_value.py::test_a_pass_box_names_the_left_value_as_a_key_error"
+      ]
+    },
+    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
@@ -143,6 +170,9 @@
         "tests/tick/test_source_control.py::test_a_change_record_defaults_to_no_body_and_not_a_draft",
         "tests/tick/test_source_control.py::test_github_merged_at_reads_the_first_merged_change_carrying_a_commit",
         "tests/tick/test_source_control.py::test_github_open_changes_reads_each_open_pull_request_check_rollup",
+        "tests/tick/test_source_control.py::test_github_workflow_runs_read_every_page_of_one_workflow_since_a_time",
+        "tests/tick/test_source_control.py::test_github_download_reads_raw_bytes_under_the_named_reader",
+        "tests/tick/test_source_control.py::test_github_download_outside_a_named_reader_counts_as_the_port",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
       ]
     },

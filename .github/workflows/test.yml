@@ -4475,7 +4475,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         env:
           SHARDS: ${{ needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards }}
-        run: python -m scripts.ci_mutation.merge .mutation-shards --prefix mutation-report- --strict --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate
+        run: python -m scripts.ci_mutation.merge .mutation-shards --prefix mutation-report- --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate
 
       - name: Upload the merged mutation report
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'

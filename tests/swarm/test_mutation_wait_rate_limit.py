@@ -46,12 +46,16 @@ def github(monkeypatch, tmp_path):
 
     def api(args, **kwargs):
         assert args[:2] == ["gh", "api"]
-        assert kwargs.pop("text", False) == (args[2] in ("graphql", PULL))
-        assert kwargs == {"capture_output": True, "timeout": 20}
+        port = args[2] not in ("graphql", PULL)
+        assert kwargs.pop("text", False) == (args[2] in ("graphql", PULL, "rate_limit"))
+        assert kwargs.pop("check", False) == (args[2] == "rate_limit")
+        assert kwargs.pop("cwd", None) == (Path.cwd() if port else None)
+        assert 0 < kwargs.pop("timeout") <= 20
+        assert kwargs == {"capture_output": True}
         endpoint = args[2]
         state.asked.append(endpoint)
         if endpoint == "rate_limit":
-            body = {"resources": {"core": state.core}}
+            body = {"resources": {"core": {"used": 5000 - state.core["remaining"], **state.core}}}
             return completed(args, 0, json.dumps(body), "")
         if state.limited or (state.jobs_limited and "/jobs?" in endpoint):
             return completed(args, 1, "", LIMITED.decode())

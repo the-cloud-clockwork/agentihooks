@@ -80,6 +80,20 @@ class RepositoryRun:
 
 
 @dataclass(frozen=True)
+class WorkflowRun:
+    id: int
+    event: str
+    status: str
+    conclusion: str | None
+    head_branch: str | None
+    head_sha: str
+    created_at: str
+    run_started_at: str
+    updated_at: str
+    run_attempt: int
+
+
+@dataclass(frozen=True)
 class QueueEntry:
     reference: ChangeRef
     position: int

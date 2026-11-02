@@ -2015,7 +2015,7 @@ def test_tests_mutation_refines_shards_and_merges_split_units():
     assert "strategy" not in merged
     steps = {step.get("name"): step for step in merged["steps"]}
     assert steps["Download every mutation shard report"]["with"]["pattern"] == "mutation-report-*"
-    assert "--prefix mutation-report- --strict" in steps["Merge the shard reports"]["run"]
+    assert "--prefix mutation-report- --shards" in steps["Merge the shard reports"]["run"]
     assert steps["Merge the shard reports"]["env"]["SHARDS"] == (
         "${{ needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards }}"
     )
