@@ -3,8 +3,8 @@
 Usage: peak_memory.py LABEL -- COMMAND [ARG...]
 
 Writes LABEL.json into PEAK_MEMORY_DIR (default RUNNER_TEMP/peak-memory), appends
-one line to the job summary, and exits with the command's status. A SIGTERM
-from a cancelled job is forwarded to the command, which is then recorded.
+one line to the job summary, and exits with the command's status. A SIGINT or
+SIGTERM from a cancelled job is forwarded to the command, which is then recorded.
 The figure is the largest single process among the command and its waited
 descendants.
 """
@@ -21,7 +21,8 @@ from pathlib import Path
 def record(label: str, command: list[str]) -> int:
     """Run command, record its peak resident memory under label and return its shell exit status."""
     child = subprocess.Popen(command)
-    signal.signal(signal.SIGTERM, lambda signum, _frame: child.send_signal(signum))
+    for forwarded in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(forwarded, lambda signum, _frame: child.send_signal(signum))
     status = child.wait()
     if status < 0:
         status = 128 - status

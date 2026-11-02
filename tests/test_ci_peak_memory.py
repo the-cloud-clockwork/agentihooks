@@ -49,7 +49,8 @@ def test_a_signalled_command_exits_as_the_shell_reports_it(tmp_path: Path) -> No
     assert json.loads((tmp_path / "peak/killed.json").read_text())["exit"] == 137
 
 
-def test_a_cancelled_step_forwards_sigterm_and_still_records(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("sent", "status"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)])
+def test_a_cancelled_step_forwards_the_signal_and_still_records(tmp_path: Path, sent: int, status: int) -> None:
     ready = tmp_path / "ready"
     child = f"import pathlib, time; pathlib.Path({str(ready)!r}).touch(); time.sleep(60)"
     env = {"PATH": "/usr/bin:/bin", "PEAK_MEMORY_DIR": str(tmp_path / "peak")}
@@ -57,9 +58,9 @@ def test_a_cancelled_step_forwards_sigterm_and_still_records(tmp_path: Path) -> 
     deadline = time.monotonic() + 30
     while not ready.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
-    wrapper.send_signal(signal.SIGTERM)
-    assert wrapper.wait(timeout=30) == 143
-    assert json.loads((tmp_path / "peak/cancelled.json").read_text())["exit"] == 143
+    wrapper.send_signal(sent)
+    assert wrapper.wait(timeout=30) == status
+    assert json.loads((tmp_path / "peak/cancelled.json").read_text())["exit"] == status
 
 
 @pytest.mark.parametrize("arguments", [[], ["select"], ["select", "true"], ["select", "--"]])
