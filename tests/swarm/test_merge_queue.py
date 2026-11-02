@@ -755,6 +755,18 @@ def test_a_failed_rest_read_reports_its_byte_error_text() -> None:
     with pytest.raises(SwarmError) as exc:
         merge_queue.rest("repos/o/r/actions/runs/5", run)
     assert str(exc.value) == "HTTP 404: Not Found"
+    cause = exc.value.__cause__
+    assert isinstance(cause, subprocess.CalledProcessError)
+    assert cause.cmd == ["gh", "api", "repos/o/r/actions/runs/5"]
+
+
+def test_a_failed_rest_read_without_error_text_reports_a_failed_api() -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 1, b"", b"")
+
+    with pytest.raises(SwarmError) as exc:
+        merge_queue.rest("repos/o/r/actions/runs/5", run)
+    assert str(exc.value) == "GitHub API failed"
 
 
 def test_a_failed_graph_read_without_error_text_reports_a_failed_api() -> None:
