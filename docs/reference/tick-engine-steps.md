@@ -56,7 +56,7 @@ and placement steps are in bold; the others hold steps from other changes.
 | 3 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |
 | 4 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
 | 5 | `tasks` | After the drained swarm check | orphans |
-| 6 | **`task passes`** | After the fleet red notice pass | run window, verification notices, size pass, grouping release, dispatcher group |
+| 6 | **`task passes`** | After the [fleet red notice pass](fleet-red-notice.md) | run window, verification notices, size pass, grouping release, dispatcher group |
 | 7 | `place` | First line inside the placing lock | |
 | 8 | **`placement acks`** | After the time left refresh, inside the placing lock | collect acks, codex hook order |
 | 9 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
