@@ -135,7 +135,8 @@ def test_write_puts_a_block_style_file_named_after_the_workflow(tmp_path):
 
     assert written == bundle / "workflows" / "review-loop.yaml"
     text = written.read_text()
-    assert "{" not in text and "[" not in text
+    assert schema.flow_errors(yaml.compose(text)) == []
+    assert "  input:\n      - case\n      - build\n" in text
     assert loader.read(written).stages["verdict"].next["retry"] == "build"
     assert yaml.safe_load(text) == schema.parse(DRAFT).to_document()
 
