@@ -1,5 +1,6 @@
 import ast
 import importlib.machinery
+import os
 import py_compile
 import sys
 from collections.abc import Iterator
@@ -101,7 +102,7 @@ def test_a_planted_head_driver_edit_cannot_change_the_kill_record(
     protected.main(grader)
     assert record.read_text() == f"killed unset {protected.DRIVER}"
     assert sys.argv == ["protected.py", str(record)]
-    monkeypatch.delenv("MUTATION_GRADER")
+    assert "MUTATION_GRADER" not in os.environ
     record.unlink()
     protected.main(grader)
     assert record.read_text() == f"killed unset {protected.DRIVER}"
