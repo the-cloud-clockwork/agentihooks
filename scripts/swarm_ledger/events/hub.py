@@ -6,6 +6,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable
+from typing import Any
 
 from . import patch
 
@@ -22,15 +23,17 @@ class Closed(Exception):
 
 
 class Channel:
-    def __init__(self, retained):
-        self.epoch = secrets.token_hex()
-        self.seq = 0
-        self.log = collections.deque(maxlen=retained)
-        self.resources = {}
-        self.subscribers = 0
+    idle_since: float
+
+    def __init__(self, retained: int) -> None:
+        self.epoch: str = secrets.token_hex()
+        self.seq: int = 0
+        self.log: collections.deque[tuple[int, str, str, dict[str, Any]]] = collections.deque(maxlen=retained)
+        self.resources: dict[str, Any] = {}
+        self.subscribers: int = 0
 
 
-def revision(value):
+def revision(value: dict[str, Any]) -> int:
     return value["_meta"]["rev"]
 
 

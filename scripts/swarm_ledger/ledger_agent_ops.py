@@ -4,10 +4,14 @@ Every op carries `by`, the agent's name; the server records it so the gate can a
 """
 
 import re
+from typing import TYPE_CHECKING, Any, Callable
 
 import ledger_comments
 
 from scripts.swarm_ledger import ports
+
+if TYPE_CHECKING:
+    import ledger_core
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ROLES = ("orchestrator", "member")
@@ -22,7 +26,7 @@ ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 MAX_TEXT = 20000
 
 
-def _check_state(op, kind):
+def _check_state(op: dict[str, Any], kind: str) -> None:
     if kind == "join" and op.get("role", "member") not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     if kind == "ack" and not isinstance(op.get("rev"), int):
@@ -41,7 +45,7 @@ def _check_state(op, kind):
         raise ValueError("gate_lift needs the gate's name")
 
 
-def _check_text(op, kind, task_ids):
+def _check_text(op: dict[str, Any], kind: str, task_ids: tuple[str, ...]) -> None:
     if kind == "add_item" and (
         op.get("list") not in ("followups", "questions") or not _text(op.get("text")) or "/" in op["id"]
     ):
@@ -69,7 +73,7 @@ def _check_text(op, kind, task_ids):
         ledger_comments.check(op["text"], "item", task_ids=task_ids)
 
 
-def check(op, task_ids=()):
+def check(op: dict[str, Any], task_ids: tuple[str, ...] = ()) -> None:
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError("agent ops need `by`, an agent name other than operator")
@@ -85,7 +89,7 @@ def check(op, task_ids=()):
         ledger_comments.check(op["status"], "comment", task_ids=task_ids)
 
 
-def check_hive(op):
+def check_hive(op: dict[str, Any]) -> None:
     if op["op"] != "add_item" or "hive" not in op:
         return
     hive = op["hive"]
@@ -93,7 +97,7 @@ def check_hive(op):
         raise ValueError("hive needs an identifier of up to 128 letters, digits, dots, underscores or hyphens")
 
 
-def check_task(op):
+def check_task(op: dict[str, Any]) -> None:
     if op["op"] != "add_item" or "task" not in op:
         return
     task = op["task"]
@@ -101,24 +105,24 @@ def check_task(op):
         raise ValueError("task needs a task id of up to 128 letters, digits, dots, underscores or hyphens")
 
 
-def _screened(text, worktree=None):
+def _screened(text: str, worktree: str | None = None) -> str:
     LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
     filters = ports.hooks().filters
 
     return filters.screen(LEDGER_WRITE, text, worktree)
 
 
-def _text(value):
+def _text(value: object) -> bool:
     return isinstance(value, str) and 0 < len(value) <= MAX_TEXT
 
 
-def touch(meta, by, at):
+def touch(meta: dict[str, Any], by: str, at: int) -> None:
     member = meta.get("members", {}).get(by)
     if member is not None:
         member["last_seen"] = at
 
 
-def _join(doc, op, ctx):
+def _join(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     members = ctx.meta["members"]
     known = members.get(op["by"])
     role = op.get("role", known["role"] if known else "member")
@@ -140,7 +144,7 @@ def _join(doc, op, ctx):
     return True
 
 
-def _leave(doc, op, ctx):
+def _leave(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     if ctx.meta["members"].pop(op["by"], None) is None:
         ctx.refused.append(f"leave refused: {op['by']} has not joined this ledger")
         return False
@@ -148,7 +152,7 @@ def _leave(doc, op, ctx):
     return True
 
 
-def _ack(doc, op, ctx):
+def _ack(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     member = ctx.meta["members"].get(op["by"])
     if member is None:
         return False
@@ -159,7 +163,7 @@ def _ack(doc, op, ctx):
     return True
 
 
-def _answer_stats(ctx, by, rev):
+def _answer_stats(ctx: "ledger_core.Context", by: str, rev: int) -> None:
     events = ctx.meta["events"]
     sent = next((e for e in reversed(events) if e.get("kind") == "stats sync requested"), None)
     if sent is None or sent["rev"] > rev:
@@ -168,12 +172,12 @@ def _answer_stats(ctx, by, rev):
         ctx.record(by, "stats check answered", "", id=sent["id"])
 
 
-def _item(doc, path):
+def _item(doc: dict[str, Any], path: str) -> dict[str, Any] | None:
     name, item_id = path.split("/")[:2]
     return next((i for i in doc.get(name, []) if i["id"] == item_id), None)
 
 
-def _claim(doc, op, ctx):
+def _claim(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     member = ctx.meta["members"].get(op["by"])
     if member is None or _item(doc, op["item"]) is None:
         return False
@@ -183,7 +187,7 @@ def _claim(doc, op, ctx):
     return True
 
 
-def _set(doc, op, ctx):
+def _set(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     if op["path"] == "time_left_minutes":
         if doc.get("time_left_minutes") != op["value"]:
             doc["time_left_minutes"] = op["value"]
@@ -210,7 +214,7 @@ def _set(doc, op, ctx):
     return True
 
 
-def _add_item(doc, op, ctx):
+def _add_item(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     items = doc.setdefault(op["list"], [])
     if any(i["id"] == op["id"] for i in items):
         return True
@@ -226,7 +230,7 @@ def _add_item(doc, op, ctx):
     return True
 
 
-def _retext(doc, op, ctx):
+def _retext(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     import ledger_core as core
 
     item = _item(doc, op["item"])
@@ -239,19 +243,19 @@ def _retext(doc, op, ctx):
     return True
 
 
-def _gate_bypass(doc, op, ctx):
+def _gate_bypass(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     ctx.record(op["by"], "gate bypassed", "", text=f"stopped with {op['unhandled']} unhandled operator events")
     return True
 
 
-def _gate_lift(doc, op, ctx):
+def _gate_lift(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     ctx.record(
         op["by"], "gate lifted", "", text=f"the operator lifted the {op['gate']} gate for one hour", gate=op["gate"]
     )
     return True
 
 
-HANDLERS = {
+HANDLERS: dict[str, Callable[[dict[str, Any], dict[str, Any], "ledger_core.Context"], bool]] = {
     "join": _join,
     "leave": _leave,
     "ack": _ack,
@@ -264,7 +268,7 @@ HANDLERS = {
 }
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "ledger_core.Context") -> bool:
     done = HANDLERS[op["op"]](doc, op, ctx)
     if done and op["op"] != "leave":
         touch(ctx.meta, op["by"], ctx.at)

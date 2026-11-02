@@ -1,22 +1,30 @@
 """Server sent events over one HTTP response: framing, parsing, and the per connection loop."""
 
 import json
+from collections.abc import Callable, Generator, Iterable
+from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING, Any
 
 from .hub import Closed, Expired
+
+if TYPE_CHECKING:
+    from .hub import Hub
 
 HEARTBEAT_S = 5.0
 WRITE_TIMEOUT_S = 30.0
 COMPACT = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"))
 
 
-def frame(name, data, cursor=None):
+def frame(name: str, data: object, cursor: str | int | None = None) -> bytes:
     head = f"id: {cursor}\n" if cursor else ""
     body = COMPACT.encode(data)
     return f"{head}event: {name}\ndata: {body}\n\n".encode()
 
 
-def parse(lines):
+def parse(lines: Iterable[str]) -> Generator[tuple[str, Any, str | None]]:
     """Yield (event, data, id) from an iterable of decoded lines."""
+    data: list[str]
+    cursor: str | None
     name, data, cursor = "message", [], None
     for raw in lines:
         line = raw.rstrip("\r\n")
@@ -35,7 +43,7 @@ def parse(lines):
             cursor = value
 
 
-def serve(handler, hub, slug, load):
+def serve(handler: BaseHTTPRequestHandler, hub: "Hub", slug: str, load: Callable[[], Any]) -> None:
     """Answer one events request until the client goes away or the hub drains; raises Expired before any byte is
     sent."""
     seq, first = hub.open(slug, load, handler.headers.get("Last-Event-ID"))

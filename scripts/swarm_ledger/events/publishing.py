@@ -1,6 +1,7 @@
 import sys
 import threading
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from scripts.swarm_ledger.repository.entry import Entry
@@ -10,18 +11,18 @@ class Publishing:
     """A LedgerRepository that hands each stored generation it reads or writes to every publisher(slug, state) once,
     on its own thread, newest generation per ledger, so no reader or writer waits for a publication."""
 
-    def __init__(self, inner, *publishers):
-        self.inner = inner
-        self.publishers = list(publishers)
-        self.published = {}
+    def __init__(self, inner: Any, *publishers: Callable[[str, Any], object]) -> None:
+        self.inner: Any = inner
+        self.publishers: list[Callable[[str, Any], object]] = list(publishers)
+        self.published: dict[str, int] = {}
         self.queued = threading.Condition()
-        self.pending = {}
-        self.worker = None
+        self.pending: dict[str, Any] = {}
+        self.worker: threading.Thread | None = None
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
 
-    def publish(self, slug, state):
+    def publish(self, slug: str, state: Any) -> None:
         for publisher in self.publishers:
             publisher(slug, state)
 
@@ -64,22 +65,28 @@ class Publishing:
             if not self.queued.wait_for(lambda: not self.pending, timeout):
                 raise TimeoutError(f"stream publications still pending after {timeout} s")
 
-    def get_document(self, slug: str) -> dict:
+    def get_document(self, slug: str) -> dict[str, Any]:
         return self.current(slug).mutable()
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
-    ) -> tuple[dict, list]:
-        options = {} if copy_state else {"copy_state": False}
+        self,
+        slug: str,
+        changes: list[Any] | None = None,
+        ops: list[Any] | None = None,
+        gate: Any = None,
+        *,
+        copy_state: bool = True,
+    ) -> tuple[dict[str, Any], list[Any]]:
+        options: dict[str, bool] = {} if copy_state else {"copy_state": False}
         state, rejected = self.inner.apply_ops(slug, changes=changes, ops=ops, gate=gate, **options)
         self.current(slug)
         return state, rejected
 
 
-SHARED = {}
+SHARED: dict[int, Publishing] = {}
 
 
-def publishing(inner, publisher):
+def publishing(inner: Any, publisher: Callable[[str, Any], object]) -> Publishing:
     """The one wrapper of a repository, shared by every module copy of the server that adds its publisher."""
     wrapper = SHARED.setdefault(id(inner), Publishing(inner))
     if publisher not in wrapper.publishers:

@@ -108,8 +108,9 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from scripts.swarm_ledger import ledger_route
 
@@ -152,11 +153,11 @@ OBJECT_FORMS = {
 }
 
 
-def base(slug=""):
+def base(slug: str = "") -> str:
     return ledger_route.url(slug) or BASE or ledger_link.base(slug=slug)
 
 
-def credentials(slug, service=False):
+def credentials(slug: str, service: bool = False) -> dict[str, str]:
     from scripts.swarm_ledger.authority_context import tick_headers
 
     who = Who.from_env()
@@ -178,27 +179,27 @@ def credentials(slug, service=False):
     return local_credentials(slug, who.name if who.pinned else "", service)
 
 
-def local_credentials(slug, agent, service):
+def local_credentials(slug: str, agent: str, service: bool) -> dict[str, str]:
     token = repository.token(slug) or ""
     if service or not agent:
         return {"X-Ledger-Token": token}
     return {"X-Ledger-Token": authority.agent_token(token, slug, agent), "X-Ledger-Agent": agent}
 
 
-def replay(slug, ops, agent, service):
+def replay(slug: str, ops: list[dict[str, Any]], agent: str, service: bool) -> dict[str, Any]:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     return ResourceClient(base(slug), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
 
 
-def derived_token(slug, name):
+def derived_token(slug: str, name: str) -> str:
     from scripts.swarm_ledger.authority_context import secret as trusted_secret
 
     secret = trusted_secret()
     return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)
 
 
-def launch_token(slug, name):
+def launch_token(slug: str, name: str) -> str:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     credential = os.environ.get("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
@@ -216,7 +217,9 @@ def launch_token(slug, name):
         raise unauthenticated(f"the ledger server refused the hive credential: {exc.code}") from None
 
 
-def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
+def request(
+    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float = REQUEST_TIMEOUT
+) -> dict[str, Any]:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     client = ResourceClient(base(slug), credentials(slug, service), timeout)
@@ -228,10 +231,10 @@ def resource(
     path: str,
     service: bool = False,
     collection: bool = False,
-    headers: dict | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
-) -> dict | list:
+) -> dict[str, Any] | list[Any]:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
@@ -241,7 +244,7 @@ def resource(
     return retried(read, attempts) if ledger_link.remote(slug=slug) else read()
 
 
-def export(slug: str, service: bool = False) -> dict:
+def export(slug: str, service: bool = False) -> dict[str, Any]:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
@@ -260,7 +263,7 @@ class Unauthenticated(SystemExit):
     pass
 
 
-def unauthenticated(reason):
+def unauthenticated(reason: str) -> Unauthenticated:
     AUTH_FAILURES[reason] += 1
     return Unauthenticated(f"unauthenticated: {reason}")
 
@@ -269,7 +272,7 @@ def ledger_remote_auth_failures_total() -> int:
     return sum(AUTH_FAILURES.values())
 
 
-def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
+def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict[str, Any]:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
@@ -309,7 +312,7 @@ def talk(ops: list[dict[str, Any]] | None) -> bool:
     )
 
 
-def queue(slug, ops, service):
+def queue(slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
     if outbox.holds(ops[0]["id"]):
         return {"queued": ops[0]["id"]}
     who = Who.from_env()
@@ -323,7 +326,7 @@ def queue(slug, ops, service):
     return {"queued": ops[0]["id"]}
 
 
-def remote_call(slug, ops, service):
+def remote_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> dict[str, Any]:
     deliver = functools.partial(request, slug, ops, service)
     try:
         answer = retried(deliver, REMOTE_READ_ATTEMPTS if ops is None else 1)
@@ -338,7 +341,10 @@ def remote_call(slug, ops, service):
     return answer
 
 
-def retried(read, attempts):
+T = TypeVar("T")
+
+
+def retried(read: Callable[[], T], attempts: int) -> T:
     for attempt in itertools.count(1):
         try:
             return read()
@@ -353,17 +359,19 @@ def retried(read, attempts):
         time.sleep(REMOTE_READ_PAUSE * attempt)
 
 
-def refusal_text(exc):
+def refusal_text(exc: urllib.error.HTTPError) -> str:
     if not hasattr(exc, "ledger_text"):
         exc.ledger_text = exc.read().decode(errors="replace")
     return exc.ledger_text
 
 
-def op(kind, args, /, **fields):
+def op(kind: str, args: argparse.Namespace, /, **fields: Any) -> dict[str, Any]:
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": args.name, **fields}
 
 
-def refused(state, ops=(), fallback="", lead=""):
+def refused(
+    state: dict[str, Any], ops: Sequence[dict[str, Any]] = (), fallback: str = "", lead: str = ""
+) -> None:
     if rejected := state.get("rejected"):
         warnings = state.get("_meta", {}).get("warnings", [])
         reasons = [
@@ -374,7 +382,7 @@ def refused(state, ops=(), fallback="", lead=""):
         sys.exit(lead + ("; ".join(reasons) or fallback or f"rejected: {rejected}"))
 
 
-def unexplained(sent):
+def unexplained(sent: dict[str, Any]) -> str:
     where = next((sent[key] for key in ("item", "target", "path", "thread", "list") if sent.get(key)), "the ledger")
     return (
         f"{sent['op']} on {where} refused without a reason from the server: "
@@ -382,17 +390,17 @@ def unexplained(sent):
     )
 
 
-def posted(state, ops):
+def posted(state: dict[str, Any], ops: list[dict[str, Any]]) -> None:
     queued = held(state)
     print(json.dumps({"posted": not queued and not state.get("rejected"), **queued}))
     refused(state, ops)
 
 
-def held(state):
+def held(state: dict[str, Any]) -> dict[str, bool]:
     return {"queued": True} if state.get("queued") else {}
 
 
-def send(args, kind, /, **fields):
+def send(args: argparse.Namespace, kind: str, /, **fields: Any) -> dict[str, Any]:
     ops = [op(kind, args, **fields)]
     lead = f"task {fields['task']} was not added: " if kind == "task_add" else ""
     try:
@@ -410,39 +418,39 @@ def send(args, kind, /, **fields):
     return state
 
 
-def mine(state, name):
+def mine(state: dict[str, Any], name: str) -> list[Any]:
     return gate.unhandled_for(state["_meta"], name, state.get("tasks", []))
 
 
-def cmd_join(args):
+def cmd_join(args: argparse.Namespace) -> None:
     send(args, "join", role=args.role)
     print(json.dumps({"joined": args.name, "slug": args.slug, "role": args.role}))
 
 
-def cmd_leave(args):
+def cmd_leave(args: argparse.Namespace) -> None:
     send(args, "leave")
     print(json.dumps({"left": args.name}))
 
 
-def cmd_events(args):
+def cmd_events(args: argparse.Namespace) -> None:
     for event in mine(call(args.slug), args.name):
         print(watch_ledger.line(event))
 
 
-def cmd_show(args):
+def cmd_show(args: argparse.Namespace) -> None:
     print(SHOW_JSON(call(args.slug)))
 
 
-def cmd_tree(args):
+def cmd_tree(args: argparse.Namespace) -> None:
     for row in resource(args.slug, f"hierarchy/subtree/{args.node}" if args.node else "hierarchy", collection=True):
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
-def cmd_get(args):
+def cmd_get(args: argparse.Namespace) -> None:
     print(SHOW_JSON(resource(args.slug, args.item)))
 
 
-def cmd_tasks(args):
+def cmd_tasks(args: argparse.Namespace) -> None:
     text = (args.text or "").lower()
     for task in resource(args.slug, "tasks", collection=True):
         state, lane, title = task.get("state") or "open", task.get("lane") or "", task.get("title") or ""
@@ -454,7 +462,7 @@ def cmd_tasks(args):
             print(f"{task['id']}  {state}  {lane}  {title}")
 
 
-def cmd_status(args):
+def cmd_status(args: argparse.Namespace) -> None:
     state = call(args.slug)
     print(
         json.dumps(
@@ -469,13 +477,13 @@ def cmd_status(args):
     )
 
 
-def cmd_ack(args):
+def cmd_ack(args: argparse.Namespace) -> None:
     rev = args.rev if args.rev is not None else call(args.slug)["_meta"]["rev"]
     send(args, "ack", rev=rev)
     print(json.dumps({"acked": rev}))
 
 
-def cmd_say(args):
+def cmd_say(args: argparse.Namespace) -> None:
     text = (sys.stdin.read() if args.text == "-" else args.text).strip()
     op = {
         "op": "add",
@@ -525,7 +533,7 @@ def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
         sys.exit(f"server refused the file: {exc.code} {exc.read().decode(errors='replace')}")
 
 
-def cmd_comment(args):
+def cmd_comment(args: argparse.Namespace) -> None:
     thread = f"{args.item}/comments"
     attachments = [upload_image(args.slug, args.name, path) for path in getattr(args, "image", [])]
     entry = {"op": "add", "thread": thread, "id": f"c-{uuid.uuid4().hex[:10]}", "text": args.text, "by": args.name}
@@ -534,7 +542,7 @@ def cmd_comment(args):
     posted(call(args.slug, [entry]), [entry])
 
 
-def cmd_artifact(args):
+def cmd_artifact(args: argparse.Namespace) -> None:
     task = args.task if args.task is not None else os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
     request = {"request": args.request} if args.request else {}
     file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": args.title, **request})
@@ -543,7 +551,7 @@ def cmd_artifact(args):
     refused(state, fallback="rejected: join the ledger first and name a task it holds")
 
 
-def cmd_publish_plan(args):
+def cmd_publish_plan(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import plan_ranges
 
     phases = comma_list(args.phase)
@@ -562,7 +570,7 @@ def cmd_publish_plan(args):
     title = args.title or ledger_publish.title_of(text, phases)
     stored = {}
 
-    def artifact(path, title):
+    def artifact(path: str, title: str) -> str:
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
         file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
         stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
@@ -612,7 +620,7 @@ def cmd_publish_plan(args):
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
 
-def cmd_plan(args):
+def cmd_plan(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import ledger_phase_cli
 
     plan = json.loads(Path(args.path).read_bytes())
@@ -633,14 +641,14 @@ def cmd_plan(args):
     )
 
 
-def cmd_artifact_purge(args):
+def cmd_artifact_purge(args: argparse.Namespace) -> None:
     send(args, "artifact_purge")
     events = resource(args.slug, "events", collection=True)
     event = next(e for e in reversed(events) if e["kind"] == "artifacts purged")
     print(json.dumps({"purged": event["count"], "artifacts": resource(args.slug, "counts")["artifacts"]}))
 
 
-def cmd_phase(args):
+def cmd_phase(args: argparse.Namespace) -> None:
     if args.id in ("add", "set") and args.values:
         from scripts.swarm_ledger import ledger_phase_cli
 
@@ -654,11 +662,11 @@ def cmd_phase(args):
     print(json.dumps({"phase": args.id, "state": args.state}))
 
 
-def with_status(args, **fields):
+def with_status(args: argparse.Namespace, **fields: Any) -> dict[str, Any]:
     return {**fields, "status": args.status} if args.status else fields
 
 
-def cmd_followup(args):
+def cmd_followup(args: argparse.Namespace) -> None:
     if args.action == "add":
         send(
             args,
@@ -677,17 +685,17 @@ def cmd_followup(args):
     print(json.dumps({"followup": args.action}))
 
 
-def cmd_question(args):
+def cmd_question(args: argparse.Namespace) -> None:
     result = send(args, "add_item", list="questions", text=args.text, **hive_fields(args))
     print(json.dumps({"question": args.action, **held(result)}))
 
 
-def hive_fields(args):
+def hive_fields(args: argparse.Namespace) -> dict[str, Any]:
     hive = vars(args).get("hive")
     return {"hive": hive} if hive is not None else {}
 
 
-def cmd_priority(args):
+def cmd_priority(args: argparse.Namespace) -> None:
     if args.action == "add":
         if len(args.values) != 2:
             sys.exit('priority add needs ITEM and "TEXT"')
@@ -703,7 +711,7 @@ def cmd_priority(args):
     refused(state, ops)
 
 
-def cmd_alert(args):
+def cmd_alert(args: argparse.Namespace) -> None:
     if args.action == "list":
         print(json.dumps([a for a in call(args.slug)["alerts"] if a["state"] != "done"], indent=2))
         return
@@ -713,7 +721,7 @@ def cmd_alert(args):
     print(json.dumps({"alert": args.id, "action": args.action}))
 
 
-def cmd_relay(args):
+def cmd_relay(args: argparse.Namespace) -> None:
     import ledger_relay
 
     if not ledger_relay.verified(args.name, args.quote):
@@ -724,7 +732,7 @@ def cmd_relay(args):
     print(json.dumps({"relayed": not queued, "item": args.item, **queued}))
 
 
-def swarm_autonomy(slug):
+def swarm_autonomy(slug: str) -> str:
     SwarmError, connect = ports.swarm().store.SwarmError, ports.swarm().store.connect
 
     try:
@@ -733,7 +741,7 @@ def swarm_autonomy(slug):
         return ""
 
 
-def cmd_answer(args):
+def cmd_answer(args: argparse.Namespace) -> None:
     import ledger_answer
 
     reason = ledger_answer.refusal(swarm_autonomy(args.slug))
@@ -743,27 +751,27 @@ def cmd_answer(args):
     print(json.dumps({"answered": not queued, "item": args.item, **queued}))
 
 
-def cmd_scope(args):
+def cmd_scope(args: argparse.Namespace) -> None:
     send(args, "set", **with_status(args, path=f"{args.item}/out_of_scope", value=args.state == "out"))
     print(json.dumps({"item": args.item, "scope": args.state}))
 
 
-def cmd_retext(args):
+def cmd_retext(args: argparse.Namespace) -> None:
     send(args, "retext", item=args.item, text=args.text)
     print(json.dumps({"retext": args.item}))
 
 
-def thread_of(target):
+def thread_of(target: str) -> str:
     return "chat" if target == "chat" else f"{target}/comments"
 
 
-def cmd_edit(args):
+def cmd_edit(args: argparse.Namespace) -> None:
     ops = [{"op": "edit", "thread": thread_of(args.target), "id": args.entry, "text": args.text, "by": args.name}]
     refused(call(args.slug, ops), ops)
     print(json.dumps({"edited": args.entry}))
 
 
-def cmd_delete(args):
+def cmd_delete(args: argparse.Namespace) -> None:
     ops = [{"op": "delete", "thread": thread_of(args.target), "id": entry, "by": args.name} for entry in args.entries]
     state = call(args.slug, ops)
     print(
@@ -777,43 +785,43 @@ def cmd_delete(args):
     refused(state, ops)
 
 
-def cmd_audit(args):
+def cmd_audit(args: argparse.Namespace) -> None:
     rows = ledger_comments.audit(export(args.slug))
     for where, entry, by, reasons in rows:
         print(f"{where} {entry} {by or '-'}: {'; '.join(reasons)}")
     print(f"{len(rows)} to clean")
 
 
-def _duration(value):
+def _duration(value: str) -> int:
     minutes = core.time_left_value(value)
     if minutes is None:
         raise argparse.ArgumentTypeError("time left must be a duration such as 3h 20m")
     return minutes
 
 
-def _ledger_item(value):
+def _ledger_item(value: str) -> str:
     if not LEDGER_ITEM.fullmatch(value):
         raise argparse.ArgumentTypeError("name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>")
     return value
 
 
-def cmd_fold(args):
+def cmd_fold(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import ledger_fold
 
     ledger_fold.run(args)
 
 
-def cmd_time_left(args):
+def cmd_time_left(args: argparse.Namespace) -> None:
     send(args, "set", path="time_left_minutes", value=args.minutes)
     print(json.dumps({"time_left_minutes": args.minutes}))
 
 
-def cmd_claim(args):
+def cmd_claim(args: argparse.Namespace) -> None:
     send(args, "claim", item=args.item)
     print(json.dumps({"claimed": args.item}))
 
 
-def cmd_plan_backfill(args):
+def cmd_plan_backfill(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import plan_backfill
 
     plan_backfill.run(args)
@@ -825,12 +833,14 @@ def cmd_hierarchy(args) -> None:
     hierarchy_backfill.run(args)
 
 
-def refuse_unset_quote(args):
+def refuse_unset_quote(args: argparse.Namespace) -> None:
     if vars(args).get("quote") and args.action != "set":
         sys.exit(f"task {args.action} takes no --quote: run task set <id> rank=<rank> --quote <his words> after it")
 
 
-def _add_task(args, title, fields):
+def _add_task(args: argparse.Namespace, title: str, fields: dict[str, Any]) -> dict[str, Any]:
+    task: dict[str, Any] = {}
+    doc: dict[str, Any] | None = None
     if args.scaffold:
         task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **fields}
         doc = call(args.slug) if args.kind == "plan" else None
@@ -854,7 +864,7 @@ def _add_task(args, title, fields):
     return {}
 
 
-def _task_add_fields(args):
+def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
     lists = {
         k: comma_list(v)
         for k, v in (
@@ -890,7 +900,7 @@ def _task_add_fields(args):
     return lists
 
 
-def _task_set_fields(values):
+def _task_set_fields(values: list[str]) -> dict[str, Any]:
     fields = dict(value.split("=", 1) for value in values if "=" in value)
     if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
@@ -940,7 +950,7 @@ def task_branch_fields(args: argparse.Namespace, fields: dict) -> dict:
     return {**fields, "repository_branches": branches}
 
 
-def cmd_task(args):
+def cmd_task(args: argparse.Namespace) -> None:
     refuse_unset_quote(args)
     if args.action == "add":
         if args.id == "-":
@@ -962,7 +972,7 @@ def cmd_task(args):
     print(json.dumps({"task": args.id, **fields}))
 
 
-def comma_list(text):
+def comma_list(text: str) -> list[str]:
     return [part.strip() for part in text.split(",") if part.strip()]
 
 
@@ -972,7 +982,7 @@ def task_list(key: str, text: str) -> list[str]:
     return comma_list(text)
 
 
-def refuse_plain_objects(fields):
+def refuse_plain_objects(fields: dict[str, Any]) -> None:
     for name, (allowed, example) in OBJECT_FORMS.items():
         if isinstance(fields.get(name, {}), str):
             sys.exit(
@@ -980,7 +990,7 @@ def refuse_plain_objects(fields):
             )
 
 
-def cmd_prompt(args):
+def cmd_prompt(args: argparse.Namespace) -> None:
     me = "agentihooks ledger"
     print(
         f"You are a member of crew ledger `{args.slug}` as `{args.name}`. Run once: {me} --slug {args.slug} "
@@ -995,11 +1005,11 @@ def cmd_prompt(args):
     )
 
 
-def cmd_url(args):
+def cmd_url(args: argparse.Namespace) -> None:
     print(ledger_link.page_line(args.slug))
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--slug")
     parser.add_argument("--as", dest="name")
@@ -1163,7 +1173,7 @@ def build_parser():
     return parser
 
 
-def main():
+def main() -> None:
     from scripts.gates import Who
     from scripts.gates.identity import refusal
 

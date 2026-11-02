@@ -5,6 +5,7 @@ master decides for the operator.
 """
 
 import re
+from typing import Any
 
 import ledger_comments
 
@@ -17,7 +18,7 @@ AUTONOMY = ("delegate", "full")
 MAX_TEXT = 20000
 
 
-def refusal(autonomy):
+def refusal(autonomy: str | None) -> str:
     if autonomy in AUTONOMY:
         return ""
     if not autonomy:
@@ -25,7 +26,7 @@ def refusal(autonomy):
     return f"answer refused: at {autonomy} autonomy the operator answers questions; wait for him to write"
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError("answer needs by, the master's name")
@@ -37,7 +38,7 @@ def check(op):
     ledger_comments.check(text, "comment")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     lane_of = ports.swarm().naming.lane_of
 
     question = next((q for q in doc["questions"] if q["id"] == op["item"].split("/")[1]), None)

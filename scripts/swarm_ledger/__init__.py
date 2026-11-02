@@ -3,9 +3,10 @@
 import importlib
 import sys
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
-TOOLS = {
+TOOLS: dict[str, tuple[str, list[str]]] = {
     "new": ("new_ledger", []),
     "storage": ("scripts.swarm_ledger.storage_migration.__main__", []),
     "serve": ("ledger_server", []),
@@ -15,7 +16,7 @@ TOOLS = {
 }
 
 
-def run(argv):
+def run(argv: list[str]) -> Any:
     from scripts.swarm_ledger import composition
 
     composition.wire()

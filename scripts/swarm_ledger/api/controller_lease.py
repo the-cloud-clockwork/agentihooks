@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from typing import Any
 
 from scripts.swarm_ledger import ports
 
@@ -26,19 +27,19 @@ SCHEMA = {
 }
 
 
-def connect():
+def connect() -> Any:
     return ports.swarm().store.connect()
 
 
-def _result(value):
+def _result(value: Any) -> dict[str, Any]:
     return {"data": asdict(value) if isinstance(value, ports.swarm().lease.Lease) else value}
 
 
-def read(slug: str) -> dict:
+def read(slug: str) -> dict[str, Any]:
     return _result(ports.swarm().lease.current(connect(), slug))
 
 
-def act(slug: str, principal: str, payload: dict) -> dict:
+def act(slug: str, principal: str, payload: dict[str, Any]) -> dict[str, Any]:
     if principal:
         raise APIError(403, "controller_access_required", "Controller access required")
     schemas.validate(SCHEMA, payload)

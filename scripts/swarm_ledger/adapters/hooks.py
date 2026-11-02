@@ -31,8 +31,8 @@ class Hooks:
 
     @property
     def classifier(self):
-        import hooks.classifier.code_rules
-        import hooks.classifier.runner
+        import hooks.classifier.code_rules  # pyright: ignore[reportUnusedImport]
+        import hooks.classifier.runner  # pyright: ignore[reportUnusedImport]
 
         return hooks.classifier
 

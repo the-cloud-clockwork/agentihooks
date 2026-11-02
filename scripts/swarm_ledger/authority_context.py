@@ -1,9 +1,10 @@
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from typing import Any
 
-_current = None
+_current: str | None = None
 
 
 def _clear() -> None:
@@ -23,7 +24,7 @@ def tick_headers(slug: str) -> dict[str, str]:
     return {"X-Ledger-Tick": tick_token(_current, slug, int(time.time()) + TICK_TTL)}
 
 
-def _hosted_secret(server_secret) -> str | None:
+def _hosted_secret(server_secret: Callable[[], str | None]) -> str | None:
     from scripts.swarm_ledger.hosted_probe import HOSTED_ENV
 
     if not os.environ.get(HOSTED_ENV):
@@ -41,7 +42,7 @@ def hosted() -> str | None:
 
 
 @contextmanager
-def bound(value: str | None) -> Iterator[None]:
+def bound(value: str | None) -> Generator[None]:
     global _current
     previous = _current
     os.environ.pop("SWARM_SECRET", None)
@@ -53,7 +54,7 @@ def bound(value: str | None) -> Iterator[None]:
 
 
 @contextmanager
-def for_tick(store: object) -> Iterator[list[str]]:
+def for_tick(store: Any) -> Generator[list[str]]:
     from scripts.swarm_ledger.storage_migration.hosted import server_secret
 
     value = server_secret() if os.environ.get("SWARM_URL") else _hosted_secret(server_secret)

@@ -5,12 +5,17 @@ import json
 import re
 import sys
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Browser, Page, Route, ViewportSize
 
 SHELL = Path(__file__).resolve().parent / "shell.html"
 PAGE_URL = "http://127.0.0.1:9/artifact-sanity"
-VIEWPORT = {"width": 1920, "height": 1080}
+VIEWPORT: "ViewportSize" = {"width": 1920, "height": 1080}
 FIRST_STATE = """async () => {
           const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
           await (await import(new URL("sync.js", main))).loaded;
@@ -92,9 +97,9 @@ MEASURE = """
 """
 
 
-def expected_blocks(text: str) -> Counter:
+def expected_blocks(text: str) -> Counter[str]:
     lines = re.split(r"\r\n?|\n", text)
-    counts = Counter()
+    counts: Counter[str] = Counter()
     end = 0
     for i in range(len(lines)):
         if i >= end:
@@ -102,7 +107,7 @@ def expected_blocks(text: str) -> Counter:
     return counts
 
 
-def _block(lines, i, counts):
+def _block(lines: list[str], i: int, counts: Counter[str]) -> int:
     line = lines[i]
     if fence := FENCE.match(line):
         counts["pre"] += 1
@@ -126,12 +131,12 @@ def _block(lines, i, counts):
     return _run(lines, i + 1, lambda row: row.strip() and not BREAK.match(row) and not LIST.match(row))
 
 
-def _run(lines, i, keep):
+def _run(lines: list[str], i: int, keep: Callable[[str], object]) -> int:
     return next((j for j in range(i, len(lines)) if not keep(lines[j])), len(lines))
 
 
-def check(measure: dict, expected: Counter | None = None) -> list[str]:
-    failures = []
+def check(measure: dict[str, Any], expected: Counter[str] | None = None) -> list[str]:
+    failures: list[str] = []
     if measure["page_overflow"]:
         failures.append("the page scrolls sideways")
     if measure["body_overflow"]:
@@ -150,8 +155,8 @@ def check(measure: dict, expected: Counter | None = None) -> list[str]:
     return failures
 
 
-def _markdown(measure, expected):
-    failures = []
+def _markdown(measure: dict[str, Any], expected: Counter[str]) -> list[str]:
+    failures: list[str] = []
     floor = WIDTH_FACTOR * BASELINE_CH * measure["ch"]
     if measure["width"] < floor - 1:
         failures.append(
@@ -175,7 +180,7 @@ def _markdown(measure, expected):
     return failures
 
 
-def ledger_doc(files: list[Path]) -> dict:
+def ledger_doc(files: list[Path]) -> dict[str, Any]:
     rows = [
         {"id": f"art-{n}", "title": path.name, "file": {"id": path.name, "type": TYPES[path.suffix]}}
         for n, path in enumerate(files)
@@ -196,7 +201,7 @@ def assets() -> dict[str, Path]:
     return ledger_core.static_assets()
 
 
-def _asset(route, served):
+def _asset(route: "Route", served: dict[str, Path]) -> None:
     path = served.get(urlsplit(route.request.url).path.split("/", 3)[3])
     if path is None:
         return route.fulfill(status=404, body="no such asset")
@@ -204,12 +209,12 @@ def _asset(route, served):
     return route.fulfill(body=path.read_text(), content_type=f"{kind}; charset=utf-8")
 
 
-def _events(route, doc):
+def _events(route: "Route", doc: dict[str, Any]) -> None:
     data = json.dumps({"ledger": doc, "swarm": None})
     route.fulfill(body=f"id: c0\nevent: snapshot\ndata: {data}\n\n", content_type="text/event-stream")
 
 
-def run(browser, files: list[Path]) -> dict[str, list[str]]:
+def run(browser: "Browser", files: list[Path]) -> dict[str, list[str]]:
     by_name = {path.name: path for path in files}
     doc, served = ledger_doc(files), assets()
     tab = browser.new_page(viewport=VIEWPORT)
@@ -232,7 +237,7 @@ def run(browser, files: list[Path]) -> dict[str, list[str]]:
         tab.close()
 
 
-def _view(tab, path):
+def _view(tab: "Page", path: Path) -> list[str]:
     if tab.locator("#art-panel").is_hidden():
         tab.locator("#art-fab").click()
     tab.locator("#art-list .art-title").get_by_text(path.name, exact=True).click()

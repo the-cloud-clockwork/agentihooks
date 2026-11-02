@@ -5,7 +5,9 @@ import json
 import os
 import time
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
 HOSTED_ENV = "AGENTIHOOKS_HOSTED_LEDGER_URL"
 HOSTED_CREDENTIALS = ("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
@@ -13,7 +15,7 @@ PROBE_S, PROBE_TTL_S = 2, 30
 _answers: dict[str, bool] = {}
 
 
-def hosted(environ=os.environ) -> str:
+def hosted(environ: Mapping[str, str] = os.environ) -> str:
     url = address(environ)
     if not url or not any(environ.get(name) for name in HOSTED_CREDENTIALS):
         return ""
@@ -22,11 +24,11 @@ def hosted(environ=os.environ) -> str:
     return url if _answers[url] else ""
 
 
-def address(environ=os.environ) -> str:
+def address(environ: Mapping[str, str] = os.environ) -> str:
     return environ.get(HOSTED_ENV, "").strip().rstrip("/")
 
 
-def probe_file(environ=os.environ) -> Path:
+def probe_file(environ: Mapping[str, str] = os.environ) -> Path:
     return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "hosted-ledger-probe.json"
 
 
@@ -40,15 +42,15 @@ def healthy(url: str) -> bool:
         return False
 
 
-def cached_answer(path: Path) -> dict:
+def cached_answer(path: Path) -> dict[str, Any]:
     try:
         cached = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
-    return cached if isinstance(cached, dict) else {}
+    return cast(dict[str, Any], cached) if isinstance(cached, dict) else {}
 
 
-def answered(url: str, environ=os.environ) -> bool:
+def answered(url: str, environ: Mapping[str, str] = os.environ) -> bool:
     path, now = probe_file(environ), time.time()
     cached = cached_answer(path)
     at = cached.get("at")

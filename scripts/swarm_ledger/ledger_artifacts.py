@@ -4,7 +4,8 @@ import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
-from pathlib import PurePath
+from pathlib import Path, PurePath
+from typing import Any
 
 import ledger_comments
 import ledger_core as core
@@ -38,11 +39,11 @@ ET.register_namespace("", SVG_NS)
 ET.register_namespace("xlink", XLINK_NS)
 
 
-def _local(name):
+def _local(name: str) -> str:
     return name.rsplit("}", 1)[-1]
 
 
-def sanitize_svg(text):
+def sanitize_svg(text: str) -> bytes:
     """The SVG without scripts, event handlers, embedded documents or links that leave the drawing."""
     if "<!ENTITY" in text or "<!DOCTYPE" in text:
         raise media.Refused(415, "an SVG may not declare a doctype or entities")
@@ -63,7 +64,7 @@ def sanitize_svg(text):
     return ET.tostring(root, encoding="unicode").encode("utf-8")
 
 
-def _text(name, data):
+def _text(name: str | None, data: bytes) -> tuple[str, bytes, dict[str, Any]]:
     ext = SUFFIXES.get(PurePath(name or "").suffix.lower())
     if ext is None:
         raise media.Refused(415, "only markdown, JSON, SVG, PNG, JPEG, WebP or GIF files are accepted")
@@ -81,7 +82,7 @@ def _text(name, data):
     return ext, data, {"type": TEXT_TYPES[ext]}
 
 
-def store(slug, name, data):
+def store(slug: str, name: str, data: bytes) -> dict[str, Any]:
     if len(data) > MAX_BYTES:
         raise media.Refused(413, f"an artifact may be at most {MAX_BYTES >> 20} MB")
     try:
@@ -96,7 +97,7 @@ def store(slug, name, data):
     return {"id": artifact_id, **fields, "size": len(data)}
 
 
-def path_of(slug, artifact_id):
+def path_of(slug: str, artifact_id: str) -> Path:
     if not isinstance(artifact_id, str) or not ID_RE.match(artifact_id):
         raise ValueError("not an artifact id")
     path = media.folder(slug) / artifact_id
@@ -105,7 +106,7 @@ def path_of(slug, artifact_id):
     return path
 
 
-def read(slug, artifact_id, adopt=False):
+def read(slug: str, artifact_id: str, adopt: bool = False) -> bytes:
     data = artifact_files.load(slug, artifact_id)
     if data is None:
         data = path_of(slug, artifact_id).read_bytes()
@@ -114,11 +115,11 @@ def read(slug, artifact_id, adopt=False):
     return data
 
 
-def served(slug, artifact_id):
+def served(slug: str, artifact_id: str) -> bytes:
     return read(slug, artifact_id, adopt=True)
 
 
-def adopt_disk(slug):
+def adopt_disk(slug: str) -> None:
     """Every stored file only this host's disk holds, copied into the shared database so any host serves it."""
     paths = sorted(media.folder(slug).glob("*"))
     if not paths:
@@ -131,7 +132,7 @@ def adopt_disk(slug):
             media.media_files.save(slug, path.name, path.read_bytes(), core.now_ms())
 
 
-def entry(slug, artifact_id):
+def entry(slug: str, artifact_id: str) -> dict[str, Any]:
     data = read(slug, artifact_id)
     ext = artifact_id.rsplit(".", 1)[1]
     if ext in TEXT_TYPES:
@@ -140,7 +141,7 @@ def entry(slug, artifact_id):
     return {"id": artifact_id, "type": kind, "width": width, "height": height, "size": len(data)}
 
 
-def resolve(slug, ops):
+def resolve(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Each published file rebuilt from the store, so the JSON holds only what the server measured."""
     for op in ops:
         if op.get("op") == "artifact_add":
@@ -148,7 +149,7 @@ def resolve(slug, ops):
     return ops
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     if op["op"] == "artifact_add":
         return check_add(op)
     if op["op"] == "artifact_purge":
@@ -160,7 +161,7 @@ def check(op):
     return None
 
 
-def check_add(op):
+def check_add(op: dict[str, Any]) -> None:
     if not ADD_KEYS <= set(op) <= ADD_KEYS | {"request", "plan"}:
         raise ValueError("artifact_add takes id, by, task, title, file and an optional request or plan")
     if "plan" in op and op["plan"] is not True:
@@ -178,7 +179,7 @@ def check_add(op):
     ledger_comments.check(op["title"], "item")
 
 
-def operator_asked(doc, entry_id):
+def operator_asked(doc: dict[str, Any], entry_id: str | None) -> bool:
     if not entry_id:
         return False
     return any(
@@ -203,7 +204,7 @@ def refusal(doc: dict, op: dict, members: dict) -> str:
     return "" if requested or operator_asked(doc, op.get("request")) else REFUSED
 
 
-def _add(doc, op, ctx):
+def _add(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool:
     rows = doc.setdefault("artifacts", [])
     if any(row["id"] == op["id"] for row in rows):
         return True
@@ -233,7 +234,7 @@ def _add(doc, op, ctx):
     return True
 
 
-def _move(doc, op, ctx, source, dest):
+def _move(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context", source: str, dest: str) -> bool:
     row = next((r for r in doc[source] if r["id"] == op["target"]), None)
     if row is None:
         return any(r["id"] == op["target"] for r in doc[dest])
@@ -248,7 +249,7 @@ def _move(doc, op, ctx, source, dest):
     return True
 
 
-def _purge(doc, op, ctx):
+def _purge(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool:
     if op["by"] not in ctx.meta["members"]:
         return False
     rows = doc["artifacts"] + doc[TRASH]
@@ -258,7 +259,7 @@ def _purge(doc, op, ctx):
     return True
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "core.Context") -> bool:
     if op["op"] == "artifact_add":
         return _add(doc, op, ctx)
     if op["op"] == "artifact_purge":
@@ -268,7 +269,7 @@ def apply(doc, op, ctx):
     return _move(doc, op, ctx, TRASH, "artifacts")
 
 
-def in_use(doc):
+def in_use(doc: dict[str, Any]) -> set[str]:
     used = {row["file"]["id"] for key in ("artifacts", TRASH) for row in doc[key]}
     for _, thread in core.thread_paths(doc):
         for entry in thread:
@@ -276,7 +277,7 @@ def in_use(doc):
     return used
 
 
-def sweep(slug, doc, ctx):
+def sweep(slug: str, doc: dict[str, Any], ctx: "core.Context") -> None:
     from scripts.swarm_ledger.storage_migration.hosted import media_mutation
 
     used = in_use(doc)
