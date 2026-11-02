@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
 
 from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from hooks.classifier.questions import MAX_QUESTIONS
@@ -43,7 +43,7 @@ class _Mail(Protocol):
     def send(self, key: str, to: str, text: str, ref: str = "") -> list[str]: ...
 
 
-type _Runner = Callable[..., subprocess.CompletedProcess[str]]
+_Runner: TypeAlias = Callable[..., subprocess.CompletedProcess[str]]
 
 NAME = "intent"
 PURPOSE = "intent-check"
