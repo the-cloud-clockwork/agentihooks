@@ -706,7 +706,17 @@ jobs:
           cd "$RUNNER_TEMP/grader"
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/selection"
-          "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 20 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+          "$RUNNER_TEMP/provenance-python/bin/python" -I "$GITHUB_WORKSPACE/.github/scripts/peak_memory.py" select -- "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 20 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+
+      - name: Upload the select step peak memory
+        if: always() && github.event_name == 'pull_request'
+        uses: ./.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: peak-memory-select
+          path: ${{ runner.temp }}/peak-memory/select.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Job outputs are protected, so each leg reads its files from this artifact.
       - name: Upload the selected legs
@@ -3879,7 +3889,17 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           MUTATION_SHARD_CPU_QUOTA: "3"
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+        run: python "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py" mutation-plan -- python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+
+      - name: Upload the mutation-plan step peak memory
+        if: always() && github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: peak-memory-mutation-plan
+          path: ${{ runner.temp }}/peak-memory/mutation-plan.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Check out the protected mutation grader
         if: github.event_name == 'workflow_dispatch' && steps.reuse.outputs.reused != 'true'
