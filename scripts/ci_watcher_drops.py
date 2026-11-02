@@ -1,6 +1,7 @@
 import argparse
 import json
 from collections.abc import Callable
+from typing import Any, cast
 
 from scripts.ci_queue_retry import _api
 

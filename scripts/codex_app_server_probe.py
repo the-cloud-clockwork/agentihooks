@@ -19,6 +19,7 @@ from websockets.sync.client import unix_connect
 
 TURN_TIMEOUT_S = 240
 RESPONSE_TIMEOUT_S = 60
+_EMPTY: dict[str, Any] = {}
 
 
 class Client:
@@ -272,8 +273,8 @@ def late_approval(sock: str, repo: str) -> dict[str, Any]:
     resumed = late.request("thread/resume", {"threadId": thread})
     reread = late.request("thread/read", {"threadId": thread, "includeTurns": True})
     req_late, _ = late.until(is_approval_request, 10)
-    turns = (read.get("result") or {}).get("thread", {}).get("turns") or [{}]
-    resumed_turns = (resumed.get("result") or {}).get("thread", {}).get("turns") or [{}]
+    turns = (read.get("result") or _EMPTY).get("thread", _EMPTY).get("turns") or [_EMPTY]
+    resumed_turns = (resumed.get("result") or _EMPTY).get("thread", _EMPTY).get("turns") or [_EMPTY]
     result: dict[str, Any] = {
         "late_resume_last_turn_status": resumed_turns[-1].get("status"),
         "thread": thread,
@@ -474,7 +475,7 @@ def first_reply(sock_path: str, payload: bytes, wait_s: float) -> str:
     return line.decode().strip() or "closed"
 
 
-def transport(sock: str, repo: str) -> dict:
+def transport(sock: str, repo: str) -> dict[str, Any]:
     return {
         "socket_is_symlink": Path(sock).is_symlink(),
         "raw_json_line_reply": first_reply(sock, RAW_LINE, 3),

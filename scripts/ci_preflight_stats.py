@@ -3,12 +3,13 @@ import json
 import statistics
 import subprocess
 from datetime import datetime
+from typing import Any
 
 PULLS = "pulls?state=closed&base=dev&per_page=100&sort=updated&direction=desc&page="
 PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs?event=push&per_page=100&branch="
 
 
-def api(path: str):
+def api(path: str) -> Any:
     done = subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/{path}"], capture_output=True, check=True)
     return json.loads(done.stdout)
 
@@ -17,7 +18,7 @@ def when(text: str) -> datetime:
     return datetime.fromisoformat(text)
 
 
-def merged(pages: int) -> list[dict]:
+def merged(pages: int) -> list[dict[str, Any]]:
     rows = [row for page in range(1, pages + 1) for row in api(f"{PULLS}{page}") if row["merged_at"]]
     return sorted(rows, key=lambda row: row["merged_at"])
 
@@ -27,7 +28,7 @@ def first_commit(number: int) -> datetime:
 
 
 def preflights(branch: str, start: datetime, end: datetime) -> list[tuple[int, str]]:
-    found = []
+    found: list[tuple[int, str]] = []
     for run in api(f"{PREFLIGHT}{branch}")["workflow_runs"]:
         if start <= when(run["created_at"]) <= end:
             jobs = api(f"actions/runs/{run['id']}/jobs")["jobs"]
@@ -35,11 +36,11 @@ def preflights(branch: str, start: datetime, end: datetime) -> list[tuple[int, s
     return found
 
 
-def pick(pulls: list[dict], mode: str, at: datetime, count: int) -> list[tuple[dict, datetime]]:
+def pick(pulls: list[dict[str, Any]], mode: str, at: datetime, count: int) -> list[tuple[dict[str, Any], datetime]]:
     if mode == "before":
         chosen = [row for row in pulls if when(row["merged_at"]) < at][-count:]
         return [(row, first_commit(row["number"])) for row in chosen]
-    picked = []
+    picked: list[tuple[dict[str, Any], datetime]] = []
     for row in pulls:
         first = first_commit(row["number"])
         if first > at and len(picked) < count:
@@ -54,7 +55,9 @@ def main() -> int:
     parser.add_argument("count", type=int)
     parser.add_argument("pages", type=int)
     args = parser.parse_args()
-    runs, mutated, waits = [], [], []
+    runs: list[int] = []
+    mutated: list[int] = []
+    waits: list[float] = []
     for row, first in pick(merged(args.pages), args.mode, when(args.at), args.count):
         found = preflights(row["head"]["ref"], first, when(row["merged_at"]))
         started = [run for run, mutation in found if mutation not in ("skipped", "absent")]

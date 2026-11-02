@@ -65,21 +65,23 @@ def validate_actors(actors: object) -> list[str]:
         actors = cast(dict[str, Any], actors)
         if set(actors) != {"actors", "queue_actor"} or not isinstance(actors["actors"], list):
             raise ValueError("trusted actors policy requires actors and queue_actor")
-        approved = validate_actors(actors["actors"])
+        approved = validate_actors(cast(list[Any], actors["actors"]))
         queue = actors["queue_actor"]
         if not isinstance(queue, str) or not re.fullmatch(r"[A-Za-z0-9-]+\[bot\]", queue) or queue in approved:
             raise ValueError("trusted actors queue identity must be a distinct platform bot")
         return approved + [queue]
-    actors = cast(list[Any], actors)
     if (
         not isinstance(actors, list)
-        or len(actors) != 3
-        or any(not isinstance(actor, str) or not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", actor) for actor in actors)
-        or len(set(actors)) != 3
-        or sum(actor.endswith("[bot]") for actor in actors) != 2
+        or len(cast(list[Any], actors)) != 3
+        or any(
+            not isinstance(actor, str) or not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", actor)
+            for actor in cast(list[Any], actors)
+        )
+        or len(set(cast(list[Any], actors))) != 3
+        or sum(actor.endswith("[bot]") for actor in cast(list[Any], actors)) != 2
     ):
         raise ValueError("trusted actors must contain one operator and two distinct app bots")
-    return actors
+    return cast(list[str], actors)
 
 
 def _compact(expression: str) -> str:

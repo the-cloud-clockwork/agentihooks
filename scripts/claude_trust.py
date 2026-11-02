@@ -21,7 +21,7 @@ def allowed(environ: dict[str, str]) -> bool:
 def _read(config: Path) -> dict[str, Any]:
     if not config.exists():
         return {}
-    data: dict[str, Any] = json.loads(config.read_text(encoding="utf-8"))
+    data = json.loads(config.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{config} does not hold a JSON object")
     return data
