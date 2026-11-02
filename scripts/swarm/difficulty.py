@@ -2,6 +2,7 @@
 
 import math
 import re
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -38,12 +39,14 @@ def size_pass(slug: str, ledger: Any, doc: dict) -> list[str]:
     return actions
 
 
-def sizes(doc: dict) -> list[tuple[str, dict]]:
-    """Return the size fields of each unsized open task this pass sizes, computed from ``doc`` without writing."""
+def sizes(doc: dict) -> Iterator[tuple[str, dict]]:
+    """Yield the size fields of each unsized open task this pass sizes, in order as each is computed, writing nothing."""
     unsized = [t for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("difficulty")][:PER_TICK]
     with ThreadPoolExecutor(max_workers=PER_TICK) as pool:
-        found = list(pool.map(lambda task: rule(task) or classify(task, doc), unsized))
-    return [(task["id"], fields) for task, fields in zip(unsized, found, strict=True)]
+        for task, fields in zip(
+            unsized, pool.map(lambda task: rule(task) or classify(task, doc), unsized), strict=True
+        ):
+            yield task["id"], fields
 
 
 def sized_action(task_id: str, fields: dict) -> str:
