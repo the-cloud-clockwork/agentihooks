@@ -9,7 +9,7 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -34,8 +34,11 @@ class Cleartext(SystemExit):
     pass
 
 
+_hosted = cast("Callable[[Mapping[str, str]], str]", hosted_probe.hosted)
+
+
 def base(environ: Mapping[str, str] = os.environ, slug: str = "") -> str:
-    if selected := ledger_route.url(slug) or hosted_probe.hosted(environ):
+    if selected := ledger_route.url(slug) or _hosted(environ):
         return selected
     if remote(environ, slug):
         url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
@@ -129,7 +132,7 @@ def urlopen(
 def remote(environ: Mapping[str, str] = os.environ, slug: str = "") -> bool:
     return bool(
         ledger_route.url(slug)
-        or hosted_probe.hosted(environ)
+        or _hosted(environ)
         or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
     ) or not local_mode(environ)
 
@@ -231,7 +234,7 @@ def hosted_line(slug: str, line: str) -> str:
     if serving(url=target) is None:
         return silent
     try:
-        ledger.resource(slug, "metadata")
+        cast("Callable[..., object]", ledger.resource)(slug, "metadata")
     except urllib.error.HTTPError as error:
         return f"No ledger page link: {target} answered a read of ledger {slug} with HTTP {error.code}"
     except ledger.Unauthenticated as error:

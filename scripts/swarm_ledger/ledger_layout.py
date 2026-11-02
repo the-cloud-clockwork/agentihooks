@@ -2,6 +2,8 @@
 
 import json
 import re
+from pathlib import Path
+from typing import Any
 
 import ledger_core as core
 
@@ -26,22 +28,22 @@ MAX_STATS = 32
 LISTS = (COLUMNS, STATS)
 
 
-def path():
+def path() -> Path:
     return core.LEDGER_DIR / ".swarm-layout"
 
 
-def size(row, key, value):
+def size(row: str, key: str, value: Any) -> int | float:
     low, high, digits = LIMITS[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
         raise ValueError(f"{row} {key} must be a number from {low} to {high}")
     return round(value, digits) if digits else round(value)
 
 
-def columns(tables):
+def columns(tables: Any) -> dict[str, list[int]]:
     if not isinstance(tables, dict) or len(tables) > MAX_TABLES:
         raise ValueError(f"columns must be an object of at most {MAX_TABLES} tables")
     low, high = COLUMN_WIDTH
-    found = {}
+    found: dict[str, list[int]] = {}
     for table, widths in tables.items():
         if not TABLE.match(table):
             raise ValueError(f"unknown column table {table}")
@@ -53,7 +55,7 @@ def columns(tables):
     return found
 
 
-def stats(keys):
+def stats(keys: Any) -> list[str]:
     if not isinstance(keys, list) or len(keys) > MAX_STATS:
         raise ValueError(f"stats must list at most {MAX_STATS} rows")
     if not all(isinstance(key, str) and TABLE.match(key) for key in keys) or len(set(keys)) != len(keys):

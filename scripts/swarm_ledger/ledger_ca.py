@@ -24,7 +24,10 @@ def certificate(pem: object) -> bool:
 
 
 def install(environ: Mapping[str, str] = os.environ, opener: Callable[..., Any] | None = None) -> str:
-    bao = cast("openbao_kv.OpenBao | None", openbao_kv.from_env(environ, opener))
+    typed_from_env = cast(
+        "Callable[[Mapping[str, str], Callable[..., Any] | None], openbao_kv.OpenBao | None]", openbao_kv.from_env
+    )
+    bao = typed_from_env(environ, opener)
     if bao is None:
         return "ledger CA: no OpenBao"
     try:
