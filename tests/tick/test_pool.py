@@ -237,24 +237,23 @@ def test_queued_steps_of_an_expired_lane_never_start() -> None:
     assert not queued.wait(0.2)
 
 
-def test_eager_steps_run_on_named_workers_under_the_caller_clock() -> None:
+def test_eager_steps_run_under_the_caller_clock() -> None:
     from scripts.tick import pool
 
-    seen: list[tuple[str, Callable[[], float]]] = []
+    seen: list[Callable[[], float]] = []
 
     def clock() -> float:
         return monotonic()
 
     def action(ctx: Context) -> Result:
-        seen.append((current_thread().name, ctx.deadline.clock))
+        seen.append(ctx.deadline.clock)
         return Result()
 
     with pool.running(workers=2):
         engine.run_group(
             "load", Context(View(), Deadline.after(5, clock=clock)), (Step("a", action), Step("b", action))
         )
-    assert len(seen) == 2
-    assert all(name.startswith("tick-step") and used is clock for name, used in seen)
+    assert seen == [clock, clock]
 
 
 def test_the_heartbeat_timer_runs_on_a_daemon_thread() -> None:

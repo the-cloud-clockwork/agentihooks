@@ -131,7 +131,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass) -> tuple[S
     dropped: set[str] = set()
     pending = list(ordered)
     running: dict[Future[StepRecord], tuple[Step, float]] = {}
-    executor = ThreadPoolExecutor(max_workers=found.workers, thread_name_prefix="tick-step")
+    executor = ThreadPoolExecutor(max_workers=found.workers)
     try:
         while pending or running:
             for step in [step for step in pending if step.needs & names <= records.keys()]:
