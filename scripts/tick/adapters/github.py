@@ -314,3 +314,16 @@ class GitHubSourceControl:
             f"?event={event}&status={conclusion}&exclude_pull_requests=true&created=>={since}&"
         )
         return tuple(_workflow_run(row) for row in self._pages(path, "workflow_runs", deadline))
+
+    def download(self, path: str, *, deadline: Deadline) -> bytes:
+        """Read one API resource as raw bytes under the reader the caller names, refusing a failed read."""
+        result = github_reads.rest(
+            github_reads.CALLER.get(CALLER),
+            ["api", path],
+            run=subprocess.run,
+            cwd=self.root,
+            timeout=_live(deadline),
+            capture_output=True,
+        )
+        result.check_returncode()
+        return result.stdout

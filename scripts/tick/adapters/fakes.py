@@ -177,6 +177,9 @@ class FakeSourceControl:
     ) -> tuple[WorkflowRun, ...]:
         return _record(self, "workflow_runs", (workflow, event, conclusion, since), deadline)
 
+    def download(self, path: str, *, deadline: Deadline) -> bytes:
+        return _record(self, "download", (path,), deadline)
+
 
 @dataclass
 class FakeRuntime:
