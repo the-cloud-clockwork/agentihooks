@@ -1,0 +1,4 @@
+name: scouter
+description: "Read only scouter: collects evidence for a case until its condition holds and delivers it to the seat that launched it"
+tier: high
+effort: medium

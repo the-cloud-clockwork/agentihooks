@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebSearch",
+      "WebFetch",
+      "mcp__playwright-cmd",
+      "Bash(agentihooks scout:*)",
+      "Bash(agentihooks msg send:*)"
+    ],
+    "deny": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '=== CONTEXT INJECTION ===\nProfile hook: scouter profile loaded successfully.'"
+          }
+        ]
+      }
+    ]
+  }
+}

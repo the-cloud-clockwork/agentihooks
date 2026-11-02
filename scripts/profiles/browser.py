@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 from hooks.context.profile_chain import PACKAGE_PREFIX
 from scripts.targets._common import _install_module
 
-ROLES = frozenset(("engineer", "cicd", "planner", "master", "qa", "documentation"))
+ROLES = frozenset(("engineer", "cicd", "planner", "master", "qa", "documentation", "scouter"))
 NAME = "playwright-cmd"
 EXTENSION = "playwright-ext-"
 
@@ -27,7 +27,7 @@ def enabled(chain: list[str]) -> bool:
 
 def proxy_enabled(chain: list[str]) -> bool:
     return enabled(chain) and any(
-        name.removeprefix(PACKAGE_PREFIX) in {"master", "qa", "documentation", "frontend"} for name in chain
+        name.removeprefix(PACKAGE_PREFIX) in {"master", "qa", "documentation", "scouter", "frontend"} for name in chain
     )
 
 
