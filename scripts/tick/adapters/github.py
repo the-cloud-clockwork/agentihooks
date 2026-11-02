@@ -25,6 +25,7 @@ from scripts.tick.ports.source_control import (
     RollupCheck,
     Run,
     Tag,
+    WorkflowRun,
 )
 
 __all__ = ["CALLER", "GitHubSourceControl", "command"]
@@ -104,6 +105,22 @@ def _open_change(node: dict[str, Any]) -> OpenChange:
     rollup = node["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
     contexts: list[dict[str, Any]] = rollup["contexts"]["nodes"] if rollup else []
     return OpenChange(node["url"], tuple(_rollup_check(context) for context in contexts))
+
+
+def _workflow_run(row: dict[str, Any]) -> WorkflowRun:
+    """Read one workflow run's identity, outcome and timing."""
+    return WorkflowRun(
+        row["id"],
+        row["event"],
+        row["status"],
+        row["conclusion"],
+        row["head_branch"],
+        row["head_sha"],
+        row["created_at"],
+        row["run_started_at"],
+        row["updated_at"],
+        row["run_attempt"],
+    )
 
 
 @dataclass(frozen=True)
@@ -287,3 +304,13 @@ class GitHubSourceControl:
                 break
             variables = {**variables, "after": pulls["pageInfo"]["endCursor"]}
         return tuple(changes)
+
+    def workflow_runs(
+        self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline
+    ) -> tuple[WorkflowRun, ...]:
+        """List one workflow's runs for an event that finished with a conclusion since a UTC stamp, every page."""
+        path = (
+            f"repos/{self.repository}/actions/workflows/{workflow}/runs"
+            f"?event={event}&status={conclusion}&exclude_pull_requests=true&created=>={since}&"
+        )
+        return tuple(_workflow_run(row) for row in self._pages(path, "workflow_runs", deadline))
