@@ -84,10 +84,12 @@ def test_required_check_rules_are_read_once_per_interval_across_pull_requests(gi
     assert [row["caller"] for row in charged()] == ["swarm.checks.rules"] * 2
 
 
-def test_the_required_view_graph_charges_graphql_and_runs_the_exact_query(github, monkeypatch):
-    seen = []
+def test_the_required_view_graph_charges_graphql_and_runs_the_exact_query(
+    github: tuple[object, list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[list[str], dict[str, object]]] = []
 
-    def read(argv, **options):
+    def read(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         seen.append((argv, options))
         return subprocess.CompletedProcess(argv, 0, '{"data": {"p0": 1}}', "")
 
