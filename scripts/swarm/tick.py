@@ -11,6 +11,7 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -1616,8 +1617,22 @@ def _spawn_order(
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
     ranked = timing.timed(_ranked, slug, store, queue, dispatched)
+    return sorted(ranked, key=_focus_key(doc, dispatched)), waits
+
+
+def _focus_key(doc: dict[str, Any], dispatched: Callable[[dict], tuple] | None) -> Callable[[tuple], tuple]:
+    """Order focused tasks first, then by rank band, then by the focus record that covers each."""
+    from scripts.swarm import focus_budget
+
     focus = focus_budget.ranks(doc)
-    return sorted(ranked, key=lambda entry: focus[entry[1]["id"]]), waits
+    outside = sum(row["verb"] == "focus" for row in doc.get("freezes", []))
+
+    def key(entry: tuple) -> tuple:
+        task = entry[1]
+        band = dispatched(task)[0] if dispatched else ledger_rank.order(task)
+        return focus[task["id"]] == outside, band, focus[task["id"]]
+
+    return key
 
 
 def _ranked(slug, store, queue, dispatched):
