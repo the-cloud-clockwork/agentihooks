@@ -367,7 +367,8 @@ class CodexAdapter:
 
     def write_settings(self, native: dict) -> Path:
         """
-        A pinned catalog limits codex to the models it lists.
+        Drops a model_catalog_json that points at the stale pinned catalog: a pinned catalog limits codex to the
+        models it lists.
 
         Native settings arrive already merged (base + bundle + profile chain). Everything else is authored natively
         (profiles/_base/config.base.toml plus each profile's .codex/config.overrides.toml) and arrives here already
