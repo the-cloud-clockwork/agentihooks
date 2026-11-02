@@ -1233,8 +1233,8 @@ def test_queue_verifier_and_shard_check_wait_for_the_units_instead_of_holding_a_
     jobs = _workflow()["jobs"]
     assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], deferred=True)
     condition = jobs["shard-check"]["if"]
-    assert "needs.unit-lost.result != 'failure'" in condition
-    assert "needs.unit-rerun.result != 'failure'" in condition
+    assert "(needs.unit-lost.result == 'success' || needs.unit-lost.result == 'skipped')" in condition
+    assert "(needs.unit-rerun.result == 'success' || needs.unit-rerun.result == 'skipped')" in condition
     assert jobs["queue-fail-fast"]["if"].startswith("${{ !cancelled() ")
 
 
