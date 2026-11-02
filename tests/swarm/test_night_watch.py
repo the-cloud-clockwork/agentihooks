@@ -203,6 +203,30 @@ def test_a_seat_left_empty_on_purpose_is_never_judged(store, state, sleeping):
     assert rig.respawned == [] and kinds(store) == []
 
 
+def starting_master(store, runtime, wrote):
+    boss = AgentRecord("boss", "master", "master", started_at=NOW, state="starting", seat="master@sw")
+    store.put_agent(SLUG, boss)
+    runtime.live.add("boss")
+    events = [{"kind": "comment", "by": "boss", "at": NOW + MINUTE}] if wrote else []
+    return {"tasks": [], "_meta": {"events": events}}
+
+
+def test_a_live_starting_front_door_that_wrote_the_ledger_holds_the_seat(store):
+    enforce(store)
+    rig = Rig()
+    doc = starting_master(store, rig.runtime, wrote=True)
+    until(store, rig, NOW, NOW + 30 * MINUTE, doc=doc)
+    assert rig.respawned == [] and rig.ledger.alerts == [] and kinds(store) == []
+
+
+def test_a_live_starting_front_door_that_never_wrote_the_ledger_leaves_the_seat_empty(store):
+    enforce(store)
+    rig = Rig()
+    doc = starting_master(store, rig.runtime, wrote=False)
+    until(store, rig, NOW, NOW + 10 * MINUTE, doc=doc)
+    assert kinds(store) == ["empty master seat"]
+
+
 def held_master(store, runtime):
     boss = AgentRecord("boss", "master", "master", state="working", seat="master@sw")
     store.put_agent(SLUG, boss)
