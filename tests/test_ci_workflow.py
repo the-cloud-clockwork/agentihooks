@@ -2161,7 +2161,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         "permission-actions": "read",
     }
     assert "permissions" not in plan
-    assert plan["outputs"]["bases"] == "${{ steps.plan.outputs.bases }}"
+    assert plan["outputs"]["bases"] == "${{ steps.bases.outputs.bases }}"
     assert plan["outputs"]["browser"] == "${{ steps.plan.outputs.browser }}"
     for job in (mutation, jobs["mutation-stats"]):
         selection = next(
