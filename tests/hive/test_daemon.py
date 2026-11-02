@@ -651,7 +651,7 @@ def test_headroom_refreshes_the_ready_marker_only_once_a_beat_created_it(
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
     monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
     stop, _, beats = _paced(monkeypatch, 2)
-    PUBLISH_HEADROOM(object(), object(), "local", stop)
+    PUBLISH_HEADROOM(Mock(), Mock(), "local", stop)
     assert len(beats) == 1
     assert marker.exists() is exists
     if exists:
@@ -673,7 +673,7 @@ def test_headroom_leaves_the_ready_marker_alone_when_its_publish_fails(
     monkeypatch.setenv("HIVE_READY_FILE", str(marker))
     monkeypatch.setattr(headroom, "publish", Mock(side_effect=ConnectionError("gone")))
     stop, _, _ = _paced(monkeypatch, 2)
-    PUBLISH_HEADROOM(object(), object(), "local", stop)
+    PUBLISH_HEADROOM(Mock(), Mock(), "local", stop)
     assert marker.stat().st_mtime == 5
 
 
@@ -687,7 +687,7 @@ def test_headroom_ignores_an_unset_ready_marker(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
     monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
     stop, _, beats = _paced(monkeypatch, 2)
-    PUBLISH_HEADROOM(object(), object(), "local", stop)
+    PUBLISH_HEADROOM(Mock(), Mock(), "local", stop)
     assert len(beats) == 1
     assert list(folder.iterdir()) == []
 
