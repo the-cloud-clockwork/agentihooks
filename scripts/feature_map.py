@@ -241,7 +241,7 @@ def junit_problems(map_path: Path, reports: list[Path]) -> list[str]:
     for report in reports:
         for case in ET.parse(report).iter("testcase"):
             verdicts = [child.tag for child in case if child.tag in ("skipped", "failure", "error")]
-            address = (case.get("classname", ""), case.get("name", "").split("[")[0])
+            address = (case.get("classname", ""), case.get("name", "").split("[")[0].split("@")[0])
             outcomes.setdefault(address, set()).add(verdicts[0] if verdicts else "passed")
     problems = []
     for node_id in mapped(map_path):

@@ -801,7 +801,14 @@ def test_junit_passes_every_ran_mapped_test_across_reports_classes_and_parameter
         '<testcase classname="tests.a.test_x" name="test_one[q]"><rerunFailure/></testcase>',
         '<testcase classname="tests.test_y.TestCase" name="test_two"/>',
     )
+    grouped = _report(
+        tmp_path,
+        "c.xml",
+        '<testcase classname="tests.a.test_x" name="test_one[r]@group"/>',
+        '<testcase classname="tests.test_y.TestCase" name="test_two@group"/>',
+    )
     assert feature_map.junit_problems(path, [first, second]) == []
+    assert feature_map.junit_problems(path, [grouped]) == []
 
 
 @pytest.mark.parametrize(
