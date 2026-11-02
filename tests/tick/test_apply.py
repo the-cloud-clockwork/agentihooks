@@ -147,7 +147,7 @@ def test_the_tasks_applier_turns_a_refused_write_into_a_conflict() -> None:
 def test_appliers_need_a_ledger_and_a_swarm() -> None:
     assert tasks.appliers({"slug": "sw"}) == {}
     assert tasks.appliers({"ledger": Ledger()}) == {}
-    assert list(tasks.appliers({"slug": "sw", "ledger": Ledger()})) == [TASKS]
+    assert list(tasks.appliers({"slug": "sw", "ledger": Ledger()})) == [tasks.SIZES, tasks.GROUPS]
 
 
 def test_the_size_pass_returns_its_sizes_as_guarded_task_writes() -> None:
@@ -159,7 +159,7 @@ def test_the_size_pass_returns_its_sizes_as_guarded_task_writes() -> None:
     )
 
     assert tasks.size_writes(tick, "doc") == [
-        Write(TASKS, "t1", fields, expected={"difficulty": ""}),
+        Write(tasks.SIZES, "t1", fields, expected={"difficulty": ""}),
         "sized task t1 S by rule",
     ]
 
@@ -178,9 +178,9 @@ def test_the_size_step_splits_actions_from_writes(monkeypatch: pytest.MonkeyPatc
 
     assert found.writes == (
         Write(actions_of("size pass"), "size pass", ["sized task t1 S by rule"]),
-        Write(TASKS, "t1", fields, expected={"difficulty": ""}),
+        Write(tasks.SIZES, "t1", fields, expected={"difficulty": ""}),
     )
-    assert TASKS in step.writes
+    assert step.writes == frozenset({tasks.SIZES})
 
 
 def test_the_size_pass_sizes_then_writes_through_the_ledger_directly() -> None:

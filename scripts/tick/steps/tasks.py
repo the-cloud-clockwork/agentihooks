@@ -13,6 +13,7 @@ from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, actions_of
 __all__ = [
     "CLOSE",
     "GROUPS",
+    "SIZES",
     "RAISED",
     "STEPS",
     "TASK_PASSES",
@@ -28,6 +29,7 @@ __all__ = [
 
 Get = Callable[[str], Any]
 GROUPS = Domain("groups")
+SIZES = Domain("sizes")
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -74,7 +76,7 @@ def size_writes(tick: Any, doc: dict[str, Any]) -> list[str | Write]:
     found: list[str | Write] = []
     for task_id, fields in tick.difficulty.sizes(doc):
         found += [
-            Write(TASKS, task_id, fields, expected={"difficulty": ""}),
+            Write(SIZES, task_id, fields, expected={"difficulty": ""}),
             tick.difficulty.sized_action(task_id, fields),
         ]
     return found
@@ -116,7 +118,7 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
     if state.get("ledger") is None or not state.get("slug"):
         return {}
     slug, ledger = cast(str, state["slug"]), state["ledger"]
-    return {TASKS: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+    return {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
 
 
 def _fresh_task(task_id: str) -> dict[str, Any] | None:
@@ -177,7 +179,7 @@ def _close_space(tick: Any, get: Get) -> Any:
 STEPS = (
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
-    WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({TASKS})),
+    WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),
     WriteStep("grouping release", TASK_PASSES, held(_grouping_release), writes=frozenset({GROUPS})),
     CallStep("dispatcher group", TASK_PASSES, held(_dispatcher_group)),
     CallStep(
