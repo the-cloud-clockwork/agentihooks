@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# If accidentally run with bash, re-exec with python3 (polyglot trick).
 """:'
 exec python3 "$0" "$@"
 exit
@@ -46,10 +45,6 @@ def _get_version() -> str:
         return "unknown"
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 AGENTIHOOKS_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -75,12 +70,6 @@ def install_root() -> Path:
 PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
 BASE_SETTINGS = PROFILES_DIR / "_base" / "settings.base.json"
 
-# agentihooks built-in features (Layer 1 of the symlink merge) live here. This
-# directory is the packaged emulation of a `.claude/` tree — it holds
-# skills/agents/commands/rules/ and IS shipped in the wheel (package-data globs
-# every json/yaml/md under profiles/). The old source, the repo-root `.claude/`,
-# was never packaged, so PyPI installs got no built-in features; sourcing from
-# under profiles/ fixes that and lets the repo-root `.claude/` be untracked.
 PACKAGE_FEATURES_DIR = PROFILES_DIR / "package"
 
 
@@ -95,12 +84,9 @@ ROUTE_LAUNCHERS = {
     "claude-ai": "scripts.routing.claude_ai",
 }
 
-# Persistent state directory for user-level agentihooks configuration.
-# Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
 AGENTIHOOKS_STATE_DIR = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
 STATE_JSON = AGENTIHOOKS_STATE_DIR / "state.json"
 
-# Repeated path fragment constants (avoids S1192 duplicate-literal warnings)
 _CLAUDE_SUBDIR = ".claude"
 _USER_BUNDLE_ENV = "AGENTIHOOKS_USER_BUNDLE_PATH"
 _SHARED_BUNDLE_ENV = "AGENTIHOOKS_SHARED_BUNDLE_PATH"
@@ -109,15 +95,6 @@ _IDENTITY_STATE_KEYS = ("bundle", "shared_bundle", "user_bundle", "linked_profil
 _CLAUDE_MD_NAME = "CLAUDE.md"
 _MCP_JSON_NAME = ".mcp.json"
 
-# Native settings/MCP authoring, one file shape per target. A profile expresses
-# each harness's configuration in that harness's OWN format rather than in
-# Claude's, because the previous translation could only carry
-# `permissions.defaultMode` and left every target-native capability
-# (codex reasoning effort, copilot permission rules, copilot's per-server MCP
-# tool allowlist) unreachable from a bundle.
-#
-# claude's entries reproduce the pre-native paths exactly — its native format
-# IS the Claude shape — so its install output is unchanged.
 _TARGET_SUBDIR = {"claude": _CLAUDE_SUBDIR, "codex": ".codex", "copilot": ".copilot"}
 _NATIVE_SETTINGS_NAME = {
     "claude": "settings.overrides.json",
@@ -135,15 +112,11 @@ _NATIVE_BASE_NAME = {
     "copilot": "settings.base.copilot.json",
 }
 
-# Keys from ~/.claude/settings.json that belong to the user and should be
-# preserved when merging (unless the base settings already define them).
 PERSONAL_KEYS = {"model", "autoUpdatesChannel", "skipDangerousModePermissionPrompt"}
 
-# Marker written into the managed settings so we can detect re-runs.
 MANAGED_BY_KEY = "_managedBy"
 MANAGED_BY_VALUE = "agentihooks/scripts/install.py"
 
-# ANSI colors for terminal output
 _BOLD = "\033[1m"
 _DIM = "\033[2m"
 _GREEN = "\033[32m"
@@ -169,10 +142,6 @@ def _cprint(msg: str, **kwargs) -> None:
             return
     print(msg, **kwargs)
 
-
-# ---------------------------------------------------------------------------
-# .claudeignore template
-# ---------------------------------------------------------------------------
 
 CLAUDEIGNORE_TEMPLATE = """\
 # .claudeignore — files and directories Claude Code will not read or index.
@@ -275,11 +244,6 @@ env/
 """
 
 
-# ---------------------------------------------------------------------------
-# JSON helpers
-# ---------------------------------------------------------------------------
-
-
 def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -295,6 +259,14 @@ def _native_layer_path(root: Path, target: str, names: dict[str, str]) -> Path |
     Looks in the target's own subdir (``.claude`` / ``.codex`` / ``.copilot``)
     and falls back to the layer root, which is where the pre-``.claude/``
     profile layout kept these files.
+
+    _TARGET_SUBDIR: Native settings/MCP authoring, one file shape per target. A profile expresses each harness's
+    configuration in that harness's OWN format rather than in Claude's, because the previous translation could only
+    carry `permissions.defaultMode` and left every target-native capability (codex reasoning effort, copilot permission
+    rules, copilot's per-server MCP tool allowlist) unreachable from a bundle.
+
+    claude's entries reproduce the pre-native paths exactly — its native format IS the Claude shape — so its install
+    output is unchanged.
     """
     name = names[target]
     candidate = root / _TARGET_SUBDIR[target] / name
@@ -335,16 +307,10 @@ def _deep_merge(base: dict, override: dict, _parent_key: str = "") -> dict:
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
             merged[key] = _deep_merge(merged[key], value, _parent_key=key)
         elif _parent_key == "hooks" and key in merged and isinstance(merged[key], list) and isinstance(value, list):
-            # Hook arrays: append profile hooks after base hooks
             merged[key] = deepcopy(merged[key]) + deepcopy(value)
         else:
             merged[key] = deepcopy(value)
     return merged
-
-
-# ---------------------------------------------------------------------------
-# State helpers (~/.agentihooks/state.json)
-# ---------------------------------------------------------------------------
 
 
 def _migrate_targets_shape(state: dict) -> bool:
@@ -364,16 +330,16 @@ def _migrate_targets_shape(state: dict) -> bool:
     preserved as-is; the flat fields are nested under ``claude``, merged over
     whatever claude record already exists there (the flat fields win, since
     they're what the old binary just wrote).
+
+    The reshaping rule itself lives in hooks.targets so the hook runtime, which never runs this migration, reads a
+    half-migrated file the same way. Imported lazily to match this module's convention and to keep `hooks` off the
+    installer's import-time critical path.
     """
     g = state.get("targets", {}).get("global")
     if not isinstance(g, dict) or not g:
         return False
     if not any(not isinstance(v, dict) for v in g.values()):
         return False  # already keyed — nothing to rewrite
-    # The reshaping rule itself lives in hooks.targets so the hook runtime,
-    # which never runs this migration, reads a half-migrated file the same way.
-    # Imported lazily to match this module's convention and to keep `hooks`
-    # off the installer's import-time critical path.
     from hooks.targets import split_global
 
     state["targets"]["global"] = split_global(g)
@@ -405,14 +371,15 @@ def _installed_targets(state: dict, *, default: tuple[str, ...] = (DEFAULT_TARGE
     first-run machine behaves exactly as it did before multi-target, but
     ``init`` passes ``()`` because ``resolve_target`` must be able to tell
     "nothing installed" from "claude installed" to decide whether to prompt.
+
+    Unknown target names (a newer binary wrote one) still count — never drop a record just because this build does not
+    recognise its name.
     """
     _migrate_targets_shape(state)
     installed = state.get("targets", {}).get("global", {})
     if not isinstance(installed, dict):
         return default
     found = [t for t in SUPPORTED_TARGETS if isinstance(installed.get(t), dict)]
-    # Unknown target names (a newer binary wrote one) still count — never drop
-    # a record just because this build does not recognise its name.
     found += sorted(t for t, v in installed.items() if isinstance(v, dict) and t not in SUPPORTED_TARGETS)
     return tuple(found) or default
 
@@ -430,10 +397,13 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
+    """AGENTIHOOKS_STATE_DIR: Persistent state directory for user-level agentihooks configuration. Overridable via
+    AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
+
+    Keep one generation of backup so a bad init can always be forensically reconstructed / restored (state.json used to
+    be overwritten blind — a profile-losing init left no trace of what the previous install was).
+    """
     AGENTIHOOKS_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    # Keep one generation of backup so a bad init can always be forensically
-    # reconstructed / restored (state.json used to be overwritten blind — a
-    # profile-losing init left no trace of what the previous install was).
     if STATE_JSON.exists():
         try:
             shutil.copy2(STATE_JSON, STATE_JSON.with_suffix(".json.bak"))
@@ -447,13 +417,11 @@ def _migrate_profile_rename(state: dict, old_name: str, new_name: str) -> None:
     changed = False
     targets = state.get("targets", {})
 
-    # Global target — every installed target's record gets the rename
     for _tname, g in targets.get("global", {}).items():
         if isinstance(g, dict) and g.get("profile") == old_name:
             g["profile"] = new_name
             changed = True
 
-    # Per-project targets
     for _proj_key, proj in targets.get("projects", {}).items():
         if proj.get("profile") == old_name:
             proj["profile"] = new_name
@@ -463,7 +431,6 @@ def _migrate_profile_rename(state: dict, old_name: str, new_name: str) -> None:
         _save_state(state)
         print(f"  {_GREEN}[OK] Migrated profile '{old_name}' → '{new_name}' in state.json{_RESET}")
 
-    # Also migrate ~/.claude.json project entries that reference the old profile
     claude_json = claude_json_path()
     if claude_json.exists():
         try:
@@ -514,15 +481,6 @@ def _state_remove_mcp(mcp_path: Path) -> None:
         state["mcpFiles"] = paths
         _save_state(state)
 
-
-# ---------------------------------------------------------------------------
-# Managed-link ledger (state.json['managed_links'])
-#
-# Ownership is RECORDED at creation, never inferred at deletion. Every symlink
-# install writes into ~/.claude/{skills,agents,commands,rules} lands here, and
-# nothing outside this ledger is ever removed. Path-prefix guessing is the
-# legacy fallback only, and only for installs that predate the ledger.
-# ---------------------------------------------------------------------------
 
 _LINKS_KEY = "managed_links"
 
@@ -581,6 +539,9 @@ def _under_managed_source(target: str) -> bool:
     The match is lexical, so it still recognises sources that have since been
     moved or deleted, and ``relative_to`` gives the separator guard for free:
     ``agentihooks-extras`` is not under ``agentihooks``.
+
+    profiles/package/<kind>/ — the packaged emulation of .claude that supplies Layer 1 built-in features
+    (skills/agents/commands/rules).
     """
     tp = Path(target.rstrip("/"))
     for root in _managed_roots():
@@ -592,15 +553,20 @@ def _under_managed_source(target: str) -> bool:
             return True
         if len(parts) >= 3 and parts[0] == "profiles" and parts[2] == _CLAUDE_SUBDIR:
             return True
-        # profiles/package/<kind>/ — the packaged emulation of .claude that
-        # supplies Layer 1 built-in features (skills/agents/commands/rules).
         if len(parts) >= 2 and parts[:2] == ("profiles", "package"):
             return True
     return False
 
 
 def _state_links() -> dict[str, dict]:
-    """Return the managed-link ledger keyed by link path."""
+    """Return the managed-link ledger keyed by link path.
+
+    _LINKS_KEY: Managed-link ledger (state.json['managed_links'])
+
+    Ownership is RECORDED at creation, never inferred at deletion. Every symlink install writes into
+    ~/.claude/{skills,agents,commands,rules} lands here, and nothing outside this ledger is ever removed. Path-prefix
+    guessing is the legacy fallback only, and only for installs that predate the ledger.
+    """
     raw = _load_state().get(_LINKS_KEY, [])
     if not isinstance(raw, list):
         return {}
@@ -673,13 +639,14 @@ def _link_is_managed(link: Path, ledger: dict[str, dict] | None = None) -> bool:
 
     Both are separator-guarded: a neighbour repo sharing a name prefix
     (``agentihooks-extras`` beside ``agentihooks``) is not a match.
+
+    Recorded but unreadable is still ours; unrecorded and unreadable is not.
     """
     if ledger is None:
         ledger = _state_links()
     try:
         raw = os.readlink(link)
     except OSError:
-        # Recorded but unreadable is still ours; unrecorded and unreadable is not.
         return str(link) in ledger
     entry = ledger.get(str(link))
     if entry and raw.rstrip("/") == str(entry.get("target", "")).rstrip("/"):
@@ -693,15 +660,16 @@ def _link_is_managed(link: Path, ledger: dict[str, dict] | None = None) -> bool:
     return _under_managed_source(resolved)
 
 
-# ---------------------------------------------------------------------------
-# Target registry (state.json)
-# ---------------------------------------------------------------------------
-
 _SYNC_LOCK_FILE = AGENTIHOOKS_STATE_DIR / "sync.lock"
 
 
 def _register_target_global(profile: str, settings_profile: str = "", target: str = DEFAULT_TARGET) -> None:
-    """Record the global install for *target* in state.json (per-target record)."""
+    """Record the global install for *target* in state.json (per-target record).
+
+    Last-used target, consulted only as the interactive TTY prompt's default. It is NOT scoped to a target's own record
+    and is never trusted to pick a target for a bare, non-interactive `init` — see resolve_target's installed-target
+    precedence in scripts/targets, which reads the per-target records under targets.global instead.
+    """
     state = _load_state()
     adapter_home = CLAUDE_HOME if target == DEFAULT_TARGET else get_adapter(target).home()
     entry = {
@@ -712,11 +680,6 @@ def _register_target_global(profile: str, settings_profile: str = "", target: st
     if settings_profile:
         entry["settings_profile"] = settings_profile
     state.setdefault("targets", {}).setdefault("global", {})[target] = entry
-    # Last-used target, consulted only as the interactive TTY prompt's
-    # default. It is NOT scoped to a target's own record and is never
-    # trusted to pick a target for a bare, non-interactive `init` — see
-    # resolve_target's installed-target precedence in scripts/targets, which
-    # reads the per-target records under targets.global instead.
     state["install_target"] = target
     _save_state(state)
 
@@ -757,11 +720,6 @@ def _sync_lock(*, blocking: bool = True):
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         fd.close()
-
-
-# ---------------------------------------------------------------------------
-# Bundle helpers
-# ---------------------------------------------------------------------------
 
 
 def _print_bundle_discover_hint(*, profile_hint: str = "default") -> None:
@@ -865,14 +823,12 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
 
     if profile_name.startswith(PACKAGE_PREFIX):
         return _package_role_dir(profile_name)
-    # Built-in profiles
     local = PROFILES_DIR / profile_name
     if local.is_dir():
         return local
     bundle_profile = _bundle_profile_dir(profile_name)
     if bundle_profile:
         return bundle_profile
-    # Linked external profiles
     linked = _resolve_linked_profile_dir(profile_name)
     if linked is not None:
         return linked
@@ -919,11 +875,6 @@ def _resolve_profile_chain(profile_input: str) -> list[tuple[str, Path]]:
 
     resolved = {name: path for name, path in dirs}
     return [(name, _resolve_profile_dir(name)) for name in expand_profiles(list(resolved), _resolve_profile_dir)]
-
-
-# ---------------------------------------------------------------------------
-# Linked profile helpers (external dirs added to the chain)
-# ---------------------------------------------------------------------------
 
 
 def _chain_targets(for_target: str | None) -> tuple[str, ...]:
@@ -986,6 +937,9 @@ def cmd_link_profile(
     State mutation runs under ``_sync_lock``. ``install_global`` is invoked
     *outside* the lock to avoid a same-process flock deadlock (it acquires
     its own ``_sync_lock``).
+
+    Unlink removes the registry entry outright, so it cannot be scoped: a target left naming the de-registered profile
+    would fail to resolve its chain on the next install.
     """
     if action in ("link", "unlink"):
         _refuse_inside_rendered_home()
@@ -1004,9 +958,6 @@ def cmd_link_profile(
         _run_pending_installs(pending)
     elif action == "unlink":
         if for_target:
-            # Unlink removes the registry entry outright, so it cannot be
-            # scoped: a target left naming the de-registered profile would
-            # fail to resolve its chain on the next install.
             print("  [--] --for-target ignored: unlink de-registers globally and clears every chain.")
         with _sync_lock():
             pending = _link_profile_unlink(name, run_init=not no_init, targets=_installed_targets(_load_state()))
@@ -1031,6 +982,9 @@ def _link_profile_link(
     Returns the ``install_global`` argparse namespace when the caller should
     re-run install (so it can be invoked outside the lock), or ``None`` if
     no install is needed.
+
+    No follow-up install will refresh installed_at — bump it here so the next manual `agentihooks init` sees the chain
+    change.
     """
     if profile_dir is None:
         print("ERROR: Provide the path to a profile directory.", file=sys.stderr)
@@ -1045,7 +999,6 @@ def _link_profile_link(
         print("ERROR: Could not derive profile name. Use --name <alias>.", file=sys.stderr)
         sys.exit(1)
 
-    # Collision guard: built-in or bundle profile of same name
     if (PROFILES_DIR / derived_name).is_dir():
         print(
             f"ERROR: Name '{derived_name}' collides with a built-in profile. Pass --name <alias> to disambiguate.",
@@ -1064,7 +1017,6 @@ def _link_profile_link(
     if not isinstance(entries, list):
         entries = []
 
-    # Upsert
     existing = next((e for e in entries if e.get("name") == derived_name), None)
     if existing:
         old_path = existing.get("path", "")
@@ -1082,7 +1034,6 @@ def _link_profile_link(
         )
     state["linked_profiles"] = entries
 
-    # Append to each target's chain (idempotent, per target)
     pending: list[argparse.Namespace] = []
     report: list[str] = []
     for tname in targets:
@@ -1102,8 +1053,6 @@ def _link_profile_link(
         settings_profile = global_target.get("settings_profile", "")
 
         if not run_init and append and chain_changed:
-            # No follow-up install will refresh installed_at — bump it here so the
-            # next manual `agentihooks init` sees the chain change.
             global_target["installed_at"] = datetime.now(timezone.utc).isoformat()
 
         if append:
@@ -1155,7 +1104,6 @@ def _sweep_symlinks_into(target_root: Path) -> None:
                 raw_target = os.readlink(link)
             except OSError:
                 continue
-            # Match either the raw symlink target or its resolved form.
             raw = raw_target.rstrip("/")
             matches = (
                 raw == target_str
@@ -1164,7 +1112,6 @@ def _sweep_symlinks_into(target_root: Path) -> None:
                 or raw.startswith(target_resolved + "/")
             )
             if not matches:
-                # Resolve symlink chain only when the raw target wasn't decisive.
                 try:
                     resolved = str(link.resolve()).rstrip("/")
                 except OSError:
@@ -1193,6 +1140,9 @@ def _link_profile_unlink(
     so *targets* must cover every installed target. Stripping one target's
     chain while another still names the now-unregistered profile leaves that
     chain unresolvable on its next install.
+
+    Fall back to first available profile (default if it exists, else whatever's there). Never leave the chain string
+    empty.
     """
     if not name:
         print("ERROR: Provide the linked profile name.", file=sys.stderr)
@@ -1211,7 +1161,6 @@ def _link_profile_unlink(
     entries = [e for e in entries if e.get("name") != name]
     state["linked_profiles"] = entries
 
-    # Strip from every target's chain
     pending: list[argparse.Namespace] = []
     report: list[str] = []
     touched_any = False
@@ -1223,8 +1172,6 @@ def _link_profile_unlink(
         if chain:
             new_chain_str = ",".join(chain)
         else:
-            # Fall back to first available profile (default if it exists, else
-            # whatever's there). Never leave the chain string empty.
             avail = _available_profiles()
             new_chain_str = "default" if "default" in avail else (avail[0] if avail else "default")
         global_target["profile"] = new_chain_str
@@ -1254,7 +1201,6 @@ def _link_profile_unlink(
     else:
         print("     Was not in any chain — registry entry removed only.")
 
-    # Sweep orphan symlinks pointing into the unlinked path before re-install
     old_path = entry.get("path", "")
     if old_path:
         _sweep_symlinks_into(Path(old_path))
@@ -1266,7 +1212,11 @@ def _link_profile_unlink(
 
 
 def _link_profile_list() -> None:
-    """Show all externally linked profiles."""
+    """Show all externally linked profiles.
+
+    Per-target chains — a name present in one target's chain and absent from another's is a divergence worth seeing, not
+    something to collapse.
+    """
     entries = _get_linked_profiles()
     if not entries:
         print("No linked profiles.")
@@ -1276,8 +1226,6 @@ def _link_profile_list() -> None:
         return
 
     state = _load_state()
-    # Per-target chains — a name present in one target's chain and absent from
-    # another's is a divergence worth seeing, not something to collapse.
     chains = {
         t: [p.strip() for p in _global_record(state, t).get("profile", "").split(",") if p.strip()]
         for t in _installed_targets(state)
@@ -1294,11 +1242,6 @@ def _link_profile_list() -> None:
         print(f"  {n}{in_chain}{exists}")
         print(f"    path:   {p}")
         print(f"    linked: {linked_at}")
-
-
-# ---------------------------------------------------------------------------
-# Connector helpers
-# ---------------------------------------------------------------------------
 
 
 def _load_connectors(profile_name: str) -> tuple[dict, list[str], list[str]]:
@@ -1333,11 +1276,9 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str], list[str]]:
             _cprint(f"  [WARN] Connector '{name}' connector.yml parse error: {exc} — skipping")
             continue
 
-        # Base env (applied to all profiles)
         base_env = (meta.get("base") or {}).get("env", {})
         merged_env.update(base_env)
 
-        # Profile-specific settings (fall back to "default" if exact profile missing)
         profile_dir = conn_dir / "profiles" / profile_name
         if not profile_dir.is_dir():
             fallback = conn_dir / "profiles" / "default"
@@ -1421,7 +1362,6 @@ def _connector_link(conn_dir: Path | None) -> None:
     }
     _save_state(state)
 
-    # Show summary
     desc = meta.get("description", "")
     version = meta.get("version", "?")
     profiles_dir = conn_dir / "profiles"
@@ -1593,7 +1533,6 @@ def _connector_new(
     """
     interactive = sys.stdin.isatty()
 
-    # --- Name ---
     if not conn_name:
         if not interactive:
             print("ERROR: --name required in headless mode.", file=sys.stderr)
@@ -1603,7 +1542,6 @@ def _connector_new(
             print("ERROR: Name cannot be empty.", file=sys.stderr)
             sys.exit(1)
 
-    # --- Path ---
     if not conn_path:
         if not interactive:
             print("ERROR: --path required in headless mode.", file=sys.stderr)
@@ -1618,13 +1556,11 @@ def _connector_new(
         print(f"ERROR: {conn_dir} already exists.", file=sys.stderr)
         sys.exit(1)
 
-    # --- Description ---
     if not description:
         if interactive:
             description = input("Description (optional): ").strip()
         description = description or f"Connector: {conn_name}"
 
-    # --- Profiles ---
     available = _available_profiles()
     if not profiles_list:
         if interactive:
@@ -1635,7 +1571,6 @@ def _connector_new(
 
     profiles = [p.strip() for p in profiles_list.split(",") if p.strip()]
 
-    # --- Base env ---
     base_env: dict[str, str] = {}
     if base_env_str:
         for pair in base_env_str.split(","):
@@ -1654,17 +1589,14 @@ def _connector_new(
             else:
                 print("  Invalid format — use KEY=VALUE")
 
-    # --- Create structure ---
     conn_dir.mkdir(parents=True)
 
-    # connector.yml
     yml_data = {"name": conn_name, "description": description, "version": "1.0.0"}
     if base_env:
         yml_data["base"] = {"env": base_env}
 
     (conn_dir / "connector.yml").write_text(yaml.dump(yml_data, default_flow_style=False, sort_keys=False))
 
-    # profiles
     for profile_name in profiles:
         profile_dir = conn_dir / "profiles" / profile_name
         profile_dir.mkdir(parents=True)
@@ -1683,7 +1615,6 @@ def _connector_new(
     print(f"  2. agentihooks connector link {conn_dir}")
     print("  3. agentihooks init --profile <name>")
 
-    # --- Auto-link ---
     if auto_link:
         _connector_link(conn_dir)
     elif interactive:
@@ -1692,20 +1623,15 @@ def _connector_new(
             _connector_link(conn_dir)
 
 
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Per-repo config (agentihooks init)
-# ---------------------------------------------------------------------------
-
-
 def _cmd_settings_profile(args: argparse.Namespace) -> None:
     """Quick-switch: re-apply only the settings layer without touching rules/CLAUDE.md.
 
     Applies to every installed target unless ``--for-target`` narrows it. Codex
     has no settings.json, but the same rendered settings dict drives its
     config.toml permission posture, so the layer is meaningful on both.
+
+    Name the scope that came up empty. An unscoped "no profile installed" reads as "nothing is installed" even when the
+    other target is.
     """
     state = _load_state()
     targets = _chain_targets(getattr(args, "for_target", None))
@@ -1713,8 +1639,6 @@ def _cmd_settings_profile(args: argparse.Namespace) -> None:
     installed = {t: rec for t, rec in records.items() if rec.get("profile")}
 
     if not installed:
-        # Name the scope that came up empty. An unscoped "no profile installed"
-        # reads as "nothing is installed" even when the other target is.
         scope = f" for target '{targets[0]}'" if getattr(args, "for_target", None) else ""
         print(f"ERROR: No profile installed{scope}. Run 'agentihooks init' first.", file=sys.stderr)
         sys.exit(1)
@@ -1728,7 +1652,6 @@ def _cmd_settings_profile(args: argparse.Namespace) -> None:
 
     sp_name = getattr(args, "sp_name", None)
     if not sp_name:
-        # Show current state, per target
         for tname, rec in installed.items():
             current_sp = rec.get("settings_profile", "")
             print(f"[{tname}] persona: {rec['profile']}")
@@ -1743,7 +1666,6 @@ def _cmd_settings_profile(args: argparse.Namespace) -> None:
         print("  agentihooks settings-profile --clear                 # revert to persona defaults")
         return
 
-    # Apply the new settings profile on top of each target's existing persona
     for tname, rec in installed.items():
         profile = rec["profile"]
         print(f"[{tname}] Switching settings layer to '{sp_name}' (keeping persona '{profile}')...")
@@ -1751,14 +1673,19 @@ def _cmd_settings_profile(args: argparse.Namespace) -> None:
 
 
 def _clean_state_dir() -> None:
-    """Reset install state + session caches for a fresh install. Preserves persistent data."""
+    """Reset install state + session caches for a fresh install. Preserves persistent data.
+
+    ~/.claude first, and before the state-dir guard: the two directories fail independently. A missing ~/.agentihooks
+    (deleted by hand, or a fresh AGENTIHOOKS_HOME) must not leave managed artifacts stranded in ~/.claude. It also has
+    to precede the state.json delete below, which drops the ledger every removal here reads.
+
+    Before the sweep: _DELETE_GLOBS drops "*.pid", which would erase the only record of a running daemon and leave it
+    orphaned on the port. Stop it first; a network-mode install restarts it at step 6.
+
+    Whitelist: only these are deleted. Everything else survives.
+    """
     import shutil
 
-    # ~/.claude first, and before the state-dir guard: the two directories fail
-    # independently. A missing ~/.agentihooks (deleted by hand, or a fresh
-    # AGENTIHOOKS_HOME) must not leave managed artifacts stranded in ~/.claude.
-    # It also has to precede the state.json delete below, which drops the ledger
-    # every removal here reads.
     removed = _clean_claude_home()
 
     state_dir = AGENTIHOOKS_STATE_DIR
@@ -1767,16 +1694,12 @@ def _clean_state_dir() -> None:
             _cprint(f"  [OK] Clean install: reset {removed} item(s) from {CLAUDE_HOME}")
         return
 
-    # Before the sweep: _DELETE_GLOBS drops "*.pid", which would erase the only
-    # record of a running daemon and leave it orphaned on the port. Stop it first;
-    # a network-mode install restarts it at step 6.
     try:
         if _mcp_daemon_module().stop():
             _cprint("  [OK] Stopped the agentihooks MCP daemon before clearing state")
     except Exception as e:  # never let cleanup fail a --force install
         _cprint(f"  {_YELLOW}[WARN] Could not stop the agentihooks MCP daemon: {e}{_RESET}")
 
-    # Whitelist: only these are deleted. Everything else survives.
     _DELETE_FILES = {
         "state.json",
         "sync-hashes.json",
@@ -1833,14 +1756,17 @@ def _clean_claude_home() -> int:
     These directories are shared with the operator and with other tools, so the
     managed-link ledger decides link-by-link; the directories themselves are
     never removed.
+
+    A whole-directory symlink into a managed root is agentihooks' own legacy install shape; anything else belongs to the
+    operator.
+
+    settings.local.json is never written by agentihooks — it is the operator's per-machine overlay and is left alone.
     """
     removed = 0
     claude_dir = CLAUDE_HOME
     for subdir in ("rules", "skills", "agents", "commands"):
         target = claude_dir / subdir
         if target.is_symlink():
-            # A whole-directory symlink into a managed root is agentihooks' own
-            # legacy install shape; anything else belongs to the operator.
             if _link_is_managed(target):
                 try:
                     target.unlink()
@@ -1863,8 +1789,6 @@ def _clean_claude_home() -> int:
             except Exception:
                 pass
 
-    # settings.local.json is never written by agentihooks — it is the
-    # operator's per-machine overlay and is left alone.
     claude_md = claude_dir / _CLAUDE_MD_NAME
     if (claude_md.exists() or claude_md.is_symlink()) and _claude_md_is_managed(claude_md):
         try:
@@ -1909,13 +1833,40 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     agentihooks init --bundle <path>    → link bundle + global install
     agentihooks init                    → re-run global install (bundle must be linked)
     agentihooks init --force            → clean reinstall; keeps the bundle link, linked profiles and profile chain
+
+    The flag was accepted by argparse and read nowhere, so `init --dry-run` performed a full destructive install —
+    rewriting CLAUDE.md, MCP config, ~/.bashrc and reinstalling the CLI — while its help promised a preview. Refusing
+    loudly beats silently doing the opposite of what was asked.
+
+    B1: process --link-profile NAME=PATH (repeatable) BEFORE profile resolution so the new profile names are visible to
+    the chain validation downstream.
+
+    Resolve install target — flag > AGENTIHOOKS_TARGET env > exactly-one-installed-target recall > interactive TTY
+    prompt > DEFAULT_TARGET (with a stderr warning when multiple targets are on record and the choice is
+    non-interactive). `install_target` below is only the TTY prompt's default, not an authoritative per-target record —
+    see resolve_target. default=() so resolve_target can distinguish "nothing installed" (prompt) from "claude
+    installed" (recall) — see _installed_targets.
+
+    Profile recall: this target's record first; a fresh target borrows the default target's chain so `init --target
+    codex` on a claude machine installs the same persona instead of falling to 'default'.
+
+    B1.1: profiles freshly linked in THIS invocation must end up in the install chain even when the operator also passed
+    --profile <name>. Without this merge, --profile clobbers the chain that --link-profile just appended in state.json,
+    and the linked profile is registered but not installed.
+
+    Guard: a bare `init` that resolved to 'default' while the managed CLAUDE.md on disk was installed from a different
+    profile means state.json has lost (or never had) the profile record — silently stomping the live profile with
+    'default' is exactly the failure this blocks. Explicit --profile / --force still win.
+
+    Scan the whole file, not just line 1 — a chained install writes one `<!-- profile: X -->` marker per chain member,
+    and the re-run suggestion below must carry the full chain, not just the first entry. findall on "" (empty CLAUDE.md)
+    returns [] rather than raising, so an existing-but-empty file is handled too.
+
+    Always write — the block is self-guarding (agentienv checks for the env file at runtime) and the alias/PATH lines
+    must land regardless.
     """
     _refuse_inside_rendered_home()
     if getattr(args, "dry_run", False):
-        # The flag was accepted by argparse and read nowhere, so `init --dry-run`
-        # performed a full destructive install — rewriting CLAUDE.md, MCP config,
-        # ~/.bashrc and reinstalling the CLI — while its help promised a preview.
-        # Refusing loudly beats silently doing the opposite of what was asked.
         print(
             "ERROR: `init --dry-run` is not implemented — init writes CLAUDE.md, MCP\n"
             "config, ~/.bashrc and the CLI, and none of that is previewable today.\n"
@@ -1938,16 +1889,12 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
             _save_state(_identity)
     bundle_path = getattr(args, "bundle", None)
 
-    # Global mode
     if bundle_path:
-        # First-time: link bundle, then global install
         bundle_dir = Path(bundle_path).expanduser().resolve()
         if not bundle_dir.is_dir():
             print(f"ERROR: Bundle directory not found: {bundle_dir}", file=sys.stderr)
             sys.exit(1)
-        # Check for profiles/ dir in bundle (new structure) or .agentihooks/ (legacy)
         if not (bundle_dir / "profiles").is_dir():
-            # Maybe they pointed at the old .agentihooks subdir?
             if (bundle_dir.parent / "profiles").is_dir():
                 print("HINT: Point --bundle at the repo root, not .agentihooks/")
             print(f"ERROR: No profiles/ directory found in {bundle_dir}", file=sys.stderr)
@@ -1956,8 +1903,6 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         print()
     bundles.link_user_arg(getattr(args, "user_bundle", None))
 
-    # B1: process --link-profile NAME=PATH (repeatable) BEFORE profile resolution
-    # so the new profile names are visible to the chain validation downstream.
     link_profile_args = list(getattr(args, "link_profile", []) or [])
     just_linked_names: list[str] = []
     for spec in link_profile_args:
@@ -1974,17 +1919,13 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         if not lp_dir.is_dir():
             print(f"ERROR: --link-profile path is not a directory: {lp_dir}", file=sys.stderr)
             sys.exit(1)
-        # run_init=False — we're about to install_global below; don't trigger an
-        # extra round-trip from inside link-profile.
         _link_profile_link(lp_dir, name=name, append=True, run_init=False)
         just_linked_names.append(name)
 
-    # Check bundle (optional — works without one using built-in profiles only)
     bundle = _get_bundle_path()
     bundles.warn_unavailable()
     if not bundle:
         print(f"{_DIM}[--] No bundle linked — using built-in profiles only.{_RESET}")
-        # B2: auto-discover hint — don't auto-link, just suggest the command.
         if not getattr(args, "no_discover", False):
             _hint_state = _load_state()
             _hint_profile = (
@@ -1996,13 +1937,6 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     profile_name = args.profile
     _prev_state = _load_state()
     _migrate_profile_rename(_prev_state, "colt", "anton")
-    # Resolve install target — flag > AGENTIHOOKS_TARGET env > exactly-one-
-    # installed-target recall > interactive TTY prompt > DEFAULT_TARGET (with
-    # a stderr warning when multiple targets are on record and the choice is
-    # non-interactive). `install_target` below is only the TTY prompt's
-    # default, not an authoritative per-target record — see resolve_target.
-    # default=() so resolve_target can distinguish "nothing installed" (prompt)
-    # from "claude installed" (recall) — see _installed_targets.
     _prev_installed = _installed_targets(_prev_state, default=())
     _stored_target = _prev_state.get("install_target", "")
     install_target = resolve_target(
@@ -2011,9 +1945,6 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         _prev_installed,
         interactive_ok=not _is_force,
     )
-    # Profile recall: this target's record first; a fresh target borrows the
-    # default target's chain so `init --target codex` on a claude machine
-    # installs the same persona instead of falling to 'default'.
     from scripts.init_reporter import previous_install
 
     _prev_global = previous_install(sys.modules[__name__], _kept_state if _is_force else _prev_state, install_target)
@@ -2028,11 +1959,6 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         else:
             profile_name = "default"
 
-    # B1.1: profiles freshly linked in THIS invocation must end up in the
-    # install chain even when the operator also passed --profile <name>.
-    # Without this merge, --profile clobbers the chain that --link-profile
-    # just appended in state.json, and the linked profile is registered but
-    # not installed.
     if just_linked_names:
         existing_chain = [p.strip() for p in profile_name.split(",") if p.strip()]
         for lname in just_linked_names:
@@ -2042,21 +1968,11 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 
     profile_name = _keep_chained_linked_profiles(profile_name, _prev_global, _kept_state if _is_force else _prev_state)
 
-    # Guard: a bare `init` that resolved to 'default' while the managed
-    # CLAUDE.md on disk was installed from a different profile means state.json
-    # has lost (or never had) the profile record — silently stomping the live
-    # profile with 'default' is exactly the failure this blocks. Explicit
-    # --profile / --force still win.
     if profile_name == "default" and not args.profile and not _is_force:
         _md_path = Path(_prev_state.get("managed_claude_md") or (claude_home() / "CLAUDE.md"))
         _marker_profile = ""
         try:
             _text = _md_path.read_text() if _md_path.exists() else ""
-            # Scan the whole file, not just line 1 — a chained install writes
-            # one `<!-- profile: X -->` marker per chain member, and the
-            # re-run suggestion below must carry the full chain, not just the
-            # first entry. findall on "" (empty CLAUDE.md) returns [] rather
-            # than raising, so an existing-but-empty file is handled too.
             _matches = re.findall(r"<!--\s*profile:\s*([A-Za-z0-9_,-]+)\s*-->", _text)
             _seen: set[str] = set()
             _chain: list[str] = [m for m in _matches if not (m in _seen or _seen.add(m))]
@@ -2074,14 +1990,12 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-    # Resolve settings profile (optional overlay) — same precedence as profile
     settings_profile = getattr(args, "settings_profile", None)
     if not settings_profile:
         settings_profile = os.environ.get("AGENTIHOOKS_SETTINGS_PROFILE", "")
     if not settings_profile:
         settings_profile = _prev_global.get("settings_profile", "")
 
-    # Build args for _install_global_inner
     global_args = argparse.Namespace(
         profile=profile_name,
         settings_profile=settings_profile or "",
@@ -2090,9 +2004,6 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     install_global(global_args)
     _rerender_profile_homes(install_target)
 
-    # --- Update bashrc block (agentienv + agenti alias + PATH) ---
-    # Always write — the block is self-guarding (agentienv checks for the
-    # env file at runtime) and the alias/PATH lines must land regardless.
     _update_bashrc_block()
 
 
@@ -2188,9 +2099,6 @@ def _update_bashrc_block() -> None:
     print(f"{_DIM}     run: source ~/.bashrc{_RESET}")
 
 
-# User env file (~/.agentihooks/.env)
-# ---------------------------------------------------------------------------
-
 _ENV_FILE_DST = AGENTIHOOKS_STATE_DIR / ".env"
 _ENV_MANAGED_START = "# === agentihooks defaults (managed) ==="
 _ENV_MANAGED_END = "# === end agentihooks defaults ==="
@@ -2284,10 +2192,6 @@ def _seed_user_env_file() -> list[str]:
     return added
 
 
-# ---------------------------------------------------------------------------
-# --loadenv: install agentihooksenv alias into ~/.bashrc (managed block)
-# ---------------------------------------------------------------------------
-
 _BASHRC = Path.home() / ".bashrc"
 _BLOCK_START = "# === agentihooks ==="
 _BLOCK_END = "# === end-agentihooks ==="
@@ -2328,7 +2232,6 @@ def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) ->
     bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
 
     if _BLOCK_START in bashrc_text:
-        # Replace existing block
         lines = bashrc_text.splitlines(keepends=True)
         new_lines = []
         inside = False
@@ -2343,7 +2246,6 @@ def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) ->
         _BASHRC.write_text("".join(new_lines), encoding="utf-8")
         _cprint(f"[OK] Updated agentihooks block in {_BASHRC}")
     else:
-        # Append new block
         sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
         _BASHRC.write_text(bashrc_text + sep + block, encoding="utf-8")
         _cprint(f"[OK] Added agentihooks block to {_BASHRC}")
@@ -2389,12 +2291,20 @@ def _detect_venv() -> Path | None:
     There is deliberately NO ``~/.agentihooks/.venv`` tier: the operator's
     environment is the source of truth, and a shadow venv under the state
     dir drifts out of date and silently hijacks hook wiring.
+
+    Explicit pin via AGENTIHOOKS_PYTHON — from the environment, then from ~/.agentihooks/*.env. The installer does not
+    import hooks.config, so a pin written to an env file would otherwise only bind inside already-running hook processes
+    and be silently ignored by `agentihooks init` in a fresh shell (same gap _resolve_installer_mcp_transport patches).
+
+    Venv beside the repo — WORKSPACE level first, then repo level. The workspace venv is the one the fleet installs into
+    and the one hooks actually run under; a repo-local .venv is usually incidental (`uv run` creates one), and letting
+    it win means `--loadenv` installs dependencies into an interpreter no hook ever executes. The probe alone cannot
+    separate them — both can `import hooks` — so the order is load-bearing and the probe only demotes a candidate that
+    is unusable.
+
+    Nothing importable yet (fresh venv, deps not installed) — fall back to the same preference order rather than
+    returning None.
     """
-    # 1. Explicit pin via AGENTIHOOKS_PYTHON — from the environment, then from
-    #    ~/.agentihooks/*.env. The installer does not import hooks.config, so a
-    #    pin written to an env file would otherwise only bind inside already-
-    #    running hook processes and be silently ignored by `agentihooks init`
-    #    in a fresh shell (same gap _resolve_installer_mcp_transport patches).
     pinned = os.environ.get("AGENTIHOOKS_PYTHON", "").strip()
     if not pinned:
         try:
@@ -2406,31 +2316,20 @@ def _detect_venv() -> Path | None:
         if python.exists():
             return python
 
-    # 2. Activated venv via VIRTUAL_ENV — explicit operator intent wins
     venv_env = os.environ.get("VIRTUAL_ENV")
     if venv_env:
         python = Path(venv_env) / "bin" / "python"
         if python.exists():
             return python
 
-    # 3. Venv beside the repo — WORKSPACE level first, then repo level. The
-    #    workspace venv is the one the fleet installs into and the one hooks
-    #    actually run under; a repo-local .venv is usually incidental (`uv run`
-    #    creates one), and letting it win means `--loadenv` installs
-    #    dependencies into an interpreter no hook ever executes. The probe
-    #    alone cannot separate them — both can `import hooks` — so the order is
-    #    load-bearing and the probe only demotes a candidate that is unusable.
     tier3 = [Path(base) / ".venv" / "bin" / "python" for base in (AGENTIHOOKS_ROOT.parent, AGENTIHOOKS_ROOT)]
     existing = [c for c in tier3 if c.exists()]
     for candidate in existing:
         if _python_can_import_hooks(candidate):
             return candidate
-    # Nothing importable yet (fresh venv, deps not installed) — fall back to
-    # the same preference order rather than returning None.
     if existing:
         return existing[0]
 
-    # 4. .venv directory in cwd — lowest priority
     local_venv = Path.cwd() / ".venv" / "bin" / "python"
     if local_venv.exists():
         return local_venv
@@ -2511,11 +2410,6 @@ def _prompt_install_requirements(*, force: bool = False) -> None:
             _cprint(f"  [!!] uv pip install failed (exit {result.returncode})")
 
 
-# ---------------------------------------------------------------------------
-# Path substitution: replace /app with the actual agentihooks root
-# ---------------------------------------------------------------------------
-
-
 def substitute_paths(obj: object, src: str = "/app", dst: str = str(AGENTIHOOKS_ROOT)) -> object:
     """Recursively replace *src* with *dst* in all string values of a JSON structure."""
     if isinstance(obj, str):
@@ -2547,13 +2441,10 @@ def _resolve_profile_hook_paths(settings: dict, profile_dir: Path) -> dict:
                 cmd = hook.get("command")
                 if not cmd or not isinstance(cmd, str):
                     continue
-                # Split to find the script path (e.g. "bash profiles/foo/bar.sh")
                 parts = cmd.split()
                 for i, part in enumerate(parts):
-                    # Skip flags and the interpreter itself
                     if part.startswith("-") or i == 0:
                         continue
-                    # Check relative to profile dir, bundle root (profiles/..), and agentihooks root
                     for base in (profile_dir, profile_dir.parent.parent, AGENTIHOOKS_ROOT):
                         candidate = base / part
                         if candidate.exists():
@@ -2647,13 +2538,12 @@ def list_profiles() -> None:
     print()
 
 
-# ---------------------------------------------------------------------------
-# Settings helpers
-# ---------------------------------------------------------------------------
-
-
 def _preserve_personal_keys(existing_path: Path) -> dict:
-    """Return personal keys from an existing unmanaged settings file."""
+    """Return personal keys from an existing unmanaged settings file.
+
+    PERSONAL_KEYS: Keys from ~/.claude/settings.json that belong to the user and should be preserved when merging
+    (unless the base settings already define them).
+    """
     personal: dict = {}
     if not existing_path.exists():
         return personal
@@ -2672,7 +2562,11 @@ def _preserve_personal_keys(existing_path: Path) -> dict:
 
 
 def _backup_settings(existing_path: Path) -> None:
-    """Back up an existing unmanaged settings file (skips if already managed)."""
+    """Back up an existing unmanaged settings file (skips if already managed).
+
+    Record the FIRST such backup only — that is the pre-agentihooks original, the one uninstall must put back. Later
+    backups are of our own output.
+    """
     if not existing_path.exists():
         return
     existing_raw = load_json(existing_path)
@@ -2682,17 +2576,10 @@ def _backup_settings(existing_path: Path) -> None:
     backup_path = existing_path.with_suffix(f".json.bak.{timestamp}")
     shutil.copy2(existing_path, backup_path)
     print(f"Backed up existing settings → {backup_path}")
-    # Record the FIRST such backup only — that is the pre-agentihooks original,
-    # the one uninstall must put back. Later backups are of our own output.
     state = _load_state()
     if not state.get("settings_original_backup"):
         state["settings_original_backup"] = str(backup_path)
         _save_state(state)
-
-
-# ---------------------------------------------------------------------------
-# OTEL env vars builder
-# ---------------------------------------------------------------------------
 
 
 def _build_otel_env(profile_data: dict) -> dict:
@@ -2721,7 +2608,6 @@ def _build_otel_env(profile_data: dict) -> dict:
     if attrs:
         env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(f"{k}={v}" for k, v in attrs.items())
 
-    # Langfuse destination (traces only, OTLP HTTP)
     langfuse = otel_cfg.get("langfuse", {})
     if langfuse.get("enabled"):
         env["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
@@ -2733,11 +2619,6 @@ def _build_otel_env(profile_data: dict) -> dict:
             env["OTEL_LANGFUSE_SECRET_KEY"] = langfuse["secret_key"]
 
     return env
-
-
-# ---------------------------------------------------------------------------
-# Global install
-# ---------------------------------------------------------------------------
 
 
 def _skill_dir_filter() -> Callable[[Path], bool]:
@@ -2763,15 +2644,49 @@ def install_global(args: argparse.Namespace) -> None:
 
 
 def _install_global_inner(args: argparse.Namespace) -> None:
-    # Target adapter — every target-specific write (settings schema, feature
-    # dirs, persona file, MCP registration) goes through this seam. Unknown /
-    # not-yet-installable targets are rejected here, before anything is written.
+    """PACKAGE_FEATURES_DIR: agentihooks built-in features (Layer 1 of the symlink merge) live here. This directory is the
+    packaged emulation of a `.claude/` tree — it holds skills/agents/commands/rules/ and IS shipped in the wheel
+    (package-data globs every json/yaml/md under profiles/). The old source, the repo-root `.claude/`, was never
+    packaged, so PyPI installs got no built-in features; sourcing from under profiles/ fixes that and lets the repo-root
+    `.claude/` be untracked.
+
+    Target adapter — every target-specific write (settings schema, feature dirs, persona file, MCP registration) goes
+    through this seam. Unknown / not-yet-installable targets are rejected here, before anything is written.
+
+    In-memory chain string — used for display only. STATE persistence below uses ``profile_input`` (operator intent) so
+    a transient missing profile source (e.g. a git checkout in the bundle repo briefly removing files) cannot shrink the
+    persisted chain.
+
+    Step 6 is where the transport is actually used, but by then settings, hooks, skills and CLAUDE.md are already on
+    disk. Fail here instead.
+
+    Layer resolution is target-agnostic; what happens to each layer (symlink, translate, compile into persona, skip) is
+    the adapter's call.
+
+    Layer 1: agentihooks built-in (packaged under profiles/package/, the emulated .claude tree — shipped in the wheel,
+    unlike the old repo-root .claude/)
+
+    Network transport needs a persistent server; stdio does not. Only in network mode does a systemd artifact appear on
+    the machine at all — and reverting to stdio tears down a unit left over from a previous run, so a downgrade cannot
+    orphan a daemon the config no longer points at.
+
+    A daemon started under a previous network-mode install keeps serving a port nothing points at once the client entry
+    reverts to stdio. Removing the unit does not touch a process started outside systemd.
+
+    MCP layers, target-native. A layer that ships the target's own MCP file (copilot: mcp-config.overrides.json, codex:
+    mcp.overrides.toml) is used as-is; otherwise the layer's Claude .mcp.json is re-projected by the adapter as before.
+    Native files are what let copilot carry its per-server `tools` allowlist and `auth: false`, neither of which the
+    Claude shape can express.
+
+    Persist the OPERATOR-INTENT chain (profile_input), not the shrunk runtime chain. See note above: dropping
+    unresolvable entries from state lets a transient git operation in the bundle repo silently demote the chain to
+    "default".
+    """
     install_target: str = getattr(args, "install_target", "") or DEFAULT_TARGET
     adapter = get_adapter(install_target)
 
     profile_input: str = args.profile
 
-    # --- Parse profile chain (comma-separated) ---
     profile_chain = [p.strip() for p in profile_input.split(",") if p.strip()]
     if not profile_chain:
         print("ERROR: No profile specified.", file=sys.stderr)
@@ -2790,10 +2705,6 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     profile_chain = [name for name, _ in profile_dirs]
-    # In-memory chain string — used for display only. STATE persistence below
-    # uses ``profile_input`` (operator intent) so a transient missing profile
-    # source (e.g. a git checkout in the bundle repo briefly removing files)
-    # cannot shrink the persisted chain.
     profile_name = ",".join(profile_chain)
     persisted_profile = profile_input.strip() or profile_name
 
@@ -2817,12 +2728,8 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     print(f"Python           : {_canonical_python}")
     print()
 
-    # --- 0. Reject an unusable MCP transport before anything is written ---
-    # Step 6 is where the transport is actually used, but by then settings,
-    # hooks, skills and CLAUDE.md are already on disk. Fail here instead.
     _mcp_transport = _validate_mcp_transport_or_exit()
 
-    # --- 1. Load and render base settings ---
     _base_settings = PROFILES_DIR / "_base" / _NATIVE_BASE_NAME[install_target]
     if not _base_settings.exists():
         print(f"ERROR: {_base_settings} not found.", file=sys.stderr)
@@ -2843,10 +2750,8 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     rendered = native_settings(install_target, profile_dirs, settings_profile)
     last_profile = profile_chain[-1]
 
-    # --- 2 + 3. Personal-key merge, backup, and settings write (target-specific) ---
     existing_settings_path = adapter.write_settings(rendered)
 
-    # --- 4. Symlink skills/agents/commands/rules (layers: agentihooks → bundle → user bundle → each profile in chain) ---
     bundle_dir = _get_bundle_path()
     user_dir = _get_user_bundle_path()
     shared_dir = _get_shared_bundle_path()
@@ -2857,39 +2762,23 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         ("commands", "command", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
     ]:
-        # Layer resolution is target-agnostic; what happens to each layer
-        # (symlink, translate, compile into persona, skip) is the adapter's call.
         layers: list[tuple[str, Path]] = []
-        # Layer 1: agentihooks built-in (packaged under profiles/package/, the
-        # emulated .claude tree — shipped in the wheel, unlike the old repo-root .claude/)
         layers.append((label, PACKAGE_FEATURES_DIR / subdir))
-        # Layer 2: bundle top-level .claude/ (inherits to all profiles)
         layers.extend(_bundle_feature_layers(subdir, label))
-        # Layer 3+: each profile in chain (later profiles override earlier for same-name files)
         for pname, pdir in profile_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
                 chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
                 layers.append((chain_label, pdir / _CLAUDE_SUBDIR / subdir))
         adapter.install_features(subdir, layers, filter_fn)
 
-    # --- 5 + 5a + 5b. Persona install (target-specific writer) ---
     adapter.install_persona(profile_dirs, profile_chain, bundle_dir, user_dir, shared_dir)
 
-    # --- 6. Install MCP servers (target-specific registration) ---
-    # Layer 1: the agentihooks MCP server
     adapter.register_hooks_utils(last_profile)
 
-    # Network transport needs a persistent server; stdio does not. Only in
-    # network mode does a systemd artifact appear on the machine at all — and
-    # reverting to stdio tears down a unit left over from a previous run, so a
-    # downgrade cannot orphan a daemon the config no longer points at.
     if _mcp_transport != "stdio":
         _install_systemd_user_unit(_mcp_transport)
         _ensure_mcp_daemon(_mcp_transport)
     else:
-        # A daemon started under a previous network-mode install keeps serving a
-        # port nothing points at once the client entry reverts to stdio. Removing
-        # the unit does not touch a process started outside systemd.
         if _mcp_daemon_module().stop():
             _cprint("  [OK] Stopped the agentihooks MCP daemon (transport reverted to stdio)")
         _remove_systemd_user_unit()
@@ -2900,12 +2789,6 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     _gc_python, _gc_root = str(_resolve_hooks_python()), str(AGENTIHOOKS_ROOT)
     _cprint("  " + reconcile_units(_gc_python, _gc_root, _gc_enabled()))
 
-    # MCP layers, target-native. A layer that ships the target's own MCP file
-    # (copilot: mcp-config.overrides.json, codex: mcp.overrides.toml) is used
-    # as-is; otherwise the layer's Claude .mcp.json is re-projected by the
-    # adapter as before. Native files are what let copilot carry its per-server
-    # `tools` allowlist and `auth: false`, neither of which the Claude shape can
-    # express.
     def _register_mcp_layer(root: Path, label: str) -> None:
         native = _native_layer_path(root, install_target, _NATIVE_MCP_NAME)
         claude_mcp = _native_layer_path(root, "claude", _NATIVE_MCP_NAME)
@@ -2920,25 +2803,20 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         except (json.JSONDecodeError, OSError) as exc:
             _cprint(f"  [WARN] Could not read {path}: {exc}")
 
-    # Layer 2: bundle — always installed; profile MCPs layer on top (override per-name)
     for kind, root in _bundle_roots():
         _register_mcp_layer(root, _BUNDLE_LABELS[kind].capitalize())
 
-    # Layer 3+: each profile (chained)
     for pname, pdir in profile_dirs:
         chain_label = f"Profile({pname})" if len(profile_chain) > 1 else "Profile"
         _register_mcp_layer(pdir, chain_label)
 
-    # --- 6b. Settings-profile MCP overlay ---
     if settings_profile_dir is not None:
         _register_mcp_layer(settings_profile_dir, "Settings-profile")
 
-    # --- 7. Re-apply any custom MCPs tracked in state.json ---
     if STATE_JSON.exists():
         print()
         sync_user_mcp()
 
-    # --- 9b. Auto-install MCP file from AGENTIHOOKS_MCP_FILE env var ---
     mcp_file_env = os.environ.get("AGENTIHOOKS_MCP_FILE", "")
     if mcp_file_env:
         mcp_path = Path(mcp_file_env).expanduser().resolve()
@@ -2948,31 +2826,21 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         else:
             _cprint(f"  [--] AGENTIHOOKS_MCP_FILE={mcp_file_env} not found — skipping.")
 
-    # --- 10. Install agentihooks CLI tool to ~/.local/bin ---
     print()
     _install_cli_tool()
 
-    # --- 11. Seed ~/.agentihooks/.env from .env.example (first run only) ---
     print()
     runtime_env.seed(_seed_user_env_file, _ENV_FILE_DST, rendered)
 
-    # --- 12. Register install in state.json ---
-    # Persist the OPERATOR-INTENT chain (profile_input), not the shrunk
-    # runtime chain. See note above: dropping unresolvable entries from
-    # state lets a transient git operation in the bundle repo silently
-    # demote the chain to "default".
     _register_target_global(persisted_profile, settings_profile=settings_profile_name, target=install_target)
 
-    # --- 12b. Target-specific ledger reconcile + snapshot ---
     adapter.post_install_reconcile(profile_chain, persisted_profile)
 
-    # --- Track version in state.json ---
     state = _load_state()
     state["version"] = _get_version()
     state["installed_at"] = datetime.now(timezone.utc).isoformat()
     _save_state(state)
 
-    # --- Done ---
     print()
     print(f"{_GREEN}{_BOLD}Installation complete.{_RESET}")
     print()
@@ -3000,10 +2868,21 @@ def _install_claude_persona(
 ) -> None:
     """Steps 5/5a/5b of the Claude install: CLAUDE.md (single or chained),
     bundle shared prepend, CI-manifesto append. Bodies moved verbatim from
-    ``_install_global_inner`` behind the target seam."""
-    # --- 5. Install CLAUDE.md (single profile = copy; chain = concatenated copy) ---
+    ``_install_global_inner`` behind the target seam.
+
+    Carry over any third-party fenced block (agentibridge et al) before this write replaces the file wholesale.
+
+    Same up-to-date guard the single-profile writer uses: without it every chained init takes the backup+overwrite path
+    below and drops another CLAUDE.md.bak.<timestamp> into ~/.claude. Skip only the write — steps 5a/5b and MCP install
+    still run.
+
+    Back up before claiming ownership: an operator file that merely happens to match would otherwise be deleted by
+    uninstall with "no pre-agentihooks original recorded".
+
+    Runs once, outside the single-profile/chain branch, so a chained install gets the shared block exactly once at the
+    top rather than once per profile.
+    """
     _cleanup_stale_claude_md_symlink()
-    # Remove any previous chain-injected CLAUDE.md rules
     rules_dir = CLAUDE_HOME / "rules"
     if rules_dir.is_dir():
         for f in rules_dir.iterdir():
@@ -3011,10 +2890,8 @@ def _install_claude_persona(
                 f.unlink()
 
     if len(profile_chain) == 1:
-        # Single profile: copy the profile's CLAUDE.md (real file, not a symlink)
         _install_system_prompt(profile_dirs[0][1], profile_dirs[0][0])
     else:
-        # Chain mode: concatenate all CLAUDE.md files into one rendered file
         claude_md_parts: list[str] = []
         for pname, pdir in profile_dirs:
             claude_md_src = pdir / _CLAUDE_MD_NAME
@@ -3027,25 +2904,15 @@ def _install_claude_persona(
             dst = CLAUDE_HOME / _CLAUDE_MD_NAME
             chained = "\n\n---\n\n".join(claude_md_parts) + "\n"
             up_to_date = False
-            # Carry over any third-party fenced block (agentibridge et al) before
-            # this write replaces the file wholesale.
             if dst.exists() and not dst.is_symlink():
                 _force_backup_if_malformed(dst)
                 chained = _preserve_foreign_blocks(chained, dst.read_text())
-                # Same up-to-date guard the single-profile writer uses: without it
-                # every chained init takes the backup+overwrite path below and
-                # drops another CLAUDE.md.bak.<timestamp> into ~/.claude.
-                # NB: skip only the write — steps 5a/5b and MCP install still run.
                 up_to_date = _same_content(_strip_managed_blocks(dst.read_text()), chained)
 
             if up_to_date:
-                # Back up before claiming ownership: an operator file that merely
-                # happens to match would otherwise be deleted by uninstall with
-                # "no pre-agentihooks original recorded".
                 _claim_claude_md_ownership(dst)
                 _cprint(f"  [--] Chained {_CLAUDE_MD_NAME} already up to date")
             else:
-                # Remove stale symlink, or back up a pre-existing real file first
                 if dst.is_symlink():
                     dst.unlink()
                 elif dst.exists():
@@ -3058,21 +2925,11 @@ def _install_claude_persona(
                 sources = [pn for pn, pd in profile_dirs if (pd / _CLAUDE_MD_NAME).exists()]
                 _cprint(f"[OK] Wrote chained CLAUDE.md ({' + '.join(sources)})")
         else:
-            # No CLAUDE.md in any profile — try last profile as fallback
             _install_system_prompt(profile_dirs[-1][1], profile_dirs[-1][0])
 
-    # --- 5a. Prepend bundle shared CLAUDE.md (cross-profile directives) ---
-    # Runs once, outside the single-profile/chain branch, so a chained install gets
-    # the shared block exactly once at the top rather than once per profile.
     _prepend_bundle_claude_md(bundle_dir, user_dir, shared_dir)
 
-    # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
     _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs, user_dir, shared_dir)
-
-
-# ---------------------------------------------------------------------------
-# User-scope MCP install (~/.claude.json)
-# ---------------------------------------------------------------------------
 
 
 def _resolve_claude_json() -> Path:
@@ -3153,18 +3010,16 @@ def _reconcile_managed_mcp_ledger(current_managed: set[str]) -> list[str]:
     regardless of provenance.
 
     Returns the sorted list of removed server names (may be empty).
+
+    A name a profile defines but the operator already occupied is theirs, not ours (see _merge_mcp_to_user_scope).
+    Claiming it here is what turns a collision into a deletion one profile-update later.
     """
     state = _load_state()
     old_ledger = set(state.get("managed_mcp_servers", []))
-    # A name a profile defines but the operator already occupied is theirs, not
-    # ours (see _merge_mcp_to_user_scope). Claiming it here is what turns a
-    # collision into a deletion one profile-update later.
     current_managed = current_managed - _state_foreign_mcp()
     to_remove = old_ledger - current_managed
     if to_remove:
         _remove_mcp_from_user_scope({name: None for name in to_remove})
-    # Reload before rewriting: _remove_mcp_from_user_scope only touches
-    # ~/.claude.json, but reload keeps us robust to any state mutation.
     state = _load_state()
     state["managed_mcp_servers"] = sorted(current_managed)
     _save_state(state)
@@ -3225,6 +3080,10 @@ def _merge_mcp_to_user_scope(servers: dict) -> None:
     the reconcile that follows would then record the name in the managed ledger,
     so the next profile that drops the name deletes the operator's server
     outright. Such names are left alone and remembered as foreign.
+
+    An identical config is ours by construction — it is what this profile chain writes. Treating it as the operator's is
+    how a machine that predates the ledger marks every server foreign, leaving the ledger permanently empty and prune
+    with nothing to sweep.
     """
     from scripts.targets._common import drop_if_credentialed, sanitize_env_and_headers
 
@@ -3238,11 +3097,6 @@ def _merge_mcp_to_user_scope(servers: dict) -> None:
                 continue
             config = sanitize_env_and_headers(name, config, str(_CLAUDE_JSON))
         if name in existing_servers:
-            # An identical config is ours by construction — it is what this
-            # profile chain writes. Treating it as the operator's is how a
-            # machine that predates the ledger marks every server foreign,
-            # leaving the ledger permanently empty and prune with nothing to
-            # sweep.
             if (
                 name not in ours
                 and existing_servers[name] != config
@@ -3304,14 +3158,14 @@ def _resolve_installer_mcp_transport() -> str:
     Resolved from ``AGENTIHOOKS_MCP_TRANSPORT`` in the installer's environment,
     then from ``~/.agentihooks/.env`` — the same file the daemon reads at
     runtime, so one operator edit drives both sides.
+
+    Delegated so the installer and the daemon tooling read the env files the same way. Scanning only `.env` here missed
+    a transport set in a companion `*.env`, which `hooks/config.py` does load — the installer then wrote a stdio entry
+    for a daemon that comes up in network mode.
     """
     val = os.environ.get("AGENTIHOOKS_MCP_TRANSPORT", "").strip().lower()
     if val:
         return val
-    # Delegated so the installer and the daemon tooling read the env files the
-    # same way. Scanning only `.env` here missed a transport set in a companion
-    # `*.env`, which `hooks/config.py` does load — the installer then wrote a stdio
-    # entry for a daemon that comes up in network mode.
     from_file = _mcp_daemon_module()._scan_env_file("MCP_TRANSPORT")
     if from_file:
         return from_file.strip().lower()
@@ -3397,6 +3251,24 @@ def _build_mcp_config(mcp_categories: str) -> dict:
     In url mode *mcp_categories* has no effect: a remote entry carries no per-
     client ``env`` block, so the daemon's own ``~/.agentihooks/.env`` decides
     its category set for every client pointing at it.
+
+    `localhost`, not the dotted quad. Both name the loopback interface, so the security boundary is identical — but a
+    Claude Code Enterprise policy was observed dropping a `127.0.0.1` MCP entry from the client's configured-server set
+    entirely, while accepting the byte-identical entry spelled `localhost`. The rejected entry does not appear in
+    `claude mcp list` at all and `claude mcp get` reports it as not configured, so the failure looks like the server was
+    never installed rather than like a policy denial.
+
+    Claude Code's config schema names streamable-http "http" — it does not accept the SDK's own "streamable-http"
+    literal. Mismatching these produces an entry that silently never connects.
+
+    The daemon itself serves plaintext, which is correct for the default loopback bind — the bind is the boundary and
+    TLS to 127.0.0.1 buys nothing. An operator who fronts it with a TLS reverse proxy, or moves it off loopback, needs
+    the client to address it as https, so the scheme is a knob rather than a literal.
+
+    No "not answering yet" hint here. This runs earlier in step 6 than _ensure_mcp_daemon, so the port is normally
+    closed at this point and the message fired on every healthy network-mode install — and it named a systemctl command
+    that cannot work under the pidfile backend. Whether the daemon came up is reported by _ensure_mcp_daemon, which
+    actually knows.
     """
     transport = _resolve_installer_mcp_transport()
 
@@ -3421,13 +3293,6 @@ def _build_mcp_config(mcp_categories: str) -> dict:
         )
         sys.exit(1)
 
-    # `localhost`, not the dotted quad. Both name the loopback interface, so the
-    # security boundary is identical — but a Claude Code Enterprise policy was
-    # observed dropping a `127.0.0.1` MCP entry from the client's configured-server
-    # set entirely, while accepting the byte-identical entry spelled `localhost`.
-    # The rejected entry does not appear in `claude mcp list` at all and `claude
-    # mcp get` reports it as not configured, so the failure looks like the server
-    # was never installed rather than like a policy denial.
     host = os.environ.get("MCP_HOST", "localhost")
     try:
         port = int(os.environ.get("MCP_PORT", "8642"))
@@ -3437,29 +3302,16 @@ def _build_mcp_config(mcp_categories: str) -> dict:
 
     if transport == "sse":
         path = os.environ.get("MCP_SSE_PATH", "/sse")
-        # Claude Code's config schema names streamable-http "http" — it does not
-        # accept the SDK's own "streamable-http" literal. Mismatching these
-        # produces an entry that silently never connects.
         client_type = "sse"
     else:
         path = os.environ.get("MCP_STREAMABLE_HTTP_PATH", "/mcp")
         client_type = "http"
 
-    # The daemon itself serves plaintext, which is correct for the default
-    # loopback bind — the bind is the boundary and TLS to 127.0.0.1 buys
-    # nothing. An operator who fronts it with a TLS reverse proxy, or moves it
-    # off loopback, needs the client to address it as https, so the scheme is a
-    # knob rather than a literal.
     scheme = os.environ.get("MCP_SCHEME", "http").strip().lower()
     if scheme not in ("http", "https"):
         print(f"ERROR: MCP_SCHEME must be http or https, got {scheme!r}.", file=sys.stderr)
         sys.exit(1)
 
-    # No "not answering yet" hint here. This runs earlier in step 6 than
-    # _ensure_mcp_daemon, so the port is normally closed at this point and the
-    # message fired on every healthy network-mode install — and it named a
-    # systemctl command that cannot work under the pidfile backend. Whether the
-    # daemon came up is reported by _ensure_mcp_daemon, which actually knows.
     return {"mcpServers": {MCP_SERVER_NAME: {"type": client_type, "url": f"{scheme}://{host}:{port}{path}"}}}
 
 
@@ -3513,9 +3365,13 @@ def _install_systemd_user_unit(transport: str) -> None:
     *transport* is baked into the unit rather than left to an ``EnvironmentFile``.
     That is what keeps the daemon and ``~/.claude.json`` from disagreeing: both
     now derive from the one value this install validated.
+
+    Under scripts/ so it resolves identically from a source checkout and from an installed wheel (AGENTIHOOKS_ROOT is
+    site-packages there).
+
+    Not an error: WSL2 without systemd=true, containers and macOS all land here. The caller starts the daemon under the
+    pidfile backend instead, so there is nothing for the operator to do and no command worth printing.
     """
-    # Under scripts/ so it resolves identically from a source checkout and from
-    # an installed wheel (AGENTIHOOKS_ROOT is site-packages there).
     template = AGENTIHOOKS_ROOT / "scripts" / "packaging" / "systemd" / f"{_SYSTEMD_UNIT_NAME}.template"
     if not template.is_file():
         _cprint(f"  [WARN] systemd unit template missing at {template}; skipping.")
@@ -3537,9 +3393,6 @@ def _install_systemd_user_unit(transport: str) -> None:
     try:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=False, timeout=10)
     except (OSError, subprocess.SubprocessError):
-        # Not an error: WSL2 without systemd=true, containers and macOS all land
-        # here. The caller starts the daemon under the pidfile backend instead, so
-        # there is nothing for the operator to do and no command worth printing.
         _cprint("  [--] No systemd user session — the daemon runs unsupervised instead.")
 
 
@@ -3646,22 +3499,20 @@ def _reseed_managed_mcp_sources() -> None:
     Idempotent. Used by `init` so the source-of-truth files (bundle
     .claude/.mcp.json, profile .claude/.mcp.json, and the agentihooks
     server) are always present in user scope.
+
+    Claude-scoped on purpose: this assembles ~/.claude.json's mcpServers, which has no codex equivalent (codex MCP lives
+    in config.toml and is written by the codex adapter). Iterating targets here would merge codex state into claude's
+    file.
     """
     state = _load_state()
-    # Claude-scoped on purpose: this assembles ~/.claude.json's mcpServers,
-    # which has no codex equivalent (codex MCP lives in config.toml and is
-    # written by the codex adapter). Iterating targets here would merge codex
-    # state into claude's file.
     profile_name = _global_record(state).get("profile")
 
-    # Layer 1: agentihooks MCP server (driven by profile mcp_categories)
     if profile_name:
         try:
             _install_user_mcp(profile_name)
         except Exception as exc:
             _cprint(f"  [WARN] Could not reseed the agentihooks MCP server: {exc}")
 
-    # Layer 2: bundle .mcp.json, root, shared, then user
     for kind, bundle_dir in _bundle_roots():
         for candidate in (bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME):
             if candidate.exists():
@@ -3673,7 +3524,6 @@ def _reseed_managed_mcp_sources() -> None:
                     _cprint(f"  [WARN] Could not reseed {kind} bundle .mcp.json: {exc}")
                 break
 
-    # Layer 3: active profile .mcp.json (full chain — see collector note)
     if profile_name:
         for _pname, profile_dir in _resolve_profile_chain(profile_name):
             profile_mcp = profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
@@ -3685,7 +3535,6 @@ def _reseed_managed_mcp_sources() -> None:
                 except (json.JSONDecodeError, OSError) as exc:
                     _cprint(f"  [WARN] Could not reseed profile .mcp.json: {exc}")
 
-    # Layer 3b: settings-profile overlay .mcp.json
     settings_profile = _global_record(state).get("settings_profile")
     if settings_profile:
         sp_dir = _resolve_profile_dir(settings_profile)
@@ -3737,11 +3586,6 @@ def sync_user_mcp() -> None:
         _merge_mcp_to_user_scope(servers)
 
 
-# ---------------------------------------------------------------------------
-# Interactive MCP uninstall (--mcp --uninstall without a path)
-# ---------------------------------------------------------------------------
-
-
 def _cmd_mcp_interactive_uninstall() -> None:
     """Show tracked MCP files, let user pick one, uninstall its servers."""
     state = _load_state()
@@ -3791,11 +3635,6 @@ def _cmd_mcp_interactive_uninstall() -> None:
     print("Restart Claude Code for the changes to take effect.")
 
 
-# ---------------------------------------------------------------------------
-# --mcp-lib: browse a directory of .mcp.json files and install one
-# ---------------------------------------------------------------------------
-
-
 def _cmd_mcp_lib(lib_path: Path | None) -> None:
     """Scan a directory for .mcp.json files and interactively install one."""
     if lib_path is None:
@@ -3811,7 +3650,6 @@ def _cmd_mcp_lib(lib_path: Path | None) -> None:
         _cprint(f"[!!] Not a directory: {lib_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Keep only files that contain mcpServers
     mcp_files: list[tuple[Path, dict]] = []
     for f in sorted(lib_path.glob("*.json")):
         try:
@@ -3825,7 +3663,6 @@ def _cmd_mcp_lib(lib_path: Path | None) -> None:
         print(f"No .json files with mcpServers found in {lib_path}")
         sys.exit(0)
 
-    # Save path for future --mcp-lib calls
     _state_set_mcp_lib(lib_path)
 
     already_tracked = set(_load_state().get("mcpFiles", []))
@@ -3862,10 +3699,6 @@ def _cmd_mcp_lib(lib_path: Path | None) -> None:
     print()
     print("Restart Claude Code for the changes to take effect.")
 
-
-# ---------------------------------------------------------------------------
-# CLI tool install (uv tool install --editable .)
-# ---------------------------------------------------------------------------
 
 _CLI_NAME = "agentihooks"
 
@@ -3961,11 +3794,6 @@ def _uninstall_cli_tool() -> None:
     elif not uv:
         _cprint("  [!!] uv not found — cannot uninstall CLI automatically.")
         print(f"       Remove manually: uv tool uninstall {_CLI_NAME}")
-
-
-# ---------------------------------------------------------------------------
-# Symlink helpers
-# ---------------------------------------------------------------------------
 
 
 def _remove_agentihooks_symlinks(
@@ -4110,6 +3938,10 @@ def _append_ci_manifesto_to_claude_md(
 
     Idempotent: if the manifesto block is already present and unchanged,
     no write happens.
+
+    The block text contains _CLAUDE_MD_MANAGED_MARKER, so appending it is itself an ownership claim — uninstall will
+    delete a file carrying it. Capture the operator's original first. Reached when no profile supplied a CLAUDE.md and
+    no bundle block was prepended, so nothing earlier took a backup.
     """
     try:
         from hooks import config as _cfg
@@ -4125,7 +3957,6 @@ def _append_ci_manifesto_to_claude_md(
         return
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
     if not dst.exists():
-        # Nothing to append to — install_system_prompt handles its own write
         return
     bodies = [
         f"<!-- manifesto: {path.name} -->\n{_cfg.manifesto_body(path).rstrip()}"
@@ -4147,7 +3978,6 @@ def _append_ci_manifesto_to_claude_md(
     begin_marker = "<!-- BEGIN CI MANIFESTO"
     end_marker = "<!-- END CI MANIFESTO -->"
     if begin_marker in current and end_marker in current:
-        # Replace existing block
         before = current.split(begin_marker, 1)[0].rstrip()
         after_split = current.split(end_marker, 1)
         after = after_split[1] if len(after_split) > 1 else ""
@@ -4157,31 +3987,14 @@ def _append_ci_manifesto_to_claude_md(
             return
     else:
         new_content = current.rstrip() + block
-    # The block text contains _CLAUDE_MD_MANAGED_MARKER, so appending it is itself
-    # an ownership claim — uninstall will delete a file carrying it. Capture the
-    # operator's original first. Reached when no profile supplied a CLAUDE.md and
-    # no bundle block was prepended, so nothing earlier took a backup.
     _claim_claude_md_ownership(dst)
     dst.write_text(new_content)
     _cprint(f"  [OK] Appended {len(bodies)} manifesto(s) to {dst} ({len(body):,} bytes)")
 
 
-# Markers for the optional bundle-wide CLAUDE.md, prepended ahead of all profile
-# content. Two constraints on the wording:
-#   1. Avoid the substring "profile:" — the init lost-state guard regex-scans the
-#      whole file for `<!-- profile: NAME -->` and would read it as a phantom
-#      chain member.
-#   2. Avoid _CLAUDE_MD_MANAGED_MARKER ("auto-injected by agentihooks init").
-#      _claude_md_is_managed() treats that substring as proof agentihooks owns the
-#      file. A bundle block alone must never make an operator's hand-authored
-#      CLAUDE.md look managed — uninstall deletes managed files, and a file we
-#      merely prepended to has no recorded original to restore from.
 _BUNDLE_CLAUDE_MD_BEGIN = "<!-- BEGIN BUNDLE CLAUDE.md (managed block — edit the bundle, not here) -->"
 _BUNDLE_CLAUDE_MD_END = "<!-- END BUNDLE CLAUDE.md -->"
 
-# Every marker that delimits a block install writes into ~/.claude/CLAUDE.md.
-# Bundle content may not contain any of them: the splices below are
-# first-occurrence based, so an embedded copy silently eats real content.
 _CI_MANIFESTO_BEGIN_PREFIX = "<!-- BEGIN CI MANIFESTO"
 _CI_MANIFESTO_END = "<!-- END CI MANIFESTO -->"
 _MANAGED_BLOCK_MARKERS = (
@@ -4192,15 +4005,6 @@ _MANAGED_BLOCK_MARKERS = (
 )
 
 
-# Fenced blocks in CLAUDE.md — `<!-- BEGIN name -->…<!-- END name -->`. agentihooks
-# owns two of them; agentibridge and anything else may own others. The profile
-# writer replaces the file wholesale, so foreign blocks must be carried across or
-# they are collateral damage on every init.
-#
-# This is scanned with a depth-tracking walk rather than a regex splice. Flat
-# "find first BEGIN, cut to nearest END" surgery silently loses content on nested
-# blocks, interleaved blocks, and owned-looking markers embedded inside a foreign
-# block — all of which are one documentation example away from happening.
 _BLOCK_MARKER_RE = re.compile(r"<!--\s*(?P<kind>BEGIN|END)\s+(?P<rest>[^\n]*?)\s*-->")
 
 _OWNED_BLOCK_NAMES = frozenset({"CI MANIFESTO", "BUNDLE CLAUDE.md"})
@@ -4225,6 +4029,14 @@ def _scan_top_level_blocks(text: str) -> tuple[list[tuple[str, int, int]], bool]
     nested inside another block are left alone. ``unbalanced`` is True when a
     BEGIN never closes or an END has no opener — the caller warns rather than
     silently dropping the region.
+
+    _BLOCK_MARKER_RE: Fenced blocks in CLAUDE.md — `<!-- BEGIN name -->…<!-- END name -->`. agentihooks owns two of
+    them; agentibridge and anything else may own others. The profile writer replaces the file wholesale, so foreign
+    blocks must be carried across or they are collateral damage on every init.
+
+    This is scanned with a depth-tracking walk rather than a regex splice. Flat "find first BEGIN, cut to nearest END"
+    surgery silently loses content on nested blocks, interleaved blocks, and owned-looking markers embedded inside a
+    foreign block — all of which are one documentation example away from happening.
     """
     stack: list[tuple[str, int]] = []
     blocks: list[tuple[str, int, int]] = []
@@ -4364,10 +4176,30 @@ def _prepend_bundle_claude_md(
     re-derives its content from ``(bundle_md on disk, current dst)`` every run — so
     a newly added or changed bundle file lands even when ``_install_system_prompt``
     took its "already up to date" early return.
+
+    _BUNDLE_CLAUDE_MD_BEGIN: Markers for the optional bundle-wide CLAUDE.md, prepended ahead of all profile content. Two
+    constraints on the wording: 1. Avoid the substring "profile:" — the init lost-state guard regex-scans the whole file
+    for `<!-- profile: NAME -->` and would read it as a phantom chain member. 2. Avoid _CLAUDE_MD_MANAGED_MARKER
+    ("auto-injected by agentihooks init"). _claude_md_is_managed() treats that substring as proof agentihooks owns the
+    file. A bundle block alone must never make an operator's hand-authored CLAUDE.md look managed — uninstall deletes
+    managed files, and a file we merely prepended to has no recorded original to restore from.
+
+    _MANAGED_BLOCK_MARKERS: Every marker that delimits a block install writes into ~/.claude/CLAUDE.md. Bundle content
+    may not contain any of them: the splices below are first-occurrence based, so an embedded copy silently eats real
+    content.
+
+    Defensive: step 5 always leaves a real file, but never write through a symlink into a profile source in the repo.
+
+    Bundle unlinked, file removed, or emptied. Drop a previously-prepended block so the shared directives stop applying
+    instead of being stranded in the file with no way to remove them.
+
+    First-occurrence splices are used both here and by the manifesto appender, so an embedded marker inside bundle prose
+    would silently eat real content or duplicate on every run. Refuse rather than corrupt.
+
+    About to mutate a file this function did not create. If nothing else has claimed ownership, capture the operator's
+    original first — uninstall deletes a managed file outright when no original was recorded.
     """
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
-    # Defensive: step 5 always leaves a real file, but never write through a symlink
-    # into a profile source in the repo.
     if not dst.exists() or dst.is_symlink():
         return
 
@@ -4382,9 +4214,6 @@ def _prepend_bundle_claude_md(
     body = "\n\n".join(text for _, text in sections)
 
     if not body:
-        # Bundle unlinked, file removed, or emptied. Drop a previously-prepended
-        # block so the shared directives stop applying instead of being stranded
-        # in the file with no way to remove them.
         if had_block:
             head, _, rest = current.partition(_BUNDLE_CLAUDE_MD_BEGIN)
             _, _, tail = rest.partition(_BUNDLE_CLAUDE_MD_END)
@@ -4392,9 +4221,6 @@ def _prepend_bundle_claude_md(
             _cprint(f"  [OK] Removed stale bundle {_CLAUDE_MD_NAME} block (no bundle content)")
         return
 
-    # First-occurrence splices are used both here and by the manifesto appender,
-    # so an embedded marker inside bundle prose would silently eat real content
-    # or duplicate on every run. Refuse rather than corrupt.
     for bundle_md, text in sections:
         for marker in _MANAGED_BLOCK_MARKERS:
             if marker in text:
@@ -4410,9 +4236,6 @@ def _prepend_bundle_claude_md(
     if had_block:
         after = current.split(_BUNDLE_CLAUDE_MD_END, 1)[1].lstrip("\n")
     else:
-        # About to mutate a file this function did not create. If nothing else has
-        # claimed ownership, capture the operator's original first — uninstall
-        # deletes a managed file outright when no original was recorded.
         after = current
         _claim_claude_md_ownership(dst)
 
@@ -4433,6 +4256,17 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     Writes a real file (not a symlink) so it resolves correctly across
     WSL/Windows boundaries and VS Code \\\\wsl.localhost paths.
     Re-run ``agentihooks init`` to refresh after editing the profile source.
+
+    Prepend the same `<!-- profile: name -->` marker the chain writer uses (see the claude_md_parts loop above) so the
+    init guard can sniff the installed profile from single-profile installs too — the common shape. This only touches
+    the rendered dst content; src on disk is never mutated.
+
+    Carry over any third-party fenced block (agentibridge et al). This write replaces the whole file, so without this it
+    silently destroys a neighbour's content that only its own installer can put back.
+
+    Check if content is already up to date. Compare against the file with the managed blocks (bundle prepend, CI
+    manifesto) stripped — they are appended by later steps, so comparing raw would never match once either exists and
+    every re-run would take the backup+overwrite path below.
     """
     src = profile_dir / _CLAUDE_MD_NAME
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
@@ -4441,29 +4275,17 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
         _cprint(f"  [--] No {_CLAUDE_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
         return
 
-    # Prepend the same `<!-- profile: name -->` marker the chain writer uses
-    # (see the claude_md_parts loop above) so the init guard can sniff the
-    # installed profile from single-profile installs too — the common shape.
-    # This only touches the rendered dst content; src on disk is never mutated.
     new_content = f"<!-- profile: {profile_name} -->\n{src.read_text()}"
 
-    # Carry over any third-party fenced block (agentibridge et al). This write
-    # replaces the whole file, so without this it silently destroys a neighbour's
-    # content that only its own installer can put back.
     if dst.exists() and not dst.is_symlink():
         _force_backup_if_malformed(dst)
         new_content = _preserve_foreign_blocks(new_content, dst.read_text())
 
-    # Check if content is already up to date. Compare against the file with the
-    # managed blocks (bundle prepend, CI manifesto) stripped — they are appended
-    # by later steps, so comparing raw would never match once either exists and
-    # every re-run would take the backup+overwrite path below.
     if dst.exists() and not dst.is_symlink():
         if _same_content(_strip_managed_blocks(dst.read_text()), new_content):
             _cprint(f"  [--] {_CLAUDE_MD_NAME} already up to date (from {profile_name})")
             return
 
-    # Remove stale symlink or backup existing file
     if dst.is_symlink():
         dst.unlink()
     elif dst.exists():
@@ -4488,8 +4310,6 @@ def _cleanup_stale_claude_md_symlink() -> None:
         _cprint(f"  [OK] Removed stale {_CLAUDE_MD_NAME} symlink → {target_str}")
 
 
-# Marker embedded by _append_ci_manifesto_to_claude_md — also used as a
-# content-based ownership signal when state.json predates managed_claude_md.
 _CLAUDE_MD_MANAGED_MARKER = "auto-injected by agentihooks init"
 
 
@@ -4514,12 +4334,15 @@ def _backup_existing_claude_md(dst: Path) -> Path | None:
     recovered by unlinking. Capture the file agentihooks is about to replace and,
     on the FIRST agentihooks install only, record it as the user's original so
     uninstall can restore the machine to its pre-agentihooks state.
+
+    Second granularity collides on fast successive writes and shutil.copy2 would clobber the previous generation —
+    including the one recorded as the user's original. Never overwrite an existing backup.
+
+    First install: nothing managed yet and no original recorded → this backup is the genuine user-authored original.
+    Never overwrite it on re-installs.
     """
     if not dst.exists() or dst.is_symlink():
         return None
-    # Second granularity collides on fast successive writes and shutil.copy2 would
-    # clobber the previous generation — including the one recorded as the user's
-    # original. Never overwrite an existing backup.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup = dst.with_suffix(f".md.bak.{timestamp}")
     suffix = 1
@@ -4528,8 +4351,6 @@ def _backup_existing_claude_md(dst: Path) -> Path | None:
         suffix += 1
     shutil.copy2(dst, backup)
     state = _load_state()
-    # First install: nothing managed yet and no original recorded → this backup
-    # is the genuine user-authored original. Never overwrite it on re-installs.
     if "managed_claude_md" not in state and "claude_md_original_backup" not in state:
         state["claude_md_original_backup"] = str(backup)
         _save_state(state)
@@ -4542,13 +4363,15 @@ def _claude_md_is_managed(p: Path) -> bool:
     Handles three cases: legacy symlink into a profiles/ dir, a real file
     recorded in state.json, or a real file carrying the manifesto marker
     (fallback for installs whose state.json predates managed_claude_md).
+
+    _CLAUDE_MD_MANAGED_MARKER: Marker embedded by _append_ci_manifesto_to_claude_md — also used as a content-based
+    ownership signal when state.json predates managed_claude_md.
+
+    A "profiles/" substring alone is not proof — another tool's profiles dir would qualify. The target must sit under
+    the profiles/ directory of a source we REGISTERED, which is the only shape install ever wrote. Registration is
+    checked lexically, so a source since moved or deleted still resolves as ours — the case that most needs reaping.
     """
     if p.is_symlink():
-        # A "profiles/" substring alone is not proof — another tool's profiles
-        # dir would qualify. The target must sit under the profiles/ directory
-        # of a source we REGISTERED, which is the only shape install ever wrote.
-        # Registration is checked lexically, so a source since moved or deleted
-        # still resolves as ours — the case that most needs reaping.
         candidates = {str(p.resolve())}
         try:
             candidates.add(os.readlink(p))
@@ -4566,11 +4389,6 @@ def _claude_md_is_managed(p: Path) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Uninstall
-# ---------------------------------------------------------------------------
-
-
 def _collect_all_managed_mcp_servers() -> dict:
     """Return the union of all MCP servers managed by agentihooks.
 
@@ -4581,14 +4399,18 @@ def _collect_all_managed_mcp_servers() -> dict:
     4. All files tracked in ~/.agentihooks/state.json mcpFiles
 
     Returns a merged {name: config} dict.
+
+    The active profile is a comma-joined chain (e.g. "anton,brain"). Resolve every hop via _resolve_profile_chain —
+    passing the joined string straight to _resolve_profile_dir returns None and silently drops every profile's MCP
+    servers, collapsing the managed set to just agentihooks.
+
+    Claude-scoped on purpose: this assembles ~/.claude's mcpServers, not codex's.
     """
     merged: dict = {}
 
-    # --- 1. agentihooks MCP server ---
     mcp_config = _build_mcp_config("all")
     merged.update(mcp_config["mcpServers"])
 
-    # --- 2. Bundle .mcp.json, root, shared, then user ---
     for _kind, bundle_dir in _bundle_roots():
         for candidate in [bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME]:
             if candidate.exists():
@@ -4598,13 +4420,7 @@ def _collect_all_managed_mcp_servers() -> dict:
                     pass
                 break
 
-    # --- 3. Profile .mcp.json (full chain) ---
-    # NOTE: the active profile is a comma-joined chain (e.g. "anton,brain").
-    # Resolve every hop via _resolve_profile_chain — passing the joined string
-    # straight to _resolve_profile_dir returns None and silently drops every
-    # profile's MCP servers, collapsing the managed set to just agentihooks.
     state = _load_state()
-    # Claude-scoped on purpose: this assembles ~/.claude's mcpServers, not codex's.
     global_target = _global_record(state)
     profile_name = global_target.get("profile")
     if profile_name:
@@ -4616,7 +4432,6 @@ def _collect_all_managed_mcp_servers() -> dict:
                 except (json.JSONDecodeError, OSError):
                     pass
 
-    # --- 3b. Settings-profile overlay .mcp.json ---
     settings_profile = global_target.get("settings_profile")
     if settings_profile:
         sp_dir = _resolve_profile_dir(settings_profile)
@@ -4628,7 +4443,6 @@ def _collect_all_managed_mcp_servers() -> dict:
                 except (json.JSONDecodeError, OSError):
                     pass
 
-    # --- 4. State-tracked MCP files ---
     for path_str in state.get("mcpFiles", []):
         p = Path(path_str)
         if not p.exists():
@@ -4642,7 +4456,52 @@ def _collect_all_managed_mcp_servers() -> dict:
 
 
 def uninstall_global(args: argparse.Namespace) -> None:
-    """Remove all agentihooks artifacts installed by 'install global'."""
+    """Remove all agentihooks artifacts installed by 'install global'.
+
+    Remove CLAUDE.md whether it's a legacy profiles/ symlink or a real file written by install (tracked in state.json /
+    manifesto marker).
+
+    Servers to remove = the persisted ledger, restricted to what is actually present in ~/.claude.json.
+
+    NOT unioned with _collect_all_managed_mcp_servers(): that collector matches by NAME against whatever the profile
+    chain defines right now, so a server the operator configured themselves would be deleted the moment a profile
+    happened to define the same name — even on a machine where init never ran. The union was there to catch servers
+    dropped from a profile before uninstall, but the ledger already records those: it is written as the full installed
+    set on every init, so anything installed is in it.
+
+    Early exit if nothing to do. Counts every step below, including the ones that run unconditionally — a bashrc block
+    or an installed CLI on its own is still an install, and returning here would silently skip both.
+
+    The systemd unit counts too: on a machine where it is the last surviving artifact, omitting it here reports "nothing
+    to uninstall" and returns before the removal step, leaving an enabled daemon running past a green uninstall.
+
+    A daemon started under the pidfile backend leaves no unit behind, so without this a machine whose only artifact is a
+    live daemon reports "nothing to uninstall" and walks away from a running process.
+
+    Non-claude targets (codex, copilot) tear down through their adapters — claude's removal is the body of this
+    function.
+
+    Stop before removing the unit: disabling a unit does not reach a process started under the pidfile backend, and once
+    the unit is gone there is nothing left to stop it with.
+
+    Verify rather than assume. `stop()` is best-effort on both backends — a systemctl stop fails silently if the user
+    bus went away — and an uninstall that reports success while a daemon keeps serving the port is the worst outcome
+    here, because nothing is left to manage it with.
+
+    install writes the profile CLAUDE.md into home and appends the manifesto additively, so "removing what agentihooks
+    added" means: restore the file agentihooks originally overwrote (if any), otherwise delete the managed file.
+
+    The original predates any third-party block added since (agentibridge et al). Every init carried those forward;
+    dropping them here would destroy live content at the one moment it matters most.
+
+    Nothing to restore, but a neighbour's block must not go with it.
+
+    Clear the managed-MCP ledger — agentihooks manages nothing after uninstall. (state.json itself is preserved below,
+    so the key must be dropped explicitly.)
+
+    The shared open-standard skills dir is swept once, after every adapter has run — LEDGER-ONLY: other tools and the
+    operator also put symlinks here, and a hand-made link into our source tree is theirs.
+    """
     yes: bool = args.yes
 
     settings_path = CLAUDE_HOME / "settings.json"
@@ -4651,7 +4510,6 @@ def uninstall_global(args: argparse.Namespace) -> None:
     commands_dir = CLAUDE_HOME / "commands"
     rules_dir = CLAUDE_HOME / "rules"
     claude_md_dst = CLAUDE_HOME / _CLAUDE_MD_NAME
-    # --- Audit ---
     remove_settings = False
     if settings_path.exists():
         try:
@@ -4671,40 +4529,16 @@ def uninstall_global(args: argparse.Namespace) -> None:
     n_commands = _count_managed_symlinks(commands_dir)
     n_rules = sum(1 for path in rules_dir.glob("*.md") if _link_is_managed(path))
 
-    # Remove CLAUDE.md whether it's a legacy profiles/ symlink or a real file
-    # written by install (tracked in state.json / manifesto marker).
     remove_claude_md = _claude_md_is_managed(claude_md_dst)
     claude_md_is_symlink = claude_md_dst.is_symlink()
 
-    # Servers to remove = the persisted ledger, restricted to what is actually
-    # present in ~/.claude.json.
-    #
-    # NOT unioned with _collect_all_managed_mcp_servers(): that collector matches
-    # by NAME against whatever the profile chain defines right now, so a server
-    # the operator configured themselves would be deleted the moment a profile
-    # happened to define the same name — even on a machine where init never ran.
-    # The union was there to catch servers dropped from a profile before
-    # uninstall, but the ledger already records those: it is written as the full
-    # installed set on every init, so anything installed is in it.
     installed_names = _get_user_scope_mcp_names()
     ledger_names = _load_state().get("managed_mcp_servers", [])
     managed_servers: dict = {name: None for name in ledger_names if name in installed_names}
 
-    # Early exit if nothing to do. Counts every step below, including the ones
-    # that run unconditionally — a bashrc block or an installed CLI on its own
-    # is still an install, and returning here would silently skip both.
     bashrc_block_present = _BASHRC.exists() and _BLOCK_START in _BASHRC.read_text(encoding="utf-8")
-    # The systemd unit counts too: on a machine where it is the last surviving
-    # artifact, omitting it here reports "nothing to uninstall" and returns
-    # before the removal step, leaving an enabled daemon running past a green
-    # uninstall.
     systemd_unit_present = _systemd_user_unit_path().exists()
-    # A daemon started under the pidfile backend leaves no unit behind, so without
-    # this a machine whose only artifact is a live daemon reports "nothing to
-    # uninstall" and walks away from a running process.
     daemon_running = _mcp_daemon_module().read_pidfile().get("pid") is not None
-    # Non-claude targets (codex, copilot) tear down through their adapters —
-    # claude's removal is the body of this function.
     other_targets = [t for t in _installed_targets(_load_state(), default=()) if t != "claude"]
     total_work = (
         int(remove_settings)
@@ -4724,7 +4558,6 @@ def uninstall_global(args: argparse.Namespace) -> None:
         print("Nothing to uninstall — agentihooks is not installed.")
         return
 
-    # --- Summary ---
     print("agentihooks uninstall")
     print("======================")
     print("Will remove:")
@@ -4767,7 +4600,6 @@ def uninstall_global(args: argparse.Namespace) -> None:
             print("Aborted.")
             sys.exit(0)
 
-    # --- 3. Remove settings.json; restore the pre-agentihooks original ---
     if remove_settings:
         settings_path.unlink()
         original = _load_state().get("settings_original_backup")
@@ -4783,24 +4615,15 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         print(f"[--] Skipped {settings_path} (not managed)")
 
-    # --- 3b. Stop and remove the agentihooks MCP daemon (network-transport installs) ---
-    # Stop before removing the unit: disabling a unit does not reach a process
-    # started under the pidfile backend, and once the unit is gone there is
-    # nothing left to stop it with.
     _mcp_daemon = _mcp_daemon_module()
     if _mcp_daemon.stop():
         _cprint("[OK] Stopped the agentihooks MCP daemon")
-    # Verify rather than assume. `stop()` is best-effort on both backends — a
-    # systemctl stop fails silently if the user bus went away — and an uninstall
-    # that reports success while a daemon keeps serving the port is the worst
-    # outcome here, because nothing is left to manage it with.
     if _mcp_daemon.pid_alive(_mcp_daemon.read_pidfile().get("pid")):
         _cprint(
             f"  {_YELLOW}[WARN] An agentihooks MCP daemon is still running. Stop it by hand before removing the CLI.{_RESET}"
         )
     _remove_systemd_user_unit()
 
-    # --- 4. Remove symlinks in skills, agents, commands ---
     print()
     for dst_dir, label in [
         (skills_dir, "skill"),
@@ -4812,19 +4635,12 @@ def uninstall_global(args: argparse.Namespace) -> None:
         if n == 0:
             _cprint(f"  [--] No {label} symlinks found in {dst_dir}")
 
-    # --- 5. Remove agentihooks CLAUDE.md; restore the pre-agentihooks original ---
-    # install writes the profile CLAUDE.md into home and appends the manifesto
-    # additively, so "removing what agentihooks added" means: restore the file
-    # agentihooks originally overwrote (if any), otherwise delete the managed file.
     print()
     if remove_claude_md:
         cmd_state = _load_state()
         original = cmd_state.get("claude_md_original_backup")
         original_path = Path(original) if original else None
         if original_path and original_path.exists():
-            # The original predates any third-party block added since (agentibridge
-            # et al). Every init carried those forward; dropping them here would
-            # destroy live content at the one moment it matters most.
             restored = original_path.read_text()
             if claude_md_dst.exists() and not claude_md_dst.is_symlink():
                 restored = _preserve_foreign_blocks(restored, claude_md_dst.read_text())
@@ -4833,7 +4649,6 @@ def uninstall_global(args: argparse.Namespace) -> None:
             claude_md_dst.write_text(restored)
             _cprint(f"[OK] Restored pre-agentihooks {claude_md_dst} from {original_path.name}")
         else:
-            # Nothing to restore, but a neighbour's block must not go with it.
             carried = ""
             if claude_md_dst.exists() and not claude_md_dst.is_symlink():
                 carried = _preserve_foreign_blocks("", claude_md_dst.read_text()).strip()
@@ -4849,7 +4664,6 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         print(f"[--] Skipped {claude_md_dst} (not managed by agentihooks)")
 
-    # --- 6. Remove MCP servers from ~/.claude.json ---
     print()
     if managed_servers:
         print(f"Removing {len(managed_servers)} MCP server(s) from {_CLAUDE_JSON}:")
@@ -4857,13 +4671,10 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         _cprint(f"  [--] No managed MCP servers to remove from {_CLAUDE_JSON}")
 
-    # Clear the managed-MCP ledger — agentihooks manages nothing after uninstall.
-    # (state.json itself is preserved below, so the key must be dropped explicitly.)
     ledger_state = _load_state()
     if ledger_state.pop("managed_mcp_servers", None) is not None:
         _save_state(ledger_state)
 
-    # --- 6b. Non-claude targets: adapter teardown ---
     if other_targets:
         print()
         from scripts.targets._common import agents_skills_home as _agents_skills_home
@@ -4874,9 +4685,6 @@ def uninstall_global(args: argparse.Namespace) -> None:
                 get_adapter(t).teardown()
             except Exception as exc:  # a broken teardown must not abort the rest
                 _cprint(f"  {_YELLOW}[WARN] {t} teardown failed: {exc} — remove its artifacts by hand.{_RESET}")
-        # The shared open-standard skills dir is swept once, after every
-        # adapter has run — LEDGER-ONLY: other tools and the operator also put
-        # symlinks here, and a hand-made link into our source tree is theirs.
         n = _remove_agentihooks_symlinks(_agents_skills_home(), "skill", ledger_only=True)
         if n == 0:
             _cprint(f"  [--] No managed skill symlinks found in {_agents_skills_home()}")
@@ -4886,15 +4694,12 @@ def uninstall_global(args: argparse.Namespace) -> None:
             targets_global.pop(t, None)
         _save_state(st)
 
-    # --- 7. Remove bashrc block ---
     if _remove_bashrc_block():
         _cprint(f"[OK] Removed agentihooks block from {_BASHRC}")
 
-    # --- 8. Uninstall CLI ---
     print()
     _uninstall_cli_tool()
 
-    # --- Done ---
     print()
     print("Uninstall complete.")
     print()
@@ -4904,17 +4709,13 @@ def uninstall_global(args: argparse.Namespace) -> None:
     print(f"      Full reset: rm -rf {AGENTIHOOKS_STATE_DIR}")
 
 
-# ---------------------------------------------------------------------------
-# Project install
-# ---------------------------------------------------------------------------
-
-
 def install_project(args: argparse.Namespace) -> None:
     with _sync_lock():
         _install_project_inner(args)
 
 
 def _install_project_inner(args: argparse.Namespace) -> None:
+    """Never overwrite — merge new keys only."""
     project_path = Path(args.path).expanduser().resolve()
     profile_name = args.profile
 
@@ -4925,7 +4726,6 @@ def _install_project_inner(args: argparse.Namespace) -> None:
         print(f"ERROR: Project path is not a directory: {project_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Validate profile (built-in or bundle)
     profile_dir = _resolve_profile_dir(profile_name)
     if profile_dir is None:
         available = _available_profiles()
@@ -4937,7 +4737,6 @@ def _install_project_inner(args: argparse.Namespace) -> None:
 
     mcp_dst = project_path / _MCP_JSON_NAME
     if mcp_dst.exists():
-        # Never overwrite — merge new keys only
         try:
             existing_mcp = load_json(mcp_dst)
         except (json.JSONDecodeError, OSError):
@@ -4973,14 +4772,8 @@ def _install_project_inner(args: argparse.Namespace) -> None:
     print()
     print(f"Next: open Claude Code in '{project_path}' and run /mcp to verify.")
 
-    # Register install in state.json
     _register_target_project(project_path, profile_name)
     _snapshot_claude_json()
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def _scan_mcp_dir(scan_dir: Path) -> list[tuple[Path, dict]]:
@@ -4998,7 +4791,6 @@ def _scan_mcp_dir(scan_dir: Path) -> list[tuple[Path, dict]]:
                 results.append((f, data["mcpServers"]))
         except (json.JSONDecodeError, OSError):
             pass
-    # Also check hidden .json files (e.g., .anton-mcp.json)
     for f in sorted(scan_dir.glob(".*.json")):
         try:
             data = load_json(f)
@@ -5006,7 +4798,6 @@ def _scan_mcp_dir(scan_dir: Path) -> list[tuple[Path, dict]]:
                 results.append((f, data["mcpServers"]))
         except (json.JSONDecodeError, OSError):
             pass
-    # Deduplicate by path (glob patterns may overlap)
     seen: set[str] = set()
     deduped: list[tuple[Path, dict]] = []
     for fpath, servers in results:
@@ -5086,11 +4877,6 @@ def _prompt_server_selection(servers: dict, action: str = "install") -> dict | N
         return None
 
 
-# ---------------------------------------------------------------------------
-# MCP prune helpers
-# ---------------------------------------------------------------------------
-
-
 def _get_valid_mcp_names() -> set[str]:
     """Return the set of MCP server names that actually exist right now.
 
@@ -5149,6 +4935,14 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False,
     3. enabled_mcps in state.json
 
     Returns summary dict with counts.
+
+    Remove orphaned mcpServers from ~/.claude.json — ledger-scoped. The candidate set is what agentihooks recorded
+    installing, not "everything present that we do not currently define". Skipped entirely when the managed set is
+    unknowable: every name in the ledger would then look orphaned, and prune would delete all of them.
+
+    Prune disabledMcpServers in ~/.claude.json projects. A disable entry is an operator preference, so "still known to
+    Claude Code" counts as alive — a server registered in a project not currently listed under `projects` must not
+    silently re-enable itself.
     """
     valid = _get_valid_mcp_names()
     summary = {
@@ -5165,11 +4959,6 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False,
             return summary
         valid = managed_fallback
 
-    # 0. Remove orphaned mcpServers from ~/.claude.json — ledger-scoped.
-    #    The candidate set is what agentihooks recorded installing, not
-    #    "everything present that we do not currently define".
-    #    Skipped entirely when the managed set is unknowable: every name in the
-    #    ledger would then look orphaned, and prune would delete all of them.
     managed = _get_managed_mcp_names()
     state_ledger = set(_load_state().get("managed_mcp_servers", [])) - _state_foreign_mcp()
     if managed is None:
@@ -5200,10 +4989,6 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False,
                 for name in sorted(orphaned):
                     print(f"  Removed orphaned server: {name}")
 
-    # 1. Prune disabledMcpServers in ~/.claude.json projects.
-    #    A disable entry is an operator preference, so "still known to Claude
-    #    Code" counts as alive — a server registered in a project not currently
-    #    listed under `projects` must not silently re-enable itself.
     known = valid | _get_all_known_mcp_names()
     if _CLAUDE_JSON.exists():
         data = load_json(_CLAUDE_JSON)
@@ -5230,7 +5015,6 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False,
     else:
         projects = {}
 
-    # 2. Prune known-mcp-servers.json
     if known_servers_file.exists():
         known_data = load_json(known_servers_file)
         known_list = set(known_data.get("knownMcpServers", []))
@@ -5242,7 +5026,6 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False,
             if verbose:
                 print(f"  Pruned {len(stale_known)} from known-mcp-servers.json: {sorted(stale_known)}")
 
-    # 3. Prune enabled_mcps in state.json
     state = _load_state()
     state_projects = state.get("targets", {}).get("projects", {})
     state_dirty = False
@@ -5340,13 +5123,14 @@ def _write_route_report(path: str, **fields: str) -> None:
 
 
 def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
-    # --dangerously-skip-permissions overrides a named --permission-mode; the allow form keeps bypass reachable.
+    """--dangerously-skip-permissions overrides a named --permission-mode; the allow form keeps bypass reachable."""
     named = any(arg == "--permission-mode" or arg.startswith("--permission-mode=") for arg in extra_args)
     skip = "--allow-dangerously-skip-permissions" if named else "--dangerously-skip-permissions"
     return [claude_bin, skip, *extra_args]
 
 
 def cmd_claude(extra_args: list[str]) -> None:
+    """Before the route lock: an install must not hold every other launch waiting."""
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import (
         RoutingError,
@@ -5374,7 +5158,6 @@ def cmd_claude(extra_args: list[str]) -> None:
     _load_claude_runtime_env()
     claude_bin = shutil.which("claude") or "claude"
     include_fable = route_requires_fable(extra_args, CLAUDE_HOME / "settings.json")
-    # Before the route lock: an install must not hold every other launch waiting.
     try:
         from scripts.deps_preflight import ensure as deps_ensure
 
@@ -5499,11 +5282,6 @@ def cmd_balance(
     )
     print(balance_table(results, live, time.time(), include_fable))
     return 0 if any(is_routable(result) for result in results) else 1
-
-
-# ---------------------------------------------------------------------------
-# migrate — fix ~/.claude.json project entries after repos move
-# ---------------------------------------------------------------------------
 
 
 _BROADCAST_EMIT_SYSTEM_PROMPT = """\
@@ -5681,7 +5459,6 @@ def _detect_active_profile() -> str:
     try:
         if claude_md.is_symlink():
             target = os.readlink(str(claude_md))
-            # Extract profile name from path like ".../profiles/anton/.claude/CLAUDE.md"
             parts = Path(target).parts
             if "profiles" in parts:
                 idx = parts.index("profiles")
@@ -5788,13 +5565,11 @@ def _cmd_broadcast(args: argparse.Namespace) -> None:
             print(f"Broadcast {bcast_clear} cleared.")
         return
 
-    # Join nargs="*" words into a single message
     words = getattr(args, "message", None) or []
     if not words:
         print("Error: message is required (or use --list / --clear)", file=sys.stderr)
         sys.exit(1)
 
-    # AI-assisted emit mode
     if words[0] == "emit":
         natural_input = " ".join(words[1:])
         _broadcast_emit(natural_input)
@@ -5802,7 +5577,6 @@ def _cmd_broadcast(args: argparse.Namespace) -> None:
 
     message = " ".join(words)
 
-    # Parse TTL string
     ttl_seconds = 0
     ttl_raw = getattr(args, "ttl", None)
     if ttl_raw:
@@ -6028,7 +5802,6 @@ def cmd_migrate(args) -> None:
         print(f"Error: {target} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    # Determine repos to migrate
     if (target / ".git").exists():
         repos = [target]
     else:
@@ -6037,7 +5810,6 @@ def cmd_migrate(args) -> None:
             print(f"Error: no git repos found under {target}", file=sys.stderr)
             sys.exit(1)
 
-    # Load ~/.claude.json
     if not _CLAUDE_JSON.exists():
         print("Error: ~/.claude.json not found", file=sys.stderr)
         sys.exit(1)
@@ -6052,7 +5824,6 @@ def cmd_migrate(args) -> None:
         print("No project entries in ~/.claude.json — nothing to migrate.")
         return
 
-    # Build remap table: new_path → old_path
     remap: list[tuple[str, str]] = []  # (old, new)
     skipped: list[tuple[str, str]] = []  # (repo_name, reason)
 
@@ -6060,20 +5831,17 @@ def cmd_migrate(args) -> None:
         new_path = str(repo)
         basename = repo.name
 
-        # Find old entries matching by basename (different path, same repo name)
         candidates = [p for p in projects if Path(p).name == basename and p != new_path]
 
         if not candidates:
             skipped.append((basename, "no old entry found"))
             continue
 
-        # Filter: skip if old path still exists on disk (different repo, not a move)
         moved = [c for c in candidates if not Path(c).exists()]
         if not moved:
             skipped.append((basename, f"old path(s) still exist on disk: {candidates}"))
             continue
 
-        # Remap each old entry → new path (merge into existing new entry if present)
         for old_path in moved:
             remap.append((old_path, new_path))
 
@@ -6085,7 +5853,6 @@ def cmd_migrate(args) -> None:
                 print(f"  {name}: {reason}")
         return
 
-    # Print remap table
     print(f"\n{'OLD PATH':<60} → NEW PATH")
     print("─" * 120)
     for old, new in remap:
@@ -6096,24 +5863,19 @@ def cmd_migrate(args) -> None:
         print("[DRY RUN] No changes written.")
         return
 
-    # Apply remaps
     for old, new in remap:
         old_data = projects.pop(old, {})
         new_data = projects.get(new, {})
-        # Merge: old data is base, new data (if any) overrides
         merged = {**old_data, **new_data}
         projects[new] = merged
 
     state = _load_state()
-    # Claude-scoped on purpose: this seeds ~/.claude.json project entries.
     active_profile = _global_record(state).get("profile", "default")
 
-    # Save
     data["projects"] = projects
     save_json(_CLAUDE_JSON, data)
     print(f"[OK] Migrated {len(remap)} project(s) in ~/.claude.json")
 
-    # Register targets in state.json
     for _old, new in remap:
         _register_target_project(Path(new), active_profile)
     print(f"[OK] Registered {len(remap)} target(s) in state.json")
@@ -6136,6 +5898,13 @@ def _crew_doctor(argv: list[str]) -> bool:
 
 
 def main() -> None:
+    """Fast path: "agentihooks claude ..." bypasses argparse entirely so that any claude flags (-r, --resume, -p, etc.)
+    pass through untouched.
+
+    Dest avoids the positional `target` above, which is the path/name.
+
+    Non-claude adapters carry their own doctor(); claude's health check is the status_checker suite below.
+    """
     _argv = bundles.user_last(sys.argv[1:])
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
         _argv.remove("--local")
@@ -6148,8 +5917,6 @@ def main() -> None:
             _at = _argv.index(_option, 2)
             _argv[1:1] = [_argv.pop(_at) for _ in range(min(2, len(_argv) - _at))]
 
-    # Fast path: "agentihooks claude ..." bypasses argparse entirely
-    # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
     if _argv and _argv[0] == "claude":
         return import_module("scripts.claude_login").dispatch(_argv[1:], cmd_claude)
     if _argv and _argv[0] == "codex":
@@ -6332,7 +6099,6 @@ def main() -> None:
         action="store_true",
         help="Skip the immediate re-install (operator runs 'agentihooks init' later)",
     )
-    # NB: dest avoids the positional `target` above, which is the path/name.
     lp_p.add_argument(
         "--for-target",
         dest="for_target",
@@ -6388,7 +6154,6 @@ def main() -> None:
         help="Overwrite an existing .claudeignore",
     )
 
-    # ── Token optimization CLI tools ──────────────────────────────────
     lint_p = sub.add_parser("lint-claude", help="Analyze CLAUDE.md token cost and suggest skill extraction")
     lint_p.add_argument("lint_path", nargs="?", default=None, help="Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)")
 
@@ -6508,7 +6273,6 @@ ai-assisted (emit):
         help="Clear all broadcasts, or a specific ID",
     )
 
-    # --- Channel subcommand ---
     chan_p = sub.add_parser(
         "channel",
         help="Manage broadcast channels (targeted messaging)",
@@ -6525,11 +6289,9 @@ examples:
     chan_p.add_argument("-s", "--severity", default="info", choices=["info", "alert", "critical"])
     chan_p.add_argument("-t", "--ttl", default=None, help="TTL: 5m, 30m, 1h, 8h, 24h, or seconds")
 
-    # --- Brain subcommand ---
     brain_p = sub.add_parser("brain", help="Manage the brain adapter (knowledge injection)")
     brain_p.add_argument("action", choices=["status", "refresh"], help="Brain action")
 
-    # --- Enforcement subcommand ---
     enf_p = sub.add_parser(
         "enforcement",
         help="Manage drumbeat enforcement reminders (re-inject every N tool calls)",
@@ -6586,7 +6348,6 @@ examples:
     cond_p.add_argument("--tool", default="", help="Show which conditions fire for this tool name")
     cond_p.add_argument("--command", dest="bash_command", default="", help="Bash command to match with --tool Bash")
 
-    # --- Rules refresh subcommand ---
     rr_p = sub.add_parser(
         "refresh-rules",
         help="Push profile rule updates into all running Claude sessions (one-shot)",
@@ -6671,7 +6432,6 @@ notes:
     elif args.command == "ignore":
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
     elif args.command == "claude":
-        # Pass everything after "claude" as extra args
         try:
             idx = sys.argv.index("claude")
             extra = sys.argv[idx + 1 :]
@@ -6724,8 +6484,6 @@ notes:
     elif args.command == "doctor":
         _doctor_target = getattr(args, "doctor_target", "claude")
         if _doctor_target != "claude":
-            # Non-claude adapters carry their own doctor(); claude's health
-            # check is the status_checker suite below.
             from scripts.targets import get_adapter as _get_adapter
 
             print(f"AgentiHooks doctor — {_doctor_target} target")

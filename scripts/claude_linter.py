@@ -37,7 +37,6 @@ class Report:
     extraction_candidates: list[Section] = field(default_factory=list)
 
 
-# Patterns that indicate workflow-specific content (extractable to skills)
 _WORKFLOW_PATTERNS = [
     r"when\s+(?:the\s+)?user",
     r"if\s+(?:the\s+)?user\s+(?:asks|says|wants|requests)",
@@ -52,7 +51,6 @@ _WORKFLOW_PATTERNS = [
 ]
 _WORKFLOW_RE = re.compile("|".join(_WORKFLOW_PATTERNS), re.IGNORECASE)
 
-# Patterns that indicate always-needed content
 _ALWAYS_PATTERNS = [
     r"^#\s+(?:commands?|architecture|environment|setup|install)",
     r"guidelines",
@@ -73,7 +71,11 @@ PREAMBLE_HEADING = "(document preamble)"
 
 
 def parse_sections(md_path: Path) -> list[Section]:
-    """Split markdown into sections by H2/H3 headers."""
+    """Split markdown into sections by H2/H3 headers.
+
+    Content before the first H2/H3 — title, intro prose, injected marker blocks. Reported so the per-section totals
+    reconcile with the whole-file token count instead of silently disagreeing.
+    """
     text = md_path.read_text(encoding="utf-8")
     lines = text.split("\n")
 
@@ -86,11 +88,7 @@ def parse_sections(md_path: Path) -> list[Section]:
     for i, line in enumerate(lines):
         m = re.match(r"^(#{2,3})\s+(.+)", line)
         if m:
-            # Save previous section
             if not current_heading and any(ln.strip() for ln in current_lines):
-                # Content before the first H2/H3 — title, intro prose, injected
-                # marker blocks. Reported so the per-section totals reconcile with
-                # the whole-file token count instead of silently disagreeing.
                 sections.append(
                     Section(
                         heading=PREAMBLE_HEADING,
@@ -117,7 +115,6 @@ def parse_sections(md_path: Path) -> list[Section]:
         else:
             current_lines.append(line)
 
-    # Save last section
     if current_heading:
         sections.append(
             Section(
@@ -141,22 +138,17 @@ def classify_section(section: Section) -> str:
     """
     text = section.content
 
-    # Check always-needed patterns first (higher priority)
     if _ALWAYS_RE.search(section.heading):
         return "always"
 
-    # Count workflow signals
     workflow_hits = len(_WORKFLOW_RE.findall(text))
 
-    # Short sections are not worth extracting
     if section.tokens < 100:
         return "always"
 
-    # Strong workflow signal: multiple pattern matches
     if workflow_hits >= 2:
         return "workflow"
 
-    # Moderate signal with size threshold
     if workflow_hits >= 1 and section.tokens >= 300:
         return "workflow"
 
@@ -232,6 +224,9 @@ def extract_to_skill(
 
     Raises:
         ValueError: If section_heading not found.
+
+    A merged CLAUDE.md carries the same heading from several sources (the bundle's shared block and a profile, say).
+    Taking the first would silently extract and delete the wrong one.
     """
     sections = parse_sections(md_path)
 
@@ -243,9 +238,6 @@ def extract_to_skill(
         raise ValueError(f'Section "{section_heading}" not found. Available sections: {", ".join(available)}')
 
     if len(matches) > 1:
-        # A merged CLAUDE.md carries the same heading from several sources (the
-        # bundle's shared block and a profile, say). Taking the first would
-        # silently extract and delete the wrong one.
         where = ", ".join(f"line {s.start_line}" for s in matches)
         raise ValueError(
             f'Section "{section_heading}" appears {len(matches)} times ({where}). '
@@ -254,31 +246,25 @@ def extract_to_skill(
 
     target = matches[0]
 
-    # Create skill directory
     if output_dir is None:
         output_dir = md_path.parent / ".claude" / "commands"
     skill_dir = output_dir / skill_name
     skill_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write SKILL.md
     skill_path = skill_dir / "SKILL.md"
     skill_content = target.content.strip()
 
-    # Remove the heading line from content (it becomes the skill name)
     skill_lines = skill_content.split("\n")
     if skill_lines and skill_lines[0].startswith("#"):
         skill_lines = skill_lines[1:]
 
     skill_path.write_text("\n".join(skill_lines).strip() + "\n", encoding="utf-8")
 
-    # Remove section from CLAUDE.md
     text = md_path.read_text(encoding="utf-8")
     lines = text.split("\n")
 
-    # Remove lines from start_line-1 to end_line-1 (0-indexed)
     start_idx = target.start_line - 1
     end_idx = target.end_line
-    # Also remove trailing blank lines
     while end_idx < len(lines) and lines[end_idx].strip() == "":
         end_idx += 1
 

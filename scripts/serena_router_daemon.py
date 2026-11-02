@@ -143,7 +143,9 @@ def stop() -> int:
 
 
 def _request(path: str, payload: dict | None = None) -> dict | None:
-    # A closed loopback port can drop instead of refuse on WSL; the short probe keeps callers from waiting out the HTTP timeout.
+    """A closed loopback port can drop instead of refuse on WSL; the short probe keeps callers from waiting out the HTTP
+    timeout.
+    """
     if not mcp_daemon.port_open(HOST, port(), timeout=0.5):
         return None
     data = json.dumps(payload).encode() if payload is not None else None

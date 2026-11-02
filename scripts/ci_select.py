@@ -23,9 +23,7 @@ TESTS = "tests"
 SOURCES = ("hooks", "scripts")
 DOCS = "docs/"
 DOC = ".md"
-# A name the workflow passes to pytest through one space separated output line.
 SAFE = re.compile(r"[A-Za-z0-9_./-]+")
-# Changing any of these changes how every test runs, so only the full suite grades them.
 HARNESS = frozenset(
     {
         "pyproject.toml",
@@ -40,14 +38,10 @@ HARNESS = frozenset(
     }
 )
 CONFTEST = "conftest.py"
-# Only the full suite ran these checks, so a new or edited test module could pass its own tier and fail the queue.
 SUITE_SPEED = "tests/test_suite_speed.py"
 FAKEREDIS = "fakeredis"
-# The manifest names its locked tests through a constant, so neither file name selects its agreement check.
 LOCKED_CHECK = f"{TESTS}/test_locked_tests.py"
-# Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
-# Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
 
@@ -67,6 +61,7 @@ def is_test(path: str) -> bool:
 
 
 def needs_full_suite(changed: list[str]) -> bool:
+    """HARNESS: Changing any of these changes how every test runs, so only the full suite grades them."""
     return any(path in HARNESS or Path(path).name == CONFTEST for path in changed)
 
 
@@ -106,6 +101,17 @@ def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
 
 
 def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest: dict | None = None) -> set[str]:
+    """SAFE: A name the workflow passes to pytest through one space separated output line.
+
+    SUITE_SPEED: Only the full suite ran these checks, so a new or edited test module could pass its own tier and fail
+    the queue.
+
+    LOCKED_CHECK: The manifest names its locked tests through a constant, so neither file name selects its agreement
+    check.
+
+    TREE_CHECKS: Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed
+    its own tier.
+    """
     tests = {path for path in changed if is_test(path)}
     if manifest is not None:
         tests.update(recorded_tests(manifest, changed))
@@ -207,6 +213,9 @@ def file_units(root: Path, path: str, durations: dict[str, float]) -> dict[str, 
 
 
 def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: int) -> list[list[str]]:
+    """LEG_SECONDS: Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs
+    longer.
+    """
     seconds = file_seconds(durations, tests)
     total = sum(seconds.values())
     count = min(limit, max(1, math.ceil(total / LEG_SECONDS)))

@@ -14,6 +14,9 @@ Two backends, auto-selected:
 
 This module deliberately does not import ``hooks.*``. ``scripts/install.py`` has
 that constraint and this is part of its dependency surface.
+
+_PROC_MARKER: The process is identified by its module path, not by the interpreter that runs it — the venv python
+differs per machine, `-m hooks.mcp` does not.
 """
 
 from __future__ import annotations
@@ -64,16 +67,9 @@ UNIT_NAME = "agentihooks-mcp.service"
 
 NETWORK_TRANSPORTS = ("sse", "streamable-http")
 
-# The process is identified by its module path, not by the interpreter that runs
-# it — the venv python differs per machine, `-m hooks.mcp` does not.
 _PROC_MARKER = "hooks.mcp"
 
 _SYSTEMCTL_TIMEOUT = 10
-
-
-# ---------------------------------------------------------------------------
-# Results
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -115,11 +111,6 @@ class DaemonStatus:
         if not self.running:
             return 1
         return 2 if self.diverged else 0
-
-
-# ---------------------------------------------------------------------------
-# Primitives
-# ---------------------------------------------------------------------------
 
 
 def port_open(host: str, port: int, timeout: float = 1.0) -> bool:
@@ -172,6 +163,11 @@ def pid_alive(pid: int | None) -> bool:
     The cmdline cross-check is what stops a recycled pid reading as a running
     daemon. Where /proc is absent the signal check stands alone and callers are
     told via ``DaemonStatus.liveness_is_exact``.
+
+    Matches `-m hooks.mcp` as an adjacent argv pair, which is exactly what both the systemd unit and _spawn_detached
+    run. A substring test on the raw blob also matches a path containing "hooks.mcp" or a future `hooks.mcp_reporter`; a
+    bare whole-argv test still matches `grep hooks.mcp`. A recycled pid landing on any of those would make `stop`
+    SIGTERM an unrelated process.
     """
     if not pid:
         return False
@@ -181,19 +177,9 @@ def pid_alive(pid: int | None) -> bool:
         return False
     if not _proc_fs_available():
         return True
-    # `-m hooks.mcp` as an adjacent argv pair, which is exactly what both the
-    # systemd unit and _spawn_detached run. A substring test on the raw blob also
-    # matches a path containing "hooks.mcp" or a future `hooks.mcp_reporter`; a
-    # bare whole-argv test still matches `grep hooks.mcp`. A recycled pid landing
-    # on any of those would make `stop` SIGTERM an unrelated process.
     argv = _read_cmdline(int(pid)).split(b"\0")
     marker = _PROC_MARKER.encode()
     return any(a == b"-m" and b == marker for a, b in zip(argv, argv[1:]))
-
-
-# ---------------------------------------------------------------------------
-# Pidfile
-# ---------------------------------------------------------------------------
 
 
 def read_pidfile() -> dict:
@@ -205,9 +191,8 @@ def read_pidfile() -> dict:
 
 
 def _write_pidfile(record: dict) -> None:
+    """Unique tmp name per writer — a fixed ".tmp" is shared by every concurrent writer and races os.replace."""
     pidfile().parent.mkdir(parents=True, exist_ok=True)
-    # Unique tmp name per writer — a fixed ".tmp" is shared by every concurrent
-    # writer and races os.replace.
     tmp = pidfile().with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(record, indent=2), encoding="utf-8")
     os.replace(str(tmp), str(pidfile()))
@@ -216,11 +201,6 @@ def _write_pidfile(record: dict) -> None:
 def _clear_pidfile() -> None:
     with contextlib.suppress(OSError):
         pidfile().unlink()
-
-
-# ---------------------------------------------------------------------------
-# Backend selection
-# ---------------------------------------------------------------------------
 
 
 def _systemctl_usable() -> bool:
@@ -270,11 +250,6 @@ def resolve_backend() -> str:
             file=sys.stderr,
         )
     return "systemd" if _systemctl_usable() else "pidfile"
-
-
-# ---------------------------------------------------------------------------
-# Configuration — mirrors what the installer writes into ~/.claude.json
-# ---------------------------------------------------------------------------
 
 
 def _env_files() -> list[Path]:
@@ -364,11 +339,6 @@ def _client_entry() -> dict | None:
 
     entry = (data.get("mcpServers") or {}).get(MCP_SERVER_NAME)
     return entry if isinstance(entry, dict) else None
-
-
-# ---------------------------------------------------------------------------
-# Start / stop
-# ---------------------------------------------------------------------------
 
 
 def _child_env(transport: str) -> dict:
@@ -552,7 +522,11 @@ def _start_systemd(transport: str) -> DaemonState:
 
 
 def _start_pidfile(transport: str, python: str, cwd: str) -> DaemonState:
-    """Spawn and record. Caller holds the lock — see ``ensure_running``."""
+    """Spawn and record. Caller holds the lock — see ``ensure_running``.
+
+    Liveness is checked before the port, deliberately. An open port is not proof that OUR child is serving it — a daemon
+    we failed to stop, or another process, answers identically. Our own pid dying is unambiguous.
+    """
     host, port = configured_host(), configured_port()
     try:
         pid = _spawn_detached(python, transport, cwd)
@@ -570,9 +544,6 @@ def _start_pidfile(transport: str, python: str, cwd: str) -> DaemonState:
         }
     )
 
-    # Liveness is checked before the port, deliberately. An open port is not proof
-    # that OUR child is serving it — a daemon we failed to stop, or another
-    # process, answers identically. Our own pid dying is unambiguous.
     for _ in range(40):  # up to ~4s
         if not pid_alive(pid):
             _clear_pidfile()
@@ -599,11 +570,6 @@ def restart(transport: str, python: str, cwd: str) -> DaemonState:
     return ensure_running(transport, python, cwd, restart=True)
 
 
-# ---------------------------------------------------------------------------
-# Status
-# ---------------------------------------------------------------------------
-
-
 def _systemd_unit_active() -> bool:
     if not _systemctl_usable():
         return False
@@ -621,7 +587,15 @@ def _systemd_unit_active() -> bool:
 
 
 def status() -> DaemonStatus:
-    """Config versus reality, with the mismatches named."""
+    """Config versus reality, with the mismatches named.
+
+    Host and port stay unknown here: the unit bakes only the transport, and the daemon reads the rest from .env at
+    import. A port change is still caught — the configured port stops answering — but a host change that leaves the
+    daemon reachable anyway (a wide bind) is not detectable.
+
+    A stdio entry has no `type` at all in the older shape, so reporting "type None" would send the reader looking for a
+    typo instead of at the real problem: the client is still told to spawn the server.
+    """
     backend = resolve_backend()
     transport = configured_transport()
     host, port = configured_host(), configured_port()
@@ -641,10 +615,6 @@ def status() -> DaemonStatus:
     if backend == "systemd":
         st.running = _systemd_unit_active()
         st.live_transport = _unit_transport()
-        # Host and port stay unknown here: the unit bakes only the transport, and
-        # the daemon reads the rest from .env at import. A port change is still
-        # caught — the configured port stops answering — but a host change that
-        # leaves the daemon reachable anyway (a wide bind) is not detectable.
         st.endpoint_check_is_exact = False
     else:
         st.running = pid_alive(record.get("pid"))
@@ -675,9 +645,6 @@ def status() -> DaemonStatus:
     if entry:
         expected_type = "sse" if transport == "sse" else "http"
         if "command" in entry and not entry.get("url"):
-            # A stdio entry has no `type` at all in the older shape, so reporting
-            # "type None" would send the reader looking for a typo instead of at
-            # the real problem: the client is still told to spawn the server.
             st.divergences.append("~/.claude.json still holds a stdio command entry — run `agentihooks init`")
         elif entry.get("type") != expected_type:
             st.divergences.append(f"~/.claude.json declares type {entry.get('type')!r}, expected {expected_type!r}")

@@ -23,7 +23,6 @@ AGENTIHOOKS_HOME = Path(os.getenv("AGENTIHOOKS_HOME", str(Path.home() / ".agenti
 CLAUDE_HOME = claude_home()
 STATE_JSON = AGENTIHOOKS_HOME / "state.json"
 
-# ── Color tags (matching install.py conventions) ────────────────────────
 
 _GREEN = "\033[32m"
 _DIM = "\033[2m"
@@ -47,9 +46,6 @@ def _cprint(msg: str) -> str:
     return msg
 
 
-# ── Helpers ─────────────────────────────────────────────────────────────
-
-
 def _load_state() -> dict:
     if STATE_JSON.exists():
         try:
@@ -59,15 +55,18 @@ def _load_state() -> dict:
     return {}
 
 
-# ── Individual check functions ──────────────────────────────────────────
-
-
 def check_profile() -> dict[str, Any]:
     """Profile chain per install target, plus linked-profile chain membership.
 
     ``targets.global`` is keyed by install target (claude / codex). Reading it
     as a flat record reports "(not installed)" on every multi-target machine,
     so the shape is resolved through the same accessor the hook runtime uses.
+
+    Headline record: the target this machine last installed, else claude, else whichever is present. Keeps
+    `name`/`settings_profile` meaningful for --json consumers and the status skill, which predate multi-target.
+
+    A linked profile counts as in-chain if ANY target carries it; naming the targets is what makes a claude/codex chain
+    divergence visible here.
     """
     from hooks.targets import DEFAULT_TARGET, split_global
 
@@ -88,9 +87,6 @@ def check_profile() -> dict[str, Any]:
             }
         )
 
-    # Headline record: the target this machine last installed, else claude,
-    # else whichever is present. Keeps `name`/`settings_profile` meaningful for
-    # --json consumers and the status skill, which predate multi-target.
     primary = state.get("install_target", "") or DEFAULT_TARGET
     head = next(
         (t for t in targets if t["target"] == primary),
@@ -104,8 +100,6 @@ def check_profile() -> dict[str, Any]:
     user_bundle = state.get("user_bundle", {}).get("path", "")
     shared_bundle = state.get("shared_bundle", {}).get("path", "")
     raw_links = state.get("linked_profiles", []) or []
-    # A linked profile counts as in-chain if ANY target carries it; naming the
-    # targets is what makes a claude/codex chain divergence visible here.
     chains = {t["target"]: [p.strip() for p in t["profile"].split(",") if p.strip()] for t in targets}
     linked: list[dict[str, Any]] = []
     for entry in raw_links:
@@ -155,12 +149,10 @@ def check_python() -> dict[str, Any]:
     """Verify the Python binary actually used by hook commands in settings.json."""
     import subprocess
 
-    # Extract the real Python from hook commands in settings.json
     python_path = _extract_hook_python()
     if not python_path:
         return {"path": "(not found in settings.json)", "ok": False}
 
-    # Test if the binary actually runs
     try:
         result = subprocess.run(
             [python_path, "--version"],
@@ -188,7 +180,6 @@ def _extract_hook_python() -> Optional[str]:
             for entry in entries:
                 for hook in entry.get("hooks", []) if isinstance(entry, dict) else []:
                     cmd = hook.get("command", "")
-                    # Match: /path/to/python3 -m hooks or /path/to/python -m hooks
                     m = re.search(r"([\w/.+-]+python[\w.]*)\s+-m\s+hooks", cmd)
                     if m:
                         return m.group(1)
@@ -205,7 +196,6 @@ def check_redis() -> dict[str, Any]:
         if r is None:
             return {"connected": False, "keys": {}, "ok": False}
         r.ping()
-        # Categorize agenticore keys by type
         counts: dict[str, int] = {}
         cursor = 0
         while True:
@@ -241,6 +231,10 @@ _GUARDRAIL_DESCRIPTIONS = {
 
 
 def check_guardrails() -> dict[str, Any]:
+    """Compression only actually fires when scope is "all" — see hooks/common.py / hook_manager.py. With scope "refresh"
+    (default, a no-op since the context-refresh path was removed) nothing is compressed, so reporting "active" on level
+    alone would mislead.
+    """
     flags = {}
     try:
         from hooks.config import (
@@ -256,10 +250,6 @@ def check_guardrails() -> dict[str, Any]:
         flags = {
             "bash_filter": BASH_FILTER_ENABLED,
             "file_dedup": FILE_READ_CACHE_ENABLED,
-            # Compression only actually fires when scope is "all" — see
-            # hooks/common.py / hook_manager.py. With scope "refresh" (default,
-            # a no-op since the context-refresh path was removed) nothing is
-            # compressed, so reporting "active" on level alone would mislead.
             "context_compression": CONTEXT_REFRESH_COMPRESSION != "off" and CONTEXT_COMPRESSION_SCOPE == "all",
             "context_audit": CONTEXT_AUDIT_ENABLED,
             "effort_policy": EFFORT_POLICY_ENABLED,
@@ -299,7 +289,6 @@ def _query_mcp_tools(url: str, headers: dict[str, str]) -> Optional[int]:
     resolved_headers.setdefault("Accept", "application/json, text/event-stream")
 
     try:
-        # Initialize
         init_resp = requests.post(
             url,
             headers=resolved_headers,
@@ -318,12 +307,10 @@ def _query_mcp_tools(url: str, headers: dict[str, str]) -> Optional[int]:
         if init_resp.status_code != 200:
             return None
 
-        # Extract session ID if present
         sid = init_resp.headers.get("Mcp-Session-Id", "")
         if sid:
             resolved_headers["Mcp-Session-Id"] = sid
 
-        # tools/list
         tools_resp = requests.post(
             url,
             headers=resolved_headers,
@@ -337,13 +324,11 @@ def _query_mcp_tools(url: str, headers: dict[str, str]) -> Optional[int]:
         if tools_resp.status_code != 200:
             return None
 
-        # Parse SSE or JSON response
         text = tools_resp.text
         for line in text.splitlines():
             if line.startswith("data:"):
                 data = json.loads(line[5:])
                 return len(data.get("result", {}).get("tools", []))
-        # Try direct JSON
         data = tools_resp.json()
         return len(data.get("result", {}).get("tools", []))
     except Exception:
@@ -412,10 +397,8 @@ def check_mcp() -> dict[str, Any]:
         if user_mcp_path.exists():
             user_data = json.loads(user_mcp_path.read_text(encoding="utf-8"))
 
-        # User-scope servers
         user_servers = user_data.get("mcpServers", {})
 
-        # Project-scope servers (CWD .mcp.json)
         project_servers: dict[str, dict] = {}
         proj_mcp = Path.cwd() / ".mcp.json"
         if proj_mcp.exists():
@@ -424,7 +407,6 @@ def check_mcp() -> dict[str, Any]:
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Per-project disabled state (UI toggles via /mcp) from ~/.claude.json
         cwd = str(Path.cwd())
         project_block = user_data.get("projects", {}).get(cwd, {})
         disabled: set[str] = set(project_block.get("disabledMcpServers", []))
@@ -438,11 +420,9 @@ def check_mcp() -> dict[str, Any]:
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Load cache for tool counts
         cache = _load_tool_cache()
         all_cfg = {**user_servers, **project_servers}
 
-        # Query ALL servers for tool counts (enabled or not)
         server_details = {}
         queried_tools: dict[str, Optional[int]] = {}
         fleet_tools = 0
@@ -453,21 +433,18 @@ def check_mcp() -> dict[str, Any]:
             source = "project" if name in project_servers else "user"
             enabled = name not in disabled
 
-            # Get tool count: live query → cache fallback
             tools = None
             from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
             if name in (MCP_SERVER_NAME, *LEGACY_MCP_SERVER_NAMES):
                 tools = _count_hooks_utils_tools()
             elif stype == "http":
-                # Try cache first
                 if name in cache:
                     tools = cache[name]
                 else:
                     url = cfg.get("url", "")
                     headers = cfg.get("headers", {})
                     tools = _query_mcp_tools(url, headers)
-            # stdio servers other than agentihooks: check cache only
             elif name in cache:
                 tools = cache[name]
 
@@ -483,7 +460,6 @@ def check_mcp() -> dict[str, Any]:
                 if enabled:
                     active_tools += tools
 
-        # Save fresh cache
         _save_tool_cache(queried_tools)
 
         enabled_count = sum(1 for v in server_details.values() if v["enabled"])
@@ -517,7 +493,6 @@ def check_session(session_id: str) -> dict[str, Any]:
         r = get_redis()
         if r is None:
             result["error"] = "Redis unavailable"
-            # Try in-memory fallback for context audit
             try:
                 from hooks.observability.context_audit import get_audit_summary
 
@@ -529,7 +504,6 @@ def check_session(session_id: str) -> dict[str, Any]:
                 pass
             return result
 
-        # Token metrics
         token_key = redis_key("tokens", session_id)
         metrics = r.hgetall(token_key)
         if metrics:
@@ -539,7 +513,6 @@ def check_session(session_id: str) -> dict[str, Any]:
             result["remaining"] = int(float(metrics.get("remaining", 0)))
             result["ok"] = True
 
-        # Context audit
         try:
             from hooks.observability.context_audit import get_audit_summary
 
@@ -549,7 +522,6 @@ def check_session(session_id: str) -> dict[str, Any]:
         except Exception:
             pass
 
-        # Warn state
         warn_key = redis_key("token_warn", session_id)
         warn_level = r.hget(warn_key, "level")
         if warn_level:
@@ -559,9 +531,6 @@ def check_session(session_id: str) -> dict[str, Any]:
     except Exception as e:
         result["error"] = str(e)
         return result
-
-
-# ── Orchestrator ────────────────────────────────────────────────────────
 
 
 def check_broadcast() -> dict[str, Any]:
@@ -606,9 +575,6 @@ def run_all_checks(session_id: Optional[str] = None) -> dict[str, Any]:
     return results
 
 
-# ── Formatters ──────────────────────────────────────────────────────────
-
-
 def _fmt_bytes(n: int) -> str:
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
@@ -632,9 +598,11 @@ def _user_bundle_lines(profile: dict[str, Any]) -> list[str]:
 
 
 def format_cli(results: dict[str, Any]) -> str:
+    """One line per install target, so a claude/codex chain divergence is visible instead of hidden behind the headline
+    record.
+    """
     lines = []
 
-    # Profile
     p = results["profile"]
     tag = "[OK]" if p["ok"] else "[!!]"
     bundle_str = f" (bundle: {p['bundle']})" if p["bundle"] != "(none)" else ""
@@ -642,8 +610,6 @@ def format_cli(results: dict[str, Any]) -> str:
     lines.append(_cprint(f"{tag} Profile: {p['name']}{sp_str}{bundle_str}"))
     lines.extend(_shared_bundle_lines(p))
     lines.extend(_user_bundle_lines(p))
-    # One line per install target, so a claude/codex chain divergence is
-    # visible instead of hidden behind the headline record.
     for t in p.get("targets", []) or []:
         t_sp = f" | settings: {t['settings_profile']}" if t.get("settings_profile") else ""
         lines.append(_cprint(f"     + target {t['target']}: {t['profile']}{t_sp}"))
@@ -653,18 +619,15 @@ def format_cli(results: dict[str, Any]) -> str:
         exists = "" if lp["exists"] else " [MISSING]"
         lines.append(_cprint(f"     + linked: {lp['name']} -> {lp['path']} ({in_chain}){exists}"))
 
-    # Hooks
     h = results["hooks"]
     tag = "[OK]" if h["ok"] else "[!!]"
     lines.append(_cprint(f"{tag} Hooks: {h['total']}/{h['expected']} wired in settings.json"))
 
-    # Python
     py = results["python"]
     tag = "[OK]" if py["ok"] else "[!!]"
     version = f" ({py['version']})" if py.get("version") else ""
     lines.append(_cprint(f"{tag} Python: {py['path']}{version}"))
 
-    # Redis
     r = results["redis"]
     if r["connected"]:
         total = r.get("total_keys", 0)
@@ -676,14 +639,12 @@ def format_cli(results: dict[str, Any]) -> str:
     else:
         lines.append(_cprint("[!!] Redis: not connected (in-memory fallback active)"))
 
-    # OTEL
     o = results["otel"]
     if o["enabled"]:
         lines.append(_cprint("[OK] OTEL: enabled"))
     else:
         lines.append(_cprint("[--] OTEL: disabled"))
 
-    # Broadcast
     b = results.get("broadcast", {})
     if b.get("enabled"):
         lines.append(_cprint(f"[OK] Broadcast: {b['sessions']} sessions, {b['messages']} messages"))
@@ -696,7 +657,6 @@ def format_cli(results: dict[str, Any]) -> str:
     else:
         lines.append(_cprint(f"[--] Serena router: not running ({s.get('url', '')})"))
 
-    # Guardrails
     g = results["guardrails"]
     descs = g.get("descriptions", {})
     tag = "[OK]" if g["active"] == g["total"] else "[!!]"
@@ -707,7 +667,6 @@ def format_cli(results: dict[str, Any]) -> str:
             desc = descs.get(name, "")
             lines.append(f"     {marker} {name}: {desc}")
 
-    # MCP
     m = results["mcp"]
     tag = "[OK]" if m["ok"] else "[--]"
     enabled = m.get("enabled", 0)
@@ -735,12 +694,10 @@ def format_cli(results: dict[str, Any]) -> str:
         tools_str = f" ({sinfo['tools']} tools)" if sinfo.get("tools") is not None else ""
         lines.append(f"     {marker} {sname} [{sinfo['type']}]{tools_str}")
 
-    # Quota
     q = results["quota"]
     tag = "[OK]" if q["ok"] else "[--]"
     lines.append(_cprint(f"{tag} Quota: {q['summary']}"))
 
-    # Session (if present)
     s = results.get("session")
     if s:
         lines.append("")
@@ -771,9 +728,6 @@ def format_json(results: dict[str, Any]) -> str:
     return json.dumps(results, indent=2, default=str)
 
 
-# ── CLI entrypoint ──────────────────────────────────────────────────────
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="agentihooks status checker")
     parser.add_argument("--json", action="store_true", help="Output JSON instead of colored text")
@@ -789,11 +743,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-# ---------------------------------------------------------------------------
-# Hook injection probe (P0.4 — agentihooks doctor --debug-hook)
-# ---------------------------------------------------------------------------
 
 
 def _synthetic_payload(event: str) -> dict:
@@ -823,6 +772,10 @@ def check_hook_injection() -> dict:
          under 10,000 chars (the documented hard cap)
 
     Returns a dict {ok: bool, events: [...], warnings: [...]}.
+
+    Per the Claude Code hooks protocol, SessionStart and UserPromptSubmit take plain-text stdout as context; PreToolUse,
+    PostToolUse and Stop prefer hookSpecificOutput JSON, where plain-text stdout is undocumented and may be ignored by
+    some versions.
     """
     import json as _json
     import os
@@ -873,10 +826,6 @@ def check_hook_injection() -> dict:
         reason = None
         ctx_len = 0
 
-        # Per Claude Code hooks protocol:
-        #  - SessionStart / UserPromptSubmit: plain-text stdout is valid context.
-        #  - PreToolUse / PostToolUse / Stop: prefer hookSpecificOutput JSON;
-        #    plain-text stdout is undocumented and may be ignored by some versions.
         accepts_plain_text = event in ("SessionStart", "UserPromptSubmit")
 
         if rc not in (0, 2):
