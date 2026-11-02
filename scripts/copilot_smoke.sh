@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # End-to-end smoke test of agentihooks running against a live GitHub Copilot CLI.
 # It drives the real binary and the real installed wrapper, so every assertion passes only when a hook acted:
-#   1. Evidence is hook-attributable: an exit code, a file the hook wrote, a line this session's hook logged.
-#      Never the model's prose, which passes whether or not a hook ran.
+#   1. Evidence is hook-attributable (an exit code, a file or log line the hook wrote), never the model's prose.
 #   2. Log evidence is scoped to this session id: the hook log is shared by every session on the machine.
 # Everything runs against a scratch COPILOT_HOME; an interrupted in-place swap would leave copilot unguarded.
 # A malformed payload makes the hook fail open (exit 0), so every deny payload is parse-checked first, and the
-# loader check is proven able to fail before its pass counts.
+# loader check is proven able to fail before its pass counts. Docs say preToolUse is fail-closed on any non-zero
+# exit while the runtime string calls exit 2 a warning, so [6] records the behaviour rather than assuming it.
 # The hook loader runs before auth and names any event it does not recognise, which proves the PascalCase names
 # and the hooks directory are read without a subscription. Since v1.0.80 stdin is the event's input object alone
 # and the registration passes the event name as argv[1]; a payload naming its event dispatches without argv.
-# Live auth copies the operator's config.json into the scratch home unconditionally; it is never read or printed.
+# Live auth copies the operator's config.json into the scratch home unconditionally, because the pre-auth probes
+# already made the binary write an unauthenticated config.json there; the file is never read or printed.
 # Two tiers:
 #   OFFLINE  config schema accepted by the real binary, plus every hook event driven through the installed
 #            wrapper. No auth, no network, no model call. The guardrail proofs live here.

@@ -2,7 +2,6 @@
 # guard-daemon.sh — Process Guard Daemon v3 (WSL/Linux)
 # Ghost detector: only kills processes with N+ instances hanging for timeout+.
 # One-pass: load config, group processes, flag ghosts, kill if timed out, exit.
-# State keeps each flagged process name's first flagged time; killed groups are dropped from it.
 # Triggered every 60s by the agentihooks scheduler (agentihooks host-guard install).
 
 set -euo pipefail

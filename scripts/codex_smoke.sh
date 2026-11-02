@@ -5,6 +5,7 @@
 #   1. Evidence is hook-attributable: a line this session's hook wrote to the hook log, a file that does or
 #      does not exist, an exit code, the tool call itself. Never the model's prose.
 #   2. Log evidence is scoped to this session id: the hook log is shared by every session on the machine.
+# Each turn captures its event stream, its session id and the hook-log lines that session wrote.
 # A guard fires only on an attempted tool call, so a turn the model declines is not a guard failure; the
 # deterministic proof feeds the hook a PreToolUse payload directly and requires exit 2 with a stderr reason.
 # The persona check asserts the compiled persona is in the rollout, and resume asserts on the answer item only,
