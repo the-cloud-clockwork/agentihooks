@@ -1,11 +1,20 @@
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import fakeredis
 import pytest
 
 from scripts.hive import registry
-from scripts.swarm import commands, host_budget, local_slots
+from scripts.swarm import capacity, cli, commands, host_budget, local_slots
 from scripts.swarm.store import RedisStore, SwarmConfig
+
+DECISION = {
+    "ceilings": {"eng": 1, "ci": 0, "plan": 0},
+    "pending_raise": {"target": None, "ticks": 0},
+    "host": {"room": 20, "reason": "load is low"},
+    "reason": "Quota seats 1.",
+}
 
 
 @pytest.fixture
@@ -48,3 +57,22 @@ def test_explicit_slot_limits_still_bound_fifteen_workers(
 def test_fifteen_worker_configuration_keeps_host_room_guard(store: RedisStore, sample: host_budget.HostSample) -> None:
     config = replace(store.config("workstation"), local_max_agents=15)
     assert host_budget.spawn_room(config, sample, 15).room == 0
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_autoscale_shows_fifteen_local_slots_on_the_workstation(
+    store: RedisStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    json_output: bool,
+) -> None:
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    registry.update(store.redis, "workstation", ["ui=yes"])
+    monkeypatch.setattr(capacity, "fixture_inputs", lambda data: data)
+    monkeypatch.setattr(capacity, "autoscaled", lambda config, inputs: (None, dict(DECISION)))
+    fixture = tmp_path / "inputs.json"
+    fixture.write_text("{}")
+    cli.cmd_autoscale(store, SimpleNamespace(slug="workstation", fixture=str(fixture), json=json_output))
+    out = capsys.readouterr().out
+    assert ('"local_slots": 15' in out) if json_output else ("local slots 15" in out.splitlines()[-1])
