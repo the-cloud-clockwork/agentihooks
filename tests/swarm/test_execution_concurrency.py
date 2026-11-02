@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.swarm import execution
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
 pytestmark = pytest.mark.unit
 
@@ -118,3 +118,47 @@ def test_each_registry_write_holds_the_lock_of_its_own_swarm(store, monkeypatch,
     second.join(5)
     assert waited is blocked
     assert calls == [("fixture", *extra), (slug, *extra)]
+
+
+@pytest.mark.parametrize("layout", ["document", "records"])
+@pytest.mark.parametrize("failures", [1, 16])
+def test_fencing_retries_sleep_only_before_remaining_attempts(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, layout: str, failures: int
+) -> None:
+    from scripts.events.bus import StateConflict
+    from scripts.swarm import fencing
+    from scripts.tick.adapters.records_redis import RedisRecords
+    from scripts.tick.ports.records import RevisionConflict
+
+    if layout == "records":
+        fencing.migrate_records(store, "fixture", writers_upgraded=True)
+        target, method, error = RedisRecords, "fenced_batch", RevisionConflict
+    else:
+        target, method, error = type(fencing._states(store)), "update", StateConflict
+    original = getattr(target, method)
+    calls, pauses, bounds = [], [], []
+
+    def conflict(*args: object, **kwargs: object) -> object:
+        calls.append(None)
+        if len(calls) <= failures:
+            raise error("conflict")
+        return original(*args, **kwargs)
+
+    def choose(low: float, high: float) -> float:
+        bounds.append((low, high))
+        return high
+
+    monkeypatch.setattr(target, method, conflict)
+    monkeypatch.setattr(fencing, "uniform", choose)
+    monkeypatch.setattr(fencing.time, "sleep", pauses.append)
+    if failures == fencing.ATTEMPTS:
+        with pytest.raises(SwarmError) as refused:
+            fencing.write(store, "fixture", lambda doc: doc.update(legacy_owner="owner"))
+        assert str(refused.value) == fencing.CONTENTION
+    else:
+        fencing.write(store, "fixture", lambda doc: doc.update(legacy_owner="owner"))
+        assert fencing.read(store, "fixture")["legacy_owner"] == "owner"
+    expected = min(failures, fencing.ATTEMPTS - 1)
+    assert len(calls) == min(failures + 1, fencing.ATTEMPTS)
+    assert bounds == [(0.001, 0.032)] * expected
+    assert pauses == [0.032] * expected
