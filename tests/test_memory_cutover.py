@@ -6,8 +6,9 @@ import pytest
 
 from hooks.memory import cutover
 from hooks.memory.api import records
-from hooks.memory.api.ingest import Rejected
+from hooks.memory.api.ingest import Grant, Rejected
 from hooks.memory.cutover import ConsumerRoutes, shadow
+from hooks.memory.migrations import OPERATOR
 from tests import sv2_mig04_cases as cases
 from tests.sv2_idx04_cases import grant
 from tests.sv2_idx05_cases import Bank
@@ -287,6 +288,22 @@ def test_the_command_line_requires_a_corpus(tmp_path, monkeypatch, argv):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit):
         cutover.main(argv)
+
+
+def test_the_command_line_requires_a_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as stopped:
+        cutover.main([])
+    assert stopped.value.code == 2
+
+
+def test_the_command_line_acts_as_the_operator_over_no_projects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[Grant] = []
+    monkeypatch.setattr(ConsumerRoutes, "route", lambda self, grant, consumer: seen.append(grant) or {})
+    assert cutover.main(["route", str(tmp_path / "routes.sqlite3"), "keeper", "--corpus", "corpus-a"]) == 0
+    assert seen == [Grant(OPERATOR, "corpus-a", frozenset())]
 
 
 @pytest.mark.parametrize("case", ["A", "B", "C"])
