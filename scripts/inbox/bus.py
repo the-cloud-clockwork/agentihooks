@@ -7,14 +7,16 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
+from typing import Any, cast
 
-from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
+from scripts.events.bus import Bus, Delivery, StateConflict, StateEntry, StateStore
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.events.subjects import subject
 from scripts.inbox.seats import is_seat
-from scripts.inbox.store import CLOSED, InboxError, Item
+from scripts.inbox.store import CLOSED, InboxError, InboxStore, Item
+from scripts.swarm.naming import NameRegistry
 
 FEED_BACKEND = "nats"
 FEED_BATCH = 10
@@ -26,7 +28,7 @@ def _identity(*parts: str) -> str:
     return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
 
 
-def _encode(value: dict) -> bytes:
+def _encode(value: dict[str, Any]) -> bytes:
     return json.dumps(value).encode()
 
 
@@ -78,8 +80,8 @@ class SeatInbox:
         try:
             self.state.create(key, event.encode())
         except StateConflict:
-            event = Envelope.decode(self.state.get(key).value)
-            if (event.swarm, event.key, event.data) != (self.swarm, address, asdict(message)):
+            event = Envelope.decode(cast(StateEntry, self.state.get(key)).value)
+            if (event.swarm, event.key, cast(dict[str, Any], event.data)) != (self.swarm, address, asdict(message)):
                 raise SentElsewhere("item id already belongs to a different message") from None
         self.bus.events.publish(_subject(self.swarm, address), event)
         publish_wake(self.bus, event)
@@ -97,7 +99,7 @@ def publish_wake(bus: Bus, event: Envelope) -> None:
         id=f"wake-{event.id}",
         type="inbox.wake",
         entity="inbox-wake",
-        key=event.data["id"],
+        key=cast(dict[str, Any], event.data)["id"],
         data={"address": event.key},
     )
     bus.events.publish(subject(event.swarm, "inbox-wake", "requested"), request)
@@ -118,7 +120,7 @@ class SeatConsumer:
         self._consumer = bus.events.consumer(self.durable, self.subject)
 
     def fetch(self, batch: int, timeout_ms: int) -> list[Receipt]:
-        receipts = []
+        receipts: list[Receipt] = []
         for delivery in self._consumer.fetch(batch, timeout_ms):
             receipt = self._claim(delivery)
             if receipt is not None:
@@ -197,7 +199,7 @@ def _drop(bus: Bus | None) -> None:
             pass
 
 
-def seat_of(store, me: str) -> str:
+def seat_of(store: InboxStore, me: str) -> str:
     me = store.names.resolve(me)
     seat = store.seats.seat_of(me)
     return seat if seat and not store.seats.left(me, seat) else ""
@@ -281,17 +283,24 @@ def _publisher(config: BusConfig) -> SeatPublisher:
     return SeatPublisher(lambda: open_bus(config))
 
 
-def publish(item, names=None) -> None:
+def publish(item: Item, names: NameRegistry | None = None) -> None:
     config = _nats()
     if config is not None:
-        swarm = names.slug_of(item.address) if names is not None and not is_seat(item.address) else ""
+        swarm = cast(str, names.slug_of(item.address)) if names is not None and not is_seat(item.address) else ""
         _publisher(config).publish(item, swarm)
 
 
 class SeatFeed:
     """Keep durable receipts until Redis records session confirmation or explicit settlement."""
 
-    def __init__(self, opener: Callable[[], Bus], store, me: str, session: str, seat: Callable[[], str] | None = None):
+    def __init__(
+        self,
+        opener: Callable[[], Bus],
+        store: InboxStore,
+        me: str,
+        session: str,
+        seat: Callable[[], str] | None = None,
+    ) -> None:
         self._opener = opener
         self._store = store
         self._seat = seat or (lambda: seat_of(store, me))
@@ -328,7 +337,7 @@ class SeatFeed:
         return bool(receipts)
 
     def settle(self) -> list[str]:
-        settled = []
+        settled: list[str] = []
         try:
             consumer = self._bind()
             for item_id, receipt in list(self.held.items()):
@@ -362,7 +371,7 @@ class SeatFeed:
         _drop(bus)
 
 
-def feed_for(store, me: str, session: str = "") -> SeatFeed | None:
+def feed_for(store: InboxStore, me: str, session: str = "") -> SeatFeed | None:
     config = _nats()
     if config is None:
         return None

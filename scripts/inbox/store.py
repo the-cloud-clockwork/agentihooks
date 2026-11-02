@@ -270,7 +270,7 @@ class InboxStore:
         return _parsed(raw)
 
     def inbox(self, address: str) -> list[Item]:
-        item_ids = []
+        item_ids: list[str] = []
         while True:
             start = len(item_ids)
             page = self.redis.zrange(self.key("address", address), start, start + ROW_BATCH - 1)
@@ -489,11 +489,12 @@ class InboxStore:
     def keys_at(self, addresses: list[str]) -> tuple[list[str], dict[str, list[str]]]:
         """The keys of the given addresses, their items and their histories, and those addresses' memberships in
         the shared waiting, indexed and wake sets, read by name with no scan."""
-        keys, wake_ids = [], []
+        keys: list[str] = []
+        wake_ids: list[str] = []
         wake = self.key("wake-outbox")
         for address in addresses:
-            ids = self.redis.zrange(self.key("address", address), 0, -1)
-            waiting = self.redis.smismember(wake, ids) if ids else []
+            ids: list[str] = self.redis.zrange(self.key("address", address), 0, -1)
+            waiting: list[bool] = self.redis.smismember(wake, ids) if ids else []
             wake_ids.extend(item_id for item_id, held in zip(ids, waiting) if held)
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
@@ -541,7 +542,7 @@ class InboxStore:
         address: str,
         reason: str,
         expected_address: str = "",
-        expected_receiver: str = "",
+        expected_receiver: str | None = "",
     ) -> Item | None:
         """Return an open item to pending at another address; a swarm step, so no actor check."""
         from redis.exceptions import WatchError
@@ -987,7 +988,7 @@ class InboxStore:
             pipe.execute()
             return moved
 
-    def pending(self):
+    def pending(self) -> list[Item]:
         if not self.redis.exists(self.key("waiting", "built")):
             self._build_waiting()
         addresses = sorted(self.redis.smembers(self.key("waiting")))
@@ -998,21 +999,21 @@ class InboxStore:
                 pipe.sismember(self.key("indexed"), address)
                 pipe.zrange(self.key("pending", address), 0, -1)
             rows = pipe.execute()
-        owners = {}
+        owners: dict[str, str] = {}
         for address, (indexed, pending) in zip(addresses, zip(*[iter(rows)] * 2)):
             for item_id in pending if indexed else self._back_fill(address):
                 owners.setdefault(item_id, address)
         return sorted(self._listed_at(owners), key=_order)
 
-    def pending_items(self, address):
+    def pending_items(self, address: str) -> list[Item]:
         return sorted(self._listed(self._pending_ids(address), address), key=_order)
 
-    def _pending_ids(self, address):
+    def _pending_ids(self, address: str) -> list[str]:
         if self.redis.sismember(self.key("indexed"), address):
             return self.redis.zrange(self.key("pending", address), 0, -1)
         return self._back_fill(address)
 
-    def _build_waiting(self):
+    def _build_waiting(self) -> None:
         prefix = self.key("address", "")
         for key in self.redis.scan_iter(match=prefix + "*"):
             address = key[len(prefix) :]
@@ -1020,7 +1021,7 @@ class InboxStore:
             self._mark_waiting(address)
         self.redis.set(self.key("waiting", "built"), 1)
 
-    def _mark_waiting(self, address):
+    def _mark_waiting(self, address: str) -> None:
         from redis.exceptions import WatchError
 
         pending = self.key("pending", address)
@@ -1038,7 +1039,7 @@ class InboxStore:
                     continue
         self.redis.sadd(self.key("waiting"), address)
 
-    def _back_fill(self, address):
+    def _back_fill(self, address: str) -> list[str]:
         from redis.exceptions import WatchError
 
         for _ in range(MOVE_ATTEMPTS):
@@ -1064,7 +1065,15 @@ class InboxStore:
         self._report_gone(address, gone)
         return list(pending)
 
-    def note(self, item_id, event, by, detail, at, held=None):
+    def note(
+        self,
+        item_id: str,
+        event: str,
+        by: str,
+        detail: str,
+        at: int,
+        held: tuple[str, int] | None = None,
+    ) -> bool:
         """held=(seat address, generation): write nothing and return False once that seat has a new occupant."""
         from redis.exceptions import WatchError
 
@@ -1080,7 +1089,15 @@ class InboxStore:
             except WatchError:
                 return False
 
-    def _move(self, item_id, by, actors, state, reason, only_from=None):
+    def _move(
+        self,
+        item_id: str,
+        by: str,
+        actors: Callable[[Item], tuple[str, ...]],
+        state: str,
+        reason: str,
+        only_from: tuple[str, ...] | None = None,
+    ) -> Item | None:
         from redis.exceptions import WatchError
 
         for _ in range(MOVE_ATTEMPTS):
@@ -1090,7 +1107,15 @@ class InboxStore:
                 continue
         raise Contended(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_move(self, item_id, by, actors, state, reason, only_from):
+    def _try_move(
+        self,
+        item_id: str,
+        by: str,
+        actors: Callable[[Item], tuple[str, ...]],
+        state: str,
+        reason: str,
+        only_from: tuple[str, ...] | None,
+    ) -> Item | None:
         key = self.key("item", item_id)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
@@ -1122,12 +1147,12 @@ class InboxStore:
             pipe.execute()
             return moved
 
-    def _owned(self, pipe, by):
+    def _owned(self, pipe: Any, by: str) -> bool:
         key = owner_key(NameRegistry(pipe).resolve(by), self.world)
         pipe.watch(key)
         return pipe.get(key) is not None
 
-    def _reserved(self, pipe, item_id):
+    def _reserved(self, pipe: Any, item_id: str) -> bool:
         """True once a delivery owner may have submitted the item; one only reserved stays deliverable."""
         key = self.key("reservation", item_id)
         pipe.watch(key)
@@ -1137,12 +1162,12 @@ class InboxStore:
         pipe.watch(self.key("delivery", held))
         return pipe.hget(self.key("delivery", held), "state") != "reserved"
 
-    def last_pending(self, pipe, item):
+    def last_pending(self, pipe: Any, item: Item) -> bool:
         pending = self.key("pending", item.address)
         pipe.watch(pending)
         return pipe.zscore(pending, item.id) is not None and pipe.zcard(pending) == 1
 
-    def stage_move(self, pipe, item, moved, by, last, indexed=True):
+    def stage_move(self, pipe: Any, item: Item, moved: Item, by: str, last: bool, indexed: bool = True) -> None:
         """pipe is already in MULTI; indexed=False keeps a delivered item out of the redelivery index."""
         pipe.hset(self.key("item", item.id), mapping=_fields(moved))
         if moved.state in CLOSED:
@@ -1161,11 +1186,11 @@ class InboxStore:
         )
 
 
-def _index_current(indexed, size, total: int) -> bool:
+def _index_current(indexed: Any, size: Any, total: int) -> bool:
     return bool(indexed) and size is not None and int(size) == total
 
 
-def _fields(item):
+def _fields(item: Item) -> dict[str, str]:
     return {k: str(v) for k, v in asdict(item).items()}
 
 
@@ -1173,43 +1198,42 @@ def _order(item: Item) -> tuple[int, int, str]:
     return item.created_at, item.sequence, item.id
 
 
-def _report_dropped(index, gone):
+def _report_dropped(index: str, gone: list[str]) -> None:
     for item_id in gone:
         print(f"agentihooks inbox: {index} lists message {item_id} whose record is gone; dropped it", file=sys.stderr)
 
 
-def _present(item_ids, rows):
+def _present(item_ids: list[str], rows: list[dict[str, str]]) -> tuple[list[Item], list[str]]:
     items = [_parsed(raw) for raw in rows if raw]
     return items, [item_id for item_id, raw in zip(item_ids, rows) if not raw]
 
 
-def _item(raw, item_id):
+def _item(raw: dict[str, str], item_id: str) -> Item:
     if not raw:
         raise Gone(f"no message {item_id}")
     return _parsed(raw)
 
 
-def _parsed(raw):
+def _parsed(raw: dict[str, str]) -> Item:
     known = {field.name for field in fields(Item)}
-    return Item(
-        **{
-            **{key: value for key, value in raw.items() if key in known},
-            "created_at": int(raw["created_at"]),
-            "updated_at": int(raw["updated_at"]),
-            "sequence": int(raw.get("sequence", 0)),
-            "fyi": raw.get("fyi") == "True",
-        }
-    )
+    values: dict[str, Any] = {
+        **{key: value for key, value in raw.items() if key in known},
+        "created_at": int(raw["created_at"]),
+        "updated_at": int(raw["updated_at"]),
+        "sequence": int(raw.get("sequence", 0)),
+        "fyi": raw.get("fyi") == "True",
+    }
+    return Item(**values)
 
 
-def _entry(state, by, reason, at, session_id=""):
+def _entry(state: str, by: str, reason: str, at: int, session_id: str = "") -> str:
     entry = {"state": state, "by": by, "reason": reason, "at": at}
     if state == "delivered":
         entry["session_id"] = session_id
     return json.dumps(entry)
 
 
-def connect(environ=None):
+def connect(environ: Mapping[str, str] | None = None) -> InboxStore:
     import redis
 
     from scripts.inbox import outbox

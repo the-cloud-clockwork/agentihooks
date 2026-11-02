@@ -7,7 +7,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 from scripts.inbox.receipts import Delivery, DispatchError, Receipts, check_owner, delivery_fields, transact
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
@@ -86,7 +86,7 @@ class Dispatcher:
         check_owner(pipe, recipient, owner, self.store.world)
         plan = self._plan(pipe, recipient, items)
         pipe.multi()
-        reserved = []
+        reserved: list[Delivery] = []
         for item, state, last in plan:
             delivery = Delivery(
                 uuid.uuid4().hex[:12], recipient, owner, item.id, item.ref, digest(item), "reserved", now_ms()
@@ -109,8 +109,7 @@ class Dispatcher:
 
     def _plan(self, pipe: Any, recipient: str, items: list[Item]) -> list[tuple[Item, str, bool]]:
         """(item, free or shown, last pending) for each item still pending for recipient and not reserved."""
-        plan: list[tuple[Item, str, bool]] = []
-        taken: set[str] = set()
+        plan, taken = cast(list[tuple[Item, str, bool]], []), cast(set[str], set())
         for listed in items:
             pipe.watch(self.key("item", listed.id), self.key("reservation", listed.id))
             item = self.store.get(listed.id)
