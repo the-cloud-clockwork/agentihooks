@@ -2016,6 +2016,36 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     )
 
 
+GRADER_FALLBACK = '[[ -d "$grader" && ! -f "$grader/scripts/ci_mutation/regrade.py" ]] && grader="$GITHUB_WORKSPACE"'
+
+
+def test_the_protected_grader_holds_the_planned_mutation_bases() -> None:
+    steps = _mutation_workflow()["jobs"]["mutation-plan"]["steps"]
+    names = [step.get("name") for step in steps]
+    dispatch = steps[names.index("Check out the protected mutation grader")]
+    held = steps[names.index("Hold the planned mutation bases to the protected grader")]
+    assert dispatch["if"] == "github.event_name == 'workflow_dispatch' && steps.reuse.outputs.reused != 'true'"
+    assert dispatch["env"] == {"GRADER": "${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}"}
+    assert held["if"] == "steps.reuse.outputs.reused != 'true'"
+    assert held["env"] == {
+        "BASE": "${{ inputs.base || 'origin/dev' }}",
+        "BASES": "${{ steps.plan.outputs.bases }}",
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+    }
+    assert held["run"] == (
+        f'grader="$RUNNER_TEMP/grader"\n{GRADER_FALLBACK}\n'
+        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade bases . "$BASE" "$BASES"\n'
+    )
+    order = [
+        "Check out the protected grader",
+        dispatch["name"],
+        "Size mutation shards from stored timings",
+        held["name"],
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    assert names.index(held["name"]) < names.index("Grade the empty change set")
+
+
 @pytest.mark.parametrize(
     ("job", "mutate", "upload", "guard"),
     [
@@ -2052,8 +2082,8 @@ def test_mutation_shards_grade_their_rows_with_the_protected_grader(
     assert grade["env"] == {"BASES": "${{ needs.mutation-plan.outputs.bases }}"}
     assert grade["run"] == (
         'grader="$RUNNER_TEMP/grader"\n'
-        '[[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"\n'
-        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json . "$BASES"\n'
+        f"{GRADER_FALLBACK}\n"
+        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"\n'
     )
     assert names.index(checkout["name"]) < names.index(mutate) < names.index(grade["name"]) < names.index(upload)
 
@@ -2411,8 +2441,8 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     assert empty["run"] == (
         'python -m scripts.ci_mutation --bases "$BASES" --budget 1080\n'
         'grader="$RUNNER_TEMP/grader"\n'
-        '[[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"\n'
-        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade .mutation-gate/report.json . "$BASES"\n'
+        f"{GRADER_FALLBACK}\n"
+        'PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"\n'
     )
     upload = plan["steps"][names.index("Forward the reused or empty mutation report")]
     assert upload["if"] == "always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')"

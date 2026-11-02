@@ -6,7 +6,7 @@ from pathlib import Path
 
 from scripts.ci_mutation.clearances import load_clearances
 from scripts.ci_mutation.report import evaluate, survivor_text
-from scripts.ci_mutation.scope import discover_changes
+from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases
 
 
 def regrade(report: dict, cleared: dict, changes: dict[str, set[int]]) -> dict:
@@ -20,13 +20,30 @@ def regrade(report: dict, cleared: dict, changes: dict[str, set[int]]) -> dict:
     return {**report, "files": files, "failed": bool(report["not_mutated"]) or any(file["failures"] for file in files)}
 
 
+def bases_held(root: Path, base: str, claimed: list[str]) -> bool:
+    """Return whether the claimed bases start at the merge base and add only ones this grader graded green."""
+    chosen = own_bases(root, base, "HEAD", graded_green)
+    return claimed[:1] == chosen[:1] and set(claimed) <= set(chosen)
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Grade the report in place and return 1 when it fails."""
+    """Hold the planned bases, or grade the report in place, and return 1 when either fails."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("report", type=Path)
-    parser.add_argument("root", type=Path)
-    parser.add_argument("bases")
+    commands = parser.add_subparsers(dest="command")
+    held = commands.add_parser("bases")
+    held.add_argument("root", type=Path)
+    held.add_argument("base")
+    held.add_argument("bases")
+    grade = commands.add_parser("report")
+    grade.add_argument("report", type=Path)
+    grade.add_argument("root", type=Path)
+    grade.add_argument("bases")
     args = parser.parse_args(argv)
+    if args.command == "bases":
+        if bases_held(args.root, args.base, args.bases.split(",")):
+            return 0
+        print(f"Protected grader: the planned mutation bases {args.bases} are not ones it would choose")
+        return 1
     changes = discover_changes(args.root, args.bases.split(","), "HEAD")
     graded = regrade(json.loads(args.report.read_text()), load_clearances(args.root), changes)
     args.report.write_text(json.dumps(graded) + "\n")

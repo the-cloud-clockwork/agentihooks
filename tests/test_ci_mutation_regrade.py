@@ -98,13 +98,47 @@ def test_main_grades_in_place_with_the_tree_clearances_and_protected_scope(
     target = tmp_path / ".mutation-gate" / "report.json"
     target.parent.mkdir()
     target.write_text(json.dumps(_lenient_report({2})))
-    assert main([str(target), str(tmp_path), "one,two"]) == 1
+    assert main(["report", str(target), str(tmp_path), "one,two"]) == 1
     assert calls == [(tmp_path, ["one", "two"], "HEAD")]
     assert json.loads(target.read_text())["failed"] is True
     out = capsys.readouterr().out
     assert out.startswith(f"survived on lines 2: {KEY}\n")
     assert out.endswith("Protected grader: mutation report failed\n")
     write_clearance(tmp_path, KEY, {"reader": "Standards", "reason": "No observable effect"})
-    assert main([str(target), str(tmp_path), "one"]) == 0
+    assert main(["report", str(target), str(tmp_path), "one"]) == 0
     assert json.loads(target.read_text())["files"][0]["failures"] == []
     assert capsys.readouterr().out == "Protected grader: mutation report passed\n"
+
+
+@pytest.mark.parametrize(
+    ("claimed", "held"),
+    [
+        (["merge"], True),
+        (["merge", "green"], True),
+        (["merge", "green", "other"], False),
+        (["green", "merge"], False),
+        ([], False),
+    ],
+)
+def test_planned_bases_hold_only_within_the_protected_choice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, claimed: list[str], held: bool
+) -> None:
+    calls = []
+
+    def chosen(root: Path, base: str, head: str, graded: object) -> list[str]:
+        calls.append((root, base, head, graded))
+        return ["merge", "green"]
+
+    monkeypatch.setattr(module, "own_bases", chosen)
+    assert module.bases_held(tmp_path, "origin/dev", claimed) is held
+    assert calls == [(tmp_path, "origin/dev", "HEAD", module.graded_green)]
+
+
+@pytest.mark.parametrize(("bases", "status"), [("merge,green", 0), ("merge,other", 1)])
+def test_main_holds_the_planned_bases(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, bases: str, status: int
+) -> None:
+    monkeypatch.setattr(module, "own_bases", lambda root, base, head, graded: ["merge", "green"])
+    assert main(["bases", str(tmp_path), "origin/dev", bases]) == status
+    expected = f"Protected grader: the planned mutation bases {bases} are not ones it would choose\n"
+    assert capsys.readouterr().out == (expected if status else "")
