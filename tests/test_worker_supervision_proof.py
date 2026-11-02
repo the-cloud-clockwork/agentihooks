@@ -248,7 +248,9 @@ def test_a_readiness_timeout_keeps_the_snapshot_error_and_unavailable_evidence(
         raise subprocess.CalledProcessError(1, "docker", output="no context.json")
 
     def docker(*args: str, timeout: float = 30) -> str:
-        raise subprocess.TimeoutExpired(["docker", *args], timeout)
+        if args[0] == "top":
+            raise subprocess.TimeoutExpired(["docker", *args], timeout, output=b"partial")
+        raise subprocess.CalledProcessError(1, ["docker", *args], output="no such container")
 
     monkeypatch.setattr(proof, "snapshot", snapshot)
     monkeypatch.setattr(proof, "docker", docker)
@@ -258,4 +260,6 @@ def test_a_readiness_timeout_keeps_the_snapshot_error_and_unavailable_evidence(
 
     message = str(raised.value)
     assert "last='no context.json'" in message
-    assert message.count("unavailable: ") == 2
+    assert "processes:\nunavailable: " in message
+    assert "partial" not in message
+    assert "logs:\nno such container" in message
