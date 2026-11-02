@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.578 · 2026-11-02
+
+### 2026-11-02 · 167efdbe8118 · #9343 · @agenticore-app
+
+**Fail the mutation shard merge on a short or unmeasured shard**
+
+This change hardens the mutation shard merge step so it no longer silently accepts a shard whose report claims success but actually graded fewer mutants than it owns, or carries no measurement at all. `merge.main` now fails and lists every such shard via `short_shards`, catching previously undetected incomplete coverage before it masks real mutants surviving undetected. `merge_reports` itself is untouched, so downstream consumers like `mutation_wait` and replay keep their existing completeness checks. Verified with planted short and unmeasured shard tests going red, and a complete run staying green.
+
 ## v2.17.574 · 2026-11-02
 
 ### 2026-11-02 · 1d6375b61a05 · #9322 · @nestorcolt
