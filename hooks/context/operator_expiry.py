@@ -12,9 +12,7 @@ from scripts.scheduler import Scheduler
 
 @contextmanager
 def state_lock(session_id: str) -> Generator[None]:
-    path = operator_mode._path(
-        session_id
-    ).with_suffix(".lock")
+    path = operator_mode._path(session_id).with_suffix(".lock")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

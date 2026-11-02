@@ -76,10 +76,7 @@ def _swarm_of(environ: Mapping[str, str], session_id: str = "") -> str:
     name = environ.get("AGENTIHOOKS_AGENT_NAME")
     slug = cast(
         str,
-        (
-            cast("str | None", naming.legacy_slug(name))
-            or environ.get("AGENTIHOOKS_SWARM")
-        )
+        (cast("str | None", naming.legacy_slug(name)) or environ.get("AGENTIHOOKS_SWARM"))
         if naming.lane_of(cast(str, name))
         else "",
     )
