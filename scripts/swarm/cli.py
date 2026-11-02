@@ -31,7 +31,7 @@ agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or opera
 agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or operator classifies a suspect execution attempt
 agentihooks swarm <id> terminal EXECUTION                         operator opens the worker terminal of an execution in herdr
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
-agentihooks swarm <id> freeze | focus [--only] [--top|--bottom] | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
+agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
 agentihooks swarm <id> cover STAGE ITEM --reason TEXT              operator, master or dispatcher marks a bottleneck stage owned by an open phases/ID or tasks/ID
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
