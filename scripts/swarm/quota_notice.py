@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.inbox.store import InboxStore, Item
 from scripts.swarm import capacity
+from scripts.tick import pool
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore, SwarmConfig
@@ -35,15 +36,17 @@ def is_notice(item: Item) -> bool:
 
 
 def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
+    """Send each working lane agent the quota notice its account level calls for, fanned out over the pass workers."""
     accounts = {(row["harness"], row["name"]): row for row in decision.get("accounts", [])}
     key = store.key(slug, "quota-notices")
-    actions = []
-    for agent in store.agents(slug):
+
+    def one(agent: Any) -> list[str]:
+        """Return the notice action sent to ``agent``, if any."""
         if agent.lane not in capacity.LANES or agent.state != "working":
-            continue
+            return []
         row = accounts.get((agent.harness, agent.account))
         if row is None or row["state"] == "UNKNOWN":
-            continue
+            return []
         kind = level(row)
         life = f"{agent.name}:{agent.started_at}"
         previous = store.redis.hget(key, life)
@@ -53,12 +56,13 @@ def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
             or previous == "handoff"
             or store.redis.hget(store.key(slug, "quota-warning-lives"), agent.name) == str(agent.started_at)
         ):
-            continue
+            return []
         text = HANDOFF.format(slug=slug) if kind == "handoff" else HURRY
         InboxStore(store.redis).send("swarm", agent.name, text)
         store.redis.hset(key, life, kind)
-        actions.append(f"sent {agent.name} the quota {kind}")
-    return actions
+        return [f"sent {agent.name} the quota {kind}"]
+
+    return [action for found in pool.fan_out(one, store.agents(slug)) for action in found]
 
 
 def refresh(
