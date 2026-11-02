@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.570 · 2026-11-02
+
+### 2026-11-02 · 085fdfa8e901 · #9316 · @agenticore-app
+
+**Document measured tick budgets and spawn prerequisites (Refs #9285)**
+
+This change adds reference documentation for the tick engine's step budgets and intervals delivered in #9278: a new `docs/reference/tick-engine-steps.md` explains how each step's budget is derived from measured p95 latency plus headroom, lists the declared intervals (60, 120, 600 seconds), gives configuration examples, describes late-worker and overlap behavior, and documents spawn's prerequisites and the forty-second bound, plus troubleshooting guidance. The reference index and swarm pillar doc are updated to link to it. This matters because it makes the engine's timing guarantees—especially that spawn is never starved by slower steps—visible and verifiable to operators and future contributors.
+
 ## v2.17.569 · 2026-11-02
 
 ### 2026-11-02 · 6644444ff98a · #9278 · @nestorcolt
