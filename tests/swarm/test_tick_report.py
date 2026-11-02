@@ -1,5 +1,7 @@
+import argparse
 import json
 from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -33,7 +35,39 @@ def test_report_aggregates_step_costs_and_pass_gaps() -> None:
             {"step": "inspect", "count": 1, "median_s": 4.0, "p95_s": 4.0, "cpu_share": 20.0},
             {"step": "launch", "count": 2, "median_s": 4.0, "p95_s": 6.0, "cpu_share": 80.0},
         ],
+        "lanes": [],
     }
+
+
+@pytest.mark.feature("swarm-tick-cost-report")
+def test_report_gives_each_lane_its_share_of_all_step_cpu() -> None:
+    passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 11000, "wall_s": 10.0}]
+    steps = [
+        {**step("a", "spawn", 1.0, 3.0, 1.0), "lane": "critical"},
+        {**step("a", "reap", 1.0, 1.0, 0.0), "lane": "critical"},
+        {**step("a", "sweep", 1.0, 2.0, 1.0), "lane": "slow"},
+        step("a", "legacy", 1.0, 2.0, 0.0),
+        {**step("a", "run_tick", 10.0, 9.0, 0.0), "lane": "critical"},
+    ]
+    assert tick_report.summarize(passes, steps)["lanes"] == [
+        {"lane": "critical", "count": 2, "cpu_share": 50.0},
+        {"lane": "slow", "count": 1, "cpu_share": 30.0},
+    ]
+
+
+def test_tick_report_prints_each_lane_share(capsys: pytest.CaptureFixture[str]) -> None:
+    report = {
+        "pass_count": 1,
+        "pass_p95_s": 1.0,
+        "gap_p95_s": None,
+        "gap_max_s": None,
+        "passes_without_steps": 0,
+        "steps": [],
+        "lanes": [{"lane": "critical", "count": 2, "cpu_share": 41.5}],
+    }
+    with mock.patch.object(tick_report, "read", return_value=report):
+        tick_report.command(object(), argparse.Namespace(slug="sw", passes=1))
+    assert "Lane critical  2 steps  41.50% CPU share" in capsys.readouterr().out
 
 
 def step(pass_id: str, name: str, wall: float, own: float, child: float) -> dict[str, Any]:
@@ -65,6 +99,7 @@ def test_empty_report_and_missing_step_history_are_explicit() -> None:
         "passes_without_steps": 0,
         "orphan_steps": 0,
         "steps": [],
+        "lanes": [],
     }
     passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}]
     assert tick_report.summarize(passes, [])["passes_without_steps"] == 1
