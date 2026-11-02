@@ -101,7 +101,7 @@ def _aggregator_problems(
         and not (
             field == "steps"
             and base_id == "gate-required"
-            and head_job.get("steps")
+            and ci_reuse.without_peak_memory(head_job.get("steps") or [])
             in [
                 typing(
                     sonar(
@@ -282,9 +282,10 @@ def grade(
                 "if": "${{ always() }}",
                 "runs-on": runner,
                 "timeout-minutes": 5,
-                "steps": finish(retry(ci_reuse.summary_steps())),
+                "steps": peak(finish(retry(ci_reuse.summary_steps()))),
             }
             for runner in runners(policy)
+            for peak in (list, ci_reuse.peak_memory)
             for finish in (list, ci_reuse.pipefail_summary)
             for retry in (list, ci_reuse.retried_summary)
         ]
