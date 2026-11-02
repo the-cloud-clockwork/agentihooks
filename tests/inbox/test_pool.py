@@ -351,11 +351,11 @@ def test_items_wait_while_no_master_is_live(swarm, inbox, held):
 def test_swarm_keys_carry_the_pool(swarm, inbox, held):
     _masters(swarm, 2)
     inbox.send("swarm", FRONT, "wait")
-    keys, _ = inbox.keys_for(lambda address: address.endswith("@sw"))
+    keys, _ = inbox.keys_at([FRONT])
     assert POOL in keys
     held.undo()
     inbox.pool.distribute(SLUG)
-    keys, _ = inbox.keys_for(lambda address: address.endswith("@sw"))
+    keys, _ = inbox.keys_at([FRONT])
     assert POOL not in keys and f"{POOL}:last" in keys and f"{POOL}:holders" in keys
 
 
