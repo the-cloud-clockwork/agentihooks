@@ -50,6 +50,7 @@ class Pass:
     workers: int
     critical: Deadline
     slow: Deadline
+    slots: BoundedSemaphore
 
     @property
     def parallel(self) -> bool:
@@ -106,7 +107,7 @@ def running(
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
     if workers < 1:
         raise ValueError("a pass needs at least one worker")
-    current = Pass(mode, workers, Deadline.after(critical_s), Deadline.after(slow_s))
+    current = Pass(mode, workers, Deadline.after(critical_s), Deadline.after(slow_s), BoundedSemaphore(workers))
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
     try:
@@ -118,17 +119,33 @@ def running(
 
 
 def fan_out(action: Callable[[Item], Found], items: Iterable[Item]) -> list[Found]:
-    """Return ``action`` of each item in item order, run on the pass workers each under a copy of this context."""
+    """Return ``action`` of each item in item order, run under copied context on the pass's shared worker slots.
+
+    Every fan out of a pass shares its ``workers`` slots; a fan out started inside a fanned out action runs inline.
+    """
     found, values = active(), list(items)
-    if found is None or not found.parallel or len(values) < 2:
+    if found is None or not found.parallel or len(values) < 2 or getattr(_FANNED, "inside", False):
         return [action(value) for value in values]
     executor = ThreadPoolExecutor(max_workers=min(found.workers, len(values)), thread_name_prefix="tick-fan-out")
     try:
-        futures = [executor.submit(copy_context().run, action, value) for value in values]
+        futures = [executor.submit(copy_context().run, _slotted, found.slots, action, value) for value in values]
         wait(futures)
         return [future.result() for future in futures]
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
+
+
+_FANNED = local()
+
+
+def _slotted(slots: BoundedSemaphore, action: Callable[[Item], Found], value: Item) -> Found:
+    """Return ``action`` of ``value`` while holding one of the pass's worker slots."""
+    with slots:
+        _FANNED.inside = True
+        try:
+            return action(value)
+        finally:
+            _FANNED.inside = False
 
 
 @contextmanager
