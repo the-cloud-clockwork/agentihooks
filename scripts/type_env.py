@@ -6,6 +6,7 @@ once per lock, and runs a type gate copy with it.
 """
 
 import argparse
+import fcntl
 import hashlib
 import os
 import shutil
@@ -23,6 +24,7 @@ EXTRAS = ("dev", "all")
 HOME = Path.home() / ".cache" / "agentihooks" / "type-env"
 READY = "ready"
 STALE_SECONDS = 7 * 24 * 3600
+MAX_ENVIRONMENTS = 3
 
 
 def key(root: Path) -> str:
@@ -40,43 +42,56 @@ def environment(
 ) -> Path:
     """Return the interpreter of the environment for root's lock, building it when missing.
 
-    Each use marks its environment, and a build removes only environments unused for STALE_SECONDS, so a concurrent
-    run on another lock keeps its own.
+    A build holds a lock per key, so concurrent runs on one lock build it once. Each use marks its environment, and a
+    build removes environments unused for STALE_SECONDS or beyond the MAX_ENVIRONMENTS most recently used.
     """
     target = home / key(root)
     python = target / "bin" / "python"
     ready = target / READY
-    if ready.is_file() and python.is_file():
-        ready.touch()
-        return python
     home.mkdir(parents=True, exist_ok=True)
-    execute(["uv", "venv", "-q", "--clear", "--python", PYTHON, str(target)], check=True)
-    execute(
-        [
-            "uv",
-            "pip",
-            "install",
-            "-q",
-            "--python",
-            str(python),
-            "--constraint",
-            str(root / LOCK),
-            "--excludes",
-            str(root / EXCLUDES),
-            "-e",
-            f"{root}[{','.join(EXTRAS)}]",
-        ],
-        env={**os.environ, "UV_CONSTRAINT": str(root / CONSTRAINTS)},
-        check=True,
-    )
-    ready.write_text(key(root) + "\n")
-    cutoff = time.time() - STALE_SECONDS
-    for stale in home.iterdir():
-        marker = stale / READY
-        if stale != target and not stale.is_symlink() and stale.is_dir():
-            if (marker.stat().st_mtime if marker.is_file() else stale.stat().st_mtime) < cutoff:
-                shutil.rmtree(stale)
+    with (home / f"{target.name}.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if ready.is_file() and python.is_file():
+            ready.touch()
+            return python
+        execute(["uv", "venv", "-q", "--clear", "--python", PYTHON, str(target)], check=True)
+        execute(
+            [
+                "uv",
+                "pip",
+                "install",
+                "-q",
+                "--python",
+                str(python),
+                "--constraint",
+                str(root / LOCK),
+                "--excludes",
+                str(root / EXCLUDES),
+                "-e",
+                f"{root}[{','.join(EXTRAS)}]",
+            ],
+            env={**os.environ, "UV_CONSTRAINT": str(root / CONSTRAINTS)},
+            check=True,
+        )
+        ready.write_text(key(root) + "\n")
+    _prune(home, target)
     return python
+
+
+def _prune(home: Path, keep: Path) -> None:
+    """Remove environments other than keep that are unused for STALE_SECONDS or beyond the most recent ones."""
+    used = sorted(
+        (
+            ((stale / READY).stat().st_mtime if (stale / READY).is_file() else stale.stat().st_mtime, stale)
+            for stale in home.iterdir()
+            if stale != keep and not stale.is_symlink() and stale.is_dir()
+        ),
+        reverse=True,
+    )
+    cutoff = time.time() - STALE_SECONDS
+    for rank, (mtime, stale) in enumerate(used):
+        if mtime < cutoff or rank >= MAX_ENVIRONMENTS - 1:
+            shutil.rmtree(stale)
 
 
 def main(argv: list[str] | None = None) -> int:

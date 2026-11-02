@@ -17,6 +17,10 @@ def _root(tmp_path: Path) -> Path:
     return root
 
 
+def _environments(home: Path) -> list[str]:
+    return sorted(path.name for path in home.iterdir() if path.is_dir())
+
+
 class _Uv:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], dict[str, str] | None]] = []
@@ -99,7 +103,21 @@ def test_a_build_removes_only_environments_unused_for_a_week(tmp_path: Path) -> 
 
     type_env.environment(root, home, _Uv())
 
-    assert sorted(path.name for path in home.iterdir()) == sorted([recent.name, type_env.key(root)])
+    assert _environments(home) == sorted([recent.name, type_env.key(root)])
+
+
+def test_a_build_keeps_only_the_most_recently_used_environments(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    built = []
+    for number in range(type_env.MAX_ENVIRONMENTS + 1):
+        (root / type_env.LOCK).write_text(f"{number}\n")
+        type_env.environment(root, home, _Uv())
+        used = time.time() - 100 + number
+        os.utime(home / type_env.key(root) / type_env.READY, (used, used))
+        built.append(type_env.key(root))
+
+    assert _environments(home) == sorted(built[1:])
 
 
 def test_reuse_marks_the_environment_used(tmp_path: Path) -> None:

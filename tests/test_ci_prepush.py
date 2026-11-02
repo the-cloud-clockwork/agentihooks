@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -168,7 +169,7 @@ def test_plan_skips_tests_when_the_change_touches_none(repo, tmp_path):
     ]
 
 
-def _type_command(repo, grader, snapshot):
+def _type_command(repo: Path, grader: Path, snapshot: Path) -> list[str]:
     return [
         sys.executable,
         "-m",
@@ -184,7 +185,7 @@ def _type_command(repo, grader, snapshot):
     ]
 
 
-def test_plan_grades_types_with_the_base_tip_gate_against_the_merge_base(repo, tmp_path):
+def test_plan_grades_types_with_the_base_tip_gate_against_the_merge_base(repo: Path, tmp_path: Path) -> None:
     _commit(repo, {"scripts/type_gate.py": "GATE = 1\n"}, "gate")
     _git(repo, "branch", "-f", "base")
     _git(repo, "checkout", "-q", "-b", "work")
@@ -206,7 +207,7 @@ def test_plan_grades_types_with_the_base_tip_gate_against_the_merge_base(repo, t
     assert (snapshot / "scripts/beta.py").read_text() == "B = 1\n"
 
 
-def test_plan_grades_types_with_the_head_gate_when_the_base_has_none(repo, tmp_path):
+def test_plan_grades_types_with_the_head_gate_when_the_base_has_none(repo: Path, tmp_path: Path) -> None:
     _commit(repo, {"scripts/type_gate.py": "GATE = 2\n"}, "introduce the gate")
     grade = tmp_path / "grade"
     grade.mkdir()
