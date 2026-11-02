@@ -3,6 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NoReturn
 
 import pytest
 
@@ -1133,13 +1134,13 @@ def test_pushed_work_with_an_origin_off_github_and_no_pull_request_is_still_refu
     assert (rig.stop().allowed, rig.stop().reason) == (False, PROGRESS.format(swarm=SLUG))
 
 
-def panic_on(rig):
+def panic_on(rig: SimpleNamespace) -> None:
     from scripts.swarm import panic
 
     panic.engage(rig.store, "test", False, (), NOW)
 
 
-def test_fleet_panic_keeps_the_stop_hook_from_pushing_and_names_panic(rig):
+def test_fleet_panic_keeps_the_stop_hook_from_pushing_and_names_panic(rig: SimpleNamespace) -> None:
     panic_on(rig)
     rig.commit()
     decision = rig.stop()
@@ -1157,7 +1158,9 @@ def test_fleet_panic_keeps_the_stop_hook_from_pushing_and_names_panic(rig):
         {"kind": "task", "target": "t9"},
     ],
 )
-def test_any_live_declared_wait_lets_the_stop_pass_while_fleet_panic_holds(rig, on):
+def test_any_live_declared_wait_lets_the_stop_pass_while_fleet_panic_holds(
+    rig: SimpleNamespace, on: dict[str, str] | None
+) -> None:
     panic_on(rig)
     rig.commit()
     wait_on(rig, on)
@@ -1166,19 +1169,21 @@ def test_any_live_declared_wait_lets_the_stop_pass_while_fleet_panic_holds(rig, 
     assert rig.inbox() == []
 
 
-def test_an_ended_wait_still_refuses_the_stop_while_fleet_panic_holds(rig):
+def test_an_ended_wait_still_refuses_the_stop_while_fleet_panic_holds(rig: SimpleNamespace) -> None:
     panic_on(rig)
     rig.commit()
     wait_on(rig, None, at=NOW - 120_000, until=NOW)
     assert not rig.stop().allowed
 
 
-def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(monkeypatch, rig):
+def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(
+    monkeypatch: pytest.MonkeyPatch, rig: SimpleNamespace
+) -> None:
     from redis.exceptions import RedisError
 
     from scripts.swarm import panic
 
-    def broken(store):
+    def broken(store: object) -> NoReturn:
         raise RedisError("down")
 
     monkeypatch.setattr(panic, "state", broken)
