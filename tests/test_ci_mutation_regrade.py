@@ -74,7 +74,7 @@ def test_rows_that_do_not_cover_the_graded_files_are_refused(graded: list[dict] 
 
 @pytest.mark.parametrize("changes", [{}, {**CHANGES, "hooks/other.py": {1}}])
 def test_a_report_that_does_not_cover_the_changed_files_is_refused(changes: dict[str, set[int]]) -> None:
-    with pytest.raises(ValueError, match="do not cover exactly the changed Python files"):
+    with pytest.raises(ValueError, match="does not cover exactly the changed Python files"):
         regrade(_lenient_report({2}), {}, changes)
 
 
