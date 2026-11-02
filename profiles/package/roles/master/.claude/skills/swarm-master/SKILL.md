@@ -61,7 +61,8 @@ passes the focus queue.
   --quote "<his words>"` drops every other focus.
 - "Focus this task too": `focus tasks/<id> --bottom` appends it; `--top` puts
   it first.
-- A focus unfreezes its target and everything under it.
+- A focus unfreezes its target and everything under it. The work a focused
+  task waits on joins the focus, so the queue can empty.
 - "Unfreeze": `unfreeze <target>` frees the task; it never focuses it, so it
   runs after the focus queue empties.
 
