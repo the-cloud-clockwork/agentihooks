@@ -66,8 +66,10 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
         run: |
-          mapfile -t nodes < <(python -m scripts.feature_map --nodes | grep -v '^tests/features/')
-          env -u AGENTIHOOKS_FEATURE_SUITE -u AGENTIHOOKS_SWARM_REDIS_URL -u AGENTIHOOKS_SWARM_DATABASE_URL python -m pytest "${nodes[@]}" -n "$(python -m scripts.ci_cpu_quota)" --dist loadgroup -v -rs --reruns 2 --tb=short --timeout=60 --timeout-method=thread -p no:cacheprovider --junitxml="$RUNNER_TEMP/feature-mapped.xml"
+          python -m scripts.feature_map --nodes > "$RUNNER_TEMP/mapped-nodes.txt"
+          mapfile -t nodes < <(grep -v '^tests/features/' "$RUNNER_TEMP/mapped-nodes.txt")
+          (( ${#nodes[@]} > 0 ))
+          env -u AGENTIHOOKS_FEATURE_SUITE -u AGENTIHOOKS_SWARM_REDIS_URL -u AGENTIHOOKS_SWARM_DATABASE_URL python -m pytest "${nodes[@]}" -n "$(python -m scripts.ci_cpu_quota)" --dist loadgroup -v -rs --tb=short --timeout=60 --timeout-method=thread -p no:cacheprovider --junitxml="$RUNNER_TEMP/feature-mapped.xml"
 
       - name: Fail on a mapped test missing, skipped or xfailed at run time
         if: ${{ !cancelled() }}

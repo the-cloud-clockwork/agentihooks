@@ -923,7 +923,14 @@ def test_feature_suite_runs_every_mapped_test_and_grades_both_reports() -> None:
     steps = {step.get("name"): step for step in workflow["jobs"]["features"]["steps"]}
     mapped = steps["Run the mapped tests outside the feature suite"]
     assert mapped["if"] == "${{ !cancelled() }}"
-    assert "python -m scripts.feature_map --nodes" in mapped["run"]
+    lines = [line.strip() for line in mapped["run"].strip().splitlines()]
+    assert lines[:3] == [
+        'python -m scripts.feature_map --nodes > "$RUNNER_TEMP/mapped-nodes.txt"',
+        "mapfile -t nodes < <(grep -v '^tests/features/' \"$RUNNER_TEMP/mapped-nodes.txt\")",
+        "(( ${#nodes[@]} > 0 ))",
+    ]
+    assert '"${nodes[@]}"' in lines[3]
+    assert "--reruns" not in lines[3]
     assert '--junitxml="$RUNNER_TEMP/feature-mapped.xml"' in mapped["run"]
     grade = steps["Fail on a mapped test missing, skipped or xfailed at run time"]
     assert grade["if"] == "${{ !cancelled() }}"
