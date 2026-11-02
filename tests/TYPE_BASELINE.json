@@ -426,7 +426,7 @@
   "scripts/hive/placement_waits.py": 53,
   "scripts/hive/quota_refresh.py": 2,
   "scripts/hive/redis_acl.py": 28,
-  "scripts/hive/registry.py": 126,
+  "scripts/hive/registry.py": 123,
   "scripts/hive/remove.py": 118,
   "scripts/hive/reports.py": 55,
   "scripts/hive/rollout.py": 27,

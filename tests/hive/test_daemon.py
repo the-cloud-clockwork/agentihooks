@@ -71,6 +71,7 @@ def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch
     assert record["name"] == "Worker"
     assert record["max_agents"] == 8
     assert record["heartbeat_at"] == 123456
+    assert record["beat_at"] == 123456
     for field in ("slots", "interactive", "repos"):
         assert record[field] == report[field]
     for field in ("sessions", "quota"):

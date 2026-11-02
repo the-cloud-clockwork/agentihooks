@@ -18,6 +18,7 @@ from scripts.swarm_v2.keyspace import INSTALLATION_FILE
 
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
+BEAT_WINDOW_MS = 300_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 JSON_FIELDS = {
@@ -33,7 +34,7 @@ JSON_FIELDS = {
     "drains": list,
 }
 DRAINS_KEPT = 20
-INT_FIELDS = ("max_agents", "heartbeat_at")
+INT_FIELDS = ("max_agents", "heartbeat_at", "beat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
@@ -279,8 +280,14 @@ def hives(client) -> list[dict]:
     return [record for hive_id in hive_state.index(client) if (record := show(client, hive_id))]
 
 
-def live(record: dict, now_ms: int) -> bool:
-    return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] <= LIVE_MS
+def live(record: dict[str, Any], now_ms: int) -> bool:
+    """A fresh heartbeat counts only while the last finished beat, where the record carries one, is within the window."""
+    finished_at: int = record.get("beat_at", record["heartbeat_at"])
+    return (
+        record["heartbeat_at"] > 0
+        and now_ms - record["heartbeat_at"] <= LIVE_MS
+        and now_ms - finished_at <= BEAT_WINDOW_MS
+    )
 
 
 def touch(client, hive_id: str, now_ms: int) -> None:
@@ -289,6 +296,15 @@ def touch(client, hive_id: str, now_ms: int) -> None:
 
     if "heartbeat_at" in (_amend(client, hive_id, refresh) or {}):
         client.pexpire(f"{key(hive_id)}:sessions", LIVE_MS)
+
+
+def finished(client: object, hive_id: str, now_ms: int) -> None:
+    """Records the end of a whole daemon beat, which the headroom heartbeat never refreshes."""
+
+    def stamp(stored: dict[str, Any] | None) -> object:
+        return {**stored, "beat_at": now_ms} if stored else hive_state.KEEP
+
+    _amend(client, hive_id, stamp)
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:
