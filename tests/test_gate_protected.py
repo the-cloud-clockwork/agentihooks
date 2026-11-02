@@ -1299,6 +1299,35 @@ def test_a_head_taking_the_inline_mutation_form_is_green(form, summary):
 
 
 @pytest.mark.parametrize("form", _FORMS)
+def test_a_head_grading_split_units_with_the_reviewed_steps_is_green(form: dict[str, bool]) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.split_units(ci_reuse.inline_mutation(ci_reuse.gate_steps(**form)))
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("weaken", ["head grader", "no shard count", "dropped step"])
+def test_a_head_weakening_the_split_units_steps_is_red(weaken: str) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    steps = ci_reuse.split_units(ci_reuse.gate_steps(queue_tier=True, promotion=True))
+    if weaken == "head grader":
+        steps[-1]["run"] = steps[-1]["run"].replace('grader="$RUNNER_TEMP/grader"', 'grader="$GITHUB_WORKSPACE"')
+    elif weaken == "no shard count":
+        steps[-1]["run"] = steps[-1]["run"].replace('"$(jq length <<< "$PLANNED")"', "1")
+    else:
+        steps.pop()
+    head["jobs"]["gate-required"]["steps"] = steps
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's Gate — Required changes its steps; the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize("form", _FORMS)
 @pytest.mark.parametrize(("shell", "problems"), [("bash", 0), ("sh", 1), ("pwsh", 1)])
 def test_a_head_running_the_summary_under_pipefail_bash_is_green(form, shell, problems):
     from scripts import ci_reuse

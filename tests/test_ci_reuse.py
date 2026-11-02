@@ -268,15 +268,17 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     )
     assert "type-gate" in workflow["jobs"]["gate-required"]["needs"]
     assert steps in [
-        ci_reuse.typing_required(
-            ci_reuse.test_only_sonar(
-                diagnostic(
-                    forward(
-                        finish(
-                            rerun(
-                                ci_reuse.inline_mutation(
-                                    ci_reuse.postgres_required(
-                                        ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+        units(
+            ci_reuse.typing_required(
+                ci_reuse.test_only_sonar(
+                    diagnostic(
+                        forward(
+                            finish(
+                                rerun(
+                                    ci_reuse.inline_mutation(
+                                        ci_reuse.postgres_required(
+                                            ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                                        )
                                     )
                                 )
                             )
@@ -285,6 +287,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
                 )
             )
         )
+        for units in (list, ci_reuse.split_units)
         for diagnostic, forward in (
             (list, list),
             (ci_reuse.selection_diagnostic, list),
