@@ -126,6 +126,12 @@ def test_settle_runs_last_and_drains_only_a_pass_with_nothing_left_to_spawn(
     blocked = replay("dependency", "tick", monkeypatch, tmp_path)["actions"][0]
     assert blocked[-1] == "drained"
     assert blocked.count("drained") == 1
+
+
+@pytest.mark.feature("swarm-tick-declared-edges")
+def test_a_pass_that_spawned_work_ends_on_the_spawn_without_draining(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     running = replay("running", "tick", monkeypatch, tmp_path)["actions"][0]
     assert running[-1] == "spawned ci@a1b2c3-0001 for t2"
     assert "drained" not in running
