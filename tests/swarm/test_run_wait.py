@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -25,7 +26,8 @@ def actions(monkeypatch):
 
     def api(args, **kwargs):
         state["asked"].append(args)
-        assert kwargs == {"capture_output": True, "timeout": 20}
+        assert 0 < kwargs.pop("timeout") <= 20
+        assert kwargs == {"capture_output": True, "cwd": Path.cwd()}
         if args == ["gh", "api", JOBS]:
             out = json.dumps(state["jobs"]).encode() if state["jobs_code"] == 0 else b""
             return subprocess.CompletedProcess(args, state["jobs_code"], out, b"HTTP 502: Bad Gateway")
