@@ -1,12 +1,27 @@
 """The task steps of the tick pass, run at their sites in today's order: task passes, then settle and close space."""
 
 from collections.abc import Callable
-from typing import Any
+from functools import partial
+from typing import Any, cast
 
-from scripts.tick import registry
-from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep
+from scripts.swarm.ledger_client import LedgerRefused
+from scripts.tick import registry, steps, view
+from scripts.tick.ports.records import RevisionConflict
+from scripts.tick.step import Context, Domain, Result, Write
+from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, actions_of
 
-__all__ = ["CLOSE", "RAISED", "STEPS", "TASK_PASSES", "held", "raise_held"]
+__all__ = [
+    "CLOSE",
+    "RAISED",
+    "STEPS",
+    "TASK_PASSES",
+    "WriteStep",
+    "appliers",
+    "held",
+    "raise_held",
+    "size_writes",
+    "task_writer",
+]
 
 Get = Callable[[str], Any]
 TASK_PASSES = "task passes"
@@ -47,7 +62,62 @@ def _verification_notices(tick: Any, get: Get) -> Any:
 
 
 def _size_pass(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(tick.difficulty.size_pass, get("slug"), get("ledger"), get("doc"))
+    return tick.skip_refused(size_writes, tick, get("doc"))
+
+
+def size_writes(tick: Any, doc: dict[str, Any]) -> list[str | Write]:
+    """Return a task write and an action for each task the size pass sizes, writing nothing itself."""
+    found: list[str | Write] = []
+    for task_id, fields in tick.difficulty.sizes(doc):
+        found += [
+            Write(TASKS, task_id, fields, expected={"difficulty": ""}),
+            tick.difficulty.sized_action(task_id, fields),
+        ]
+    return found
+
+
+class WriteStep(CallStep):
+    """A task step whose call returns action lines and the task writes the engine applies with compare and set."""
+
+    def run(self, ctx: Context) -> Result:
+        """Run the call against the pass state, returning its actions and its writes."""
+        found = self.call(steps.import_module("scripts.swarm.tick"), partial(ctx.view.read, PASS)) or []
+        writes = tuple(item for item in found if isinstance(item, Write))
+        lines = [item for item in found if not isinstance(item, Write)]
+        return Result((Write(actions_of(self.name), self.name, lines), *writes))
+
+
+def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None]) -> Callable[[Write], None]:
+    """Return the tasks applier: it writes a task's fields only while the fields it expects still hold.
+
+    ``read`` returns the task as the ledger holds it now. A moved field or a refused write raises RevisionConflict.
+    """
+
+    def apply(write: Write) -> None:
+        expected = cast(dict[str, Any], write.expected or {})
+        task = read(write.key) or {}
+        moved = sorted(key for key, value in expected.items() if task.get(key, "") != value)
+        if moved:
+            raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
+        try:
+            ledger.update_task(slug, write.key, write.value)
+        except LedgerRefused as exc:
+            raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
+
+    return apply
+
+
+def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
+    """Return the appliers of a task group site: the tasks applier when the site holds a ledger and a swarm."""
+    if state.get("ledger") is None or not state.get("slug"):
+        return {}
+    return {TASKS: task_writer(cast(str, state["slug"]), state["ledger"], _fresh_task)}
+
+
+def _fresh_task(task_id: str) -> dict[str, Any] | None:
+    """Return the task as the held ledger view has it after the pass's latest write, or nothing without a view."""
+    held = view.current()
+    return None if held is None else cast(dict[str, Any] | None, held.read("tasks", task_id))
 
 
 def _grouping_release(tick: Any, get: Get) -> Any:
@@ -73,7 +143,7 @@ def _close_space(tick: Any, get: Get) -> Any:
 STEPS = (
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
-    CallStep("size pass", TASK_PASSES, held(_size_pass)),
+    WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({TASKS})),
     CallStep("grouping release", TASK_PASSES, held(_grouping_release)),
     CallStep("dispatcher group", TASK_PASSES, held(_dispatcher_group)),
     CallStep(

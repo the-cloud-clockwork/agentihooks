@@ -3,6 +3,7 @@
 import math
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from hooks.classifier import Answer, ClassifierError, code_rules, decide, definitions, runner
 from scripts.swarm.ledger_client import LedgerRefused
@@ -25,18 +26,29 @@ INFRA_RE = re.compile(
 )
 
 
-def size_pass(slug: str, ledger, doc: dict) -> list[str]:
-    unsized = [t for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("difficulty")][:PER_TICK]
+def size_pass(slug: str, ledger: Any, doc: dict) -> list[str]:
     actions = []
-    with ThreadPoolExecutor(max_workers=PER_TICK) as pool:
-        for task, fields in zip(unsized, pool.map(lambda task: rule(task) or classify(task, doc), unsized)):
-            try:
-                ledger.update_task(slug, task["id"], fields)
-            except LedgerRefused:
-                actions.append(f"skipped sizing task {task['id']}: the ledger refused its write")
-                continue
-            actions.append(f"sized task {task['id']} {fields['difficulty']} by {fields['difficulty_source']}")
+    for task_id, fields in sizes(doc):
+        try:
+            ledger.update_task(slug, task_id, fields)
+        except LedgerRefused:
+            actions.append(f"skipped sizing task {task_id}: the ledger refused its write")
+            continue
+        actions.append(sized_action(task_id, fields))
     return actions
+
+
+def sizes(doc: dict) -> list[tuple[str, dict]]:
+    """Return the size fields of each unsized open task this pass sizes, computed from ``doc`` without writing."""
+    unsized = [t for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("difficulty")][:PER_TICK]
+    with ThreadPoolExecutor(max_workers=PER_TICK) as pool:
+        found = list(pool.map(lambda task: rule(task) or classify(task, doc), unsized))
+    return [(task["id"], fields) for task, fields in zip(unsized, found, strict=True)]
+
+
+def sized_action(task_id: str, fields: dict) -> str:
+    """Return the action line naming the size given to task ``task_id``."""
+    return f"sized task {task_id} {fields['difficulty']} by {fields['difficulty_source']}"
 
 
 def rule(task: dict) -> dict | None:

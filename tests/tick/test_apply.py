@@ -1,12 +1,20 @@
 """The engine applies the writes steps return through compare and set appliers and records the ones it drops."""
 
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
+import pytest
+
+import scripts.swarm.cli  # noqa: F401
+from scripts.swarm import difficulty
+from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import engine
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Lane, Result, Write
-from scripts.tick.steps import actions, actions_of
+from scripts.tick.steps import actions, actions_of, tasks
+
+pytestmark = pytest.mark.unit
 
 TASKS = Domain("tasks")
 
@@ -97,3 +105,92 @@ def test_writes_without_an_applier_pass_through_untouched() -> None:
 
 def test_a_write_defaults_to_no_expected_revision() -> None:
     assert Write(TASKS, "t1", "S").expected is None
+
+
+class Ledger:
+    def __init__(self, refuse: bool = False) -> None:
+        self.refuse = refuse
+        self.updates: list[tuple[str, str, object]] = []
+
+    def update_task(self, slug: str, task_id: str, fields: object) -> dict[str, object]:
+        if self.refuse:
+            raise LedgerRefused("refused")
+        self.updates.append((slug, task_id, fields))
+        return {}
+
+
+def test_the_tasks_applier_writes_while_the_expected_fields_hold() -> None:
+    ledger = Ledger()
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
+
+    apply(Write(TASKS, "t1", {"difficulty": "M"}, expected={"difficulty": ""}))
+
+    assert ledger.updates == [("sw", "t1", {"difficulty": "M"})]
+
+
+def test_the_tasks_applier_drops_a_write_whose_expected_field_moved() -> None:
+    ledger = Ledger()
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1", "difficulty": "L"}}.get)
+
+    with pytest.raises(RevisionConflict, match="^task t1 changed difficulty since the step read it$"):
+        apply(Write(TASKS, "t1", {"difficulty": "M"}, expected={"difficulty": ""}))
+    assert ledger.updates == []
+
+
+def test_the_tasks_applier_turns_a_refused_write_into_a_conflict() -> None:
+    apply = tasks.task_writer("sw", Ledger(refuse=True), {}.get)
+
+    with pytest.raises(RevisionConflict, match="^the ledger refused the write of task t1$"):
+        apply(Write(TASKS, "t1", {"difficulty": "M"}))
+
+
+def test_appliers_need_a_ledger_and_a_swarm() -> None:
+    assert tasks.appliers({"slug": "sw"}) == {}
+    assert tasks.appliers({"ledger": Ledger()}) == {}
+    assert list(tasks.appliers({"slug": "sw", "ledger": Ledger()})) == [TASKS]
+
+
+def test_the_size_pass_returns_its_sizes_as_guarded_task_writes() -> None:
+    fields = {"difficulty": "S", "difficulty_source": "rule"}
+    tick = SimpleNamespace(
+        difficulty=SimpleNamespace(
+            sizes=lambda doc: [("t1", fields)] if doc == "doc" else [], sized_action=difficulty.sized_action
+        )
+    )
+
+    assert tasks.size_writes(tick, "doc") == [
+        Write(TASKS, "t1", fields, expected={"difficulty": ""}),
+        "sized task t1 S by rule",
+    ]
+
+
+def test_the_size_step_splits_actions_from_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    fields = {"difficulty": "S", "difficulty_source": "rule"}
+    tick = SimpleNamespace(
+        skip_refused=lambda function, *args: function(*args),
+        difficulty=SimpleNamespace(sizes=lambda doc: [("t1", fields)], sized_action=difficulty.sized_action),
+    )
+    monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: tick)
+    (step,) = [step for step in tasks.STEPS if step.name == "size pass"]
+    state: dict[str, object] = {"doc": "doc", "box": {}}
+
+    found = step.run(Context(SimpleNamespace(read=lambda domain, key: state.get(key)), Deadline.after(60.0)))
+
+    assert found.writes == (
+        Write(actions_of("size pass"), "size pass", ["sized task t1 S by rule"]),
+        Write(TASKS, "t1", fields, expected={"difficulty": ""}),
+    )
+    assert TASKS in step.writes
+
+
+def test_the_size_pass_sizes_then_writes_through_the_ledger_directly() -> None:
+    ledger = Ledger()
+    doc = {"tasks": [{"id": "t1", "state": "open", "territory": [], "kind": "ops"}]}
+
+    assert difficulty.size_pass("sw", ledger, doc) == ["sized task t1 L by rule"]
+    assert ledger.updates == [
+        ("sw", "t1", {"difficulty": "L", "difficulty_source": "rule", "difficulty_confidence": 1.0})
+    ]
+    assert difficulty.size_pass("sw", Ledger(refuse=True), doc) == [
+        "skipped sizing task t1: the ledger refused its write"
+    ]
