@@ -6,7 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
-from scripts.swarm import github_reads, ledger_events
+from scripts.swarm import github_reads
+from scripts.swarm.ledger_events import view as read_view
+from scripts.swarm.ledger_events import views as read_views
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 
@@ -31,9 +33,9 @@ class RunPort:
 
 def view(url: str, run: Callable[..., Any], required_checks: dict[str, int] | None = None) -> Any:
     """Read one pull request through the port double over ``run``."""
-    return ledger_events.view(url, cast(SourceControl, RunPort(run)), required_checks)
+    return read_view(url, cast(SourceControl, RunPort(run)), required_checks)
 
 
 def views(urls: list[str], run: Callable[..., Any], cache: object | None = None) -> Any:
     """Read pull requests in batches through the port double over ``run``."""
-    return ledger_events.views(urls, cast(SourceControl, RunPort(run)), cache)
+    return read_views(urls, cast(SourceControl, RunPort(run)), cache)
