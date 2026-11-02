@@ -12,18 +12,22 @@ from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, actions_of
 
 __all__ = [
     "CLOSE",
+    "GROUPS",
     "RAISED",
     "STEPS",
     "TASK_PASSES",
     "WriteStep",
     "appliers",
+    "group_writer",
     "held",
     "raise_held",
+    "release_writes",
     "size_writes",
     "task_writer",
 ]
 
 Get = Callable[[str], Any]
+GROUPS = Domain("groups")
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -108,10 +112,11 @@ def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
-    """Return the appliers of a task group site: the tasks applier when the site holds a ledger and a swarm."""
+    """Return the appliers of a task group site: tasks and groups when the site holds a ledger and a swarm."""
     if state.get("ledger") is None or not state.get("slug"):
         return {}
-    return {TASKS: task_writer(cast(str, state["slug"]), state["ledger"], _fresh_task)}
+    slug, ledger = cast(str, state["slug"]), state["ledger"]
+    return {TASKS: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
 
 
 def _fresh_task(task_id: str) -> dict[str, Any] | None:
@@ -121,7 +126,36 @@ def _fresh_task(task_id: str) -> dict[str, Any] | None:
 
 
 def _grouping_release(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(tick.grouping.release_pass, get("slug"), get("store"), get("ledger"), get("doc"))
+    return tick.skip_refused(release_writes, tick, get("slug"), get("store"), get("doc"))
+
+
+def release_writes(tick: Any, slug: str, store: Any, doc: dict[str, Any]) -> list[str | Write]:
+    """Return a group write and an action for each stopped group lead, writing nothing and leaving ``doc`` as read."""
+    found: list[str | Write] = []
+    for lead_id, why, released in tick.grouping.releases(slug, store, doc):
+        lead = next(task for task in doc["tasks"] if task["id"] == lead_id)
+        members = list(lead["group_members"])
+        found += [
+            Write(GROUPS, lead_id, released, expected={"group_members": members}),
+            tick.grouping.released_action(lead_id, why, released),
+        ]
+    return found
+
+
+def group_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None]) -> Callable[[Write], None]:
+    """Return the groups applier: it releases a lead's group only while the lead still holds the members it read."""
+
+    def apply(write: Write) -> None:
+        expected = cast(dict[str, Any], write.expected or {})
+        task = read(write.key) or {}
+        if list(task.get("group_members") or []) != expected.get("group_members", []):
+            raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
+        try:
+            ledger.ungroup_tasks(slug, write.key)
+        except LedgerRefused as exc:
+            raise RevisionConflict(f"the ledger refused the release of the group under task {write.key}") from exc
+
+    return apply
 
 
 def _dispatcher_group(tick: Any, get: Get) -> Any:
@@ -144,7 +178,7 @@ STEPS = (
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
     WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({TASKS})),
-    CallStep("grouping release", TASK_PASSES, held(_grouping_release)),
+    WriteStep("grouping release", TASK_PASSES, held(_grouping_release), writes=frozenset({GROUPS})),
     CallStep("dispatcher group", TASK_PASSES, held(_dispatcher_group)),
     CallStep(
         "settle", CLOSE, held(_settle), frozenset({"spawn"}), frozenset({AGENTS, TASKS, SWARM}), frozenset({SWARM})

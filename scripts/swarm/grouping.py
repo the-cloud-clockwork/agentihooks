@@ -1,6 +1,7 @@
 """The tick step that groups small open tasks so one agent delivers them in one pull request."""
 
 import math
+from typing import Any
 
 from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from scripts.inbox.store import InboxStore
@@ -49,23 +50,36 @@ def group_pass(slug, config, store, ledger, doc):
     return actions
 
 
-def release_pass(slug, store, ledger, doc):
+def release_pass(slug: str, store: Any, ledger: Any, doc: dict) -> list[str]:
     known = {t["id"]: t for t in doc["tasks"]}
     actions = []
-    for lead in [t for t in known.values() if t.get("group_members")]:
-        why = _stopped(slug, store, lead, doc)
-        if not why:
-            continue
+    for lead_id, why, released in releases(slug, store, doc):
         try:
-            ledger.ungroup_tasks(slug, lead["id"])
+            ledger.ungroup_tasks(slug, lead_id)
         except LedgerRefused:
-            actions.append(f"skipped releasing the group under task {lead['id']}: the ledger refused its write")
+            actions.append(f"skipped releasing the group under task {lead_id}: the ledger refused its write")
             continue
-        released = [m for m in lead.pop("group_members") if known.get(m, {}).get("merged_into") == lead["id"]]
+        known[lead_id].pop("group_members")
         for member in released:
             del known[member]["merged_into"]
-        actions.append(f"released tasks {', '.join(released)} from task {lead['id']}: its lead {why}")
+        actions.append(released_action(lead_id, why, released))
     return actions
+
+
+def releases(slug: str, store: Any, doc: dict) -> list[tuple[str, str, list[str]]]:
+    """Return each group lead that stopped, why, and the members it releases, computed from ``doc`` without writing."""
+    known = {t["id"]: t for t in doc["tasks"]}
+    found = []
+    for lead in [t for t in known.values() if t.get("group_members")]:
+        if why := _stopped(slug, store, lead, doc):
+            members = [m for m in lead["group_members"] if known.get(m, {}).get("merged_into") == lead["id"]]
+            found.append((lead["id"], why, members))
+    return found
+
+
+def released_action(lead_id: str, why: str, released: list[str]) -> str:
+    """Return the action line naming the members released from the group under ``lead_id``."""
+    return f"released tasks {', '.join(released)} from task {lead_id}: its lead {why}"
 
 
 def _stopped(slug, store, lead, doc):

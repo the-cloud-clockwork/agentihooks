@@ -92,7 +92,7 @@ def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest
         ("run window", "sw", "config", "store", "ledger", "doc", 7),
         (claim_hold.verification_notices, "sw", "store", "doc", 7),
         (tasks.size_writes, tick, "doc"),
-        (grouping.release_pass, "sw", "store", "ledger", "doc"),
+        (tasks.release_writes, tick, "sw", "store", "doc"),
         ("dispatcher group", "sw", "config", "store", "ledger", "doc", 7),
     ]
 

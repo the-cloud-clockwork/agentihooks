@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import scripts.swarm.cli  # noqa: F401
-from scripts.swarm import difficulty
+from scripts.swarm import difficulty, grouping
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import engine
 from scripts.tick.deadline import Deadline
@@ -194,3 +194,76 @@ def test_the_size_pass_sizes_then_writes_through_the_ledger_directly() -> None:
     assert difficulty.size_pass("sw", Ledger(refuse=True), doc) == [
         "skipped sizing task t1: the ledger refused its write"
     ]
+
+
+class GroupLedger:
+    def __init__(self, refuse: bool = False) -> None:
+        self.refuse = refuse
+        self.ungrouped: list[tuple[str, str]] = []
+
+    def ungroup_tasks(self, slug: str, lead: str) -> None:
+        if self.refuse:
+            raise LedgerRefused("refused")
+        self.ungrouped.append((slug, lead))
+
+
+def test_the_groups_applier_releases_while_the_lead_holds_the_members_it_read() -> None:
+    ledger = GroupLedger()
+    apply = tasks.group_writer("sw", ledger, {"l1": {"id": "l1", "group_members": ["m1", "m2"]}}.get)
+
+    apply(Write(tasks.GROUPS, "l1", ["m1"], expected={"group_members": ["m1", "m2"]}))
+
+    assert ledger.ungrouped == [("sw", "l1")]
+
+
+def test_the_groups_applier_drops_a_release_whose_members_moved() -> None:
+    ledger = GroupLedger()
+    apply = tasks.group_writer("sw", ledger, {"l1": {"id": "l1", "group_members": ["m1"]}}.get)
+
+    with pytest.raises(RevisionConflict, match="^task l1 changed group_members since the step read it$"):
+        apply(Write(tasks.GROUPS, "l1", ["m1"], expected={"group_members": ["m1", "m2"]}))
+    assert ledger.ungrouped == []
+
+
+def test_the_groups_applier_turns_a_refused_release_into_a_conflict() -> None:
+    apply = tasks.group_writer("sw", GroupLedger(refuse=True), {"l1": {"group_members": ["m1"]}}.get)
+
+    with pytest.raises(RevisionConflict, match="^the ledger refused the release of the group under task l1$"):
+        apply(Write(tasks.GROUPS, "l1", ["m1"], expected={"group_members": ["m1"]}))
+
+
+def test_the_grouping_release_returns_guarded_group_writes_and_leaves_the_document() -> None:
+    doc = {
+        "tasks": [
+            {"id": "l1", "state": "done", "group_members": ["m1", "m2"]},
+            {"id": "m1", "state": "open", "merged_into": "l1"},
+            {"id": "m2", "state": "open", "merged_into": "other"},
+        ]
+    }
+    before = repr(doc)
+    tick = SimpleNamespace(grouping=grouping)
+
+    assert tasks.release_writes(tick, "sw", None, doc) == [
+        Write(tasks.GROUPS, "l1", ["m1"], expected={"group_members": ["m1", "m2"]}),
+        f"released tasks m1 from task l1: its lead {grouping.RELEASE_CLOSED}",
+    ]
+    assert repr(doc) == before
+
+
+def test_the_release_pass_still_releases_through_the_ledger_directly() -> None:
+    doc = {
+        "tasks": [
+            {"id": "l1", "state": "done", "group_members": ["m1"]},
+            {"id": "m1", "state": "open", "merged_into": "l1"},
+        ]
+    }
+    ledger = GroupLedger()
+
+    assert grouping.release_pass("sw", None, ledger, doc) == [
+        f"released tasks m1 from task l1: its lead {grouping.RELEASE_CLOSED}"
+    ]
+    assert ledger.ungrouped == [("sw", "l1")]
+    assert doc["tasks"] == [{"id": "l1", "state": "done"}, {"id": "m1", "state": "open"}]
+    assert grouping.release_pass(
+        "sw", None, GroupLedger(refuse=True), {"tasks": [{"id": "l1", "state": "done", "group_members": ["m1"]}]}
+    ) == ["skipped releasing the group under task l1: the ledger refused its write"]
