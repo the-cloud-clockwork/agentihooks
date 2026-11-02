@@ -51,7 +51,7 @@ def test_a_judged_real_finding_becomes_a_troubleshoot_task_then_a_fix_naming_its
 
 
 @pytest.mark.parametrize("fix", ["code", "tune"])
-def test_the_doctor_cause_and_fix_tasks_close_only_with_the_feature_they_proved(fix):
+def test_the_doctor_cause_and_fix_tasks_close_only_with_the_feature_they_proved(fix: str) -> None:
     cause, fixed = loop.fix_tasks(WATCHED, *judged("established"), fix, ())
     assert cause["contract"]["feature"] == "yes"
     assert fixed["contract"]["feature"] == "yes"

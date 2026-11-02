@@ -101,6 +101,7 @@ FEATURE_MAP = "feature-map.json"
 PULL = re.compile(r"/pull/(\d+)")
 PULL_JQ = "{merged_at, merge_commit_sha} | @json"
 FILES_JQ = ".[] | {filename, status} | @json"
+CONTENT_JQ = "{content} | @json"
 PIN_WAIT = (
     "A later dev push run of Tests passed, but no merged pull request on this task added or changed a mapped test, "
     "so the swarm filed a pinning task and closes this one once that task is done."
@@ -399,26 +400,16 @@ def pinned(repo_dir: str, url: str | None, run: Callable = subprocess.run) -> bo
             return False
         files = _read(repo_dir, f"{pulls}/files?per_page=100", FILES_JQ, run)
         mapped = _mapped_files(repo_dir, pull["merge_commit_sha"], run)
-    except (*dev_red.READ_ERRORS, IndexError):
+    except dev_red.READ_ERRORS:
         return None
     return any(f["filename"] in mapped for f in files if f.get("status") != "removed")
 
 
 def _mapped_files(repo_dir: str, ref: str, run: Callable) -> set[str]:
-    done = github_reads.rest(
-        "swarm.promotion_watch",
-        ["api", f"repos/{{owner}}/{{repo}}/contents/{FEATURE_MAP}?ref={ref}"],
-        run,
-        cwd=repo_dir,
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    )
-    found = json.loads(base64.b64decode(json.loads(done.stdout)["content"]))
-    entries = found.get("features") if isinstance(found, dict) else None
-    tests = [t for e in entries or [] if isinstance(e, dict) for t in e.get("tests") or [] if isinstance(t, str)]
-    return {test.split("::")[0] for test in tests}
+    endpoint = f"repos/{{owner}}/{{repo}}/contents/{FEATURE_MAP}?ref={ref}"
+    content = _read(repo_dir, endpoint, CONTENT_JQ, run, pages=())[0]["content"]
+    found = json.loads(base64.b64decode(content))
+    return {test.split("::")[0] for feature in found["features"] for test in feature.get("tests", [])}
 
 
 def _pin(slug: str, ledger: LedgerClient, task: dict, pin: dict, run_id: int) -> list[str]:

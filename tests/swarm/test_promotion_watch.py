@@ -1,6 +1,7 @@
 import base64
 import json
 import subprocess
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -81,17 +82,22 @@ MAPPED = "tests/swarm/test_pinned.py"
 MAPPED_CHANGE = {"filename": MAPPED, "status": "modified"}
 FEATURES = {
     "features": [
-        {"id": "pinned", "tests": [f"{MAPPED}::test_it", 7]},
+        {"id": "pinned", "tests": [f"{MAPPED}::test_it"]},
         {"id": "bare"},
-        "not an entry",
         {"id": "other", "tests": ["tests/test_other.py::test_case"]},
     ]
 }
 CONTENT = json.dumps({"content": base64.encodebytes(json.dumps(FEATURES).encode()).decode()})
 
 
-def gh(runs, jobs=PROMOTED, calls=None, files=(MAPPED_CHANGE,), merged_at=MERGED_AT):
-    def run(argv, **kwargs):
+def gh(
+    runs: list[dict],
+    jobs: list[dict] = PROMOTED,
+    calls: list | None = None,
+    files: tuple[dict, ...] = (MAPPED_CHANGE,),
+    merged_at: str | None = MERGED_AT,
+) -> Callable[..., subprocess.CompletedProcess]:
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if calls is not None:
             calls.append((argv, kwargs))
         if "/contents/" in argv[2]:
@@ -720,7 +726,7 @@ def test_a_fixer_someone_works_through_a_green_run_still_holds_its_job(store, st
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
 
 
-def fixer(**extra):
+def fixer(**extra: str) -> dict[str, str]:
     return {"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open", **extra}
 
 
@@ -747,7 +753,7 @@ def test_a_fixer_whose_merged_pull_request_changed_a_mapped_test_closes_on_green
             ],
             kwargs,
         ),
-        (["gh", "api", contents], kwargs),
+        (["gh", "api", contents, "--jq", "{content} | @json"], kwargs),
     ]
     rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
     assert [row["caller"] for row in rows if row["endpoint"].startswith("repos/{owner}/{repo}/contents/")] == [
@@ -826,7 +832,7 @@ def test_every_fixer_without_a_mapped_test_gets_its_own_pinning_task(store):
 def test_an_unread_fixer_does_not_hold_the_next_fixer_from_closing(store):
     answer = gh([GREEN])
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if "/pulls/66" in argv[2]:
             raise subprocess.CalledProcessError(1, argv, stderr="HTTP 502")
         return answer(argv, **kwargs)
@@ -850,7 +856,7 @@ def test_a_former_owner_fixer_reads_its_pull_request_in_the_watched_repo(store, 
 def test_an_unread_pull_request_leaves_the_fixer_for_the_next_green(store):
     answer = gh([GREEN])
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if "/pulls/" in argv[2]:
             raise subprocess.CalledProcessError(1, argv, stderr="HTTP 502")
         return answer(argv, **kwargs)

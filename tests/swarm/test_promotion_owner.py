@@ -85,7 +85,7 @@ PR_URL = "https://github.com/o/r/pull/77"
 MAPPED = {"features": [{"id": "pinned", "tests": ["tests/test_pinned.py::test_it"]}]}
 
 
-def github(argv, **kwargs):
+def github(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
     if "/contents/" in argv[2]:
         content = base64.b64encode(json.dumps(MAPPED).encode()).decode()
         return subprocess.CompletedProcess(argv, 0, json.dumps({"content": content}), "")
