@@ -663,19 +663,27 @@ def _elsewhere(agent: AgentRecord) -> bool:
 def _reap(
     slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
 ) -> list[str]:
-    """Judge every legacy agent of the swarm, fanned out over the pass workers, returning actions in agent order."""
+    """Judge every legacy agent of the swarm, one task per pass worker, returning actions in agent order."""
     from scripts.hub.reconciler import legacy_agents
 
     live, rows = timing.timed(_live_names, runtime), dict(rows)
 
     judging = _Reaping(slug, store, ledger, runtime, rows, live, now_ms)
+    agents = list(timing.timed(legacy_agents, store, slug))
+    by_task: dict[str, list[int]] = {}
+    for index, agent in enumerate(agents):
+        by_task.setdefault(agent.task or agent.name, []).append(index)
 
-    def one(agent: AgentRecord) -> list[str]:
-        """Return the actions judging ``agent`` took."""
-        with timing.acting(agent.name):
-            return _reap_agent(judging, agent)
+    def one(indexes: list[int]) -> list[tuple[int, list[str]]]:
+        """Return the actions judging each agent of one task took, in agent order."""
+        judged: list[tuple[int, list[str]]] = []
+        for index in indexes:
+            with timing.acting(agents[index].name):
+                judged.append((index, _reap_agent(judging, agents[index])))
+        return judged
 
-    return [action for found in pool.fan_out(one, timing.timed(legacy_agents, store, slug)) for action in found]
+    found = dict(pair for pairs in pool.fan_out(one, by_task.values()) for pair in pairs)
+    return [action for index in range(len(agents)) for action in found[index]]
 
 
 @dataclass(frozen=True)

@@ -147,7 +147,8 @@ def _applied(record: StepRecord, apply: Appliers) -> StepRecord:
 def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
     """Return ``ctx`` with its deadline capped by the deadline of the step's lane."""
     lane = found.lane(step.lane)
-    return Context(ctx.view, Deadline(min(ctx.deadline.expires_at, lane.expires_at), ctx.deadline.clock))
+    clock = ctx.deadline.clock
+    return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock))
 
 
 def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: Appliers) -> tuple[StepRecord, ...]:
