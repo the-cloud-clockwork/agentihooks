@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
-from hooks.common import log  # pyright: ignore[reportUnknownVariableType]
+from hooks.common import log
 from hooks.hook_manager import BlockAction
 
 _PASS_ARGS = frozenset({"--delete", "-d", "--dry-run", "-n"})
@@ -54,7 +54,7 @@ def _path(word: str) -> str:
 
 
 def _own_worktree(cwd: Path, name: str) -> Path | None:
-    from scripts.gates.push_stop import default_root, trees  # pyright: ignore[reportUnknownVariableType]
+    from scripts.gates.push_stop import default_root, trees
 
     checkout = _toplevel(cwd)
     if checkout is None:
@@ -65,7 +65,7 @@ def _own_worktree(cwd: Path, name: str) -> Path | None:
 
 def _branch_worktree(cwd: Path, task: dict[str, Any]) -> Path | None:
     from scripts.gates.push_stop import default_root
-    from scripts.swarm.snapshot import worktrees  # pyright: ignore[reportUnknownVariableType]
+    from scripts.swarm.snapshot import worktrees
 
     branch: str = task["branch"]
     candidates = [cwd]
@@ -82,13 +82,13 @@ def _branch_worktree(cwd: Path, task: dict[str, Any]) -> Path | None:
 
 def _swarm_cwd(cwd: Path) -> tuple[Path | None, str]:
     from scripts.gates.base import Who
-    from scripts.swarm_ledger.storage import read_ledger  # pyright: ignore[reportUnknownVariableType]
+    from scripts.swarm_ledger.storage import read_ledger
 
-    who = Who.from_env()  # pyright: ignore[reportUnknownMemberType]
+    who = Who.from_env()
     if not (who.pinned and who.task):
         return None, "identity binding"
     folder = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    doc: dict[str, Any] = read_ledger(folder, who.swarm, f"tasks/{who.task}") or {}
+    doc: dict[str, Any] = cast("dict[str, Any] | None", read_ledger(folder, who.swarm, f"tasks/{who.task}")) or {}
     task: dict[str, Any] = next(
         (cast("dict[str, Any]", row) for row in doc.get("tasks", []) if row.get("id") == who.task), {}
     )
@@ -179,7 +179,7 @@ def _branches(root: Path, args: list[str]) -> tuple[str, list[str]]:
         remote, _, branch = pushed.partition("/")
         if branch:
             return remote, [branch]
-    branches = []
+    branches: list[str] = []
     for spec in words[1:] or ["HEAD"]:
         if _unspaced(spec):
             continue
@@ -225,7 +225,7 @@ def check_prepush(payload: dict[str, Any]) -> None:
     import shlex
 
     try:
-        pushes = []
+        pushes: list[tuple[Path, list[str]]] = []
         root = _unpassed(_pushes(payload), pushes)
         crowded = None if root else _crowded(pushes, time.time())
     except BlockAction:

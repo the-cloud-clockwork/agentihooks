@@ -7,7 +7,7 @@ from typing import Any, Protocol, cast
 from hooks.context.brain_adapter import (
     BrainEntry,
     BrainSourceUnavailable,
-    _parse_frontmatter,  # pyright: ignore[reportPrivateUsage]
+    _parse_frontmatter,
 )
 from hooks.context.project_identity import ProjectIdentity
 from hooks.context.project_sessions import lookup

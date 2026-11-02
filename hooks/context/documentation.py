@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Any, cast
 
-from hooks.classifier import code_rules, runner  # pyright: ignore[reportMissingTypeStubs]
+from hooks.classifier import code_rules, runner
 from hooks.classifier.definitions import Definition
 from hooks.classifier.result import Answer
 
@@ -20,7 +20,7 @@ def _verdicts(
 
 
 RULE = code_rules.CodeRule(
-    code_rules.asked,  # pyright: ignore[reportUnknownMemberType]
+    code_rules.asked,
     _verdicts,
     {"needs_documentation": (True, False, None), "size": ("none", "small", "medium", "large", None)},
     {"needs_documentation": False, "size": "none"},
@@ -28,9 +28,9 @@ RULE = code_rules.CodeRule(
 
 
 def classify(evidence: dict[str, Any], *, decider: Callable[..., Any] | None = None) -> dict[str, Any]:
-    output = runner.run("documentation-needed", evidence, decider=decider)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    output = runner.run("documentation-needed", evidence, decider=decider)
     return {
         **output.verdicts,
         "source": output.raw.source,
-        "answers": {key: value.to_dict() for key, value in output.raw.answers.items()},  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        "answers": {key: value.to_dict() for key, value in output.raw.answers.items()},
     }

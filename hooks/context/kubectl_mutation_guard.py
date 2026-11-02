@@ -378,7 +378,7 @@ def _exec_violation(target_args: str, after_dash: str) -> Optional[str]:
         if not pattern.search(after_dash):
             continue
         if rule != "exec-shell-c":
-            return _violation_or_allow(rule, description, namespace, pod)
+            return _violation_or_allow(rule, cast("str", description), namespace, pod)
         for inner_pat, inner_rule in _INNER_SHELL_PATTERNS:
             if inner_pat.search(after_dash):
                 return _violation_or_allow(
@@ -485,8 +485,8 @@ def check_kubectl_mutation(payload: dict[str, Any]) -> None:
         )
         return
 
-    tool_input = payload.get("tool_input", {}) or {}
-    command = tool_input.get("command", "") or ""
+    tool_input: dict[str, Any] = payload.get("tool_input", {}) or {}
+    command: object = tool_input.get("command", "") or ""
     if not isinstance(command, str):
         return
     reason = check_kubectl_mutation_command(command)

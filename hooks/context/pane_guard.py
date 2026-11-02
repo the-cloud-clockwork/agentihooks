@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from hooks.context.shell_commands import _SHELLS  # pyright: ignore[reportPrivateUsage]
+from hooks.context.shell_commands import _SHELLS
 
 _HERDR = {
     ("pane", "split"),

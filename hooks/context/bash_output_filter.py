@@ -147,7 +147,7 @@ def filter_bash_output(
     if not tool_output:
         return None
 
-    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""  # pyright: ignore[reportUnnecessaryIsInstance]
+    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
 
     output_type = _detect_output_type(command)
 

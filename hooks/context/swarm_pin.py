@@ -17,7 +17,7 @@ IDENTITY = (
 AGENTS = frozenset({"claude", "codex"})
 
 
-def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:
+def nested(environ: MutableMapping[str, str], start: int | None = None, proc: Path = _PROC) -> bool:
     launcher = str(environ.get(LAUNCHER))
     if not launcher.isdigit():
         return False

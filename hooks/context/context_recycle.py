@@ -77,7 +77,7 @@ def _swarm_of(environ: Mapping[str, str], session_id: str = "") -> str:
     slug = cast(
         str,
         (
-            cast("str | None", naming.legacy_slug(name))  # pyright: ignore[reportUnknownMemberType]
+            cast("str | None", naming.legacy_slug(name))
             or environ.get("AGENTIHOOKS_SWARM")
         )
         if naming.lane_of(cast(str, name))
@@ -224,13 +224,13 @@ def gate(
 
 def _resolver(slug: str) -> Any:
     from scripts.handoff.resolve import Resolver
-    from scripts.swarm.store import SwarmError, connect  # pyright: ignore[reportUnknownVariableType]
+    from scripts.swarm.store import SwarmError, connect
 
     try:
-        redis: Any = connect().redis  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType]
+        redis: Any = connect().redis
     except SwarmError:
         redis = None
-    return Resolver(slug, redis)  # pyright: ignore[reportUnknownArgumentType]
+    return Resolver(slug, redis)
 
 
 def _handoff_refusal(command: str, slug: str) -> str | None:
@@ -241,5 +241,5 @@ def _handoff_refusal(command: str, slug: str) -> str | None:
         text = Path(tokens[4]).expanduser().read_text(encoding="utf-8")
     except OSError:
         return None
-    found = cast("list[str]", handoff_check.problems(text, _resolver(slug)))  # pyright: ignore[reportUnknownMemberType]
-    return "BLOCKED: " + handoff_check.refusal(found) if found else None  # pyright: ignore[reportUnknownMemberType]
+    found = cast("list[str]", handoff_check.problems(text, _resolver(slug)))
+    return "BLOCKED: " + handoff_check.refusal(found) if found else None

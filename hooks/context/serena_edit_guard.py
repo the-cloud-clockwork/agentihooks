@@ -112,7 +112,7 @@ def _own_worktree(root: Path) -> bool:
     if (root.parent.parent.parent if tmp else root.parent.parent) != base:
         return False
     try:
-        return naming.is_worktree(root.name, os.environ, tmp=tmp)  # pyright: ignore[reportUnknownMemberType]
+        return naming.is_worktree(root.name, os.environ, tmp=tmp)
     except naming.NamingError:
         return False
 

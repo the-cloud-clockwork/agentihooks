@@ -24,7 +24,7 @@ def _project_root(cwd: Path) -> Path | None:
 
 def check_venv_guard(payload: dict[str, Any]) -> None:
     from hooks.context._strip import strip_non_command_content
-    from hooks.context.branch_guard import _resolve_cwd  # pyright: ignore[reportPrivateUsage]
+    from hooks.context.branch_guard import _resolve_cwd
 
     command: str = payload.get("tool_input", {}).get("command", "")
     venv = os.environ.get("VIRTUAL_ENV", "")

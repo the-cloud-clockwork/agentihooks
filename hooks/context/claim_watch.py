@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from hooks.context import worker_mode
-from scripts.swarm.claim_lost import lost  # pyright: ignore[reportUnknownVariableType]
+from scripts.swarm.claim_lost import lost
 
 if TYPE_CHECKING:
     from scripts.swarm.ledger_client import LedgerClient
@@ -28,8 +28,8 @@ def check(
     now: float | None = None,
     spawn: Callable[..., Any] | None = None,
 ) -> str | None:
-    from scripts.hive import scope  # pyright: ignore[reportMissingTypeStubs]
-    from scripts.swarm_ledger import ledger_workspace  # pyright: ignore[reportMissingTypeStubs]
+    from scripts.hive import scope
+    from scripts.swarm_ledger import ledger_workspace
 
     env = os.environ if environ is None else environ
     slug, name, task = (env.get(k) for k in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK"))
@@ -40,13 +40,13 @@ def check(
     ):
         return None
     now = time.time() if now is None else now
-    folder = ledger_workspace.folder(slug, task)  # pyright: ignore[reportUnknownMemberType]
+    folder = ledger_workspace.folder(slug, task)
     folder.mkdir(parents=True, exist_ok=True)
     if ledger is None:
         from scripts.swarm.ledger_client import LedgerClient
 
         ledger = LedgerClient(read_timeout=READ_TIMEOUT)
-    row: dict[str, Any] | None = ledger.task(slug, task)  # pyright: ignore[reportUnknownMemberType]
+    row: dict[str, Any] | None = ledger.task(slug, task)
     if not lost(name, row, bool(scope.member(env))):
         return None
     owner: Any = cast("dict[str, Any]", row).get("claimed_by") or "nobody"

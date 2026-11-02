@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from hooks._redis import SESSION_TTL, get_redis, redis_key
-from hooks.common import log  # pyright: ignore[reportUnknownVariableType]
+from hooks.common import log
 from hooks.config import AGENTIHOOKS_HOME, CLAUDE_MD_MAXLINES
 from hooks.hook_manager import BlockAction
 

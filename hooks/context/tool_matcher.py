@@ -94,7 +94,7 @@ def command_heads(command: str) -> frozenset[str]:
     """Lowercased basenames of every simple command's program in *command*."""
     if not command.strip():
         return frozenset()
-    from hooks.context.credential_guard import strip_heredocs  # pyright: ignore[reportUnknownVariableType]
+    from hooks.context.credential_guard import strip_heredocs
 
     text = strip_heredocs(command)
     try:
@@ -145,7 +145,7 @@ def _is_control(tok: str, prev: str) -> bool:
 
 
 def _fallback_heads(text: str) -> frozenset[str]:
-    from hooks.context.credential_guard import (  # pyright: ignore[reportUnknownVariableType]
+    from hooks.context.credential_guard import (
         split_commands,
         split_stages,
         tokens_of,

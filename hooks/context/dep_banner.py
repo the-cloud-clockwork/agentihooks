@@ -12,7 +12,7 @@ Runs as PreToolUse. Does not block — only announces.
 import re
 from typing import Any
 
-from hooks.common import inject_context, log  # pyright: ignore[reportUnknownVariableType]
+from hooks.common import inject_context, log
 
 _INSTALL_PATTERNS = [
     (re.compile(r"\b(?:python[0-9.]*\s+-m\s+)?(?:uv\s+)?pip[0-9]*\s+install\b"), "pip"),
