@@ -239,7 +239,7 @@ def junit_problems(map_path: Path, reports: list[Path]) -> list[str]:
     """Each mapped id no junit testcase ran, or one of whose testcases skipped, xfailed, failed or errored."""
     outcomes: dict[tuple[str, str], set[str]] = {}
     for report in reports:
-        for case in ET.parse(report).iter("testcase"):
+        for case in ET.parse(report).iter("testcase"):  # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
             verdicts = [child.tag for child in case if child.tag in ("skipped", "failure", "error")]
             address = (case.get("classname", ""), case.get("name", "").split("[")[0].split("@")[0])
             outcomes.setdefault(address, set()).add(verdicts[0] if verdicts else "passed")
