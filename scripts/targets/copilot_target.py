@@ -444,8 +444,8 @@ class CopilotAdapter:
         fires every hook twice.
 
         Copilot's hook stdin is the event's input object alone — no hookEventName/hookType field. The registration is
-        the event's identity, so each entry passes its event name as argv[1]; the wrapper exports it as AGENTIHOOKS_COPILOT_EVENT
-        for the normalizer. Commands run via /bin/sh, so the argument survives the spawn.
+        the event's identity, so each entry passes its event name as argv[1]; the wrapper exports it as
+        AGENTIHOOKS_COPILOT_EVENT for the normalizer. Commands run via /bin/sh, so the argument survives the spawn.
 
         Preserve foreign entries the operator added to OUR file; other files under hooks/ are never read or rewritten.
         """
