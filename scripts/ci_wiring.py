@@ -3,6 +3,7 @@ import json
 import re
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -26,7 +27,7 @@ def triggers(workflow: dict) -> dict[str, dict]:
     return {event: config or {} for event, config in on.items()}
 
 
-def needs_of(job: dict) -> set[str]:
+def needs_of(job: dict[str, Any]) -> set[str]:
     needs = job.get("needs") or []
     return {needs} if isinstance(needs, str) else set(needs)
 
