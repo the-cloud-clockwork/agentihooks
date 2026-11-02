@@ -82,12 +82,9 @@ publishes a copy of the swarm's `executions` alone, and these reads take that co
 Since [pull request 9279](https://github.com/the-cloud-clockwork/agentihooks/pull/9279) these reads go through the
 records port, `fencing.records(store, slug)`, described in [Fencing records](../reference/fencing-records.md#the-records-port).
 On a swarm still on the document layout the port takes the published copy for any read limited to `executions` and
-`by-name`, and the whole document otherwise. See
+`by-name`, and the whole document otherwise; the document stays authoritative and the copy is only read. A migrated
+swarm keeps its authority in the per record keys. See
 [Execution reads through the records port](#execution-reads-through-the-records-port) for each read on both layouts.
-
-On a swarm still on the document layout the document stays authoritative and the copy is only read. A migrated swarm
-keeps its authority in the per record keys; see
-[Execution reads through the records port](#execution-reads-through-the-records-port).
 
 ### How the copy stays consistent
 
