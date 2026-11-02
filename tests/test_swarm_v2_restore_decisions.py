@@ -615,10 +615,12 @@ def test_published_listener_needs_a_port_an_https_address_and_a_certificate(cert
 
     assert published({}) == (None, "")
     listen, url = published(published_environ(cert))
+    assert listen is not None
     assert listen[:2] == ("0.0.0.0", 8781)
     assert listen[2].verify_mode == ssl.CERT_NONE
     assert url == "https://localhost:8781"
     listen, url = published(published_environ(cert, port="65535", url="https://swarm.example/X/"))
+    assert listen is not None
     assert (listen[1], url) == (65535, "https://swarm.example/X")
     bare = {control_service.TLS_PORT_ENV: "8781"}
     names = f"{control_service.PUBLIC_URL_ENV}, {control_service.TLS_CERT_ENV}, {control_service.TLS_KEY_ENV}"
@@ -640,6 +642,7 @@ def test_published_listener_serves_only_recovery_over_tls(pending: SimpleNamespa
     from scripts.swarm_v2.control_service import published
 
     listen, _ = published(published_environ(cert, port="1"))
+    assert listen is not None
     server = pending.service.serve_published("127.0.0.1", 0, listen[2])
     base = f"https://localhost:{server.server_port}"
     trusted = ssl.create_default_context(cafile=cert[0])
@@ -686,6 +689,7 @@ def test_controller_publishes_its_public_address_beside_the_worker_address(
     assert writes == []
     monkeypatch.undo()
     listen, _ = published(published_environ(cert, port="1"))
+    assert listen is not None
     pending.service.published = ("127.0.0.1", 0, listen[2])
     pending.service.control_url = "https://swarm.example:8780"
     pending.service._open()
@@ -707,6 +711,7 @@ def test_published_listener_drops_a_caller_that_never_starts_tls(
 
     monkeypatch.setattr(api_server, "HANDSHAKE_S", 0.2)
     listen, _ = published(published_environ(cert, port="1"))
+    assert listen is not None
     secure = pending.service.serve_published("127.0.0.1", 0, listen[2])
     with socket.create_connection(("127.0.0.1", secure.server_port), timeout=5) as raw:
         try:
@@ -725,6 +730,7 @@ def test_restore_decision_prefers_the_published_address_and_trusts_the_ledger_ca
 
     slug = pending.recovery.slug
     listen, _ = published(published_environ(cert, port="1"))
+    assert listen is not None
     server = pending.service.serve_published("127.0.0.1", 0, listen[2])
     monkeypatch.setenv(ledger_link.CA_FILE_ENV, cert[0])
     monkeypatch.setattr(

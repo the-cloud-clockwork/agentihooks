@@ -93,7 +93,7 @@ def reachable(url: str, environ: Mapping[str, str] = os.environ) -> bool:
     return parts.scheme == "https" or loopback(host)
 
 
-def transport(environ=os.environ) -> dict:
+def transport(environ: Mapping[str, str] = os.environ) -> dict[str, ssl.SSLContext]:
     pem = environ.get(CA_ENV, "").strip()
     if pem:
         return {"context": ssl.create_default_context(cadata=pem)}

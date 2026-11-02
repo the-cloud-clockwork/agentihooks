@@ -16,7 +16,7 @@ from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
 from scripts.swarm_v2.api import artifacts, health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.recovery import RecoveryAPI
-from scripts.swarm_v2.api.server import RecoveryRoutes, Routes, serve, serve_tls
+from scripts.swarm_v2.api.server import Routes, serve, serve_tls
 from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.artifacts import remote
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
@@ -229,7 +229,7 @@ class ControlService:
 
     def serve_published(self, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
         """Serve the recovery endpoints over TLS for callers outside the cluster."""
-        self.secure = serve_tls(RecoveryRoutes(self.recovery_api), host, port, context)
+        self.secure = serve_tls(self.recovery_api, host, port, context)
         self.secure_thread = threading.Thread(target=self.secure.serve_forever, name=f"{THREAD}-tls", daemon=True)
         self.secure_thread.start()
         return self.secure

@@ -29,8 +29,8 @@ def decide(store: RedisStore, slug: str, agent: AgentRecord, choice: str, who: W
         method="POST",
     )
     try:
-        transport = ledger_link.transport() if address.startswith("https://") else {}
-        with urllib.request.urlopen(request, timeout=10, **transport) as response:
+        context = ledger_link.transport().get("context") if address.startswith("https://") else None
+        with urllib.request.urlopen(request, timeout=10, context=context) as response:
             return json.loads(response.read())
     except urllib.error.HTTPError as error:
         detail = json.loads(error.read())

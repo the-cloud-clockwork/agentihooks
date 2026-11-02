@@ -1,5 +1,6 @@
 import json
 import re
+import socket
 import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -57,7 +58,7 @@ class Routes:
 
 
 class ExecutionsHandler(BaseHTTPRequestHandler):
-    api: "ExecutionsAPI | Routes | RecoveryRoutes"
+    api: "ExecutionsAPI | Routes | RecoveryAPI"
 
     def do_GET(self) -> None:
         self.reply(*self.api.route("GET", self.path, str(self.headers.get(AUTHORIZATION)), None))
@@ -96,39 +97,25 @@ class ExecutionsHandler(BaseHTTPRequestHandler):
         return
 
 
-class RecoveryRoutes:
-    """Routes only the recovery endpoints, for the listener published beyond the cluster."""
-
-    def __init__(self, recovery: RecoveryAPI) -> None:
-        self.recovery = recovery
-
-    def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
-        if RECOVERY_PATH.fullmatch(path):
-            return self.recovery.route(method, path, authorization, body)
-        return 404, GrantRefused("invalid_request", "no such recovery endpoint").detail()
-
-
-class TLSHandler(ExecutionsHandler):
+class TLSServer(ThreadingHTTPServer):
     tls: ssl.SSLContext
 
-    def setup(self) -> None:
-        self.request.settimeout(HANDSHAKE_S)
-        self.request = self.tls.wrap_socket(self.request, server_side=True)
-        self.request.settimeout(None)
-        super().setup()
-
-    def finish(self) -> None:
+    def finish_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        request.settimeout(HANDSHAKE_S)
+        secure = self.tls.wrap_socket(request, server_side=True)
+        secure.settimeout(None)
         try:
-            super().finish()
+            super().finish_request(secure, client_address)
         finally:
-            self.request.close()
+            secure.close()
 
 
 def serve(api: ExecutionsAPI | Routes, host: str, port: int) -> ThreadingHTTPServer:
     return ThreadingHTTPServer((host, port), type(ExecutionsHandler.__name__, (ExecutionsHandler,), {"api": api}))
 
 
-def serve_tls(api: RecoveryRoutes, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
+def serve_tls(api: RecoveryAPI, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
     """Serve the given routes over TLS with the given server context."""
-    handler = type(TLSHandler.__name__, (TLSHandler,), {"api": api, "tls": context})
-    return ThreadingHTTPServer((host, port), handler)
+    server = TLSServer((host, port), type(ExecutionsHandler.__name__, (ExecutionsHandler,), {"api": api}))
+    server.tls = context
+    return server
