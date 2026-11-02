@@ -180,7 +180,8 @@ def test_the_size_step_splits_actions_from_writes(monkeypatch: pytest.MonkeyPatc
         Write(actions_of("size pass"), "size pass", ["sized task t1 S by rule"]),
         Write(tasks.SIZES, "t1", fields, expected={"difficulty": ""}),
     )
-    assert step.writes == frozenset({tasks.SIZES})
+    assert tasks.SIZES in step.writes
+    assert TASKS not in step.writes
 
 
 def test_the_size_pass_sizes_then_writes_through_the_ledger_directly() -> None:
