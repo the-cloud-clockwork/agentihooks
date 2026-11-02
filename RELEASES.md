@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.586 · 2026-11-02
+
+### 2026-11-02 · 699dbac59add · #9393 · @agenticore-app
+
+**Clamp negative job durations and read runner minutes with the job token**
+
+This change fixes the CI runner minutes measurement used to track efficiency against the 100 euro per day Oracle budget. A job whose recorded completion time preceded its start was producing a negative duration, which had thrown off a pull request tier reading by over 1188 minutes; the fix clamps such cases to zero seconds so the metric stays accurate. Additionally, the ci-minutes workflow now accepts a job token input, letting a measurement window be read using the job's own token rather than hitting the App installation's rate limit, keeping the ongoing measurement runs reliable.
+
+### 2026-11-02 · bd97fca24b43 · #9389 · @agenticore-app
+
+**Record the cause when a worker probe container misses readiness**
+
+When a worker probe container fails to become ready, `supervision_proof.ready` previously just raised a bare timeout error with no context, making it hard to diagnose the failure. Now it captures the last readiness snapshot (or the snapshot error), the container's process list, and the last 40 log lines, each bounded by a time limit, and includes that evidence in the raised exception. This doesn't change pass/fail behavior, but the next time a worker probe times out, the uploaded evidence will show the actual cause instead of requiring guesswork.
+
 ## v2.17.585 · 2026-11-02
 
 ### 2026-11-02 · 2374b33699f7 · #9370 · @agenticore-app
