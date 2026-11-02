@@ -260,13 +260,10 @@ def _native_layer_path(root: Path, target: str, names: dict[str, str]) -> Path |
     and falls back to the layer root, which is where the pre-``.claude/``
     profile layout kept these files.
 
-    _TARGET_SUBDIR: Native settings/MCP authoring, one file shape per target. A profile expresses each harness's
-    configuration in that harness's OWN format rather than in Claude's, because the previous translation could only
-    carry `permissions.defaultMode` and left every target-native capability (codex reasoning effort, copilot permission
-    rules, copilot's per-server MCP tool allowlist) unreachable from a bundle.
-
-    claude's entries reproduce the pre-native paths exactly — its native format IS the Claude shape — so its install
-    output is unchanged.
+    Each target keeps its native settings and MCP files in its own subdir (``_TARGET_SUBDIR``), in that harness's own
+    format, so target-native capabilities (codex reasoning effort, copilot permission rules, copilot's per-server MCP
+    tool allowlist) stay reachable from a bundle. Claude's native format is the Claude shape, so its paths match the
+    pre-native layout.
     """
     name = names[target]
     candidate = root / _TARGET_SUBDIR[target] / name
@@ -397,11 +394,10 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
-    """AGENTIHOOKS_STATE_DIR: Persistent state directory for user-level agentihooks configuration. Overridable via
-    AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
+    """Write state.json under AGENTIHOOKS_STATE_DIR, keeping one generation of backup.
 
-    Keep one generation of backup so a bad init can always be forensically reconstructed / restored (state.json used to
-    be overwritten blind — a profile-losing init left no trace of what the previous install was).
+    AGENTIHOOKS_HOME overrides the state directory for per-pod isolation on shared filesystems. The backup lets a bad
+    init always be reconstructed or restored.
     """
     AGENTIHOOKS_STATE_DIR.mkdir(parents=True, exist_ok=True)
     if STATE_JSON.exists():
@@ -543,8 +539,8 @@ def _under_managed_source(target: str) -> bool:
     moved or deleted, and ``relative_to`` gives the separator guard for free:
     ``agentihooks-extras`` is not under ``agentihooks``.
 
-    profiles/package/<kind>/ — the packaged emulation of .claude that supplies Layer 1 built-in features
-    (skills/agents/commands/rules).
+    A ``profiles/package/<kind>/`` target is managed too: it is the packaged emulation of .claude that supplies Layer 1
+    built-in features (skills/agents/commands/rules).
     """
     tp = Path(target.rstrip("/"))
     for root in _managed_roots():
@@ -564,9 +560,7 @@ def _under_managed_source(target: str) -> bool:
 def _state_links() -> dict[str, dict]:
     """Return the managed-link ledger keyed by link path.
 
-    _LINKS_KEY: Managed-link ledger (state.json['managed_links'])
-
-    Ownership is RECORDED at creation, never inferred at deletion. Every symlink install writes into
+    The ledger lives under state.json['managed_links'] (``_LINKS_KEY``). Ownership is RECORDED at creation, never inferred at deletion. Every symlink install writes into
     ~/.claude/{skills,agents,commands,rules} lands here, and nothing outside this ledger is ever removed. Path-prefix
     guessing is the legacy fallback only, and only for installs that predate the ledger.
     """
