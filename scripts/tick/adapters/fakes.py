@@ -19,6 +19,7 @@ from scripts.tick.ports.source_control import (
     RepositoryRun,
     Run,
     Tag,
+    WorkflowRun,
 )
 
 if TYPE_CHECKING:
@@ -170,6 +171,11 @@ class FakeSourceControl:
 
     def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
         return _record(self, "cancel_run", (run_id,), deadline)
+
+    def workflow_runs(
+        self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline
+    ) -> tuple[WorkflowRun, ...]:
+        return _record(self, "workflow_runs", (workflow, event, conclusion, since), deadline)
 
 
 @dataclass

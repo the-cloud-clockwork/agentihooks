@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,8 @@ from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_delivery import FakeHerdr
@@ -1951,54 +1954,57 @@ def test_a_continuation_whose_recorded_branch_left_origin_is_told_to_push_head_t
     )
 
 
-HEAD_JSON = (
-    '{"headRefName": "engineer-a1b2c3-0001", "headRepository": {"name": "bundle"}, '
-    '"headRepositoryOwner": {"login": "fork-owner"}}'
-)
+PullPorts = Callable[[str], tuple[FakeSourceControl, ChangeRef]]
+PULL_READ_ERRORS = [ValueError("x"), KeyError("x"), TimeoutError("tool deadline expired"), OSError("x")]
 
 
-def test_the_pull_request_head_branch_and_repository_are_read_from_github():
-    calls = []
+def _pull_port(head_repository: str, seen: list[str] | None = None) -> tuple[PullPorts, FakeSourceControl, ChangeRef]:
+    reference = ChangeRef("o/r", 3)
+    change = ChangeState(reference, "open", "h", "dev", False, "u", "engineer-a1b2c3-0001", "", False, head_repository)
+    provider = FakeSourceControl({"change": change})
 
-    def fake(argv, **kwargs):
-        calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, HEAD_JSON, "")
+    def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
+        if seen is not None:
+            seen.append(url)
+        return provider, reference
 
-    head = cli.pull_branch("https://github.com/o/r/pull/3", run=fake)
+    return ports, provider, reference
+
+
+def test_the_pull_request_head_branch_and_repository_are_read_through_the_port() -> None:
+    seen: list[str] = []
+    ports, provider, reference = _pull_port("fork-owner/bundle", seen)
+
+    head = cli.pull_branch("https://github.com/o/r/pull/3", ports)
     assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle")
-    fields = "headRefName,headRepository,headRepositoryOwner"
-    assert calls == [(["gh", "pr", "view", "https://github.com/o/r/pull/3", "--json", fields], GIT_OPTS)]
+    assert seen == ["https://github.com/o/r/pull/3"]
+    [call] = provider.calls
+    assert (call.operation, call.args) == ("change", (reference,))
+    assert 19 < call.deadline.remaining <= cli.PULL_SECONDS == 20
+
+
+def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> None:
+    ports, _, _ = _pull_port("")
+
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "")
 
 
 @pytest.mark.parametrize(
-    "answer",
-    [
-        '{"headRefName": "x"}',
-        '{"headRefName": "x", "headRepository": null, "headRepositoryOwner": {"login": "o"}}',
-        '{"headRefName": "x", "headRepository": {"name": "r"}, "headRepositoryOwner": {"login": ""}}',
-        '{"headRefName": "x", "headRepository": {"name": ""}, "headRepositoryOwner": {"login": "o"}}',
-    ],
+    "error", [subprocess.CalledProcessError(1, []), subprocess.TimeoutExpired([], 20), *PULL_READ_ERRORS]
 )
-def test_a_pull_request_without_a_head_repository_gives_the_branch_alone(answer):
-    def fake(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, answer, "")
+def test_an_unreadable_pull_request_gives_no_branch(error: Exception) -> None:
+    def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
+        raise error
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("x", "")
-
-
-@pytest.mark.parametrize("answer", [(1, HEAD_JSON), (0, "not json"), (0, "{}")])
-def test_an_unreadable_pull_request_gives_no_branch(answer):
-    def fake(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, answer[0], answer[1], "")
-
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("", "")
 
 
-def test_a_failing_github_call_gives_no_branch():
-    def fake(argv, **kwargs):
-        raise subprocess.TimeoutExpired(argv, 20)
+def test_the_pull_branch_reads_through_the_stack_source_control_port() -> None:
+    import inspect
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
+    from scripts.swarm import stack
+
+    assert inspect.signature(cli.pull_branch).parameters["ports"].default is stack.source_control
 
 
 @pytest.mark.parametrize(

@@ -61,15 +61,23 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline)), daemon=True)
     worker.start()
     worker.join(step.budget_s)
-    if not outcome:
-        return StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
+    return (_finished if outcome else _left)(step, outcome, clock() - started)
+
+
+def _left(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
+    """Record a step still running at its budget as abandoned, keeping its wall time."""
+    return StepRecord(step.name, wall_s, step.budget_s, abandoned=True)
+
+
+def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
+    """Record a step that ended within its budget with its result, or the error it raised."""
     found = outcome[0]
     if isinstance(found, BaseException) and not isinstance(found, (Exception, SystemExit)):
         raise found
     if isinstance(found, BaseException):
         error = f"{type(found).__module__}.{type(found).__qualname__}"
-        return StepRecord(step.name, clock() - started, step.budget_s, error)
-    return StepRecord(step.name, clock() - started, step.budget_s, result=found)
+        return StepRecord(step.name, wall_s, step.budget_s, error)
+    return StepRecord(step.name, wall_s, step.budget_s, result=found)
 
 
 def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context) -> None:
@@ -96,9 +104,14 @@ def pass_budget_hold(store: Any, slug: str) -> str:
 
 
 def update_pass_budget(store: Any, slug: str) -> str:
+    from redis.exceptions import RedisError
+
     stage = os.environ.get("AGENTIHOOKS_TICK_STAGE", "S1")
     target = STAGE_TARGETS[stage]
-    rows = tick_report.history(store, slug, "tick:passes", PASS_WINDOW)
+    try:
+        rows = tick_report.history(store, slug, "tick:passes", PASS_WINDOW)
+    except RedisError:
+        rows = []
     if len(rows) < PASS_WINDOW:
         return pass_budget_hold(store, slug)
     measured = tick_report.p95([row["wall_s"] for row in rows])

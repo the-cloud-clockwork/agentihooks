@@ -17,6 +17,7 @@ from scripts.tick.ports.source_control import (
     RepositoryRun,
     Run,
     Tag,
+    WorkflowRun,
 )
 
 if TYPE_CHECKING:
@@ -89,6 +90,10 @@ class SourceControl(Protocol):
     def merged_at(self, commit: str, *, deadline: Deadline) -> str | None: ...
 
     def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]: ...
+
+    def workflow_runs(
+        self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline
+    ) -> tuple[WorkflowRun, ...]: ...
 
 
 @runtime_checkable
