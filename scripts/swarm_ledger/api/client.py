@@ -8,7 +8,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -18,24 +18,23 @@ import orjson
 
 from .. import ledger_link
 from ..repository.entry import thawed
-from ..repository.rows import children, encode
+from ..repository.rows import children, encode  # pyright: ignore[reportUnknownVariableType]
 from . import resources, schemas
 
 RETRIES = 5
 BACKOFF = 0.25
-KEPT: dict[tuple[str, str], tuple[int, dict[str, Any] | None]] | None = None
-_target = cast(Callable[[dict[str, Any]], str], schemas.target)
+KEPT = None
 
 
 @contextmanager
-def kept_exports() -> Iterator[None]:
+def kept_exports() -> Generator[None, None, None]:
     """Keep each ledger's last export while inside, so later snapshots read only what changed since it."""
     global KEPT
-    KEPT = {}
+    KEPT = {}  # pyright: ignore[reportConstantRedefinition]
     try:
         yield
     finally:
-        KEPT = None
+        KEPT = None  # pyright: ignore[reportConstantRedefinition]
 
 
 def export_file(base: str, slug: str, environ: Mapping[str, str] = os.environ) -> Path:
@@ -69,9 +68,7 @@ def patched(state: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
     for key, touched in changes["lists"].items():
         old = {
             encode(parts[-1]): child
-            for child, parts, *_ in cast(
-                Iterable[tuple[Any, list[Any], Any, Any, Any]], children(state[key], [], None)
-            )
+            for child, parts, *_ in cast(Iterable[tuple[Any, list[Any], Any, Any, Any]], children(state[key], [], None))
         }
         state[key] = [touched["items"][item] if item in touched["items"] else old[item] for item in touched["order"]]
     for path, value in changes["set"]:
@@ -100,17 +97,20 @@ class ResourceClient:
             headers={"Content-Type": "application/json", **self.credentials},
             method="GET" if payload is None else "POST",
         )
-        extra_headers: dict[str, str] = writer_header() if path == "operations" else {}
-        for name, value in extra_headers.items():
+        for name, value in (writer_header() if path == "operations" else cast(dict[str, str], {})).items():
             request.add_header(name, value)
-        with ledger_link.urlopen(request, self.timeout) as response:
+        with cast(Callable[[urllib.request.Request, float], Any], ledger_link.urlopen)(
+            request, self.timeout
+        ) as response:
             return json.loads(response.read())
 
     def collection(self, slug: str, path: str) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        query: dict[str, Any] = {"limit": 100}
-        snapshot: dict[str, Any] | None = None
-        restarts = itertools.count()
+        rows, query, snapshot, restarts = (
+            cast(list[dict[str, Any]], []),
+            cast(dict[str, Any], {"limit": 100}),
+            cast(dict[str, Any] | None, None),
+            itertools.count(),
+        )
         swarm = path.startswith("swarm/")
         read = resources.swarm_read if swarm else resources.read
         while True:
@@ -143,15 +143,19 @@ class ResourceClient:
         state = self.export(slug) if KEPT is not None else self.stored_export(slug)
         import ledger_gate
 
-        crew = cast(Callable[[dict[str, Any]], list[dict[str, Any]]], ledger_gate.crew)
-        state["_meta"]["crew"] = crew(state["_meta"])
+        state["_meta"]["crew"] = cast(Callable[[dict[str, Any]], list[dict[str, Any]]], ledger_gate.crew)(
+            state["_meta"]
+        )
         return state
 
     def export(
         self, slug: str, kept: dict[tuple[str, str], tuple[int, dict[str, Any] | None]] | None = None
     ) -> dict[str, Any]:
         """The full export, read as the changes since the one this process kept for this server and ledger."""
-        kept = cast(dict[tuple[str, str], tuple[int, dict[str, Any] | None]], KEPT if kept is None else kept)
+        kept = cast(
+            dict[tuple[str, str], tuple[int, dict[str, Any] | None]],
+            KEPT if kept is None else kept,
+        )
         key = (self.base, slug)
         generation, held = kept.get(key, (0, None))
         try:
@@ -176,25 +180,28 @@ class ResourceClient:
 
     def stored_export(self, slug: str) -> dict[str, Any]:
         """The full export, read as the changes since the one the last command on this host stored for it."""
-        path = export_file(self.base, slug)
-        kept: dict[tuple[str, str], tuple[int, dict[str, Any] | None]] = {}
+        path, kept = export_file(self.base, slug), cast(dict[tuple[str, str], tuple[int, dict[str, Any] | None]], {})
         stored = read_export_file(path)
         if stored is not None:
             kept[(self.base, slug)] = stored
         state = self.export(slug, kept)
         fresh = kept.get((self.base, slug))
         if fresh is not None and (stored is None or fresh[0] != stored[0]):
-            write_export_file(path, fresh[0], cast(dict[str, Any], fresh[1]))
+            write_export_file(path, *cast(tuple[int, dict[str, Any]], fresh))
         return state
 
-    def mutate(self, slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+    def mutate(self, slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:  # pyright: ignore[reportReturnType]
         unpinned = [
             operation
             for operation in operations
             if not operation.get("expected_revision") and operation["op"] != "task_add"
         ]
-        pinned = {_target(operation) for operation in operations if operation.get("expected_revision")}
-        fetched = {_target(operation) for operation in unpinned} - pinned
+        pinned = {
+            cast(Callable[[dict[str, Any]], str], schemas.target)(operation)
+            for operation in operations
+            if operation.get("expected_revision")
+        }
+        fetched = {cast(Callable[[dict[str, Any]], str], schemas.target)(operation) for operation in unpinned} - pinned
         for attempt in itertools.count():
             try:
                 return self.send(slug, operations)
@@ -211,17 +218,16 @@ class ResourceClient:
             time.sleep(random.uniform(BACKOFF * 2**attempt / 2, BACKOFF * 2**attempt))
 
     def send(self, slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
-        guards: dict[str, Any] = {}
-        ops: list[dict[str, Any]] = []
+        guards, ops = cast(dict[str, Any], {}), cast(list[dict[str, Any]], [])
         for operation in operations:
             if revision := operation.get("expected_revision"):
-                path = _target(operation)
+                path = cast(Callable[[dict[str, Any]], str], schemas.target)(operation)
                 if guards.setdefault(path, revision) != revision:
                     raise ValueError(f"one batch pins {path} to two revisions: {guards[path]} and {revision}")
         operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
             if operation["op"] != "task_add":
-                path = _target(operation)
+                path = cast(Callable[[dict[str, Any]], str], schemas.target)(operation)
                 if path not in guards:
                     guards[path] = self.request(slug, path)["revision"]
                 operation.setdefault("expected_revision", guards[path])
@@ -238,7 +244,7 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict[s
         error = json.loads(body)["error"]
     except (ValueError, KeyError, TypeError):
         return replay, {}
-    return replay, error if isinstance(error, dict) else {}
+    return replay, cast(dict[str, Any], error) if isinstance(error, dict) else {}
 
 
 def writer_header() -> dict[str, str]:
@@ -251,12 +257,12 @@ def writer_header() -> dict[str, str]:
 def retryable(replay: urllib.error.HTTPError, error: dict[str, Any], fetched: set[str]) -> bool:
     if replay.code != 409 or error.get("code") != "revision_conflict":
         return False
-    path = (error.get("details") or {}).get("path")
+    path = cast(dict[str, Any], error.get("details") or {}).get("path")
     return path in fetched if path else bool(fetched)
 
 
 def exhausted(replay: urllib.error.HTTPError, error: dict[str, Any], fetched: set[str]) -> urllib.error.HTTPError:
-    where = (error.get("details") or {}).get("path") or ", ".join(sorted(fetched))
+    where = cast(dict[str, Any], error.get("details") or {}).get("path") or ", ".join(sorted(fetched))
     message = f"revision conflict on {where} persisted after {RETRIES} retries"
     detail = ": ".join(part for part in (error.get("message"), message) if part)
     body = json.dumps({"error": {**error, "message": detail}}).encode()

@@ -88,24 +88,22 @@ def read(
         return closed_page(doc, path, query)
     raw = value(doc, path)
     if isinstance(raw, list):
-        rows = cast(list[Any], raw)
         hash_page = path == "tasks"
         if cache is None:
-            return page(rows, resource_revision(doc, path), query or {}, hash_page=hash_page)
+            return page(cast(list[Any], raw), resource_revision(doc, path), query or {}, hash_page=hash_page)
         key = (collection_revisions, path)
         if key not in cache:
-            cache[key] = collection_revisions(rows)
+            cache[key] = collection_revisions(cast(list[Any], raw))
         digest, items = cache[key]
         rev = resource_revision(doc, path) if hash_page else digest
-        return page(rows, rev, query or {}, items, hash_page)
+        return page(cast(list[Any], raw), rev, query or {}, items, hash_page)
     return bounded({"data": project(raw), "revision": resource_revision(doc, path)})
 
 
 def closed_page(doc: dict[str, Any], path: str, query: dict[str, Any]) -> dict[str, Any]:
     if path not in ledger_closed.COLLECTIONS or query.get("state") != "done":
         raise APIError(400, "schema_invalid", DONE_ONLY)
-    recent = cast(Callable[[str, list[Any]], list[dict[str, Any]]], ledger_closed.recent)
-    rows = recent(path, doc.get(path) or [])
+    rows = cast(Callable[[str, list[Any]], list[dict[str, Any]]], ledger_closed.recent)(path, doc.get(path) or [])
     text = query.get("q", "").casefold()
     if text:
         rows = [row for row in rows if text in f"{row.get('id')} {row.get('title') or row.get('text')}".casefold()]
@@ -170,11 +168,10 @@ def value(doc: dict[str, Any], path: str) -> Any:
 def project(raw: object) -> object:
     if not isinstance(raw, dict):
         return raw
-    mapping = cast(dict[str, Any], raw)
-    result = {key: item for key, item in mapping.items() if key not in ("comments", "answers")}
+    result = {key: item for key, item in cast(dict[str, Any], raw).items() if key not in ("comments", "answers")}
     for key in ("comments", "answers"):
-        if key in mapping:
-            result[f"{key}_count"] = len(mapping[key])
+        if key in cast(dict[str, Any], raw):
+            result[f"{key}_count"] = len(cast(dict[str, Any], raw)[key])
     return result
 
 
@@ -185,10 +182,9 @@ def page(
     revisions: list[str | None] | None = None,
     hash_page: bool = False,
 ) -> dict[str, Any]:
-    from . import schemas as _schemas
+    from .schemas import PAGINATION, validate  # pyright: ignore[reportUnknownVariableType]
 
-    validate = cast(Callable[[dict[str, Any], object], None], _schemas.validate)
-    validate(_schemas.PAGINATION, query)
+    validate(PAGINATION, query)
     if "state" in query or "offset" in query:
         raise APIError(400, "schema_invalid", DONE_ONLY)
     offset = 0
@@ -204,8 +200,10 @@ def page(
         item = project(row)
         end = offset + len(selected) + 1
         if isinstance(item, dict):
-            typed_item = cast(dict[str, Any], item)
-            item = {**typed_item, "revision": revisions[end - 1] if revisions is not None else revision(row)}
+            item = {
+                **cast(dict[str, Any], item),
+                "revision": revisions[end - 1] if revisions is not None else revision(row),
+            }
         next_cursor = f"{rev}:{end}" if end < len(rows) else None
         item_size = reply_size(item) + (2 if selected else 0)
         cursor_size = reply_size(next_cursor) - 4
@@ -243,10 +241,8 @@ def swarm_read(status: dict[str, Any] | None, path: str, query: dict[str, Any]) 
 
 
 def hierarchy_read(repository: Any, slug: str, path: str, query: dict[str, Any]) -> dict[str, Any]:
-    from ..repository import hierarchy as _hierarchy
+    from ..repository.hierarchy import KINDS, READS, text  # pyright: ignore[reportUnknownVariableType]
 
-    text = cast(Callable[[object], bool], _hierarchy.text)
-    KINDS, READS = _hierarchy.KINDS, _hierarchy.READS
     name, _, node = path.removeprefix("hierarchy").removeprefix("/").partition("/")
     if (name or "subtree") not in READS:
         raise APIError(404, "resource_missing", "No such hierarchy read")
@@ -255,15 +251,13 @@ def hierarchy_read(repository: Any, slug: str, path: str, query: dict[str, Any])
     except KeyError:
         raise APIError(404, "resource_missing", "No such node") from None
     doc: dict[str, Any] = {"tasks": [], **cast(dict[str, Any], repository.current(slug).state)}
-    items: dict[str, dict[str, Any]] = {
-        f"{key}/{typed['id']}": typed
+    items = {
+        f"{key}/{cast(dict[str, Any], item)['id']}": cast(dict[str, Any], item)
         for key in KINDS
         for item in cast(list[Any], doc.get(key) or [])
-        if isinstance(item, dict) and text((typed := cast(dict[str, Any], item)).get("id"))
+        if isinstance(item, dict) and text(cast(dict[str, Any], item).get("id"))
     }
-    data = [
-        {**row, "state": node_state(row["kind"], items.get(row["node"], cast(dict[str, Any], {})), doc)} for row in rows
-    ]
+    data = [{**row, "state": node_state(row["kind"], items.get(row["node"], {}), doc)} for row in rows]
     return page(data, revision(data), query)
 
 

@@ -10,15 +10,6 @@ from .services import LedgerCore, Services
 
 WRITES = ("add", "edit", "add_item", "retext")
 
-_target = cast(Callable[[dict[str, Any]], str], schemas.target)
-_check_operations = cast(
-    Callable[[dict[str, Any], LedgerCore, tuple[Any, ...]], list[dict[str, Any]]],
-    schemas.check_operations,
-)
-_receipts_find = cast(Callable[[Any, str], tuple[str | None, dict[str, Any] | None]], receipts.find)
-_receipts_store = cast(Callable[[Any, str, str, dict[str, Any]], None], receipts.store)
-_screen = cast(Callable[[dict[str, Any], list[dict[str, Any]]], Any], ledger_task_duplicates.screen)
-
 
 class GuardedOperations:
     def __init__(
@@ -42,14 +33,16 @@ class GuardedOperations:
         return self.payload.get("changes", []) if op["id"] == self.payload.get("id") else []
 
     def check(self, doc: dict[str, Any], ctx: Any) -> None:
-        _, known = _receipts_find(ctx.meta, self.payload["operation_id"])
+        _, known = cast(Callable[[Any, str], tuple[str | None, dict[str, Any] | None]], receipts.find)(
+            ctx.meta, self.payload["operation_id"]
+        )
         if known is not None:
             if known["digest"] != self.digest:
                 raise APIError(409, "operation_conflict", "Operation identifier was already used for different content")
             self.results = dict(known["results"])
         pending = [op for op in self.payload["ops"] if op["id"] not in self.results]
         targets = {
-            _target(op)
+            cast(Callable[[dict[str, Any]], str], schemas.target)(op)
             for op in pending
             if op["op"] not in schemas.UNGUARDED and not self.changes_for(op) and "worker_claim" not in op
         }
@@ -69,8 +62,7 @@ class GuardedOperations:
 
         if "controller_epoch" in op:
             try:
-                if self.fence is not None:
-                    self.fence(op["controller_epoch"])
+                cast(Callable[[int], None], self.fence)(op["controller_epoch"])
             except SwarmError as exc:
                 raise APIError(409, "stale_controller", str(exc)) from None
 
@@ -78,19 +70,23 @@ class GuardedOperations:
         self.check_controller(op)
         from . import worker_writes
 
-        check_worker_writes = cast(Callable[[str, dict[str, Any], dict[str, Any]], None], worker_writes.check)
-        check_worker_writes(self.slug, doc, op)
+        cast(Callable[[str, dict[str, Any], dict[str, Any]], None], worker_writes.check)(self.slug, doc, op)
         if not self.checked:
             self.check(doc, ctx)
         if op["id"] in self.results:
             return self.results[op["id"]]
         changes = self.changes_for(op)
-        apply_changes = cast(Callable[[dict[str, Any], list[Any], Any], bool], self.core.apply_changes)
-        accepted = not apply_changes(doc, changes, ctx) if changes else self.budget.apply(doc, op, ctx, apply_op)
+        accepted = (
+            not cast(Callable[[dict[str, Any], list[Any], Any], bool], self.core.apply_changes)(doc, changes, ctx)
+            if changes
+            else self.budget.apply(doc, op, ctx, apply_op)
+        )
         self.check_controller(op)
-        check_worker_writes(self.slug, doc, op)
+        cast(Callable[[str, dict[str, Any], dict[str, Any]], None], worker_writes.check)(self.slug, doc, op)
         self.results[op["id"]] = bool(accepted)
-        _receipts_store(ctx.meta, self.payload["operation_id"], self.digest, dict(self.results))
+        cast(Callable[[Any, str, str, dict[str, Any]], None], receipts.store)(
+            ctx.meta, self.payload["operation_id"], self.digest, dict(self.results)
+        )
         ctx.dirty = True
         return accepted
 
@@ -100,12 +96,9 @@ def writer(headers: Mapping[str, str]) -> str:
 
 
 def _stamp(op: object, worktree: str) -> object:
-    if not isinstance(op, dict):
-        return op
-    mapping = cast(dict[str, Any], op)
-    if mapping.get("op") not in WRITES:
-        return mapping
-    bare = {key: value for key, value in mapping.items() if key != "worktree"}
+    if not isinstance(op, dict) or cast(dict[str, Any], op).get("op") not in WRITES:
+        return cast(object, op)
+    bare = {key: value for key, value in cast(dict[str, Any], op).items() if key != "worktree"}
     return {**bare, "worktree": worktree} if worktree else bare
 
 
@@ -120,10 +113,20 @@ def apply(services: Services, slug: str, principal: str, payload: dict[str, Any]
     task_ids = tuple(t["id"] for t in doc.get("tasks", []))
     operations = [
         {key: value for key, value in op.items() if key != "worktree"}
-        for op in _check_operations(stamped(payload, worktree), services.ledger.core, task_ids)
+        for op in cast(
+            Callable[[dict[str, Any], LedgerCore, tuple[Any, ...]], list[dict[str, Any]]],
+            schemas.check_operations,
+        )(stamped(payload, worktree), services.ledger.core, task_ids)
     ]
-    refusal = cast(Callable[[str, dict[str, Any]], str | None], services.ledger.authority.refusal)
-    refusals = [reason for op in operations if (reason := refusal(principal, op))]
+    refusals = [
+        reason
+        for op in operations
+        if (
+            reason := cast(Callable[[str, dict[str, Any]], str | None], services.ledger.authority.refusal)(
+                principal, op
+            )
+        )
+    ]
     if principal and payload.get("changes"):
         raise APIError(403, "forbidden", "Checkbox changes need the operator")
     payload = {**payload, "ops": operations}
@@ -133,11 +136,9 @@ def apply(services: Services, slug: str, principal: str, payload: dict[str, Any]
             "_meta": {"warnings": [*doc["_meta"].get("warnings", [])[:10], *refusals]},
         }
         raise APIError(403, "forbidden", "Caller cannot perform this operation as its author", details)
-    resolve_media = cast(Callable[[str, list[dict[str, Any]]], None], services.media.resolve_media)
-    resolve_artifacts = cast(Callable[[str, list[dict[str, Any]]], None], services.media.resolve_artifacts)
-    resolve_media(slug, operations)
-    resolve_artifacts(slug, operations)
-    screen = _screen(doc, operations)
+    cast(Callable[[str, list[dict[str, Any]]], None], services.media.resolve_media)(slug, operations)
+    cast(Callable[[str, list[dict[str, Any]]], None], services.media.resolve_artifacts)(slug, operations)
+    screen = cast(Callable[[dict[str, Any], list[dict[str, Any]]], Any], ledger_task_duplicates.screen)(doc, operations)
     fence = cast(Any, services.ledger.write_gate(slug))
     gate = ledger_task_duplicates.Gate(
         screen,
@@ -145,15 +146,13 @@ def apply(services: Services, slug: str, principal: str, payload: dict[str, Any]
             payload, fence, services.ledger.core, lambda epoch: services.ledger.authority.fence(slug, epoch), slug
         ),
     )
-    apply_ops = cast(Callable[..., tuple[dict[str, Any], list[Any]]], services.repository.apply_ops)
-    state, rejected = apply_ops(slug, ops=operations, gate=gate, copy_state=False)
+    state, rejected = cast(Callable[..., tuple[dict[str, Any], list[Any]]], services.repository.apply_ops)(
+        slug, ops=operations, gate=gate, copy_state=False
+    )
     fence.publish(rejected)
-    relay_to_inbox = cast(Callable[[str, dict[str, Any]], object], services.ledger.relay_to_inbox)
-    doctor_phrase = cast(Callable[[str, dict[str, Any]], object], services.swarm.doctor_phrase)
-    deliver_alerts = cast(Callable[[str, dict[str, Any]], object], services.ledger.deliver_alerts)
-    relay_to_inbox(slug, state)
-    doctor_phrase(slug, state)
-    deliver_alerts(slug, state)
+    cast(Callable[[str, dict[str, Any]], object], services.ledger.relay_to_inbox)(slug, state)
+    cast(Callable[[str, dict[str, Any]], object], services.swarm.doctor_phrase)(slug, state)
+    cast(Callable[[str, dict[str, Any]], object], services.ledger.deliver_alerts)(slug, state)
     tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
     rows = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
     reply: dict[str, Any] = {
