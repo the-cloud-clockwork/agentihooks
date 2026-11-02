@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, fields, replace
-from typing import Any
+from typing import Any, cast
 
 from scripts.inbox.seen import TTL_S, SeenMarks
 from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, InboxStore, now_ms, owner_key
@@ -179,9 +179,12 @@ def _delivery(raw: dict[str, str], delivery_id: str) -> Delivery:
         raise DispatchError(f"no delivery {delivery_id}")
     known = {field.name for field in fields(Delivery)}
     return Delivery(
-        **{
-            **{name: value for name, value in raw.items() if name in known},
-            "at": int(raw["at"]),
-            "committed": raw.get("committed") == "True",
-        }
+        **cast(
+            dict[str, Any],
+            {
+                **{name: value for name, value in raw.items() if name in known},
+                "at": int(raw["at"]),
+                "committed": raw.get("committed") == "True",
+            },
+        )
     )

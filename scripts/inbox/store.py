@@ -506,7 +506,7 @@ class InboxStore:
         members[wake] = wake_ids
         return keys, {key: found for key, found in members.items() if found}
 
-    def read(self, item_id, reader):
+    def read(self, item_id: str, reader: str) -> Item | None:
         return self._move(item_id, reader, lambda item: (item.address,), "read", "")
 
     def close(
@@ -553,7 +553,15 @@ class InboxStore:
                 continue
         raise InboxError(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_redirect(self, item_id, by, address, reason, expected_address, expected_receiver):
+    def _try_redirect(
+        self,
+        item_id: str,
+        by: str,
+        address: str,
+        reason: str,
+        expected_address: str,
+        expected_receiver: str | None,
+    ) -> Item | None:
         key = self.key("item", item_id)
         dest = self.home_store(address)
         with self.redis.pipeline() as pipe:
@@ -612,7 +620,16 @@ class InboxStore:
         home = self.home(address)
         return self if home == self.world else InboxStore(self.redis, persist=self.persist, world=home)
 
-    def _relocate(self, pipe, item, moved, dest, by, last, pooled):
+    def _relocate(
+        self,
+        pipe: Any,
+        item: Item,
+        moved: Item,
+        dest: "InboxStore",
+        by: str,
+        last: bool,
+        pooled: bool,
+    ) -> Item:
         """Move item out of this inbox into dest's, pending at moved.address with its history."""
         history, entry = self.key("history", item.id), self.key("entry", item.id)
         pipe.watch(history, entry)
@@ -654,7 +671,7 @@ class InboxStore:
                 continue
         raise InboxError(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_move_world(self, item_id, target, by, reason):
+    def _try_move_world(self, item_id: str, target: "InboxStore", by: str, reason: str) -> Item | None:
         key, history = self.key("item", item_id), self.key("history", item_id)
         with self.redis.pipeline() as pipe:
             pipe.watch(key, history, self.key("entry", item_id))
@@ -691,7 +708,7 @@ class InboxStore:
             pipe.execute()
             return moved
 
-    def _move_address(self, pipe, item, address):
+    def _move_address(self, pipe: Any, item: Item, address: str) -> None:
         """pipe is in MULTI: move item's address and open entries, and the open counts, to address."""
         pipe.zrem(self.key("address", item.address), item.id)
         pipe.zadd(self.key("address", address), {item.id: item.created_at})
@@ -701,14 +718,14 @@ class InboxStore:
             pipe.decr(self.key("open-size", item.address))
             pipe.incr(self.key("open-size", address))
 
-    def stage_pending(self, pipe, item, address):
+    def stage_pending(self, pipe: Any, item: Item, address: str) -> None:
         """pipe is in MULTI: index item pending at address, moving its address entry and open count there."""
         self._move_address(pipe, item, address)
         pipe.zadd(self.key("pending", address), {item.id: item.created_at})
         pipe.sadd(self.key("waiting"), address)
         pipe.publish(NOTIFY, address)
 
-    def stage_claim(self, pipe, item, address, by):
+    def stage_claim(self, pipe: Any, item: Item, address: str, by: str) -> Item:
         """pipe is in MULTI: hand a pool item to the master seat at address, pending there, its holder recorded."""
         reason = f"claimed from the master pool by {address}"
         moved = replace(item, address=address, updated_at=now_ms(), reason=reason)
@@ -719,7 +736,7 @@ class InboxStore:
         pipe.rpush(self.key("history", item.id), _entry("pending", by, reason, moved.updated_at))
         return moved
 
-    def _stage_pool_return(self, pipe, item, moved, holder):
+    def _stage_pool_return(self, pipe: Any, item: Item, moved: Item, holder: str) -> Item:
         """pipe is in MULTI: unsettled work waits in the pool again, passing its previous holder over."""
         front = master_of(item.address)
         back = replace(moved, address=front)
@@ -820,7 +837,7 @@ class InboxStore:
         self._close_reply(item_id, replier, answer.id, answer_id)
         return answer
 
-    def _close_reply(self, item_id, replier, reply_id, operation_id):
+    def _close_reply(self, item_id: str, replier: str, reply_id: str, operation_id: str) -> None:
         item = self.get(item_id)
         expected = close_reason("done", replied(reply_id))
         if (item.state, item.reason) == expected:
@@ -834,7 +851,7 @@ class InboxStore:
             if (item.state, item.reason) != expected:
                 raise
 
-    def reopen(self, answer, by, reason):
+    def reopen(self, answer: Item, by: str, reason: str) -> Item | None:
         """Open the item a refused answer closed, with its answer slot cleared so the next reply is a new message."""
         from redis.exceptions import WatchError
 
@@ -845,7 +862,7 @@ class InboxStore:
                 continue
         raise Contended(f"message {answer.ref} changed meanwhile; run the command again")
 
-    def _try_reopen(self, answer, by, reason):
+    def _try_reopen(self, answer: Item, by: str, reason: str) -> Item | None:
         key = self.key("item", answer.ref)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
@@ -865,25 +882,25 @@ class InboxStore:
             pipe.execute()
             return moved
 
-    def about(self, item_id, entry):
+    def about(self, item_id: str, entry: str) -> None:
         """Name the ledger entry an item is about, before the item is written."""
         self.redis.set(self.key("entry", item_id), entry)
 
-    def entry_of(self, item_id):
+    def entry_of(self, item_id: str) -> str:
         return self.redis.get(self.key("entry", item_id)) or ""
 
-    def deliver(self, item_id, receiver):
+    def deliver(self, item_id: str, receiver: str) -> Item | None:
         try:
             return self._move(item_id, receiver, lambda item: (item.address,), "delivered", "", only_from=("pending",))
         except InboxError:
             return None
 
-    def confirm(self, item_id, receiver):
+    def confirm(self, item_id: str, receiver: str) -> Item | None:
         return self._move(
             item_id, receiver, lambda item: (item.address,), "confirmed", "", only_from=("delivered", "read")
         )
 
-    def confirm_shown(self, receiver, before):
+    def confirm_shown(self, receiver: str, before: int) -> list[Item]:
         """Confirm every item delivered to receiver before this hook event began: the session lived past it."""
         receiver = self.names.resolve(receiver)
         confirmed = []
