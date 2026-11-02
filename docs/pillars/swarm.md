@@ -3067,8 +3067,8 @@ the bottleneck remedy read that record.
 | A lane with held spawns has an open hive placement wait | `host` | empty | `hive placement: <wait reason>`, for example `hive placement: no hive for eng has room` |
 | Neither | `quota` | The harness every held lane is pinned to, else empty | The capacity reason, then one note per held lane pinned to a harness |
 
-A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to
-<harness>`, plural `spawns` above one, in lane name order and joined with
+A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to <harness>`,
+plural `spawns` above one, in lane name order and joined with
 `; `. A lane set to `auto` gets no note. Example:
 
 ```text
@@ -3444,8 +3444,8 @@ count too.
 When one or more such launches exist it raises one finding, kind `unclaimed local launch`, id
 `unclaimed-local-launch/<slug>`, summary `<n> local launches of <slug> in the last hour held a pane with no local slot
 claim: <names>`, evidence `<name> on task <task> started at <ms> on <hive>` per launch, with `the workstation` for
-an empty hive, and the launch count as its number. An unreadable journal fails it with `local slot claims unavailable:
-<error>`. Measure it with `agentihooks doctor rig-grade-swarm measure unclaimed-local-launch`.
+an empty hive, and the launch count as its number. An unreadable journal fails it with
+`local slot claims unavailable: <error>`. Measure it with `agentihooks doctor rig-grade-swarm measure unclaimed-local-launch`.
 
 ### Doctor handoff detectors
 
@@ -4351,6 +4351,12 @@ minute heartbeat limit, when the lease TTL drops below two cron minutes, or when
 the stale watcher's pass and slug window no longer fit inside the heartbeat limit
 less the cadence. Six minutes breaks the delivery guard and the heartbeat limit.
 
+Registered steps have measured budgets and declared intervals. A step still
+running at its budget is recorded late and the pass continues; its worker
+keeps running. See [Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals)
+for timing configuration, overlap limits and the conditional forty second
+spawn prerequisite bound.
+
 `agentihooks swarm <id> tick-report --passes 100` reports the latest retained
 passes with per step count, median, p95 and CPU share, plus pass p95 and the
 idle gaps between consecutive passes. CPU share uses the sum of own and reaped
@@ -4383,7 +4389,7 @@ An outage holds the affected idle and delivery decisions until recovery (see
 execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)), then:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
-2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
+2. Free the tasks of agents whose pane is gone, or that stayed eligible for idle retirement for nineteen minutes since the first idle observation. A stale agent is nudged through its inbox
    (see Stale nudge).
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
@@ -6185,8 +6191,10 @@ no nudge.
 
 ### Safe retire
 
-The tick retires an agent for idleness only after 20 idle ticks, and a tick counts as idle only when all three
-say idle:
+The tick retires an agent for idleness after nineteen eligible idle minutes since its first observation,
+at the next pass that reaches the limit with thirty seconds of scheduling slack. At a one minute cadence this
+is the twentieth observation. [Elapsed thresholds](../reference/swarm-thresholds.md) explains slower passes,
+holds, health settings and compatibility counts. An observation counts as idle only when all three say idle:
 
 - its herdr pane, read by its pane id, never by its name, reads idle;
 - its session heartbeat does not say `working` (hooks write `working` on each prompt and tool call and `idle` at
