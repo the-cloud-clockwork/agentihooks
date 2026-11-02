@@ -94,5 +94,9 @@
   "hooks/quota.py",
   "hooks/secrets.py",
   "hooks/telemetry.py",
+  "scripts/targets/__init__.py",
+  "scripts/targets/codex_hook_trust.py",
+  "scripts/targets/codex_target.py",
+  "scripts/targets/copilot_target.py",
   "tests/test_integrations_failure_paths.py"
 ]
