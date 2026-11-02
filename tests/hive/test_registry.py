@@ -329,6 +329,19 @@ def test_a_finished_beat_never_creates_a_missing_hive(redis):
     assert registry.show(redis, "ghost") is None
 
 
+def test_a_first_beat_that_never_finishes_ages_out_under_the_headroom_heartbeat(redis):
+    registry.update(redis, "box", ["max-agents=2"])
+    registry.beat(redis, "box", {"heartbeat_at": 1_000})
+    registry.touch(redis, "box", 2_000)
+    assert registry.show(redis, "box")["beat_at"] == 2_000
+    later = 2_001 + registry.BEAT_WINDOW_MS
+    registry.touch(redis, "box", later)
+    record = registry.show(redis, "box")
+    assert record["beat_at"] == 2_000
+    assert record["heartbeat_at"] == later
+    assert registry.live(record, later) is False
+
+
 def test_a_record_without_a_finished_beat_keeps_the_heartbeat_rule():
     assert registry.live({"heartbeat_at": 1_000}, 1_000 + registry.LIVE_MS) is True
     assert registry.live({"heartbeat_at": 1_000, "beat_at": 1_000}, 1_000 + registry.LIVE_MS) is True

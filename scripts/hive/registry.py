@@ -290,9 +290,13 @@ def live(record: dict[str, Any], now_ms: int) -> bool:
     )
 
 
-def touch(client, hive_id: str, now_ms: int) -> None:
-    def refresh(stored: dict | None):
-        return {**stored, "heartbeat_at": now_ms} if stored and "heartbeat_at" in stored else hive_state.KEEP
+def touch(client: Any, hive_id: str, now_ms: int) -> None:
+    """Refreshes the heartbeat and seeds the finished beat once, so a first beat that never ends ages out."""
+
+    def refresh(stored: dict[str, Any] | None) -> object:
+        if not stored or "heartbeat_at" not in stored:
+            return hive_state.KEEP
+        return {"beat_at": now_ms, **stored, "heartbeat_at": now_ms}
 
     if "heartbeat_at" in (_amend(client, hive_id, refresh) or {}):
         client.pexpire(f"{key(hive_id)}:sessions", LIVE_MS)
