@@ -94,7 +94,6 @@ def test_peer_changes_use_a_retained_view_and_restore_the_swarm_view(
 def test_a_refused_peer_view_preserves_the_swarm_view(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
-
     client = ledger_client.LedgerClient(service=True)
     store = SimpleNamespace(
         config=lambda slug: SimpleNamespace(template=freeze.priming.TEMPLATE),
