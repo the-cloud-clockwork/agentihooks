@@ -12,8 +12,12 @@ from scripts.tick import view
 
 @pytest.mark.feature("swarm-tick-delta-reads")
 @pytest.mark.parametrize("service_mode", [False, True])
+@pytest.mark.parametrize(
+    ("target", "label"),
+    [("kind:research", "research tasks"), ("plans/a", "plan Alpha"), ("slices/s", "slice Slice")],
+)
 def test_peer_changes_use_a_retained_view_and_restore_the_swarm_view(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, service_mode: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, service_mode: bool, target: str, label: str
 ) -> None:
     client = ledger_client.LedgerClient(service=service_mode)
     store = SimpleNamespace(
@@ -33,7 +37,12 @@ def test_peer_changes_use_a_retained_view_and_restore_the_swarm_view(
     def changes(self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...]) -> dict[str, Any]:
         requests.append((self.base, self.credentials, self.timeout, slug, since, parts))
         if since == 0:
-            return {"generation": generation, "data": {"freezes": focus}}
+            data = {
+                "freezes": focus,
+                "plans": [{"id": "a", "title": "Alpha"}],
+                "slices": [{"id": "s", "title": "Slice"}],
+            }
+            return {"generation": generation, "data": {part: data[part] for part in parts if part in data}}
         updates = [[["freezes"], focus]] if since != generation else []
         return {"generation": generation, "changes": {"set": updates, "drop": [], "lists": {}}}
 
@@ -66,9 +75,9 @@ def test_peer_changes_use_a_retained_view_and_restore_the_swarm_view(
         assert requests
         assert all(request[4] == 1 for request in requests)
         assert whole == []
-        generation, focus = 2, [{"verb": "focus", "target": "kind:research"}]
+        generation, focus = 2, [{"verb": "focus", "target": target}]
         changed = freeze.watched("doctor", cast(Any, store), client, own)
-        assert changed[freeze.WATCHED] == ["the focus on research tasks in the watched swarm"]
+        assert changed[freeze.WATCHED] == [f"the focus on {label} in the watched swarm"]
         assert freeze.outside_watched({"kind": "code", "phase": "ordinary"}, changed, "fixes")
         generation, focus = 3, []
         cleared = freeze.watched("doctor", cast(Any, store), client, own)
