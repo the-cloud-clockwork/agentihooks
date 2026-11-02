@@ -50,6 +50,7 @@ def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
@@ -61,6 +62,7 @@ def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup):
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     before = lease.now_ms(setup.store)
     refused = fenced.placement_refusal("ci", {"id": "task"})
@@ -175,6 +177,7 @@ def test_local_mode_exempts_masters_at_capacity(setup, monkeypatch):
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     assert fenced.placement_refusal("master", {"id": "master"}) == ""
     assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == setup.herdr.spawn.return_value
