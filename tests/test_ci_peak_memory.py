@@ -1,6 +1,8 @@
 import json
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -47,6 +49,19 @@ def test_a_signalled_command_exits_as_the_shell_reports_it(tmp_path: Path) -> No
     assert json.loads((tmp_path / "peak/killed.json").read_text())["exit"] == 137
 
 
+def test_a_cancelled_step_forwards_sigterm_and_still_records(tmp_path: Path) -> None:
+    ready = tmp_path / "ready"
+    child = f"import pathlib, time; pathlib.Path({str(ready)!r}).touch(); time.sleep(60)"
+    env = {"PATH": "/usr/bin:/bin", "PEAK_MEMORY_DIR": str(tmp_path / "peak")}
+    wrapper = subprocess.Popen([sys.executable, str(PEAK), "cancelled", "--", sys.executable, "-c", child], env=env)
+    deadline = time.monotonic() + 30
+    while not ready.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    wrapper.send_signal(signal.SIGTERM)
+    assert wrapper.wait(timeout=30) == 143
+    assert json.loads((tmp_path / "peak/cancelled.json").read_text())["exit"] == 143
+
+
 @pytest.mark.parametrize("arguments", [[], ["select"], ["select", "true"], ["select", "--"]])
 def test_refuses_a_call_without_label_and_command(tmp_path: Path, arguments: list[str]) -> None:
     done = _run(tmp_path, *arguments)
@@ -55,23 +70,29 @@ def test_refuses_a_call_without_label_and_command(tmp_path: Path, arguments: lis
 
 
 @pytest.mark.parametrize(
-    ("job", "step", "label", "helper"),
+    ("job", "step", "label", "helper", "action", "guard"),
     [
         (
             "select",
             "Select the tests the change reaches",
             "select",
             '-I "$RUNNER_TEMP/grader/.github/scripts/peak_memory.py"',
+            "./.github/actions/retry-upload",
+            "'pull_request'",
         ),
         (
             "mutation-plan",
             "Size mutation shards from stored timings",
             "mutation-plan",
             '-I "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py"',
+            "./.workflow-revision/.github/actions/retry-upload",
+            "steps.reuse.outputs.reused != 'true'",
         ),
     ],
 )
-def test_pull_request_tests_record_and_upload_the_step_peak(job: str, step: str, label: str, helper: str) -> None:
+def test_pull_request_tests_record_and_upload_the_step_peak(
+    job: str, step: str, label: str, helper: str, action: str, guard: str
+) -> None:
     steps = yaml.safe_load(WORKFLOW.read_text())["jobs"][job]["steps"]
     names = [entry.get("name") for entry in steps]
     measured = steps[names.index(step)]
@@ -83,3 +104,10 @@ def test_pull_request_tests_record_and_upload_the_step_peak(job: str, step: str,
     assert upload["with"]["name"] == f"peak-memory-{label}"
     assert upload["with"]["path"] == f"${{{{ runner.temp }}}}/peak-memory/{label}.json"
     assert upload["with"]["after-cancel"] is True
+    assert upload["uses"] == action
+    assert upload["if"].endswith(guard)
+    if job == "mutation-plan":
+        assert measured["if"] == "steps.reuse.outputs.reused != 'true'"
+        extract = names.index("Take the helper scripts from the workflow revision")
+        assert extract < names.index(step)
+        assert steps[extract]["if"] == measured["if"]
