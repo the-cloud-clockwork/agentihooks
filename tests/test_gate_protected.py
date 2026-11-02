@@ -1487,8 +1487,8 @@ def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on
 @pytest.mark.parametrize("merged", [False, True])
 @pytest.mark.parametrize("stage", ["mutation-refine", "mutation-shard", "audit"])
 def test_a_mutation_stage_runs_outside_required_grading_only_when_the_required_mutation_job_merges_it(
-    gated, merged, stage
-):
+    gated: bool, merged: bool, stage: str
+) -> None:
     base, head = _aggregators()
     head["jobs"][stage] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["mutation"] = {"needs": [stage] if merged else [], "runs-on": "ubuntu-latest"}
