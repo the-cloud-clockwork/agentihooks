@@ -2839,98 +2839,10 @@ def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
     assert capsys.readouterr().out.splitlines() == ["herdr: swept"]
 
 
-def quick_beside_slow(monkeypatch, capsys):
-    import threading
-    import time
-
-    release, ticks, starts = threading.Event(), {"fast": 0, "slow": 0}, []
-
-    def run_tick(store, slug):
-        assert store.slugs() == ["slow", "fast"]
-        ticks[slug] += 1
-        if slug == "slow":
-            release.wait(2)
-        else:
-            starts.append(time.monotonic())
-            if ticks["fast"] > 3:
-                pytest.fail("extra ticks went on after every first tick ended")
-            if ticks["fast"] == 3:
-                release.set()
-        return [f"tick {ticks[slug]}"]
-
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=0.5)
-    return ticks, starts, capsys.readouterr().out.splitlines()
-
-
-def test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs(monkeypatch, capsys):
-    ticks, _, out = quick_beside_slow(monkeypatch, capsys)
-    assert ticks == {"fast": 3, "slow": 1}
-    assert sorted(out[:-1]) == ["fast: tick 1", "fast: tick 2", "fast: tick 3", "slow: tick 1"]
-    assert out[-1] == "herdr: swept"
-
-
-@pytest.mark.wall_clock
-def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
-    _, starts, _ = quick_beside_slow(monkeypatch, capsys)
-    assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
-
-
 def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
     ticks = []
     _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"], tick_seconds=60)
     assert sorted(ticks) == ["a", "b", "c"]
-
-
-def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, capsys):
-    import time
-
-    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 1.5)
-    ticks = {"fast": 0, "slow": 0}
-
-    def run_tick(store, slug):
-        ticks[slug] += 1
-        if slug == "slow":
-            time.sleep(3.0)
-        return []
-
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=1.0)
-    assert ticks == {"fast": 2, "slow": 1}
-
-
-def test_an_extra_tick_starting_exactly_at_the_deadline_still_runs(monkeypatch, capsys):
-    import threading
-    import time
-    import types
-
-    monkeypatch.setattr(cli, "time", types.SimpleNamespace(monotonic=lambda: 100.0, time=time.time, sleep=time.sleep))
-    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 0)
-    release, ticks = threading.Event(), {"fast": 0, "slow": 0}
-
-    def run_tick(store, slug):
-        ticks[slug] += 1
-        if slug == "slow":
-            release.wait(2)
-        elif ticks["fast"] == 2:
-            release.set()
-        return []
-
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
-    assert ticks["slow"] == 1 and ticks["fast"] >= 2
-
-
-def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
-    ticks = {"fast": 0}
-
-    def run_tick(store, slug):
-        if slug == "slow":
-            raise SystemExit(3)
-        ticks["fast"] += 1
-        if ticks["fast"] > 3:
-            pytest.fail("extra ticks went on after every first tick ended")
-        return []
-
-    with pytest.raises(SystemExit):
-        _tick_all(monkeypatch, run_tick, ["fast", "slow"])
 
 
 def test_set_stores_the_scaling_settings_and_reports_them(env, capsys):

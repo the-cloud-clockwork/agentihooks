@@ -4373,8 +4373,8 @@ registers it and starts the scheduler runner; each tick pass re-registers it if 
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
-again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
+minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks once per pass in its own thread; a swarm whose
+tick runs long never makes another swarm tick again within the same pass.
 An outage holds the affected idle and delivery decisions until recovery (see
 [Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm, before step 1 the tick ends any orphan
 execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)), then:
