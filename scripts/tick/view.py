@@ -48,12 +48,6 @@ def _refuse(*_args: object, **_kwargs: object) -> NoReturn:
     raise TypeError(READ_ONLY)
 
 
-def _refuse_changes(cls: type, names: tuple[str, ...]) -> None:
-    """Make every method of ``cls`` named in ``names`` refuse the change."""
-    for name in names:
-        setattr(cls, name, staticmethod(_refuse))
-
-
 class FrozenDict(dict[str, Any]):
     """A mapping of the view that refuses every change and copies to a plain dict."""
 
@@ -70,14 +64,13 @@ class FrozenList(list[Any]):
         return list, (list(self),)
 
 
-_refuse_changes(
-    FrozenDict, ("__setitem__", "__delitem__", "__ior__", "clear", "pop", "popitem", "setdefault", "update")
-)
-_refuse_changes(
-    FrozenList,
-    ("__setitem__", "__delitem__", "__iadd__", "__imul__", "append", "extend", "insert", "pop", "remove", "clear")
-    + ("sort", "reverse"),
-)
+for _name in ("__setitem__", "__delitem__", "__ior__", "clear", "pop", "popitem", "setdefault", "update"):
+    setattr(FrozenDict, _name, staticmethod(_refuse))
+for _name in (
+    *("__setitem__", "__delitem__", "__iadd__", "__imul__", "append", "extend", "insert", "pop", "remove", "clear"),
+    *("sort", "reverse"),
+):
+    setattr(FrozenList, _name, staticmethod(_refuse))
 
 
 def freeze(value: object) -> object:

@@ -2,7 +2,7 @@ from collections.abc import Callable
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event, Lock, Thread
+from threading import Event, Lock, Thread, current_thread
 from time import monotonic
 
 import pytest
@@ -189,8 +189,97 @@ def test_expired_lane_drops_late_result_and_does_not_start_dependent() -> None:
         assert all(row.outcome == engine.LATE for row in rows)
         assert not dependent.is_set()
         assert all(row.result is None for row in rows)
+        assert [row.budget_s for row in rows] == [2.0, 2.0]
+        assert 0.0 < rows[0].wall_s < 1.0
+        assert rows[1].wall_s == 0.0
     finally:
         release.set()
+
+
+def test_an_expired_lane_drops_its_ready_step_and_every_dependent_in_another_lane() -> None:
+    from scripts.tick import pool
+
+    ran: list[str] = []
+
+    def action(ctx: Context) -> Result:
+        ran.append("ran")
+        return Result()
+
+    steps = (Step("slow", action, lane=Lane("slow")), Step("after", action, frozenset({"slow"})))
+    with pool.running(slow_s=0.0):
+        rows = engine.run_group("load", context(), steps)
+    assert ran == []
+    assert [(row.name, row.outcome, row.wall_s, row.budget_s) for row in rows] == [
+        ("slow", engine.LATE, 0.0, 2.0),
+        ("after", engine.LATE, 0.0, 2.0),
+    ]
+
+
+def test_queued_steps_of_an_expired_lane_never_start() -> None:
+    from scripts.tick import pool
+
+    release, queued = Event(), Event()
+
+    def stuck(ctx: Context) -> Result:
+        release.wait(1)
+        return Result()
+
+    def later(ctx: Context) -> Result:
+        queued.set()
+        return Result()
+
+    try:
+        with pool.running(workers=1, critical_s=0.02):
+            rows = engine.run_group("load", context(), (Step("stuck", stuck), Step("later", later)))
+        assert [row.outcome for row in rows] == [engine.LATE, engine.LATE]
+    finally:
+        release.set()
+    assert not queued.wait(0.2)
+
+
+def test_eager_steps_run_on_named_workers_under_the_caller_clock() -> None:
+    from scripts.tick import pool
+
+    seen: list[tuple[str, Callable[[], float]]] = []
+
+    def clock() -> float:
+        return monotonic()
+
+    def action(ctx: Context) -> Result:
+        seen.append((current_thread().name, ctx.deadline.clock))
+        return Result()
+
+    with pool.running(workers=2):
+        engine.run_group(
+            "load", Context(View(), Deadline.after(5, clock=clock)), (Step("a", action), Step("b", action))
+        )
+    assert len(seen) == 2
+    assert all(name.startswith("tick-step") and used is clock for name, used in seen)
+
+
+def test_the_heartbeat_timer_runs_on_a_daemon_thread() -> None:
+    from scripts.tick import pool
+
+    daemon: list[bool] = []
+    beat = Event()
+
+    def heartbeat() -> None:
+        daemon.append(current_thread().daemon)
+        beat.set()
+
+    with pool.running(critical_s=0.01, heartbeat=heartbeat):
+        assert beat.wait(1)
+    assert daemon == [True]
+
+
+def test_a_fresh_host_lock_is_not_held(tmp_path: Path) -> None:
+    from scripts.tick import pool
+
+    lock = pool.HostLock(tmp_path / "placing.lock")
+    assert not lock.locked()
+    with lock:
+        assert lock.locked()
+    assert not lock.locked()
 
 
 @pytest.mark.parametrize(("resource", "cap"), (("herdr", 6), ("github", 4)))
