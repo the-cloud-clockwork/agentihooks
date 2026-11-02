@@ -424,9 +424,9 @@ def record_shard_measurement(
 def grade_shard_rows(
     report: dict[str, Any],
     path: str,
-    rows: list[dict[str, Any]],
+    rows: list[dict],
     lines: set[int],
-    cleared: dict[str, Any],
+    cleared: dict,
     split: set[str],
 ) -> dict[str, Any]:
     if units := [row for row in rows if row["name"] in split]:

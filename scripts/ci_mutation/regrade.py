@@ -3,7 +3,7 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from scripts.ci_mutation.clearances import load_clearances  # pyright: ignore[reportUnknownVariableType]
 from scripts.ci_mutation.report import evaluate, survivor_text  # pyright: ignore[reportUnknownVariableType]
@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Protected grader: the planned mutation bases {args.bases} are not ones it would choose")
         return 1
     changes = discover_changes(args.root, args.bases.split(","), "HEAD")
-    cleared = cast(dict[str, Any], load_clearances(args.root))
+    cleared: dict[str, Any] = load_clearances(args.root)  # pyright: ignore[reportUnknownVariableType]
     graded = regrade(json.loads(args.report.read_text()), cleared, changes)
     args.report.write_text(json.dumps(graded) + "\n")
     for file in graded["files"]:
