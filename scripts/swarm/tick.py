@@ -395,6 +395,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
             task_steps.raise_held(box)
         actions.extend(master_steps.run_dispatch(locals()))
     actions.extend(master_steps.run_watch(locals()))
+    passing["rows"] = box["rows"]
     actions += run_group(task_steps.CLOSE, **passing, config=config)
     task_steps.raise_held(box)
     return actions
