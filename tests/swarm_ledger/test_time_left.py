@@ -228,11 +228,11 @@ class TestFrozenSplit:
         assert (held["minutes"], held["chain"], held["remaining"]) == (15, 15, 3)
         assert (held["frozen"], held["frozen_work"]) == (2, 75)
 
-    def test_a_focus_holds_open_work_outside_it_but_not_urgent_or_in_flight_tasks(self):
+    def test_a_focus_holds_open_work_outside_it_urgent_included_but_not_in_flight_tasks(self):
         d = self.ledger(("focus", "tasks/e"))
         d["tasks"][0]["rank"] = "urgent"
         result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
-        assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (3, 45, 2, 75)
+        assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (2, 30, 3, 90)
 
     def test_a_focus_counts_the_unfinished_dependencies_of_focused_work(self):
         result = ledger_stats.calculate(self.ledger(("focus", "tasks/c")), [], NOW, {"slots": 1, "ci_minutes": 5})
@@ -268,12 +268,12 @@ class TestFrozenSplit:
         )
         d["freezes"] = [{"verb": "focus", "target": "tasks/y"}]
         result = ledger_stats.calculate(d, [], NOW, {"slots": 2, "ci_minutes": 5})
-        assert (result["minutes"], result["remaining"], result["work"], result["chain"]) == (45, 4, 75, 45)
-        assert (result["frozen"], result["frozen_work"]) == (40, 600)
+        assert (result["minutes"], result["remaining"], result["work"], result["chain"]) == (45, 3, 60, 45)
+        assert (result["frozen"], result["frozen_work"]) == (41, 615)
         assert ledger_stats.time_left_line(d, [], NOW, result) == (
-            "the page shows not set, computed 0h 45m as the larger of a 45m chain and 75m of work over 2 slots, "
-            "for 4 remaining tasks at S 10m, M 25m, L 40m and 5m of CI, "
-            "with 40 frozen tasks holding 600m of work left out, stale"
+            "the page shows not set, computed 0h 45m as the larger of a 45m chain and 60m of work over 2 slots, "
+            "for 3 remaining tasks at S 10m, M 25m, L 40m and 5m of CI, "
+            "with 41 frozen tasks holding 615m of work left out, stale"
         )
 
     def test_a_phase_freeze_holds_every_open_task_under_it(self):

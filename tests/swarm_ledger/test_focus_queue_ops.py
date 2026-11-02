@@ -44,7 +44,6 @@ def test_focusing_a_frozen_task_unfreezes_it_and_a_focus_on_a_plan_unfreezes_eve
     state, _ = freeze("plans/a", verb="focus")
     assert targets(state) == [
         ("freeze", "phases/p2"),
-        ("focus", "tasks/t1"),
         ("freeze", "plans/b"),
         ("freeze", "lane:eng"),
         ("focus", "plans/a"),
