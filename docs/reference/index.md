@@ -18,6 +18,7 @@ See [Cancelled watcher after the gate change](delivery-tiers.md#cancelled-watche
 
 | Page | What it covers |
 |------|---------------|
+| [Swarm elapsed thresholds](swarm-thresholds.md) | Idle and input timing, retirement, dispatch and autoscale windows, cadence examples, legacy settings, holds and ledger probe limits |
 | [Semgrep feature tests](semgrep-features.md) | One dated rule per operator ordered feature, regression and passing fixtures, and required CI proofs |
 | [Feature map](feature-map.md) | Feature map origins and keys, the test marker, live check targets and the pull request validation |
 | [Feature live checks](feature-live-checks.md) | The feature map, how the Doctor runs each live check on its timer, the `feature regressed` finding with the operator's words, the front door login check, measuring and troubleshooting |
