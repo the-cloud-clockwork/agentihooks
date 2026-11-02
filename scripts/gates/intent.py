@@ -87,7 +87,7 @@ REASONS = {
 
 
 def mode_of(config: "SwarmConfig") -> str:
-    chosen = cast(str | None, config.gates.get(NAME))
+    chosen = cast(dict[str, Any], config.gates).get(NAME)
     return chosen if chosen in MODES else DEFAULT_MODE
 
 
@@ -129,7 +129,7 @@ def section(doc: dict[str, Any], task: dict[str, Any]) -> str:
 
 
 def _declared(task: dict[str, Any]) -> dict[str, Any] | None:
-    return (task.get("pull_scopes") or {}).get(task.get("pr_url"))
+    return cast(dict[str, Any], task.get("pull_scopes") or {}).get(task.get("pr_url"))
 
 
 def with_intent(body: str, text: str) -> str:

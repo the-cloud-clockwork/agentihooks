@@ -103,9 +103,8 @@ class BrainGate:
             Callable[[str, str, Mapping[str, str]], dict[str, Any] | None],
             task_context.binding,
         )(who.swarm, who.task, os.environ if self.environ is None else self.environ)
-        receipt = (
-            self.receipts
-            or cast(Callable[[str], dict[str, Any] | None], task_context.consultation)
-        )(call.session)
+        receipt = (self.receipts or cast(Callable[[str], dict[str, Any] | None], task_context.consultation))(
+            call.session
+        )
         reason = check(receipt, current, self.clock()) if current else UNREADABLE
         return Decision.deny(REFUSAL.format(reason=reason, task=who.task)) if reason else Decision()
