@@ -32,9 +32,7 @@ def _runner_problem(key: str, cls: str, runner: object, policy: dict[str, Any]) 
     return None
 
 
-def check(
-    workflows: dict[str, dict[str, Any]], table: dict[str, str], policy: dict[str, Any]
-) -> list[str]:
+def check(workflows: dict[str, dict[str, Any]], table: dict[str, str], policy: dict[str, Any]) -> list[str]:
     problems = [
         f"{file}/{name}: runner classes cannot resolve local workflow {job['uses']}"
         for file, workflow in workflows.items()

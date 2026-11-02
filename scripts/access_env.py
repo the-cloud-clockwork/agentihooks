@@ -25,7 +25,9 @@ def _opener(request: Request | str, timeout: float) -> Any:
 
 
 def values(environ: Mapping[str, str], opener: Callable[..., Any] = _opener) -> dict[str, str]:
-    from_env = cast(Callable[[Mapping[str, str], Callable[..., Any] | None], "openbao_kv.OpenBao | None"], openbao_kv.from_env)
+    from_env = cast(
+        Callable[[Mapping[str, str], Callable[..., Any] | None], "openbao_kv.OpenBao | None"], openbao_kv.from_env
+    )
     bao = from_env(environ, opener)
     if bao is None:
         return {}

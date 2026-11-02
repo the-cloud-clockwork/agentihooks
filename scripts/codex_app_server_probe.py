@@ -13,7 +13,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from websockets.sync.client import unix_connect
 
@@ -367,7 +367,7 @@ SANDBOX_CMD = [
     "curl -s -o /dev/null -m 5 -w 'external_https=%{http_code}\\n' https://pypi.org/simple/ || echo external_https=fail",
 ]
 
-SANDBOX_POLICIES = {
+SANDBOX_POLICIES: dict[str, dict[str, Any]] = {
     "readOnly": {"type": "readOnly"},
     "readOnly+network": {"type": "readOnly", "networkAccess": True},
     "workspaceWrite(repo)": {"type": "workspaceWrite"},
@@ -378,9 +378,9 @@ SANDBOX_POLICIES = {
 }
 
 
-def sandbox(sock: str, repo: str) -> dict:
+def sandbox(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-sandbox")
-    out = {}
+    out: dict[str, Any] = {}
     for name, policy in SANDBOX_POLICIES.items():
         policy = {**policy, **({"writableRoots": [repo]} if policy.get("writableRoots") == ["REPO"] else {})}
         r = c.request("command/exec", {"command": SANDBOX_CMD, "cwd": repo, "sandboxPolicy": policy}, 60)
@@ -396,7 +396,7 @@ def sandbox(sock: str, repo: str) -> dict:
     return out
 
 
-def account(sock: str, repo: str) -> dict:
+def account(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-account")
     r = c.request("account/read", {})
     acct = (r.get("result") or {}).get("account") or {}
@@ -412,7 +412,7 @@ def account(sock: str, repo: str) -> dict:
     }
 
 
-def bridge_turn(sock: str, thread: str) -> dict:
+def bridge_turn(sock: str, thread: str) -> dict[str, Any]:
     c = Client(sock, "probe-bridge-tui")
     c.request("thread/resume", {"threadId": thread})
     turn = run_turn(c, thread, "Fixture twelve from the bridge while the terminal is attached. Reply LIMA.")
@@ -420,7 +420,7 @@ def bridge_turn(sock: str, thread: str) -> dict:
     return turn
 
 
-def new_thread(sock: str, repo: str) -> dict:
+def new_thread(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-tui-seed")
     thread = start_thread(c, repo)
     turn = run_turn(c, thread, "Fixture thirteen seeds the terminal thread. Reply MIKE.")
@@ -428,15 +428,15 @@ def new_thread(sock: str, repo: str) -> dict:
     return {"thread": thread, "turn": turn}
 
 
-def list_hooks(c: Client, repo: str) -> list[dict]:
+def list_hooks(c: Client, repo: str) -> list[dict[str, Any]]:
     entries = c.request("hooks/list", {"cwds": [repo]})["result"]["data"]
     return [h for e in entries for h in e["hooks"]]
 
 
-def trust_hooks(sock: str, repo: str) -> dict:
+def trust_hooks(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-hook-trust")
     before = list_hooks(c, repo)
-    edits = [
+    edits: list[dict[str, Any]] = [
         {
             "keyPath": f"hooks.state.{json.dumps(h['key'])}.trusted_hash",
             "value": h["currentHash"],

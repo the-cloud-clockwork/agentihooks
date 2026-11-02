@@ -74,10 +74,10 @@ def _mark(config: Path, directory: Path, lock_timeout: float) -> bool:
         data = _read(config)
         if _trusted(data, directory):
             return False
-        projects = data.setdefault("projects", {})
+        projects: Any = data.setdefault("projects", {})
         if not isinstance(projects, dict):
             raise ValueError(f"{config} projects is not a JSON object")
-        entry = projects.setdefault(str(directory), {})
+        entry: Any = projects.setdefault(str(directory), {})
         if not isinstance(entry, dict):
             raise ValueError(f"{config} entry for {directory} is not a JSON object")
         entry["hasTrustDialogAccepted"] = True

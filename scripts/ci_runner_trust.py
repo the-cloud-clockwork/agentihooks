@@ -143,6 +143,7 @@ def selector(policy: dict[str, Any], pool: str, queue: bool = False, *, trusted_
 def selectors(policy: object, pool: str) -> set[str]:
     if not isinstance(policy, dict):
         return set()
+    policy = cast(dict[str, Any], policy)
     return {
         _compact(selector(policy, pool, queue, trusted_reruns=reruns))
         for queue in (False, pool in QUEUE_POOLS)
@@ -154,18 +155,18 @@ def _selector(runner: object, policy: object) -> bool:
     return isinstance(runner, str) and any(_compact(runner) in selectors(policy, pool) for pool in POOLS)
 
 
-def _trusted_runner(job: dict, actors: object) -> bool:
-    uses = job.get("uses")
+def _trusted_runner(job: dict[str, Any], actors: object) -> bool:
+    uses: str | None = job.get("uses")
     if uses and uses.lower() != SHARED:
         return False
     runner = (job.get("with") or {}).get("runs_on") if uses else job.get("runs-on")
     return _hosted(runner) or _selector(runner, actors)
 
 
-def check(workflows: dict[str, dict], actors: object = None) -> list[str]:
+def check(workflows: dict[str, dict[str, Any]], actors: object = None) -> list[str]:
     if actors is not None:
         validate_actors(actors)
-    problems = []
+    problems: list[str] = []
     if "runner-trust.yml" in workflows:
         loader = dict(workflows["runner-trust.yml"])
         loader.pop("name", None)
@@ -176,9 +177,9 @@ def check(workflows: dict[str, dict], actors: object = None) -> list[str]:
     for file, workflow in workflows.items():
         events = workflow.get("on", workflow.get(True, {}))
         events = [events] if isinstance(events, str) else events
-        jobs = workflow.get("jobs", {})
+        jobs: dict[str, dict[str, Any]] = workflow.get("jobs", {})
         for name, job in jobs.items():
-            uses = job.get("uses", "")
+            uses: str = job.get("uses", "")
             if uses == LOADER:
                 continue
             if uses.startswith("./.github/workflows/"):
@@ -206,8 +207,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     import yaml
 
-    workflows = {
-        path.name: yaml.safe_load(path.read_text()) or {}
+    workflows: dict[str, dict[str, Any]] = {
+        path.name: cast(dict[str, Any], yaml.safe_load(path.read_text()) or {})
         for path in (args.root / ".github/workflows").iterdir()
         if path.suffix in (".yml", ".yaml")
     }
