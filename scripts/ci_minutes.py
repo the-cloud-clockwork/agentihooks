@@ -14,6 +14,8 @@ from scripts.ci_storage import rows
 
 HOUR = timedelta(hours=1)
 LISTED_CAP = 1000
+JOB_PAGE = 100
+SMALL_JOB_PAGE = 30
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 ANTON = "anton"
 MATRIX = re.compile(r" \(.*\)$")
@@ -132,8 +134,8 @@ def read_runs(repo: str, since: datetime, until: datetime) -> list[dict]:
 
 
 def read_jobs(repo: str, runs: list[dict], cache: dict) -> list[dict]:
-    def read(run):
-        return attempt(run), rows(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
+    def read(run: dict) -> tuple[str, list[dict]]:
+        return attempt(run), jobs_of(repo, run["id"])
 
     unread = [run for run in runs if attempt(run) not in cache]
     with ThreadPoolExecutor() as pool:
@@ -142,6 +144,15 @@ def read_jobs(repo: str, runs: list[dict], cache: dict) -> list[dict]:
         if run.get("status") == "completed":
             cache[attempt(run)] = {"created_at": run["created_at"], "jobs": fresh[attempt(run)]}
     return [job for key in map(attempt, runs) for job in (fresh[key] if key in fresh else cache[key]["jobs"])]
+
+
+def jobs_of(repo: str, run_id: int) -> list[dict]:
+    """GitHub answers 502 for a full page of a run whose jobs carry many steps, so that run is read in small pages."""
+    path = f"repos/{repo}/actions/runs/{run_id}/jobs?filter=all&per_page="
+    try:
+        return rows(f"{path}{JOB_PAGE}", "jobs")
+    except subprocess.CalledProcessError:
+        return rows(f"{path}{SMALL_JOB_PAGE}", "jobs")
 
 
 def attempt(run: dict) -> str:
