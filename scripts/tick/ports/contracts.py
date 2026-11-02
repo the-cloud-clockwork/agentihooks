@@ -95,6 +95,8 @@ class SourceControl(Protocol):
         self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline
     ) -> tuple[WorkflowRun, ...]: ...
 
+    def download(self, path: str, *, deadline: Deadline) -> bytes: ...
+
 
 @runtime_checkable
 class Runtime(Protocol):

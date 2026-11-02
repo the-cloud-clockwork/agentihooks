@@ -8,7 +8,7 @@ from typing import Any
 from scripts.swarm import tick
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.tick import registry
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, Left, PassBox
 
 RAISED = "raised"
 PASS_KEYS = ("slug", "store", "ledger", "runtime", "now_ms", "box")
@@ -20,8 +20,10 @@ def _run(call: Callable[..., Any], _module: Any, get: Callable[[str], Any]) -> A
     if RAISED in box:
         return []
     try:
-        values = {**{key: get(key) for key in PASS_KEYS}, **box}
+        values = PassBox({**{key: get(key) for key in PASS_KEYS}, **box})
         return call(**{name: values[name] for name in signature(call).parameters})
+    except Left:
+        return []
     except (Exception, SystemExit) as exc:
         box[RAISED] = exc
         return []

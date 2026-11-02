@@ -18,7 +18,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, Left
 
 Get = Callable[[str], Any]
 
@@ -32,6 +32,8 @@ def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
             return []
         try:
             return call(import_module("scripts.swarm.cli"), get)
+        except Left:
+            return []
         except (Exception, SystemExit) as exc:
             box["raised"] = exc
             return []
