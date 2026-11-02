@@ -1512,6 +1512,38 @@ def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on
         assert "The test summary must use the reviewed reporting job." in problems
 
 
+@pytest.mark.parametrize("gated", [False, True])
+@pytest.mark.parametrize("merged", [False, True])
+@pytest.mark.parametrize("stage", ["mutation-refine", "mutation-shard", "audit"])
+def test_a_mutation_stage_runs_outside_required_grading_only_when_the_required_mutation_job_merges_it(
+    gated: bool, merged: bool, stage: str
+) -> None:
+    base, head = _aggregators()
+    head["jobs"][stage] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["mutation"] = {"needs": [stage] if merged else [], "runs-on": "ubuntu-latest"}
+    if gated:
+        head["jobs"]["gate-required"]["needs"].append("mutation")
+    else:
+        head["jobs"]["mutation"]["if"] = "github.event_name == 'push'"
+    config = {"not_gates": {f"test.yml/{stage}": _entry()}}
+    accepted = gated and merged and stage != "audit"
+    expected = [] if accepted else [f"test.yml/{stage} runs on pull requests but is not a need of Gate — Required."]
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _TODAY, _POLICY) == expected
+
+
+@pytest.mark.parametrize("stage", ["mutation-refine", "mutation-shard"])
+def test_a_merged_mutation_stage_keeps_the_base_expiry(stage: str) -> None:
+    base, head = _aggregators()
+    head["jobs"][stage] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["mutation"] = {"needs": [stage], "runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].append("mutation")
+    key = f"test.yml/{stage}"
+    base_config = {"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}}
+    head_config = {"not_gates": {key: {**_entry(), "expires": "2027-01-01"}}}
+    problems = gate_protected.grade({"test.yml": base}, base_config, {"test.yml": head}, head_config, _TODAY, _POLICY)
+    assert f"{key} expired on 2026-10-01." in problems
+
+
 def _separate_summary(head, steps):
     head["jobs"]["test-summary"] = {
         "needs": ["unit", "unit-selected"],
