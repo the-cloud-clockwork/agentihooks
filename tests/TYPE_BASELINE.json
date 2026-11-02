@@ -1192,7 +1192,7 @@
   "tests/hive/test_master_placement.py": 3,
   "tests/hive/test_master_swarms.py": 1,
   "tests/hive/test_mcp_endpoints.py": 5,
-  "tests/hive/test_member_scope.py": 2,
+  "tests/hive/test_member_scope.py": 1,
   "tests/hive/test_member_swarms.py": 3,
   "tests/hive/test_nats_grant.py": 11,
   "tests/hive/test_nats_scope.py": 2,
