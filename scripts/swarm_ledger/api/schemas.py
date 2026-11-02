@@ -248,7 +248,7 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
 UNGUARDED = ("ack", "task_add")
 
 
-def target(op: dict) -> str:
+def target(op: dict[str, str]) -> str:
     kind = op["op"]
     if kind in ("add", "edit", "delete", "clear"):
         return op["thread"]

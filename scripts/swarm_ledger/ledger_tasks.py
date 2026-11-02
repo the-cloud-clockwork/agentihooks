@@ -2,6 +2,7 @@
 
 import re
 from pathlib import Path
+from typing import Any
 
 import ledger_comments
 import ledger_kinds
@@ -605,7 +606,7 @@ def _normalized(op):
     return op
 
 
-def _done_refusal(doc, op, after):
+def _done_refusal(doc: dict[str, Any], op: dict[str, Any], after: dict[str, Any]) -> str | None:
     if after.get("state") != "done":
         return None
     if ledger_kinds.unmet(after):

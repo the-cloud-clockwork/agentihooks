@@ -2,6 +2,7 @@ import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -53,9 +54,10 @@ def test_gat05_requires_current_learning_without_replacing_implementation_proof(
     from scripts.swarm_ledger import ledger_brain, ledger_tasks
 
     doc, task, _, _, _ = fixture
-    assert "learning" in ledger_brain.completion(task)
-    assert "learning" in ledger_tasks._done_refusal(doc, {"item": "tasks/work"}, {**task, "state": "done"})
-    assert "proof" in ledger_tasks._done_refusal(doc, {"item": "tasks/work"}, {**task, "state": "done", "proof": {}})
+    assert "learning" in (ledger_brain.completion(task) or "")
+    assert "learning" in (ledger_tasks._done_refusal(doc, {"item": "tasks/work"}, {**task, "state": "done"}) or "")
+    refused = ledger_tasks._done_refusal(doc, {"item": "tasks/work"}, {**task, "state": "done", "proof": {}})
+    assert "proof" in (refused or "")
 
 
 @pytest.mark.parametrize(
@@ -181,7 +183,7 @@ def test_gat05_authenticated_api_refuses_emergency_without_touching_repository(f
     )
     op = operation("brain_emergency", scope, expires=160, reason=inputs()["forged_approval"])
     with pytest.raises(APIError):
-        mutations.apply(services, "swarm", principal, {"operation_id": "batch", "guards": {}, "ops": [op]})
+        mutations.apply(cast(Any, services), "swarm", principal, {"operation_id": "batch", "guards": {}, "ops": [op]})
     assert doc == before
 
 

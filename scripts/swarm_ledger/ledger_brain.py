@@ -1,45 +1,74 @@
+"""Ledger operations that record task learning outcomes, the brain policy and operator emergency bypasses."""
+
 import hashlib
 import json
 import re
+from typing import Any, Protocol, cast
 
 OPS = ("brain_policy", "brain_learning", "brain_emergency")
 SCOPE = frozenset({"purpose", "task", "revision", "generation", "brain"})
 KINDS = ("lesson", "decision", "no_new_learning")
 MAX_BYPASS_SECONDS = 300
 
+Json = dict[str, Any]
+
+
+class ApplyContext(Protocol):
+    """The ledger sync context an extension operation writes through."""
+
+    at: int
+    meta: Json
+    refused: list[str]
+    dirty: bool
+
+    def record(self, by: str, kind: str, target: str, **extra: object) -> None:
+        """Append one ledger event."""
+        ...
+
+
+def mapping(value: object) -> Json | None:
+    """Return the value as a JSON object, or None when it is not one."""
+    return cast(Json, value) if isinstance(value, dict) else None
+
 
 def text(value: object, limit: int) -> bool:
+    """Return whether the value is a non blank string of at most limit characters."""
     return isinstance(value, str) and bool(value.strip()) and len(value) <= limit
 
 
 def check_binding(value: object) -> None:
+    """Refuse a binding that is not a complete task consultation scope."""
+    binding = mapping(value)
     if (
-        not isinstance(value, dict)
-        or set(value) != SCOPE
-        or value["purpose"] != "task"
-        or not text(value["task"], 200)
-        or not text(value["brain"], 200)
-        or not isinstance(value["revision"], str)
-        or not re.fullmatch(r"[a-f0-9]{64}", value["revision"])
-        or type(value["generation"]) is not int
-        or value["generation"] < 0
+        binding is None
+        or frozenset(binding) != SCOPE
+        or binding["purpose"] != "task"
+        or not text(binding["task"], 200)
+        or not text(binding["brain"], 200)
+        or not isinstance(binding["revision"], str)
+        or not re.fullmatch(r"[a-f0-9]{64}", binding["revision"])
+        or type(binding["generation"]) is not int
+        or binding["generation"] < 0
     ):
         raise ValueError("brain operation needs the current task binding")
 
 
 def check_learning(value: object) -> None:
-    if not isinstance(value, dict) or set(value) != {"kind", "content", "sources"}:
+    """Refuse a learning outcome that is not a supported kind with bounded source evidence."""
+    learning = mapping(value)
+    if learning is None or set(learning) != {"kind", "content", "sources"}:
         raise ValueError("learning needs kind, content and sources")
-    if value["kind"] not in KINDS or not text(value["content"], 4096):
+    if learning["kind"] not in KINDS or not text(learning["content"], 4096):
         raise ValueError("learning needs a supported lesson, decision or explicit no new learning result")
-    sources = value["sources"]
-    if not isinstance(sources, list) or len(sources) > 20 or not all(text(source, 1000) for source in sources):
+    sources = cast(list[object], learning["sources"]) if isinstance(learning["sources"], list) else None
+    if sources is None or len(sources) > 20 or not all(text(source, 1000) for source in sources):
         raise ValueError("learning sources must be bounded evidence references")
-    if value["kind"] != "no_new_learning" and not sources:
+    if learning["kind"] != "no_new_learning" and not sources:
         raise ValueError("a lesson or decision needs source evidence")
 
 
-def check(op: dict) -> None:
+def check(op: Json) -> None:
+    """Refuse a brain operation whose fields do not match its contract."""
     common = {"op", "id", "item"}
     fields = {
         "brain_policy": {"mode", "brain"},
@@ -63,19 +92,21 @@ def check(op: dict) -> None:
         raise ValueError("emergency action needs expiry and reason")
 
 
-def current(task: dict) -> dict:
+def current(task: Json) -> Json:
+    """Return the task's current consultation binding under its brain policy."""
     from scripts.gates.brain import bind
 
     return bind(task["id"], task, task.get("brain_policy", {}).get("brain", ""))
 
 
-def bypassed(record: dict | None, scope: dict, now: float) -> bool:
-    return bool(
-        record and record.get("binding") == {key: scope[key] for key in SCOPE} and record.get("expires", 0) > now
-    )
+def bypassed(record: object, scope: Json, now: float) -> bool:
+    """Return whether an emergency record covers this exact scope and has not expired."""
+    held = mapping(record)
+    return bool(held and held.get("binding") == {key: scope[key] for key in SCOPE} and held.get("expires", 0) > now)
 
 
-def completion(task: dict) -> str | None:
+def completion(task: Json) -> str | None:
+    """Return why a task under a required brain policy cannot be done yet, or None when it can."""
     if task.get("brain_policy", {}).get("mode") != "required":
         return None
     scope = current(task)
@@ -87,7 +118,8 @@ def completion(task: dict) -> str | None:
     return "task needs a current learning outcome or explicit no new learning linked to its proof"
 
 
-def refusal(op: dict, task: dict, at: float) -> str:
+def refusal(op: Json, task: Json, at: float) -> str:
+    """Return why the authority or scope of a brain operation is refused, or an empty string."""
     if op["op"] == "brain_policy":
         return "" if "by" not in op else "brain policy needs authenticated operator authority"
     if op.get("binding") != current(task):
@@ -100,7 +132,8 @@ def refusal(op: dict, task: dict, at: float) -> str:
     return ""
 
 
-def apply(doc: dict, op: dict, ctx: object) -> bool:
+def apply(doc: Json, op: Json, ctx: ApplyContext) -> bool:
+    """Apply one brain operation to its task, recording audit, metrics and its idempotent identity."""
     task = next((row for row in doc.get("tasks", []) if f"tasks/{row['id']}" == op["item"]), None)
     if task is None:
         ctx.refused.append("brain operation task is absent")

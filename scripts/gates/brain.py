@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Mapping
+from typing import Any
 
 from scripts.gates.base import Decision
 from scripts.gates.build import EDIT_TOOLS, SERENA, SERENA_EDITS
@@ -36,7 +38,7 @@ def task_row(ledger_dir, slug, task):
     return next((t for t in doc.get("tasks", []) if t.get("id") == task), {})
 
 
-def bind(task, row, brain):
+def bind(task: str, row: Mapping[str, Any], brain: str) -> dict[str, Any]:
     spec = json.dumps({name: row.get(name, "") for name in SPEC}, sort_keys=True)
     return {
         "purpose": PURPOSE,

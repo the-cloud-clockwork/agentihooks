@@ -1,7 +1,9 @@
 import hashlib
 import os
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from hooks.context import project_cache
 from hooks.context.project_render import NO_MEMORY
@@ -57,7 +59,7 @@ def hold(session_id: str, pack: str) -> None:
     project_cache.defer_project_context(session_id, pack)
 
 
-def binding(swarm: str | None, task: str | None, environ=None) -> dict:
+def binding(swarm: str | None, task: str | None, environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     if not (swarm and task):
         return {}
     from scripts.gates.brain import bind, task_row
