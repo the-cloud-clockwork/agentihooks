@@ -253,3 +253,17 @@ def test_a_quote_on_a_doctrine_file_that_moved_is_refused(tmp_path, capsys):
     assert trace([SID, "--wrong", row["source"], "--repo", "/r", "--reason", "x", "--quote", "Never"]) == 2
     assert "cannot read" in capsys.readouterr().err
     assert injection_trace.corrections() == []
+
+
+def test_the_trace_parser_names_its_program_and_shows_the_usage_text_raw() -> None:
+    import argparse
+
+    from scripts import trace_cli
+
+    parser = trace_cli.build_parser()
+    assert parser.prog == "agentihooks trace"
+    assert parser.description == trace_cli.USAGE
+    assert parser.formatter_class is argparse.RawDescriptionHelpFormatter
+    assert trace_cli.USAGE.splitlines()[0] == (
+        "agentihooks trace: the directives a session received and the layer behind each."
+    )
