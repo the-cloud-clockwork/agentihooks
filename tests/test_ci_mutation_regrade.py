@@ -68,13 +68,13 @@ def test_rows_that_do_not_cover_the_graded_files_are_refused(graded: list[dict] 
         del report["graded"]
     else:
         report["graded"] = graded
-    with pytest.raises(ValueError, match="do not cover exactly its graded files"):
+    with pytest.raises(ValueError, match=r"^Mutation report rows do not cover exactly its graded files$"):
         regrade(report, {}, CHANGES)
 
 
 @pytest.mark.parametrize("changes", [{}, {**CHANGES, "hooks/other.py": {1}}])
 def test_a_report_that_does_not_cover_the_changed_files_is_refused(changes: dict[str, set[int]]) -> None:
-    with pytest.raises(ValueError, match="does not cover exactly the changed Python files"):
+    with pytest.raises(ValueError, match=r"^Mutation report does not cover exactly the changed Python files$"):
         regrade(_lenient_report({2}), {}, changes)
 
 
@@ -138,7 +138,14 @@ def test_planned_bases_hold_only_within_the_protected_choice(
 def test_main_holds_the_planned_bases(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, bases: str, status: int
 ) -> None:
-    monkeypatch.setattr(module, "own_bases", lambda root, base, head, graded: ["merge", "green"])
+    calls = []
+
+    def chosen(root: Path, base: str, head: str, graded: object) -> list[str]:
+        calls.append((root, base))
+        return ["merge", "green"]
+
+    monkeypatch.setattr(module, "own_bases", chosen)
     assert main(["bases", str(tmp_path), "origin/dev", bases]) == status
+    assert calls == [(tmp_path, "origin/dev")]
     expected = f"Protected grader: the planned mutation bases {bases} are not ones it would choose\n"
     assert capsys.readouterr().out == (expected if status else "")
