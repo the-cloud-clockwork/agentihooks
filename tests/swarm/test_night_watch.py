@@ -203,7 +203,7 @@ def test_a_seat_left_empty_on_purpose_is_never_judged(store, state, sleeping):
     assert rig.respawned == [] and kinds(store) == []
 
 
-def starting_master(store, runtime, wrote):
+def starting_master(store: RedisStore, runtime: Runtime, wrote: bool) -> dict:
     boss = AgentRecord("boss", "master", "master", started_at=NOW, state="starting", seat="master@sw")
     store.put_agent(SLUG, boss)
     runtime.live.add("boss")

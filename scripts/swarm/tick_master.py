@@ -80,11 +80,11 @@ def run(
     runtime: Any,
     now_ms: int,
     launch: Callable[[], list[str]],
-    doc: dict | None = None,
+    doc: dict,
 ) -> list[str]:
     """launch runs the tick's own master launch and returns its actions; doc is the ledger, whose writes seat a
     live master still recorded as starting."""
-    config, doc = store.config(slug), doc or {}
+    config = store.config(slug)
     state, minutes = read(store, slug), down_minutes(os.environ)
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
     forcing = forcing and not _bound(store, slug, runtime, doc)
