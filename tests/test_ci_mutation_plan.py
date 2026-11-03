@@ -147,7 +147,7 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
 
     function = "scripts.sample.x_f"
     names = [f"{function}__mutmut_{index}" for index in range(3)]
-    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0]}
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0], "head_seconds": 1.0}
     memory = killers.KillMemory(tmp_path)
     ticks = iter([0.0, 9.0, 20.0, 21.0, 30.0, 39.0, 40.0, 41.0])
     monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
@@ -174,6 +174,33 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
     mixed = measured.measured_plan([(["scripts.sample.x_plain__mutmut_1", *names], results)], memory, limit=2)
     assert mixed["unit_costs"] == plan["unit_costs"]
     assert "scripts.sample.x_plain__mutmut_1" in mixed["assignments"]
+
+
+def test_a_slice_a_probed_shard_ran_alone_is_reused_with_its_head_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(2)]
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0], "head_seconds": 2.0}
+    memory = killers.KillMemory(tmp_path)
+    for tests, seconds in ((["left"], 4.0), (["fast", "right"], 7.0), (["right"], 50.0)):
+        path = memory._cost_path(names[0], tests)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"tests": sorted(tests), "seconds": seconds}))
+    assert measured.observed_unit(memory, names[0], split, ["left"]) == 6.5
+    assert measured.observed_unit(memory, names[0], split, ["right"]) == 7.0
+    assert measured.observed_unit(memory, names[1], split, ["left"]) is None
+    assert measured.observed_unit(None, names[0], split, ["left"]) is None
+    headless = {key: value for key, value in split.items() if key != "head_seconds"}
+    assert measured.observed_unit(memory, names[0], headless, ["left"]) == 4.0
+    monkeypatch.setattr(measured, "measured_splits", lambda *args: {function: split})
+    results = [
+        {"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}
+    ]
+    plan = measured.measured_plan([(names, results)], memory, limit=2)
+    assert plan["unit_costs"] == {names[0]: [6.5, 7.0], names[1]: [100.0, 100.0]}
 
 
 def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_drift(tmp_path, monkeypatch):
@@ -206,6 +233,7 @@ def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_d
     seconds = drifted_durations[0]["durations"]
     expected = [plan.MUTANT_SECONDS + 1.25 * (1.0 + sum(seconds[node] for node in chosen)) for chosen in slices]
     assert drifted["splits"][function]["costs"] == pytest.approx(expected)
+    assert drifted["splits"][function]["head_seconds"] == 1.0
     fresh = measured.measured_plan([(names, drifted_durations)], killers.KillMemory(tmp_path / "empty"), limit=3)
     assert fresh["splits"][function]["slices"] != first["splits"][function]["slices"]
     changed = [{"tests": {function: [*nodes, "t6"]}, "durations": {**drifted_durations[0]["durations"], "t6": 50.0}}]
@@ -468,6 +496,7 @@ def test_the_head_takes_the_fastest_tests_to_its_budget_and_slices_balance_the_r
         "head": ["h1", "h2", "h3"],
         "slices": [["a1", "a4"], ["a2", "a3"]],
         "costs": [pytest.approx(5.6 + 1.25 * 150), pytest.approx(5.6 + 1.25 * 130)],
+        "head_seconds": 20.0,
     }
     assert split_tests(set(seconds) - {"a1", "a2", "a3"}, seconds, 10) is None
     over = split_tests({"a4", "a3", "a2"}, seconds, 10)
@@ -651,8 +680,15 @@ def test_measured_cli_requires_bases_and_statistics(monkeypatch, args):
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize(("splits", "flag"), [({}, "false"), ({"scripts.sample.x_f": {"head": ["early"]}}, "true")])
-def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path, monkeypatch, splits, flag):
+@pytest.mark.parametrize(
+    ("splits", "early", "flag"),
+    [
+        ({}, {}, "false"),
+        ({"scripts.sample.x_f": {"head": ["early"]}}, {}, "true\nprobe_shards=[0, 1]"),
+        ({"scripts.sample.x_f": {"head": ["early"]}}, {"probe_shards": 3}, "true\nprobe_shards=[0, 1, 2]"),
+    ],
+)
+def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path, monkeypatch, splits, early, flag):
     from scripts.ci_mutation import measured
 
     monkeypatch.chdir(tmp_path)
@@ -672,6 +708,7 @@ def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path
             "splits": splits,
             "shard_worker_seconds": [0.5, 0.5],
             "workers": 3,
+            **early,
         },
     )
     monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(folder)])
@@ -1002,6 +1039,7 @@ def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota():
     planners = (
         "scripts.ci_mutation.plan ",
         "scripts.ci_mutation.measured ",
+        "scripts.ci_mutation.probed ",
         "scripts.ci_mutation.replay prepare",
         "python .refinement-proof/run.py",
     )

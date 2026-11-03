@@ -11,6 +11,9 @@ import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
+SHARD_MATRIX = (
+    "${{ fromJSON(needs.replan.outputs.shards || needs.refine.outputs.shards || needs.stats.outputs.shards) }}"
+)
 
 
 _MERGED_STATS_CHECK = 'if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi'
@@ -212,16 +215,16 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
         "fail-fast": False,
         "matrix": {"part": "${{ fromJSON(needs.plan.outputs.stats_parts) }}"},
     }
-    assert jobs["mutation-shard"]["needs"] == ["plan", "stats", "refine", "probe"]
+    assert jobs["mutation-shard"]["needs"] == ["plan", "stats", "refine", "probe", "replan"]
     assert jobs["mutation-shard"]["strategy"] == {
         "fail-fast": False,
-        "matrix": {"shard": "${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}"},
+        "matrix": {"shard": SHARD_MATRIX},
     }
     assert jobs["mutation-shard"]["if"] == (
         "${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0'"
         " && needs.stats.result == 'success' && (needs.refine.result == 'success'"
         " || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]')"
-        " && (needs.probe.result == 'success' || needs.probe.result == 'skipped') }}"
+        " && (needs.replan.result == 'success' || needs.probe.result == 'skipped') }}"
     )
 
 
@@ -267,9 +270,7 @@ def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
     selection = steps[names.index("Download planned mutation test selection")]
     assert selection["with"] == {"name": "mutation-selection"}
     assert names.index(selection["name"]) < names.index(measured["name"])
-    assert jobs["mutation-shard"]["strategy"]["matrix"]["shard"] == (
-        "${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}"
-    )
+    assert jobs["mutation-shard"]["strategy"]["matrix"]["shard"] == SHARD_MATRIX
     assert "refine" in jobs["mutation-shard"]["needs"]
     assert "refine" in jobs["mutation"]["needs"]
     assert "stats" in jobs["mutation"]["needs"]
@@ -278,36 +279,61 @@ def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
     assert artifact["with"] == {"name": "mutation-plan", "path": ".mutation-stats"}
     merge_steps, merge_names = _steps(jobs["mutation"])
     shards = merge_steps[merge_names.index("Merge the shard reports")]["env"]["SHARDS"]
-    assert "needs.refine.outputs.shards || needs.stats.outputs.shards" in shards
+    assert "needs.replan.outputs.shards || needs.refine.outputs.shards || needs.stats.outputs.shards" in shards
+    assert "replan" in jobs["mutation"]["needs"]
 
 
 def test_split_mutants_run_their_early_tests_once_before_the_shards_share_the_result():
     jobs = _workflow()["jobs"]
     assert jobs["refine"]["outputs"]["probe"] == "${{ steps.refine.outputs.probe }}"
+    assert jobs["refine"]["outputs"]["probe_shards"] == "${{ steps.refine.outputs.probe_shards }}"
     probe = jobs["probe"]
     assert probe["needs"] == ["plan", "stats", "refine"]
     assert probe["if"].endswith("&& (needs.refine.outputs.probe || needs.stats.outputs.probe) == 'true' }}")
-    assert probe["strategy"]["matrix"] == jobs["mutation-shard"]["strategy"]["matrix"]
+    assert probe["strategy"]["matrix"] == {
+        "shard": "${{ fromJSON(needs.refine.outputs.probe_shards || needs.stats.outputs.probe_shards) }}"
+    }
     steps, names = _steps(probe)
     run = steps[names.index("Run each mutant's early tests once for every shard")]
     assert run["run"] == (
         'python -m scripts.ci_mutation.probe --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
         " --stats .mutation-stats"
     )
+    assert run["env"]["SHARDS"] == "${{ strategy.job-total }}"
     assert names.index("Download the measured mutation plan") < names.index(run["name"])
     assert steps[-1]["with"]["name"] == "mutation-probe-${{ matrix.shard }}"
-    shard = jobs["mutation-shard"]
-    assert "probe" in shard["needs"]
-    assert shard["if"].endswith("&& (needs.probe.result == 'success' || needs.probe.result == 'skipped') }}")
-    shard_steps, shard_names = _steps(shard)
-    download = shard_steps[shard_names.index("Download the early mutation results")]
-    merge = shard_steps[shard_names.index("Validate every early result and charge its elapsed time")]
-    assert download["if"] == merge["if"] == "needs.probe.result == 'success'"
+    replan = jobs["replan"]
+    assert replan["needs"] == ["plan", "stats", "refine", "probe"]
+    assert replan["if"] == "${{ !cancelled() && needs.probe.result == 'success' }}"
+    assert replan["outputs"] == {"shards": "${{ steps.replan.outputs.shards }}"}
+    replan_steps, replan_names = _steps(replan)
+    download = replan_steps[replan_names.index("Download the early mutation results")]
+    sized = replan_steps[replan_names.index("Size the shards from the mutants the early tests left")]
+    upload = replan_steps[replan_names.index("Upload the probed mutation plan")]
     assert download["with"] == {"pattern": "mutation-probe-*", "path": ".mutation-stats", "merge-multiple": True}
-    assert merge["run"] == "python -m scripts.ci_mutation.probe --stats .mutation-stats --merge"
-    plan = shard_names.index("Download the measured mutation plan")
-    assert plan < shard_names.index(download["name"]) < shard_names.index(merge["name"])
-    assert shard_names.index(merge["name"]) < shard_names.index("Mutate changed Python files")
+    assert sized["id"] == "replan"
+    assert sized["env"] == {"MUTATION_SHARD_CPU_QUOTA": "3"}
+    assert sized["run"] == "python -m scripts.ci_mutation.probed --stats .mutation-stats --budget 1080"
+    assert upload["with"]["name"] == "mutation-plan-probed"
+    assert upload["with"]["path"] == ".mutation-stats/plan.json"
+    order = [
+        "Restore the tests that killed this branch's earlier mutants",
+        "Download the measured mutation plan",
+        download["name"],
+        sized["name"],
+        upload["name"],
+    ]
+    assert [replan_names.index(name) for name in order] == sorted(replan_names.index(name) for name in order)
+    shard = jobs["mutation-shard"]
+    assert "replan" in shard["needs"]
+    assert shard["if"].endswith("&& (needs.replan.result == 'success' || needs.probe.result == 'skipped') }}")
+    shard_steps, shard_names = _steps(shard)
+    probed = shard_steps[shard_names.index("Download the probed mutation plan")]
+    assert probed["if"] == "needs.replan.result == 'success'"
+    assert probed["with"] == {"name": "mutation-plan-probed", "path": ".mutation-stats"}
+    assert "Download the early mutation results" not in shard_names
+    plan = shard_names.index("Download the measured mutation plan, attempt 2")
+    assert plan < shard_names.index(probed["name"]) < shard_names.index("Mutate changed Python files")
 
 
 def test_a_single_stats_part_refines_inside_the_statistics_worker():
@@ -316,6 +342,7 @@ def test_a_single_stats_part_refines_inside_the_statistics_worker():
     assert stats["outputs"] == {
         "shards": "${{ steps.refine.outputs.shards }}",
         "probe": "${{ steps.refine.outputs.probe }}",
+        "probe_shards": "${{ steps.refine.outputs.probe_shards }}",
     }
     steps, names = _steps(stats)
     refine_steps, refine_names = _steps(jobs["refine"])
@@ -540,7 +567,7 @@ def test_single_shard_collection_preserves_both_supported_workflow_states():
 def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
-    assert job["needs"] == ["plan", "stats", "refine", "mutation-shard"]
+    assert job["needs"] == ["plan", "stats", "refine", "replan", "mutation-shard"]
     assert job["if"] == "${{ !cancelled() && needs.plan.outputs.graded == 'true' }}"
     assert job["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
     steps, names = _steps(job)
@@ -554,7 +581,7 @@ def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
     merge["env"]["UNRELATED_SETTING"] = "ignored"
     assert merge["env"]["SHARDS"] == (
         "${{ needs.plan.outputs.changed != '0'"
-        " && (needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}"
+        " && (needs.replan.outputs.shards || needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}"
     )
     assert merge["run"] == (
         "python -m scripts.ci_mutation."
