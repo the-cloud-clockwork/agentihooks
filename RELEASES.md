@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.606 · 2026-11-03
+
+### 2026-11-03 · 052ed283086e · #9518 · @nestorcolt
+
+**Test runtime observe on a remote worker its hive reports gone**
+
+This change adds a direct test covering `HerdrRuntime.observe`/`status` for a remote worker whose hive report marks it gone, confirming it correctly returns `exited`, and also checks that with no hive reports at all `observe` returns `unknown`. It's needed because an earlier fix (#9506) changed the tick logic to check `Reports.gone` before calling `runtime.observe`, which meant the existing tick tests no longer exercised that gone-branch code path, tripping the coverage ratchet. This is a test-only addition with no production code changes, restoring coverage so the pipeline passes.
+
+### 2026-11-03 · 6bcc4f6c151a · #9517 · @nestorcolt
+
+**Run the post spawn ledger, GitHub, findings and metrics tick steps in the slow lane**
+
+This change moves twelve post-spawn report steps (ledger events, done rechecks, progress checks, merge pass, doc report, findings, metrics, bottleneck status, snapshot job, etc.) into the slow lane, since none of them block spawn or are needed by a critical step. Command runner and quota notice stay critical because they run before spawn. The tick registry now also enforces ordering across lanes for readers and writers. This directly informs whether lane processes get built, since the decision hinges on critical lane CPU share staying above forty percent, measured in the next tick report.
+
+### 2026-11-03 · 4be3124c8bbf · #9475 · @nestorcolt
+
+**Tick steps return writes the engine applies with compare and set**
+
+This change moves sizing and grouping steps away from writing state directly, having them instead return writes that the engine applies through per-domain compare-and-set appliers; if a write conflicts with what another step changed, it's dropped, logged on the step record with its reason, surfaced in step actions, and recomputed on the next pass rather than silently corrupting data. This is the first slice of the broader move to pure steps under the parallel engine, proving the pattern with a concrete conflict test before extending it to rank, phase, planning, fleet red, and stall steps in a follow-up pull request.
+
+### 2026-11-03 · cffcc1094275 · #9506 · @nestorcolt
+
+**Settle a worker its restarted hive reports gone instead of retrying retire**
+
+This fix corrects a bug where a worker on a hive that restarted or dropped its pane would get stuck being retried for retirement indefinitely, since the tick's runtime lacked hive reports and so never detected the worker was gone. Now `_remote_gone_reason` checks `Reports(store.redis).gone(agent)` directly, so the tick correctly ends such records, releases claims, reopens unfinished tasks, and clears the retire-failure finding, rather than endlessly retrying a retire that always fails.
+
 ## v2.17.605 · 2026-11-03
 
 ### 2026-11-03 · 635b434ef675 · #9509 · @nestorcolt
