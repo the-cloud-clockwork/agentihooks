@@ -2729,7 +2729,7 @@ def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkey
     )
 
 
-def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
+def _tick_all(monkeypatch, run_tick, slugs):
     import os
     import types
 
@@ -2751,7 +2751,6 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
             pytest.fail(f"{slug} ticked more than ten times in one pass")
         return run_tick(store, slug)
 
-    monkeypatch.setattr(cli, "TICK_SECONDS", tick_seconds)
     monkeypatch.setattr(cli, "run_tick", bounded)
     reconciled = []
     monkeypatch.setattr(timer, "reconcile", lambda binary: reconciled.append(binary) or True)
@@ -2812,7 +2811,7 @@ def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatc
             raise ValueError("ledger down")
         return [f"ok {slug}"]
 
-    _tick_all(monkeypatch, run_tick, ["a", "b"], tick_seconds=60)
+    _tick_all(monkeypatch, run_tick, ["a", "b"])
     captured = capsys.readouterr()
     assert captured.out.splitlines() == ["b: ok b", "herdr: swept"]
     assert captured.err == "a: ValueError: ledger down\n"
@@ -2841,7 +2840,7 @@ def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
 
 def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
     ticks = []
-    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"], tick_seconds=60)
+    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"])
     assert sorted(ticks) == ["a", "b", "c"]
 
 

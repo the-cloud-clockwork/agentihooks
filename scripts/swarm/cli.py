@@ -238,7 +238,6 @@ CONFIG_KEYS = {
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
-TICK_SECONDS = 60
 # Every swarm ticks in a thread of one process; at the default 5 ms a CPU heavy swarm stalls the others' round trips
 TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")

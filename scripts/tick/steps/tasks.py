@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
+from scripts.swarm import dev_red, fleet_red, prerequisite_wait, promotion_watch, release_wait
 from scripts.tick import registry
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, Left
 
@@ -61,36 +62,26 @@ def _drained_resume(tick: Any, get: Get) -> Any:
 
 
 def _dev_red_reopen(tick: Any, get: Get) -> Any:
-    from scripts.swarm import dev_red
-
     keys = ("slug", "config", "store", "ledger", "rows")
-    return tick.skip_refused(dev_red.reopen_pass, *map(get, keys))
+    return tick.skip_refused(dev_red.reopen_pass, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _prerequisite_reopen(tick: Any, get: Get) -> Any:
-    from scripts.swarm import prerequisite_wait
-
     keys = ("slug", "store", "ledger", "rows")
-    return tick.skip_refused(prerequisite_wait.reopen_pass, *map(get, keys))
+    return tick.skip_refused(prerequisite_wait.reopen_pass, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _promotion_refresh(tick: Any, get: Get) -> Any:
-    from scripts.swarm import promotion_watch
-
     keys = ("slug", "config", "store", "ledger", "doc", "now_ms")
-    return tick.skip_refused(promotion_watch.refresh, *map(get, keys))
+    return tick.skip_refused(promotion_watch.refresh, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _release_alert(tick: Any, get: Get) -> Any:
-    from scripts.swarm import release_wait
-
     keys = ("slug", "config", "ledger", "doc")
-    return tick.skip_refused(release_wait.alert_pass, *map(get, keys))
+    return tick.skip_refused(release_wait.alert_pass, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _fleet_red_notice(tick: Any, get: Get) -> Any:
-    from scripts.swarm import fleet_red
-
     keys = ("slug", "store", "ledger", "rows", "now_ms")
     return tick.skip_refused(fleet_red.notice_pass, *map(get, keys))
 
