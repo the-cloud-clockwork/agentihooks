@@ -447,7 +447,7 @@ def run_tick(
             doc = timing.call(ledger_client.pass_state, ledger, slug)
             run_group("after", **(passing | {"doc": doc}))
             host_steps.raise_held(box)
-            started = box["started"]
+            started = box.get("started")
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     except Left:
         return []

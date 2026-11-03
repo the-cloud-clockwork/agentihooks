@@ -7,6 +7,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextvars import Context as ContextCopy
 from contextvars import copy_context
 from dataclasses import dataclass, replace
+from functools import partial
 from threading import Lock, Thread
 from typing import Any
 from uuid import uuid4
@@ -121,20 +122,51 @@ def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: St
 
 
 def run_group(
-    name: str, ctx: Context, steps: Iterable[Step] | None = None, apply: Appliers | None = None
+    name: str,
+    ctx: Context,
+    steps: Iterable[Step] | None = None,
+    apply: Appliers | None = None,
+    finished: Callable[[tuple[StepRecord, ...]], object] | None = None,
 ) -> tuple[StepRecord, ...]:
     """Run every step of group ``name``, applying each step's writes through ``apply`` as it ends.
 
     A failed or late step never stops the next. Outside a parallel pass steps run one at a time in group order. In a
     parallel pass each step starts as soon as every step it needs has ended, records keep group order, writes are
     applied on the scheduling thread as each step ends, and a lane past its deadline drops its unfinished steps and
-    every step that needs them.
+    every step that needs them. Slow lane steps, and the steps that need them, run on after the group returns: the
+    pass joins them when it ends and hands their records to ``finished``.
     """
     ordered = group_steps(name, steps)
     found = pool.active()
     if found is None or not found.parallel:
         return tuple(_applied(run_step(step, ctx), apply or {}) for step in ordered)
-    return _eager(ordered, ctx, found, apply or {})
+    later = _slow_lane(ordered)
+    if later:
+        found.detach(partial(_run_later, later, ctx, found, apply or {}, finished))
+    names = {step.name for step in later}
+    return _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
+
+
+def _slow_lane(ordered: tuple[Step, ...]) -> tuple[Step, ...]:
+    """Return the slow lane steps of ``ordered`` and every step that needs one of them, in group order."""
+    names: set[str] = set()
+    for step in ordered:
+        if step.lane == SLOW or step.needs & names:
+            names.add(step.name)
+    return tuple(step for step in ordered if step.name in names)
+
+
+def _run_later(
+    later: tuple[Step, ...],
+    ctx: Context,
+    found: pool.Pass,
+    apply: Appliers,
+    finished: Callable[[tuple[StepRecord, ...]], object] | None,
+) -> None:
+    """Run the handed off steps on the pass workers and hand their records to ``finished``."""
+    records = _eager(later, ctx, found, apply)
+    if finished is not None:
+        finished(records)
 
 
 def _applied(record: StepRecord, apply: Appliers) -> StepRecord:

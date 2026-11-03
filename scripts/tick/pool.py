@@ -5,9 +5,9 @@ from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from threading import BoundedSemaphore, Lock, Timer, local
+from threading import BoundedSemaphore, Lock, Thread, Timer, local
 from typing import IO, TypeVar
 
 from scripts.tick.deadline import Deadline
@@ -51,6 +51,13 @@ class Pass:
     critical: Deadline
     slow: Deadline
     slots: BoundedSemaphore
+    later: list[Thread] = field(default_factory=list[Thread], compare=False)
+
+    def detach(self, work: Callable[[], object]) -> None:
+        """Start ``work`` under the caller's copied context on a daemon thread the pass joins when it ends."""
+        thread = Thread(target=copy_context().run, args=(work,), name="tick-slow-lane", daemon=True)
+        self.later.append(thread)
+        thread.start()
 
     @property
     def parallel(self) -> bool:
@@ -113,6 +120,8 @@ def running(
     try:
         yield current
     finally:
+        for thread in current.later:
+            thread.join(max(0.0, current.slow.remaining))
         _ACTIVE.reset(token)
         if beat is not None:
             beat.close()

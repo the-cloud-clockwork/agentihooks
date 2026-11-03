@@ -215,9 +215,18 @@ class _PassView:
 
 
 def run_group(name: str, **state: object) -> list[str]:
-    """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions."""
+    """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions.
+
+    Actions of slow lane steps that end after the group returns are printed when they end.
+    """
     ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
-    return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state)))
+    return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=_print_actions))
+
+
+def _print_actions(records: tuple[engine.StepRecord, ...]) -> None:
+    """Print each action the handed off steps returned, one per line."""
+    for action in steps.actions(records):
+        print(action)
 
 
 @reaper.scanning_pass
