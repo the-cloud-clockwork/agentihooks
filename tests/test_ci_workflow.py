@@ -2090,16 +2090,13 @@ def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memo
     names = [step.get("name") for step in jobs["mutation-refine"]["steps"]]
     steps = _preflight_seed_steps()
     mint = steps["Mint the token that reads the branch preflight kill memory"]
-    find = steps["Find the branch preflight that kept kill memory"]
-    download = steps["Download the branch preflight kill memory"]
-    retry = steps["Download the branch preflight kill memory, attempt 2"]
+    find = steps["Seed the kill memory from the branch preflight"]
     keep = steps["Keep the branch preflight kill memory for this run's shards"]
+    assert not [name for name in names if "Download the branch preflight" in str(name)]
     order = [
         "Restore the tests that killed this branch's earlier mutants",
         mint["name"],
         find["name"],
-        download["name"],
-        retry["name"],
         keep["name"],
         "Refine mutation shards from measured statistics",
     ]
@@ -2121,18 +2118,8 @@ def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memo
         "HEAD": "${{ github.event.pull_request.head.sha }}",
         "BRANCH": "${{ github.head_ref }}",
     }
-    assert download["if"] == "steps.preflight.outputs.id != ''"
-    assert download["with"] == {
-        "pattern": "mutation-killers-*",
-        "path": ".mutation-stats/killers",
-        "merge-multiple": True,
-        "run-id": "${{ steps.preflight.outputs.id }}",
-        "repository": "${{ github.repository }}",
-        "github-token": "${{ steps.app-token.outputs.token }}",
-    }
-    assert retry["with"] == download["with"]
     assert keep["uses"] == "actions/cache/save@v4"
-    assert keep["if"] == "steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''"
+    assert keep["if"] == "steps.preflight.outputs.id != ''"
     prefix = "mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-"
     assert keep["with"] == {
         "path": ".mutation-stats/killers",
@@ -2144,20 +2131,30 @@ def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memo
 
 
 @pytest.mark.parametrize(
-    ("same", "kept", "chosen"),
+    ("same", "kept", "failures", "chosen"),
     [
-        (["41"], {"41": 2, "42": 3}, "41"),
-        (["41"], {"41": 0, "42": 3}, "42"),
-        ([], {"42": 1}, "42"),
-        (["41"], {}, ""),
-        (["41"], {"41": -1, "42": 2}, "42"),
+        (["41"], {"41": 2, "42": 3}, 0, "41"),
+        (["41"], {"41": 0, "42": 3}, 0, "42"),
+        ([], {"42": 1}, 0, "42"),
+        (["41"], {}, 0, ""),
+        (["41"], {"41": -1, "42": 2}, 0, "42"),
+        (["41"], {"41": 2}, 1, "41"),
+        (["41"], {"41": 2}, 2, ""),
     ],
-    ids=["same-head", "same-head-without-memory", "newest-on-branch", "none", "artifact-listing-fails"],
+    ids=[
+        "same-head",
+        "same-head-without-memory",
+        "newest-on-branch",
+        "none",
+        "artifact-listing-fails",
+        "download-fails-once",
+        "download-fails-twice",
+    ],
 )
 def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
-    tmp_path: Path, same: list[str], kept: dict[str, int], chosen: str
+    tmp_path: Path, same: list[str], kept: dict[str, int], failures: int, chosen: str
 ) -> None:
-    find = _preflight_seed_steps()["Find the branch preflight that kept kill memory"]
+    seed = _preflight_seed_steps()["Seed the kill memory from the branch preflight"]
     done = "completed"
     branch = [{"id": 43, "head_branch": "topic", "status": "in_progress"}] + [
         {"id": int(run), "head_branch": "topic", "status": done} for run in ("42", "41", "40")
@@ -2187,6 +2184,15 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
     (binary / "gh").write_text(
         "#!/usr/bin/env bash\n"
         "set -o pipefail\n"
+        'if [[ "$1" == run ]]; then\n'
+        '  echo "download $3 $5 $7" >> "$CALLS"\n'
+        '  echo x >> "$ATTEMPTS"\n'
+        '  (( $(wc -l < "$ATTEMPTS") > FAILURES )) || exit 1\n'
+        '  mkdir -p "$9/mutation-killers-0" "$9/mutation-killers-1"\n'
+        '  echo "killer of $3" > "$9/mutation-killers-0/a"\n'
+        '  echo "cost of $3" > "$9/mutation-killers-1/b.cost"\n'
+        "  exit 0\n"
+        "fi\n"
         'echo "$2" >> "$CALLS"\n'
         "python3 -c 'import json, sys\n"
         "url = sys.argv[1]\n"
@@ -2195,15 +2201,24 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
         'print(json.dumps(found[0] if found else {"artifacts": [], "workflow_runs": []}))\' "$2" "$RESPONSES"'
         ' | jq -r "$4"\n'
     )
-    (binary / "gh").chmod(0o755)
+    (binary / "sleep").write_text('#!/usr/bin/env bash\necho "$1" >> "$SLEPT"\n')
+    for stub in ("gh", "sleep"):
+        (binary / stub).chmod(0o755)
     output = tmp_path / "output"
+    work = tmp_path / "work"
+    work.mkdir()
     result = subprocess.run(
-        ["bash", "-e", "-c", find["run"]],
+        ["bash", "-e", "-c", seed["run"]],
+        cwd=work,
         env={
             **os.environ,
             "PATH": f"{binary}:{os.environ['PATH']}",
             "CALLS": str(tmp_path / "calls"),
+            "ATTEMPTS": str(tmp_path / "attempts"),
+            "FAILURES": str(failures),
+            "SLEPT": str(tmp_path / "slept"),
             "RESPONSES": str(tmp_path / "responses.json"),
+            "RUNNER_TEMP": str(tmp_path / "runner"),
             "GITHUB_OUTPUT": str(output),
             "GITHUB_REPOSITORY": "o/r",
             "HEAD": "abc",
@@ -2212,7 +2227,7 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+    assert (result.returncode == 0) is (failures < 2), result.stderr
     assert (output.read_text() if output.exists() else "") == (f"id={chosen}\n" if chosen else "")
     calls = (tmp_path / "calls").read_text().splitlines()
     assert calls[:2] == [
@@ -2222,10 +2237,23 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
     assert not {"runs/7/artifacts", "runs/43/artifacts", "runs/44/artifacts"} & {
         call.removeprefix("repos/o/r/actions/").partition("?")[0] for call in calls
     }
-    if chosen:
-        assert f"kill memory of Mutation preflight run {chosen}" in result.stdout
+    killers = work / ".mutation-stats/killers"
+    if failures:
+        assert (tmp_path / "slept").read_text() == "30\n"
     else:
+        assert not (tmp_path / "slept").exists()
+    if chosen:
+        assert calls[-1] == f"download {chosen} o/r mutation-killers-*"
+        assert {path.name: path.read_text() for path in killers.iterdir()} == {
+            "a": f"killer of {chosen}\n",
+            "b.cost": f"cost of {chosen}\n",
+        }
+        assert f"2 kill memory files of Mutation preflight run {chosen}" in result.stdout
+    else:
+        assert not killers.exists()
+    if not chosen and not failures:
         assert "No Mutation preflight run of topic kept kill memory" in result.stdout
+        assert not [call for call in calls if call.startswith("download")]
 
 
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
