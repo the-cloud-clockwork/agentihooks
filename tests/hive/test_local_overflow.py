@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -195,7 +196,7 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     assert fenced.placement_refusal("eng", {"id": "task"}) == capped(2, 2, 2, cpus=3)
 
 
-def test_the_local_machine_cap_defaults_to_fifteen(setup):
+def test_the_local_machine_cap_defaults_to_fifteen(setup: SimpleNamespace) -> None:
     from scripts.swarm.store import SwarmConfig
 
     assert setup.store.config(setup.config.slug).local_max_agents == 15
@@ -228,7 +229,9 @@ def test_the_workstation_hive_limit_counts_another_swarm(setup, monkeypatch):
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci"])
-def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch, lane):
+def test_codex_local_fallback_refuses_at_the_eight_agent_cap(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
     from scripts.swarm.store import SwarmConfig
 
     fenced = hybrid(setup, monkeypatch)
@@ -245,7 +248,9 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
-def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(setup, monkeypatch):
+def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from types import SimpleNamespace
 
     from scripts import terminate_agent

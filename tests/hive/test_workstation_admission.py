@@ -46,7 +46,7 @@ def test_a_root_reservation_consumes_the_same_slot_as_overflow(setup, monkeypatc
         fenced.spawn(setup.config, "eng", "second", {"id": "second"})
 
 
-def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
+def test_local_deployment_obeys_the_workstation_cap(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
@@ -56,7 +56,7 @@ def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
 
 
-def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup):
+def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup: SimpleNamespace) -> None:
     from scripts.hive import placement_waits
     from scripts.hive.placement import LOCAL_FULL
     from scripts.swarm.controller import FencedRuntime
@@ -173,7 +173,7 @@ def test_an_existing_task_cannot_inflate_resource_room_during_a_pending_launch(s
     assert "1 of its 1" in setup.launcher.reserve_room(request, selected)
 
 
-def test_local_mode_exempts_masters_at_capacity(setup, monkeypatch):
+def test_local_mode_exempts_masters_at_capacity(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
