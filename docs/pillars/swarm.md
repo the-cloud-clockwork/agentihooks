@@ -5850,6 +5850,15 @@ grep '"gate": "reset"' ~/.agentihooks/swarm/<id>/gates/log.jsonl
 agentihooks swarm <id> set reset-gate=deny
 ```
 
+### Early end findings
+
+A tick pass ends early when a step reads a pass value that no step stored, usually because the step that writes it
+was held or ran past its budget. Such a pass still stamps its finish and the heartbeat, so the stale watcher sees a
+live tick. Each early end counts against the value it missed; an early end on another value starts the count again
+at one, and a full pass clears it. Once the count reaches `AGENTIHOOKS_HEALTH_EARLY_ENDS` (3), `agentihooks swarm
+<id> status` shows one `early end` finding that names the value and the count. The finding is information only and
+stops nothing.
+
 ### Spawn stall findings
 
 A `spawn stall` health finding means the swarm could have launched an agent for ten minutes and launched none. The

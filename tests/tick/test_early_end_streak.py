@@ -27,10 +27,9 @@ def _ending_early(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     monkeypatch.setattr(cli, "run_group", group)
 
 
-def _passes(swarm: Any, ledger: Any, runtime: Any, count: int) -> None:
-    """Run ``count`` tick passes of swarm ``sw``."""
-    for _ in range(count):
-        cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
+def _passes(swarm: Any, ledger: Any, runtime: Any, count: int) -> list[list[str]]:
+    """Run ``count`` tick passes of swarm ``sw``, returning the actions of each."""
+    return [cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({})) for _ in range(count)]
 
 
 def _early_ends(swarm: Any, ledger: Any) -> list[dict[str, Any]]:
@@ -62,7 +61,6 @@ def test_passes_ending_early_on_one_value_raise_one_finding_at_the_threshold(
     ]
 
 
-@pytest.mark.feature("swarm-tick-early-end-streak")
 def test_a_full_pass_clears_the_finding(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
@@ -71,10 +69,13 @@ def test_a_full_pass_clears_the_finding(
     run("sw", "create", "--repo", "/repo")
     real = cli.run_group
     _ending_early(monkeypatch, "agents")
-    _passes(swarm, ledger, runtime, 3)
+    early = _passes(swarm, ledger, runtime, 3)
+    assert all(actions[-1].startswith("pass ended early: no step stored agents") for actions in early)
     assert len(_early_ends(swarm, ledger)) == 1
     monkeypatch.setattr(cli, "run_group", real)
-    _passes(swarm, ledger, runtime, 1)
+    [full] = _passes(swarm, ledger, runtime, 1)
+    assert not any(action.startswith("pass ended early") for action in full)
+    assert swarm.redis.get(swarm.key("sw", "early-end-streak")) is None
     assert _early_ends(swarm, ledger) == []
 
 
