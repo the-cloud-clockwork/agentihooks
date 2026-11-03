@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.603 · 2026-11-03
+
+### 2026-11-03 · d2ca9320bdc6 · #9492 · @nestorcolt
+
+**Accept the focus only flag in the ledger API schema**
+
+This fixes a schema bug where the ledger server rejected `focus --only` requests with a 400 error because `operation_schema` defaulted untyped fields to strings, while clients send `only` as a JSON boolean. The ledger schema now explicitly types `freeze_set`'s `only` as a boolean and `position` as the `top`/`bottom` enum matching `ledger_freezes.POSITIONS`, so valid requests pass validation while invalid values (non-boolean `only`, bad `position`) are still correctly refused. This unblocks the `agentihooks swarm focus --only` CLI workflow.
+
 ## v2.17.600 · 2026-11-03
 
 ### 2026-11-03 · 950d4c0f5424 · #9484 · @nestorcolt
