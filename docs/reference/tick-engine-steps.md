@@ -19,8 +19,10 @@ steps that moved out of the hand written pass.
 | --- | --- | --- |
 | Registry | `scripts.tick.registry` | Holds every registered step. `waves()` orders them by `order` and `needs` and refuses duplicate names, unknown dependencies, dependency cycles, a budget that is not a finite positive number, a negative interval, and two steps in one lane that write the same domain with no dependency between them |
 | Group run | `scripts.tick.engine.run_group` | Runs the steps of one group sorted by `order`. Each step runs in a daemon thread under a copied context and a child deadline of its own budget; the engine waits at most that budget. A step that raises is recorded `failed`, one that runs past its budget is recorded `late`, and neither stops the next step |
-| Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments and returns the actions the steps wrote, in step order. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
+| Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments, hands the engine the task appliers (`tasks.appliers(state)`) and returns the actions the steps wrote, then a line for each write the engine dropped, in step order. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
+| Write applier | `run_group(..., apply=...)` | A map of domain to a function that applies one `Write`. As each step ends, the engine passes every write of a mapped domain to its applier; an applier that raises `RevisionConflict` drops that write. See [Steps that return writes](#steps-that-return-writes) |
 | Call step | `scripts.tick.steps.CallStep` | A step that runs one call of the tick module. It reads the pass state through the view and writes the actions it returned to its own domain, `actions:<step name>` |
+| Write step | `scripts.tick.steps.tasks.WriteStep` | A call step whose call returns action lines mixed with `Write` objects. It keeps every attribute of the `CallStep` it builds and splits the returned list: the strings go to `actions:<step name>`, the writes go to the engine |
 
 Every `CallStep` runs in lane `tick` with a declared budget and interval from
 `scripts.tick.steps.budgets.timing_of(name)`. Dependencies default to empty;
@@ -189,8 +191,8 @@ the step checks it and returns no actions when it does not hold.
 | --- | --- | --- |
 | 10 | run window | `run_window.step` |
 | 20 | verification notices | `claim_hold.verification_notices` |
-| 30 | size pass | `difficulty.size_pass` |
-| 40 | grouping release | `grouping.release_pass` |
+| 30 | size pass | `tasks.size_writes`, over `difficulty.sizes`; returns guarded `sizes` writes |
+| 40 | grouping release | `tasks.release_writes`, over `grouping.releases`; returns guarded `groups` writes |
 | 50 | dispatcher group | `dispatcher.group` |
 
 ### Placement (`scripts.tick.steps.place`)
@@ -224,6 +226,137 @@ The agent steps in `close` (orders 100 to 120) run before them. A stopped swarm
 that is not woken ends the pass in the `stopped branch` step of the `start`
 group, which makes its own `_close_space` call, and never reaches the `close`
 group.
+
+## Steps that return writes
+
+Under the parallel engine two steps of one group can run at the same time, so a
+step that writes the ledger itself can overwrite what a concurrent step wrote
+from the same read. A write step instead computes its change from the pass
+state and returns it. The engine applies it with compare and set: the write
+lands only while the field the step read still holds the value it saw.
+
+The size pass and the grouping release are the steps that write this way in
+this delivery. The rank pass, phase and planning steps, the
+[fleet red notice](fleet-red-notice.md) and the master stall step still make
+their ledger writes inside their own calls.
+
+### The write
+
+`scripts.tick.step.Write` carries four fields:
+
+| Field | Meaning |
+| --- | --- |
+| `domain` | What the write changes; selects the applier |
+| `key` | The record, a task id for both task appliers |
+| `value` | The change to make |
+| `expected` | The guard: the values the step read. Defaults to `None`, which the task appliers read as no fields to compare |
+
+| Step | Domain | Key | Value | Guard (`expected`) | Applier call |
+| --- | --- | --- | --- | --- | --- |
+| size pass | `sizes` | task id | the size fields from `difficulty.rule` or the classifier: `difficulty`, `difficulty_source` (`rule`, `classifier` or `default`) and `difficulty_confidence` | `{"difficulty": ""}`: the task is still unsized | `ledger.update_task(slug, task_id, fields)` |
+| grouping release | `groups` | lead task id | the members released | `{"group_members": [...]}`: the lead still holds the members the step read | `ledger.ungroup_tasks(slug, lead_id)` |
+
+Both steps read the pass document and leave it as read; neither writes the
+ledger nor edits `doc` in place. `difficulty.sizes(doc)` yields each unsized
+open task's fields (at most `PER_TICK`, five, per pass) and
+`grouping.releases(slug, store, doc)` returns each stopped lead with the reason
+and its members.
+
+### How the engine applies writes
+
+1. The step ends. In a parallel pass the engine applies its writes on the
+   scheduling thread before any step that needs it starts; outside one, after
+   the step and before the next.
+2. For each write whose domain has an applier, the applier reads the task from
+   the pass's held ledger view (`scripts.tick.view.current()`), as it stands
+   after the pass's latest write, and compares the guarded fields.
+3. A match makes the ledger call. A guarded field that moved, or a ledger call
+   refused with `LedgerRefused`, raises `RevisionConflict`.
+4. The engine catches `RevisionConflict`, adds the write to the step record's
+   `dropped` and the reason to `conflicts`, and goes on with the next write.
+   Any other exception from an applier is not caught.
+
+`tasks.appliers(state)` maps `sizes` to `task_writer` and `groups` to
+`group_writer` when the site's pass state holds a `ledger` and a `slug`; with
+either missing it returns no appliers. Every group site receives the same map;
+only steps that return `sizes` or `groups` writes reach it.
+
+### Dropped writes and the recompute
+
+A dropped write is not retried in the same pass. `steps.actions(records)`
+appends one line per dropped write after the step's own actions:
+
+```text
+dropped write sizes t7 of step size pass: task t7 changed difficulty since the step read it; the next pass recomputes it
+dropped write groups t3 of step grouping release: task t3 changed group_members since the step read it; the next pass recomputes it
+dropped write sizes t7 of step size pass: the ledger refused the write of task t7; the next pass recomputes it
+```
+
+The line joins the pass actions in the tick journal. The step's own action
+line, such as `sized task t7 M by rule`, is still reported for that pass even
+though its write was dropped, so read both lines together.
+
+The next pass reads the ledger again and runs the step on the new state. A task
+another writer sized is no longer unsized, so the size pass skips it; a task
+still unsized gets a fresh size. A lead whose members changed is judged on its
+new members. No queue of dropped writes is kept.
+
+### Conflict scenario
+
+`tests/tick/test_apply.py` holds the scenario both sequentially and on a
+parallel pass:
+
+1. Task `t1` is at revision 1. The step reads it and returns a write expecting
+   revision 1; a concurrent writer moves `t1` to revision 2 before the write is
+   applied.
+2. The applier raises `RevisionConflict`. The record's `dropped` holds the write,
+   the store keeps the concurrent value, and the actions read
+   `sized from revision 1` followed by
+   `dropped write tasks t1 of step size: tasks/t1 moved from revision 1 to 2; the next pass recomputes it`.
+3. The next pass reads revision 2, returns a write expecting it, and the write
+   lands: `t1` is at revision 3 with `M from revision 2` and nothing is dropped.
+
+### Writing a step that returns writes
+
+Return action strings and `Write` objects from the call and register it as a
+`WriteStep` that declares its write domain, so `waves()` can order it against
+other writers of that domain:
+
+```python
+from collections.abc import Callable
+from typing import Any
+
+from scripts.tick import registry
+from scripts.tick.step import Write
+from scripts.tick.steps.tasks import SIZES, TASK_PASSES, WriteStep, held
+
+
+def _example(tick: Any, get: Callable[[str], Any]) -> list[str | Write]:
+    return [
+        Write(SIZES, "t7", {"difficulty": "S", "difficulty_source": "rule"}, expected={"difficulty": ""}),
+        "sized task t7 S by rule",
+    ]
+
+
+registry.register(WriteStep("example", TASK_PASSES, held(_example), writes=frozenset({SIZES})))
+```
+
+A write to a domain with no applier at the site is neither applied nor dropped:
+it stays on the record's result and changes nothing. A new domain needs its
+applier added to `tasks.appliers`. The step name still needs its timing entry,
+as described above.
+
+### Limits
+
+- The guard is compared against the pass's held ledger view, not checked by the
+  ledger server. A change that reaches the server after that view's latest
+  refresh is not seen by the compare. Without a held view the applier skips the
+  compare and writes; a task the view lacks compares as empty, so its size write
+  goes through.
+- A dropped write waits a whole pass for its recompute.
+- `LedgerRefused` on these two steps is now a dropped write with a
+  `dropped write` line, where the old calls produced a `skipped ...: the ledger
+  refused its write` line through `skip_refused`.
 
 ## Exceptions
 
@@ -284,6 +417,7 @@ The delivered proof and limitations are recorded in
 | Test | What it holds |
 | --- | --- |
 | `tests/tick/test_step_isolation.py` | The 300 second predecessor scenario, completed results, abandoned wall time and daemon worker, budget calculation, undeclared timing refusal, registered timings, spawn prerequisites and longest path start bound |
+| `tests/tick/test_apply.py` | The dropped write and its recompute, sequential and parallel; writes without an applier pass through; both appliers write while their guard holds, drop a moved guard and turn a refused ledger call into a conflict; appliers need a ledger and a swarm; the size pass and grouping release return guarded writes and leave the document as read; a write step keeps every attribute of its call step |
 | `tests/tick/test_tasks.py` | The task passes and close steps make the old calls in order, and a held exception skips the rest and is raised at the site |
 | `tests/tick/test_place.py` | Group membership and orders; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
@@ -302,4 +436,6 @@ The delivered proof and limitations are recorded in
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
+| A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
+| A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
 | A tick pass raised and later steps of the same group did not run | Expected: the first moved step that raised holds the exception and the rest of the group's moved steps skip until it is raised at the site |
