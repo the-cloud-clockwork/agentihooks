@@ -220,3 +220,23 @@ def test_finished_and_ended_agents_do_not_count_on_their_hive(setup, monkeypatch
 def test_each_unreported_live_agent_adds_to_the_processes_its_hive_reports(setup, monkeypatch):
     states = ["launching", "working", "suspect", "retiring"]
     assert _remote_agents(setup, monkeypatch, states, {"codex:other": 2}) == 5
+
+
+def test_running_and_held_reuse_one_fleet_scan_through_a_shared_cache(setup, monkeypatch):
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    scans: list[str] = []
+    original = setup.store.agents
+
+    def counting(slug: str) -> list[AgentRecord]:
+        scans.append(slug)
+        return original(slug)
+
+    monkeypatch.setattr(setup.store, "agents", counting)
+    cache = local_slots.PassCache()
+    local_slots.running(setup.store, setup.config.slug, "task", cache)
+    local_slots.held(setup.store, "workstation", setup.config.slug, "task", cache)
+    assert len(scans) == 1
+    scans.clear()
+    local_slots.running(setup.store, setup.config.slug, "task")
+    local_slots.held(setup.store, "workstation", setup.config.slug, "task")
+    assert len(scans) == 2

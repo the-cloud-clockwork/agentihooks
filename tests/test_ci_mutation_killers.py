@@ -48,6 +48,16 @@ def test_tests_covering_the_changed_lines_run_before_faster_fallback_tests(tmp_p
     ]
 
 
+def test_a_test_file_named_as_direct_runs_every_one_of_its_tests_first(tmp_path):
+    memory = killers.KillMemory(tmp_path, {"scripts.a.": ["tests/test_a.py"]})
+    tests = ["tests/test_tick.py::test_fast", "tests/test_a.py::test_b[1]", "tests/test_ab.py::test_c"]
+    assert memory.order("scripts.a.x_f__mutmut_1", tests) == [tests[1], tests[0], tests[2]]
+    assert killers.is_direct("tests/test_a.py::test_b[1]", ["tests/test_a.py::test_b"])
+    assert not killers.is_direct("tests/test_a.py::test_bc", ["tests/test_a.py::test_b"])
+    assert not killers.is_direct("tests/test_ab.py::test_c", ["tests/test_a.py"])
+    assert killers.is_direct("tests/test_a.py::TestA::test_b", ["tests/test_a.py"])
+
+
 def test_the_test_that_killed_a_mutant_runs_first_for_every_later_mutant_of_its_function(tmp_path):
     memory = killers.KillMemory(tmp_path / "killers")
     memory.mutant = "scripts.a.x_f__mutmut_1"

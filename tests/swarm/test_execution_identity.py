@@ -2,6 +2,7 @@ import json
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -370,16 +371,18 @@ def test_updates_preserve_status_timestamp_until_status_changes(store, agent, mo
     assert store.execution("fixture", current.execution_id) == changed
 
 
-def _legacy_contention(store, monkeypatch, attempts, trips):
+def _legacy_contention(store: RedisStore, monkeypatch: pytest.MonkeyPatch, attempts: list[bool], trips: int) -> None:
     from redis.exceptions import WatchError
 
     original = store.redis.pipeline
 
-    def pipeline(*args, **kwargs):
+    def pipeline(*args: Any, **kwargs: Any) -> Any:
         pipe = original(*args, **kwargs)
         execute = pipe.execute
 
-        def contested():
+        def contested() -> Any:
+            if not pipe.watching:
+                return execute()
             attempts.append(True)
             if len(attempts) <= trips:
                 raise WatchError("synthetic competing controller")
@@ -689,17 +692,21 @@ def test_unbound_uid_never_hides_a_changed_runtime_target(store, agent, field):
 
 
 @pytest.mark.parametrize("changed_key", ["executions", "agents"])
-def test_legacy_write_retries_when_its_observed_state_changes(store, agent, monkeypatch, changed_key):
+def test_legacy_write_retries_when_its_observed_state_changes(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, changed_key: str
+) -> None:
     store.put_agent("fixture", agent)
     key = store.key("fixture", changed_key)
     watched = []
     original = store.redis.pipeline
 
-    def pipeline(*args, **kwargs):
+    def pipeline(*args: Any, **kwargs: Any) -> Any:
         pipe = original(*args, **kwargs)
         execute = pipe.execute
 
-        def competing_commit():
+        def competing_commit() -> Any:
+            if not pipe.watching:
+                return execute()
             watched.append(True)
             if len(watched) == 1:
                 if changed_key == "executions":
@@ -789,3 +796,34 @@ def test_the_hive_ack_binds_the_full_target_over_the_host_only_target(store, age
     stale = store.start_execution("fixture", replace(agent, state="launching", runtime_target={"host_id": "hive"}))
     store.put_agent("fixture", replace(stale, state="working", runtime_target=HIVE_TARGET, pane_id="w1:p2"))
     assert store.execution("fixture", stale.execution_id).runtime_target == HIVE_TARGET
+
+
+@pytest.mark.parametrize("layout", ["document", "records"])
+@pytest.mark.parametrize("query", ["get", "records", "occupants", "managed", "agents", "hive"])
+def test_registry_queries_use_record_port(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, query: str, layout: str
+) -> None:
+    from scripts.swarm import fencing
+
+    current = store.start_execution("fixture", agent)
+    if layout == "records":
+        fencing.migrate_records(store, "fixture", writers_upgraded=True)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("registry read the whole fencing document")
+
+    if layout == "records":
+        monkeypatch.setattr(fencing.WholeDocumentRecords, "sections", forbidden)
+
+    monkeypatch.setattr(fencing, "read", forbidden)
+    registry = store.execution_registry
+    if query == "hive":
+        assert registry.hive("fixture", agent.name) == current.hive
+    elif query == "get":
+        assert registry.get("fixture", current.execution_id) == current
+    elif query == "managed":
+        assert registry.managed("fixture", agent.name)
+    elif query == "occupants":
+        assert registry.occupants("fixture") == {current.seat: current}
+    else:
+        assert getattr(registry, query)("fixture") == [current]

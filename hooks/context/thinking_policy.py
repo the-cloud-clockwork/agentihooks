@@ -18,7 +18,7 @@ def get_thinking_guidance(default_effort: str, budget: int) -> str:
         Guidance string for injection, or empty string if disabled/default-high.
     """
     if default_effort == "high" and budget <= 0:
-        return ""  # No constraint to communicate
+        return ""
 
     parts = []
 
@@ -57,12 +57,11 @@ def check_subagent_effort(tool_input: dict, default_effort: str) -> Optional[str
         Warning string if misaligned, None otherwise.
     """
     if default_effort == "high":
-        return None  # No constraint to enforce
+        return None
 
     model = (tool_input.get("model") or "").lower()
     if model == "opus" and default_effort in ("low", "medium"):
         subagent_type = tool_input.get("subagent_type", "general-purpose")
-        # These common agent types rarely need Opus-level reasoning
         if subagent_type in ("Explore", "Plan", "general-purpose"):
             return (
                 f"Subagent spawned with model=opus (profile default: {default_effort}). "

@@ -140,7 +140,7 @@ RUN = [
     "bundle unlink",
     "init",
     "deps ensure",
-    "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= max-agents=20 prefer=",
+    "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= max-agents=20 prefer=",
     "hive run",
 ]
 
@@ -150,7 +150,7 @@ def test_the_charted_placement_rank_is_registered_on_every_start(tmp_path, monke
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert (
-        "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
         "max-agents=20 prefer=eng:1,ci:1,plan:1"
     ) in commands.splitlines()
 
@@ -160,7 +160,7 @@ def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeyp
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert (
-        "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
         "max-agents=20 prefer= name=swarm-hive-002"
     ) in commands.splitlines()
 

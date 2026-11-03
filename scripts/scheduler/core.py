@@ -5,7 +5,7 @@ import socket
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 from hooks._redis import redis_key
 from scripts.events.bus import StateConflict
@@ -21,7 +21,18 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 BUCKET = "scheduler"
 WRITE_TRIES = 64
+PROCESS_OWNER = "process"
+ABANDONED_S = 3600
+ABANDONED = ("ready", "fired", "cancelled", "stopped", "stale")
 T = TypeVar("T")
+
+
+def _abandoned(entry: dict[str, Any], now: float) -> bool:
+    """A process timer no waiter holds: finished or never started, and due ABANDONED_S or more before now."""
+    due = entry.get("due")
+    return (
+        entry["owner"] == PROCESS_OWNER and entry["state"] in ABANDONED and due is not None and now - due >= ABANDONED_S
+    )
 
 
 @dataclass(frozen=True)
@@ -150,7 +161,7 @@ class Scheduler:
     def document(self) -> dict:
         return self._read()[0]
 
-    def _read(self) -> tuple[dict, int | None]:
+    def _read(self) -> tuple[dict[str, Any], int | None]:
         from scripts.events.scheduler_state import read
 
         stored = read(self.state, self.name("entries"), self.key("entries"))
@@ -335,20 +346,38 @@ class Scheduler:
         self.get(entry_id).cancel()
         self.change(lambda document: document["retired"].__setitem__(entry_id, True))
 
-    def _reap(self, lease: Lease) -> None:
-        def reap(document):
+    def _reap(self, lease: Lease, now: float | None = None) -> None:
+        """Drop retired entries, and process timers left finished or never started for longer than ABANDONED_S."""
+        now = time.time() if now is None else now
+
+        def reap(document: dict[str, Any]) -> None:
             for entry_id in document["retired"]:
                 document["entries"].pop(entry_id, None)
             document["retired"] = {}
+            for entry_id in [key for key, entry in document["entries"].items() if _abandoned(entry, now)]:
+                document["entries"].pop(entry_id)
 
         self.change(reap, lease=lease)
 
+    @staticmethod
+    def _has_work(document: dict[str, Any], now: float) -> bool:
+        """True when an entry is due or pending, or a retired entry waits to be reaped."""
+        if document["retired"]:
+            return True
+        return any(
+            entry["state"] == "pending" or (entry["state"] == "active" and entry["due"] <= now)
+            for entry in document["entries"].values()
+        )
+
     def run_due(self, *, now: float | None = None) -> int:
+        """Dispatch due entries under the dispatch lease; a pass with nothing due, pending or retired writes nothing."""
         now = time.time() if now is None else now
+        if not self._has_work(self._read()[0], now):
+            return 0
         with dispatch_lock(self.state, self.name("entries")) as lease:
             fired = self.change(lambda document: self._claim(document, now), lease=lease)
             for entry_id, entry in self.document()["entries"].items():
                 if entry["state"] == "pending":
                     self._deliver(entry_id, now, lease)
-            self._reap(lease)
+            self._reap(lease, now)
             return fired

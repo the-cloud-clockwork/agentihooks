@@ -39,6 +39,7 @@ def chat():
     return [(e["by"], e["text"]) for e in state["chat"]]
 
 
+@pytest.mark.feature("ledger-operator-chat")
 def test_an_agent_line_addressed_to_nobody_is_refused():
     state, rejected = core.sync(SLUG, ops=[said(1, "The docs task is merged.", by="boss")])
     assert chat() == []
@@ -46,12 +47,14 @@ def test_an_agent_line_addressed_to_nobody_is_refused():
     assert "chat is reply only" in " ".join(state["_meta"]["warnings"])
 
 
+@pytest.mark.feature("ledger-operator-chat")
 def test_an_unprompted_agent_line_to_the_operator_is_refused():
     _, rejected = core.sync(SLUG, ops=[said(1, "Phase one is half done.", by="boss", to="operator")])
     assert rejected == ["m-1"]
     assert chat() == []
 
 
+@pytest.mark.feature("ledger-operator-chat")
 def test_an_agent_line_answering_an_operator_line_is_shown():
     core.sync(SLUG, ops=[said(1, "where are we")])
     core.sync(SLUG, ops=[said(2, "Phase one is half done.", by="boss", reply_to="m-1")])
@@ -77,6 +80,7 @@ def test_the_operator_writes_without_an_address():
     assert chat() == [("operator", "where are we")]
 
 
+@pytest.mark.feature("ledger-operator-chat")
 def test_a_notice_lands_in_the_notifications_panel_and_never_in_chat():
     state, _ = core.sync(SLUG, ops=[{"op": "notice", "id": "n1", "by": "swarm", "text": "The master is down."}])
     [row] = state["notifications"]

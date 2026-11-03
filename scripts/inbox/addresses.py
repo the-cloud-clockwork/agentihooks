@@ -4,7 +4,7 @@ from scripts.inbox.store import InboxError, InboxStore
 
 
 def check_address(inbox: InboxStore, sender: str, address: str) -> None:
-    resolved = inbox.names.resolve(address)
+    resolved = inbox.seats.recipient(address)
     if resolved == "operator" or inbox.names.entry(resolved):
         return
     if is_seat(resolved) and inbox.seats.occupant(resolved).generation:

@@ -74,6 +74,7 @@ def sent_at(item):
     return item.created_at
 
 
+@pytest.mark.feature("inbox-wake")
 def test_an_idle_pane_with_a_pending_item_gets_exactly_one_prompt(inbox):
     item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
     second = inbox.send(MASTER_NAME, "sw-eng-1", "and the docs")
@@ -217,6 +218,7 @@ def test_unresolved_sweep_keeps_processing_after_repeated_live_addresses(inbox, 
 
 
 @pytest.mark.parametrize("state", ["blocked", "working", "unknown"])
+@pytest.mark.feature("inbox-wake")
 def test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_window(inbox, state):
     item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
     herdr, ledger = FakeHerdr({"p1": state}), FakeLedger()
@@ -272,6 +274,7 @@ def test_the_original_overdue_item_replayed_at_nine_minutes(pane, step):
     assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W, "sw") == step
 
 
+@pytest.mark.feature("inbox-escalation")
 def test_retries_stop_at_three_then_the_master_gets_an_item(inbox):
     item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
     herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
@@ -288,6 +291,7 @@ def test_retries_stop_at_three_then_the_master_gets_an_item(inbox):
     assert ledger.alerts == []
 
 
+@pytest.mark.feature("inbox-escalation")
 def test_the_operator_notification_follows_the_next_window(inbox):
     item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
     herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
@@ -319,6 +323,7 @@ def test_the_operator_notification_is_text_the_ledger_accepts_whatever_the_messa
 
 
 @pytest.mark.parametrize("address", ["sw-eng-1", MASTER_NAME])
+@pytest.mark.feature("inbox-escalation")
 def test_an_unread_fyi_is_never_escalated(inbox, address):
     item = inbox.send("operator", address, "noted, nothing to do", fyi=True)
     herdr, ledger = FakeHerdr({"p1": "idle", "pm": "idle"}), FakeLedger()
@@ -399,6 +404,7 @@ def test_a_session_outside_herdr_gets_no_wake_and_goes_straight_to_escalation(in
     assert herdr.prompts == [] and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.alerts) == 1
 
 
+@pytest.mark.feature("inbox-escalation")
 def test_an_item_for_the_master_skips_straight_to_the_operator(inbox):
     item = inbox.send("sw-eng-1", MASTER_NAME, "check the plan")
     herdr, ledger = FakeHerdr({"pm": "idle"}), FakeLedger()
@@ -508,6 +514,7 @@ def test_an_unread_alert_notice_never_raises_another_alert(inbox):
 
 
 @pytest.mark.parametrize("harness", ["", "claude", "codex"])
+@pytest.mark.feature("inbox-wake")
 def test_a_tick_with_pending_items_never_types_into_the_master_pane(inbox, harness):
     master = AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm", seat="master@sw", harness=harness)
     inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
@@ -520,6 +527,7 @@ def test_a_tick_with_pending_items_never_types_into_the_master_pane(inbox, harne
     assert herdr.prompts == []
 
 
+@pytest.mark.feature("inbox-wake")
 def test_a_claude_pane_takes_its_items_through_the_inbox_channel_never_a_typed_wake(inbox):
     claude = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="claude")
     codex = AgentRecord("sw-eng-2", "eng", "t2", pane_id="p2", harness="codex")

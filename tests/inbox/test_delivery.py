@@ -42,6 +42,7 @@ def _post(capsys):
     return capsys.readouterr().out
 
 
+@pytest.mark.feature("inbox-hook-delivery")
 def test_claude_gets_a_pending_item_once_at_pre_tool_use_and_it_is_delivered(store, capsys):
     item = store.send("alice", "bob", "review my branch")
     out = _pre(capsys)
@@ -52,6 +53,7 @@ def test_claude_gets_a_pending_item_once_at_pre_tool_use_and_it_is_delivered(sto
     assert "review my branch" not in _pre(capsys)
 
 
+@pytest.mark.feature("inbox-hook-delivery")
 def test_codex_gets_the_item_at_post_tool_use_not_at_pre_tool_use(store, codex, capsys):
     item = store.send("alice", "bob", "review my branch")
     assert "review my branch" not in _pre(capsys)
@@ -80,6 +82,7 @@ def test_the_codex_memory_helper_never_takes_the_main_thread_item(store, codex, 
     assert store.get(item.id).state == "delivered"
 
 
+@pytest.mark.feature("inbox-hook-delivery")
 def test_another_session_items_are_never_injected(store, capsys):
     item = store.send("alice", "carol", "for carol only")
     assert "for carol only" not in _pre(capsys)

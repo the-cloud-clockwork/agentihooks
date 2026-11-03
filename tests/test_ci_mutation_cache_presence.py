@@ -9,7 +9,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 
 def _steps():
-    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation"]["steps"]
+    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-shard"]["steps"]
 
 
 def test_mutation_cache_save_uses_a_presence_output_without_hashing_files():

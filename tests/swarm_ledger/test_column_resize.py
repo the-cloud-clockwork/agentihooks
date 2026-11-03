@@ -16,6 +16,7 @@ def fresh():
     layout.path().unlink(missing_ok=True)
 
 
+@pytest.mark.feature("ledger-column-resize")
 def test_every_table_on_the_ledger_page_is_one_the_column_grips_reach():
     body = page_source().split("<body>", 1)[1]
     tables = re.findall(r"<table\b[^>]*>", body)
@@ -38,6 +39,7 @@ def test_no_script_builds_a_table_the_column_grips_cannot_reach():
         assert 'createElement("table")' not in source, script.name
 
 
+@pytest.mark.feature("ledger-column-resize")
 def test_the_ledger_page_and_home_wire_column_grips_and_save_their_widths():
     ledger = ROOT.joinpath("static", "js", "layout.js").read_text()
     assert 'document.querySelectorAll("table.sw-table[id]")' in ledger
@@ -47,6 +49,7 @@ def test_the_ledger_page_and_home_wire_column_grips_and_save_their_widths():
     assert "writeLayout(layout)" in home
 
 
+@pytest.mark.feature("ledger-column-resize")
 def test_column_widths_round_trip_beside_panel_sizes_and_reset_with_them():
     saved = layout.write(
         {"handoff-box": {"height": 200}, "columns": {"agents-table-9": [250.4, 60, 0], "home": [280, 56]}}

@@ -8,9 +8,13 @@ import sys
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
 import pytest
+
+if TYPE_CHECKING:
+    from scripts.scheduler.core import Scheduler
 
 pytestmark = pytest.mark.unit
 
@@ -96,6 +100,60 @@ async def test_runner_still_stops_on_any_other_error(monkeypatch, tmp_path):
 
     with pytest.raises(KeyError):
         await service.run(SimpleNamespace(run_due=drain), asyncio.Event())
+
+
+async def test_a_pass_that_loses_its_dispatch_lock_ends_and_the_next_pass_reacquires_it(monkeypatch, tmp_path, capsys):
+    import fakeredis
+
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.scheduler import lease, service
+    from scripts.scheduler.core import Scheduler
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(lease, "Thread", Mock())
+    scheduler = Scheduler(RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="proof")
+    timer = scheduler.timer(owner="operator", payload="notice", delay=0)
+    timer.start()
+    deliver, run_due, stop, delivered = scheduler._deliver, scheduler.run_due, asyncio.Event(), []
+
+    def lapsing(entry_id, now, held):
+        if not delivered:
+            scheduler.change(lambda document: document["lease"].__setitem__("expires", 0))
+        delivered.append(entry_id)
+        deliver(entry_id, now, held)
+
+    def passing():
+        try:
+            return run_due()
+        finally:
+            if timer.state == "fired":
+                stop.set()
+
+    monkeypatch.setattr(scheduler, "_deliver", lapsing)
+    monkeypatch.setattr(scheduler, "run_due", passing)
+    await service.run(scheduler, stop)
+    assert delivered == [timer.id, timer.id]
+    assert timer.state == "fired"
+    assert "lease" not in scheduler.document()
+    assert capsys.readouterr().err == "scheduler pass ended: scheduler lost its dispatch lock\n"
+
+
+@pytest.mark.parametrize("lost", ["LostLock", "Busy"])
+async def test_runner_keeps_dispatching_after_a_pass_without_the_dispatch_lock(monkeypatch, tmp_path, capsys, lost):
+    from scripts.scheduler import lease, service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    stop, passes = asyncio.Event(), []
+
+    def drain():
+        passes.append(1)
+        if len(passes) == 1:
+            raise getattr(lease, lost)("the lock moved")
+        stop.set()
+
+    await service.run(cast("Scheduler", SimpleNamespace(run_due=drain)), stop)
+    assert passes == [1, 1]
+    assert capsys.readouterr().err == "scheduler pass ended: the lock moved\n"
 
 
 def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch, tmp_path):
@@ -666,6 +724,41 @@ def test_a_supervisor_started_by_its_unit_marks_its_runtime_folder_before_it_loc
         with pytest.raises(service.AlreadyRunning):
             service.supervise(stopped)
     assert (tmp_path / "scheduler" / "agentihooks-scheduler.service").read_text() == "agentihooks-scheduler.service"
+
+
+def test_a_supervisor_started_by_its_unit_drains_one_started_outside_it_then_takes_the_lock(
+    monkeypatch, tmp_path, capsys
+):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", "1")
+    asked, drained = [], []
+    monkeypatch.setattr(service, "holder", lambda environ: asked.append(environ) or {"pid": 4242})
+    monkeypatch.setattr(service, "drain", lambda pid, environ: drained.append((pid, environ)) or True)
+    stopped = Event()
+    stopped.set()
+    service.supervise(stopped)
+    assert asked == [os.environ]
+    assert drained == [(4242, os.environ)]
+    assert capsys.readouterr() == ("", "the scheduler unit takes over from supervisor 4242, started outside it\n")
+    assert json.loads((tmp_path / "supervisor.json").read_text())["pid"] == os.getpid()
+
+
+@pytest.mark.parametrize(("unit", "held"), [("1", None), ("1", "self"), ("", 4242)])
+def test_a_supervisor_drains_no_holder_unless_its_unit_started_it_and_another_holds(monkeypatch, tmp_path, unit, held):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", unit)
+    pid = os.getpid() if held == "self" else held
+    monkeypatch.setattr(service, "holder", lambda environ: None if pid is None else {"pid": pid})
+    monkeypatch.setattr(service, "drain", Mock(side_effect=AssertionError("drained without cause")))
+    stopped = Event()
+    stopped.set()
+    service.supervise(stopped)
 
 
 def test_a_supervisor_started_by_its_unit_creates_and_marks_a_new_runtime_folder(monkeypatch, tmp_path):

@@ -1,13 +1,18 @@
 import json
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Thread, get_ident
 from unittest.mock import patch
 
 import pytest
 
+from scripts.inbox import relay
+from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import cli, lease
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import authority_context, ledger, ledger_link, ledger_route
+from scripts.tick import engine
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_cli import run
 
@@ -38,23 +43,41 @@ def store():
     return result
 
 
+class _StepsPerTick:
+    """The engine's running steps kept apart per tick thread, so one swarm's tick never holds the other's step."""
+
+    def __init__(self) -> None:
+        self._steps: dict[tuple[int, str], Thread] = {}
+
+    def get(self, name: str, default: Thread | None = None) -> Thread | None:
+        return self._steps.get((get_ident(), name), default)
+
+    def __setitem__(self, name: str, worker: Thread) -> None:
+        self._steps[(get_ident(), name)] = worker
+
+
 def test_only_the_selected_tick_uses_the_hosted_ledger(store, monkeypatch):
     seen = {}
     before = dict(os.environ)
+    monkeypatch.setattr(engine, "_RUNNING", _StepsPerTick())
     monkeypatch.setattr(cli.outbox, "flush", lambda *_: None)
-    monkeypatch.setattr(cli.relay, "relay", lambda *_: None)
-    monkeypatch.setattr(cli.LaunchSlots, "refresh_reported", lambda *_: None)
+    monkeypatch.setattr(relay, "relay", lambda *_: None)
+    monkeypatch.setattr(LaunchSlots, "refresh_reported", lambda *_: None)
     monkeypatch.setattr(cli.outage, "providers", lambda *_: None)
     monkeypatch.setattr(cli, "_publish_tick_status", lambda *_: None)
     monkeypatch.setattr(lease, "acquire", lambda *_: lease.Lease("host", 4, 10**15))
+    monkeypatch.setattr(lease, "renew", lambda _store, _slug, held: held)
     from scripts.swarm import controller
 
     monkeypatch.setattr(controller, "take_tick_lock", lambda *_: "lock")
     monkeypatch.setattr(controller, "keep_tick", lambda *_: None)
     monkeypatch.setattr(controller, "release_tick_lock", lambda *_: None)
 
-    def probe(slug, _now, _check):
+    both = Barrier(2)
+
+    def probe(slug: str, _now: int, _check: Callable[[], bool] | None) -> bool:
         seen[slug] = (ledger.base(), ledger_link.remote())
+        both.wait(30)
         return False
 
     monkeypatch.setattr(cli.outage, "ledger_health", probe)

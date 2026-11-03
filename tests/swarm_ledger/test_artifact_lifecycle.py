@@ -50,12 +50,14 @@ def publish(slug, op_id, task="", data=MARKDOWN, **extra):
 
 
 class TestRequestGate:
+    @pytest.mark.feature("artifact-request-rule")
     def test_a_publish_on_an_unmarked_task_is_refused_and_names_where_proofs_go(self, slug):
         add_task(slug, "w1")
         state, rejected = publish(slug, "a-plain", task="w1")
         assert rejected == ["a-plain"] and state["artifacts"] == []
         assert any(RULE in w for w in state["_meta"]["warnings"])
 
+    @pytest.mark.feature("artifact-request-rule")
     def test_a_task_marked_artifact_accepts_a_publish(self, slug):
         add_task(slug, "w2", artifact=True)
         state, rejected = publish(slug, "a-asked", task="w2")
@@ -68,6 +70,7 @@ class TestRequestGate:
         assert next(t for t in state["tasks"] if t["id"] == "w3")["artifact"] is True
         assert publish(slug, "a-later", task="w3")[1] == []
 
+    @pytest.mark.feature("artifact-request-rule")
     def test_an_operator_message_naming_the_request_accepts_a_publish(self, slug):
         storage.apply_ops(slug, ops=[{"op": "add", "thread": "chat", "id": "m-asks", "text": "Draw me the logo"}])
         state, rejected = publish(slug, "a-logo", request="m-asks")
@@ -79,6 +82,7 @@ class TestRequestGate:
         storage.apply_ops(slug, ops=[comment])
         assert publish(slug, "a-plan", task="w4", request="c-asks")[1] == []
 
+    @pytest.mark.feature("artifact-request-rule")
     def test_an_agent_message_or_an_unknown_id_is_no_request(self, slug):
         agent_line = {"op": "add", "thread": "chat", "id": "m-self", "text": "I made a plan", "by": AGENT}
         storage.apply_ops(slug, ops=[agent_line])
@@ -206,6 +210,7 @@ def delete(slug, row_id, op="artifact_delete"):
 
 
 class TestTrash:
+    @pytest.mark.feature("artifact-trash")
     def test_delete_moves_the_artifact_to_the_trash_and_keeps_its_file(self, slug):
         add_task(slug, "w5", artifact=True)
         state, _ = publish(slug, "a-del", task="w5")
@@ -216,6 +221,7 @@ class TestTrash:
         assert trashed["id"] == "a-del" and isinstance(trashed["deleted_at"], int)
         assert artifacts.path_of(slug, file_id).is_file()
 
+    @pytest.mark.feature("artifact-trash")
     def test_restore_brings_it_back(self, slug):
         add_task(slug, "w6", artifact=True)
         publish(slug, "a-back", task="w6")

@@ -1,7 +1,7 @@
 import os
 import socket
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -12,7 +12,7 @@ from scripts.swarm.store import RedisStore, SwarmError
 
 TICK_MS = 60_000
 TICK_REFUSAL = "AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second"
-STALE = "the controller lease is stale"
+STALE = document.STALE
 EPOCH = ContextVar("controller_epoch", default=None)
 T = TypeVar("T")
 
@@ -97,7 +97,8 @@ def current(store: RedisStore, slug: str) -> Lease | None:
     if _address(slug):
         data = _remote(slug, "current")
         return Lease(**data) if data is not None else None
-    return _live(document.read(store, slug), now_ms(store))
+    cheap = document.read_lease(store, slug)
+    return _live(cheap if cheap is not None else document.read(store, slug), now_ms(store))
 
 
 def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
@@ -169,7 +170,7 @@ def fenced(store: RedisStore, slug: str, held: Lease | int | None, change: Calla
         _check(doc, now_ms(store), held)
         return change(doc)
 
-    return document.write(store, slug, guarded)
+    return document.write(store, slug, guarded, held)
 
 
 def require(store: RedisStore, slug: str, held: Lease) -> None:
@@ -182,10 +183,20 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
     if _address(slug):
         return Lease(**_remote(slug, "renew", {"owner": held.owner, "epoch": held.epoch}))
 
+    cheap = document.read_lease(store, slug)
+    if cheap is not None:
+        at = now_ms(store)
+        _check(cheap, at, held)
+        live = _recorded(cheap)
+        assert live is not None
+        if live.expires_at - at >= ttl_ms() - tick_ms():
+            return live
+
     def extend(doc: dict[str, Any]) -> Any:
         at = now_ms(store)
         _check(doc, at, held)
         live = _recorded(doc)
+        assert live is not None
         if live.expires_at - at >= ttl_ms() - tick_ms():
             return live
         doc["lease"] = asdict(Lease(held.owner, held.epoch, at + ttl_ms()))
@@ -233,6 +244,36 @@ def fencing(epoch: int | None) -> Iterator[None]:
         yield
     finally:
         EPOCH.reset(token)
+
+
+PASS: ContextVar[tuple[RedisStore, str, int] | None] = ContextVar("controller_pass", default=None)
+
+
+def epoch_for(slug: str) -> int | None:
+    """The controller epoch a ledger write to slug carries: the fencing epoch in scope, else the pass's own epoch
+    for its swarm and the live owner's epoch for another swarm, else none."""
+    if (epoch := EPOCH.get()) is not None:
+        return epoch
+    held = PASS.get()
+    if held is None:
+        return None
+    store, own, epoch = held
+    if slug == own:
+        return epoch
+    owner = current(store, slug)
+    return owner.epoch if owner else None
+
+
+@contextmanager
+def held_pass(store: RedisStore, slug: str, held: Lease) -> Generator[None]:
+    """Hold the lease for one pass: renew it once, keep one beat for the whole pass and fence its ledger writes."""
+    renew(store, slug, held)
+    token = PASS.set((store, slug, held.epoch))
+    try:
+        with kept(store, slug, held):
+            yield
+    finally:
+        PASS.reset(token)
 
 
 def release(store: RedisStore, slug: str, held: Lease) -> bool:

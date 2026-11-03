@@ -33,7 +33,7 @@ def swept(monkeypatch):
     [
         lambda repo: repo.read("absent", "title"),
         lambda repo: repo.get_document("absent"),
-        lambda repo: repo.events_since("absent", 0),
+        lambda repo: repo.export_document("absent"),
     ],
 )
 def test_a_missing_ledger_error_names_its_slug(tmp_path, call):
@@ -70,7 +70,7 @@ def test_stored_rows_hold_an_empty_event_list_and_the_events_live_in_their_table
             )
         ]
     assert rows == [(exact[-1], "array", "null")]
-    assert repo.events_since("ev", 0) == document()["_meta"]["events"]
+    assert repo.export_document("ev")["_meta"]["events"] == document()["_meta"]["events"]
 
 
 def test_an_import_without_a_token_gets_a_fresh_32_character_token(tmp_path):

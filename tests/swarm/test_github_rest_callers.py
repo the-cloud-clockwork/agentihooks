@@ -1,9 +1,14 @@
 import json
 import subprocess
+from collections.abc import Iterator
 
 import pytest
 
 from scripts.swarm import github_reads, github_sampler, ledger_events, merge_queue
+from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.adapters.github import command
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.source_control import RateLimit
 
 pytestmark = pytest.mark.unit
 PR = "https://github.com/org/repo/pull/7"
@@ -79,19 +84,56 @@ def test_required_check_rules_are_read_once_per_interval_across_pull_requests(gi
     assert [row["caller"] for row in charged()] == ["swarm.checks.rules"] * 2
 
 
+def test_the_required_view_graph_charges_graphql_and_runs_the_exact_query(
+    github: tuple[object, list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[list[str], dict[str, object]]] = []
+
+    def read(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        seen.append((argv, options))
+        return subprocess.CompletedProcess(argv, 0, '{"data": {"p0": 1}}', "")
+
+    monkeypatch.setattr(merge_queue.time, "time", lambda: 50.0)
+    with github_reads.calling("swarm.checks.view"):
+        body = merge_queue.graphql("{q}", {"url": PR}, read)
+    assert body == {"p0": 1}
+    assert seen == [
+        (
+            command(["api", "graphql", "-f", "query={q}", "-f", f"url={PR}"]),
+            {"capture_output": True, "text": True, "timeout": 20},
+        )
+    ]
+    assert [(row["caller"], row["endpoint"], row["at"]) for row in charged()] == [
+        ("swarm.checks.view", "graphql", 50.0)
+    ]
+
+
 def test_the_sampler_counts_used_calls_across_a_window_reset():
     assert github_sampler.spent([(100, 1), (160, 1), (40, 2), (90, 2)]) == 60 + 40 + 50
     assert github_sampler.spent([(5, 1), (5, 1)]) == 0
 
 
-def rate_limit(used):
-    def read(args, **kwargs):
-        assert args == ["gh", "api", "rate_limit"]
-        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 30}
-        body = {"resources": {"core": {"used": next(used), "reset": 5}}}
-        return subprocess.CompletedProcess(args, 0, json.dumps(body), "")
+class Quota(FakeSourceControl):
+    def __init__(self, used: Iterator[int]) -> None:
+        super().__init__()
+        self.used = used
+        self.deadlines: list[Deadline] = []
 
-    return read
+    def rate_limit(self, *, deadline: Deadline) -> RateLimit:
+        assert 29 < deadline.remaining <= github_sampler.RATE_LIMIT_SECONDS == 30
+        self.deadlines.append(deadline)
+        return RateLimit(next(self.used), 1, 5)
+
+
+def rate_limit(used: Iterator[int]) -> Quota:
+    return Quota(used)
+
+
+def test_the_sampler_reads_the_core_quota_through_the_login_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    quota = Quota(iter([12]))
+    monkeypatch.setattr(github_sampler.stack, "login_source_control", lambda: quota)
+    assert github_sampler.core() == (12, 5)
+    assert len(quota.deadlines) == 1
 
 
 def test_the_sampler_reports_calls_an_hour_and_the_spend_outside_the_doctor(github, monkeypatch):
@@ -108,7 +150,7 @@ def test_the_sampler_reports_calls_an_hour_and_the_spend_outside_the_doctor(gith
     github_reads.charge("swarm.head", PULL, 200.0)
     monkeypatch.delenv("GH_TOKEN")
     found = github_sampler.sample(
-        120, 3600, run=rate_limit(iter([1000, 1600, 2200])), sleep=lambda pause: None, clock=lambda: next(clock)
+        120, 3600, provider=rate_limit(iter([1000, 1600, 2200])), sleep=lambda pause: None, clock=lambda: next(clock)
     )
     assert found == {
         "since": 100.0,
@@ -124,7 +166,9 @@ def test_the_sampler_reports_calls_an_hour_and_the_spend_outside_the_doctor(gith
 
 def test_the_sampler_reads_once_a_minute_and_reports_an_idle_window_as_zero(github):
     pauses, clock = [], iter([0.0, 3600.0])
-    found = github_sampler.sample(60, run=rate_limit(iter([7] * 61)), sleep=pauses.append, clock=lambda: next(clock))
+    found = github_sampler.sample(
+        60, provider=rate_limit(iter([7] * 61)), sleep=pauses.append, clock=lambda: next(clock)
+    )
     assert pauses == [60] * 60
     assert found["calls"] == found["per_hour"] == 0
     assert found["outside_doctor_per_hour"] == found["unattributed_per_hour"] == 0
@@ -133,13 +177,13 @@ def test_the_sampler_reads_once_a_minute_and_reports_an_idle_window_as_zero(gith
 def test_an_hour_window_reports_its_calls_as_the_hourly_rate(github):
     clock = iter([0.0, 3600.0])
     found = github_sampler.sample(
-        1, run=rate_limit(iter([0, 7200])), sleep=lambda pause: None, clock=lambda: next(clock)
+        1, provider=rate_limit(iter([0, 7200])), sleep=lambda pause: None, clock=lambda: next(clock)
     )
     assert found["per_hour"] == 7200
 
 
 def test_a_window_too_short_to_time_counts_its_calls_as_one_hour(github):
-    found = github_sampler.sample(1, run=rate_limit(iter([7, 9])), sleep=lambda pause: None, clock=lambda: 500.0)
+    found = github_sampler.sample(1, provider=rate_limit(iter([7, 9])), sleep=lambda pause: None, clock=lambda: 500.0)
     assert found["calls"] == found["per_hour"] == 2
 
 

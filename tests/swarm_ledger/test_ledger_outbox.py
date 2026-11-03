@@ -80,6 +80,7 @@ def chat(state):
     return [entry["text"] for entry in state["chat"] if entry["by"] == ENG]
 
 
+@pytest.mark.feature("ledger-outbox")
 def test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_when_it_returns(server, capsys):
     phase = f"phases/{stored()['phases'][0]['id']}"
     server.stop()
@@ -114,6 +115,7 @@ def test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_wh
     assert not outbox.path().exists()
 
 
+@pytest.mark.feature("ledger-outbox")
 def test_a_replayed_record_lands_once_even_when_it_is_replayed_again(server, capsys):
     phase = f"phases/{stored()['phases'][0]['id']}"
     server.stop()
@@ -169,6 +171,7 @@ def test_a_record_the_server_refuses_on_replay_is_set_aside_and_reported(server,
     assert "refused on replay" in capsys.readouterr().err
 
 
+@pytest.mark.feature("ledger-outbox")
 def test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped(server):
     server.stop()
     with pytest.raises(SystemExit, match="ledger server not answering"):
@@ -178,6 +181,7 @@ def test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped(ser
     assert queued() == []
 
 
+@pytest.mark.feature("ledger-outbox")
 def test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it(
     server: Server, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -206,6 +210,40 @@ def test_join_reaches_the_server_past_unrelated_talk_and_keeps_deduplication(
     assert ledger.call(SLUG, [op])["applied"] == [op["id"]]
     assert stored() == joined
     assert outbox.path().read_text() == before
+
+
+@pytest.mark.parametrize("pinned", [False, True])
+def test_outage_join_is_kept_replayed_once_and_counted_at_launch(
+    server: Server, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], pinned: bool
+) -> None:
+    from scripts.swarm import launch_check
+    from scripts.swarm.store import AgentRecord
+
+    if pinned:
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ENG)
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    agent = AgentRecord(ENG, "eng", "t1", started_at=1)
+    assert launch_check.joined_at(agent, stored()) is None
+    server.stop()
+    assert run(capsys, ENG, "join") == [{"joined": ENG, "slug": SLUG, "role": "member"}]
+    line = outbox.path().read_text()
+    entry = json.loads(line)
+    assert entry["args"]["ops"][0]["op"] == "join"
+    assert entry["args"]["agent"] == (ENG if pinned else "")
+    assert launch_check.joined_at(agent, stored()) is None
+    assert outbox.flush(None).applied == []
+    assert outbox.path().read_text() == line
+    server.start()
+    assert outbox.flush(None).applied == [entry["item"]]
+    joined = launch_check.joined_at(agent, stored())
+    assert joined is not None
+    first = stored()["_meta"]
+    outbox.path().write_text(line)
+    assert outbox.flush(None).applied == [entry["item"]]
+    assert stored()["_meta"]["join_history"] == first["join_history"]
+    assert stored()["_meta"]["members"] == first["members"]
+    assert launch_check.joined_at(agent, stored()) == joined
+    assert not outbox.path().exists()
 
 
 def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay(server, monkeypatch, capsys):
@@ -273,6 +311,7 @@ def test_a_record_the_server_keeps_answering_busy_is_set_aside_once_it_is_older_
     assert json.loads(outbox.skipped_path().read_text().splitlines()[-1])["reason"] == reason
 
 
+@pytest.mark.feature("ledger-outbox-expiry")
 def test_a_stopped_server_never_expires_held_talk(server, capsys):
     server.stop()
     run(capsys, ENG, "say", "Held through a long outage", "--reply-to", OPERATOR_LINE)
@@ -281,6 +320,7 @@ def test_a_stopped_server_never_expires_held_talk(server, capsys):
     assert (report.left, report.rejected) == (1, [])
 
 
+@pytest.mark.feature("ledger-outbox-expiry")
 def test_the_busy_age_limit_reads_its_setting_and_defaults_to_an_hour():
     assert outbox.busy_age({}) == 3600
     assert outbox.busy_age({outbox.BUSY_AGE_ENV: "90"}) == 90
@@ -327,6 +367,7 @@ def test_a_flush_without_a_store_keeps_inbox_records_untried(server, capsys):
     assert "outbox replay stopped" not in capsys.readouterr().err
 
 
+@pytest.mark.feature("ledger-outbox-expiry")
 def test_an_expired_record_is_set_aside_as_it_was_written(server, monkeypatch, capsys):
     server.stop()
     run(capsys, ENG, "say", "Expired verbatim", "--reply-to", OPERATOR_LINE)

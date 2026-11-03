@@ -60,6 +60,7 @@ PAGINATION = {
         "state": {"enum": ["done"]},
         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "q": {"type": "string", "maxLength": 200},
+        "targets": {"type": "string", "minLength": 1, "maxLength": 500},
     },
 }
 
@@ -115,7 +116,7 @@ FIELDS = {
     "alert_close": "by target item outcome",
     "alert_raise": "by source text item",
     "time_left": "by slots ci_minutes fix_phase watched",
-    "freeze_set": "by verb target reason quote",
+    "freeze_set": "by verb target reason quote position only",
     "freeze_clear": "by target reason quote",
     "events_ack": "by rev",
     "blocker_attempt": "by item text command output",

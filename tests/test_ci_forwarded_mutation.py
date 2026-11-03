@@ -20,7 +20,7 @@ def _jobs():
 @pytest.mark.parametrize("stats", ["success", "failure", "skipped", "cancelled"])
 def test_required_gate_grades_forwarded_reports_and_real_statistics(event, forwarded, plan, stats):
     step = _jobs()["gate-required"]["steps"][0]
-    required = ["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]
+    required = ["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]
     needs = {name: {"result": "success"} for name in required}
     needs["select"]["outputs"] = {"scope": "none"}
     needs["mutation-plan"] = {"result": plan, "outputs": {"forwarded": forwarded}}

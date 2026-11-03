@@ -34,7 +34,9 @@
       ]
     },
     "leaked": [],
-    "protected_changed": [],
+    "protected_changed": [
+      "lease-cache"
+    ],
     "refusals": {
       "forged_resume": "unrecognized_report",
       "shallow_backup": "shallow_report",

@@ -59,6 +59,35 @@ def test_archive_moves_only_rows_no_live_reader_returns(store):
     assert registry.archive("fixture") == 0
 
 
+@pytest.mark.parametrize("external", [False, True])
+def test_fenced_archive_and_rows_written_in_the_old_layout_reach_old_readers(store: RedisStore, external: bool) -> None:
+    from scripts.swarm import lease
+
+    first, second, third, other = history(store)
+    if external:
+        fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        assert store.execution_registry.archive("fixture") == 2
+        store.put_agent("fixture", replace(third, state="working"))
+    port = fencing.records(store, "fixture")
+    assert port.layout("fixture") == fencing.DOCUMENT
+    doc = fencing.read(store, "fixture")
+    executions = fencing.read_executions(store, "fixture")
+    assert set(doc["archive"]) == {first.execution_id, second.execution_id}
+    assert executions == doc["executions"]
+    assert executions[third.execution_id]["state"] == "working"
+    for execution_id, row in doc["archive"].items():
+        found = port.record("fixture", "archive", execution_id)
+        assert found is not None
+        assert found.value == row
+    for execution_id, row in executions.items():
+        found = port.record("fixture", "executions", execution_id)
+        assert found is not None
+        assert found.value == row
+
+
 def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
     first, second, third, other = history(store)
     registry = store.execution_registry
@@ -262,3 +291,60 @@ def test_a_first_read_imports_the_legacy_execution_hashes(store):
     doc = fencing.read(store, "other")
     assert set(doc["executions"]) == {"exe-old"}
     assert set(doc["archive"]) == {"exe-older"}
+
+
+VALIDATION = {"state": "validated", "pid": 7, "revisions": {"/repo": "abc"}, "source_blobs": [{"path": "CLAUDE.md"}]}
+
+
+def validated(store, seat, previous=""):
+    agent = AgentRecord(
+        store.next_name("fixture", "eng"), "eng", "task", seat=seat, profile_decision={"validation": dict(VALIDATION)}
+    )
+    return store.start_execution("fixture", agent, previous)
+
+
+def test_archive_drops_binding_source_blobs_and_keeps_the_rest_of_the_validation(store):
+    first = validated(store, "eng-1@fixture")
+    store.drop_agent("fixture", first.name)
+    second = validated(store, "eng-1@fixture", first.execution_id)
+
+    assert store.execution_registry.archive("fixture") == 1
+
+    archived = section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
+    live = section(store, "executions")[second.execution_id]["profile_decision"]["validation"]
+    assert archived == {key: value for key, value in VALIDATION.items() if key != "source_blobs"}
+    assert live == VALIDATION
+    assert store.execution("fixture", first.execution_id).profile_decision["validation"]["state"] == "validated"
+
+
+def test_archive_compacts_rows_archived_before_it_dropped_source_blobs(store):
+    first = validated(store, "eng-1@fixture")
+    store.drop_agent("fixture", first.name)
+    validated(store, "eng-1@fixture", first.execution_id)
+    bare = {"name": "old@fixture", "seat": "eng-9@fixture", "generation": 1, "execution_id": "exe-bare"}
+
+    def legacy(doc):
+        doc["archive"][first.execution_id] = doc["executions"].pop(first.execution_id)
+        doc["archive"]["exe-bare"] = dict(bare)
+
+    fencing.write(store, "fixture", legacy)
+    assert "source_blobs" in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
+
+    assert store.execution_registry.archive("fixture") == 0
+    assert "source_blobs" not in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]
+    assert section(store, "archive")["exe-bare"] == bare
+    compacted = fencing._states(store).get("fixture").revision
+    assert store.execution_registry.archive("fixture") == 0
+    assert fencing._states(store).get("fixture").revision == compacted
+
+
+def test_the_tick_reconcile_archives_without_source_blobs(store):
+    first = validated(store, "eng-1@fixture")
+    store.drop_agent("fixture", first.name)
+    validated(store, "eng-1@fixture", first.execution_id)
+    runtime = MagicMock()
+    runtime.live_names.return_value = set()
+
+    ExecutionRegistry(store).reconcile("fixture", runtime, 0)
+
+    assert "source_blobs" not in section(store, "archive")[first.execution_id]["profile_decision"]["validation"]

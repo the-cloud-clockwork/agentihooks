@@ -87,8 +87,8 @@ def freezes(task: dict, doc: dict, graph: dict) -> str:
     return ""
 
 
-def urgent(task: dict, rows: dict, doc: dict, graph: dict) -> str:
-    return phased(task, doc) or freezes(task, doc, graph) or waits(task, rows)
+def urgent(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> str:
+    return phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows)
 
 
 def waits(task: dict, rows: dict) -> str:

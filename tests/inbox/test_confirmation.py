@@ -39,11 +39,13 @@ def _pre(capsys):
     return capsys.readouterr().out
 
 
+@pytest.mark.feature("inbox-redelivery")
 def test_redelivery_window_defaults_to_five_minutes_and_reads_the_environment():
     assert redelivery_ms({}) == 300_000
     assert redelivery_ms({ENV: "7"}) == 7000
 
 
+@pytest.mark.feature("inbox-confirmation")
 def test_confirm_moves_a_delivered_or_read_item_to_confirmed(store):
     item = delivered(store)
     assert store.confirm(item.id, "bob").state == "confirmed"
@@ -59,6 +61,7 @@ def test_confirm_leaves_a_pending_item_alone(store):
     assert store.get(item.id).state == "pending"
 
 
+@pytest.mark.feature("inbox-redelivery")
 def test_a_delivered_item_never_confirmed_returns_to_pending_after_the_window(store):
     item = delivered(store)
     assert store.redeliver(item.updated_at + W - 1, W) == []
@@ -69,6 +72,7 @@ def test_a_delivered_item_never_confirmed_returns_to_pending_after_the_window(st
     assert item.id in {i.id for i in store.pending()}
 
 
+@pytest.mark.feature("inbox-redelivery")
 def test_a_confirmed_item_is_never_redelivered(store):
     item = delivered(store)
     store.confirm(item.id, "bob")
@@ -77,6 +81,7 @@ def test_a_confirmed_item_is_never_redelivered(store):
 
 
 @pytest.mark.parametrize("finish", ["read", "close"])
+@pytest.mark.feature("inbox-confirmation")
 def test_read_and_close_count_as_confirmation(store, finish):
     item = delivered(store)
     if finish == "read":
@@ -172,6 +177,7 @@ def test_a_successor_at_a_seat_does_not_confirm_what_its_predecessor_was_shown(s
     assert [i.id for i in store.confirm_shown("bob", item.updated_at + 1)] == [item.id]
 
 
+@pytest.mark.feature("inbox-confirmation")
 def test_the_next_hook_event_confirms_an_item_shown_by_the_last_one(store, capsys, monkeypatch):
     item = store.send("alice", "bob", "review my branch")
     assert "review my branch" in _pre(capsys)
@@ -224,6 +230,7 @@ def test_known_session_redelivers_a_legacy_delivery_without_session_identity(sto
     assert store.get(item.id).state == "pending"
 
 
+@pytest.mark.feature("inbox-confirmation")
 def test_another_session_cannot_directly_confirm_the_delivery(store):
     item = store.deliver(store.send("alice", "bob", "review").id, "bob")
     replacement = InboxStore(store.redis, session_id="s2")
@@ -301,6 +308,7 @@ def test_stop_and_prompt_confirm_items_the_channel_pushed(store, event, monkeypa
     assert store.get(item.id).state == "confirmed"
 
 
+@pytest.mark.feature("inbox-redelivery")
 def test_an_unconfirmed_item_is_shown_again_by_whichever_transport_claims_next(store, monkeypatch):
     item = store.send("alice", "bob", "review my branch")
     [pushed] = seen.claim(store, "bob")
@@ -369,6 +377,7 @@ def test_the_wake_ladder_treats_a_redelivered_item_as_pending(store):
     assert store.get(item.id).state == "pending"
 
 
+@pytest.mark.feature("inbox-channel-write-failure")
 def test_a_failed_channel_write_puts_every_unsent_item_back_to_pending(store):
     import anyio
 
@@ -393,6 +402,7 @@ def test_a_failed_channel_write_puts_every_unsent_item_back_to_pending(store):
     assert states(store, first.id)[-1] == ("pending", "bob", "the inbox channel could not show it")
 
 
+@pytest.mark.feature("inbox-channel-write-failure")
 def test_a_cancelled_channel_write_puts_the_item_back_to_pending(store):
     import anyio
 

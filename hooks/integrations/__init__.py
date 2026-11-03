@@ -80,10 +80,6 @@ from hooks.integrations.storage import (
     upload_path,
 )
 
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
-
 
 def check_all_integrations(print_output: bool = False) -> dict:
     """Check configuration status of all registered integrations.
@@ -110,20 +106,17 @@ def check_all_integrations(print_output: bool = False) -> dict:
 
 
 __all__ = [
-    # Integration Base
     "IntegrationBase",
     "IntegrationRegistry",
     "ConfigStatus",
     "EnvVarStatus",
     "check_all_integrations",
-    # AWS
     "AWSConfigParser",
     "AWSAccount",
     "get_aws_profiles",
     "get_aws_account_id",
     "get_all_aws_accounts",
     "find_aws_account",
-    # Email
     "EmailClient",
     "EmailResult",
     "EmailConfig",
@@ -137,22 +130,18 @@ __all__ = [
     "markdown_to_html",
     "wrap_html_body",
     "parse_recipients",
-    # S3 Storage
     "S3StorageClient",
     "StorageIntegration",
     "UploadResult",
     "upload_path",
-    # Lambda
     "LambdaClient",
     "LambdaResult",
     "LambdaIntegration",
     "lambda_invoke",
-    # DynamoDB
     "DynamoDBClient",
     "DynamoDBResult",
     "DynamoDBIntegration",
     "dynamodb_put_item",
-    # PostgreSQL
     "PostgresClient",
     "PostgresResult",
     "PostgresIntegration",

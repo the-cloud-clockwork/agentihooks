@@ -24,6 +24,7 @@ def store(server):
     return fresh(server)
 
 
+@pytest.mark.feature("inbox-seats")
 def test_an_item_sent_to_a_seat_is_delivered_to_whichever_agent_occupies_it(store):
     store.seats.occupy(SEAT, "rig-eng-1", at=1)
     item = store.send("rig-master-1", SEAT, "take the flaky test")
@@ -32,6 +33,7 @@ def test_an_item_sent_to_a_seat_is_delivered_to_whichever_agent_occupies_it(stor
     assert store.deliver(item.id, "rig-eng-2") is None
 
 
+@pytest.mark.feature("inbox-seats")
 def test_a_successor_gets_its_predecessors_pending_items(store):
     store.seats.occupy(SEAT, "rig-eng-1", at=1)
     item = store.send("rig-master-1", SEAT, "rebase onto dev")
@@ -49,6 +51,7 @@ def test_the_mailbox_keeps_items_sent_to_the_session_name(store):
     assert {i.id for i in store.mailbox("rig-eng-1")} == {direct.id, seated.id}
 
 
+@pytest.mark.feature("inbox-seats")
 def test_only_the_occupant_reads_replies_and_closes_a_seat_item(store):
     store.seats.occupy(SEAT, "rig-eng-1", at=1)
     item = store.send("alice", SEAT, "question")

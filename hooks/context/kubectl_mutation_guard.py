@@ -7,30 +7,15 @@ lifecycle** actions — restarting pods, scaling for capacity, draining nodes,
 labelling for ops, ad-hoc debug pods — are allowed because they are
 troubleshooting, not feature work.
 
-The blocklist focuses on commands that *encode behavior into the live cluster
-without going through git*:
-  kubectl edit / patch / set / autoscale / cp INTO pod / exec writes
-  helm install / upgrade / rollback outside CI
-  argocd app sync --local
-  ssh-edit / scp INTO host / docker exec writes/installs
+Blocked, because they encode behavior into the live cluster without git: kubectl edit,
+patch, set, autoscale, cp INTO pod and exec writes; helm install, upgrade and rollback
+outside CI; argocd app sync --local; ssh edits, scp INTO host and docker exec writes.
+Lifecycle ops (rollout restart, scale, drain, cordon, taint, debug, annotate, label,
+create, apply -f, delete) stay allowed for troubleshooting without ceremony.
 
-The blocklist deliberately does NOT include lifecycle ops (rollout restart,
-scale, drain, cordon, taint, debug, annotate, label, create, apply -f, delete)
-because those are part of operational troubleshooting and the operator wants
-them available without ceremony.
-
-Bypass mode (operator said ``disable controls``) unlocks this guard for
-troubleshooting, per CI Manifesto §2 — the HARD FLOOR itself (direct
-push/commit/tag/reset on main, secrets in files) is a different, narrower
-set enforced elsewhere and is unaffected by this toggle.
-
-KUBECTL_MUTATION_GUARD_EXEC_ALLOW lists comma-separated `namespace/pod-glob`
-entries (matched with fnmatch) whose `kubectl exec` / `kubectl cp` target
-pod is let through without bypass mode.
-
-References:
-- agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md §2
-- agentihooks-bundle/profiles/*/.claude/rules/code-is-source.md
+Bypass mode (``disable controls``) unlocks this guard per CI Manifesto §2; the HARD FLOOR
+is enforced elsewhere. KUBECTL_MUTATION_GUARD_EXEC_ALLOW lists comma-separated
+`namespace/pod-glob` entries whose `kubectl exec` / `kubectl cp` target is let through.
 """
 
 from __future__ import annotations
@@ -41,36 +26,19 @@ import re
 import shlex
 from typing import Optional
 
-# ---------------------------------------------------------------------------
-# Whole-command regex patterns — match the full Bash command string
-# ---------------------------------------------------------------------------
-
 _RE_FLAGS = re.IGNORECASE | re.DOTALL
 
-# Each entry: (pattern, short rule key, human description).
-#
-# Scope rule: this list contains ONLY commands that encode behavior into the
-# live cluster without going through git. Operational lifecycle commands
-# (rollout restart/pause/resume, scale, drain, cordon, taint, debug,
-# annotate, label, create, apply -f, replace -f, delete) are deliberately
-# absent — those are troubleshooting tools and the operator must be free to
-# use them without ceremony.
 _WHOLE_CMD_PATTERNS: list[tuple[re.Pattern, str, str]] = [
-    # kubectl edit — opens an in-place editor on the live manifest. Behavior
-    # change disguised as ops.
     (
         re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?edit\b", _RE_FLAGS),
         "kubectl-edit",
         "kubectl edit (in-place manifest edit — change the manifest in code, push, let CI/ArgoCD apply)",
     ),
-    # kubectl patch — strategic/JSON merge patch on a live resource. Behavior
-    # change disguised as ops.
     (
         re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?patch\b", _RE_FLAGS),
         "kubectl-patch",
         "kubectl patch (in-place manifest patch — change the manifest in code, push, let CI/ArgoCD apply)",
     ),
-    # kubectl set env/image/resources/... — direct field mutation.
     (
         re.compile(
             r"\bkubectl\s+(?:[^\n;|&]*?\s)?set\s+(?:env|image|resources?|serviceaccount|selector|subject)\b", _RE_FLAGS
@@ -78,20 +46,16 @@ _WHOLE_CMD_PATTERNS: list[tuple[re.Pattern, str, str]] = [
         "kubectl-set",
         "kubectl set <env|image|resources|...> (field mutation — put it in the manifest)",
     ),
-    # kubectl autoscale — creates an HPA. HPA is a behavior config, belongs
-    # in the chart.
     (
         re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?autoscale\b", _RE_FLAGS),
         "kubectl-autoscale",
         "kubectl autoscale (HPA is a behavior config — put it in the chart)",
     ),
-    # helm install / upgrade / rollback — deploys are git-driven via ArgoCD.
     (
         re.compile(r"\bhelm\s+(?:[^\n;|&]*?\s)?(?:install|upgrade|rollback)\b", _RE_FLAGS),
         "helm-deploy",
         "helm install/upgrade/rollback (deploys go through git + ArgoCD)",
     ),
-    # argocd app sync --local — bypasses git as source of truth.
     (
         re.compile(r"\bargocd\s+app\s+sync\b[^\n;|&]*?--local\b", _RE_FLAGS),
         "argocd-sync-local",
@@ -99,20 +63,13 @@ _WHOLE_CMD_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     ),
 ]
 
-# ---------------------------------------------------------------------------
-# kubectl exec mutation patterns — match what comes AFTER the `--` separator
-# ---------------------------------------------------------------------------
 
-# Capture the kubectl exec command and what's after `--`. Command-position
-# anchored so `kubectl exec` mid-string in a quoted commit body / echo arg
-# does not falsely trigger.
 _KUBECTL_EXEC_RE = re.compile(
     r"(?:^|[;&|]\s*|\n\s*|`|\$\(\s*)"
     r"\bkubectl\s+(?:[^\n;|&]*?\s)?exec\b([^\n;|&]*?)--\s+(.+?)(?=\s*(?:[;|&\n]|$))",
     _RE_FLAGS,
 )
 
-# Things that, immediately after --, indicate a write/install inside the pod.
 _EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r"^\s*tee\b", _RE_FLAGS), "exec-tee", "kubectl exec ... -- tee (writes a file inside the pod)"),
     (
@@ -142,10 +99,9 @@ _EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern, str, str]] = [
         re.compile(r"^\s*(?:sh|bash|ash|zsh|dash)\s+-c\s+['\"]", _RE_FLAGS),
         "exec-shell-c",
         None,
-    ),  # special handling — inspect inside the quoted shell
+    ),
 ]
 
-# Inside `sh -c '...'` — flag mutation patterns within the quoted command
 _INNER_SHELL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r">\s*['\"]?(?:/|\$|~)", _RE_FLAGS), "redirect-to-fs-path"),
     (re.compile(r">>\s*['\"]?(?:/|\$|~)", _RE_FLAGS), "append-to-fs-path"),
@@ -163,10 +119,6 @@ _INNER_SHELL_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# kubectl cp direction parsing — only block local → pod copies
-# ---------------------------------------------------------------------------
-
 _KUBECTL_CP_RE = re.compile(
     r"(?:^|[;&|]\s*|\n\s*|`|\$\(\s*)"
     r"\bkubectl\s+(?:[^\n;|&]*?\s)?cp\b([^\n;|&]*)",
@@ -181,30 +133,21 @@ def _check_kubectl_cp_into_pod(cmd_args: str) -> bool:
       - Each arg is either `path` (local) or `[ns/]pod:path` (remote).
       - `kubectl cp <local> <pod>:<path>` — INTO pod (forbidden).
       - `kubectl cp <pod>:<path> <local>` — OUT of pod (allowed).
+    An unparseable command counts as INTO a pod and is blocked.
     """
     try:
         tokens = shlex.split(cmd_args.strip())
     except ValueError:
-        # Unparseable — be conservative and block.
         return True
-    # Filter out flags
     positional = [t for t in tokens if not t.startswith("-")]
     if len(positional) < 2:
         return False
     src, dst = positional[0], positional[1]
     src_is_pod = ":" in src and not src.startswith("/") and not src.startswith(".")
     dst_is_pod = ":" in dst and not dst.startswith("/") and not dst.startswith(".")
-    # Local → Pod is blocked
     return (not src_is_pod) and dst_is_pod
 
 
-# ---------------------------------------------------------------------------
-# SSH and scp INTO host detection
-# ---------------------------------------------------------------------------
-
-# `ssh ... <remote-cmd>` where <remote-cmd> contains write patterns.
-# Anchored at command position (start of input, or after a shell separator)
-# to avoid false-positive matches against the word "ssh" inside text.
 _CMD_POSITION_PREFIX = r"(?:^|[;&|]\s*|\n\s*|`|\$\(\s*)"
 
 _SSH_RE = re.compile(
@@ -232,9 +175,6 @@ _SSH_WRITE_PATTERNS: list[tuple[re.Pattern, str]] = [
     ),
 ]
 
-# scp INTO remote host: any scp where the destination contains `<host>:<path>`
-# Pattern: `scp [flags] <src...> <user@host:path>` — last positional arg has
-# `:` after a host segment (not a relative/absolute filesystem path).
 _SCP_RE = re.compile(
     r"(?:^|[;&|]\s*|\n\s*|`|\$\(\s*)\bscp\s+(.+)",
     _RE_FLAGS,
@@ -251,23 +191,16 @@ def _check_scp_into_host(cmd_args: str) -> bool:
     if len(positional) < 2:
         return False
     dst = positional[-1]
-    # Remote path looks like `[user@]host:path` — has `:` and the part before
-    # `:` is not a drive letter and not a filesystem path.
     if ":" not in dst:
         return False
     host_part, _, _ = dst.partition(":")
     if not host_part or host_part.startswith("/") or host_part.startswith("."):
         return False
-    # Check at least one source is local (no colon or starts with / or .)
     for src in positional[:-1]:
         if ":" not in src or src.startswith("/") or src.startswith("."):
             return True
     return False
 
-
-# ---------------------------------------------------------------------------
-# docker exec mutation detection (same shape as kubectl exec)
-# ---------------------------------------------------------------------------
 
 _DOCKER_EXEC_RE = re.compile(
     r"(?:^|[;&|]\s*|\n\s*|`|\$\(\s*)"
@@ -296,11 +229,6 @@ _DOCKER_EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-# Module-level cache of the latest violation reason for downstream logging.
 _last_violation: Optional[str] = None
 
 
@@ -339,7 +267,6 @@ def _strip_quoted_strings(cmd: str) -> str:
             i += 1
             while i < n and cmd[i] != quote:
                 if cmd[i] == "\\" and quote == '"' and i + 1 < n:
-                    # Skip escape sequence inside double quotes
                     i += 2
                     continue
                 i += 1
@@ -351,7 +278,6 @@ def _strip_quoted_strings(cmd: str) -> str:
             i += 1
 
     cleaned = "".join(out)
-    # Elide heredoc bodies: <<EOF\n...\nEOF (and <<-EOF)
     cleaned = re.sub(
         r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n.*?\n\s*\1\s*(?:\n|$)",
         "<<HEREDOC_STRIPPED\n",
@@ -382,12 +308,15 @@ def _target_allowlisted(namespace: Optional[str], pod: Optional[str]) -> bool:
 
 
 _VALUE_FLAGS = ("-n", "--namespace", "-c", "--container")
-# Any other flag may take the next token as its value, so the target is unknown and nothing is allowlisted.
 _BOOL_FLAGS = ("-i", "-t", "-it", "-ti", "--stdin", "--tty", "-q", "--quiet", "--no-preserve")
 
 
 def _kubectl_positionals(args: str) -> tuple[Optional[str], list[str]]:
-    """Split kubectl arguments into the namespace flag value and the positional arguments."""
+    """Split kubectl arguments into the namespace flag value and the positional arguments.
+
+    Any other flag may take the next token as its value, so an unknown flag returns no
+    namespace and no positionals and nothing is allowlisted.
+    """
     try:
         tokens = shlex.split(args)
     except ValueError:
@@ -474,36 +403,26 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
     Returns None if the command is allowed.
 
     Pure function — no side effects, easily testable.
+
+    Whole-command patterns, kubectl cp and scp run on the command with quoted strings and
+    heredoc bodies stripped, so text mentions never match. ssh, kubectl exec and docker exec
+    run on the original command because they inspect inside the quoted inner command.
+    The ssh pattern is anchored at command position so the word ssh inside text never matches.
     """
     if not command:
         return None
 
-    # Strip outer quoted strings + heredoc bodies. Used for whole-command
-    # patterns and cp/scp direction parsing — both are command-position
-    # checks where text mentions inside quoted args (git commit -m "...",
-    # echo "...", cat <<EOF...) would produce false positives.
-    #
-    # SSH / kubectl-exec / docker-exec detection runs on the ORIGINAL
-    # command since those checks deliberately parse INSIDE the quoted
-    # remote/inner command bodies.
     stripped = _strip_quoted_strings(command)
 
-    # 1. Whole-command forbidden patterns (run on stripped — no false matches
-    # against text mentions inside quoted args)
     for pattern, rule, description in _WHOLE_CMD_PATTERNS:
         if pattern.search(stripped):
             return _violation(rule, description)
 
-    # 2. kubectl exec — inspect what's after `--` (run on ORIGINAL because
-    # the after-dash content may include quoted sh -c bodies we want to
-    # introspect)
     for match in _KUBECTL_EXEC_RE.finditer(command):
         reason = _exec_violation(match.group(1), match.group(2))
         if reason:
             return reason
 
-    # 3. kubectl cp direction (run on stripped — positional paths don't
-    # carry quotes legitimately, and stripping suppresses text mentions)
     for match in _KUBECTL_CP_RE.finditer(stripped):
         if _check_kubectl_cp_into_pod(match.group(1)):
             namespace, pod = _cp_dest_target(match.group(1))
@@ -516,8 +435,6 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
             if reason:
                 return reason
 
-    # 4. SSH with remote write patterns (run on ORIGINAL — the SSH remote
-    # command is by definition inside quotes that the hook needs to inspect)
     for match in _SSH_RE.finditer(command):
         remote = match.group(1)
         for pattern, rule in _SSH_WRITE_PATTERNS:
@@ -527,8 +444,6 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
                     f"ssh <host> '<command>' with write pattern ({rule})",
                 )
 
-    # 5. scp INTO remote host (run on stripped — positional args
-    # don't carry quotes legitimately)
     for match in _SCP_RE.finditer(stripped):
         if _check_scp_into_host(match.group(1)):
             return _violation(
@@ -536,7 +451,6 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
                 "scp <local> <host>:<path> (copy INTO host — push via git, not scp)",
             )
 
-    # 6. docker exec mutations (run on ORIGINAL — same reason as kubectl exec)
     for match in _DOCKER_EXEC_RE.finditer(command):
         body = match.group(1)
         for pattern, rule in _DOCKER_EXEC_MUTATION_PATTERNS:

@@ -20,13 +20,11 @@ from hooks.common import log
 from hooks.config import AGENTIHOOKS_HOME
 from hooks.hook_manager import BlockAction
 
-# Per-turn branch-creation signal (CI Manifesto §14)
 _BRANCH_SIGNAL_TYPE = "branch_create_signal"
-# Per-turn PR-creation signal (CI Manifesto §15)
 _PR_SIGNAL_TYPE = "pr_create_signal"
 _BRANCH_SIGNAL_TTL = 300
-_PR_SIGNAL_TTL = 14400  # session-scoped (CI Manifesto §15)
-_PR_SIGNAL_MAX_COUNT = 3  # re-signal required after N PR creations
+_PR_SIGNAL_TTL = 14400
+_PR_SIGNAL_MAX_COUNT = 3
 
 
 def _branch_signal_key(session_id: str) -> str:
@@ -93,6 +91,7 @@ def _has_branch_signal(session_id: str) -> bool:
 
 
 def set_pr_signal(session_id: str) -> None:
+    """Arm the PR signal; a re-signal resets the PR counter, as the limit message promises."""
     r = get_redis()
     if r:
         try:
@@ -105,11 +104,6 @@ def set_pr_signal(session_id: str) -> None:
         f.write_text("1")
     except Exception as e:
         log("branch_guard.set_pr_signal file failed", {"error": str(e)})
-    # Re-signal resets the counter (CI Manifesto §8: "max 3 per session,
-    # then re-signal"). The limit-reached error message already promises
-    # this reset — without it a session that legitimately needs a 4th PR
-    # is permanently locked out no matter how many times the operator
-    # re-authorizes.
     clear_pr_counter(session_id)
 
 
@@ -196,57 +190,41 @@ def _has_pr_signal(session_id: str) -> bool:
     return _pr_signal_flag(session_id).exists()
 
 
-# PR creation pattern (CI Manifesto §15). Blocks `gh pr create` in any form.
-# Other gh pr subcommands (list/view/status/comment/review/edit/merge) pass.
 _PR_CREATE_PATTERN = re.compile(r"\bgh\b[^|&;\n]*?\bpr\s+create\b")
 
 _PR_BASE_RE = re.compile(r"(?:^|\s)(?:--base[\s=]+|-B\s*)(\S+)")
 PROTECTED_PR_BASES = frozenset({"main", "master", "v1"})
 
 
-# Branch-creation patterns (blocked without branch signal).
-# Worktree commands are NOT blocked — worktrees are the operator-assigned
-# parallel-work primitive (§14).
 _BRANCH_CREATE_PATTERNS = [
     re.compile(r"\bgit\s+checkout\s+-[bB]\b"),
     re.compile(r"\bgit\s+switch\s+-[cC]\b"),
-    # git branch <name> (creation form — not -d/-D/-a/-v/-l/-r/--list)
     re.compile(
         r"\bgit\s+branch\s+(?!(-[aAvVlLrRdD]|--list|--all|--verbose|--delete|--remotes|--sort|--contains|--merged|--no-merged|-m|-M|--move|--copy|-c|-C|--set-upstream-to|--unset-upstream|--edit-description|--format|--show-current))\S+"
     ),
 ]
 
 _BLOCKED_PATTERNS = [
-    # Push to main/master (direct push bypasses PR workflow)
     (
         re.compile(r"git\s+push\s+\S*\s+(origin\s+)?(HEAD:)?(?<![\w-])(main|master)(?![/\w-])"),
         "Pushing directly to main/master is blocked. Reach main through a PR: gh pr create --base main.",
     ),
-    # Merge into main/master (direct merge bypasses PR workflow). The `/`
-    # in the lookbehind exempts a remote-tracking ref used as the merge
-    # SOURCE (e.g. `git merge origin/main` while on dev to resolve a
-    # snapshot PR) — that merges main INTO the current branch and is allowed.
     (
         re.compile(r"git\s+merge\s+[^|&;\n]*(?<![\w/-])(main|master)(?![/\w-])"),
         "Direct merge of bare main/master is blocked. Use a PR, or `git merge origin/main` to pull main into dev.",
     ),
-    # Rebase onto main/master (same remote-source exemption)
     (
         re.compile(r"git\s+rebase\s+[^|&;\n]*(?<![\w/-])(main|master)(?![/\w-])"),
         "Rebasing onto bare main/master is blocked. Use origin/main as the upstream if pulling main into dev.",
     ),
-    # Delete main/master branch
     (
         re.compile(r"git\s+branch\s+(-[dD]|--delete)\b.*(?<![\w-])(main|master)(?![/\w-])"),
         "Deleting main/master is blocked.",
     ),
-    # Reset main/master (destructive — rewrites history)
     (
         re.compile(r"git\s+reset\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Resetting main/master is blocked — this rewrites history.",
     ),
-    # Force push (any branch — can destroy remote history).
-    # Bypass-eligible: short-circuited when 'disable controls' is active.
     (
         re.compile(r"git\s+push\s+--force(?!-with-lease)"),
         "Force push is blocked — this can destroy remote history.",
@@ -259,7 +237,6 @@ _BLOCKED_PATTERNS = [
         re.compile(r"git\s+push\s+.*--force-with-lease"),
         "Force push (with lease) is blocked — this can destroy remote history.",
     ),
-    # Git tag (tagging is a release operation — must be done by a human or CI)
     (
         re.compile(r"git\s+tag\b"),
         "Git tagging is blocked — tags and releases should not be created locally.\n\n"
@@ -365,6 +342,8 @@ def check_branch_guard(payload: dict) -> None:
     Should only be called when tool_name == 'Bash'.
     Only checks the actual command portion — strips heredoc bodies and
     quoted commit messages to avoid false positives on message content.
+    Force push and rebase onto main are bypass-eligible; a direct push to main is still
+    caught by the main/master push pattern.
     """
     tool_input = payload.get("tool_input", {})
     command = tool_input.get("command", "")
@@ -386,9 +365,6 @@ def check_branch_guard(payload: dict) -> None:
     for pattern, message in _BLOCKED_PATTERNS:
         if pattern.search(check_text):
             if _bypass_active and ("Force push" in message or "Rebasing onto" in message or "Direct merge" in message):
-                # Force-push and rebase-onto-main are bypass-eligible per
-                # controls-toggle rule. Direct-to-main push still caught by
-                # the main/master push pattern above.
                 continue
             log(
                 "branch_guard: blocked",
@@ -404,7 +380,6 @@ def check_branch_guard(payload: dict) -> None:
 
     check_prepush(payload)
 
-    # Branch creation — default-deny unless operator signaled this turn (§14)
     session_id = payload.get("session_id", "")
     for pattern in _BRANCH_CREATE_PATTERNS:
         if pattern.search(check_text) and not _has_branch_signal(session_id):

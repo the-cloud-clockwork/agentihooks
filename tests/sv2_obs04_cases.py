@@ -19,7 +19,7 @@ from scripts.swarm_v2.controller import Controller
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 INPUTS = ("health-diagnostics.json",)
-LEASE = {"control-owner"}
+LEASE = {"control-owner", "lease-cache"}
 EVIDENCE_CLASS = (
     "mocked: fakeredis execution registry, task claims and heartbeats behind a server that can be disconnected, a "
     "fake wall and Redis clock, signed fixture launch grants, a fixture operator page credential and an in process "

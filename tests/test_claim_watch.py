@@ -3,6 +3,7 @@ import subprocess
 import pytest
 
 from hooks.context import claim_watch
+from scripts.swarm import ledger_client
 from scripts.swarm_ledger import ledger_workspace
 
 pytestmark = pytest.mark.unit
@@ -46,6 +47,32 @@ def hive(monkeypatch):
 
     monkeypatch.setattr(scope, "member", member)
     return seen
+
+
+@pytest.fixture
+def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
+    from scripts.swarm_ledger.api import client
+
+    reads = []
+
+    class Slow:
+        def __init__(self, base: str, credentials: dict, timeout: float = 10) -> None:
+            self.timeout = timeout
+
+        def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
+            reads.append((slug, path, self.timeout))
+            raise TimeoutError("timed out")
+
+        def collection(self, slug: str, path: str) -> list:
+            return [self.request(slug, path)]
+
+    module = ledger_client._ledger()
+    monkeypatch.setattr(client, "ResourceClient", Slow)
+    monkeypatch.setattr(module.ledger_link, "remote", lambda environ=None, slug="": True)
+    monkeypatch.setattr(module, "base", lambda slug="": "http://hosted.test")
+    monkeypatch.setattr(module, "credentials", lambda slug, service=False: {})
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: reads.append(("slept", seconds)))
+    return reads
 
 
 def _check(row, env=ENV, now=1000.0):
@@ -213,7 +240,7 @@ def test_the_swarm_gates_run_in_order_and_the_first_block_wins(monkeypatch):
     assert calls == [("recycle", "Bash", {}, "s1")]
 
 
-@pytest.mark.parametrize("error", [OSError, RuntimeError, ValueError])
+@pytest.mark.parametrize("error", [OSError, RuntimeError, ValueError, SystemExit])
 def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch, error):
     from hooks.context import context_recycle, swarm_gates
 
@@ -234,3 +261,59 @@ def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch,
     logged.clear()
     assert swarm_gates.pretool("Bash", {}, "s1") == "handoff"
     assert logged == [("claim watch failed", {"error": "no transcript"})]
+
+
+def test_a_slow_hosted_ledger_costs_one_short_read_and_the_call_passes(
+    hive: list, hosted: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hooks.context import context_recycle, swarm_gates
+
+    logged = []
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: None)
+    monkeypatch.setattr(swarm_gates, "log", lambda message, payload: logged.append((message, payload)))
+
+    assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") is None
+    assert hosted == [("sw", "tasks/t1", claim_watch.READ_TIMEOUT)]
+    assert claim_watch.READ_TIMEOUT == 2
+    assert logged == [("claim watch failed", {"error": "timed out"})]
+
+
+def test_other_ledger_clients_keep_three_ten_second_attempts(hosted: list) -> None:
+    with pytest.raises(TimeoutError):
+        ledger_client.LedgerClient().task("sw", "t1")
+
+    assert hosted == [
+        ("sw", "tasks/t1", 10),
+        ("slept", 0.5),
+        ("sw", "tasks/t1", 10),
+        ("slept", 1.0),
+        ("sw", "tasks/t1", 10),
+    ]
+
+
+def test_a_bounded_read_forwards_the_service_and_collection_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    class Module:
+        @staticmethod
+        def resource(slug: str, path: str, **options: object) -> list:
+            calls.append((slug, path, options))
+            return []
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: Module)
+    client = ledger_client.LedgerClient(service=True, read_timeout=2)
+
+    assert client.tasks("sw") == []
+    assert calls == [
+        ("sw", "tasks", {"service": True, "collection": True, "timeout": 2, "attempts": 1}),
+    ]
+
+
+def test_a_bounded_client_reads_collections_once_with_its_timeout(hosted: list) -> None:
+    with pytest.raises(TimeoutError):
+        ledger_client.LedgerClient(read_timeout=3).tasks("sw")
+
+    assert hosted == [("sw", "tasks", 3)]

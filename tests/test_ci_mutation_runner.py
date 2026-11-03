@@ -93,6 +93,28 @@ def test_every_group_reached_after_the_deadline_is_reported_over_budget(tmp_path
     assert "hooks/sample.py: not mutated, over budget" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("stage", ["scripts.ci_mutation.selection", "scripts.ci_mutation.report"])
+def test_a_mutation_child_killed_at_the_shard_deadline_turns_the_gate_red_as_over_budget(tmp_path, monkeypatch, stage):
+    timeouts = []
+
+    def process(command, cwd, timeout, log):
+        timeouts.append(timeout)
+        log.write_text("")
+        return None if stage in command else 0
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", lambda root, work, paths, tests: None)
+    monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
+    report = run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 600)
+    assert report["failed"] is True
+    assert report["files"] == []
+    assert report["not_mutated"] == [
+        {"path": "hooks/sample.py", "reason": "over budget"},
+        {"path": "scripts/ci_mutation/identity.py", "reason": "over budget"},
+    ]
+    assert len(timeouts) == (2 if stage.endswith("selection") else 4)
+    assert all(0 < timeout <= 600 for timeout in timeouts)
+
+
 def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_run(tmp_path, monkeypatch):
     calls = []
 

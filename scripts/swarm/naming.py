@@ -103,7 +103,7 @@ def legacy_slug(name):
     return found.group(1) if found else ""
 
 
-def lane_of(name):
+def lane_of(name: str) -> str:
     """The lane an agent name belongs to (eng, ci or master), '' for anything that is not an agent name."""
     parsed = parse(name)
     if parsed:
@@ -309,7 +309,7 @@ class NameRegistry:
     def _amend_aliases_of(self, name, change):
         self.names_state.amend("aliases-of", name, change, self._legacy_aliases_of(name))
 
-    def resolve(self, name, reader=None):
+    def resolve(self, name: str, reader: Any = None) -> str:
         try:
             return self._alias_of(name, reader) or name
         except state.unavailable() as exc:

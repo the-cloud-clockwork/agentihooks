@@ -23,11 +23,34 @@ UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-requir
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = (
     UNIT
-    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation", "writer-lock"}
+    | {
+        "select",
+        "lint",
+        "semgrep",
+        "sonar",
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-shard",
+        "mutation",
+        "writer-lock",
+    }
     | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
 )
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
-PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}) | {
+PROMOTION = (
+    PULL_REQUEST
+    - {
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-shard",
+        "mutation",
+        "lint",
+        "semgrep",
+        "test-count",
+    }
+) | {
     "queue-fail-fast",
     "reuse",
     "coverage-ratchet",
@@ -163,7 +186,13 @@ def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards() -> 
 
 def test_main_pull_requests_keep_their_nonmutation_checks() -> None:
     expected = PULL_REQUEST | _planned_jobs("pull_request")
-    assert jobs_for("pull_request", "main") == expected - {"mutation-plan", "mutation-stats", "mutation"}
+    assert jobs_for("pull_request", "main") == expected - {
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-shard",
+        "mutation",
+    }
 
 
 def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_promotion_form() -> None:
@@ -174,10 +203,10 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
     steps = jobs["gate-required"]["steps"]
-    typing = ci_reuse.typing_required if "type-gate" in jobs else list
+    assert "type-gate" in jobs["gate-required"]["needs"]
     steps[0]["run"] = steps[0]["run"].replace('"docs", "semgrep"', '"semgrep"')
     assert steps in [
-        typing(
+        ci_reuse.typing_required(
             ci_reuse.test_only_sonar(
                 ci_reuse.selection_diagnostic(
                     forward(
