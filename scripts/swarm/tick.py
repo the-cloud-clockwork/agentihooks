@@ -17,7 +17,7 @@ from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
 from importlib import import_module
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 import scripts.tick.steps.agents  # noqa: F401
 from hooks.context import context_recycle
@@ -217,13 +217,14 @@ class _PassView:
         return self._state.get(key) if domain == steps.PASS else None
 
 
-def run_group(name: str, **state: object) -> list[str]:
+def run_group(name: str, **state: Any) -> list[str]:
     """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions.
 
     Actions of slow lane steps that end after the group returns are printed when they end.
     """
     ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
-    printing = partial(_print_actions, cast(Mapping[str, object], state.get("box", {})))
+    box: Mapping[str, object] = state.get("box", {})
+    printing = partial(_print_actions, box)
     return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=printing))
 
 
