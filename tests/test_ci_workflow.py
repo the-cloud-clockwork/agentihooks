@@ -2055,7 +2055,10 @@ def test_tests_mutation_carries_kill_memory_to_the_next_plan() -> None:
     assert "if" not in {step.get("name"): step for step in jobs["mutation-refine"]["steps"]}[restore]
     collect = shard["Collect the tests that killed mutants"]
     assert collect["if"] == f"always() && {forwarded}"
-    assert "find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +" in collect["run"]
+    assert "find .mutation-gate -path '*/killers/*' -type f -exec cp {} .mutation-killers/ \\;" in collect["run"]
+    for workflow in (".github/workflows/test.yml", ".github/workflows/mutation-preflight.yml"):
+        source = (_ROOT / workflow).read_text()
+        assert "killers" in source and "cp -t" not in source
     upload = shard["Upload the tests that killed mutants"]
     assert upload["if"] == f"always() && {forwarded}"
     assert upload["with"]["name"] == "mutation-killers-${{ matrix.shard }}"
