@@ -96,8 +96,8 @@ def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     finally:
         try:
             record.update(end_ms=time.time_ns() // 1000000, wall_s=time.perf_counter() - started)
-            finish_pass(store, slug, record)
             tick_metrics.pass_finished(slug, record)
+            finish_pass(store, slug, record)
         finally:
             PASS.reset(token)
 

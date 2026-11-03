@@ -35,7 +35,7 @@ def test_a_step_outside_a_tick_exports_nothing(exported: list[tuple[str, str, di
     assert exported == []
 
 
-def test_a_finished_pass_exports_its_record_after_saving_it(
+def test_a_finished_pass_exports_its_record_before_saving_it(
     exported: list[tuple[str, str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     saved: list[tuple[object, str, dict[str, Any]]] = []
