@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from functools import partial
+from importlib import import_module
 from typing import Any, cast
 
 from scripts.swarm import dev_red, dispatcher, fleet_red, prerequisite_wait, promotion_watch, release_wait
@@ -429,4 +430,4 @@ STEPS = (
 for _step in STEPS:
     registry.register(_step)
 
-tick: Any = steps.import_module("scripts.swarm.tick")
+tick: Any = import_module("scripts.swarm.tick")
