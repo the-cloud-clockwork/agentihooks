@@ -44,6 +44,7 @@ that update automatically when new reports arrive.
 | `spawn` | 21.812 s | 33 s | 60 s |
 | `pane evidence` | 1.047 s | 2 s | 120 s |
 | `metrics record` | 18.905 s | 29 s | 600 s |
+| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 19.981 s | 30 s | 60 s |
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
 seconds. The group runner runs each group at its site on every pass and does
@@ -106,7 +107,11 @@ by the worker are raised to the caller.
 
 Abandoning a worker does not cancel it. Its daemon thread keeps running and
 its eventual result is dropped. External writes already performed are not
-rolled back. This delivery allows the next pass to start the same step while
+rolled back. Writes the step returns for the engine to apply, cache saves
+included, are dropped with the result: a step that runs late on every pass
+never saves its cache, so every pass repeats the work the cache was meant to
+skip. The [fleet red notice](fleet-red-notice.md#the-notice-step-budget) step
+did this with its fifteen second unmeasured budget until it was measured. This delivery allows the next pass to start the same step while
 the earlier worker remains active. Do not interpret `late` as proof that the
 underlying call stopped or that retrying it cannot overlap.
 
