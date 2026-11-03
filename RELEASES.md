@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.600 · 2026-11-03
+
+### 2026-11-03 · 950d4c0f5424 · #9484 · @nestorcolt
+
+**Seed the first Tests mutation plan of a pull request from the branch preflight kill memory**
+
+When a pull request's first Tests run can't restore its own cached kill memory, it used to price every mutation split unit blind, pushing eleven of thirty-six e2 shards over budget. This change has mutation-refine mint a scoped token, locate the newest Mutation preflight run for the head commit (falling back to the branch) with live killer artifacts, download them before planning, and save them under the pull request cache with a distinct preflight suffix. The first run now plans from real evidence instead of guessing, and the final mutation job's cache save stays separate.
+
 ## v2.17.599 · 2026-11-03
 
 ### 2026-11-03 · c92aed7e72a6 · #9485 · @nestorcolt
