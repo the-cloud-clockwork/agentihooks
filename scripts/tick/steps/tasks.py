@@ -117,12 +117,13 @@ def _fleet_red_notice(tick: Any, get: Get) -> Any:
 
 
 def fleet_red_writes(slug: str, store: Any, rows: dict[str, dict[str, Any]], now_ms: int) -> list[str | Write]:
-    """Return a guarded hold write and an action per task fleet red newly holds, and a write forgetting lifted holds.
+    """Return the listing saves, a guarded hold write and an action per task fleet red newly holds, and a write
+    forgetting lifted holds.
 
-    The step posts and forgets nothing itself.
+    The step saves, posts and forgets nothing itself.
     """
-    found, cleared = fleet_red.holds(slug, store, rows, now_ms)
-    writes = [item for hold in found for item in _fleet_red_write(*hold)]
+    found, cleared, saves = fleet_red.holds(slug, store, rows, now_ms)
+    writes = [*saves, *(item for hold in found for item in _fleet_red_write(*hold))]
     return [*writes, Write(FLEET_RED_LIFTED, slug, "\n".join(cleared))] if cleared else writes
 
 
@@ -278,6 +279,7 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
     if (store := state.get("store")) is not None:
         found[FLEET_RED] = fleet_red_writer(slug, store, ledger, _fresh_task)
         found[FLEET_RED_LIFTED] = lifted_writer(store)
+        found[fleet_red.LISTINGS] = fleet_red.saver(store)
     return found
 
 
@@ -348,7 +350,12 @@ STEPS = (
     CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"})),
     CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),
     CallStep("release alert", REOPENS, held(_release_alert)),
-    WriteStep("fleet red notice", REOPENS, held(_fleet_red_notice), writes=frozenset({FLEET_RED, FLEET_RED_LIFTED})),
+    WriteStep(
+        "fleet red notice",
+        REOPENS,
+        held(_fleet_red_notice),
+        writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
+    ),
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
     WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),
