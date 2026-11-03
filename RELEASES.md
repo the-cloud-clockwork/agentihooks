@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.605 · 2026-11-03
+
+### 2026-11-03 · 635b434ef675 · #9509 · @nestorcolt
+
+**Grade oversized mutation plans in two runner waves instead of refusing them**
+
+The mutation gate planner now runs oversized changes across two waves of the 40-runner pool (up to 80 shards, 216000 worker seconds) instead of refusing them outright, since queued shards don't count against timeout-minutes. Pull request counts in any remaining refusal now reflect this real 80-shard capacity, and a refusal only names a specific mutant when it genuinely can't be split to fit a shard. Kill-file collection and preflight seed copying were fixed to handle same-named files across shards. Verified against e2: 49 shards graded all 4618 mutants with no budget exhaustion, with CI node count unchanged at seven.
+
 ## v2.17.603 · 2026-11-03
 
 ### 2026-11-03 · d2ca9320bdc6 · #9492 · @nestorcolt
