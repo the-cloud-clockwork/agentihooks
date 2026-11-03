@@ -33,9 +33,10 @@ def _passes(swarm: Any, ledger: Any, runtime: Any, count: int) -> list[list[str]
 
 
 def _early_ends(swarm: Any, ledger: Any) -> list[dict[str, Any]]:
-    """Return the early end findings swarm status shows for ``sw``."""
-    found = status.findings(swarm, "sw", swarm.config("sw"), ledger.tasks("sw"), [])
-    return [finding.as_dict() for finding in found if finding.kind == "early end"]
+    """Return the early end findings swarm status shows for ``sw``, without their verdict bookkeeping."""
+    shown = status.findings(swarm, "sw", swarm.config("sw"), ledger.tasks("sw"), [])
+    kept = ("kind", "subject", "summary", "evidence", "threshold")
+    return [{key: row[key] for key in kept} for row in shown if row["kind"] == "early end"]
 
 
 @pytest.mark.feature("swarm-tick-early-end-streak")
