@@ -168,8 +168,21 @@ def observe_managed(record: TransportRecord | None) -> PaneObservation:
     return PaneObservation("working" if turns[-1].get("status") == "inProgress" else "idle")
 
 
+def launched(agent: AgentRecord) -> dict:
+    """The record's validation, with the home its launch report validated while the record still holds it pending."""
+    validation = agent.profile_decision.get("validation", {})
+    if validation.get("home") or not validation.get("report"):
+        return validation
+    try:
+        report = json.loads(Path(validation["report"]).read_text())
+        home = report["validation"]["home"] if report["state"] == "validated" else ""
+    except (OSError, ValueError, TypeError, KeyError):
+        return validation
+    return {**validation, "home": home}
+
+
 def assignment(agent: AgentRecord) -> dict:
-    validated = agent.profile_decision.get("validation", {})
+    validated = launched(agent)
     home = validated.get("home") or str(Path.home() / ".agentihooks" / "profiles" / agent.profile / agent.harness)
     return {
         "harness": agent.harness,

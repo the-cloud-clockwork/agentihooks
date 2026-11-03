@@ -1539,7 +1539,7 @@ def test_an_unvalidated_launch_report_keeps_the_profile_home(
     assert live_binding.assignment(master)["home"] == str(expected)
 
 
-@pytest.mark.parametrize("content", [None, "not json", "[]"])
+@pytest.mark.parametrize("content", [None, "not json", "[]", '{"state": "validated"}'])
 def test_an_unreadable_launch_report_keeps_the_profile_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, content: str | None
 ) -> None:
