@@ -675,7 +675,7 @@ def test_a_handed_off_chain_under_a_dropped_critical_step_is_dropped_whole_with_
     steps = (
         Step("critical", note),
         Step("slow", note, lane=Lane("slow")),
-        Step("both", note, frozenset({"critical", "slow"}), budget_s=3.0),
+        Step("both", note, frozenset({"critical", "slow"}), lane=Lane("slow"), budget_s=3.0),
         Step("after both", note, frozenset({"both"}), lane=Lane("slow"), budget_s=4.0),
     )
     later: list[tuple[engine.StepRecord, ...]] = []
