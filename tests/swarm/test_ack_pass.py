@@ -152,6 +152,44 @@ def test_a_holder_renews_its_lock_every_ten_seconds_and_never_a_successors(
     assert len(made) == 1
 
 
+def test_a_redis_error_while_renewing_is_reported_and_the_next_beat_retries(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    key = store.key("sw", ack_pass.LOCK)
+    store.redis.set(key, "mine", px=5_000)
+    real = store.redis.pexpire
+    monkeypatch.setattr(store.redis, "pexpire", lambda *args: (_ for _ in ()).throw(RedisConnectionError("down")))
+    ack_pass._renew(store, key, "mine")
+    assert capsys.readouterr().err == f"renewing the acks lock {key} failed: ConnectionError('down')\n"
+    monkeypatch.setattr(store.redis, "pexpire", real)
+    ack_pass._renew(store, key, "mine")
+    assert 29_000 < store.redis.pttl(key) <= 30_000
+
+
+def test_the_lock_is_released_even_when_the_renewal_will_not_stop(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.scheduler import process_interval
+
+    class Interval:
+        def __init__(self, callback: Any, *, every: float) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+        def close(self) -> None:
+            raise RuntimeError("scheduled interval did not stop")
+
+    monkeypatch.setattr(process_interval, "Interval", Interval)
+    with pytest.raises(RuntimeError, match="^scheduled interval did not stop$"):
+        with ack_pass.collecting(store, "sw"):
+            pass
+    assert store.redis.get(store.key("sw", ack_pass.LOCK)) is None
+
+
 def test_the_lock_is_released_only_by_its_own_holder(store: RedisStore) -> None:
     key = store.key("sw", ack_pass.LOCK)
     with ack_pass.collecting(store, "sw") as taken:

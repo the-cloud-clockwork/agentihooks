@@ -5,6 +5,7 @@ The tick's collect acks step and this pass share one per swarm lock, so one coll
 
 import json
 import os
+import sys
 import time
 import uuid
 from collections.abc import Iterator
@@ -33,15 +34,22 @@ def collecting(store: RedisStore, slug: str) -> Iterator[bool]:
     try:
         yield True
     finally:
-        renewing.close()
-        if store.redis.get(key) == token:
-            store.redis.delete(key)
+        try:
+            if store.redis.get(key) == token:
+                store.redis.delete(key)
+        finally:
+            renewing.close()
 
 
 def _renew(store: RedisStore, key: str, token: str) -> None:
-    """Extend the acks lock while this holder still owns it."""
-    if store.redis.get(key) == token:
-        store.redis.pexpire(key, LOCK_MS)
+    """Extend the acks lock while this holder still owns it; a Redis error is reported and the next beat retries."""
+    from redis.exceptions import RedisError
+
+    try:
+        if store.redis.get(key) == token:
+            store.redis.pexpire(key, LOCK_MS)
+    except RedisError as exc:
+        print(f"renewing the acks lock {key} failed: {exc!r}", file=sys.stderr)
 
 
 def due(store: RedisStore, slug: str) -> bool:
