@@ -193,7 +193,7 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
     slug, ledger, store = state.get("slug"), state.get("ledger"), state.get("store")
     found: dict[Domain, Callable[[Write], None]] = {}
     if ledger is not None and slug:
-        found |= {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+        found = {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
         if store is not None:
             found[fleet_red.HOLDS] = fleet_red.holder(store, ledger, slug)
     if store is not None:

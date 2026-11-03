@@ -232,7 +232,7 @@ def _listed(fetch: Callable[[str], Listed], repo: str) -> Listed:
 def _unmarked(store: Listings, holds: list[Hold]) -> list[Hold]:
     """Return the holds no pass has marked yet, reading every mark in one call and nothing without holds."""
     marks = store.redis.mget([key for _, _, key, _ in holds]) if holds else []
-    return [hold for hold, mark in zip(holds, marks, strict=True) if mark is None]
+    return [hold for index, hold in enumerate(holds) if marks[index] is None]
 
 
 def _hold_write(task_id: str, url: str, key: str, pulls: Pulls) -> list[str | Write]:
