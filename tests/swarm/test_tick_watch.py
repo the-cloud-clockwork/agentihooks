@@ -815,7 +815,9 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
 
 def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_bound():
     release = threading.Event()
-    repair = tick_watch.Repair(lambda: "restarted" if release.wait(2) else "timed out", lambda slug: [f"spawned {slug}"], (0.1, 5))
+    repair = tick_watch.Repair(
+        lambda: "restarted" if release.wait(2) else "timed out", lambda slug: [f"spawned {slug}"], (0.1, 5)
+    )
     try:
         actions = repair("sw", START)
     finally:
