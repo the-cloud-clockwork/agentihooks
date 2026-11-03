@@ -2289,6 +2289,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
                 "Check out the protected mutation grader",
                 "Grade the shard report from the protected grader",
                 "Restore the tests that killed this branch's earlier mutants",
+                "Collect the tests that killed mutants",
             )
         )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
