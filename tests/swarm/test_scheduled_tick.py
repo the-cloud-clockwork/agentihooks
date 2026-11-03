@@ -288,6 +288,60 @@ def test_a_failed_pass_ends_what_is_left_of_its_group(monkeypatch: pytest.Monkey
     assert group.sent == []
 
 
+class _Fading:
+    def __init__(self, lives: list[bool]) -> None:
+        self.lives, self.checked, self.sent = list(lives), [], []
+
+    def __call__(self, pgid: int, number: int) -> None:
+        self.sent.append((pgid, number))
+
+    def alive(self, pgid: int) -> bool:
+        self.checked.append(pgid)
+        return self.lives.pop(0) if self.lives else False
+
+
+def test_the_sweep_polls_the_group_until_it_empties_before_killing(monkeypatch: pytest.MonkeyPatch) -> None:
+    slept = []
+    monkeypatch.setattr(scheduled_tick.time, "sleep", slept.append)
+    group = _Fading([True, True, True, False])
+    scheduled_tick._sweep(PID, group, group.alive)
+    assert group.sent == [(PID, signal.SIGTERM)]
+    assert slept == [0.2, 0.2]
+    assert group.checked == [PID] * 4
+
+
+def test_the_sweep_kills_once_its_grace_is_spent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduled_tick.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
+    group = _Fading([True, True])
+    scheduled_tick._sweep(PID, group, group.alive)
+    assert group.sent == [(PID, signal.SIGTERM), (PID, signal.SIGKILL)]
+    assert group.checked == [PID, PID]
+
+
+def test_a_tick_killed_after_its_stop_grace_still_sweeps_its_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    group = _Fading([])
+    assert scheduled_tick._finish(_Tick([None, None, 0]), group, group.alive) == 0
+    assert group.checked == [PID]
+
+
+class _Listed:
+    def __init__(self, entries: list[Path]) -> None:
+        self.entries = entries
+
+    def iterdir(self) -> list[Path]:
+        return self.entries
+
+
+def test_an_unreadable_process_does_not_hide_a_live_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "5").mkdir()
+    (tmp_path / "6").mkdir()
+    (tmp_path / "6" / "stat").write_text("6 (py) S 1 77 77 0")
+    monkeypatch.setattr(scheduled_tick, "PROC", _Listed([tmp_path / "5", tmp_path / "6"]))
+    assert scheduled_tick._group_alive(77)
+
+
 def test_a_group_of_only_zombies_counts_as_ended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for pid, state, pgrp in ((10, "Z", 77), (11, "S", 78), (12, "S", 77)):
         (tmp_path / str(pid)).mkdir()
