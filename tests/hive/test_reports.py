@@ -476,6 +476,7 @@ def test_the_tick_settles_a_worker_its_restarted_hive_reports_gone_without_hive_
 
     assert actions == [f"retired {remote.agent.name}: its hive pane is gone{said}"]
     assert remote.store.agents("fixture") == []
+    assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == "ended"
     assert remote.store.claimant("fixture", "task") is None
     assert retire_watch.rows(remote.store, "fixture") == []
 
