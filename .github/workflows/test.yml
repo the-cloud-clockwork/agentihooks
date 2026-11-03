@@ -4265,6 +4265,13 @@ jobs:
         uses: actions/download-artifact@v4
         with: *mutation-refine-download-the-shared-mutation-stats
 
+      - name: Restore the tests that killed this branch's earlier mutants
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
       - name: Refine mutation shards from measured statistics
         id: refine
         env:
@@ -4462,6 +4469,14 @@ jobs:
         uses: actions/download-artifact@v4
         with: *mutation-download-the-shared-mutation-stats
 
+      - name: Restore the tests that killed this branch's earlier mutants
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
       - name: Download the measured mutation plan
         if: needs.mutation-refine.result == 'success'
         id: download-the-measured-mutation-plan
@@ -4532,6 +4547,24 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+      - name: Collect the tests that killed mutants
+        if: always() && needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          mkdir -p .mutation-killers
+          [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +
+          echo "Functions with a recorded killing test: $(find .mutation-killers -type f | wc -l)"
+
+      - name: Upload the tests that killed mutants
+        if: always() && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: mutation-killers-${{ matrix.shard }}
+          path: .mutation-killers/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 1
+
   mutation:
     needs: [mutation-plan, mutation-stats, mutation-refine, mutation-shard, admission]
     if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
@@ -4577,6 +4610,43 @@ jobs:
         if: steps.download-every-mutation-shard-report.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *mutation-download-every-mutation-shard-report
+
+      - name: Restore the tests that killed this branch's earlier mutants
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Download the tests that killed mutants
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        id: download-the-tests-that-killed-mutants
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &mutation-download-the-tests-that-killed-mutants
+          pattern: mutation-killers-*
+          path: .mutation-stats/killers
+          merge-multiple: true
+
+      - name: Download the tests that killed mutants, wait before attempt 2
+        if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the tests that killed mutants failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the tests that killed mutants, attempt 2
+        if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-download-the-tests-that-killed-mutants
+
+      - name: Keep the tests that killed mutants for this branch's next plan
+        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats/killers/*') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Merge the shard reports
         if: needs.mutation-plan.outputs.forwarded != 'true'
