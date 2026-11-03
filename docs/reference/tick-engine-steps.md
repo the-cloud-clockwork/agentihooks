@@ -152,18 +152,22 @@ and placement steps are in bold; the others hold steps from other changes.
 | Order | Group | Site in the pass | Steps |
 | --- | --- | --- | --- |
 | 1 | `start` | First line of the pass | config load, stopped branch |
-| 2 | `observe` | After `start`, unless the stopped branch ended the pass | pane evidence through verify, including **spawn due** at order 70 |
-| 3 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |
-| 4 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
-| 5 | `tasks` | After the drained swarm check | orphans |
-| 6 | **`task passes`** | After the [fleet red notice pass](fleet-red-notice.md) | run window, verification notices, size pass, grouping release, dispatcher group |
-| 7 | `place` | First line inside the placing lock | |
-| 8 | **`placement acks`** | After the time left refresh, inside the placing lock | collect acks, codex hook order |
-| 9 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
-| 10 | **`placement`** | After the master seats, inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
-| 11 | `dispatch seat` | Last site inside the placing lock | dispatch seat |
-| 12 | `master watch` | After the placing lock | night watch, master alarm |
-| 13 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
+| 2 | `pass setup` | After `start`, unless the stopped branch ended the pass | spawn hold clear, pass budget |
+| 3 | `observe` | After `pass setup` | pane evidence through verify, including **spawn due** at order 70 |
+| 4 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |
+| 5 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
+| 6 | `drained resume` | After the masters | sleeping, drained resume |
+| 7 | `tasks` | After `drained resume` | orphans |
+| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) |
+| 9 | **`task passes`** | After `reopen passes` | run window, verification notices, size pass, grouping release, dispatcher group |
+| 10 | `place` | First line inside the placing lock | |
+| 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner, time left |
+| 12 | **`placement acks`** | After `placement notices`, inside the placing lock | collect acks, codex hook order |
+| 13 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
+| 14 | **`placement`** | After the master seats, inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
+| 15 | `dispatch seat` | Last site inside the placing lock | dispatch seat |
+| 16 | `master watch` | After the placing lock | night watch, master alarm |
+| 17 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
 
 The group order and the context each site hands its steps are covered in
 [Tick adapters](tick-adapters.md#empty-registry-integration).
