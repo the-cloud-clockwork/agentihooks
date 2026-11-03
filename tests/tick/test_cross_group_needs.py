@@ -76,7 +76,7 @@ def test_a_slow_step_starts_only_after_the_slow_step_of_an_earlier_group_it_need
     record = Step("cross metrics record", _seeing(ended, started, seen), "cross metrics", frozenset({findings.name}))
     later: list[tuple[engine.StepRecord, ...]] = []
     try:
-        with pool.running(workers=4, critical_s=0.0):
+        with pool.running(workers=4, critical_s=0.0, slow_s=3.0):
             assert engine.run_group("cross events", _ctx(), (findings,), finished=later.append) == ()
             assert engine.run_group("cross metrics", _ctx(), (record,), finished=later.append) == ()
             assert not started.wait(0.2)
@@ -99,7 +99,7 @@ def test_a_critical_step_that_needs_a_handed_off_step_of_an_earlier_group_is_han
     )
     later: list[tuple[engine.StepRecord, ...]] = []
     try:
-        with pool.running(workers=4):
+        with pool.running(workers=4, critical_s=3.0, slow_s=3.0):
             engine.run_group("cross slow", _ctx(), (findings,), finished=later.append)
             assert engine.run_group("cross critical", _ctx(), (wake,), finished=later.append) == ()
             release.set()
@@ -127,6 +127,7 @@ def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs
         ("cross dropped dependent", True),
         ("cross stuck step", True),
     ]
+    assert [row.wall_s > 0.0 for records in later for row in records if row.name == stuck.name] == [True]
 
 
 def test_a_step_runs_once_the_handed_off_step_of_an_earlier_group_it_needs_was_held() -> None:
@@ -137,7 +138,7 @@ def test_a_step_runs_once_the_handed_off_step_of_an_earlier_group_it_needs_was_h
     later: list[tuple[engine.StepRecord, ...]] = []
     try:
         assert engine.run_step(findings, _ctx()).outcome == engine.LATE
-        with pool.running(workers=4):
+        with pool.running(workers=4, critical_s=3.0, slow_s=3.0):
             engine.run_group("cross held", _ctx(), (findings,), finished=later.append)
             engine.run_group("cross after", _ctx(), (record,), finished=later.append)
             assert started.wait(5.0)
@@ -189,7 +190,7 @@ def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs
     dependent = Step("cross budget dependent", _noting(ran, "dependent"), "cross budget after", frozenset({stuck.name}))
     later: list[tuple[engine.StepRecord, ...]] = []
     try:
-        with pool.running(workers=4):
+        with pool.running(workers=4, critical_s=3.0, slow_s=3.0):
             engine.run_group("cross budget", _ctx(), (stuck,), finished=later.append)
             engine.run_group("cross budget after", _ctx(), (dependent,), finished=later.append)
     finally:
@@ -206,9 +207,9 @@ def test_a_critical_step_runs_in_its_group_once_the_handed_off_step_it_needs_alr
     ran: list[str] = []
     first = Step("cross ended first", _noting(ran, "first"), "cross ended")
     wake = Step("cross ended wake", _noting(ran, "wake"), "cross ended wake", frozenset({first.name}), Lane("tick"))
-    with pool.running(workers=4) as found:
+    with pool.running(workers=4, critical_s=3.0, slow_s=3.0) as found:
         engine.run_group("cross ended", _ctx(), (first,))
-        assert found.handed[first.name].wait(5.0)
+        assert found.handed[first.name].wait(3.0)
         assert found.pending() == frozenset()
         rows = engine.run_group("cross ended wake", _ctx(), (wake,))
     assert [(row.name, row.outcome) for row in rows] == [("cross ended wake", engine.OK)]
@@ -219,7 +220,7 @@ def test_a_critical_step_is_dropped_in_its_group_when_the_handed_off_step_it_nee
     ran: list[str] = []
     first = Step("cross gone first", _noting(ran, "first"), "cross gone")
     wake = Step("cross gone wake", _noting(ran, "wake"), "cross gone wake", frozenset({first.name}), Lane("tick"))
-    with pool.running(workers=4) as found:
+    with pool.running(workers=4, critical_s=3.0, slow_s=3.0) as found:
         found.hand((first.name,))
         found.end(first.name, True)
         rows = engine.run_group("cross gone wake", _ctx(), (wake,))
