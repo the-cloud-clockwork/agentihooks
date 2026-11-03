@@ -2,7 +2,7 @@
 other hives; a hive that stopped beating has no report."""
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from scripts.hive import registry
 from scripts.hive.auth import HiveError
@@ -71,6 +71,16 @@ class Reports:
         if namespace and recorded and namespace != recorded:
             return True
         return bool(agent.pane_id) and agent.pane_id not in panes
+
+    def vanished(self, agent: "AgentRecord", now_ms: int) -> bool:
+        """True when the beating hive ``agent`` was admitted to lists other members but not it past startup."""
+        raw = self.redis.get(key(agent.hive)) if agent.hive else None
+        launched = agent.launched_at or agent.started_at
+        if not raw or not launched or now_ms - launched < STARTUP_MS:
+            return False
+        found: object = json.loads(cast(str, raw)).get("names")
+        names = cast("list[object]", found) if isinstance(found, list) else []
+        return bool(names) and agent.name not in names
 
     def lost(self, agent: "AgentRecord", now_ms: int, after_ms: int) -> bool:
         hive = host(agent)

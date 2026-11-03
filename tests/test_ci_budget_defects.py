@@ -16,7 +16,7 @@ NOW_MS = 1_791_540_000_000
 URL = "https://github.com/o/r/actions/runs/{}/job/9"
 TEXT = (
     "A pull request Tests run took 16 minutes 8 seconds from push to Gate Required, over the 15 minute budget."
-    " Its slowest stage mutation-shard took 14 minutes 4 seconds against 6 minutes."
+    " Its slowest stage mutation-shard took 14 minutes 4 seconds against 3 minutes 30 seconds."
 )
 
 
@@ -209,7 +209,7 @@ def test_a_slow_run_sample_keeps_only_stages_strictly_over_a_budget_and_the_run_
         JOBS,
         8,
         [
-            _job("mutation-shard (1)", "01:00", "07:00", 8),
+            _job("mutation-shard (1)", "01:00", "04:30", 8),
             _job("unbudgeted", "00:00", "16:40", 8),
             _job("lint", "00:00", "05:00", 8),
             _job("Gate — Required", "17:00", "17:00", 8),

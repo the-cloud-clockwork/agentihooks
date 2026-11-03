@@ -17,12 +17,13 @@ steps that moved out of the hand written pass.
 
 | Part | Module | What it does |
 | --- | --- | --- |
-| Registry | `scripts.tick.registry` | Holds every registered step. `waves()` orders them by `order` and `needs` and refuses duplicate names, unknown dependencies, dependency cycles, a budget that is not a finite positive number, a negative interval, and two steps in one lane that write the same domain with no dependency between them |
+| Registry | `scripts.tick.registry` | Holds every registered step. `waves()` orders them by `order` and `needs` and refuses duplicate names, unknown dependencies, dependency cycles, a budget that is not a finite positive number, a negative interval, and two steps that write the same domain, or where one reads a domain the other writes, with no dependency between them, in one lane or across lanes |
 | Group run | `scripts.tick.engine.run_group` | Runs the steps of one group sorted by `order`. Each step runs in a daemon thread under a copied context and a child deadline of its own budget; the engine waits at most that budget. A step that raises is recorded `failed`, one that runs past its budget is recorded `late`, and neither stops the next step |
 | Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments and returns the actions the steps wrote, in step order. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
 | Call step | `scripts.tick.steps.CallStep` | A step that runs one call of the tick module. It reads the pass state through the view and writes the actions it returned to its own domain, `actions:<step name>` |
 
-Every `CallStep` runs in lane `tick` with a declared budget and interval from
+Every `CallStep` runs in lane `tick` unless it is given `lane=SLOW`
+(`scripts.tick.engine.SLOW`), with a declared budget and interval from
 `scripts.tick.steps.budgets.timing_of(name)`. Dependencies default to empty;
 spawn declares the prerequisites described below. Its constructor takes the step name, group, order and the
 call, `call(tick_module, get)`, where `get(key)` reads one value of the pass
@@ -110,6 +111,72 @@ rolled back. This delivery allows the next pass to start the same step while
 the earlier worker remains active. Do not interpret `late` as proof that the
 underlying call stopped or that retrying it cannot overlap.
 
+### Lanes
+
+A parallel pass gives each lane its own deadline: 110 seconds for the critical
+lane, which holds every step whose lane is not `slow`, and 400 seconds for the
+slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`). These report steps
+in `scripts.tick.steps.report` declare the slow lane:
+
+| Group | Slow lane steps |
+| --- | --- |
+| `wrapper events` | ledger event pass, done recheck, progress checks, waits end, merge pass, doc report, priorities sweep, health findings, findings pass |
+| `wrapper metrics` | metrics record, bottleneck status |
+
+The other report steps (stall watch, overrun pass, quiet pass, inbox wake,
+snapshot job, last tick, heartbeat, status publish) and every step outside the
+report module stay critical. The command runner and quota notice run before
+spawn and stay critical, because a slow step in a group before spawn would hold
+spawn until the slow deadline.
+
+In a parallel pass `run_group` takes the slow lane steps of a group, and every
+step that needs one of them, out of the group. It runs the rest eagerly and
+returns their records at once; the handed off steps start afterwards on a
+daemon thread the pass owns (`Pass.detach`) and run eagerly on up to 8
+workers. A handed off step that needs a step recorded late or dropped is
+dropped and recorded late. Their records go to the `finished` callback; the
+tick site passes one that prints their actions, then
+`slow lane step <name> failed: <error>` for each failed step and
+`a slow lane step held <repr>` when the pass box holds a held exception, printed
+with its repr. When the
+pass ends, `scripts.tick.pool.running` joins each handed off thread for at
+most the slow lane time left plus `LATER_GRACE_S` (one second), one thread
+after another, so each extra hung thread adds about one second. A handed off
+step waits only for the steps of its own group: a need on a step of another
+group is not waited for in a parallel pass. In sequential mode every step runs
+in group order, each in its own daemon thread the caller waits on up to its
+budget, slow lane included.
+
+Lanes are threads, not processes. No lane process is spawned or killed at its
+deadline; a hung slow step stays alive in its daemon thread after the pass has
+joined it, and the next pass holds that step while it runs. Whether each lane
+becomes a process is decided by the critical lane share in the tick report.
+
+Give a new step the slow lane only when no critical step needs it:
+
+```python
+from scripts.tick.engine import SLOW
+
+CallStep("example", "wrapper events", held(_example), lane=SLOW)
+```
+
+A critical step that needs a slow step is handed off with it, so it starts only
+after that slow step ends, yet it keeps the critical deadline: if the critical
+lane expires first it is dropped and recorded late. The registry checks domains across lanes, so a slow step
+and a critical step that touch the same domain need a dependency between them:
+
+```text
+ValueError: Unordered writers in lanes tick and slow for tasks: other, example
+ValueError: Unordered reader and writer in lanes tick and slow for tasks: other, example
+```
+
+The message names both lanes, in registration order, when the two steps sit in
+different lanes, and one lane when they share it, as in
+`Unordered writers in lane tick for tasks: other, example`.
+
+`agentihooks swarm <slug> tick-report` prints each lane's share of step CPU
+(see [Lane lines](tick-report.md#lane-lines)).
+
 ### Spawn prerequisites and the forty second bound
 
 Spawn declares only these prerequisites:
@@ -189,8 +256,8 @@ the step checks it and returns no actions when it does not hold.
 | --- | --- | --- |
 | 10 | run window | `run_window.step` |
 | 20 | verification notices | `claim_hold.verification_notices` |
-| 30 | size pass | `difficulty.size_pass` |
-| 40 | grouping release | `grouping.release_pass` |
+| 30 | size pass | `tasks.size_writes` returns a `sizes` task write per task `difficulty.sizes` sizes, applied by `tasks.task_writer` only while the task is still unsized |
+| 40 | grouping release | `tasks.release_writes` returns a `groups` write per lead `grouping.releases` finds stopped, applied by `tasks.group_writer` only while the lead still holds the members it read |
 | 50 | dispatcher group | `dispatcher.group` |
 
 ### Placement (`scripts.tick.steps.place`)
@@ -288,7 +355,10 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_place.py` | Group membership and orders; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
 | `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
-| `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space |
+| `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
+| `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
+| `tests/tick/test_report.py` | The slow lane report steps and a `CallStep` keeping the lane it is given |
+| `tests/tick/test_pool.py` | A parallel group returning its critical records while its slow step runs, a handed off step starting after the critical step it needs and dropped when that step was dropped, a handed off step applying its writes through the group appliers on a daemon thread named `tick-slow-lane`, the pass waiting for a hung slow step only until the slow deadline plus the grace second, and a sequential pass running slow steps in the group |
 
 ## Troubleshooting
 
@@ -298,6 +368,9 @@ The delivered proof and limitations are recorded in
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
 | Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
+| `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
+| A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
+| `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |

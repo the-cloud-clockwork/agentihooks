@@ -127,11 +127,6 @@ def _reboot_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(reboot.boot_pass, get("slug"), get("store"), get("ledger"), get("runtime"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
-def _tick_call(cli: Any, get: Get) -> Any:
-    runtime = get("runtime") or cli.routed(herdr=cli.HerdrRuntime())
-    return timing.call(cli.tick, get("slug"), get("store"), get("ledger"), runtime, cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
-
-
 def _outbox_migration(cli: Any, get: Get) -> None:
     timing.call(delivery.migrate_outbox, get("store"), get("slug"), get("inbox"))  # pyright: ignore[reportUnknownMemberType]
 
@@ -166,7 +161,6 @@ STEPS = (
     CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
     CallStep("intent check", "wrapper intent", held(_intent_check)),
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
-    CallStep("tick call", "wrapper reboot", held(_tick_call)),
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
     CallStep("page relay", "wrapper relay", held(_page_relay)),
     CallStep("tick view", "wrapper view", held(_tick_view)),

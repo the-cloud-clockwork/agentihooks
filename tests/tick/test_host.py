@@ -44,7 +44,6 @@ class _Slots:
 
 
 STORE = SimpleNamespace(redis="redis")
-TICK = object()
 
 
 def _pass(box: dict[str, Any] | None = None, **extra: object) -> dict[str, Any]:
@@ -81,9 +80,6 @@ def _cli(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespace
         _planning_after_phase=lambda *args: calls.append(("after", *args)) or ["planned again"],
         relay=relay,
         refresh_job=refresh_job,
-        tick=TICK,
-        routed=lambda herdr: ("routed", herdr),
-        HerdrRuntime=lambda: "herdr",
     )
 
 
@@ -127,7 +123,6 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("refresh job", "wrapper refresh"),
         ("intent check", "wrapper intent"),
         ("reboot pass", "wrapper reboot"),
-        ("tick call", "wrapper reboot"),
         ("outbox migration", "wrapper relay"),
         ("page relay", "wrapper relay"),
         ("tick view", "wrapper view"),
@@ -228,13 +223,11 @@ def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase
     ]
 
 
-def test_the_tick_call_runs_after_the_reboot_pass_with_the_pass_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
-    assert calls[1] == ("call", TICK, "sw", STORE, "ledger", "runtime", 7)
-    calls.clear()
-    _run("wrapper reboot", calls, _pass(runtime=None), monkeypatch)
-    assert calls[1] == ("call", TICK, "sw", STORE, "ledger", ("routed", "herdr"), 7)
+def test_no_host_step_wraps_the_tick_and_the_reboot_site_holds_only_the_reboot_pass() -> None:
+    registered = [step for wave in registry.waves() for step in wave]
+    assert "tick call" not in {step.name for step in registered}
+    assert "tick call" not in budgets.MEASURED
+    assert [step.name for step in engine.group_steps("wrapper reboot")] == ["reboot pass"]
 
 
 class _Agent:
@@ -293,8 +286,8 @@ def test_the_intent_check_keeps_its_judgement_in_the_box(monkeypatch: pytest.Mon
 
 def test_the_reboot_pass_boots_with_the_fenced_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
-    assert calls[0] == ("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)
+    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1"]
+    assert calls == [("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)]
 
 
 def test_a_raising_step_skips_the_rest_and_raises_at_the_site(monkeypatch: pytest.MonkeyPatch) -> None:
