@@ -3,12 +3,15 @@
 from collections.abc import Callable
 from typing import Any
 
+from scripts.swarm import dev_red, fleet_red, prerequisite_wait, promotion_watch, release_wait
 from scripts.tick import registry
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, Left
 
-__all__ = ["CLOSE", "RAISED", "STEPS", "TASK_PASSES", "held", "raise_held"]
+__all__ = ["CLOSE", "DRAINED", "RAISED", "REOPENS", "STEPS", "TASK_PASSES", "held", "raise_held", "sleeping_of"]
 
 Get = Callable[[str], Any]
+DRAINED = "drained resume"
+REOPENS = "reopen passes"
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -36,6 +39,51 @@ def raise_held(box: dict[str, Any]) -> None:
     """Raise the exception a step held, as the hand written pass let it escape."""
     if RAISED in box:
         raise box[RAISED]
+
+
+def sleeping_of(box: dict[str, Any]) -> bool:
+    """Return whether the sleeping step found the swarm asleep, asleep when that step left no answer."""
+    return box.get("sleeping", True)
+
+
+def _sleeping(tick: Any, get: Get) -> Any:
+    get("box")["sleeping"] = tick.lifetime.sleeping(get("slug"), get("store"), get("rows"))
+    return []
+
+
+def _drained_resume(tick: Any, get: Get) -> Any:
+    slug, store, rows, doc, config = get("slug"), get("store"), get("rows"), get("doc"), get("config")
+    if sleeping_of(get("box")) or config.state != "drained":
+        return []
+    if not any(tick._claimable(slug, store, rows, doc, lane) for lane in tick.LANES):
+        return []
+    get("box")["config"] = store.update(slug, state="running")
+    return ["new tasks, running again"]
+
+
+def _dev_red_reopen(tick: Any, get: Get) -> Any:
+    keys = ("slug", "config", "store", "ledger", "rows")
+    return tick.skip_refused(dev_red.reopen_pass, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
+
+
+def _prerequisite_reopen(tick: Any, get: Get) -> Any:
+    keys = ("slug", "store", "ledger", "rows")
+    return tick.skip_refused(prerequisite_wait.reopen_pass, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
+
+
+def _promotion_refresh(tick: Any, get: Get) -> Any:
+    keys = ("slug", "config", "store", "ledger", "doc", "now_ms")
+    return tick.skip_refused(promotion_watch.refresh, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
+
+
+def _release_alert(tick: Any, get: Get) -> Any:
+    keys = ("slug", "config", "ledger", "doc")
+    return tick.skip_refused(release_wait.alert_pass, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
+
+
+def _fleet_red_notice(tick: Any, get: Get) -> Any:
+    keys = ("slug", "store", "ledger", "rows", "now_ms")
+    return tick.skip_refused(fleet_red.notice_pass, *map(get, keys))
 
 
 def _run_window(tick: Any, get: Get) -> Any:
@@ -73,6 +121,13 @@ def _close_space(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
+    CallStep("sleeping", DRAINED, held(_sleeping)),
+    CallStep("drained resume", DRAINED, held(_drained_resume), frozenset({"sleeping"})),
+    CallStep("dev red reopen", REOPENS, held(_dev_red_reopen)),
+    CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"})),
+    CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),
+    CallStep("release alert", REOPENS, held(_release_alert)),
+    CallStep("fleet red notice", REOPENS, held(_fleet_red_notice)),
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
     CallStep("size pass", TASK_PASSES, held(_size_pass)),

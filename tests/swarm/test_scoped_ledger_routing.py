@@ -171,7 +171,7 @@ def test_pending_destination_stages_private_authority_without_routing_the_tick(s
     monkeypatch.setattr(hosted, "server_secret", lambda: "private-staging-fixture")
     monkeypatch.setattr(cli, "_reconcile_services", lambda: None)
 
-    def run(slugs, callback, settled, elapsed):
+    def run(slugs, callback, elapsed):
         seen.append((authority_context.secret(), ledger_link.remote()))
         return True
 

@@ -14,6 +14,7 @@ from scripts.tick.steps import CallStep, Left, PassBox
 tick: Any = import_module("scripts.swarm.tick")
 
 RAISED = "raised"
+PASS_SETUP = "pass setup"
 PASS_KEYS = ("slug", "store", "ledger", "runtime", "now_ms", "box")
 
 
@@ -178,9 +179,21 @@ def step_verify(
     return tick.skip_refused(tick._verify, slug, store, ledger, runtime, rows, now_ms)
 
 
+def step_spawn_hold_clear(slug: str, store: Any) -> list[str]:
+    store.redis.delete(store.key(slug, tick.SPAWN_HOLD))
+    return []
+
+
+def step_pass_budget(slug: str, store: Any) -> list[str]:
+    tick.engine.update_pass_budget(store, slug)
+    return []
+
+
 STEPS = (
     CallStep("config load", "start", partial(_run, step_config_load)),
     CallStep("stopped branch", "start", partial(_run, step_stopped_branch)),
+    CallStep("spawn hold clear", PASS_SETUP, partial(_run, step_spawn_hold_clear)),
+    CallStep("pass budget", PASS_SETUP, partial(_run, step_pass_budget)),
     CallStep("pane evidence", "observe", partial(_run, step_pane_evidence)),
     CallStep("execution reconcile", "observe", partial(_run, step_execution_reconcile)),
     CallStep("master move fail over", "observe", partial(_run, step_master_move_fail_over)),

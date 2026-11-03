@@ -4437,9 +4437,8 @@ registers it and starts the scheduler runner; each tick pass re-registers it if 
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its
-own thread; while one swarm's tick runs long, a quicker swarm ticks again each minute until every swarm's first
-tick of the pass ends; no extra tick starts after seven minutes.
+minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks once per
+pass in its own thread; a swarm whose tick runs long never makes another swarm tick again within the same pass.
 
 `AGENTIHOOKS_TICK_CADENCE` sets the slow lane cadence in whole minutes, one to five, one when unset; the cron stays
 every minute. `scripts.tick.engine.interval_s` gives a slow lane step the larger of its declared interval and the
