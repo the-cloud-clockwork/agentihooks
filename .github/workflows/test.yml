@@ -4289,6 +4289,7 @@ jobs:
         id: preflight
         if: steps.app-token.outcome == 'success'
         continue-on-error: true
+        timeout-minutes: 3
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           HEAD: ${{ github.event.pull_request.head.sha }}
@@ -4320,6 +4321,7 @@ jobs:
 
       - name: Keep the branch preflight kill memory for this run's shards
         if: steps.preflight.outputs.id != ''
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats/killers
