@@ -342,7 +342,7 @@ def main() -> int:
     print(f"Measured mutation worker seconds: {plan['estimated_worker_seconds']:.1f}")
     print(f"Measured mutation shards: {plan['shards']}; assigned mutants: {len(plan['assignments'])}")
     if overrun := budget_overrun(plan, args.budget):
-        if not plan["splits"]:
+        if not plan["splits"] or overrun.startswith("Mutant "):
             print(f"::error title=Mutation plan over budget::{overrun}")
             return 1
         print(f"Before the early stage: {overrun} The replan grades the budget after the early stage.")
