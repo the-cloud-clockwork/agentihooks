@@ -618,11 +618,12 @@ def _drop_remote(slug, store, ledger, rows, agent, reason):
 
 
 def _remote_gone_reason(slug: str, store: RedisStore, runtime: Any, agent: AgentRecord, now_ms: int) -> str:
-    if _elsewhere(agent) and reports.Reports(store.redis).vanished(agent, now_ms):
+    hives = reports.Reports(store.redis)
+    if _elsewhere(agent) and hives.vanished(agent, now_ms):
         return "its hive no longer lists it"
     if not reports.host(agent):
         return ""
-    if reports.Reports(store.redis).gone(agent) or runtime.observe(agent).state == "exited":
+    if hives.gone(agent) or runtime.observe(agent).state == "exited":
         return "its hive pane is gone"
     return "its hive stopped reporting" if _hive_lost(slug, store, agent, now_ms) else ""
 
