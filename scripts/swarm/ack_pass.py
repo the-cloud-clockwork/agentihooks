@@ -14,20 +14,34 @@ from typing import Any
 from scripts.swarm.store import RedisStore
 
 LOCK = "acks-lock"
-LOCK_MS = 60_000
+LOCK_MS = 30_000
+RENEW_S = 10.0
 COLLECTING = ("acknowledging", "launching")
 
 
 @contextmanager
 def collecting(store: RedisStore, slug: str) -> Iterator[bool]:
-    """Hold the swarm's acks lock for the block, yielding whether this caller took it."""
+    """Hold the swarm's acks lock for the block, renewed while held, yielding whether this caller took it."""
+    from scripts.scheduler.process_interval import Interval
+
     key, token = store.key(slug, LOCK), uuid.uuid4().hex
-    taken = bool(store.redis.set(key, token, nx=True, px=LOCK_MS))
+    if not store.redis.set(key, token, nx=True, px=LOCK_MS):
+        yield False
+        return
+    renewing = Interval(lambda: _renew(store, key, token), every=RENEW_S)
+    renewing.start()
     try:
-        yield taken
+        yield True
     finally:
-        if taken and store.redis.get(key) == token:
+        renewing.close()
+        if store.redis.get(key) == token:
             store.redis.delete(key)
+
+
+def _renew(store: RedisStore, key: str, token: str) -> None:
+    """Extend the acks lock while this holder still owns it."""
+    if store.redis.get(key) == token:
+        store.redis.pexpire(key, LOCK_MS)
 
 
 def due(store: RedisStore, slug: str) -> bool:

@@ -116,11 +116,47 @@ def test_a_stopped_swarm_collects_nothing(store: RedisStore, collected: list[Any
     assert collected == []
 
 
+def test_a_holder_renews_its_lock_every_ten_seconds_and_never_a_successors(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.scheduler import process_interval
+
+    made: list[Any] = []
+
+    class Interval:
+        def __init__(self, callback: Any, *, every: float) -> None:
+            self.callback, self.every, self.closed = callback, every, False
+            made.append(self)
+
+        def start(self) -> None:
+            pass
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(process_interval, "Interval", Interval)
+    key = store.key("sw", ack_pass.LOCK)
+    with ack_pass.collecting(store, "sw"):
+        (renewing,) = made
+        assert renewing.every == 10.0
+        store.redis.pexpire(key, 5_000)
+        renewing.callback()
+        assert 29_000 < store.redis.pttl(key) <= 30_000
+        store.redis.set(key, "successor", px=5_000)
+        renewing.callback()
+        assert store.redis.pttl(key) <= 5_000
+    assert renewing.closed is True
+    assert store.redis.get(key) == "successor"
+    with ack_pass.collecting(store, "sw") as taken:
+        assert taken is False
+    assert len(made) == 1
+
+
 def test_the_lock_is_released_only_by_its_own_holder(store: RedisStore) -> None:
     key = store.key("sw", ack_pass.LOCK)
     with ack_pass.collecting(store, "sw") as taken:
         assert taken is True
-        assert 59_000 < store.redis.pttl(key) <= 60_000
+        assert 29_000 < store.redis.pttl(key) <= 30_000
         with ack_pass.collecting(store, "sw") as second:
             assert second is False
         assert store.redis.get(key)
