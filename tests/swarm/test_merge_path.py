@@ -296,9 +296,19 @@ def test_updated_pull_requests_past_the_search_cap_are_refused_not_undercounted(
 
 
 def test_a_pull_request_with_more_queue_events_than_read_is_refused():
-    crowded = [{**PULLS[0], "url": f"u{n}", "timelineItems": {"totalCount": 101, "nodes": []}} for n in (1, 2)]
+    inside = {"totalCount": 101, "nodes": [{"__typename": "AddedToMergeQueueEvent", "createdAt": stamp(0)}]}
+    crowded = [
+        {**PULLS[0], "url": "u1", "timelineItems": {"totalCount": 101, "nodes": []}},
+        {**PULLS[0], "url": "u2", "timelineItems": inside},
+    ]
     with pytest.raises(SwarmError, match="^more than 100 merge queue events on u1, u2; shorten the window$"):
         merge_path.read_pulls("/repo", "o/r", SINCE, Gh([searched(crowded, total=2)]))
+
+
+def test_a_pull_request_whose_oldest_read_queue_event_predates_the_window_is_kept():
+    events = [{"__typename": "AddedToMergeQueueEvent", "createdAt": stamp(offset)} for offset in (-1, 5)]
+    long_lived = {**PULLS[0], "timelineItems": {"totalCount": 250, "nodes": events}}
+    assert merge_path.read_pulls("/repo", "o/r", SINCE, Gh([searched([long_lived], total=1)])) == [long_lived]
 
 
 def test_a_pull_request_with_exactly_the_queue_events_read_is_kept():

@@ -221,13 +221,21 @@ def _search(repo_dir: str, query: str, variables: dict, run: Callable, paginate:
     return pages
 
 
+def _queue_events_cut(timeline: dict, since_s: float) -> bool:
+    """True when events older than the newest ones read may still fall inside the window."""
+    if timeline["totalCount"] <= TIMELINE:
+        return False
+    oldest = timeline["nodes"][0].get("createdAt") if timeline["nodes"] else None
+    return oldest is None or _seconds(oldest) >= since_s
+
+
 def read_pulls(repo_dir: str, repo: str, since_s: float, run: Callable) -> list[dict]:
     pages = _search(repo_dir, PULLS, {"q": f"repo:{repo} is:pr base:dev updated:>={_stamp(since_s)}"}, run, True)
     pulls = [node for page in pages for node in page["nodes"] if node]
     total = pages[0]["issueCount"]
     if len(pulls) < total:
         raise SwarmError(f"listed {len(pulls)} of {total} updated pull requests; shorten the window")
-    if cut := [pull["url"] for pull in pulls if pull["timelineItems"]["totalCount"] > TIMELINE]:
+    if cut := [pull["url"] for pull in pulls if _queue_events_cut(pull["timelineItems"], since_s)]:
         raise SwarmError(f"more than {TIMELINE} merge queue events on {', '.join(cut)}; shorten the window")
     return pulls
 
