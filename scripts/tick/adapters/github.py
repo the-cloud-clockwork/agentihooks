@@ -132,6 +132,7 @@ class GitHubSourceControl:
     root: Path
     base: str
     git: Git = subprocess.run
+    gh: Git | None = None
 
     def _call(self, args: list[str], deadline: Deadline) -> str:
         """Run one audited gh api call inside the deadline and return its output."""
@@ -321,7 +322,7 @@ class GitHubSourceControl:
         result = github_reads.rest(
             github_reads.CALLER.get(CALLER),
             ["api", path],
-            run=subprocess.run,
+            run=self.gh or subprocess.run,
             cwd=self.root,
             timeout=_live(deadline),
             capture_output=True,
@@ -337,11 +338,12 @@ class GitHubSourceControl:
         result = github_reads.rest(
             caller,
             ["api", "graphql", "-f", f"query={document}", *flags],
-            run=subprocess.run,
+            run=self.gh or subprocess.run,
             cwd=self.root,
             timeout=_live(deadline),
             capture_output=True,
             text=True,
             check=True,
         )
+        result.check_returncode()
         return json.loads(result.stdout)
