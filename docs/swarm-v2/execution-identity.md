@@ -276,8 +276,8 @@ itself.
 Pull request 9279 shipped the read behind the flag, off by default. Pull request 9474 made it the default. The read
 is trusted only when every writer maintains `hosts`, because a writer on older code updates execution records and the
 `agents` hash without touching it and leaves a field naming a hive the agent has left. A process reads the projection
-as soon as it runs a release carrying pull request 9474, so a deployment that still has writers on older code holds the
-read off until they are upgraded. The rollout runs in this order:
+as soon as it runs a release carrying pull request 9474, whatever release the other writers run. Only
+`SWARM_HOST_PROJECTION_ENABLED=false` in git holds the read off while writers on older code remain. The rollout runs in this order:
 
 1. Set `SWARM_HOST_PROJECTION_ENABLED=false` in the deployment's git configuration for every controller, tick and hive
    member process, so the upgraded processes keep the registry read during the roll.
@@ -380,7 +380,7 @@ every attempt. Nothing is configured.
 | Symptom | Cause | Action |
 |---|---|---|
 | A hive member's projection writes fail with a Redis permission error naming `…:hosts` | Its Redis user was granted before pull request 9279 | Grant the member again so its access list carries `swarm:*:hosts` |
-| A controller reads an agent's session readings below the wrong member | A process on a release without pull request 9474 moved the agent without updating `hosts` | Set `SWARM_HOST_PROJECTION_ENABLED=false` through git configuration, upgrade that process, then remove the setting |
+| A controller reads an agent's session readings below the wrong member | A process on code from before pull request 9279 moved the agent without updating `hosts`, or a process on a release with 9279 but without 9474 failed a projection write and left the old field | Set `SWARM_HOST_PROJECTION_ENABLED=false` through git configuration, upgrade that process, then remove the setting |
 | A swarm write raises `agent registry kept changing; the agent was not shown` or a Redis error, and the agent's `hosts` field is gone | The projection write failed and `forget_hosts` dropped the field | No action; host lookups read the registry until the agent's next projection write |
 | `scope.readings` median stays near its old value with the flag on | The `hosts` field is missing for most agents, so lookups fall back | Compare `HLEN` of `hosts` and `agents` as above |
 | `the swarm fencing state kept changing; nothing was committed` | Sixteen conflicting attempts, as in [Fencing records](../reference/fencing-records.md#troubleshooting) | The next pass retries; find the scanning change in the tick journal |
