@@ -134,7 +134,7 @@ def _dispatch_op(op: tuple) -> None:
     elif kind == "counter":
         _add_counter(cast(tuple[str, str, float, dict[str, str]], op))
     elif kind == "histogram":
-        _record_histogram(cast(tuple[str, str, float, dict[str, str]], op))
+        _record_histogram(op)
     elif kind == "flush":
         try:
             succeeded = True

@@ -178,7 +178,7 @@
   "hooks/observability/correlation.py": 75,
   "hooks/observability/event_relay.py": 120,
   "hooks/observability/metrics.py": 17,
-  "hooks/observability/otel.py": 67,
+  "hooks/observability/otel.py": 59,
   "hooks/observability/signals.py": 2,
   "hooks/observability/token_monitor.py": 41,
   "hooks/observability/trace_flush.py": 66,
