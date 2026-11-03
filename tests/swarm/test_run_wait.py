@@ -363,6 +363,7 @@ def test_a_failed_tick_guard_is_logged_and_the_wait_pass_goes_on(monkeypatch, ca
     monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
     monkeypatch.setattr(cli.timer, "guard", broken)
     monkeypatch.setattr(cli, "run_waits", lambda store, slug: ["wait checked"])
+    monkeypatch.setattr(cli.ack_pass, "run", lambda store, slug: [])
     cli.cmd_waits(SimpleNamespace(slugs=lambda: ["sw"]), Namespace())
     output = capsys.readouterr()
     assert output.out == "sw: wait checked\n"

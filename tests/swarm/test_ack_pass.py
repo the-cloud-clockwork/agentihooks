@@ -101,8 +101,9 @@ def test_a_remote_ledger_swarm_is_collected_only_with_tick_authority(
     _launch(store, "acknowledging")
     store.redis.hset(store.key("sw", "config"), "api_url", "https://hosted.example")
     acquired: list[str] = []
-    real = lease.acquire
-    monkeypatch.setattr(lease, "acquire", lambda own, slug, owner: acquired.append(slug) or real(own, slug, owner))
+    held = lease.Lease(commands.hive_id(), 1, 10**15)
+    monkeypatch.setattr(lease, "acquire", lambda own, slug, owner: acquired.append(slug) or held)
+    monkeypatch.setattr(lease, "require", lambda own, slug, current: None)
     with authority_context.bound(authority):
         found = ack_pass.run(store, "sw", ledger="ledger", runtime="runtime")
     assert acquired == (["sw"] if authority else [])
@@ -162,7 +163,7 @@ def test_a_redis_error_while_renewing_is_reported_and_the_next_beat_retries(
     real = store.redis.pexpire
     monkeypatch.setattr(store.redis, "pexpire", lambda *args: (_ for _ in ()).throw(RedisConnectionError("down")))
     ack_pass._renew(store, key, "mine")
-    assert capsys.readouterr().err == f"renewing the acks lock {key} failed: ConnectionError('down')\n"
+    assert capsys.readouterr().err == f"renewing the acks lock {key} failed: ConnectionError\n"
     monkeypatch.setattr(store.redis, "pexpire", real)
     ack_pass._renew(store, key, "mine")
     assert 29_000 < store.redis.pttl(key) <= 30_000

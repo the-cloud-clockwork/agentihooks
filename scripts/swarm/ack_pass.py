@@ -49,7 +49,7 @@ def _renew(store: RedisStore, key: str, token: str) -> None:
         if store.redis.get(key) == token:
             store.redis.pexpire(key, LOCK_MS)
     except RedisError as exc:
-        print(f"renewing the acks lock {key} failed: {exc!r}", file=sys.stderr)
+        print(f"renewing the acks lock {key} failed: {type(exc).__name__}", file=sys.stderr)
 
 
 def due(store: RedisStore, slug: str) -> bool:
