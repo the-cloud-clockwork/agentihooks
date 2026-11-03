@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
+from importlib import import_module
 from typing import Any, Protocol
 
 import scripts.tick.steps.agents  # noqa: F401
@@ -221,6 +222,7 @@ def run_group(name: str, **state: object) -> list[str]:
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
+    import_module("scripts.hive.launch")
     box: dict[str, Any] = steps.PassBox()
     passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
     actions = run_group("start", **passing)
