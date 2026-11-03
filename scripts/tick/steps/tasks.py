@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from functools import partial
-from importlib import import_module
 from typing import Any, cast
 
 from scripts.swarm import dev_red, dispatcher, fleet_red, prerequisite_wait, promotion_watch, release_wait
@@ -372,6 +371,7 @@ def _dispatcher_group(tick: Any, get: Get) -> Any:
 
 
 def _settle(slug: Any, config: Any, store: Any, ledger: Any, rows: Any, doc: Any) -> Any:
+    tick: Any = steps.import_module("scripts.swarm.tick")
     agents = store.agents(slug)
     if config.state == "stopping":
         if agents:
@@ -429,5 +429,3 @@ STEPS = (
 
 for _step in STEPS:
     registry.register(_step)
-
-tick: Any = import_module("scripts.swarm.tick")
