@@ -516,7 +516,7 @@ class RedisStore:
 
     def forget_hosts(self, slug: str, *names: str) -> None:
         """Drop host projections so hive scope reads fall back to the execution registry."""
-        self.redis.hdel(self.key(slug, "hosts"), *names)
+        self.redis.hdel(self.key(slug, "hosts"), *names)  # pyright: ignore[reportUnknownMemberType]
 
     def project_legacy(self, slug: str, agent: AgentRecord, managed: Callable[[], bool]) -> bool:
         def write(pipe: Any) -> bool:
