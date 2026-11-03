@@ -2,10 +2,10 @@
 
 import math
 import re
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 from hooks.classifier import Answer, ClassifierError, code_rules, decide, definitions, runner
-from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm_ledger import ledger_kinds
 
 PER_TICK = 5
@@ -25,18 +25,19 @@ INFRA_RE = re.compile(
 )
 
 
-def size_pass(slug: str, ledger, doc: dict) -> list[str]:
+def sizes(doc: dict) -> Iterator[tuple[str, dict]]:
+    """Yield the size fields of each unsized open task this pass sizes, in order as each is computed, writing nothing."""
     unsized = [t for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("difficulty")][:PER_TICK]
-    actions = []
     with ThreadPoolExecutor(max_workers=PER_TICK) as pool:
-        for task, fields in zip(unsized, pool.map(lambda task: rule(task) or classify(task, doc), unsized)):
-            try:
-                ledger.update_task(slug, task["id"], fields)
-            except LedgerRefused:
-                actions.append(f"skipped sizing task {task['id']}: the ledger refused its write")
-                continue
-            actions.append(f"sized task {task['id']} {fields['difficulty']} by {fields['difficulty_source']}")
-    return actions
+        for task, fields in zip(
+            unsized, pool.map(lambda task: rule(task) or classify(task, doc), unsized), strict=True
+        ):
+            yield task["id"], fields
+
+
+def sized_action(task_id: str, fields: dict) -> str:
+    """Return the action line naming the size given to task ``task_id``."""
+    return f"sized task {task_id} {fields['difficulty']} by {fields['difficulty_source']}"
 
 
 def rule(task: dict) -> dict | None:

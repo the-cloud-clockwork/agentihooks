@@ -85,14 +85,32 @@ def test_crossed_reader_writer_domains_from_only_one_direction_are_refused() -> 
     assert str(error.value) == "Unordered reader and writer in lane local for config, tasks: a, b"
 
 
-def test_ordered_reader_and_writer_or_other_lanes_accepted() -> None:
+def test_ordered_reader_and_writer_accepted_across_lanes() -> None:
     subject = registry().Registry()
     writer = SampleStep("a", writes=frozenset({"tasks"}))
     reader = SampleStep("b", frozenset({"a"}), reads=frozenset({"tasks"}))
-    remote = SampleStep("c", reads=frozenset({"tasks"}), lane="remote")
+    remote = SampleStep("c", frozenset({"a"}), reads=frozenset({"tasks"}), lane="remote")
     for step in (writer, reader, remote):
         subject.register(step)
-    assert subject.waves() == ((writer, remote), (reader,))
+    assert subject.waves() == ((writer,), (reader, remote))
+
+
+def test_unordered_reader_and_writer_in_other_lanes_refused() -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", writes=frozenset({"tasks"})))
+    subject.register(SampleStep("b", reads=frozenset({"tasks"}), lane="remote"))
+    with pytest.raises(ValueError) as error:
+        subject.waves()
+    assert str(error.value) == "Unordered reader and writer in lanes local and remote for tasks: a, b"
+
+
+def test_unordered_writers_in_other_lanes_refused() -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", writes=frozenset({"tasks"})))
+    subject.register(SampleStep("b", writes=frozenset({"tasks"}), lane="remote"))
+    with pytest.raises(ValueError) as error:
+        subject.waves()
+    assert str(error.value) == "Unordered writers in lanes local and remote for tasks: a, b"
 
 
 def test_ordered_puts_each_step_after_the_steps_it_needs() -> None:
@@ -219,11 +237,11 @@ def test_transitive_needs_orders_shared_writers(reverse: bool) -> None:
     assert subject.waves() == tuple((step,) for step in steps)
 
 
-def test_other_lanes_and_disjoint_domains_are_independent() -> None:
+def test_disjoint_domains_are_independent_in_any_lane() -> None:
     subject = registry().Registry()
     steps = (
         SampleStep("a", writes=frozenset({"agents"})),
-        SampleStep("b", writes=frozenset({"agents"}), lane="remote"),
+        SampleStep("b", writes=frozenset({"swarm"}), lane="remote"),
         SampleStep("c", writes=frozenset({"tasks"})),
     )
     for step in steps:

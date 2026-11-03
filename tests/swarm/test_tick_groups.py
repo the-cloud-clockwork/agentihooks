@@ -46,9 +46,9 @@ def _spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Context]]:
     seen: list[tuple[str, Context]] = []
     real = engine.run_group
 
-    def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
+    def run_group(name: str, ctx: Context, **options: Any) -> tuple[engine.StepRecord, ...]:
         seen.append((name, ctx))
-        return real(name, ctx)
+        return real(name, ctx, **options)
 
     monkeypatch.setattr(tick_module.engine, "run_group", run_group)
     return seen
