@@ -73,18 +73,19 @@ def test_a_freeze_on_a_plan_gone_from_the_ledger_still_marks_the_phase_and_tasks
     assert frozen == {"phases/ph3", "tasks/t9"}
 
 
-def test_a_focus_holds_what_lies_outside_it_but_never_urgent_or_fix_phase_tasks():
-    assert marks([record("plans/p1", "focus")])["held"] == {"plans/p2", "phases/ph2", "tasks/t2"}
+def test_a_focus_holds_what_lies_outside_it_urgent_included_but_never_fix_phase_tasks():
+    assert marks([record("plans/p1", "focus")])["held"] == {"plans/p2", "phases/ph2", "tasks/t2", "tasks/t4"}
     assert marks([record("plans/p1", "focus")], fix_phase="ph2")["held"] == {"plans/p2", "phases/ph2"}
 
 
 def test_a_task_focus_keeps_the_nodes_above_it_unheld():
-    assert marks([record("tasks/t1", "focus")])["held"] == {"plans/p2", "phases/ph2", "tasks/t2", "tasks/t3"}
+    held = {"plans/p2", "phases/ph2", "tasks/t2", "tasks/t3", "tasks/t4"}
+    assert marks([record("tasks/t1", "focus")])["held"] == held
 
 
 def test_lane_records_mark_only_tasks():
     assert marks([record("lane:ci")])["frozen"] == {"tasks/t3"}
-    assert marks([record("lane:ci", "focus")])["held"] == {"tasks/t1", "tasks/t2", "tasks/t5"}
+    assert marks([record("lane:ci", "focus")])["held"] == {"tasks/t1", "tasks/t2", "tasks/t4", "tasks/t5"}
 
 
 def test_a_frozen_node_is_never_also_held():
@@ -96,20 +97,17 @@ def test_a_watched_swarm_focus_holds_every_task_but_urgent_and_fix_phase_ones():
 
 
 def test_a_task_that_is_not_open_is_never_held():
-    doc = {**DOC, "tasks": [{**DOC["tasks"][1], "state": "done"}], "freezes": [record("plans/p1", "focus")]}
+    rows = [DOC["tasks"][0], {**DOC["tasks"][1], "state": "done"}]
+    doc = {**DOC, "tasks": rows, "freezes": [record("plans/p1", "focus")]}
     assert freeze.marks(doc, hierarchy.project(doc)[0], "", False)["held"] == ["plans/p2", "phases/ph2"]
 
 
-def test_a_focus_on_an_item_gone_from_the_ledger_holds_everything_but_urgent_work():
-    held = marks([record("tasks/gone", "focus")])["held"]
-    assert {"plans/p1", "plans/p2", "phases/ph1", "phases/ph2", "tasks/t1", "tasks/t2"} <= held
-    assert "tasks/t4" not in held
+def test_a_focus_on_an_item_gone_from_the_ledger_holds_nothing():
+    assert marks([record("tasks/gone", "focus")])["held"] == set()
 
 
-def test_a_lane_focus_never_holds_plans_or_phases_whatever_its_value():
-    held = marks([record("lane:ci:night", "focus")])["held"]
-    assert not held & {"plans/p1", "plans/p2", "phases/ph1", "phases/ph2"}
-    assert {"tasks/t1", "tasks/t3"} <= held
+def test_a_lane_focus_matching_no_task_holds_nothing():
+    assert marks([record("lane:ci:night", "focus")])["held"] == set()
 
 
 def test_the_streamed_ledger_view_carries_the_marks_and_the_server_limits():

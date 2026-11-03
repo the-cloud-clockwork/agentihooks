@@ -147,7 +147,7 @@ from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
-from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
+from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     agent_hive,
@@ -1366,7 +1366,7 @@ def cmd_status(store, args):
         )
 
 
-def cmd_freeze(store, args):
+def cmd_freeze(store: RedisStore, args: argparse.Namespace) -> None:
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
     full = store.config(args.slug).autonomy == FULL
@@ -1374,8 +1374,11 @@ def cmd_freeze(store, args):
         raise SwarmError(
             "below full autonomy the master writes freezes only with the operator's words: pass them with --quote"
         )
-    LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
-    print(json.dumps({args.command: args.target, "by": writer}))
+    given: dict[str, Any] = vars(args)
+    queue = {key: given[key] for key in ("position", "only") if given.get(key)}
+    words = FreezeWords(reason=args.reason or "", quote=args.quote or "", **queue)
+    LedgerClient().freeze(args.slug, args.command, args.target, by=by, words=words)
+    print(json.dumps({args.command: args.target, "by": writer, **queue}))
 
 
 def cmd_cover(store, args):
@@ -1405,8 +1408,8 @@ def autoscale_lines(config, decision):
     return lines
 
 
-def cmd_autoscale(store, args):
-    from scripts.swarm import capacity
+def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
+    from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
     if args.fixture:
@@ -1414,10 +1417,17 @@ def cmd_autoscale(store, args):
     else:
         inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
     _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs)
+    known = args.slug in store.slugs()
+    slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     if args.json:
-        print(json.dumps({"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision}, indent=2))
+        print(
+            json.dumps(
+                {"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision, **slots}, indent=2
+            )
+        )
         return
-    print("\n".join(autoscale_lines(config, decision)))
+    local = [f"local slots {slots['local_slots']}, host room guard applies"] if known else []
+    print("\n".join([*autoscale_lines(config, decision), *local]))
 
 
 def cmd_names(store, args):
@@ -2457,6 +2467,11 @@ def build_parser() -> argparse.ArgumentParser:
         frozen.add_argument("target")
         frozen.add_argument("--reason", default="")
         frozen.add_argument("--quote", default="")
+        if verb == "focus":
+            frozen.add_argument("--only", action="store_true")
+            place = frozen.add_mutually_exclusive_group()
+            place.add_argument("--top", dest="position", action="store_const", const="top")
+            place.add_argument("--bottom", dest="position", action="store_const", const="bottom")
     scale = sub.add_parser("autoscale")
     scale.add_argument("--fixture", default="")
     scale.add_argument("--json", action="store_true")
