@@ -248,7 +248,7 @@ def phase_writer(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, 
 
 
 def _apply_phase(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, Any], write: Write) -> list[str]:
-    """Set the checkbox of ``write`` and mark the pass box, dropping it as a conflict once the phase moved.
+    """Mark the pass box and set the checkbox of ``write``, dropping it as a conflict once the phase moved.
 
     The phase is read from the held view after the pass's latest write; without a held view the write goes through.
     """
@@ -258,12 +258,11 @@ def _apply_phase(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, 
             fresh = None if held is None else cast(dict[str, Any], held.read("phases", change.phase_id) or {})
             if fresh is not None and bool(fresh.get("done")) != write.expected:
                 raise RevisionConflict(f"phase {change.phase_id} changed its checkbox since the phase pass read it")
+            box[PHASE_CHANGED] = True
             try:
-                line = phases.apply_change(inbox, store, slug, ledger, change)
+                return [phases.apply_change(inbox, store, slug, ledger, change)]
             except LedgerRefused as exc:
                 raise RevisionConflict(f"the ledger refused the checkbox of phase {change.phase_id}") from exc
-            box[PHASE_CHANGED] = True
-            return [line]
         case _:
             raise RevisionConflict(f"the phase write of {write.key} carries no phase change")
 

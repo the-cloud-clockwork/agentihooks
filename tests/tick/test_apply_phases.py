@@ -125,7 +125,21 @@ def test_the_phase_applier_drops_a_checkbox_the_ledger_refused(
     box: dict[str, Any] = {}
     with pytest.raises(RevisionConflict, match="^the ledger refused the checkbox of phase p1$"):
         tasks.phase_writer("sw", "ledger", "inbox", "store", box)(Write(tasks.PHASES, "p1", TICK, expected=False))
-    assert box == {}
+    assert box == {tasks.PHASE_CHANGED: True}
+
+
+def test_the_phase_applier_marks_the_box_before_a_notice_that_fails(
+    monkeypatch: pytest.MonkeyPatch, held_phases: list[dict[str, Any]]
+) -> None:
+    def fail(*args: Any) -> str:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(phases, "apply_change", fail)
+    held_phases.append({"id": "p1"})
+    box: dict[str, Any] = {}
+    with pytest.raises(RuntimeError, match="redis down"):
+        tasks.phase_writer("sw", "ledger", "inbox", "store", box)(Write(tasks.PHASES, "p1", TICK, expected=False))
+    assert box == {tasks.PHASE_CHANGED: True}
 
 
 def test_the_phase_applier_drops_a_write_carrying_no_phase_change() -> None:
