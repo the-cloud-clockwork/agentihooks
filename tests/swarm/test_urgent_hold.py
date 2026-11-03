@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from scripts.swarm.store import RedisStore
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_cli import run
 
@@ -112,10 +113,12 @@ def test_a_frozen_task_is_held_by_the_freeze_that_covers_it():
     assert hold(found, "b") == ""
 
 
-def test_a_focus_elsewhere_never_holds_a_normal_task_or_an_urgent_one():
+def test_a_focus_elsewhere_holds_a_normal_task_and_an_urgent_one_only_while_it_has_open_work():
     focus = [{"verb": "focus", "target": "lane:ci"}]
-    assert hold(doc([task("a")], freezes=focus), "a") == ""
-    assert hold(doc([task("a", rank="urgent")], freezes=focus), "a") == ""
+    work = task("c", lane="ci")
+    assert hold(doc([task("a"), work], freezes=focus), "a") == "a focus elsewhere holds it"
+    assert hold(doc([task("a", rank="urgent"), work], freezes=focus), "a") == "a focus elsewhere holds it"
+    assert hold(doc([task("a", rank="urgent"), {**work, "state": "done"}], freezes=focus), "a") == ""
 
 
 def test_an_urgent_task_is_still_held_by_a_freeze():
@@ -372,3 +375,22 @@ def test_a_judged_urgent_finding_returns_when_the_task_is_claimed_then_unclaimed
     urgent_hold.observe(store, SLUG, found, 160 * MINUTE)
     urgent_hold.observe(store, SLUG, found, 230 * MINUTE)
     assert judged_status(store, monkeypatch, found, 230 * MINUTE) == ["urgent-unclaimable/a"]
+
+
+def test_a_doctor_fix_task_under_a_focus_elsewhere_is_recorded_as_claimable(store: RedisStore) -> None:
+    from scripts.doctor import loop, priming
+    from scripts.swarm.health import urgent_hold
+
+    store.update(SLUG, template=priming.TEMPLATE)
+    found = doc(
+        [task("fix", phase=loop.FIX_PHASE, rank="urgent"), task("plain", rank="urgent"), task("c", lane="ci")],
+        freezes=[{"verb": "focus", "target": "lane:ci"}],
+    )
+    found["phases"] = [
+        {"id": "p1", "title": "build", "depends_on": []},
+        {"id": loop.FIX_PHASE, "title": "fix", "depends_on": []},
+    ]
+    urgent_hold.observe(store, SLUG, found, 0)
+    rows = urgent_hold.read(store, SLUG)["tasks"]
+    assert rows["fix"]["why"] is False
+    assert rows["plain"]["why"] == "a focus elsewhere holds it"
