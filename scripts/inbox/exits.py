@@ -248,7 +248,7 @@ class _WorldPass:
         self.up = list(worlds)
         self.skipped: list[str] = []
 
-    def run(self, world: "InboxStore", function):
+    def run[T](self, world: "InboxStore", function: "Callable[[InboxStore], T]") -> T | None:
         from redis.exceptions import ConnectionError as RedisConnectionError
         from redis.exceptions import TimeoutError as RedisTimeoutError
 

@@ -140,7 +140,7 @@ class InboxStore:
         self.world = scope.member() if world is None else world
         self.prefix = prefix(self.world)
 
-    def key(self, *parts):
+    def key(self, *parts: str) -> str:
         return ":".join((self.prefix, *parts))
 
     def home(self, address):
