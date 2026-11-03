@@ -572,7 +572,10 @@ def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
 def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded():
     tests = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     assert "name" not in tests["mutation"]
-    assert tests["mutation"]["strategy"]["matrix"] == {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"}
+    assert "strategy" not in tests["mutation"]
+    assert tests["mutation-shard"]["strategy"]["matrix"] == {
+        "shard": "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+    }
     assert "name" not in _workflow()["jobs"]["mutation"]
     assert "strategy" not in _workflow()["jobs"]["mutation"]
     assert "strategy" in _workflow()["jobs"]["mutation-shard"]
@@ -674,7 +677,7 @@ def test_touched_tests_keep_one_xdist_group_on_one_worker(tmp_path):
     assert len(set(workers)) == 1, (workers, output)
 
 
-@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation"])
+@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation-shard"])
 def test_protected_mutation_jobs_install_with_no_branch_lock(tmp_path, job):
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     steps, names = _steps(workflow["jobs"][job])
@@ -703,7 +706,7 @@ export -f uv
     assert "Trusted dependency lock resolved without a branch lock" in result.stdout
 
 
-@pytest.mark.parametrize("job", ["mutation-stats", "mutation"])
+@pytest.mark.parametrize("job", ["mutation-stats", "mutation-shard"])
 def test_mutation_jobs_keep_the_head_lock_when_the_head_has_one(tmp_path, job):
     steps, names = _steps(yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job])
     install = steps[names.index("Install dependencies")]["run"]

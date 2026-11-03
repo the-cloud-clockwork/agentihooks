@@ -67,6 +67,24 @@ def test_a_writer_read_first_is_refused_in_either_position() -> None:
     assert str(error.value) == "Unordered reader and writer in lane local for swarm: a, b"
 
 
+def test_crossed_reader_writer_domains_from_both_directions_are_joined_and_sorted() -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", writes=frozenset({"tasks", "config"}), reads=frozenset({"alpha"})))
+    subject.register(SampleStep("b", reads=frozenset({"config", "zeta"}), writes=frozenset({"alpha", "beta"})))
+    with pytest.raises(ValueError) as error:
+        subject.validate()
+    assert str(error.value) == "Unordered reader and writer in lane local for alpha, config: a, b"
+
+
+def test_crossed_reader_writer_domains_from_only_one_direction_are_refused() -> None:
+    subject = registry().Registry()
+    subject.register(SampleStep("a", writes=frozenset({"tasks", "config"})))
+    subject.register(SampleStep("b", reads=frozenset({"tasks", "config", "other"})))
+    with pytest.raises(ValueError) as error:
+        subject.validate()
+    assert str(error.value) == "Unordered reader and writer in lane local for config, tasks: a, b"
+
+
 def test_ordered_reader_and_writer_or_other_lanes_accepted() -> None:
     subject = registry().Registry()
     writer = SampleStep("a", writes=frozenset({"tasks"}))
@@ -90,6 +108,13 @@ def test_ordered_refuses_a_cycle() -> None:
     a, b = SampleStep("a", frozenset({"b"})), SampleStep("b", frozenset({"a"}))
     with pytest.raises(ValueError) as error:
         registry().ordered([a, b, SampleStep("c")])
+    assert str(error.value) == "Dependency cycle: a, b"
+
+
+def test_ordered_cycle_without_a_free_step_raises_the_cycle_message() -> None:
+    a, b = SampleStep("a", frozenset({"b"})), SampleStep("b", frozenset({"a"}))
+    with pytest.raises(ValueError) as error:
+        registry().ordered([a, b])
     assert str(error.value) == "Dependency cycle: a, b"
 
 

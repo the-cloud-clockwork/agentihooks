@@ -142,32 +142,36 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass) -> tuple[S
     records: dict[str, StepRecord] = {}
     dropped: set[str] = set()
     pending = list(ordered)
-    running: dict[Future[StepRecord], tuple[Step, float]] = {}
-    executor = ThreadPoolExecutor(max_workers=found.workers, thread_name_prefix="tick-step")
+    running: dict[Future[StepRecord], tuple[Step, float, Deadline]] = {}
+    executor = ThreadPoolExecutor(max_workers=found.workers)
     try:
         while pending or running:
-            for step in [step for step in pending if step.needs & names <= records.keys()]:
+            ready = [step for step in pending if step.needs & names <= records.keys()]
+            for step in ready:
                 pending.remove(step)
-                if step.needs & dropped or found.lane(step.lane).expired:
+                lane = found.lane(step.lane)
+                if step.needs & dropped or lane.expired:
                     dropped.add(step.name)
                     records[step.name] = StepRecord(step.name, 0.0, step.budget_s, abandoned=True)
-                    continue
-                future = executor.submit(copy_context().run, run_step, step, _lane_context(step, ctx, found))
-                running[future] = (step, clock())
+                else:
+                    future = executor.submit(copy_context().run, run_step, step, _lane_context(step, ctx, found))
+                    running[future] = (step, clock(), lane)
             if not running:
+                if not ready:
+                    raise ValueError(f"steps {sorted(step.name for step in pending)} wait on needs that never end")
                 continue
-            timeout = min(found.lane(step.lane).remaining for step, _ in running.values())
+            timeout = min(lane.remaining for _, _, lane in running.values())
             done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
             for future in done:
-                step, _ = running.pop(future)
+                step, _, _ = running.pop(future)
                 records[step.name] = future.result()
-            for future, (step, started) in list(running.items()):
-                if found.lane(step.lane).expired:
+            for future, (step, started, lane) in list(running.items()):
+                if lane.expired:
                     running.pop(future)
                     dropped.add(step.name)
                     records[step.name] = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
     finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+        executor.shutdown(False, cancel_futures=True)
     return tuple(records[step.name] for step in ordered)
 
 

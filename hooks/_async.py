@@ -80,7 +80,6 @@ def fork_and_call(
             pass
         return
 
-    # First child.
     try:
         os.setsid()
     except OSError:
@@ -92,7 +91,6 @@ def fork_and_call(
     if pid2 > 0:
         os._exit(0)
 
-    # Grandchild — detached, replaced by a fresh interpreter that runs the job.
     try:
         _detach_stdio()
         _close_inherited_fds()
