@@ -83,7 +83,8 @@ def test_a_member_beat_lands_below_its_own_hive_key_and_the_controller_reads_it_
     assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
     assert idle.heartbeat(redis, "fixture", name) == {"state": "working", "at": 5}
     assert idle.last_prompt(redis, "fixture", name) == 6
-    assert idle.wait(redis, "fixture", name)["reason"] == "checks"
+    wait = idle.wait(redis, "fixture", name)
+    assert wait is not None and wait["reason"] == "checks"
     assert idle.waited(redis, "fixture", name) == 100
     assert [entry["at"] for entry in idle.wait_history(redis, "fixture", name)] == [7]
     idle.end_wait(redis, "fixture", name, 60)
@@ -241,7 +242,8 @@ def test_member_session_model_progress_and_stop_blocks_stay_below_the_member(red
     assert sorted(redis.keys(f"{own}:*")) == sorted(
         f"{own}:{kind}:{name}" for kind in ("session-model", "progress", "stop-blocks")
     )
-    assert session_model.get(redis, "fixture", name)["model"] == "opus"
+    model = session_model.get(redis, "fixture", name)
+    assert model is not None and model["model"] == "opus"
     assert Progress(redis, "fixture").read(name).outcome == "pushed"
     assert Streak(swarm, "fixture", name).key == f"{own}:stop-blocks:{name}"
 
@@ -429,7 +431,7 @@ def test_host_hash_hit_uses_one_field_read(redis: Any, swarm: Any, monkeypatch: 
     def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("host lookup scanned the execution registry")
 
-    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", "true")
+    monkeypatch.delenv("SWARM_HOST_PROJECTION_ENABLED", raising=False)
     monkeypatch.setattr(ExecutionRegistry, "hive", forbidden)
     with scope.one_pass():
         scope.joined(redis)
@@ -458,14 +460,58 @@ def test_removing_an_agent_removes_its_host(redis: Any, swarm: Any) -> None:
     assert scope.host(redis, "fixture", name) == ""
 
 
+def lost_projection(*args: object, **kwargs: object) -> None:
+    """Stand in for a writer that dies between the fenced commit and the host projection."""
+    raise RuntimeError("writer died before the projection")
+
+
+def test_a_hive_move_that_loses_its_projection_reads_the_registry_host(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    join(redis, "m2")
+    name = place(swarm, "m1")
+    current = swarm.agents("fixture")[0]
+    monkeypatch.setattr(swarm, "project_agent", lost_projection)
+    with pytest.raises(RuntimeError):
+        swarm.execution_registry.update("fixture", replace(current, hive="m2"))
+    assert redis.hget(swarm.key("fixture", "hosts"), name) is None
+    assert scope.host(redis, "fixture", name) == "m2"
+
+
+def test_a_replacement_that_loses_its_projection_leaves_no_host_for_either_name(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import scope
+    from scripts.swarm.store import AgentRecord
+
+    join(redis, "m1")
+    join(redis, "m2")
+    old = place(swarm, "m1")
+    previous = swarm.agents("fixture")[0]
+    new = swarm.next_name("fixture", "eng")
+    monkeypatch.setattr(swarm, "project_agent", lost_projection)
+    with pytest.raises(RuntimeError):
+        swarm.execution_registry.start(
+            "fixture", AgentRecord(new, "eng", "task", seat="eng-1@fixture", hive="m2"), previous.execution_id
+        )
+    assert redis.hmget(swarm.key("fixture", "hosts"), [old, new]) == [None, None]
+    assert scope.host(redis, "fixture", old) == "m1"
+
+
+@pytest.mark.parametrize("off", ["false", "0", "no", " OFF "])
 @pytest.mark.parametrize("legacy_change", ["remove", "move"])
-def test_host_projection_stays_untrusted_until_every_writer_upgrades(
-    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch, legacy_change: str
+def test_host_projection_off_switch_keeps_the_legacy_registry_lookup(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch, legacy_change: str, off: str
 ) -> None:
     from scripts.hive import scope
     from scripts.swarm import fencing
 
-    monkeypatch.delenv("SWARM_HOST_PROJECTION_ENABLED", raising=False)
+    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", off)
     join(redis, "m1")
     join(redis, "m2")
     name = place(swarm, "m1")
