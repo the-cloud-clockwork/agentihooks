@@ -19,11 +19,10 @@ class RecoveryRuntime(FakeRuntime):
 PATIENT_S = 30.0
 
 
-@pytest.fixture(autouse=True)
 def patient_steps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every tick step waits out its first lazy imports on a busy runner instead of being dropped at its budget."""
+    """Raise every registered tick step's budget to at least PATIENT_S for the test."""
     for step in step_registry.steps():
-        monkeypatch.setattr(step, "budget_s", PATIENT_S)
+        monkeypatch.setattr(step, "budget_s", max(step.budget_s, PATIENT_S))
 
 
 @pytest.mark.parametrize("record", ["stale", "missing"])
