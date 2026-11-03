@@ -461,7 +461,6 @@ def test_a_schema_mismatch_names_the_first_unknown_key_and_the_top_field(live):
         )
 
 
-
 def test_stale_cursor_missing_guard_and_origin_are_rejected(live):
     status, page = request(live, "GET", "chat?limit=1")
     assert status == 200
