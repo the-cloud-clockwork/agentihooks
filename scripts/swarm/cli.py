@@ -449,7 +449,8 @@ def run_tick(
             host_steps.raise_held(box)
             started = box["started"]
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
-    except Left:
+    except Left as missing:
+        sys.stderr.write(f"{slug}: pass ended early: no step stored {missing}\n")
         return []
     finally:
         try:
