@@ -608,7 +608,7 @@ def _drop_remote(slug, store, ledger, rows, agent, reason):
     return f"retired {agent.name}: {reason}" + _drop(slug, store, ledger, rows, agent)
 
 
-def _remote_gone_reason(slug, store, runtime, agent, now_ms):
+def _remote_gone_reason(slug: str, store: RedisStore, runtime: Any, agent: AgentRecord, now_ms: int) -> str:
     if not reports.host(agent):
         return ""
     if reports.Reports(store.redis).gone(agent) or runtime.observe(agent).state == "exited":
