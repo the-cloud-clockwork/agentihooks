@@ -308,11 +308,26 @@ def test_the_wait_command_checks_other_swarms_despite_a_failure_or_slow_pass(mon
         return ["wait checked"]
 
     monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+
+    def acks(store, slug):
+        if slug == "fast":
+            raise RuntimeError("acks unavailable")
+        return [f"acks collected for {slug}"]
+
     monkeypatch.setattr(cli, "run_waits", check)
+    monkeypatch.setattr(cli.ack_pass, "run", acks)
     cli.cmd_waits(SimpleNamespace(slugs=lambda: ["broken", "slow", "fast"]), Namespace())
     output = capsys.readouterr()
-    assert set(output.out.splitlines()) == {"slow: wait checked", "fast: wait checked"}
-    assert output.err == "broken: RuntimeError: unavailable\n"
+    assert set(output.out.splitlines()) == {
+        "slow: wait checked",
+        "fast: wait checked",
+        "broken: acks collected for broken",
+        "slow: acks collected for slow",
+    }
+    assert sorted(output.err.splitlines()) == [
+        "broken: RuntimeError: unavailable",
+        "fast: RuntimeError: acks unavailable",
+    ]
 
 
 def test_the_wait_command_accepts_an_empty_swarm_list(monkeypatch, capsys):

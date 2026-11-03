@@ -87,6 +87,7 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
+    ack_pass,
     affinity,
     agent_up,
     blockers,
@@ -535,17 +536,18 @@ def cmd_waits(store, args):
     except (OSError, subprocess.SubprocessError) as exc:
         timing.emit(sys.stderr, f"the scheduled swarm tick guard failed: {type(exc).__name__}: {exc}")
 
-    def check(slug):
+    def check(job: tuple[str, Callable[[RedisStore, str], list[str]]]) -> None:
+        slug, passing = job
         try:
-            for action in run_waits(store, slug):
+            for action in passing(store, slug):
                 timing.emit(sys.stdout, f"{slug}: {action}")
         except Exception as exc:
             timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
-    slugs = store.slugs()
-    if slugs:
-        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
-            list(pool.map(check, slugs))
+    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits, ack_pass.run)]
+    if jobs:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            list(pool.map(check, jobs))
 
 
 def _tickable(slug):

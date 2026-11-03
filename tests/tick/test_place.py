@@ -24,12 +24,34 @@ class _State:
         return self.state.get(key) if domain == PASS else None
 
 
+LOCK_KEY = "sw:acks-lock"
+
+
 class _Redis:
     def __init__(self, log: list[Any]) -> None:
         self.log = log
+        self.token = ""
 
     def delete(self, key: str) -> None:
-        self.log.append(("delete", key))
+        if key == LOCK_KEY:
+            self.token = ""
+        else:
+            self.log.append(("delete", key))
+
+    def set(self, key: str, value: str, nx: bool, px: int) -> bool:
+        assert (key, nx, px) == (LOCK_KEY, True, 120_000)
+        if self.log.count("acks held"):
+            return False
+        self.token = value
+        return True
+
+    def get(self, key: str) -> str:
+        assert key == LOCK_KEY
+        return self.token
+
+
+def _store(log: list[Any]) -> SimpleNamespace:
+    return SimpleNamespace(redis=_Redis(log), key=lambda slug, name: f"{slug}:{name}")
 
 
 ROWS = {"t1": {"id": "t1", "state": "open"}}
@@ -43,7 +65,7 @@ def _pass(log: list[Any], state: str = "running", engine_name: str = "tick", **e
     return {
         "slug": "sw",
         "config": SimpleNamespace(state=state, engine=engine_name),
-        "store": SimpleNamespace(redis=_Redis(log)),
+        "store": _store(log),
         "ledger": "ledger",
         "runtime": "runtime",
         "rows": ROWS,
@@ -182,6 +204,15 @@ def test_collect_acks_then_the_codex_hook_order_while_awake(calm: list[Any], mon
         ("collect acks", "sw", state["config"], state["store"], "ledger", "runtime", "doc", 7),
         ("codex hook order",),
     ]
+
+
+def test_the_pass_skips_collecting_acks_while_the_wait_pass_holds_the_acks_lock(
+    calm: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calm.append("acks held")
+    found = _run(place.ACKS, _tick(calm), _pass(calm), monkeypatch)
+    assert found == ["ran codex hook order"]
+    assert calm == ["acks held", ("codex hook order",)]
 
 
 def test_a_sleeping_swarm_collects_acks_without_the_codex_hook_order(
