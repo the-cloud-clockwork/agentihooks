@@ -169,7 +169,7 @@ def test_step_runs_through_timing_call() -> None:
     with mock.patch.object(engine.timing, "within", return_value=Result()) as call:
         record = engine.run_step(step, context(clock))
     budget, function, ctx = call.call_args.args
-    assert call.call_args.kwargs == {"lane": "main"}
+    assert call.call_args.kwargs == {"lane": "main", "name": "step:timed"}
     assert budget == 5.0
     assert function == step.run
     assert ctx.deadline.expires_at == 105.0

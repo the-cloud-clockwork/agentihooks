@@ -108,6 +108,26 @@ def test_budgeted_step_record_carries_its_lane_only_when_given() -> None:
     assert "lane" not in rows[1]
 
 
+@pytest.mark.feature("swarm-tick-cost-report")
+def test_budgeted_step_records_and_fails_under_the_name_it_is_given() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    def fail() -> None:
+        raise ValueError("broken")
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    with timing.tick("sw", store), timing.pass_record(store, "sw"):
+        timing.within(1.0, sorted, [1], name="step:spawn")
+        with pytest.raises(ValueError):
+            timing.within(1.0, fail, name="step:reap")
+    rows = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
+    assert [row["step"] for row in rows] == ["step:spawn", "step:reap"]
+    passes = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:passes"))]
+    assert passes[0]["failed_steps"] == ["step:reap"]
+
+
 def test_budgeted_step_that_raises_is_an_error_not_late() -> None:
     import fakeredis
 
