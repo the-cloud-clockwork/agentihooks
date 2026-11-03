@@ -5118,7 +5118,7 @@ in [One lease heartbeat per tick pass](../reference/tick-adapters.md#one-lease-h
 The refresh job, which runs the GitHub, Langfuse and Grafana refreshes and, for a `doctor` swarm, the Doctor timer,
 keeps its own heartbeat for the length of its run.
 
-The automatic snapshot never runs inside the pass. Step 12 of the list above only starts the detached snapshot job
+The automatic snapshot never runs inside the pass. The pass only starts the detached snapshot job
 and returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
 most 30 minutes once it starts; a tick that finds the lock held starts no second job. Two jobs started before
 either holds the lock race for it: the first to take it writes the snapshot, the other exits without one.
