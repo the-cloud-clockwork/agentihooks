@@ -253,8 +253,8 @@ def holder(store: Listings, ledger: Any, slug: str) -> Callable[[Write], None]:
 def _hold(store: Listings, ledger: Any, slug: str, write: Write) -> None:
     """Mark the hold of ``write`` and post its notice unless another pass marked it since the step read none.
 
-    The mark is set before the notice, so a refused notice leaves the hold marked with no notice retried, as before,
-    and raises RevisionConflict so the engine drops the write.
+    The mark is set before the notice, so a refused notice leaves the hold marked with no notice retried and raises
+    RevisionConflict so the engine drops the write.
     """
     task_id, url, notice = cast(tuple[str, str, str], write.value)
     if not store.redis.set(write.key, url, nx=True):

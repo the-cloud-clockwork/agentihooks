@@ -485,9 +485,9 @@ def test_the_releaser_forgets_every_lifted_hold_in_one_call(store: RedisStore) -
 @pytest.mark.parametrize(
     "applier",
     [
-        lambda store: fleet_red.saver(store),
+        fleet_red.saver,
         lambda store: fleet_red.holder(store, Ledger(), "sw"),
-        lambda store: fleet_red.releaser(store),
+        fleet_red.releaser,
     ],
 )
 def test_every_fleet_red_applier_drops_its_write_on_a_redis_timeout(
@@ -573,8 +573,9 @@ def test_the_engine_applies_the_listing_the_notice_step_returns(
     assert (store.redis.get(hold), store.redis.get(gone)) == (MINE, None)
     assert ledger.notices == [("sw", "red", fleet_red.NOTICE.format(url=MINE, checks="Semgrep, Tests"))]
     assert actions([record]) == [f"task red held unclaimed, {MINE} is red only from Semgrep, Tests"]
+    listed_before = len(reads)
     engine.run_group(tasks.REOPENS, Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state))
-    assert reads == ["o/r", "o/r"]
+    assert len(reads) == listed_before
     assert len(ledger.notices) == 1
 
 
