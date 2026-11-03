@@ -46,21 +46,23 @@ def test_a_root_reservation_consumes_the_same_slot_as_overflow(setup, monkeypatc
         fenced.spawn(setup.config, "eng", "second", {"id": "second"})
 
 
-def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
+def test_local_deployment_obeys_the_workstation_cap(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
 
 
-def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup):
+def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup: SimpleNamespace) -> None:
     from scripts.hive import placement_waits
     from scripts.hive.placement import LOCAL_FULL
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     before = lease.now_ms(setup.store)
     refused = fenced.placement_refusal("ci", {"id": "task"})
@@ -171,10 +173,11 @@ def test_an_existing_task_cannot_inflate_resource_room_during_a_pending_launch(s
     assert "1 of its 1" in setup.launcher.reserve_room(request, selected)
 
 
-def test_local_mode_exempts_masters_at_capacity(setup, monkeypatch):
+def test_local_mode_exempts_masters_at_capacity(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     assert fenced.placement_refusal("master", {"id": "master"}) == ""
     assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == setup.herdr.spawn.return_value

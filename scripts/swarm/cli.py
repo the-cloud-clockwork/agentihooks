@@ -1408,8 +1408,8 @@ def autoscale_lines(config, decision):
     return lines
 
 
-def cmd_autoscale(store, args):
-    from scripts.swarm import capacity
+def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
+    from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
     if args.fixture:
@@ -1417,10 +1417,17 @@ def cmd_autoscale(store, args):
     else:
         inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
     _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs)
+    known = args.slug in store.slugs()
+    slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     if args.json:
-        print(json.dumps({"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision}, indent=2))
+        print(
+            json.dumps(
+                {"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision, **slots}, indent=2
+            )
+        )
         return
-    print("\n".join(autoscale_lines(config, decision)))
+    local = [f"local slots {slots['local_slots']}, host room guard applies"] if known else []
+    print("\n".join([*autoscale_lines(config, decision), *local]))
 
 
 def cmd_names(store, args):
