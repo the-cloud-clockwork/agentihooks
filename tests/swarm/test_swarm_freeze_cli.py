@@ -4,7 +4,7 @@ import pytest
 
 from scripts.gates import Who
 from scripts.swarm import clearance, cli, naming
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import FreezeWords, LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeLedger
@@ -199,7 +199,7 @@ def test_every_lane_agent_at_full_autonomy_is_still_refused(swarm, monkeypatch, 
 def test_the_client_sends_one_freeze_op(monkeypatch, verb, by, fields, op):
     sent = []
     monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops: sent.append((slug, ops)))
-    LedgerClient().freeze("demo", verb, "plans/a", by=by, **fields)
+    LedgerClient().freeze("demo", verb, "plans/a", by=by, words=FreezeWords(**fields))
     [(slug, [written])] = sent
     assert slug == "demo"
     assert written.pop("id").startswith(op["op"] + "-")

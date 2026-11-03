@@ -3,6 +3,7 @@
 import sys
 import urllib.error
 import uuid
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -46,6 +47,16 @@ def _ledger():
     import ledger
 
     return ledger
+
+
+@dataclass(frozen=True)
+class FreezeWords:
+    """The words and focus queue place a freeze write carries."""
+
+    reason: str = ""
+    quote: str = ""
+    position: str = ""
+    only: bool = False
 
 
 class LedgerClient:
@@ -246,11 +257,11 @@ class LedgerClient:
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
-    def freeze(self, slug: str, verb: str, target: str, by: str | None = None, **fields: str | bool) -> None:
-        given = {key: value for key, value in fields.items() if value}
+    def freeze(self, slug: str, verb: str, target: str, by: str | None = None, words: FreezeWords | None = None) -> None:
+        given = {key: value for key, value in asdict(words or FreezeWords()).items() if value}
         if verb == "unfreeze":
-            words = {key: value for key, value in given.items() if key in ("reason", "quote")}
-            op = _op("freeze_clear", by, target=target, **words)
+            given = {key: value for key, value in given.items() if key in ("reason", "quote")}
+            op = _op("freeze_clear", by, target=target, **given)
         else:
             op = _op("freeze_set", by, verb=verb, target=target, **given)
         if by is None:

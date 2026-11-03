@@ -147,7 +147,7 @@ from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
-from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
+from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     agent_hive,
@@ -1369,7 +1369,8 @@ def cmd_freeze(store: RedisStore, args: argparse.Namespace) -> None:
         )
     given: dict[str, Any] = vars(args)
     queue = {key: given[key] for key in ("position", "only") if given.get(key)}
-    LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote, **queue)
+    words = FreezeWords(reason=args.reason or "", quote=args.quote or "", **queue)
+    LedgerClient().freeze(args.slug, args.command, args.target, by=by, words=words)
     print(json.dumps({args.command: args.target, "by": writer, **queue}))
 
 
