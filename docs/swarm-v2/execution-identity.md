@@ -237,9 +237,9 @@ Every agent projection write also writes the agent's hive into a separate hash, 
 #### A projection write that fails
 
 `ExecutionRegistry` commits the fenced execution record first and projects it second. When the projection write
-raises after the commit, for example a lost Redis connection or a writer killed between the two steps, the registry
-deletes the `hosts` fields of the names that write touched with `RedisStore.forget_hosts`, then raises the original
-error:
+raises after the commit, for example on a Redis error or on `agent registry kept changing; the agent was not shown`
+after five watched attempts, the registry deletes the `hosts` fields of the names that write touched with
+`RedisStore.forget_hosts`, then raises the original error:
 
 | Write | Fields deleted on a failed projection |
 |---|---|
@@ -248,8 +248,13 @@ error:
 | `ExecutionRegistry.start` with no earlier execution | The new name |
 
 A missing field sends `scope.host` to `ExecutionRegistry.hive`, which reads the committed record, so a failed
-projection never leaves a field naming the hive the agent left. The `agents` hash is not rolled back; the agent's next
-projection write sets both again. The caller still sees the error.
+projection never leaves a field naming the hive the agent left. The projection writes the `agents` row and the `hosts`
+field in one transaction, so a failed write leaves the `agents` row as it was; the agent's next projection write sets
+both. The caller still sees the error.
+
+The cleanup runs inside the writing process. A process killed outright between the commit and the projection, or a
+`forget_hosts` call that fails on the same Redis outage, leaves the old field in place until the agent's next
+projection write. `ExecutionRegistry.set_pane` projects without the cleanup; it never changes an agent's hive.
 
 ### The one field read
 
@@ -350,6 +355,6 @@ every attempt. Nothing is configured.
 |---|---|---|
 | A hive member's projection writes fail with a Redis permission error naming `…:hosts` | Its Redis user was granted before pull request 9279 | Grant the member again so its access list carries `swarm:*:hosts` |
 | A controller reads an agent's session readings below the wrong member | A process on a release without pull request 9474 moved the agent without updating `hosts` | Set `SWARM_HOST_PROJECTION_ENABLED=false` through git configuration, upgrade that process, then remove the setting |
-| A swarm write raises after its execution record committed, and the agent's `hosts` field is gone | The projection write failed and `forget_hosts` dropped the field | No action; host lookups read the registry until the agent's next projection write |
+| A swarm write raises `agent registry kept changing; the agent was not shown` or a Redis error, and the agent's `hosts` field is gone | The projection write failed and `forget_hosts` dropped the field | No action; host lookups read the registry until the agent's next projection write |
 | `scope.readings` median stays near its old value with the flag on | The `hosts` field is missing for most agents, so lookups fall back | Compare `HLEN` of `hosts` and `agents` as above |
 | `the swarm fencing state kept changing; nothing was committed` | Sixteen conflicting attempts, as in [Fencing records](../reference/fencing-records.md#troubleshooting) | The next pass retries; find the scanning change in the tick journal |
