@@ -68,9 +68,9 @@ def _task(**fields: str) -> dict[str, Any]:
 def test_the_fleet_red_step_returns_guarded_hold_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[tuple[Any, ...]] = []
 
-    def holds(slug: str, store: Any, rows: Any, now_ms: int) -> list[tuple[str, str, str]]:
+    def holds(slug: str, store: Any, rows: Any, now_ms: int) -> tuple[list[tuple[str, str, str]], list[str]]:
         seen.append((slug, store, rows, now_ms))
-        return [("t1", URL, "Tests"), ("t2", URL, "Lint, Tests")]
+        return [("t1", URL, "Tests"), ("t2", URL, "Lint, Tests")], ["sw:fleet-red:t3"]
 
     monkeypatch.setattr(fleet_red, "holds", holds)
     found = tasks.fleet_red_writes("sw", "store", {"t1": {}}, 7)
@@ -80,7 +80,20 @@ def test_the_fleet_red_step_returns_guarded_hold_writes(monkeypatch: pytest.Monk
         f"task t1 held unclaimed, {URL} is red only from Tests",
         Write(tasks.FLEET_RED, "t2", {"url": URL, "checks": "Lint, Tests"}, expected={**EXPECTED}),
         f"task t2 held unclaimed, {URL} is red only from Lint, Tests",
+        Write(tasks.FLEET_RED_LIFTED, "sw", ["sw:fleet-red:t3"]),
     ]
+
+
+def test_the_fleet_red_step_returns_no_lifted_write_when_no_hold_lifted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fleet_red, "holds", lambda *args: ([], []))
+    assert tasks.fleet_red_writes("sw", "store", {}, 7) == []
+
+
+def test_the_lifted_applier_forgets_every_hold_mark_it_names() -> None:
+    store = Store()
+    store.redis.saved = {"sw:fleet-red:t1": URL, "sw:fleet-red:t2": URL, "sw:fleet-red:t3": URL}
+    tasks.lifted_writer(store)(Write(tasks.FLEET_RED_LIFTED, "sw", ["sw:fleet-red:t1", "sw:fleet-red:t3"]))
+    assert store.redis.saved == {"sw:fleet-red:t2": URL}
 
 
 def test_the_fleet_red_applier_posts_while_the_task_stays_open_and_unclaimed() -> None:
@@ -115,10 +128,21 @@ def test_the_fleet_red_applier_forgets_a_refused_notice_so_the_next_pass_retries
     assert store.redis.saved == {}
 
 
+def test_the_fleet_red_applier_forgets_a_failed_notice_and_raises_its_error() -> None:
+    class Broken(Ledger):
+        def notice(self, slug: str, task_id: str, text: str) -> None:
+            raise OSError("down")
+
+    store = Store()
+    with pytest.raises(OSError, match="^down$"):
+        tasks.fleet_red_writer("sw", store, Broken(), {}.get)(HOLD)
+    assert store.redis.saved == {}
+
+
 def test_appliers_add_fleet_red_only_with_a_store() -> None:
     assert sorted(tasks.appliers({"slug": "sw", "ledger": Ledger()})) == [tasks.GROUPS, tasks.SIZES]
     both = tasks.appliers({"slug": "sw", "ledger": Ledger(), "store": Store()})
-    assert sorted(both) == [tasks.FLEET_RED, tasks.GROUPS, tasks.SIZES]
+    assert sorted(both) == [tasks.FLEET_RED, tasks.FLEET_RED_LIFTED, tasks.GROUPS, tasks.SIZES]
 
 
 class _State:
@@ -135,11 +159,11 @@ def test_a_hold_a_seat_claims_mid_pass_is_dropped_and_recomputed_on_the_next_pas
     store, ledger = Store(), Ledger()
     rival = ["engineer@a"]
 
-    def holds(slug: str, held_store: Any, rows: Any, now_ms: int) -> list[tuple[str, str, str]]:
+    def holds(slug: str, held_store: Any, rows: Any, now_ms: int) -> tuple[list[tuple[str, str, str]], list[str]]:
         if rival:
             store.claims.add("t1")
             rival.clear()
-        return [("t1", URL, "Tests")]
+        return [("t1", URL, "Tests")], []
 
     monkeypatch.setattr(fleet_red, "holds", holds)
     step = next(step for step in tasks.STEPS if step.name == "fleet red notice")

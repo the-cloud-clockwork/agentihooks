@@ -129,30 +129,16 @@ def checker(reader: Reader | None = None, clock: Callable[[], float] = time.time
     return admits
 
 
-def notice_pass(
-    slug: str,
-    store: RedisStore,
-    ledger: Any,
-    rows: dict[str, dict[str, Any]],
-    now_ms: int,
-    reader: Reader | None = None,
-) -> list[str]:
-    """Post one notice per unclaimed open task newly held by fleet red, and forget holds that lifted."""
-    return [
-        action for found in holds(slug, store, rows, now_ms, reader) if (action := post(slug, store, ledger, *found))
-    ]
-
-
 def holds(
     slug: str,
     store: RedisStore,
     rows: dict[str, dict[str, Any]],
     now_ms: int,
     reader: Reader | None = None,
-) -> list[tuple[str, str, str]]:
-    """Return the task, pull request and red checks of each unclaimed open task newly held, forgetting lifted holds.
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Return the task, pull request and red checks of each unclaimed open task newly held, and the lifted hold keys.
 
-    A task whose hold was already noticed is left out, so the pass posts nothing for it.
+    A task whose hold was already noticed is left out, so the pass posts nothing for it. Nothing is posted or forgotten.
     """
     unclaimed = [
         task["id"]
@@ -180,9 +166,7 @@ def holds(
             continue
         if not store.redis.exists(key):
             found.append((task_id, url, ", ".join(sorted(own(pulls, url)))))
-    if cleared:
-        store.redis.delete(*cleared)
-    return found
+    return found, cleared
 
 
 def post(slug: str, store: RedisStore, ledger: Any, task_id: str, url: str, checks: str) -> str:

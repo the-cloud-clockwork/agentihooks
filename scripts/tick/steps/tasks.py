@@ -15,6 +15,7 @@ __all__ = [
     "CLOSE",
     "DRAINED",
     "FLEET_RED",
+    "FLEET_RED_LIFTED",
     "GROUPS",
     "SIZES",
     "RAISED",
@@ -27,6 +28,7 @@ __all__ = [
     "fleet_red_writes",
     "group_writer",
     "held",
+    "lifted_writer",
     "raise_held",
     "release_writes",
     "size_writes",
@@ -40,6 +42,7 @@ REOPENS = "reopen passes"
 GROUPS = Domain("groups")
 SIZES = Domain("sizes")
 FLEET_RED = Domain("fleet red")
+FLEET_RED_LIFTED = Domain("fleet red lifted")
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -114,8 +117,13 @@ def _fleet_red_notice(tick: Any, get: Get) -> Any:
 
 
 def fleet_red_writes(slug: str, store: Any, rows: dict[str, dict[str, Any]], now_ms: int) -> list[str | Write]:
-    """Return a guarded hold write and an action for each task fleet red newly holds, posting nothing itself."""
-    return [item for found in fleet_red.holds(slug, store, rows, now_ms) for item in _fleet_red_write(*found)]
+    """Return a guarded hold write and an action for each task fleet red newly holds, and a write forgetting lifted holds.
+
+    The step posts and forgets nothing itself.
+    """
+    found, cleared = fleet_red.holds(slug, store, rows, now_ms)
+    writes = [item for hold in found for item in _fleet_red_write(*hold)]
+    return [*writes, Write(FLEET_RED_LIFTED, slug, cleared)] if cleared else writes
 
 
 def _fleet_red_write(task_id: str, url: str, checks: str) -> list[str | Write]:
@@ -141,16 +149,31 @@ def fleet_red_writer(
 def _notice_hold(
     slug: str, store: Any, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write
 ) -> None:
-    """Post the hold notice of ``write`` unless its task moved, a seat claimed it or the ledger refuses the notice."""
+    """Post the hold notice of ``write`` unless its task moved, a seat claimed it or the notice fails.
+
+    A failed notice forgets its mark so the next pass posts it again; a refused one is dropped as a conflict.
+    """
     _write_task_check(write, read(write.key))
     if store.claimed(slug, [write.key]):
         raise RevisionConflict(f"task {write.key} was claimed since the step read it")
     fields = cast(dict[str, str], write.value)
     try:
         fleet_red.post(slug, store, ledger, write.key, fields["url"], fields["checks"])
-    except LedgerRefused as exc:
+    except Exception as exc:
         store.redis.delete(store.key(slug, f"fleet-red:{write.key}"))
-        raise RevisionConflict(f"the ledger refused the hold notice of task {write.key}") from exc
+        if isinstance(exc, LedgerRefused):
+            raise RevisionConflict(f"the ledger refused the hold notice of task {write.key}") from exc
+        raise
+
+
+def lifted_writer(store: Any) -> Callable[[Write], None]:
+    """Return the lifted holds applier: it forgets the hold marks a write names, which no other step sets."""
+    return partial(_forget_holds, store)
+
+
+def _forget_holds(store: Any, write: Write) -> None:
+    """Delete the hold marks ``write`` names."""
+    store.redis.delete(*cast(list[str], write.value))
 
 
 def _run_window(tick: Any, get: Get) -> Any:
@@ -242,6 +265,7 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
     found = {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
     if (store := state.get("store")) is not None:
         found[FLEET_RED] = fleet_red_writer(slug, store, ledger, _fresh_task)
+        found[FLEET_RED_LIFTED] = lifted_writer(store)
     return found
 
 
@@ -312,7 +336,7 @@ STEPS = (
     CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"})),
     CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),
     CallStep("release alert", REOPENS, held(_release_alert)),
-    WriteStep("fleet red notice", REOPENS, held(_fleet_red_notice), writes=frozenset({FLEET_RED})),
+    WriteStep("fleet red notice", REOPENS, held(_fleet_red_notice), writes=frozenset({FLEET_RED, FLEET_RED_LIFTED})),
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
     WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),
