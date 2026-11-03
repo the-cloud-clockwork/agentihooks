@@ -4,12 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Barrier, BrokenBarrierError, Event, Lock, Thread, current_thread, get_ident
 from time import monotonic, sleep
+from typing import cast
 
 import pytest
 
 from scripts.tick import engine
 from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Domain, Lane, Result
+from scripts.tick.step import Context, Domain, Lane, Result, Write
 
 
 class View:
@@ -660,3 +661,71 @@ def test_a_handed_off_step_is_dropped_when_the_critical_step_it_needs_was_droppe
         [("slow", engine.OK), ("both", engine.LATE)]
     ]
     assert later[0][1].wall_s == 0.0
+
+
+def test_a_handed_off_chain_under_a_dropped_critical_step_is_dropped_whole_with_each_budget() -> None:
+    from scripts.tick import pool
+
+    ran: list[str] = []
+
+    def note(ctx: Context) -> Result:
+        ran.append("ran")
+        return Result()
+
+    steps = (
+        Step("critical", note),
+        Step("slow", note, lane=Lane("slow")),
+        Step("both", note, frozenset({"critical", "slow"}), budget_s=3.0),
+        Step("after both", note, frozenset({"both"}), budget_s=4.0),
+    )
+    later: list[tuple[engine.StepRecord, ...]] = []
+    with pool.running(critical_s=0.0):
+        engine.run_group("load", context(), steps, finished=later.append)
+    assert ran == ["ran"]
+    assert [(row.name, row.outcome, row.wall_s, row.budget_s) for row in later[0]] == [
+        ("slow", engine.OK, later[0][0].wall_s, 2.0),
+        ("both", engine.LATE, 0.0, 3.0),
+        ("after both", engine.LATE, 0.0, 4.0),
+    ]
+
+
+def test_a_handed_off_step_applies_its_writes_through_the_group_appliers() -> None:
+    from scripts.tick import pool
+
+    write = Write(Domain("tasks"), "t1", 1)
+    applied: list[Write] = []
+    with pool.running(workers=2):
+        engine.run_group(
+            "load",
+            context(),
+            (Step("slow", lambda ctx: Result((write,)), lane=Lane("slow")),),
+            apply={Domain("tasks"): applied.append},
+        )
+    assert applied == [write]
+
+
+def test_a_slow_lane_thread_is_a_daemon_named_for_the_slow_lane() -> None:
+    from scripts.tick import pool
+
+    release = Event()
+    with pool.running(workers=2) as found:
+        found.detach(release.wait)
+        assert [(thread.name, thread.daemon) for thread in found.later] == [("tick-slow-lane", True)]
+        release.set()
+
+
+class _Joined:
+    def __init__(self) -> None:
+        self.timeouts: list[float | None] = []
+
+    def join(self, timeout: float | None = None) -> None:
+        self.timeouts.append(timeout)
+
+
+def test_the_pass_joins_a_slow_thread_for_the_grace_alone_once_the_slow_deadline_passed() -> None:
+    from scripts.tick import pool
+
+    joined = _Joined()
+    with pool.running(slow_s=0.0) as found:
+        found.later.append(cast(Thread, joined))
+    assert joined.timeouts == [pool.LATER_GRACE_S]

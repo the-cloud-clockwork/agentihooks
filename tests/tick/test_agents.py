@@ -234,3 +234,15 @@ def test_the_tick_prints_the_exception_a_held_slow_step_stored(
     with pool.running(workers=2):
         assert tick_module.run_group("agents", slug="sw", box={}) == []
     assert capsys.readouterr().out == "a slow lane step held RuntimeError('metrics broke')\n"
+
+
+def test_the_tick_prints_handed_off_records_when_no_box_was_handed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def finish(name: str, ctx: Context, apply: object = None, finished: Any = None) -> tuple[StepRecord, ...]:
+        finished((StepRecord("failed panes", 0.1, 1.0),))
+        return ()
+
+    monkeypatch.setattr(tick_module.engine, "run_group", finish)
+    assert tick_module.run_group("agents", slug="sw") == []
+    assert capsys.readouterr().out == ""
