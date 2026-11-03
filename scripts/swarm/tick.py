@@ -2017,7 +2017,9 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
         controller.release_tick_lock(store, slug, token)
 
 
-def _settle(slug, config, store, ledger, rows, doc):
+def _settle(
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], doc: Any
+) -> list[str]:
     agents = store.agents(slug)
     if config.state == "stopping":
         if _end_undecided(slug, store, ledger, rows, agents):
@@ -2035,7 +2037,9 @@ def _settle(slug, config, store, ledger, rows, doc):
     return ["drained"]
 
 
-def _end_undecided(slug, store, ledger, rows, agents):
+def _end_undecided(
+    slug: str, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], agents: list[AgentRecord]
+) -> list[AgentRecord]:
     if any(a.lane == MASTER and a.state != "finished" for a in agents):
         return agents
     for agent in agents:
