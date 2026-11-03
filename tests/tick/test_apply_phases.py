@@ -61,6 +61,10 @@ def test_the_phase_step_returns_a_write_per_checkbox_guarded_on_the_done_state_i
     assert ledger.set == []
 
 
+def test_the_phase_step_returns_no_write_for_a_ledger_without_phases() -> None:
+    assert phases.phase_changes("sw", {}, Ledger([node("tasks/t1", 1, "done")])) == []
+
+
 def test_the_phase_step_passes_a_skipped_hierarchy_read_through_as_an_action() -> None:
     class Broken(Ledger):
         def hierarchy(self, slug: str) -> list[dict[str, Any]]:

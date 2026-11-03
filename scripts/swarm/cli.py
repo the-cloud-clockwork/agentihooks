@@ -277,8 +277,9 @@ def _phase_steps(inbox: Any, store: Any, slug: str, doc: dict[str, Any], ledger:
 
 
 def _planning_after_phase(inbox: Any, store: Any, slug: str, ledger: Any, box: dict[str, Any]) -> list[str]:
-    if not box.pop(task_steps.PHASE_CHANGED, False):
+    if task_steps.PHASE_CHANGED not in box:
         return []
+    del box[task_steps.PHASE_CHANGED]
     doc = timing.call(ledger_client.pass_state, ledger, slug)
     return skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
 
