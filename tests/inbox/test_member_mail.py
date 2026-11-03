@@ -702,3 +702,21 @@ def test_the_sweep_moves_controller_dispatcher_seat_mail_to_its_hive_occupant(st
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     assert [i.id for i in InboxStore(store.redis, world="m1").pending_mail(name)] == [item.id]
     assert controller.inbox(seat) == []
+
+
+def test_mail_redirected_to_a_settled_agent_on_its_hive_clears_its_mark_there(redis, agent):
+    member = InboxStore(redis, world="m1")
+    member.quiet_exits([agent.name, "sw-eng-9"])
+    controller = InboxStore(redis, world="")
+    item = controller.send("sender", "operator-desk", "contract")
+    controller.redirect(item.id, "swarm", agent.name, "moved")
+    assert member.get(item.id).address == agent.name
+    assert member.settled_exits() == {"sw-eng-9"}
+
+
+def test_mail_moved_to_a_settled_agent_in_another_world_clears_its_mark_there(store, agent, mail):
+    member, item = mail
+    target = InboxStore(store.redis, world="m2")
+    target.quiet_exits([agent.name, "sw-eng-9"])
+    member.move_world(item.id, target, exits.BY, "moved")
+    assert target.settled_exits() == {"sw-eng-9"}
