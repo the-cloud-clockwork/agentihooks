@@ -2072,26 +2072,24 @@ def test_closed_doctor_stays_stopped_and_withdraws_its_wake_message(store, monke
 
 def test_newly_open_phase_sends_its_planning_notice_on_the_same_tick(store, monkeypatch):
     from scripts.inbox.store import InboxStore
-    from scripts.swarm import cli
+    from scripts.swarm import phases
+    from scripts.swarm.tick import run_group
+    from scripts.tick.steps import PassBox
 
     ledger = FakeLedger([{"id": "t1", "phase": "p1", "state": "done"}])
     ledger.phases = [
         {"id": "p1", "title": "First", "planning": "manual"},
         {"id": "p2", "title": "Next", "planning": "auto", "depends_on": ["p1"]},
     ]
-
-    def finish(*args):
-        ledger.phases[0]["done"] = True
-        return ["finished first phase"]
-
-    def add(slug, row, by):
-        ledger.rows[row["task"]] = {**row, "id": row["task"], "state": "open"}
-
-    ledger.add_task = add
-    monkeypatch.setattr(cli.phases, "phase_pass", finish)
+    ledger.add_task = lambda slug, row, by: ledger.rows.update(
+        {row["task"]: {**row, "id": row["task"], "state": "open"}}
+    )
+    ledger.set_phase = lambda slug, phase_id, done, status: ledger.phases[0].update(done=done)
+    monkeypatch.setattr(phases, "phase_changes", lambda *args: [phases.PhaseChange("p1", "First", True, 1, ())])
     inbox = InboxStore(store.redis)
-    actions = cli._phase_steps(inbox, store, "sw", ledger.state("sw"), ledger)
-    assert "queued plan-p2 for phase p2" in actions
+    passing = {"store": store, "slug": "sw", "runtime": None, "box": PassBox(), "ledger": ledger}
+    actions = run_group("wrapper phases", **passing, inbox=inbox, doc=ledger.state("sw"))
+    assert "phase p1 ticked" in actions and "queued plan-p2 for phase p2" in actions
     assert ledger.rows["plan-p2"]["phase"] == "p2"
     assert any("phase p2 Next needs a plan" in item.text for item in inbox.inbox("master@sw"))
 

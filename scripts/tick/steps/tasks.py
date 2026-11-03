@@ -4,7 +4,7 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any, cast
 
-from scripts.swarm import dev_red, dispatcher, fleet_red, prerequisite_wait, promotion_watch, release_wait
+from scripts.swarm import dev_red, dispatcher, fleet_red, phases, prerequisite_wait, promotion_watch, release_wait
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import registry, steps, view
 from scripts.tick.ports.records import RevisionConflict
@@ -17,6 +17,8 @@ __all__ = [
     "FLEET_RED",
     "FLEET_RED_LIFTED",
     "GROUPS",
+    "PHASE_CHANGED",
+    "PHASES",
     "SIZES",
     "RAISED",
     "RANK",
@@ -30,6 +32,8 @@ __all__ = [
     "group_writer",
     "held",
     "lifted_writer",
+    "phase_writer",
+    "phase_writes",
     "raise_held",
     "rank_writer",
     "rank_writes",
@@ -47,6 +51,8 @@ SIZES = Domain("sizes")
 FLEET_RED = Domain("fleet red")
 FLEET_RED_LIFTED = Domain("fleet red lifted")
 RANK = Domain("rank")
+PHASES = Domain("phases")
+PHASE_CHANGED = "phase changed"
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -226,6 +232,42 @@ def _apply_ranking(store: Any, write: Write) -> list[str]:
             raise RevisionConflict(f"the rank write of swarm {write.key} carries no rank pass")
 
 
+def phase_writes(slug: str, doc: dict[str, Any], ledger: Any) -> list[str | Write]:
+    """Return a write for each phase the phase pass ticks or reopens, guarded on the done state it read."""
+    return [
+        Write(PHASES, change.phase_id, change, expected=not change.done)
+        if isinstance(change, phases.PhaseChange)
+        else change
+        for change in phases.phase_changes(slug, doc, ledger)
+    ]
+
+
+def phase_writer(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, Any]) -> Callable[[Write], list[str]]:
+    """Return the phases applier: it sets a phase checkbox only while the done state the step read still holds."""
+    return partial(_apply_phase, slug, ledger, inbox, store, box)
+
+
+def _apply_phase(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, Any], write: Write) -> list[str]:
+    """Set the checkbox of ``write`` and mark the pass box, dropping it as a conflict once the phase moved.
+
+    The phase is read from the held view after the pass's latest write; without a held view the write goes through.
+    """
+    match write.value:
+        case phases.PhaseChange() as change:
+            held = view.current()
+            fresh = None if held is None else cast(dict[str, Any], held.read("phases", change.phase_id) or {})
+            if fresh is not None and bool(fresh.get("done")) != write.expected:
+                raise RevisionConflict(f"phase {change.phase_id} changed its checkbox since the phase pass read it")
+            try:
+                line = phases.apply_change(inbox, store, slug, ledger, change)
+            except LedgerRefused as exc:
+                raise RevisionConflict(f"the ledger refused the checkbox of phase {change.phase_id}") from exc
+            box[PHASE_CHANGED] = True
+            return [line]
+        case _:
+            raise RevisionConflict(f"the phase write of {write.key} carries no phase change")
+
+
 def _run_window(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
         tick.run_window.step, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
@@ -317,6 +359,8 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] 
         found[FLEET_RED_LIFTED] = lifted_writer(store)
         found[fleet_red.LISTINGS] = fleet_red.saver(store)
         found[RANK] = rank_writer(store)
+        if (inbox := state.get("inbox")) is not None and (box := state.get("box")) is not None:
+            found[PHASES] = phase_writer(slug, ledger, inbox, store, cast(dict[str, Any], box))
     return found
 
 
