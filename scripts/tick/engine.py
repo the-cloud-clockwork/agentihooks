@@ -40,7 +40,7 @@ LATE = "late"
 FAILED = "failed"
 HELD = "held"
 
-_RUNNING: dict[str, Thread] = {}
+_RUNNING: dict[tuple[str | None, str], Thread] = {}
 _RUNNING_LOCK = Lock()
 
 
@@ -79,19 +79,21 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     """Run one step under a copied context and its own deadline, waiting at most its budget for it to end.
 
     A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
-    While that earlier run is alive, a new run of the same step is held: no thread starts and the record reads held.
+    While that earlier run is alive, a new run of the same step for the same swarm is held: no thread starts and the
+    record reads held. Another swarm's run of that step is never held by it.
     """
     deadline = ctx.deadline.child(step.budget_s)
     clock = deadline.clock
     started = clock()
     outcome: list[Result | BaseException] = []
     caller = copy_context()
+    key = (None, step.name)
     with _RUNNING_LOCK:
-        earlier = _RUNNING.get(step.name)
+        earlier = _RUNNING.get(key)
         if earlier is not None and earlier.is_alive():
             return StepRecord(step.name, 0.0, step.budget_s, held=True)
         worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline)), daemon=True)
-        _RUNNING[step.name] = worker
+        _RUNNING[key] = worker
         worker.start()
     worker.join(step.budget_s)
     return (_finished if outcome else _left)(step, outcome, clock() - started)
