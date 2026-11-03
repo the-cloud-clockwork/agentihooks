@@ -19,7 +19,6 @@ import fcntl
 import hashlib
 import os
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -171,19 +170,6 @@ def _record_histogram(op: tuple[str, str, float, dict[str, str]]) -> None:
     _histograms[name].record(value, attrs)
 
 
-def temporality() -> dict[type, Any]:
-    """Delta temporality for counters and histograms, so each short lived process exports only what it added."""
-    from opentelemetry.sdk.metrics import Counter, Histogram
-    from opentelemetry.sdk.metrics.export import AggregationTemporality
-
-    return {Counter: AggregationTemporality.DELTA, Histogram: AggregationTemporality.DELTA}
-
-
-def metric_exporter(exporter: Callable[..., Any], endpoint: str) -> Any:
-    """Build the OTLP metric exporter for ``endpoint`` with delta counters and histograms."""
-    return exporter(endpoint=endpoint, preferred_temporality=temporality())
-
-
 def _correlation(attrs: dict) -> dict:
     from hooks.observability.correlation import resolve
 
@@ -231,12 +217,14 @@ def _init_sdk() -> None:
         protocol, endpoints = _collector_endpoints()
         if protocol == "grpc":
             from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+            from hooks.observability.otel_delta import GrpcMetricExporter as OTLPMetricExporter
         else:
             from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-            from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+            from hooks.observability.otel_delta import HttpMetricExporter as OTLPMetricExporter
 
         resource = Resource.create({"service.name": OTEL_HOOKS_SERVICE_NAME})
 
@@ -248,8 +236,7 @@ def _init_sdk() -> None:
 
         # Metrics — periodic export, flushed on atexit
         reader = PeriodicExportingMetricReader(
-            metric_exporter(OTLPMetricExporter, endpoints["metrics"]),
-            export_interval_millis=60_000,
+            OTLPMetricExporter(endpoint=endpoints["metrics"]), export_interval_millis=60_000
         )
         mp = MeterProvider(resource=resource, metric_readers=[reader])
         metrics.set_meter_provider(mp)

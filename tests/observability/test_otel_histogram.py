@@ -48,23 +48,3 @@ def test_record_histogram_enqueues_a_histogram_op(monkeypatch: pytest.MonkeyPatc
         ("histograms", ("histogram", "h", 2.0, {"swarm": "sw"})),
         ("histograms", ("histogram", "g", 1.0, {})),
     ]
-
-
-def test_counters_and_histograms_export_as_deltas_so_each_short_process_adds_its_own_share() -> None:
-    from opentelemetry.sdk.metrics import Counter, Histogram, UpDownCounter
-    from opentelemetry.sdk.metrics.export import AggregationTemporality
-
-    found = otel.temporality()
-    assert found == {Counter: AggregationTemporality.DELTA, Histogram: AggregationTemporality.DELTA}
-    assert UpDownCounter not in found
-
-
-def test_the_metric_exporter_is_built_for_the_endpoint_with_delta_temporality() -> None:
-    built: list[dict[str, Any]] = []
-
-    def exporter(**kwargs: Any) -> str:
-        built.append(kwargs)
-        return "exporter"
-
-    assert otel.metric_exporter(exporter, "http://collector:4318/v1/metrics") == "exporter"
-    assert built == [{"endpoint": "http://collector:4318/v1/metrics", "preferred_temporality": otel.temporality()}]
