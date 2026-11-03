@@ -104,6 +104,8 @@ def _run(group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: 
     for moved in ("_placement_pass", "_collect_acks", "_codex_hook_order"):
         if hasattr(tick, moved):
             monkeypatch.setattr(place, moved, getattr(tick, moved))
+        else:
+            monkeypatch.delattr(place, moved)
     return actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0))))
 
 

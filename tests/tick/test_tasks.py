@@ -18,7 +18,7 @@ from scripts.swarm import (
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, budgets, tasks
+from scripts.tick.steps import PASS, CallStep, actions, agents, budgets, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -68,11 +68,20 @@ def _tick(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespac
     )
 
 
+MOVED = (
+    (tasks, ("_settle", "_close_space")),
+    (agents, ("_reap", "_strays", "_orphans", "_conversations", "_session_models")),
+)
+
+
 def _run(group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: tick)
-    for moved in ("_settle", "_close_space"):
-        if hasattr(tick, moved):
-            monkeypatch.setattr(tasks, moved, getattr(tick, moved))
+    for module, names in MOVED:
+        for name in names:
+            if hasattr(tick, name):
+                monkeypatch.setattr(module, name, getattr(tick, name))
+            else:
+                monkeypatch.delattr(module, name)
     return actions(engine.run_group(group, _ctx(state)))
 
 
