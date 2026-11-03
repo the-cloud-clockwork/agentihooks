@@ -34,6 +34,7 @@ CRITICAL_S = 110.0
 SLOW_S = 400.0
 WORKERS = 8
 SLOW_LANE = "slow"
+LATER_GRACE_S = 1.0
 LIMITS = {"herdr": 6, "github": 4}
 
 _GATES = {name: BoundedSemaphore(cap) for name, cap in LIMITS.items()}
@@ -121,7 +122,7 @@ def running(
         yield current
     finally:
         for thread in current.later:
-            thread.join(max(0.0, current.slow.remaining))
+            thread.join(max(0.0, current.slow.remaining) + LATER_GRACE_S)
         _ACTIVE.reset(token)
         if beat is not None:
             beat.close()
