@@ -386,6 +386,7 @@ def test_a_doctor_fix_task_under_a_focus_elsewhere_is_recorded_as_claimable(stor
         [task("fix", phase=loop.FIX_PHASE, rank="urgent"), task("plain", rank="urgent"), task("c", lane="ci")],
         freezes=[{"verb": "focus", "target": "lane:ci"}],
     )
+    found["phases"].append({"id": loop.FIX_PHASE, "title": "fix", "depends_on": []})
     urgent_hold.observe(store, SLUG, found, 0)
     rows = urgent_hold.read(store, SLUG)["tasks"]
     assert rows["fix"]["why"] == ""
