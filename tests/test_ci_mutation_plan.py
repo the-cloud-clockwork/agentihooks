@@ -556,11 +556,14 @@ def test_each_unit_of_a_split_whose_head_holds_direct_tests_costs_those_direct_t
     assert planned["costs"][names[0]] == pytest.approx((5.6 + 1.25 * 15.0) * len(split["slices"]))
 
 
-def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mutants_and_covers_every_test():
+def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mutants_and_covers_every_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from scripts.ci_mutation.measured import measured_plan
 
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "4")
     nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
-    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 130.0)}]
+    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 100.0)}]
     single = measured_plan([(["scripts.sample.x_f__mutmut_1"], results)])
     assert single["shards"] == 1 and single["assignments"] == {"scripts.sample.x_f__mutmut_1": 0}
     assert not single["splits"]
