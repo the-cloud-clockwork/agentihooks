@@ -91,16 +91,30 @@ def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) 
     key = store.key(slug, f"fleet-red-pulls:{repo}")
     saved = store.redis.get(key)
     if saved is not None:
-        rows = json.loads(saved)
-        if rows is None:
-            return None, ()
-        return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows), ()
+        return _decoded(saved), ()
     try:
         pulls: Pulls | None = tuple((reader or read)(repo))
     except ERRORS:
         pulls = None
     listing = None if pulls is None else [[p.url, [[c.name, c.result, c.at] for c in p.checks]] for p in pulls]
     return pulls, (Write(LISTINGS, key, json.dumps(listing)),)
+
+
+def saved(store: Listings, slug: str) -> Reader:
+    """Return a reader of the listings saved in the last ten minutes: nothing where none or a failed one is saved."""
+    return partial(_saved, store, slug)
+
+
+def _saved(store: Listings, slug: str, repo: str) -> Pulls:
+    raw = store.redis.get(store.key(slug, f"fleet-red-pulls:{repo}"))
+    return (_decoded(raw) if raw is not None else None) or ()
+
+
+def _decoded(saved: str | bytes) -> Pulls | None:
+    rows = json.loads(saved)
+    if rows is None:
+        return None
+    return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows)
 
 
 def saver(store: Listings) -> Callable[[Write], None]:

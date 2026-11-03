@@ -5,19 +5,30 @@ from scripts.swarm_ledger.repository import hierarchy
 
 
 def ranks(doc: dict) -> dict[str, int]:
+    """Rank each task by the first focus record covering it, the record count when none does."""
     targets = [row["target"] for row in doc.get("freezes", []) if row["verb"] == "focus"]
     graph = hierarchy.project(doc)[0]
+    paths: dict[str, int] = {}
+    selected = []
+    for index, target in enumerate(targets):
+        if _selects(target):
+            selected.append((index, target))
+        else:
+            paths.setdefault(target, index)
     return {
-        task["id"]: next(
-            (
-                index
-                for index, target in enumerate(targets)
-                if freeze.covers(target, task, freeze.ancestry(task, graph))
-            ),
-            len(targets),
-        )
-        for task in doc["tasks"]
+        task["id"]: _rank(task, freeze.ancestry(task, graph), paths, selected, len(targets)) for task in doc["tasks"]
     }
+
+
+def _selects(target: str) -> bool:
+    selector, _, value = target.partition(":")
+    return selector in freeze.SELECTORS and bool(value)
+
+
+def _rank(task: dict, chain: list, paths: dict[str, int], selected: list, unfocused: int) -> int:
+    found = [paths[node] for node in chain if node in paths]
+    found += [next((index for index, target in selected if freeze.covers(target, task, chain)), unfocused)]
+    return min(found)
 
 
 def select(doc: dict, ready: list, lane: str, capacity: int, running: list | None = None) -> list:
