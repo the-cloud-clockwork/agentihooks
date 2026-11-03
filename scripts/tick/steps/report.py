@@ -21,6 +21,7 @@ from scripts.swarm import (
     timing,
     waits,
 )
+from scripts.swarm.health import early_ends
 from scripts.swarm.status import findings  # pyright: ignore[reportUnknownVariableType]
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
@@ -208,6 +209,7 @@ def _last_tick(cli: Any, get: Get) -> None:
 
 def _heartbeat(cli: Any, get: Get) -> None:
     tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))  # pyright: ignore[reportUnknownMemberType]
+    early_ends.clear(get("store"), get("slug"))
 
 
 def early_end(store: Any, slug: str, at: int, doc: Any, missing: KeyError, left: list[str]) -> list[str]:
@@ -215,6 +217,7 @@ def early_end(store: Any, slug: str, at: int, doc: Any, missing: KeyError, left:
     line naming that value and the ``left`` steps of the pass."""
     store.redis.set(store.key(slug, "last-tick"), at)
     tick_heartbeat.write(store, slug, at, doc)  # pyright: ignore[reportUnknownMemberType]
+    early_ends.note(store, slug, missing.args[0])
     steps = ", ".join(dict.fromkeys(left)) or "no recorded step"
     return [f"pass ended early: no step stored {missing.args[0]}, the pass left {steps}"]
 

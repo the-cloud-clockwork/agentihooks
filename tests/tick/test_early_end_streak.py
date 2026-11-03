@@ -1,10 +1,13 @@
 """Tick passes that keep ending early on the same missing value raise one health finding until a full pass."""
 
+import json
 from typing import Any
 
 import pytest
 
 from scripts.swarm import cli, status, tick_heartbeat
+from scripts.swarm.health import early_ends
+from scripts.swarm.health.findings import Finding
 from scripts.tick.steps import Left
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -102,3 +105,43 @@ def test_the_health_setting_sets_the_threshold(
     assert _early_ends(swarm, ledger) == []
     _passes(swarm, ledger, runtime, 1)
     assert [row["threshold"] for row in _early_ends(swarm, ledger)] == ["5 passes in a row"]
+
+
+@pytest.fixture
+def store() -> Any:
+    """Return a swarm store on a fresh fake Redis."""
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+
+@pytest.mark.feature("swarm-tick-early-end-streak")
+@pytest.mark.parametrize(
+    ("environ", "limit"),
+    [({}, 3), ({"AGENTIHOOKS_HEALTH_EARLY_ENDS": "5"}, 5), ({"AGENTIHOOKS_HEALTH_EARLY_ENDS": "1"}, 1)]
+    + [({"AGENTIHOOKS_HEALTH_EARLY_ENDS": raw}, 3) for raw in ("0", "-2", "x", "")],
+)
+def test_the_threshold_takes_only_a_positive_whole_number(environ: dict[str, str], limit: int) -> None:
+    assert early_ends.threshold(environ) == limit
+
+
+@pytest.mark.feature("swarm-tick-early-end-streak")
+def test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_of_one(store: Any) -> None:
+    one = {"AGENTIHOOKS_HEALTH_EARLY_ENDS": "1"}
+    assert early_ends.findings(store, "sw", one) == []
+    early_ends.note(store, "sw", "agents")
+    assert json.loads(store.redis.get(store.key("sw", "early-end-streak"))) == {"value": "agents", "count": 1}
+    assert early_ends.findings(store, "sw", one) == [
+        Finding(
+            "early end",
+            "sw",
+            "Tick passes keep ending early because no step stored agents",
+            ("1 passes in a row ended early on agents while the heartbeat was stamped",),
+            "1 passes in a row",
+            1,
+        )
+    ]
+    early_ends.clear(store, "sw")
+    assert store.redis.get(store.key("sw", "early-end-streak")) is None
