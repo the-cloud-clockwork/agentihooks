@@ -608,7 +608,7 @@ def test_a_sequential_pass_runs_slow_steps_in_the_group() -> None:
     later: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(mode="sequential"):
         rows = engine.run_group(
-            "load", context(), (Step("slow", lambda ctx: Result(), lane=Lane("slow")),), later.append
+            "load", context(), (Step("slow", lambda ctx: Result(), lane=Lane("slow")),), finished=later.append
         )
     assert ([row.name for row in rows], later) == (["slow"], [])
 

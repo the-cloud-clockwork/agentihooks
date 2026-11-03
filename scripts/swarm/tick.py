@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import scripts.tick.steps.agents  # noqa: F401
 from hooks.context import context_recycle
@@ -221,7 +221,7 @@ def run_group(name: str, **state: object) -> list[str]:
     Actions of slow lane steps that end after the group returns are printed when they end.
     """
     ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
-    printing = partial(_print_actions, state.get("box", {}))
+    printing = partial(_print_actions, cast(Mapping[str, object], state.get("box", {})))
     return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=printing))
 
 
