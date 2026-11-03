@@ -10,7 +10,7 @@ import json
 import os
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -143,6 +143,10 @@ class SpawnError(RuntimeError):
         self.status = status
         self.pane_id = pane_id
         self.harness = harness
+
+    def step_fields(self) -> dict[str, str]:
+        """The message and status a failed tick step records for this launch."""
+        return {"detail": str(self), "status": str(self.status)}
 
 
 @dataclass(frozen=True)
@@ -618,9 +622,12 @@ def _drop_remote(slug, store, ledger, rows, agent, reason):
 
 
 def _remote_gone_reason(slug: str, store: RedisStore, runtime: Any, agent: AgentRecord, now_ms: int) -> str:
+    hives = reports.Reports(store.redis)
+    if _elsewhere(agent) and hives.vanished(agent, now_ms):
+        return "its hive no longer lists it"
     if not reports.host(agent):
         return ""
-    if reports.Reports(store.redis).gone(agent) or runtime.observe(agent).state == "exited":
+    if hives.gone(agent) or runtime.observe(agent).state == "exited":
         return "its hive pane is gone"
     return "its hive stopped reporting" if _hive_lost(slug, store, agent, now_ms) else ""
 
@@ -1038,14 +1045,20 @@ class Claims:
     ordered: list
 
 
-def claim_view(slug, store, rows, doc, dispatched=None):
+def claim_view(
+    slug: str,
+    store: RedisStore,
+    rows: dict[str, dict[str, Any]],
+    doc: dict[str, Any],
+    dispatched: Callable[[dict[str, Any]], Any] | None = None,
+) -> Claims:
     awaiting = _owned_tasks(slug, store)
     claimed = store.claimed(slug, [task_id for task_id, t in rows.items() if t.get("state") == "open"])
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
-    unshared = fleet_red.checker()
+    unshared = fleet_red.checker(fleet_red.saved_reader(store, slug))
     view = readiness.Snapshot(
         slug,
         rows,
@@ -2004,9 +2017,14 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
         controller.release_tick_lock(store, slug, token)
 
 
-def _settle(slug, config, store, ledger, rows, doc):
+def _settle(
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], doc: Any
+) -> list[str]:
     agents = store.agents(slug)
     if config.state == "stopping":
+        if not any(a.lane == MASTER and a.state != "finished" for a in agents):
+            _end_awaiting_seats(slug, store, ledger, rows, agents)
+            agents = [a for a in agents if a.state != resume.AWAITING]
         if agents:
             return []
         store.update(slug, state="stopped")
@@ -2020,3 +2038,11 @@ def _settle(slug, config, store, ledger, rows, doc):
     waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
     ledger.notify(slug, freeze.notice(doc, rows.values(), freeze.fix_phase(config)) + waiting)
     return ["drained"]
+
+
+def _end_awaiting_seats(
+    slug: str, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], agents: list[AgentRecord]
+) -> None:
+    for agent in agents:
+        if agent.state == resume.AWAITING:
+            _drop(slug, store, ledger, rows, agent)

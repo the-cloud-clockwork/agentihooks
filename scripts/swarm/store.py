@@ -823,12 +823,13 @@ class RedisStore:
             "names": self.names.export(slug),
         }
 
-    def restore(self, slug, state):
+    def restore(self, slug: str, state: dict[str, Any]) -> None:
         """Replace the swarm's own keys and fencing document with the exported ones and write back seats and inbox."""
         from scripts.swarm import fencing
 
         with self.redis.pipeline() as pipe:
             pipe.delete(*self.redis.scan_iter(match=self.key(slug, "*")), *state["keys"])
+            pipe.delete(self.seats.legacy_listed(slug))
             for key, entry in state["keys"].items():
                 _WRITE[entry["type"]](pipe, key, entry["value"])
                 if entry["ttl_ms"] > 0:

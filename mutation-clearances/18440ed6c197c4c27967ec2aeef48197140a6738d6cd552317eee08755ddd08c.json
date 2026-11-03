@@ -1,0 +1,6 @@
+{
+  "scripts/hive/reports.py:scripts.hive.reports.xǁReportsǁvanished:e4360ad0ed65e8b7c5a7de3ac1d6038bde9a8a554587bd1d66e36caf3fa9d6c3": {
+    "reader": "standards_reader",
+    "reason": "Changes only the type argument of typing.cast(str, raw) to None; cast returns its value argument unchanged at runtime, so the json.loads input and output are identical."
+  }
+}

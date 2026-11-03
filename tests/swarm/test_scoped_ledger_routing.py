@@ -2,7 +2,7 @@ import json
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Thread, get_ident
+from threading import Barrier
 from unittest.mock import patch
 
 import pytest
@@ -12,7 +12,6 @@ from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import cli, lease
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import authority_context, ledger, ledger_link, ledger_route
-from scripts.tick import engine
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_cli import run
 
@@ -43,23 +42,9 @@ def store():
     return result
 
 
-class _StepsPerTick:
-    """The engine's running steps kept apart per tick thread, so one swarm's tick never holds the other's step."""
-
-    def __init__(self) -> None:
-        self._steps: dict[tuple[int, str], Thread] = {}
-
-    def get(self, name: str, default: Thread | None = None) -> Thread | None:
-        return self._steps.get((get_ident(), name), default)
-
-    def __setitem__(self, name: str, worker: Thread) -> None:
-        self._steps[(get_ident(), name)] = worker
-
-
 def test_only_the_selected_tick_uses_the_hosted_ledger(store, monkeypatch):
     seen = {}
     before = dict(os.environ)
-    monkeypatch.setattr(engine, "_RUNNING", _StepsPerTick())
     monkeypatch.setattr(cli.outbox, "flush", lambda *_: None)
     monkeypatch.setattr(relay, "relay", lambda *_: None)
     monkeypatch.setattr(LaunchSlots, "refresh_reported", lambda *_: None)
@@ -207,7 +192,7 @@ def test_the_wait_command_skips_a_remote_swarm_and_finishes_the_local_one(store,
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append(slug))
     with authority_context.bound(None):
         cli.cmd_waits(store, Namespace())
-    assert acquired == ["other"]
+    assert acquired == ["other", "other"]
     assert capsys.readouterr() == ("", "")
 
 
