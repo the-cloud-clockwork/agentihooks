@@ -2433,7 +2433,8 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     assert mutation["strategy"] == {
         "fail-fast": False,
         "matrix": {
-            "shard": "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+            "shard": "${{ fromJSON(needs.mutation-replan.outputs.shards || needs.mutation-refine.outputs.shards"
+            " || needs.mutation-plan.outputs.shards) }}"
         },
     }
     for name in ("Mutate changed Python files", "Mutate dispatched Python files"):
