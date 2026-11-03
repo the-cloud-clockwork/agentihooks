@@ -196,7 +196,7 @@ def test_the_drain_notice_counts_held_work_and_names_only_the_freezes_holding_it
         "The swarm has no task it may start: 1 open task is held by the freeze on plan Ledger polish"
     )
     fix = task("t2", phase=loop.FIX_PHASE)
-    passing = doc(record("plans/b"), record("plans/a", "focus"), tasks=[fix])
+    passing = doc(record("plans/b"), record("plans/a", "focus"), tasks=[fix, task()])
     assert freeze.notice(passing, [fix], loop.FIX_PHASE) == (
         "The swarm has no task it may start: 1 open task is held by the freeze on plan Ledger polish"
     )
