@@ -418,6 +418,11 @@ class ReleaseLedger(GroupLedger):
     def ungroup_tasks(self, slug, lead):
         assert slug == "sw"
         self.ungrouped.append(lead)
+        view = getattr(self, "view", {})
+        if lead in view:
+            for member in view[lead].pop("group_members"):
+                if view.get(member, {}).get("merged_into") == lead:
+                    del view[member]["merged_into"]
 
 
 ENGINEER = "engineer@abcdef-0001"
@@ -441,18 +446,15 @@ def release(store, found, claim=None, handoff=None):
 
 
 def released(store: RedisStore, ledger: ReleaseLedger, found: dict) -> list[str]:
-    """Apply the grouping release writes through the groups applier and drop what the ledger released from ``found``."""
-    known = {t["id"]: t for t in found["tasks"]}
-    apply = task_steps.group_writer("sw", ledger, known.get)
+    """Apply the grouping release writes through the groups applier, the ledger releasing each group in ``found``."""
+    ledger.view = {t["id"]: t for t in found["tasks"]}
+    apply = task_steps.group_writer("sw", ledger, ledger.view.get)
     actions = []
     for item in task_steps.release_writes(SimpleNamespace(grouping=grouping), "sw", store, found):
-        if not isinstance(item, Write):
+        if isinstance(item, Write):
+            apply(item)
+        else:
             actions.append(item)
-            continue
-        apply(item)
-        known[item.key].pop("group_members")
-        for member in item.value:
-            del known[member]["merged_into"]
     return actions
 
 
