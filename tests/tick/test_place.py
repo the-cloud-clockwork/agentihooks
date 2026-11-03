@@ -1,7 +1,7 @@
 """The placement steps run the tick's hand written acks, ranking, preempt and spawn calls at their sites in today's order."""
 
 from contextlib import contextmanager
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Iterator
 
 import pytest
@@ -11,7 +11,7 @@ from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, budgets, place, tasks
+from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, actions, actions_of, budgets, place, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -32,6 +32,9 @@ class _Redis:
         self.log.append(("delete", key))
 
 
+ROWS = {"t1": {"id": "t1", "state": "open"}}
+
+
 def _probe(runtime: Any, *args: Any) -> None:
     return None
 
@@ -43,7 +46,7 @@ def _pass(log: list[Any], state: str = "running", engine_name: str = "tick", **e
         "store": SimpleNamespace(redis=_Redis(log)),
         "ledger": "ledger",
         "runtime": "runtime",
-        "rows": "rows",
+        "rows": ROWS,
         "doc": "doc",
         "now_ms": 7,
         "due": "due key",
@@ -119,7 +122,13 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
         "preempt",
         "spawn",
     ]
-    assert [step.order for step in place.STEPS] == [10, 20, 10, 20, 30, 40]
+    declared = {step.name: (step.needs, step.reads, step.writes - {actions_of(step.name)}) for step in place.STEPS}
+    assert declared["preempt"] == (frozenset({"reap"}), frozenset({AGENTS}), frozenset({AGENTS}))
+    assert declared["spawn"] == (budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), frozenset({AGENTS, TASKS}))
+    assert {name: value for name, value in declared.items() if name not in {"preempt", "spawn"}} == {
+        name: (frozenset(), frozenset(), frozenset())
+        for name in ("collect acks", "codex hook order", "rank pass", "bottleneck remedy")
+    }
     registered = [step for wave in registry.waves() for step in wave]
     for step in place.STEPS:
         assert step in registered
@@ -151,7 +160,7 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
     found = _run(place.PLACEMENT, tick, state, monkeypatch)
     assert found == ["ran rank pass", "ran bottleneck remedy", "ran preempt", "ran spawn"]
     seats = calm[3][-1]
-    assert seats.args[:4] == ("rows", "ended", "owner", "ready in order")
+    assert seats.args[:4] == (ROWS, "ended", "owner", "ready in order")
     assert seats.args[4].func is _probe
     assert seats.args[4].args == ("runtime",)
     assert calm == [
@@ -159,13 +168,17 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
         ("bottleneck remedy", "sw", store, "ledger", "doc", 7),
         "panic read",
         ("preempt", "sw", config, store, "doc", 7, seats),
-        ("places", "tick", "rows"),
+        ("places", "tick", ROWS),
         "panic read",
         ("enter pass", "runtime"),
-        ("spawn", "sw", config, store, "ledger", "runtime", "rows", "doc", 7),
+        ("spawn", "sw", config, store, "ledger", "runtime", ROWS, "doc", 7),
         ("leave pass", "runtime"),
         ("delete", "due key"),
     ]
+    spawned = calm[7][6]
+    assert spawned is not ROWS and state["box"]["rows"] == ROWS
+    assert isinstance(state["box"]["rows"], MappingProxyType)
+    assert state["box"]["rows"]["t1"] is spawned["t1"]
 
 
 @pytest.mark.parametrize(("state", "engine_name"), [("paused", "tick"), ("running", "events")])
@@ -183,7 +196,7 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
     found = _run(place.PLACEMENT, _tick(log), _pass(log), monkeypatch)
     assert found == ["ran rank pass", "ran bottleneck remedy"]
-    assert log[-1] == ("places", "tick", "rows")
+    assert log[-1] == ("places", "tick", ROWS)
 
 
 def test_spawn_waits_until_the_tick_places(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:

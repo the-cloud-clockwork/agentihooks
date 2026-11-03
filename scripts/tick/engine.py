@@ -3,6 +3,7 @@
 import json
 import os
 from collections.abc import Iterable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextvars import Context as ContextCopy
 from contextvars import copy_context
 from dataclasses import dataclass
@@ -11,8 +12,9 @@ from typing import Any
 from uuid import uuid4
 
 from scripts.swarm import tick_report, timing
-from scripts.tick import registry
+from scripts.tick import pool, registry
 from scripts.tick.adapters.inbox import notify_pass_budget
+from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Result, Step
 
 __all__ = ["FAILED", "HELD", "LATE", "OK", "StepRecord", "group_steps", "run_group", "run_step"]
@@ -49,9 +51,9 @@ class StepRecord:
 
 
 def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, ...]:
-    """Return the steps of group ``name`` in legacy order."""
-    pool = [step for wave in registry.waves() for step in wave] if steps is None else list(steps)
-    return tuple(sorted((step for step in pool if step.group == name), key=lambda step: step.order))
+    """Return the steps of group ``name``, each after the group steps it needs, otherwise in registration order."""
+    pool = registry.steps() if steps is None else tuple(steps)
+    return registry.ordered(step for step in pool if step.group == name)
 
 
 def run_step(step: Step, ctx: Context) -> StepRecord:
@@ -101,8 +103,64 @@ def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: St
 
 
 def run_group(name: str, ctx: Context, steps: Iterable[Step] | None = None) -> tuple[StepRecord, ...]:
-    """Run every step of group ``name`` in legacy order; a failed or late step never stops the next."""
-    return tuple(run_step(step, ctx) for step in group_steps(name, steps))
+    """Run every step of group ``name``; a failed or late step never stops the next.
+
+    Outside a parallel pass steps run one at a time in group order. In a parallel pass each step starts as soon as
+    every step it needs has ended, records keep group order, and a lane past its deadline drops its unfinished steps
+    and every step that needs them.
+    """
+    ordered = group_steps(name, steps)
+    found = pool.active()
+    if found is None or not found.parallel:
+        return tuple(run_step(step, ctx) for step in ordered)
+    return _eager(ordered, ctx, found)
+
+
+def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
+    """Return ``ctx`` with its deadline capped by the deadline of the step's lane."""
+    lane = found.lane(step.lane)
+    clock = ctx.deadline.clock
+    return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock))
+
+
+def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass) -> tuple[StepRecord, ...]:
+    """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended."""
+    clock = ctx.deadline.clock
+    names = {step.name for step in ordered}
+    records: dict[str, StepRecord] = {}
+    dropped: set[str] = set()
+    pending = list(ordered)
+    running: dict[Future[StepRecord], tuple[Step, float, Deadline]] = {}
+    executor = ThreadPoolExecutor(max_workers=found.workers)
+    try:
+        while pending or running:
+            ready = [step for step in pending if step.needs & names <= records.keys()]
+            for step in ready:
+                pending.remove(step)
+                lane = found.lane(step.lane)
+                if step.needs & dropped or lane.expired:
+                    dropped.add(step.name)
+                    records[step.name] = StepRecord(step.name, 0.0, step.budget_s, abandoned=True)
+                else:
+                    future = executor.submit(copy_context().run, run_step, step, _lane_context(step, ctx, found))
+                    running[future] = (step, clock(), lane)
+            if not running:
+                if not ready:
+                    raise ValueError(f"steps {sorted(step.name for step in pending)} wait on needs that never end")
+                continue
+            timeout = min(lane.remaining for _, _, lane in running.values())
+            done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
+            for future in done:
+                step, _, _ = running.pop(future)
+                records[step.name] = future.result()
+            for future, (step, started, lane) in list(running.items()):
+                if lane.expired:
+                    running.pop(future)
+                    dropped.add(step.name)
+                    records[step.name] = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
+    finally:
+        executor.shutdown(False, cancel_futures=True)
+    return tuple(records[step.name] for step in ordered)
 
 
 PASS_BUDGET_HOLD = "tick:budget-hold"

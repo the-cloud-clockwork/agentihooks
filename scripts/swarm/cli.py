@@ -188,6 +188,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
+from scripts.tick import pool
 from scripts.tick import view as ledger_view
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
@@ -372,6 +373,12 @@ def run_tick(
     doc, view, beating = {}, None, ExitStack()
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
+        beating.enter_context(
+            pool.running(
+                mode=store.config(slug).tick_mode,
+                heartbeat=lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS),
+            )
+        )
         timing.keep()
         run_group("before")
         if store.config(slug).state == "stopped":

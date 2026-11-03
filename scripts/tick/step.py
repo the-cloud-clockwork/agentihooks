@@ -42,9 +42,6 @@ class Step(Protocol):
     def lane(self) -> Lane: ...
 
     @property
-    def order(self) -> int: ...
-
-    @property
     def budget_s(self) -> float: ...
 
     @property
@@ -52,6 +49,9 @@ class Step(Protocol):
 
     @property
     def needs(self) -> frozenset[str]: ...
+
+    @property
+    def reads(self) -> frozenset[Domain]: ...
 
     @property
     def writes(self) -> frozenset[Domain]: ...

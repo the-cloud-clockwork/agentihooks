@@ -159,6 +159,9 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     assert held is not None
     assert sent == [("http://ledger/sw", {"X-Ledger-Token": "sw True"}, 4, "sw", 0, view.PARTS)]
     assert view.CURRENT.get() is held
+    kept = view.HELD.get()
+    assert kept is not None and kept.view is held and not kept.stale
+    view.HELD.set(None)
     assert held.generation == 11
     assert api.read_export_file(view.view_file("http://ledger/sw", "sw", tmp_path)) == (11, STATE)
     pair = view.REFRESH.get()
@@ -194,6 +197,7 @@ def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
     view.CURRENT.set(view.LedgerView(1, STATE))
     assert view.start("sw", False) is None
     assert view.CURRENT.get() is None
+    assert view.HELD.get() is None
     assert not view.view_file("http://ledger", "sw", tmp_path).exists()
     assert capsys.readouterr().err == "ledger view of sw skipped: the ledger server refused named parts\n"
 
@@ -289,3 +293,19 @@ def test_holding_drops_the_view_the_block_started() -> None:
     assert (view.CURRENT.get(), view.REFRESH.get()) == (outer, outer_refresh)
     view.CURRENT.set(None)
     view.REFRESH.set(None)
+
+
+def test_document_refreshes_a_stale_held_record_and_clears_its_stale_flag() -> None:
+    fresh = view.LedgerView(9, {**STATE, "overview": "fresh"})
+
+    def refresh() -> view.LedgerView:
+        return fresh
+
+    with view.holding():
+        view.REFRESH.set(("sw", refresh))
+        kept = view.Held(view.LedgerView(7, STATE), lambda: pytest.fail("renew should not run"), stale=True)
+        view.HELD.set(kept)
+        doc = view.document("sw")
+    assert doc == fresh.document
+    assert kept.view is fresh
+    assert kept.stale is False
