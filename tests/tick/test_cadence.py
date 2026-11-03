@@ -38,7 +38,7 @@ def test_an_unset_cadence_is_one_minute() -> None:
 
 @pytest.mark.parametrize("minutes", [1, 2, 3, 4, 5])
 def test_the_cron_stays_every_minute(minutes: int) -> None:
-    engine.cadence_s({engine.CADENCE_ENV: str(minutes)})
+    assert engine.cadence_s({engine.CADENCE_ENV: str(minutes)}) == minutes * engine.CRON_S
     assert scheduled_tick.EXPRESSION == "* * * * *"
 
 
