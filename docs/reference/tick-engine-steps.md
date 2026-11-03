@@ -46,10 +46,13 @@ that update automatically when new reports arrive.
 | `metrics record` | 18.905 s | 29 s | 600 s |
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
-seconds. This change declares the intervals; the sequential group runner
-still runs each group at its existing site and does not skip a step merely
-because its interval has not elapsed. Interval scheduling belongs to the
-later cadence executor.
+seconds. The group runner runs each group at its site on every pass and does
+not skip a step because its interval has not elapsed.
+`scripts.tick.engine.interval_s(step, cadence)` gives a step in lane `slow`
+the larger of its declared interval and the slow lane cadence from
+`AGENTIHOOKS_TICK_CADENCE`, and leaves every other step at its own interval;
+no pass reads it yet. See
+[Cadence](../pillars/swarm.md#cadence).
 
 A step with no report row uses `UNMEASURED_S`, a ten second p95, giving a
 fifteen second budget. It still needs an explicit timing table entry. An
@@ -152,18 +155,22 @@ and placement steps are in bold; the others hold steps from other changes.
 | Order | Group | Site in the pass | Steps |
 | --- | --- | --- | --- |
 | 1 | `start` | First line of the pass | config load, stopped branch |
-| 2 | `observe` | After `start`, unless the stopped branch ended the pass | pane evidence through verify, including **spawn due** at order 70 |
-| 3 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |
-| 4 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
-| 5 | `tasks` | After the drained swarm check | orphans |
-| 6 | **`task passes`** | After the [fleet red notice pass](fleet-red-notice.md) | run window, verification notices, size pass, grouping release, dispatcher group |
-| 7 | `place` | First line inside the placing lock | |
-| 8 | **`placement acks`** | After the time left refresh, inside the placing lock | collect acks, codex hook order |
-| 9 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
-| 10 | **`placement`** | After the master seats, inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
-| 11 | `dispatch seat` | Last site inside the placing lock | dispatch seat |
-| 12 | `master watch` | After the placing lock | night watch, master alarm |
-| 13 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
+| 2 | `pass setup` | After `start`, unless the stopped branch ended the pass | spawn hold clear, pass budget |
+| 3 | `observe` | After `pass setup` | pane evidence through verify, including **spawn due** at order 70 |
+| 4 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |
+| 5 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
+| 6 | `drained resume` | After the masters | sleeping, drained resume |
+| 7 | `tasks` | After `drained resume` | orphans |
+| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) |
+| 9 | **`task passes`** | After `reopen passes` | run window, verification notices, size pass, grouping release, dispatcher group |
+| 10 | `place` | First line inside the placing lock | |
+| 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner, time left |
+| 12 | **`placement acks`** | After `placement notices`, inside the placing lock | collect acks, codex hook order |
+| 13 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
+| 14 | **`placement`** | After the master seats, inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
+| 15 | `dispatch seat` | Last site inside the placing lock | dispatch seat |
+| 16 | `master watch` | After the placing lock | night watch, master alarm |
+| 17 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
 
 The group order and the context each site hands its steps are covered in
 [Tick adapters](tick-adapters.md#empty-registry-integration).
@@ -290,7 +297,7 @@ The delivered proof and limitations are recorded in
 | `Undeclared step timing` at import | Declare that exact step name in `MEASURED` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
-| Changing `interval_s` does not reduce call frequency | The interval is declared metadata until cadence scheduling is applied |
+| Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |

@@ -76,7 +76,7 @@ def _stop(futures: list[Future], pending: set[Future], why: str) -> set[Future]:
     return pending
 
 
-def run(slugs: list[str], work: Callable[[str], object], on_stop: Callable[[], object], spent: float) -> bool:
+def run(slugs: list[str], work: Callable[[str], object], spent: float) -> bool:
     STOP.clear()
     signaled: list[int] = []
     previous = signal.signal(signal.SIGTERM, lambda signum, _: signaled.append(signum))
@@ -90,7 +90,6 @@ def run(slugs: list[str], work: Callable[[str], object], on_stop: Callable[[], o
                 future.result()
             return False
         STOP.set()
-        on_stop()
         by_service = signal.SIGTERM in signaled
         why = "by the service" if by_service else f"at its {DEADLINE_S} second deadline"
         code = SIGTERM_EXIT if by_service else 0

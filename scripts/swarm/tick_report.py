@@ -47,7 +47,24 @@ def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict
             }
             for name, rows in sorted(grouped.items())
         ],
+        "lanes": lane_shares([row for rows in grouped.values() for row in rows], cpu),
     }
+
+
+def lane_shares(steps: list[dict[str, Any]], cpu: float) -> list[dict[str, Any]]:
+    """Return each recorded lane's step count and its percent of ``cpu``; steps recorded without a lane are left out."""
+    lanes: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in steps:
+        if "lane" in row:
+            lanes[row["lane"]].append(row)
+    return [
+        {
+            "lane": lane,
+            "count": len(rows),
+            "cpu_share": 100 * sum(row["own_cpu_s"] + row["reaped_child_cpu_s"] for row in rows) / cpu if cpu else 0.0,
+        }
+        for lane, rows in sorted(lanes.items())
+    ]
 
 
 def history(store: Any, slug: str, stream: str, limit: int) -> list[dict[str, Any]]:
@@ -91,4 +108,6 @@ def command(store: Any, args: argparse.Namespace) -> None:
         print(
             f"{row['step']}  {row['count']}  {seconds(row['median_s'])}  {seconds(row['p95_s'])}  {row['cpu_share']:.2f}%"
         )
+    for row in report["lanes"]:
+        print(f"Lane {row['lane']}  {row['count']} steps  {row['cpu_share']:.2f}% CPU share")
     print("CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.")
