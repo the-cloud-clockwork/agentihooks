@@ -113,6 +113,8 @@ def test_the_scheduler_fires_the_tick_holder_every_minute(monkeypatch):
 
 
 class _Tick:
+    pid = 4242
+
     def __init__(self, codes):
         self.codes, self.waits, self.signals = list(codes), [], []
 
@@ -205,16 +207,76 @@ def test_the_holder_holds_the_tick_lock_while_the_tick_runs(monkeypatch):
     assert held == [True]
 
 
-def test_a_tick_past_its_timeout_is_terminated_then_killed():
-    tick = _Tick([None, 143])
-    assert scheduled_tick._finish(tick) == 143
-    assert tick.waits == [540, 90]
-    assert tick.signals == ["terminate"]
+class _Group:
+    def __init__(self, members=0):
+        self.members, self.sent = members, []
 
+    def __call__(self, pgid, number):
+        self.sent.append((pgid, number))
+        if number == 0 and self.members <= 0:
+            raise ProcessLookupError
+        self.members -= number == 0
+
+
+def test_a_tick_past_its_timeout_signals_its_whole_group_then_kills_it(monkeypatch):
+    import signal
+
+    monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    group = _Group()
+    tick = _Tick([None, 143])
+    assert scheduled_tick._finish(tick, group) == 143
+    assert tick.waits == [540, 90]
+    assert group.sent[0] == (4242, signal.SIGTERM)
+    assert tick.signals == []
+
+    group = _Group()
     tick = _Tick([None, None, -9])
-    assert scheduled_tick._finish(tick) == -9
+    assert scheduled_tick._finish(tick, group) == -9
     assert tick.waits == [540, 90, None]
-    assert tick.signals == ["terminate", "kill"]
+    assert group.sent[:2] == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
+
+
+def test_a_clean_pass_leaves_its_group_alone():
+    group = _Group()
+    assert scheduled_tick._finish(_Tick([0]), group) == 0
+    assert group.sent == []
+
+
+def test_a_failed_pass_ends_what_is_left_of_its_group(monkeypatch):
+    import signal
+
+    monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    group = _Group(members=2)
+    assert scheduled_tick._finish(_Tick([1]), group) == 1
+    assert group.sent == [(4242, signal.SIGTERM), (4242, 0), (4242, 0), (4242, 0)]
+
+    group = _Group(members=10**6)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
+    assert scheduled_tick._finish(_Tick([1]), group) == 1
+    assert group.sent == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
+
+
+def test_a_failed_pass_leaves_no_child_running(tmp_path, monkeypatch):
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 2)
+    pid_file = tmp_path / "child"
+    tick = subprocess.Popen(["sh", "-c", f"sleep 300 & echo $! > {pid_file}; exit 3"], start_new_session=True)
+    assert scheduled_tick._finish(tick) == 3
+    child = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while tick_reaper.alive(child) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not tick_reaper.alive(child)
+
+
+def test_the_holder_starts_the_tick_as_its_own_process_group(monkeypatch):
+    from scripts.swarm import timer
+
+    monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    launched = []
+    scheduled_tick.main(lambda argv, **kwargs: launched.append(kwargs) or _Tick([0]))
+    assert launched[0]["start_new_session"] is True
 
 
 def _holding(monkeypatch):
