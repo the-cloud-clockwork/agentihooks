@@ -7,7 +7,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import BoundedSemaphore, Lock, Thread, Timer, local
+from threading import BoundedSemaphore, Event, Lock, Thread, Timer, local
+from time import monotonic
 from typing import IO, TypeVar
 
 from scripts.tick.deadline import Deadline
@@ -53,6 +54,27 @@ class Pass:
     slow: Deadline
     slots: BoundedSemaphore
     later: list[Thread] = field(default_factory=list[Thread], compare=False)
+    handed: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
+    gone: set[str] = field(default_factory=set[str], compare=False)
+
+    def hand(self, names: Iterable[str]) -> None:
+        """Mark each step in ``names`` handed off to run on after its group, pending until ``end`` marks it."""
+        for name in names:
+            self.handed[name] = Event()
+
+    def end(self, name: str, dropped: bool) -> None:
+        """Mark handed off step ``name`` ended, ``dropped`` when it never ran or ran past its lane; others are ignored."""
+        if name not in self.handed:
+            return
+        if dropped:
+            self.gone.add(name)
+        self.handed[name].set()
+
+    def ended(self, names: Iterable[str], timeout: float) -> bool:
+        """Return whether every handed off step in ``names`` ended within ``timeout`` seconds and none was dropped."""
+        wanted = set(names)
+        until = monotonic() + timeout
+        return all(self.handed[name].wait(until - monotonic()) for name in wanted) and not wanted & self.gone
 
     def detach(self, work: Callable[[], object]) -> None:
         """Start ``work`` under the caller's copied context on a daemon thread the pass joins when it ends."""

@@ -164,3 +164,33 @@ def test_a_sequential_pass_runs_a_cross_group_dependent_after_the_step_it_needs(
         engine.run_group("cross sequential one", _ctx(), (first,))
         engine.run_group("cross sequential two", _ctx(), (second,))
     assert ran == ["first", "second"]
+
+
+@pytest.mark.wall_clock
+def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs_lost_its_critical_need() -> None:
+    release, ended = Event(), Event()
+    ran: list[str] = []
+
+    def note(name: str) -> Callable[[Context], Result]:
+        def action(ctx: Context) -> Result:
+            ran.append(name)
+            return Result()
+
+        return action
+
+    stuck = Step("cross stuck critical", _blocking(release, ended), "cross lost", lane=Lane("tick"))
+    slow = Step("cross lost slow", note("slow"), "cross lost", frozenset({stuck.name}))
+    dependent = Step("cross lost dependent", note("dependent"), "cross after lost", frozenset({slow.name}))
+    later: list[tuple[engine.StepRecord, ...]] = []
+    try:
+        with pool.running(workers=4, critical_s=0.05):
+            engine.run_group("cross lost", _ctx(), (stuck, slow), finished=later.append)
+            engine.run_group("cross after lost", _ctx(), (dependent,), finished=later.append)
+    finally:
+        release.set()
+        assert ended.wait(5.0)
+    assert ran == []
+    assert sorted((row.name, row.abandoned) for records in later for row in records) == [
+        ("cross lost dependent", True),
+        ("cross lost slow", True),
+    ]
