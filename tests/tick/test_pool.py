@@ -634,3 +634,29 @@ def test_a_handed_off_step_starts_after_the_critical_step_it_needs() -> None:
         assert [row.name for row in engine.run_group("load", context(), steps, finished=later.append)] == ["critical"]
     assert ran == ["critical", "slow", "both"]
     assert [[row.name for row in records] for records in later] == [["slow", "both"]]
+
+
+def test_a_handed_off_step_is_dropped_when_the_critical_step_it_needs_was_dropped() -> None:
+    from scripts.tick import pool
+
+    ran: list[str] = []
+
+    def note(ctx: Context) -> Result:
+        ran.append("ran")
+        return Result()
+
+    steps = (
+        Step("critical", note),
+        Step("slow", note, lane=Lane("slow")),
+        Step("both", note, frozenset({"critical", "slow"})),
+    )
+    later: list[tuple[engine.StepRecord, ...]] = []
+    with pool.running(critical_s=0.0):
+        assert [
+            (row.name, row.outcome) for row in engine.run_group("load", context(), steps, finished=later.append)
+        ] == [("critical", engine.LATE)]
+    assert ran == ["ran"]
+    assert [[(row.name, row.outcome) for row in records] for records in later] == [
+        [("slow", engine.OK), ("both", engine.LATE)]
+    ]
+    assert later[0][1].wall_s == 0.0

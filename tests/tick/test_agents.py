@@ -218,3 +218,19 @@ def test_the_tick_prints_each_slow_step_that_failed_after_its_group(
     with pool.running(workers=2):
         assert tick_module.run_group("agents", slug="sw") == []
     assert capsys.readouterr().out == "slow lane step failed panes failed: builtins.RuntimeError\n"
+
+
+def test_the_tick_prints_the_exception_a_held_slow_step_stored(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.tick import pool
+
+    def hold(tick: object, get: Any) -> list[str]:
+        get("box")["raised"] = RuntimeError("metrics broke")
+        return []
+
+    monkeypatch.setattr(registry, "registry", registry.Registry())
+    registry.register(CallStep("failed panes", "agents", hold, lane=engine.SLOW))
+    with pool.running(workers=2):
+        assert tick_module.run_group("agents", slug="sw", box={}) == []
+    assert capsys.readouterr().out == "a slow lane step held RuntimeError('metrics broke')\n"

@@ -144,7 +144,8 @@ def run_group(
     names = {step.name for step in later}
     records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
     if later:
-        found.detach(partial(_run_later, later, ctx, found, apply or {}, finished))
+        dropped = frozenset(record.name for record in records if record.abandoned)
+        found.detach(partial(_run_later, later, dropped, ctx, found, apply or {}, finished))
     return records
 
 
@@ -159,13 +160,20 @@ def _slow_lane(ordered: tuple[Step, ...]) -> tuple[Step, ...]:
 
 def _run_later(
     later: tuple[Step, ...],
+    dropped: frozenset[str],
     ctx: Context,
     found: pool.Pass,
     apply: Appliers,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
 ) -> None:
-    """Run the handed off steps on the pass workers and hand their records to ``finished``."""
-    records = _eager(later, ctx, found, apply)
+    """Run the handed off steps on the pass workers, dropping each that needs a ``dropped`` step, then hand their
+    records in group order to ``finished``."""
+    gone = set(dropped)
+    for step in later:
+        if step.needs & gone:
+            gone.add(step.name)
+    ran = {record.name: record for record in _eager(tuple(s for s in later if s.name not in gone), ctx, found, apply)}
+    records = tuple(ran.get(step.name, StepRecord(step.name, 0.0, step.budget_s, abandoned=True)) for step in later)
     if finished is not None:
         finished(records)
 
