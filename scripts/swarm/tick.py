@@ -144,6 +144,10 @@ class SpawnError(RuntimeError):
         self.pane_id = pane_id
         self.harness = harness
 
+    def step_fields(self) -> dict[str, str]:
+        """The message and status a failed tick step records for this launch."""
+        return {"detail": str(self), "status": str(self.status)}
+
 
 @dataclass(frozen=True)
 class Placed:
