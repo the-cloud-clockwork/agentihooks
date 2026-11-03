@@ -68,9 +68,6 @@ EDGES = (
     ("health findings", "metrics record"),
     ("sleeping", "drained resume"),
     ("dev red reopen", "prerequisite reopen"),
-    ("prerequisite reopen", "promotion refresh"),
-    ("promotion refresh", "release alert"),
-    ("release alert", "fleet red notice"),
 )
 
 
