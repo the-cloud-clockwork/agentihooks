@@ -125,16 +125,21 @@ class SeatRegistry:
         """The swarm's names from before the registry: scanned from the keyspace once, then kept in a set that
         seating a name of that style adds to."""
         key = f"{PREFIX}-legacy:{slug}"
-        if not self.redis.exists(f"{key}:listed"):
+        if not self.redis.exists(self.legacy_listed(slug)):
             prefix = f"{PREFIX}-of:"
             found = self.redis.scan_iter(match=f"{prefix}{slug}-*", count=SCAN_PAGE)
             old = [name for pointer in found if naming.legacy_slug(name := pointer[len(prefix) :]) == slug]
             with self.redis.pipeline() as pipe:
                 if old:
                     pipe.sadd(key, *old)
-                pipe.set(f"{key}:listed", 1)
+                pipe.set(self.legacy_listed(slug), 1)
                 pipe.execute()
         return sorted(self.redis.smembers(key))
+
+    def legacy_listed(self, slug: str) -> str:
+        """The key marking that the swarm's old style names were scanned into their set; without it the next listing
+        scans again."""
+        return f"{PREFIX}-legacy:{slug}:listed"
 
     def _known_seats(self, names):
         return [seat or "" for seat in self.redis.mget([f"{PREFIX}-of:{name}" for name in names])] if names else []
