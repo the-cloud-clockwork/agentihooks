@@ -15,6 +15,8 @@ from scripts.ci_mutation.mutant_shards import function_name
 from scripts.ci_mutation.plan import (
     BATCH_RUNNERS,
     MUTANT_SECONDS,
+    RUNNER_WAVES,
+    SHARD_CEILING,
     SHARD_SETUP_SECONDS,
     shard_capacity,
     shard_count,
@@ -27,7 +29,6 @@ from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 # Traced test seconds: every unit of a split mutant reruns the fastest tests, where most mutants die, then one slice.
 HEAD_SECONDS = 20.0
 SLICE_SECONDS = 120.0
-SHARD_LIMIT = 10
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
@@ -186,7 +187,7 @@ def plan_shards(
     seconds = sum(costs[name] for name in sorted(costs))
     widest = max(map(len, units.values()), default=1)
     count = max(min(limit, widest), shard_count(seconds, len(items), target, limit, budget))
-    ceiling = max(count, min(BATCH_RUNNERS, len(items)))
+    ceiling = max(count, min(SHARD_CEILING, len(items)))
     fits = (
         count
         for count in range(count, ceiling)
@@ -273,13 +274,13 @@ def budget_overrun(plan: dict[str, Any], budget: float) -> str:
     if slowest <= shard_capacity(workers, budget):
         return ""
     total: float = plan["estimated_worker_seconds"]
-    capacity = SHARD_LIMIT * shard_capacity(workers, budget)
+    capacity = SHARD_CEILING * shard_capacity(workers, budget)
     parts = max(2, math.ceil(total / capacity))
     return (
         f"The slowest mutation shard needs {slowest:.0f} worker seconds, {slowest / workers:.0f} seconds on"
         f" {workers} workers, against the {budget:.0f} second shard budget less {SHARD_SETUP_SECONDS:.0f} seconds"
-        f" of setup. The change needs {total:.0f} worker seconds and {SHARD_LIMIT} shards hold at most"
-        f" {capacity:.0f}, so split it into at least {parts} pull requests."
+        f" of setup. The change needs {total:.0f} worker seconds and {SHARD_CEILING} shards in {RUNNER_WAVES} waves"
+        f" of {BATCH_RUNNERS} runners hold at most {capacity:.0f}, so split it into at least {parts} pull requests."
     )
 
 
