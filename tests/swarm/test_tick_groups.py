@@ -14,7 +14,7 @@ from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import PASS, observe, report
+from scripts.tick.steps import PASS, Left, observe, report
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -187,6 +187,49 @@ def test_the_wrapper_steps_after_fencing_read_the_fenced_runtime(
     assert sites["wrapper probes"].view.read(PASS, "runtime") is rt
     for group in ("wrapper health", "wrapper commands", "wrapper reboot", "wrapper events", "wrapper metrics"):
         assert isinstance(sites[group].view.read(PASS, "runtime"), controller.FencedRuntime)
+
+
+def test_the_wrapper_runs_the_tick_with_the_fenced_pass_state_and_keeps_its_actions(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    calls: list[tuple[Any, ...]] = []
+
+    def ticked(*args: Any) -> list[str]:
+        calls.append(args)
+        return ["tick acted"]
+
+    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
+    monkeypatch.setattr(cli, "tick", ticked)
+    assert "tick acted" in cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    [(slug, held, used, runtime, now)] = calls
+    assert (slug, held, used, now) == ("sw", swarm, ledger, 9_000_000)
+    assert isinstance(runtime, controller.FencedRuntime)
+
+
+def test_a_tick_value_left_past_its_budget_drops_the_tick_actions_and_the_wrapper_goes_on(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+
+    def left(*args: Any) -> list[str]:
+        raise Left("config")
+
+    monkeypatch.setattr(cli, "tick", left)
+    assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == []
+    assert [name for name, _ in seen][-6:] == [
+        "wrapper relay",
+        "wrapper view",
+        "wrapper events",
+        "wrapper metrics",
+        "after",
+        "wrapper status",
+    ]
 
 
 def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
