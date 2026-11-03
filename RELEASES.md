@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.614 · 2026-11-03
+
+### 2026-11-03 · a6506ccdc9b2 · #9555 · @nestorcolt
+
+**Move the size and group release tests onto the tick write path**
+
+This change finishes the cleanup started in #9475 by moving the difficulty size and grouping release tests off the deleted `size_pass`/`release_pass` functions and onto the current tick write path, exercising `tasks.size_writes`/`tasks.task_writer` and `tasks.release_writes`/`tasks.group_writer` instead. The tick engine steps reference is updated to name the actual write functions and appliers rather than the removed passes. This keeps the test suite aligned with the real code path, removes dead reimplementations, and closes out the follow-up task left after the legacy passes were deleted, with mutation testing and review confirming no regressions.
+
 ## v2.17.610 · 2026-11-03
 
 ### 2026-11-03 · 0b3ad4ae3ff7 · #9528 · @nestorcolt
