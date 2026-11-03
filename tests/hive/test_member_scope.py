@@ -83,7 +83,7 @@ def test_a_member_beat_lands_below_its_own_hive_key_and_the_controller_reads_it_
     assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
     assert idle.heartbeat(redis, "fixture", name) == {"state": "working", "at": 5}
     assert idle.last_prompt(redis, "fixture", name) == 6
-    assert idle.wait(redis, "fixture", name)["reason"] == "checks"
+    assert (idle.wait(redis, "fixture", name) or {})["reason"] == "checks"
     assert idle.waited(redis, "fixture", name) == 100
     assert [entry["at"] for entry in idle.wait_history(redis, "fixture", name)] == [7]
     idle.end_wait(redis, "fixture", name, 60)
@@ -241,7 +241,7 @@ def test_member_session_model_progress_and_stop_blocks_stay_below_the_member(red
     assert sorted(redis.keys(f"{own}:*")) == sorted(
         f"{own}:{kind}:{name}" for kind in ("session-model", "progress", "stop-blocks")
     )
-    assert session_model.get(redis, "fixture", name)["model"] == "opus"
+    assert (session_model.get(redis, "fixture", name) or {})["model"] == "opus"
     assert Progress(redis, "fixture").read(name).outcome == "pushed"
     assert Streak(swarm, "fixture", name).key == f"{own}:stop-blocks:{name}"
 
