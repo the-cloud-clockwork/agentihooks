@@ -828,9 +828,8 @@ class RedisStore:
         from scripts.swarm import fencing
 
         with self.redis.pipeline() as pipe:
-            pipe.delete(
-                *self.redis.scan_iter(match=self.key(slug, "*")), *state["keys"], self.seats.legacy_listed(slug)
-            )
+            pipe.delete(*self.redis.scan_iter(match=self.key(slug, "*")), *state["keys"])
+            pipe.delete(self.seats.legacy_listed(slug))
             for key, entry in state["keys"].items():
                 _WRITE[entry["type"]](pipe, key, entry["value"])
                 if entry["ttl_ms"] > 0:
