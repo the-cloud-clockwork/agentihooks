@@ -212,6 +212,7 @@ def test_phase_pass_reads_each_phase_s_tasks_and_states_from_the_ledger_hierarch
                 node("tasks/t5", 2, "out_of_scope"),
                 node("phases/p2", 1),
                 node("tasks/t3", 2),
+                node("tasks/t8", 2),
                 node("tasks/t4", 0),
                 node("phases/p3", 0),
                 node("tasks/t6", 1, "done"),
@@ -232,7 +233,7 @@ def test_phase_pass_reads_each_phase_s_tasks_and_states_from_the_ledger_hierarch
         "phase p3 ticked",
     ]
     assert Ledger.ticked == [("p1", True), ("p2", False), ("p3", True)]
-    assert Inbox.sent[0].endswith("all 2 tasks closed.") and Inbox.sent[1].endswith("reopened for t3.")
+    assert Inbox.sent[0].endswith("all 2 tasks closed.") and Inbox.sent[1].endswith("reopened for t3, t8.")
 
 
 def test_phase_pass_skips_when_the_hierarchy_read_fails(store):

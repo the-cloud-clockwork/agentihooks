@@ -53,7 +53,8 @@ def apply_change(inbox: Any, store: Any, slug: str, ledger: Any, change: PhaseCh
         text = (
             f"For your information: phase {change.phase_id} {change.title} reopened for {', '.join(change.open_ids)}."
         )
-    inbox.send(SENDER, Mail(inbox, store, slug).master, text, fyi=True)
+    mail = Mail(inbox, store, slug)
+    mail.inbox.send(SENDER, mail.master, text, fyi=True)
     return f"phase {change.phase_id} {'ticked' if change.done else 'reopened'}"
 
 
