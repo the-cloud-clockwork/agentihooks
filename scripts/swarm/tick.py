@@ -2022,7 +2022,10 @@ def _settle(
 ) -> list[str]:
     agents = store.agents(slug)
     if config.state == "stopping":
-        if _end_undecided(slug, store, ledger, rows, agents):
+        if not any(a.lane == MASTER and a.state != "finished" for a in agents):
+            _end_awaiting_seats(slug, store, ledger, rows, agents)
+            agents = [a for a in agents if a.state != resume.AWAITING]
+        if agents:
             return []
         store.update(slug, state="stopped")
         return ["stopped"]
@@ -2037,11 +2040,9 @@ def _settle(
     return ["drained"]
 
 
-def _end_undecided(
+def _end_awaiting_seats(
     slug: str, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], agents: list[AgentRecord]
-) -> list[AgentRecord]:
-    if any(a.lane == MASTER and a.state != "finished" for a in agents):
-        return agents
+) -> None:
     for agent in agents:
         if agent.state == resume.AWAITING:
             store.release(slug, agent.task, agent.name)
@@ -2050,4 +2051,3 @@ def _end_undecided(
             if row.get("state") in ACTIVE and row.get("claimed_by") == agent.name:
                 _reopen(slug, ledger, rows, agent.task)
             exits.settle(InboxStore(store.redis), agent.name, "", "stopped")
-    return [a for a in agents if a.state != resume.AWAITING]
