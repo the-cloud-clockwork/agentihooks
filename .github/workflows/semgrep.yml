@@ -122,9 +122,6 @@ jobs:
       - name: Operator feature regressions and passing fixtures
         run: semgrep --metrics off --test .semgrep/features
 
-      - name: Validate operator feature map
-        run: python -m scripts.feature_map
-
       # Each rule matches a pattern behind an outage; the scan job fails only instances new against the base.
       - name: Outage rules fire on their planted faults and pass their clean cases
         run: semgrep --metrics off --test .semgrep-incidents

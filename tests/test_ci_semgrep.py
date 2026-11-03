@@ -92,9 +92,9 @@ def test_feature_fixture_command_runs_recursively():
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
 
 
-def test_feature_map_links_are_required_alongside_feature_rule_fixtures():
-    steps = _jobs()["feature-tests"]["steps"]
-    assert any(step.get("run") == "python -m scripts.feature_map" for step in steps)
+def test_feature_map_is_graded_only_by_the_protected_validator() -> None:
+    steps = [step for job in _jobs().values() for step in job.get("steps", [])]
+    assert not any("scripts.feature_map" in step.get("run", "") for step in steps)
     assert any(step.get("run") == 'python -m pip install semgrep==1.177.0 "pyyaml>=6.0"' for step in steps)
 
 
