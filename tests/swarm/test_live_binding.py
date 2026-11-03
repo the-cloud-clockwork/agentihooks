@@ -1482,15 +1482,33 @@ def test_local_agent_without_validation_still_expects_the_profile_home(
     assert live_binding.unknown(agent, facts) == []
 
 
-def _login_report(path: Path, state: str, home: Path) -> Path:
-    validated = {"profile": "master", "harness": "claude", "home": str(home), "state": "validated", "pid": 7}
-    data = {"profile": "master", "harness": "claude", "state": state, "rendered": {"home": str(home)}}
-    path.write_text(json.dumps({**data, **({"validation": validated} if state == "validated" else {})}))
+def _login_report(path: Path, state: str, home: Path, profile: str = "master", account: str = "team") -> Path:
+    validated = {
+        "profile": profile,
+        "harness": "claude",
+        "home": str(home),
+        "state": "validated",
+        "pid": 7,
+        "persona": "persona",
+        "sources": "sources",
+        "account": account,
+    }
+    data = {"profile": profile, "harness": "claude", "state": state, "rendered": {"home": str(home)}}
+    found = {"validation": validated} if state == "validated" else {"reason": "refused"}
+    path.write_text(json.dumps({**data, **found}))
     return path
 
 
-def _login_master(report: Path, home: str = "") -> AgentRecord:
-    pending = {"state": "pending", "report": str(report), "profile": "master", "harness": "claude", "account": ""}
+def _login_master(report: Path, home: str = "", account: str = "") -> AgentRecord:
+    pending = {
+        "state": "pending",
+        "report": str(report),
+        "profile": "master",
+        "harness": "claude",
+        "account": account,
+        "model": "sonnet",
+        "effort": "low",
+    }
     return AgentRecord(
         "master@zz-1",
         "master",
@@ -1509,21 +1527,27 @@ def _login_facts(home: Path) -> dict:
         "harness": "claude",
         "home": str(home),
         "profile": "master",
-        "model": "opus",
-        "effort": "high",
+        "model": "sonnet",
+        "effort": "low",
         "account": "team",
         "hooks": True,
     }
 
 
+def _profile_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "operator")
+    return str(tmp_path / "operator" / ".agentihooks" / "profiles" / "master" / "claude")
+
+
 def test_master_launched_on_the_login_home_has_no_home_difference(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(Path, "home", lambda: tmp_path / "operator")
+    _profile_home(monkeypatch, tmp_path)
     login = tmp_path / "master-login-2" / "claude"
     login.mkdir(parents=True)
     master = _login_master(_login_report(tmp_path / "report.json", "validated", login))
-    assert live_binding.assignment(master)["home"] == str(login.resolve())
+    expected = live_binding.assignment(master)
+    assert (expected["home"], expected["model"], expected["effort"]) == (str(login.resolve()), "sonnet", "low")
     assert live_binding.compare(master, _login_facts(login)) == {}
 
 
@@ -1531,24 +1555,34 @@ def test_master_launched_on_the_login_home_has_no_home_difference(
 def test_an_unvalidated_launch_report_keeps_the_profile_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str
 ) -> None:
-    monkeypatch.setattr(Path, "home", lambda: tmp_path / "operator")
+    default = _profile_home(monkeypatch, tmp_path)
     login = tmp_path / "master-login-2" / "claude"
     login.mkdir(parents=True)
-    master = _login_master(_login_report(tmp_path / "report.json", state, login))
-    expected = tmp_path / "operator" / ".agentihooks" / "profiles" / "master" / "claude"
-    assert live_binding.assignment(master)["home"] == str(expected)
+    expected = live_binding.assignment(_login_master(_login_report(tmp_path / "report.json", state, login)))
+    assert (expected["home"], expected["model"], expected["effort"]) == (default, "sonnet", "low")
 
 
 @pytest.mark.parametrize("content", [None, "not json", "[]", '{"state": "validated"}'])
 def test_an_unreadable_launch_report_keeps_the_profile_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, content: str | None
 ) -> None:
-    monkeypatch.setattr(Path, "home", lambda: tmp_path / "operator")
+    default = _profile_home(monkeypatch, tmp_path)
     report = tmp_path / "report.json"
     if content is not None:
         report.write_text(content)
-    expected = tmp_path / "operator" / ".agentihooks" / "profiles" / "master" / "claude"
-    assert live_binding.assignment(_login_master(report))["home"] == str(expected)
+    expected = live_binding.assignment(_login_master(report))
+    assert (expected["home"], expected["model"], expected["effort"]) == (default, "sonnet", "low")
+
+
+@pytest.mark.parametrize("profile, reported, recorded", [("engineer", "team", ""), ("master", "other", "team")])
+def test_a_report_of_another_launch_keeps_the_profile_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, profile: str, reported: str, recorded: str
+) -> None:
+    default = _profile_home(monkeypatch, tmp_path)
+    login = tmp_path / "master-login-2" / "claude"
+    login.mkdir(parents=True)
+    report = _login_report(tmp_path / "report.json", "validated", login, profile, reported)
+    assert live_binding.assignment(_login_master(report, account=recorded))["home"] == default
 
 
 def test_a_recorded_home_is_kept_over_the_launch_report(tmp_path: Path) -> None:
@@ -1557,3 +1591,17 @@ def test_a_recorded_home_is_kept_over_the_launch_report(tmp_path: Path) -> None:
     rendered.mkdir()
     master = _login_master(_login_report(tmp_path / "report.json", "validated", login), str(rendered))
     assert live_binding.assignment(master)["home"] == str(rendered.resolve())
+
+
+def test_a_hosted_master_with_a_validated_report_compares_its_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.hive import reports
+
+    monkeypatch.setattr(reports, "host", lambda agent: "hive-1")
+    login = tmp_path / "master-login-2" / "claude"
+    login.mkdir(parents=True)
+    master = _login_master(_login_report(tmp_path / "report.json", "validated", login))
+    facts = {**_login_facts(login), "home": str(tmp_path / "elsewhere")}
+    assert list(live_binding.compare(master, facts)) == ["home"]
+    assert live_binding.unknown(master, facts) == []

@@ -170,15 +170,18 @@ def observe_managed(record: TransportRecord | None) -> PaneObservation:
 
 def launched(agent: AgentRecord) -> dict:
     """The record's validation, with the home its launch report validated while the record still holds it pending."""
+    from scripts.profiles import binding
+
     validation = agent.profile_decision.get("validation", {})
     if validation.get("home") or not validation.get("report"):
         return validation
     try:
-        report = json.loads(Path(validation["report"]).read_text())
-        home = report["validation"]["home"] if report["state"] == "validated" else ""
+        confirmed = binding.confirm(
+            Path(validation["report"]), agent.profile, agent.harness, validation.get("account", "")
+        )
     except (OSError, ValueError, TypeError, KeyError):
         return validation
-    return {**validation, "home": home}
+    return {**validation, "home": confirmed.get("home", "")}
 
 
 def assignment(agent: AgentRecord) -> dict:
@@ -250,9 +253,7 @@ def hosted_home(store: RedisStore, agent: AgentRecord) -> AgentRecord:
 def _unheld(agent: AgentRecord) -> list[str]:
     from scripts.hive import reports
 
-    homeless = not agent.profile_decision.get("validation", {}).get("home") and (
-        not (agent.profile and agent.harness) or bool(reports.host(agent))
-    )
+    homeless = not launched(agent).get("home") and (not (agent.profile and agent.harness) or bool(reports.host(agent)))
     return [field for field, value in assignment(agent).items() if not value or (field == "home" and homeless)]
 
 
