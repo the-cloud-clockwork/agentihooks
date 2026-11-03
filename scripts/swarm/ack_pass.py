@@ -8,11 +8,9 @@ import os
 import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
-
-from scripts.swarm.store import RedisStore
 
 LOCK = "acks-lock"
 LOCK_MS = 30_000
@@ -21,7 +19,7 @@ COLLECTING = ("acknowledging", "launching")
 
 
 @contextmanager
-def collecting(store: RedisStore, slug: str) -> Iterator[bool]:
+def collecting(store: Any, slug: str) -> Generator[bool, None, None]:
     """Hold the swarm's acks lock for the block, renewed while held, yielding whether this caller took it."""
     from scripts.scheduler.process_interval import Interval
 
@@ -41,7 +39,7 @@ def collecting(store: RedisStore, slug: str) -> Iterator[bool]:
             renewing.close()
 
 
-def _renew(store: RedisStore, key: str, token: str) -> None:
+def _renew(store: Any, key: str, token: str) -> None:
     """Extend the acks lock while this holder still owns it; a Redis error is reported and the next beat retries."""
     from redis.exceptions import RedisError
 
@@ -52,7 +50,7 @@ def _renew(store: RedisStore, key: str, token: str) -> None:
         print(f"renewing the acks lock {key} failed: {type(exc).__name__}", file=sys.stderr)
 
 
-def due(store: RedisStore, slug: str) -> bool:
+def due(store: Any, slug: str) -> bool:
     """Whether any launch waits for its acknowledgement or its workstation launch job."""
     from scripts.swarm import launch_job
 
@@ -62,17 +60,17 @@ def due(store: RedisStore, slug: str) -> bool:
     return any(json.loads(raw).get("state") in COLLECTING for raw in rows)
 
 
-def run(store: RedisStore, slug: str, ledger: Any = None, runtime: Any = None) -> list[str]:
+def run(store: Any, slug: str, ledger: Any = None, runtime: Any = None) -> list[str]:
     """Collect the swarm's launch acknowledgements when this hive holds its lease and no other collector runs."""
     from scripts.swarm_ledger import authority_context, ledger_link, ledger_route
 
     with ledger_route.scoped(slug, ledger_route.configured(store, slug)):
-        if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):
+        if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):  # pyright: ignore[reportUnknownMemberType]
             return []
         return _collect(store, slug, ledger, runtime)
 
 
-def _collect(store: RedisStore, slug: str, ledger: Any, runtime: Any) -> list[str]:
+def _collect(store: Any, slug: str, ledger: Any, runtime: Any) -> list[str]:
     from scripts.swarm import commands, controller, lease, ledger_client, timing
     from scripts.swarm import tick as engine
 
@@ -92,7 +90,16 @@ def _collect(store: RedisStore, slug: str, ledger: Any, runtime: Any) -> list[st
         )
         lease.require(store, slug, held)
         with timing.tick(slug):
-            return timing.call(engine._collect_acks, slug, config, store, ledger, fenced, doc, int(time.time() * 1000))
+            return timing.call(  # pyright: ignore[reportUnknownMemberType]
+                engine._collect_acks,  # pyright: ignore[reportPrivateUsage]
+                slug,
+                config,
+                store,
+                ledger,
+                fenced,
+                doc,
+                int(time.time() * 1000),
+            )
 
 
 def _runtime() -> Any:
