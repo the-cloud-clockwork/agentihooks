@@ -890,7 +890,7 @@ def test_tick_reports_spawn_intent_and_store_stages(env, capsys):
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
     finished = {row["step"] for row in rows if row["phase"] == "finished"}
     assert {
-        "scripts.tick.steps.place._spawn",
+        "scripts.swarm.tick._spawn",
         "scripts.gates.intent.Check.run",
         "scripts.swarm.store.RedisStore.agents",
     } <= finished

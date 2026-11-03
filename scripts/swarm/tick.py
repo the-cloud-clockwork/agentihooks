@@ -1035,6 +1035,41 @@ def _owner_hold(slug, store, runtime, task):
     return f"task {task['id']} retains its live owner"
 
 
+def _spawn(
+    slug: str,
+    config: SwarmConfig,
+    store: object,
+    ledger: object,
+    runtime: object,
+    rows: dict,
+    doc: dict,
+    now_ms: int,
+) -> list:
+    agents = store.agents(slug)
+    taken = {a.seat for a in agents}
+    held = timing.timed(_held_for_master, slug, store, now_ms)
+    order, actions = timing.timed(_spawn_order, slug, config, store, agents, rows, doc, runtime)
+    actions += timing.timed(_block_unresolved, slug, ledger, rows, order)
+    order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
+    run = _Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
+    clock, batch = _LaunchClock(), []
+    for lane, task in order:
+        stop = held or [
+            timing.timed(_spawn_stop, slug, config, store, runtime, now_ms, len(batch)) or clock.spent(task, batch)
+        ]
+        if any(stop):
+            return actions + _launch_all(run, clock, batch) + stop
+        at = time.monotonic()
+        launch, prepared = _prepare(run, lane, task, taken, clock.failing, {peer.record.name for peer in batch})
+        clock.prepared(at)
+        actions += prepared
+        batch += [launch] if launch else []
+        if batch and len(batch) >= _launch_room(runtime, config):
+            actions += _launch_all(run, clock, batch)
+            batch = []
+    return actions + _launch_all(run, clock, batch)
+
+
 @dataclass(frozen=True)
 class _Pass:
     slug: str

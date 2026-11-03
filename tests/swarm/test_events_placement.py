@@ -255,7 +255,7 @@ def test_events_tick_does_not_run_placement_without_workstation_tasks(
     store.update("sw", engine="events")
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     spawn = Mock()
-    monkeypatch.setattr(tick_module.place, "_spawn", spawn)
+    monkeypatch.setattr(tick_module, "_spawn", spawn)
 
     tick("sw", store, ledger, runtime, now_ms=1_000)
 

@@ -37,43 +37,6 @@ def _placement_pass(runtime: Any) -> Any:
             end()
 
 
-def _spawn(
-    slug: str,
-    config: Any,
-    store: Any,
-    ledger: Any,
-    runtime: Any,
-    rows: dict[str, Any],
-    doc: dict[str, Any],
-    now_ms: int,
-) -> list[str]:
-    agents = store.agents(slug)
-    taken = {a.seat for a in agents}
-    held = tick.timing.timed(tick._held_for_master, slug, store, now_ms)
-    order, actions = tick.timing.timed(tick._spawn_order, slug, config, store, agents, rows, doc, runtime)
-    actions += tick.timing.timed(tick._block_unresolved, slug, ledger, rows, order)
-    order = [(lane, task) for lane, task in order if tick.profile_first.UNRESOLVED not in task]
-    run = tick._Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
-    batch: list[Any]
-    clock, batch = tick._LaunchClock(), []
-    for lane, task in order:
-        stop = held or [
-            tick.timing.timed(tick._spawn_stop, slug, config, store, runtime, now_ms, len(batch))
-            or clock.spent(task, batch)
-        ]
-        if any(stop):
-            return actions + tick._launch_all(run, clock, batch) + stop
-        at = tick.time.monotonic()
-        launch, prepared = tick._prepare(run, lane, task, taken, clock.failing, {peer.record.name for peer in batch})
-        clock.prepared(at)
-        actions += prepared
-        batch += [launch] if launch else []
-        if batch and len(batch) >= tick._launch_room(runtime, config):
-            actions += tick._launch_all(run, clock, batch)
-            batch = []
-    return actions + tick._launch_all(run, clock, batch)
-
-
 def _collect_acks(
     slug: str, config: Any, store: Any, ledger: Any, runtime: Any, doc: dict[str, Any], now_ms: int
 ) -> list[str]:
@@ -180,7 +143,7 @@ def _preempt(tick: Any, get: Get) -> Any:
     return []
 
 
-def _spawn_step(tick: Any, get: Get) -> Any:
+def _spawn(tick: Any, get: Get) -> Any:
     config, store = get("config"), get("store")
     if (
         config.state == "running"
@@ -190,7 +153,7 @@ def _spawn_step(tick: Any, get: Get) -> Any:
         rows = dict(get("rows"))
         args = tuple(rows if key == "rows" else get(key) for key in _SPAWN_KEYS)
         with _placement_pass(get("runtime")):
-            found = tick.skip_refused(_spawn, *args)
+            found = tick.skip_refused(tick._spawn, *args)
         get("box")["rows"] = MappingProxyType(rows)
         store.redis.delete(get("due"))
         return found
@@ -206,7 +169,7 @@ STEPS = (
     WriteStep("rank pass", PLACEMENT, held(_rank_pass), writes=frozenset({RANK})),
     CallStep("bottleneck remedy", PLACEMENT, held(_bottleneck_remedy)),
     CallStep("preempt", PLACEMENT, held(_preempt), PREEMPT_NEEDS, frozenset({AGENTS}), frozenset({AGENTS})),
-    CallStep("spawn", PLACEMENT, held(_spawn_step), budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), PLACED),
+    CallStep("spawn", PLACEMENT, held(_spawn), budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), PLACED),
 )
 
 for _step in STEPS:
