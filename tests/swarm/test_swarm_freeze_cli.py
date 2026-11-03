@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -28,10 +29,16 @@ def swarm(monkeypatch):
     store.put_agent("demo", AgentRecord(PLANNER, "plan", "t3"))
     ledger = FakeLedger([])
     ledger.freezes = []
-    ledger.freeze = lambda slug, verb, target, **fields: ledger.freezes.append((slug, verb, target, fields))
+    ledger.freeze = lambda slug, verb, target, by, words: ledger.freezes.append((slug, verb, target, flat(by, words)))
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     return store, ledger
+
+
+def flat(by: str | None, words: FreezeWords) -> dict[str, Any]:
+    """Return the author and words of one freeze write as the fields a test compares."""
+    queue = {key: value for key, value in (("position", words.position), ("only", words.only)) if value}
+    return {"by": by, "reason": words.reason, "quote": words.quote, **queue}
 
 
 def acting(monkeypatch, name="", swarm=""):
