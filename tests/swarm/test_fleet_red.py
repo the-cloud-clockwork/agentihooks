@@ -383,6 +383,37 @@ def test_the_claim_view_lists_open_pull_requests_in_the_task_pull_request_repo(s
     assert reads == ["o/r"]
 
 
+def test_the_claim_view_judges_a_saved_listing_without_listing_again(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
+    both = [run("Tests", "FAILURE", datetime.now(UTC).isoformat())]
+    listed(store, "sw", "o/r", lambda repo: fleet(both, *[both] * 3))
+    rows = {"red": task("red", pr_url=MINE)}
+
+    assert _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng") == []
+    assert reads == []
+
+
+def test_the_claim_view_admits_every_task_when_the_saved_listing_records_a_failed_read(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
+    store.redis.set(store.key("sw", "fleet-red-pulls:o/r"), "null")
+    rows = {"red": task("red", pr_url=MINE)}
+
+    assert _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng") == [rows["red"]]
+    assert reads == []
+
+
+def test_the_notice_step_budget_outlasts_the_live_listing_so_its_save_is_kept() -> None:
+    (step,) = [step for step in tasks.STEPS if step.name == "fleet red notice"]
+
+    assert step.budget_s >= 30.0
+
+
 def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, monkeypatch):
     from scripts.swarm import tick
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
