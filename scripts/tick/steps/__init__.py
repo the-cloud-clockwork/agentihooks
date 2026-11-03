@@ -10,6 +10,9 @@ from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import budgets
 
 PASS = Domain("pass")
+AGENTS = Domain("agents")
+TASKS = Domain("tasks")
+SWARM = Domain("swarm")
 
 
 class CallStep:
@@ -21,18 +24,19 @@ class CallStep:
         self,
         name: str,
         group: str,
-        order: int,
         call: Callable[[Any, Callable[[str], Any]], Any],
         needs: frozenset[str] = frozenset(),
+        reads: frozenset[Domain] = frozenset(),
+        writes: frozenset[Domain] = frozenset(),
     ) -> None:
-        """Name the step, place it at ``order`` in tick group ``group``, keep the call it runs and the steps it needs."""
+        """Name the step in tick group ``group``, keep its call, its needs and the domains it reads and writes."""
         self.name = name
         self.needs = needs
         self.group = group
-        self.order = order
         self.call = call
         self.budget_s, self.interval_s = budgets.timing_of(name)
-        self.writes = frozenset({actions_of(name)})
+        self.reads = reads
+        self.writes = writes | {actions_of(name)}
 
     def run(self, ctx: Context) -> Result:
         """Run the call with the tick module and a reader of the pass state, writing its actions."""

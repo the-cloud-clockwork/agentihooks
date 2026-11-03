@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/observe.py:scripts.tick.steps.observe.x_step_spawn_due:79448a6681f97e3d3898f6aacb442badd33568d4d7d1bd2943956f91d0d5d0e0": {
+    "reader": "standards_reader",
+    "reason": "The actions list starts empty and receives exactly one result, the list skip refused returns from spawn, so extending it and assigning that list give the same returned contents."
+  }
+}

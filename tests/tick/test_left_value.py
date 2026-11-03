@@ -39,9 +39,9 @@ def _steps(release: Event, read: list[object]) -> tuple[CallStep, CallStep]:
         read.append(get("box")["found"])
         return ["used"]
 
-    writer = CallStep("health findings", GROUP, 10, host.held(write))
+    writer = CallStep("health findings", GROUP, host.held(write))
     writer.budget_s = 0.1
-    reader = CallStep("findings pass", GROUP, 20, host.held(use), frozenset({"health findings"}))
+    reader = CallStep("findings pass", GROUP, host.held(use), frozenset({"health findings"}))
     return writer, reader
 
 

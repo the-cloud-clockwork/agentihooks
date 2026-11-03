@@ -10,7 +10,7 @@ from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
-from scripts.tick.steps import PASS, CallStep, actions, actions_of, agents
+from scripts.tick.steps import AGENTS, PASS, TASKS, CallStep, actions, actions_of, agents
 
 pytestmark = pytest.mark.unit
 
@@ -121,10 +121,16 @@ def test_the_close_group_keeps_sessions_and_transfers_current(monkeypatch: pytes
 
 
 def test_a_call_step_is_placed_and_bounded_as_registered() -> None:
-    step = CallStep("reap", "agents", 5, lambda tick, get: None)
-    assert (step.name, step.group, step.order) == ("reap", "agents", 5)
+    step = CallStep("reap", "agents", lambda tick, get: None)
+    assert (step.name, step.group) == ("reap", "agents")
+    assert not hasattr(step, "order")
     assert (step.lane, step.budget_s, step.interval_s) == (Lane("tick"), 22.0, 60.0)
-    assert (step.needs, step.writes) == (frozenset(), frozenset({Domain("actions:reap")}))
+    assert (step.needs, step.reads, step.writes) == (frozenset(), frozenset(), frozenset({Domain("actions:reap")}))
+    declared = CallStep(
+        "reap", "agents", lambda tick, get: None, frozenset({"x"}), frozenset({AGENTS}), frozenset({TASKS})
+    )
+    assert (declared.needs, declared.reads) == (frozenset({"x"}), frozenset({Domain("agents")}))
+    assert declared.writes == frozenset({Domain("tasks"), Domain("actions:reap")})
     assert (PASS, actions_of("probe")) == (Domain("pass"), Domain("actions:probe"))
 
 
@@ -135,7 +141,10 @@ def test_the_registered_agent_steps_declare_writers_the_registry_accepts() -> No
     fresh.validate()
     assert {domain for step in agents.STEPS for domain in step.writes} == {
         actions_of(step.name) for step in agents.STEPS
-    }
+    } | {AGENTS, TASKS}
+    declared = {step.name: (step.needs, step.reads, step.writes - {actions_of(step.name)}) for step in agents.STEPS}
+    assert declared["reap"] == (frozenset(), frozenset({AGENTS}), frozenset({AGENTS, TASKS}))
+    assert declared["orphans"] == (frozenset({"reap"}), frozenset({TASKS}), frozenset({TASKS}))
 
 
 def test_a_call_step_reads_the_pass_state_and_the_tick_module() -> None:
@@ -145,7 +154,7 @@ def test_a_call_step_reads_the_pass_state_and_the_tick_module() -> None:
         seen.append((tick, get("slug")))
         return ["one", "two"]
 
-    result = CallStep("strays", "agents", 0, call).run(_ctx(_state()))
+    result = CallStep("strays", "agents", call).run(_ctx(_state()))
     assert result == Result((Write(actions_of("strays"), "strays", ["one", "two"]),))
     assert seen == [(tick_module, "sw")]
 
@@ -167,7 +176,7 @@ def test_a_raising_call_is_recorded_failed_and_the_next_step_still_runs() -> Non
     def boom(tick: Any, get: Any) -> list[str]:
         raise RuntimeError("reap broke")
 
-    pool = (CallStep("reap", "agents", 0, boom), CallStep("strays", "agents", 1, lambda tick, get: ["after"]))
+    pool = (CallStep("reap", "agents", boom), CallStep("strays", "agents", lambda tick, get: ["after"]))
     records = engine.run_group("agents", _ctx(_state()), pool)
     assert [(record.name, record.outcome, record.error) for record in records] == [
         ("reap", engine.FAILED, "builtins.RuntimeError"),
@@ -178,6 +187,6 @@ def test_a_raising_call_is_recorded_failed_and_the_next_step_still_runs() -> Non
 
 def test_the_tick_returns_the_actions_its_group_steps_wrote(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(registry, "registry", registry.Registry())
-    registry.register(CallStep("strays", "agents", 0, lambda tick, get: [f"saw {get('slug')} at {get('now_ms')}"]))
+    registry.register(CallStep("strays", "agents", lambda tick, get: [f"saw {get('slug')} at {get('now_ms')}"]))
     assert tick_module.run_group("agents", slug="sw", now_ms=3) == ["saw sw at 3"]
     assert tick_module.run_group("masters", slug="sw") == []

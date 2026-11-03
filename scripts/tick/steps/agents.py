@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from scripts.tick import registry
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import AGENTS, TASKS, CallStep
 
 Get = Callable[[str], Any]
 
@@ -54,14 +54,14 @@ def _transfers(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
-    CallStep("reap", "agents", 10, _reap),
-    CallStep("recover outages", "agents", 20, _recover_outages),
-    CallStep("strays", "agents", 30, _strays),
-    CallStep("failed panes", "agents", 40, _failed_panes),
-    CallStep("orphans", "tasks", 0, _orphans),
-    CallStep("conversations", "close", 100, _conversations),
-    CallStep("session models", "close", 110, _session_models),
-    CallStep("handoff transfers", "close", 120, _transfers),
+    CallStep("reap", "agents", _reap, reads=frozenset({AGENTS}), writes=frozenset({AGENTS, TASKS})),
+    CallStep("recover outages", "agents", _recover_outages),
+    CallStep("strays", "agents", _strays),
+    CallStep("failed panes", "agents", _failed_panes),
+    CallStep("orphans", "tasks", _orphans, frozenset({"reap"}), frozenset({TASKS}), frozenset({TASKS})),
+    CallStep("conversations", "close", _conversations),
+    CallStep("session models", "close", _session_models),
+    CallStep("handoff transfers", "close", _transfers),
 )
 
 for _step in STEPS:
