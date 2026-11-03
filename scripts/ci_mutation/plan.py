@@ -40,6 +40,7 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 BATCH_RUNNERS = 40
+SHARD_SETUP_SECONDS = 180.0
 RECORD_RETRY_SECONDS = 10
 STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
@@ -54,6 +55,11 @@ RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipf
 def shard_workers() -> int:
     quota = os.environ.get("MUTATION_SHARD_CPU_QUOTA")
     return quota_workers(WORKERS, float(quota) if quota else None)
+
+
+def shard_capacity(workers: int, budget: float) -> float:
+    """Return the worker seconds a shard can spend on mutants once its setup and tail are paid from the budget."""
+    return workers * (budget - SHARD_SETUP_SECONDS)
 
 
 def estimate(
@@ -601,7 +607,7 @@ def narrow(
 
 def shard_count(seconds: float, mutants: int, target: float, limit: int, budget: float = 1080) -> int:
     wanted = min(limit, math.ceil(seconds / (shard_workers() * target)))
-    needed = min(BATCH_RUNNERS, math.ceil(seconds / (shard_workers() * budget)))
+    needed = min(BATCH_RUNNERS, math.ceil(seconds / shard_capacity(shard_workers(), budget)))
     return max(1, min(mutants, max(wanted, needed)))
 
 
