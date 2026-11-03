@@ -218,6 +218,7 @@ jobs:
     outputs:
       shards: ${{ steps.refine.outputs.shards }}
       probe: ${{ steps.refine.outputs.probe }}
+      probe_shards: ${{ steps.refine.outputs.probe_shards }}
     strategy:
       fail-fast: false
       matrix:
@@ -355,6 +356,7 @@ jobs:
     outputs:
       shards: ${{ steps.refine.outputs.shards }}
       probe: ${{ steps.refine.outputs.probe }}
+      probe_shards: ${{ steps.refine.outputs.probe_shards }}
     steps:
       - name: Record refinement start
         id: refinement-start
@@ -477,7 +479,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}
+        shard: ${{ fromJSON(needs.refine.outputs.probe_shards || needs.stats.outputs.probe_shards) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
@@ -598,9 +600,81 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  mutation-shard:
+  replan:
     needs: [plan, stats, refine, probe]
-    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && (needs.refine.result == 'success' || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]') && (needs.probe.result == 'success' || needs.probe.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.probe.result == 'success' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.replan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Restore the tests that killed this branch's earlier mutants
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Download the measured mutation plan
+        id: download-the-measured-mutation-plan
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: *download-the-measured-mutation-plan
+
+      - name: Download the measured mutation plan, wait before attempt 2
+        if: steps.download-the-measured-mutation-plan.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the measured mutation plan failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the measured mutation plan, attempt 2
+        if: steps.download-the-measured-mutation-plan.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-the-measured-mutation-plan
+
+      - name: Download the early mutation results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-probe-*
+          path: .mutation-stats
+          merge-multiple: true
+
+      - name: Size the shards from the mutants the early tests left
+        id: replan
+        env:
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: python -m scripts.ci_mutation.probed --stats .mutation-stats --budget 1080
+
+      - name: Upload the probed mutation plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-plan-probed
+          path: .mutation-stats/plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  mutation-shard:
+    needs: [plan, stats, refine, probe, replan]
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && (needs.refine.result == 'success' || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]') && (needs.replan.result == 'success' || needs.probe.result == 'skipped') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     concurrency:
@@ -608,7 +682,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}
+        shard: ${{ fromJSON(needs.replan.outputs.shards || needs.refine.outputs.shards || needs.stats.outputs.shards) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
@@ -706,17 +780,26 @@ jobs:
         uses: actions/download-artifact@v4
         with: *download-the-measured-mutation-plan
 
-      - name: Download the early mutation results
-        if: needs.probe.result == 'success'
+      - name: Download the probed mutation plan
+        if: needs.replan.result == 'success'
+        id: download-the-probed-mutation-plan
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
-          pattern: mutation-probe-*
+        with: &download-the-probed-mutation-plan
+          name: mutation-plan-probed
           path: .mutation-stats
-          merge-multiple: true
 
-      - name: Validate every early result and charge its elapsed time
-        if: needs.probe.result == 'success'
-        run: python -m scripts.ci_mutation.probe --stats .mutation-stats --merge
+      - name: Download the probed mutation plan, wait before attempt 2
+        if: steps.download-the-probed-mutation-plan.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the probed mutation plan failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the probed mutation plan, attempt 2
+        if: steps.download-the-probed-mutation-plan.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *download-the-probed-mutation-plan
 
       - name: Mutate changed Python files
         env:
@@ -766,7 +849,7 @@ jobs:
 
   # Readers take one report and the check named mutation, so every shard ends here.
   mutation:
-    needs: [plan, stats, refine, mutation-shard]
+    needs: [plan, stats, refine, replan, mutation-shard]
     if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 10
@@ -847,7 +930,7 @@ jobs:
 
       - name: Merge the shard reports
         env:
-          SHARDS: ${{ needs.plan.outputs.changed != '0' && (needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}
+          SHARDS: ${{ needs.plan.outputs.changed != '0' && (needs.replan.outputs.shards || needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}
         run: python -m scripts.ci_mutation.merge .mutation-shards --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate
 
       - name: Upload complete mutation evidence
