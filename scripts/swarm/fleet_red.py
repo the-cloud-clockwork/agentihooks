@@ -66,7 +66,7 @@ def read(repo: str, ports: Callable[[str], SourceControl] = panic.port) -> Pulls
     return ports(repo).open_changes(deadline=Deadline.after(SECONDS))
 
 
-class Saved(Protocol):
+class _Saved(Protocol):
     """The Redis calls the listing cache makes."""
 
     def get(self, name: str) -> str | bytes | None:
@@ -90,7 +90,7 @@ class Saved(Protocol):
 class Listings(Protocol):
     """The swarm store parts the listing cache reads."""
 
-    redis: Saved
+    redis: _Saved
 
     def key(self, slug: str, *parts: str) -> str:
         """Name a swarm key."""
