@@ -2076,7 +2076,7 @@ def test_tests_mutation_carries_kill_memory_to_the_next_plan() -> None:
     keep = steps["Keep the tests that killed mutants for this branch's next plan"]
     assert keep["uses"] == "actions/cache/save@v4"
     assert keep["with"] == {"path": ".mutation-stats/killers", "key": key}
-    assert keep["if"] == f"{forwarded} && hashFiles('.mutation-stats/killers/*') != ''"
+    assert keep["if"] == "${{ !cancelled() && " + forwarded + " && hashFiles('.mutation-stats/killers/*') != '' }}"
     assert merged.index(download["name"]) < merged.index(keep["name"]) < merged.index("Merge the shard reports")
 
 

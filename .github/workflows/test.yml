@@ -4642,7 +4642,7 @@ jobs:
         with: *mutation-download-the-tests-that-killed-mutants
 
       - name: Keep the tests that killed mutants for this branch's next plan
-        if: needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats/killers/*') != ''
+        if: ${{ !cancelled() && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats/killers/*') != '' }}
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats/killers
