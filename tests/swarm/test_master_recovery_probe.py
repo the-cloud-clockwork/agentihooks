@@ -13,7 +13,12 @@ from tests.swarm.test_tick import tasks
 
 
 def _scenario() -> tuple[list, list]:
+    import sys as _sys
+    import traceback
+
     from scripts.hive import registry
+    from scripts.swarm import affinity, master_move
+    from scripts.tick import engine
     from tests.hive.test_controller_launch import publish_room
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -26,7 +31,37 @@ def _scenario() -> tuple[list, list]:
         publish_room(store, hive, room)
     _hive_master(store)
     runtime = RecoveryRuntime()
-    actions = tick("sw", store, tasks(), runtime, NOW)
+    records: list = []
+    seen: list = []
+    original_step, original_fail = engine.run_step, master_move.fail_over
+
+    def step(step: object, ctx: object) -> object:
+        record = original_step(step, ctx)
+        if record.held or record.abandoned or record.error:
+            records.append(str(record))
+        return record
+
+    def fail(slug: str, config: object, store_: object, runtime_: object, now_ms: int) -> list:
+        master = affinity.live_master(store_, slug)
+        quiet = master_move.quiet_for(store_, config, master, now_ms) if master else None
+        live = sorted(runtime_.live_names())
+        found = original_fail(slug, config, store_, runtime_, now_ms)
+        seen.append({"master": getattr(master, "name", None), "quiet": quiet, "live": live, "found": found})
+        return found
+
+    engine.run_step, master_move.fail_over = step, fail
+    try:
+        actions = tick("sw", store, tasks(), runtime, NOW)
+    finally:
+        engine.run_step, master_move.fail_over = original_step, original_fail
+    if not runtime.masters:
+        frames = _sys._current_frames()
+        alive = {
+            name: "".join(traceback.format_stack(frames[worker.ident])[-4:])
+            for name, worker in engine._RUNNING.items()
+            if worker.is_alive() and worker.ident in frames
+        }
+        actions = [*actions, {"records": records, "fail_over": seen, "alive": alive}]
     return actions, runtime.masters
 
 
@@ -36,7 +71,7 @@ def test_probe_in_process() -> None:
         actions, launched = _scenario()
         if [task.get("hive") for _, task in launched] != ["small"]:
             bad.append((attempt, actions, [t.get("hive") for _, t in launched]))
-    assert not bad, json.dumps(bad[:5], default=str)
+    assert not bad, json.dumps([len(bad), bad[:2]], default=str)
 
 
 def test_probe_once() -> None:
