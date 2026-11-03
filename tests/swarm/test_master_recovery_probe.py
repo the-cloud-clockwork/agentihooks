@@ -115,3 +115,24 @@ def test_probe_target_alone(attempt: int) -> None:
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short", PREDECESSORS[-1]]
     done = subprocess.run(command, capture_output=True, text=True, env={**os.environ, "PROBE_CHILD": "1"})
     assert done.returncode == 0, done.stdout[-4000:]
+
+
+@pytest.mark.parametrize("attempt", range(4))
+def test_probe_cold_under_contention(attempt: int) -> None:
+    if os.environ.get("PROBE_CHILD"):
+        pytest.skip("child")
+    burn = [sys.executable, "-c", "import time\nend = time.time() + 20\nwhile time.time() < end: pass"]
+    burners = [subprocess.Popen(burn) for _ in range(2 * (os.cpu_count() or 2))]
+    node = "tests/swarm/test_master_recovery_probe.py::test_probe_once"
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-x", "--tb=short", node]
+    try:
+        children = [
+            subprocess.Popen(command, stdout=subprocess.PIPE, text=True, env={**os.environ, "PROBE_CHILD": "1"})
+            for _ in range(6)
+        ]
+        outputs = [child.communicate()[0] for child in children]
+    finally:
+        for burner in burners:
+            burner.kill()
+    failed = [output[-3000:] for child, output in zip(children, outputs, strict=True) if child.returncode]
+    assert not failed, "\n=====\n".join(failed)
