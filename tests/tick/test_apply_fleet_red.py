@@ -123,18 +123,18 @@ def test_the_fleet_red_applier_drops_a_hold_a_seat_claimed() -> None:
 
 def test_the_fleet_red_applier_forgets_a_refused_notice_so_the_next_pass_retries_it() -> None:
     store = Store()
-    with pytest.raises(RevisionConflict, match="^the ledger refused the hold notice of task t1$"):
+    with pytest.raises(RevisionConflict, match="^the hold notice of task t1 failed: LedgerRefused$"):
         tasks.fleet_red_writer("sw", store, Ledger(refuse=True), {}.get)(HOLD)
     assert store.redis.saved == {}
 
 
-def test_the_fleet_red_applier_forgets_a_failed_notice_and_raises_its_error() -> None:
+def test_the_fleet_red_applier_drops_any_failed_notice_as_a_conflict_and_forgets_it() -> None:
     class Broken(Ledger):
         def notice(self, slug: str, task_id: str, text: str) -> None:
             raise OSError("down")
 
     store = Store()
-    with pytest.raises(OSError, match="^down$"):
+    with pytest.raises(RevisionConflict, match="^the hold notice of task t1 failed: OSError$"):
         tasks.fleet_red_writer("sw", store, Broken(), {}.get)(HOLD)
     assert store.redis.saved == {}
 

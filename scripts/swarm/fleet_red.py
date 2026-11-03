@@ -174,4 +174,9 @@ def post(slug: str, store: RedisStore, ledger: Any, task_id: str, url: str, chec
     if not store.redis.set(store.key(slug, f"fleet-red:{task_id}"), url, nx=True):
         return ""
     ledger.notice(slug, task_id, NOTICE.format(url=url, checks=checks))
+    return held_action(task_id, url, checks)
+
+
+def held_action(task_id: str, url: str, checks: str) -> str:
+    """Return the action line naming the hold fleet red puts on ``task_id``."""
     return f"task {task_id} held unclaimed, {url} is red only from {checks}"

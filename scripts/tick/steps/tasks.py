@@ -117,7 +117,7 @@ def _fleet_red_notice(tick: Any, get: Get) -> Any:
 
 
 def fleet_red_writes(slug: str, store: Any, rows: dict[str, dict[str, Any]], now_ms: int) -> list[str | Write]:
-    """Return a guarded hold write and an action for each task fleet red newly holds, and a write forgetting lifted holds.
+    """Return a guarded hold write and an action per task fleet red newly holds, and a write forgetting lifted holds.
 
     The step posts and forgets nothing itself.
     """
@@ -127,7 +127,7 @@ def fleet_red_writes(slug: str, store: Any, rows: dict[str, dict[str, Any]], now
 
 
 def _fleet_red_write(task_id: str, url: str, checks: str) -> list[str | Write]:
-    """Return the hold write of ``task_id``, guarded on the task staying open and unclaimed on ``url``, and its action."""
+    """Return the hold write of ``task_id``, guarded on its staying open and unclaimed on ``url``, and its action."""
     return [
         Write(
             FLEET_RED,
@@ -135,7 +135,7 @@ def _fleet_red_write(task_id: str, url: str, checks: str) -> list[str | Write]:
             {"url": url, "checks": checks},
             expected={"state": "open", "pr_url": url, "claimed_by": ""},
         ),
-        f"task {task_id} held unclaimed, {url} is red only from {checks}",
+        fleet_red.held_action(task_id, url, checks),
     ]
 
 
@@ -151,7 +151,7 @@ def _notice_hold(
 ) -> None:
     """Post the hold notice of ``write`` unless its task moved, a seat claimed it or the notice fails.
 
-    A failed notice forgets its mark so the next pass posts it again; a refused one is dropped as a conflict.
+    A failed notice forgets its mark and is dropped as a conflict, so the next pass posts it again.
     """
     _write_task_check(write, read(write.key))
     if store.claimed(slug, [write.key]):
@@ -161,9 +161,7 @@ def _notice_hold(
         fleet_red.post(slug, store, ledger, write.key, fields["url"], fields["checks"])
     except Exception as exc:
         store.redis.delete(store.key(slug, f"fleet-red:{write.key}"))
-        if isinstance(exc, LedgerRefused):
-            raise RevisionConflict(f"the ledger refused the hold notice of task {write.key}") from exc
-        raise
+        raise RevisionConflict(f"the hold notice of task {write.key} failed: {type(exc).__name__}") from exc
 
 
 def lifted_writer(store: Any) -> Callable[[Write], None]:
@@ -258,7 +256,7 @@ def _write_task_check(write: Write, task: dict[str, Any] | None) -> None:
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
-    """Return the appliers of a tick group site: tasks and groups with a ledger and a swarm, fleet red with a store too."""
+    """Return the appliers of a tick group site: tasks and groups with a ledger and a swarm, fleet red with a store."""
     slug, ledger = state.get("slug"), state.get("ledger")
     if ledger is None or not slug:
         return {}
