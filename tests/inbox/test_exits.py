@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 from scripts.inbox import exits, wake
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import CLOSED, SETTLED_EXITS, InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -660,6 +660,7 @@ def test_a_sweep_of_settled_agents_reads_the_open_index_once_per_settle_step(red
     exits.sweep(inbox, "sw", store, dict)
     assert reads == [
         ["sw-eng-1", "sw-eng-2", "sw-eng-3"],
+        ["sw-eng-1", "sw-eng-2", "sw-eng-3"],
         ["eng-1@sw", "eng-2@sw", "eng-3@sw"],
         ["eng-1@sw", "eng-2@sw", "eng-3@sw"],
     ]
@@ -1051,7 +1052,7 @@ def test_the_sweep_settles_seat_mail_of_an_unknown_swarm_as_before(redis):
     assert inbox.get(item.id).state == "pending"
 
 
-def test_a_later_sweep_reads_no_agent_an_earlier_sweep_found_settled(
+def test_a_later_sweep_runs_no_quiet_check_or_exit_read_for_an_agent_found_settled(
     redis: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store, inbox = RedisStore(redis), InboxStore(redis)
@@ -1080,18 +1081,30 @@ def test_an_agent_the_sweep_had_to_settle_stays_unmarked_until_a_sweep_finds_it_
     assert inbox.settled_exits() == {"sw-eng-1"}
 
 
-def test_quiet_exits_marks_every_name_and_returns_the_quiet_ones(redis: Any) -> None:
+def test_marking_keeps_only_the_quiet_names_settled(redis: Any) -> None:
     inbox = InboxStore(redis)
     inbox.send("sender", "sw-eng-2", "open")
-    assert inbox.quiet_exits(["sw-eng-1", "sw-eng-2"]) == {"sw-eng-1"}
-    assert inbox.settled_exits() == {"sw-eng-1", "sw-eng-2"}
-    inbox.unsettle_exits(["sw-eng-2"])
+    inbox.mark_exits_settled(["sw-eng-1", "sw-eng-2"])
     assert inbox.settled_exits() == {"sw-eng-1"}
+
+
+def test_marking_drops_a_name_mail_reached_before_its_recheck(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    inbox = InboxStore(redis)
+    monkeypatch.setattr(inbox, "quiet", lambda names: set())
+    inbox.mark_exits_settled(["sw-eng-1", "sw-eng-2"])
+    assert inbox.settled_exits() == set()
+
+
+def test_marking_no_names_reads_nothing(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    inbox, reads = InboxStore(redis), []
+    monkeypatch.setattr(inbox, "quiet", lambda names: reads.append(names) or set())
+    inbox.mark_exits_settled([])
+    assert (reads, inbox.settled_exits()) == ([], set())
 
 
 def test_mail_sent_to_a_settled_agent_clears_its_mark(redis: Any) -> None:
     inbox = InboxStore(redis)
-    inbox.quiet_exits(["sw-eng-1", "sw-eng-2"])
+    inbox.redis.sadd(inbox.key(SETTLED_EXITS), "sw-eng-1", "sw-eng-2")
     inbox.send("sender", "sw-eng-1", "late")
     assert inbox.settled_exits() == {"sw-eng-2"}
 
@@ -1099,7 +1112,7 @@ def test_mail_sent_to_a_settled_agent_clears_its_mark(redis: Any) -> None:
 def test_mail_redirected_to_a_settled_agent_clears_its_mark(redis: Any) -> None:
     inbox = InboxStore(redis)
     item = inbox.send("sender", "sw-eng-2", "contract")
-    inbox.quiet_exits(["sw-eng-1", "sw-eng-3"])
+    inbox.redis.sadd(inbox.key(SETTLED_EXITS), "sw-eng-1", "sw-eng-3")
     inbox.redirect(item.id, "swarm", "sw-eng-1", "moved")
     assert inbox.settled_exits() == {"sw-eng-3"}
 
@@ -1108,6 +1121,6 @@ def test_mail_reopened_at_a_settled_agent_clears_its_mark(redis: Any) -> None:
     inbox = InboxStore(redis)
     item = inbox.send("sender", "sw-eng-1", "question")
     answer = inbox.reply(item.id, "sw-eng-1", "answer")
-    inbox.quiet_exits(["sw-eng-1", "sw-eng-3"])
+    inbox.redis.sadd(inbox.key(SETTLED_EXITS), "sw-eng-1", "sw-eng-3")
     inbox.reopen(answer, "swarm", "reopened")
     assert inbox.settled_exits() == {"sw-eng-3"}

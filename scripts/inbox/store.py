@@ -299,15 +299,14 @@ class InboxStore:
         """Gone agents whose exit this world settled, with no mail opened at any of them since."""
         return set(self.redis.smembers(self.key(SETTLED_EXITS)))
 
-    def quiet_exits(self, names: list[str]) -> set[str]:
-        """Mark names settled, then return the quiet ones: mail that opens at a name after the mark clears it."""
-        if names:
-            self.redis.sadd(self.key(SETTLED_EXITS), *names)
-        return self.quiet(names)
-
-    def unsettle_exits(self, names: list[str]) -> None:
-        """Clear the settled mark of names the sweep still has to settle."""
-        self.redis.srem(self.key(SETTLED_EXITS), *names)
+    def mark_exits_settled(self, names: list[str]) -> None:
+        """Mark names settled, then clear the mark of any not quiet: mail that opens after the mark clears it too."""
+        if not names:
+            return
+        self.redis.sadd(self.key(SETTLED_EXITS), *names)
+        reached = set(names) - self.quiet(names)
+        if reached:
+            self.redis.srem(self.key(SETTLED_EXITS), *reached)
 
     def _open_ids(self, address):
         from redis.exceptions import WatchError
