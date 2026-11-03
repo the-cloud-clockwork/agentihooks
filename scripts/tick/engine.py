@@ -139,14 +139,15 @@ def run_group(
     applied on the scheduling thread as each step ends, and a lane past its deadline drops its unfinished steps and
     every step that needs them. Slow lane steps, and the steps that need them, start once the group's other steps
     end and run on after the group returns: the pass joins them when it ends and hands their records to ``finished``.
-    A step that needs a step an earlier group of the pass handed off is handed off too, and starts once that step
-    ended or was held; it is dropped when that step was dropped or ran past its lane.
+    A step that needs a step an earlier group of the pass handed off starts once that step ended or was held, handed
+    off too while that step still runs; it is dropped when that step was dropped or left running past its budget or
+    its lane.
     """
     ordered = group_steps(name, steps)
     found = pool.active()
     if found is None or not found.parallel:
         return tuple(_applied(run_step(step, ctx), apply or {}) for step in ordered)
-    later = _slow_lane(ordered, frozenset(found.handed))
+    later = _slow_lane(ordered, found.pending())
     names = {step.name for step in later}
     records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
     if later:
@@ -157,8 +158,8 @@ def run_group(
 
 
 def _slow_lane(ordered: tuple[Step, ...], handed: frozenset[str]) -> tuple[Step, ...]:
-    """Return the slow lane steps of ``ordered`` and every step that needs one of them or a ``handed`` step of an
-    earlier group, in group order."""
+    """Return the slow lane steps of ``ordered`` and every step that needs one of them or a still running ``handed``
+    step of an earlier group, in group order."""
     names: set[str] = set(handed)
     for step in ordered:
         if step.lane == SLOW or step.needs & names:
@@ -258,7 +259,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                     dropped.add(step.name)
                     records[step.name] = _ended(found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True))
                 else:
-                    earlier = step.needs & (found.handed.keys() - names)
+                    earlier = found.handed_of(step.needs - names)
                     lane_ctx = _lane_context(step, ctx, found)
                     future = executor.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
                     running[future] = (step, clock(), lane)

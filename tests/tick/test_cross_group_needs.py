@@ -186,3 +186,49 @@ def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs
         ("cross lost dependent", True),
         ("cross lost slow", True),
     ]
+
+
+@pytest.mark.wall_clock
+def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs_ran_past_its_budget() -> None:
+    release, ended = Event(), Event()
+    ran: list[str] = []
+    stuck = Step("cross over budget", _blocking(release, ended), "cross budget", budget_s=0.05)
+    dependent = Step("cross budget dependent", _noting(ran, "dependent"), "cross budget after", frozenset({stuck.name}))
+    later: list[tuple[engine.StepRecord, ...]] = []
+    try:
+        with pool.running(workers=4):
+            engine.run_group("cross budget", _ctx(), (stuck,), finished=later.append)
+            engine.run_group("cross budget after", _ctx(), (dependent,), finished=later.append)
+    finally:
+        release.set()
+        assert ended.wait(5.0)
+    assert ran == []
+    assert sorted((row.name, row.outcome, row.abandoned) for records in later for row in records) == [
+        ("cross budget dependent", engine.LATE, True),
+        ("cross over budget", engine.LATE, True),
+    ]
+
+
+def test_a_critical_step_runs_in_its_group_once_the_handed_off_step_it_needs_already_ended() -> None:
+    ran: list[str] = []
+    first = Step("cross ended first", _noting(ran, "first"), "cross ended")
+    wake = Step("cross ended wake", _noting(ran, "wake"), "cross ended wake", frozenset({first.name}), Lane("tick"))
+    with pool.running(workers=4) as found:
+        engine.run_group("cross ended", _ctx(), (first,))
+        assert found.handed[first.name].wait(5.0)
+        assert found.pending() == frozenset()
+        rows = engine.run_group("cross ended wake", _ctx(), (wake,))
+    assert [(row.name, row.outcome) for row in rows] == [("cross ended wake", engine.OK)]
+    assert ran == ["first", "wake"]
+
+
+def test_a_critical_step_is_dropped_in_its_group_when_the_handed_off_step_it_needs_was_dropped() -> None:
+    ran: list[str] = []
+    first = Step("cross gone first", _noting(ran, "first"), "cross gone")
+    wake = Step("cross gone wake", _noting(ran, "wake"), "cross gone wake", frozenset({first.name}), Lane("tick"))
+    with pool.running(workers=4) as found:
+        found.hand((first.name,))
+        found.end(first.name, True)
+        rows = engine.run_group("cross gone wake", _ctx(), (wake,))
+    assert [(row.name, row.abandoned) for row in rows] == [("cross gone wake", True)]
+    assert ran == []
