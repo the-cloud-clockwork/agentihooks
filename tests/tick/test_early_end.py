@@ -16,6 +16,7 @@ from tests.swarm.test_delivery import FakeHerdr
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.feature("swarm-tick-early-end-stamp")
 def test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
