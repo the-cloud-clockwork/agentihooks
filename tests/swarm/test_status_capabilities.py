@@ -64,6 +64,20 @@ def test_status_report_carries_the_findings_it_is_given_without_finding_again(
     assert calls == []
 
 
+def test_status_report_finds_the_findings_once_when_none_are_given(
+    saved: tuple[RedisStore, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _ = saved
+    calls: list[object] = []
+    found = [{"kind": "stale", "subject": "t1"}]
+    monkeypatch.setattr(status, "findings", lambda *args: calls.append(args) or found)
+
+    report = status.status_report(store, "sw", {"tasks": []})
+
+    assert report["findings"] == found
+    assert len(calls) == 1
+
+
 def test_status_text_prints_push_inbox_and_native_terminal_per_agent(saved, capsys):
     store, names = saved
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
