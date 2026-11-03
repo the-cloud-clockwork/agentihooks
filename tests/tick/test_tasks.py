@@ -162,6 +162,11 @@ def test_a_drained_swarm_with_claimable_work_runs_again(
     assert seen == [("sw", store, "rows", "doc", lane) for lane in asked]
 
 
+@pytest.mark.parametrize(("box", "expected"), [({"sleeping": False}, False), ({"sleeping": True}, True), ({}, True)])
+def test_a_swarm_reads_asleep_when_the_sleeping_step_left_no_answer(box: dict[str, Any], expected: bool) -> None:
+    assert tasks.sleeping_of(box) is expected
+
+
 def test_settle_then_close_space_close_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     found = _run(tasks.CLOSE, _tick(calls), _pass(), monkeypatch)

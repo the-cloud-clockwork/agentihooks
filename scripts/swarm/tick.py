@@ -235,7 +235,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     actions.extend(master_steps.run_masters(locals()))
     actions += run_group(task_steps.DRAINED, **passing, config=config)
     task_steps.raise_held(box)
-    config, sleeping = box["config"], box["sleeping"]
+    config, sleeping = box["config"], task_steps.sleeping_of(box)
     actions += run_group("tasks", **passing, config=config)
     actions += run_group(task_steps.REOPENS, **passing, config=config)
     actions += run_group(task_steps.TASK_PASSES, **passing, config=config)

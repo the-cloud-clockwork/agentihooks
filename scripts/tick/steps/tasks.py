@@ -6,7 +6,7 @@ from typing import Any
 from scripts.tick import registry
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, Left
 
-__all__ = ["CLOSE", "DRAINED", "RAISED", "REOPENS", "STEPS", "TASK_PASSES", "held", "raise_held"]
+__all__ = ["CLOSE", "DRAINED", "RAISED", "REOPENS", "STEPS", "TASK_PASSES", "held", "raise_held", "sleeping_of"]
 
 Get = Callable[[str], Any]
 DRAINED = "drained resume"
@@ -40,6 +40,11 @@ def raise_held(box: dict[str, Any]) -> None:
         raise box[RAISED]
 
 
+def sleeping_of(box: dict[str, Any]) -> bool:
+    """Return whether the sleeping step found the swarm asleep, asleep when that step left no answer."""
+    return box.get("sleeping", True)
+
+
 def _sleeping(tick: Any, get: Get) -> Any:
     get("box")["sleeping"] = tick.lifetime.sleeping(get("slug"), get("store"), get("rows"))
     return []
@@ -47,7 +52,7 @@ def _sleeping(tick: Any, get: Get) -> Any:
 
 def _drained_resume(tick: Any, get: Get) -> Any:
     slug, store, rows, doc, config = get("slug"), get("store"), get("rows"), get("doc"), get("config")
-    if get("box")["sleeping"] or config.state != "drained":
+    if sleeping_of(get("box")) or config.state != "drained":
         return []
     if not any(tick._claimable(slug, store, rows, doc, lane) for lane in tick.LANES):
         return []
