@@ -174,3 +174,13 @@ def test_a_rank_pass_whose_heads_another_pass_moved_is_dropped_and_recomputed_on
     assert second.dropped == ()
     assert taken == ['{"eng": ["b"]}']
     assert actions([second]) == ["put task a at the head of the eng claim queue"]
+
+
+def test_the_engine_applies_the_writes_after_a_dropped_one() -> None:
+    def conflict(write: Write) -> list[str] | None:
+        raise RevisionConflict("moved")
+
+    first, second = Write(Domain("a"), "k", 1), Write(Domain("b"), "k", 2)
+    record = engine.StepRecord("rank pass", 0.0, 1.0, result=Result((first, second)))
+    found = engine._applied(record, {Domain("a"): conflict, Domain("b"): lambda write: ["two"]})
+    assert (found.applied, found.dropped) == (("two",), (first,))
