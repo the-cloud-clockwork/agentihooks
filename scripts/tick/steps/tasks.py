@@ -189,7 +189,7 @@ def lifted_writer(store: Any) -> Callable[[Write], None]:
 
 def _forget_holds(store: Any, write: Write) -> None:
     """Delete the hold marks ``write`` names, one per line."""
-    store.redis.delete(*str(write.value).split("\n"))
+    store.redis.delete(*str(write.value).splitlines())
 
 
 def _run_window(tick: Any, get: Get) -> Any:
