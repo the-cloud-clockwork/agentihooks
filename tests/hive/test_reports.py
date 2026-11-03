@@ -480,6 +480,21 @@ def test_the_tick_settles_a_worker_its_restarted_hive_reports_gone_without_hive_
     assert retire_watch.rows(remote.store, "fixture") == []
 
 
+def test_the_tick_settles_a_worker_whose_hive_reports_its_pane_exited(remote):
+    from scripts.swarm import tick
+
+    _publish(remote, state="exited")
+    assert remote.reports.Reports(remote.redis).gone(remote.agent) is False
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    rows = {"task": {"state": "done", "claimed_by": remote.agent.name}}
+    remote.runtime.retire = Mock(side_effect=AssertionError("an exited hive pane takes no retire"))
+
+    actions = tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, 10**9)
+
+    assert actions == [f"retired {remote.agent.name}: its hive pane is gone"]
+    assert remote.store.agents("fixture") == []
+
+
 @pytest.mark.parametrize("listed", [[], [{"pane_id": PANE}], None])
 def test_hive_report_distinguishes_an_empty_pane_listing_from_an_outage(remote, monkeypatch, listed):
     from scripts.hive import daemon
