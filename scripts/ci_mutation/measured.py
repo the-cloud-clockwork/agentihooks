@@ -12,7 +12,14 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.killers import KillMemory, is_direct
 from scripts.ci_mutation.mutant_shards import function_name
-from scripts.ci_mutation.plan import BATCH_RUNNERS, MUTANT_SECONDS, shard_count, shard_workers
+from scripts.ci_mutation.plan import (
+    BATCH_RUNNERS,
+    MUTANT_SECONDS,
+    SHARD_SETUP_SECONDS,
+    shard_capacity,
+    shard_count,
+    shard_workers,
+)
 from scripts.ci_mutation.scope import discover_changes, select_tests
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -21,7 +28,6 @@ from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 HEAD_SECONDS = 20.0
 SLICE_SECONDS = 120.0
 SHARD_LIMIT = 10
-SHARD_SETUP_SECONDS = 180.0
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
@@ -156,11 +162,6 @@ def assign_units(
         loads[index] += cost
     split = {name: [shards[position] for position in range(len(units[name]))] for name, shards in placed.items()}
     return {**split, **whole}, loads
-
-
-def shard_capacity(workers: int, budget: float) -> float:
-    """Return the worker seconds a shard can spend on mutants once its setup and tail are paid from the budget."""
-    return workers * (budget - SHARD_SETUP_SECONDS)
 
 
 def plan_shards(

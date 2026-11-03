@@ -393,8 +393,9 @@ def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_s
     assert max(planned["shard_worker_seconds"]) == 2560 <= 3 * (1080 - 180)
     assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == BATCH_RUNNERS == 40
     assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
-    assert plan.shard_count(3 * 1080 * 15, 500, 120, 10) == 15
-    assert plan.shard_count(3 * 1080 * 15, 12, 120, 10) == 12
+    assert plan.shard_count(3 * 900 * 15, 500, 120, 10) == 15
+    assert plan.shard_count(3 * 900 * 15 + 1, 500, 120, 10) == 16
+    assert plan.shard_count(3 * 900 * 15, 12, 120, 10) == 12
     assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == BATCH_RUNNERS
     assert plan.shard_count(3 * 120 * 4, 500, 120, 10) == 4
     assert plan_shards({"a": 3241, "b": 1}, target=10**6, limit=1)["shards"] == 2
@@ -912,8 +913,8 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
         (961, 500, 2),
         (4800, 500, 5),
         (4800, 3, 3),
-        (43200, 10**4, 10),
-        (43201, 10**4, 11),
+        (36000, 10**4, 10),
+        (36001, 10**4, 11),
         (10**6, 10**4, 40),
     ],
 )
