@@ -237,11 +237,11 @@ def test_transitive_needs_orders_shared_writers(reverse: bool) -> None:
     assert subject.waves() == tuple((step,) for step in steps)
 
 
-def test_other_lanes_and_disjoint_domains_are_independent() -> None:
+def test_disjoint_domains_are_independent_in_any_lane() -> None:
     subject = registry().Registry()
     steps = (
         SampleStep("a", writes=frozenset({"agents"})),
-        SampleStep("b", writes=frozenset({"agents"}), lane="remote"),
+        SampleStep("b", writes=frozenset({"swarm"}), lane="remote"),
         SampleStep("c", writes=frozenset({"tasks"})),
     )
     for step in steps:
