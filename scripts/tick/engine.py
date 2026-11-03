@@ -217,7 +217,7 @@ SLOW = Lane("slow")
 
 
 def cadence_breaches(cadence: float) -> list[str]:
-    """Return each guard a slow lane pass every ``cadence_s`` seconds breaks; every guard outlasts one missed pass."""
+    """Return each guard a slow lane pass every ``cadence`` seconds breaks; every guard outlasts one missed pass."""
     from scripts.swarm import lease, scheduled_tick, tick_heartbeat, tick_watch
 
     missed_s = 2 * cadence
