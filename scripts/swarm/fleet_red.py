@@ -74,7 +74,8 @@ class Saved(Protocol):
         ...
 
     def set(self, name: str, value: str, *, ex: int | None = None, nx: bool = False) -> object:
-        """Save the value under the name for ex seconds, only while nothing is saved there when nx holds."""
+        """Save the value under the name, for ex seconds when ex is given, and only while nothing is saved there when nx
+        holds."""
         ...
 
     def mget(self, keys: list[str]) -> list[str | bytes | None]:
@@ -118,7 +119,17 @@ def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) 
 
 def saver(store: Listings) -> Callable[[Write], None]:
     """Return the listings applier: it saves a listing for ten minutes only while no listing is saved under its key."""
-    return partial(_save, store)
+    return partial(_settled, partial(_save, store))
+
+
+def _settled(apply: Callable[[Write], None], write: Write) -> None:
+    """Apply ``write``, turning a Redis timeout into a dropped write the next pass recomputes, as the step skipped it."""
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    try:
+        apply(write)
+    except RedisTimeoutError as exc:
+        raise RevisionConflict(f"Redis timed out applying {write.domain} {write.key}") from exc
 
 
 def _save(store: Listings, write: Write) -> None:
@@ -236,13 +247,14 @@ def _hold_write(task_id: str, url: str, key: str, pulls: Pulls) -> list[str | Wr
 
 def holder(store: Listings, ledger: Any, slug: str) -> Callable[[Write], None]:
     """Return the holds applier: it marks a hold and posts its notice only while no pass marked it yet."""
-    return partial(_hold, store, ledger, slug)
+    return partial(_settled, partial(_hold, store, ledger, slug))
 
 
 def _hold(store: Listings, ledger: Any, slug: str, write: Write) -> None:
     """Mark the hold of ``write`` and post its notice unless another pass marked it since the step read none.
 
-    A refused notice raises RevisionConflict, as the hold stays marked the way a refused notice left it before.
+    The mark is set before the notice, so a refused notice leaves the hold marked with no notice retried, as before,
+    and raises RevisionConflict so the engine drops the write.
     """
     task_id, url, notice = cast(tuple[str, str, str], write.value)
     if not store.redis.set(write.key, url, nx=True):
@@ -255,7 +267,7 @@ def _hold(store: Listings, ledger: Any, slug: str, write: Write) -> None:
 
 def releaser(store: Listings) -> Callable[[Write], None]:
     """Return the releases applier: it forgets every lifted hold of a pass in one call."""
-    return partial(_release, store)
+    return partial(_settled, partial(_release, store))
 
 
 def _release(store: Listings, write: Write) -> None:
