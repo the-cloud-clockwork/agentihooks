@@ -1,8 +1,7 @@
+import argparse
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.hive import registry
@@ -19,6 +18,8 @@ DECISION = {
 
 @pytest.fixture
 def store() -> RedisStore:
+    import fakeredis
+
     result = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     result.create(SwarmConfig("workstation", "/repo", 15, 0, max_plan=0))
     return result
@@ -62,7 +63,8 @@ def test_fifteen_worker_configuration_keeps_host_room_guard(store: RedisStore, s
 def test_fifteen_worker_configuration_grants_room_on_a_healthy_host(store: RedisStore) -> None:
     config = replace(store.config("workstation"), local_max_agents=15)
     healthy = host_budget.HostSample(0.5, 8, 64_000, 15)
-    assert host_budget.spawn_room(config, healthy, None).room > 0
+    room = host_budget.spawn_room(config, healthy, None).room
+    assert room is not None and room > 0
 
 
 @pytest.mark.parametrize("json_output", [False, True])
@@ -79,6 +81,6 @@ def test_autoscale_shows_fifteen_local_slots_on_the_workstation(
     monkeypatch.setattr(capacity, "autoscaled", lambda config, inputs: (None, dict(DECISION)))
     fixture = tmp_path / "inputs.json"
     fixture.write_text("{}")
-    cli.cmd_autoscale(store, SimpleNamespace(slug="workstation", fixture=str(fixture), json=json_output))
+    cli.cmd_autoscale(store, argparse.Namespace(slug="workstation", fixture=str(fixture), json=json_output))
     out = capsys.readouterr().out
     assert ('"local_slots": 15' in out) if json_output else ("local slots 15" in out.splitlines()[-1])
