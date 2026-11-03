@@ -81,6 +81,8 @@
   "test.yml/mutation": "light",
   "test.yml/mutation-plan": "light",
   "test.yml/mutation-refine": "light",
+  "test.yml/mutation-probe": "batch",
+  "test.yml/mutation-replan": "light",
   "test.yml/mutation-shard": "batch",
   "test.yml/mutation-stats": "batch",
   "test.yml/mutation-stats-seed": "light",

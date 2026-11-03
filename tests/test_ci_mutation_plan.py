@@ -722,6 +722,7 @@ def _measured_plan_cli(
     loads: list[float],
     budget: int | None,
     costs: dict[str, float] | None = None,
+    splits: dict[str, object] | None = None,
 ) -> tuple[int, Path, Path]:
     from scripts.ci_mutation import measured
 
@@ -737,9 +738,10 @@ def _measured_plan_cli(
         "shards": len(loads),
         "assignments": {},
         "costs": costs or {"scripts.sample.x__mutmut_1": 10.0},
-        "splits": {},
+        "splits": splits or {},
         "shard_worker_seconds": loads,
         "workers": 3,
+        **({"probe_shards": 2} if splits else {}),
     }
     monkeypatch.setattr(measured, "refine_plan", lambda *args: planned)
     budget_args = [] if budget is None else ["--budget", str(budget)]
@@ -777,6 +779,26 @@ def test_measured_cli_names_a_mutant_that_no_shard_can_hold_instead_of_asking_fo
         " count or pull request split can grade it; shorten or split the tests that cover it." in text
     )
     assert "pull requests." not in text
+
+
+def test_measured_cli_leaves_the_budget_to_the_replan_when_split_mutants_reach_the_early_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    splits = {"scripts.sample.x": {"head": ["fast"], "slices": [["slow"]], "costs": [31000.0]}}
+    status, folder, output = _measured_plan_cli(tmp_path, monkeypatch, [31000.0] * 10, None, splits=splits)
+    text = capsys.readouterr().out
+    assert status == 0
+    assert json.loads((folder / "plan.json").read_text())["splits"] == splits
+    assert "::error" not in text
+    assert (
+        "Before the early stage: The slowest mutation shard needs 31000 worker seconds, 10333 seconds on 3 workers,"
+        " against the 1080 second shard budget less 180 seconds of setup. The change needs 310000 worker seconds and"
+        " 80 shards in 2 waves of 40 runners hold at most 216000, so split it into at least 2 pull requests."
+        " The replan grades the budget after the early stage." in text
+    )
+    assert output.read_text() == (
+        f"shards={json.dumps(list(range(10)))}\nprobe=true\nprobe_shards={json.dumps([0, 1])}\n"
+    )
 
 
 def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_shard() -> None:
