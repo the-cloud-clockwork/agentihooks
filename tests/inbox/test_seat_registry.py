@@ -90,7 +90,28 @@ def test_agent_seats_read_every_seat_at_once_and_page_the_legacy_scan(seats, mon
     assert seats.agent_seats("rig") == [("rig-eng-9", "eng-3@rig"), (minted[0], "eng-1@rig"), (minted[2], "eng-2@rig")]
     assert reads == [3, 4]
     assert seats.agent_names("rig") == ["rig-eng-9", minted[0], minted[2]]
-    assert scans == [{"match": f"{PREFIX}-of:rig-*", "count": 1000}] * 2
+    assert scans == [{"match": f"{PREFIX}-of:rig-*", "count": 1000}]
+
+
+def test_the_legacy_names_are_scanned_once_and_seating_keeps_them_current(seats, monkeypatch) -> None:
+    seats.occupy("eng-1@rig", "rig-eng-1", at=1)
+    seats.occupy("eng-1@other", "other-eng-1", at=1)
+    assert seats.agent_seats("rig") == [("rig-eng-1", "eng-1@rig")]
+    monkeypatch.setattr(seats.redis, "scan_iter", lambda **kw: pytest.fail(f"a second keyspace scan: {kw}"))
+    seats.occupy("eng-2@rig", "rig-eng-2", at=2)
+    seats.occupy("eng-1@rig", "rig-eng-1", at=3)
+    assert seats.agent_seats("rig") == [("rig-eng-1", "eng-1@rig"), ("rig-eng-2", "eng-2@rig")]
+    assert seats.agent_names("other") == ["other-eng-1"]
+
+
+def test_a_legacy_name_whose_pointer_is_gone_leaves_the_listing(seats) -> None:
+    from scripts.inbox.seats import PREFIX
+
+    seats.occupy("eng-1@rig", "rig-eng-1", at=1)
+    seats.occupy("eng-2@rig", "rig-eng-2", at=1)
+    assert seats.agent_names("rig") == ["rig-eng-1", "rig-eng-2"]
+    seats.redis.delete(f"{PREFIX}-of:rig-eng-2")
+    assert seats.agent_seats("rig") == [("rig-eng-1", "eng-1@rig")]
 
 
 def test_exits_reads_every_recorded_exit_at_once(seats, monkeypatch):
