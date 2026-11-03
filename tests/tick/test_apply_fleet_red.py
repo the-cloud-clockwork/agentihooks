@@ -166,7 +166,14 @@ def test_the_fleet_red_applier_drops_a_write_that_names_no_pull_request_and_chec
 def test_appliers_add_fleet_red_only_with_a_store() -> None:
     assert sorted(tasks.appliers({"slug": "sw", "ledger": Ledger()})) == [tasks.GROUPS, tasks.SIZES]
     both = tasks.appliers({"slug": "sw", "ledger": Ledger(), "store": Store()})
-    assert sorted(both) == [tasks.FLEET_RED, tasks.FLEET_RED_LIFTED, fleet_red.LISTINGS, tasks.GROUPS, tasks.SIZES]
+    assert sorted(both) == [
+        tasks.FLEET_RED,
+        tasks.FLEET_RED_LIFTED,
+        fleet_red.LISTINGS,
+        tasks.GROUPS,
+        tasks.RANK,
+        tasks.SIZES,
+    ]
 
 
 def test_the_fleet_red_step_declares_the_listings_it_returns() -> None:
