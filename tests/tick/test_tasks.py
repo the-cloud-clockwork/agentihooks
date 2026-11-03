@@ -121,25 +121,38 @@ def test_the_reopen_passes_run_their_calls_with_the_pass_state(monkeypatch: pyte
 
 
 @pytest.mark.parametrize(
-    ("sleeping", "state", "claimable", "expected"),
+    ("sleeping", "state", "claimable", "expected", "asked"),
     [
-        (False, "drained", True, ["new tasks, running again"]),
-        (True, "drained", True, []),
-        (False, "running", True, []),
-        (False, "drained", False, []),
+        (False, "drained", ("ci",), ["new tasks, running again"], ["eng", "ci"]),
+        (False, "drained", ("eng",), ["new tasks, running again"], ["eng"]),
+        (True, "drained", ("eng", "ci"), [], []),
+        (False, "running", ("eng", "ci"), [], []),
+        (False, "drained", (), [], ["eng", "ci"]),
     ],
 )
 def test_a_drained_swarm_with_claimable_work_runs_again(
-    monkeypatch: pytest.MonkeyPatch, sleeping: bool, state: str, claimable: bool, expected: list[str]
+    monkeypatch: pytest.MonkeyPatch,
+    sleeping: bool,
+    state: str,
+    claimable: tuple[str, ...],
+    expected: list[str],
+    asked: list[str],
 ) -> None:
     updates: list[tuple[str, str]] = []
+    seen: list[tuple[Any, ...]] = []
     store = SimpleNamespace(update=lambda slug, state: updates.append((slug, state)) or "resumed")
-    tick = SimpleNamespace(LANES=("eng", "ci"), _claimable=lambda slug, store, rows, doc, lane: claimable)
+
+    def claimable_in(slug: str, store_seen: Any, rows: Any, doc: Any, lane: str) -> bool:
+        seen.append((slug, store_seen, rows, doc, lane))
+        return lane in claimable
+
+    tick = SimpleNamespace(LANES=("eng", "ci"), _claimable=claimable_in)
     box: dict[str, Any] = {"config": "old"}
     state_of = {**_pass(box), "store": store, "config": SimpleNamespace(state=state), "sleeping": sleeping}
     assert _run(tasks.DRAINED, tick, state_of, monkeypatch) == expected
     assert box["config"] == ("resumed" if expected else "old")
     assert updates == ([("sw", "running")] if expected else [])
+    assert seen == [("sw", store, "rows", "doc", lane) for lane in asked]
 
 
 def test_settle_then_close_space_close_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
