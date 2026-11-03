@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from argparse import Namespace
 
 import pytest
@@ -642,8 +643,8 @@ TICK_SERVICE = (
     "[Service]\nType=oneshot\n"
     "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
     "EnvironmentFile=-%h/.agentihooks/.env\n"
-    'ExecStart="/installed/bin/agentihooks" swarm tick\n'
-    "TimeoutStartSec=540\nKillMode=process\n"
+    f'ExecStart="{sys.executable}" -m scripts.swarm.scheduled_tick --unit\n'
+    "TimeoutStartSec=710\nKillMode=process\n"
 )
 TICK_TIMER = (
     "[Unit]\nDescription=agentihooks swarm tick every minute\n\n"

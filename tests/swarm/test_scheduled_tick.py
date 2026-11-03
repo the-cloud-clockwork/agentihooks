@@ -236,6 +236,27 @@ def test_a_tick_past_its_timeout_signals_its_whole_group_then_kills_it(monkeypat
     assert group.sent[:2] == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
 
 
+def test_a_tick_that_exits_clean_after_its_timeout_still_ends_its_group(monkeypatch):
+    import signal
+
+    monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    group = _Group(members=1)
+    assert scheduled_tick._finish(_Tick([None, 0]), group) == 0
+    assert group.sent == [(4242, signal.SIGTERM), (4242, signal.SIGTERM), (4242, 0), (4242, 0)]
+
+
+def test_the_unit_holder_runs_the_tick_without_recording_a_scheduler_delivery(monkeypatch):
+    from scripts.swarm import timer
+
+    monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    recorded = []
+    monkeypatch.setattr(scheduled_tick, "_delivered", recorded.append)
+    assert scheduled_tick.main(lambda argv, **kwargs: _Tick([0]), record=False) == 0
+    assert recorded == []
+    assert scheduled_tick.main(lambda argv, **kwargs: _Tick([0])) == 0
+    assert len(recorded) == 1
+
+
 def test_a_clean_pass_leaves_its_group_alone():
     group = _Group()
     assert scheduled_tick._finish(_Tick([0]), group) == 0

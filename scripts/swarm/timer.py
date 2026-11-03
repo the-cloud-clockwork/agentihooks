@@ -93,14 +93,17 @@ def _current(path, text):
     return path.is_file() and path.read_text() == text
 
 
-def tick_units(binary):
+def tick_units(binary: str) -> dict[str, str]:
+    """The fallback tick timer, run through the tick holder so a timed out or failed pass ends its whole group."""
+    from scripts.swarm.scheduled_tick import UNIT_FLAG, UNIT_TIMEOUT_S
+
     service = (
         "[Unit]\nDescription=agentihooks swarm tick\n\n"
         "[Service]\nType=oneshot\n"
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
-        f'ExecStart="{binary}" swarm tick\n'
-        "TimeoutStartSec=540\nKillMode=process\n"
+        f'ExecStart="{sys.executable}" -m scripts.swarm.scheduled_tick {UNIT_FLAG}\n'
+        f"TimeoutStartSec={UNIT_TIMEOUT_S}\nKillMode=process\n"
     )
     timer = (
         "[Unit]\nDescription=agentihooks swarm tick every minute\n\n"

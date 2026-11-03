@@ -26,6 +26,8 @@ LIVE = ("active", "pending")
 TIMEOUT_S = 540
 STOP_S = 90
 SWEEP_S = 10
+UNIT_FLAG = "--unit"
+UNIT_TIMEOUT_S = TIMEOUT_S + STOP_S + 2 * SWEEP_S + 60
 DELIVERED = "swarm-tick-delivered"
 FRESH_S = TIMEOUT_S + STOP_S + 60
 KEEP = ("HOME", "LANG", "LOGNAME", "SHELL", "USER", "XDG_RUNTIME_DIR", "XDG_DATA_DIRS")
@@ -115,16 +117,16 @@ def environment(environ: Mapping[str, str]) -> dict[str, str]:
     return {**kept, "PATH": f"{home}/.local/bin:{home}/.cargo/bin:/usr/local/bin:/usr/bin:/bin"}
 
 
-def _ended(tick: subprocess.Popen, killpg: Callable[[int, int], None]) -> int:
+def _ended(tick: subprocess.Popen, killpg: Callable[[int, int], None]) -> tuple[int, bool]:
     try:
-        return tick.wait(TIMEOUT_S)
+        return tick.wait(TIMEOUT_S), False
     except subprocess.TimeoutExpired:
         _signal_group(tick.pid, signal.SIGTERM, killpg)
     try:
-        return tick.wait(STOP_S)
+        return tick.wait(STOP_S), True
     except subprocess.TimeoutExpired:
         _signal_group(tick.pid, signal.SIGKILL, killpg)
-        return tick.wait()
+        return tick.wait(), True
 
 
 def _signal_group(pgid: int, number: int, killpg: Callable[[int, int], None]) -> bool:
@@ -149,8 +151,8 @@ def _sweep(pgid: int, killpg: Callable[[int, int], None]) -> None:
 
 def _finish(tick: subprocess.Popen, killpg: Callable[[int, int], None] = os.killpg) -> int:
     """Wait for the tick pass, and after a timed out or failed pass end every child left in its process group."""
-    code = _ended(tick, killpg)
-    if code:
+    code, timed_out = _ended(tick, killpg)
+    if code or timed_out:
         _sweep(tick.pid, killpg)
     return code
 
@@ -178,7 +180,8 @@ def tick_lock(environ: Mapping[str, str] = os.environ) -> Iterator[None]:
     yield
 
 
-def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen) -> int:
+def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen, record: bool = True) -> int:
+    """Hold the machine tick lock around one tick pass; the systemd fallback unit passes record=False."""
     from scripts.swarm import timer
 
     try:
@@ -188,7 +191,8 @@ def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen) -> int:
             code = _finish(popen(command(timer.entry_point()), env=env, pass_fds=(fd,), start_new_session=True))
     except AlreadyRunning:
         return 0
-    _delivered(time.time())
+    if record:
+        _delivered(time.time())
     return code
 
 
@@ -234,4 +238,4 @@ def restart(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(record=UNIT_FLAG not in sys.argv[1:]))
