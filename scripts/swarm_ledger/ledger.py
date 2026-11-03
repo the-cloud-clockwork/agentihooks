@@ -35,8 +35,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed);
                                       masters never run it, it slows every write
   get ITEM                            print one item through the ledger API: tasks/<id>, phases/<id>, followups/<id>
-                                      or priorities/<id>, or every task or freeze as JSON with tasks or freezes
-                                      (no --as needed)
+                                      or priorities/<id> (no --as needed)
   tasks [--state S] [--lane L] [--text T]
                                       list open tasks, one line each, by state, lane or title text (no --as needed)
   priority add ITEM TEXT              operator and swarm only, at most 20 words; agents are refused; ITEM may
