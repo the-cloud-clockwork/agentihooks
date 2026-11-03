@@ -148,6 +148,26 @@ def test_the_cli_writes_the_probed_plan_and_its_shard_matrix(tmp_path, monkeypat
     )
 
 
+def test_the_cli_prices_survivor_slices_from_the_branch_kill_memory(tmp_path, monkeypatch):
+    folder = _stats(tmp_path, _plan())
+    memory = KillMemory(folder / "killers")
+    path = memory._cost_path(M2, ["right"])
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"tests": ["right"], "seconds": 12.0}))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    monkeypatch.setattr("sys.argv", ["probed", "--stats", str(folder)])
+    assert probed.main() == 0
+    assert json.loads((folder / "plan.json").read_text())["unit_costs"] == {M2: [pytest.approx(95.6), 12.0]}
+
+
+@pytest.mark.parametrize("args", [[], ["--budget", "1080"]])
+def test_the_cli_requires_the_statistics_folder(monkeypatch, args):
+    monkeypatch.setattr("sys.argv", ["probed", *args])
+    with pytest.raises(SystemExit) as error:
+        probed.main()
+    assert error.value.code == 2
+
+
 def test_the_cli_refuses_a_plan_the_remaining_budget_cannot_hold(tmp_path, monkeypatch, capsys):
     folder = _stats(tmp_path, _plan())
     output = tmp_path / "github-output"
