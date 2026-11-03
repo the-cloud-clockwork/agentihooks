@@ -216,16 +216,16 @@ CRON_S = 60.0
 SLOW = Lane("slow")
 
 
-def cadence_breaches(cadence_s: float) -> list[str]:
+def cadence_breaches(cadence: float) -> list[str]:
     """Return each guard a slow lane pass every ``cadence_s`` seconds breaks; every guard outlasts one missed pass."""
     from scripts.swarm import lease, scheduled_tick, tick_heartbeat, tick_watch
 
-    missed_s = 2 * cadence_s
+    missed_s = 2 * cadence
     checks = {
         "delivery guard": scheduled_tick.FRESH_S >= missed_s,
         "heartbeat limit": tick_heartbeat.LIMIT_MS / 1000 >= missed_s,
         "lease TTL": lease.ttl_ms() / 1000 >= 2 * CRON_S,
-        "stale watcher": tick_watch.PASS_S + tick_watch.SLUG_PASS_S <= tick_heartbeat.LIMIT_MS / 1000 - cadence_s,
+        "stale watcher": tick_watch.PASS_S + tick_watch.SLUG_PASS_S <= tick_heartbeat.LIMIT_MS / 1000 - cadence,
     }
     return [name for name, held in checks.items() if not held]
 
