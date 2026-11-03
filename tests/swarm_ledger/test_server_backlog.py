@@ -35,7 +35,7 @@ def listening(monkeypatch, ledger_port, tmp_path):
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
     watched = threading.Event()
-    monkeypatch.setattr(server, "watch_ledgers", lambda *args: watched.set())
+    monkeypatch.setattr(server, "watch_ledgers", lambda *args, **kwargs: watched.set())
     monkeypatch.setattr(server, "HUB", server.Hub())
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
     monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
