@@ -130,9 +130,8 @@ def test_the_pass_setup_steps_clear_the_spawn_hold_and_update_the_pass_budget(
 
 def test_the_start_and_observe_steps_sit_in_their_groups_in_legacy_order() -> None:
     assert [step.name for step in engine.group_steps("start")] == ["config load", "stopped branch"]
+    assert [step.name for step in engine.group_steps(observe.PASS_SETUP)] == ["spawn hold clear", "pass budget"]
     assert [step.name for step in engine.group_steps("observe")] == [
-        "spawn hold clear",
-        "pass budget",
         "pane evidence",
         "execution reconcile",
         "master move fail over",

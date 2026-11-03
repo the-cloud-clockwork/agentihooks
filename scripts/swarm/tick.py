@@ -227,6 +227,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     observe_steps.raise_held(box)
     if "finished" in box:
         return actions
+    actions += run_group(observe_steps.PASS_SETUP, **passing)
     actions += run_group("observe", **passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)

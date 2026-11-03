@@ -23,6 +23,7 @@ pytestmark = pytest.mark.unit
 
 TICK_GROUPS = [
     "start",
+    "pass setup",
     "observe",
     "agents",
     "masters",

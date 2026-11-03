@@ -11,9 +11,8 @@ from tests.swarm.tick_scenarios.test_characterisation import replay
 
 TODAY = {
     "start": ["config load", "stopped branch"],
+    "pass setup": ["spawn hold clear", "pass budget"],
     "observe": [
-        "spawn hold clear",
-        "pass budget",
         "pane evidence",
         "execution reconcile",
         "master move fail over",
@@ -67,6 +66,11 @@ EDGES = (
     ("stall watch", "overrun pass"),
     ("health findings", "findings pass"),
     ("health findings", "metrics record"),
+    ("sleeping", "drained resume"),
+    ("dev red reopen", "prerequisite reopen"),
+    ("prerequisite reopen", "promotion refresh"),
+    ("promotion refresh", "release alert"),
+    ("release alert", "fleet red notice"),
 )
 
 
