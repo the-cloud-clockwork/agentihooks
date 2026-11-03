@@ -87,7 +87,7 @@ class Repair:
         restart: Callable[[], str],
         respawn: Callable[[str], list[str]],
         bounds: tuple[float, float] = (RESTART_S, REPAIR_S),
-    ):
+    ) -> None:
         self.restart, self.respawn, self.restarted, self.lock = restart, respawn, None, Lock()
         self.bounds = bounds
 

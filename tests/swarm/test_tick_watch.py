@@ -783,6 +783,7 @@ def test_the_repair_restarts_the_scheduler_once_per_stale_window_and_respawns_ev
     assert (len(restarts), respawns) == (2, ["sw", "other", "sw"])
 
 
+@pytest.mark.wall_clock
 def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its_bound():
     import time
 
@@ -814,7 +815,7 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
 
 def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_bound():
     release = threading.Event()
-    repair = tick_watch.Repair(lambda: release.wait(2) and "restarted", lambda slug: [f"spawned {slug}"], (0.1, 5))
+    repair = tick_watch.Repair(lambda: "restarted" if release.wait(2) else "timed out", lambda slug: [f"spawned {slug}"], (0.1, 5))
     try:
         actions = repair("sw", START)
     finally:
