@@ -467,7 +467,7 @@
   "scripts/inbox/receive.py": 9,
   "scripts/inbox/recipient.py": 53,
   "scripts/inbox/relay.py": 16,
-  "scripts/inbox/seats.py": 219,
+  "scripts/inbox/seats.py": 211,
   "scripts/inbox/seen.py": 147,
   "scripts/inbox/store.py": 1320,
   "scripts/inbox/wake.py": 748,

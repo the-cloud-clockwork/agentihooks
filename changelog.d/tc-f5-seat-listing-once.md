@@ -1,0 +1,1 @@
+List the old style seated names of a swarm from a set kept beside the seat table, scanned from the keyspace once and added to as such names are seated, so the exit sweep and every other seat listing no longer scan the whole Redis keyspace each pass.
