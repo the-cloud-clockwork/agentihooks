@@ -474,3 +474,20 @@ def test_the_notice_pass_declares_nothing_while_the_cache_holds_a_failed_listing
     ledger = Ledger()
     assert fleet_red.notice_pass("sw", store, ledger, {"red": task("red", pr_url=MINE)}, NOW_MS) == []
     assert ledger.notices == []
+
+
+def test_holds_leave_out_a_noticed_task_and_post_notices_it_only_once(store):
+    both = [run("Tests", "FAILURE")]
+    red = fleet(both, *[both] * 3)
+    rows = {"red": task("red", pr_url=MINE)}
+    ledger = Ledger()
+    assert fleet_red.holds("sw", store, rows, NOW_MS, lambda repo: red) == [("red", MINE, "Tests")]
+    assert store.redis.get(store.key("sw", "fleet-red:red")) is None
+    assert (
+        fleet_red.post("sw", store, ledger, "red", MINE, "Tests")
+        == f"task red held unclaimed, {MINE} is red only from Tests"
+    )
+    assert fleet_red.post("sw", store, ledger, "red", MINE, "Tests") == ""
+    assert ledger.notices == [("sw", "red", fleet_red.NOTICE.format(url=MINE, checks="Tests"))]
+    assert fleet_red.holds("sw", store, rows, NOW_MS, lambda repo: red) == []
+    assert store.redis.get(store.key("sw", "fleet-red:red")) == MINE

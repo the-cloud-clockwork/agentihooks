@@ -14,6 +14,7 @@ from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actio
 __all__ = [
     "CLOSE",
     "DRAINED",
+    "FLEET_RED",
     "GROUPS",
     "SIZES",
     "RAISED",
@@ -22,6 +23,8 @@ __all__ = [
     "TASK_PASSES",
     "WriteStep",
     "appliers",
+    "fleet_red_writer",
+    "fleet_red_writes",
     "group_writer",
     "held",
     "raise_held",
@@ -36,6 +39,7 @@ DRAINED = "drained resume"
 REOPENS = "reopen passes"
 GROUPS = Domain("groups")
 SIZES = Domain("sizes")
+FLEET_RED = Domain("fleet red")
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -106,8 +110,47 @@ def _release_alert(tick: Any, get: Get) -> Any:
 
 
 def _fleet_red_notice(tick: Any, get: Get) -> Any:
-    keys = ("slug", "store", "ledger", "rows", "now_ms")
-    return tick.skip_refused(fleet_red.notice_pass, *map(get, keys))
+    return tick.skip_refused(fleet_red_writes, get("slug"), get("store"), get("rows"), get("now_ms"))
+
+
+def fleet_red_writes(slug: str, store: Any, rows: dict[str, dict[str, Any]], now_ms: int) -> list[str | Write]:
+    """Return a guarded hold write and an action for each task fleet red newly holds, posting nothing itself."""
+    return [item for found in fleet_red.holds(slug, store, rows, now_ms) for item in _fleet_red_write(*found)]
+
+
+def _fleet_red_write(task_id: str, url: str, checks: str) -> list[str | Write]:
+    """Return the hold write of ``task_id``, guarded on the task staying open and unclaimed on ``url``, and its action."""
+    return [
+        Write(
+            FLEET_RED,
+            task_id,
+            {"url": url, "checks": checks},
+            expected={"state": "open", "pr_url": url, "claimed_by": ""},
+        ),
+        f"task {task_id} held unclaimed, {url} is red only from {checks}",
+    ]
+
+
+def fleet_red_writer(
+    slug: str, store: Any, ledger: Any, read: Callable[[str], dict[str, Any] | None]
+) -> Callable[[Write], None]:
+    """Return the fleet red applier: it posts a hold notice only while the task is still open, unclaimed and red."""
+    return partial(_notice_hold, slug, store, ledger, read)
+
+
+def _notice_hold(
+    slug: str, store: Any, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write
+) -> None:
+    """Post the hold notice of ``write`` unless its task moved, a seat claimed it or the ledger refuses the notice."""
+    _write_task_check(write, read(write.key))
+    if store.claimed(slug, [write.key]):
+        raise RevisionConflict(f"task {write.key} was claimed since the step read it")
+    fields = cast(dict[str, str], write.value)
+    try:
+        fleet_red.post(slug, store, ledger, write.key, fields["url"], fields["checks"])
+    except LedgerRefused as exc:
+        store.redis.delete(store.key(slug, f"fleet-red:{write.key}"))
+        raise RevisionConflict(f"the ledger refused the hold notice of task {write.key}") from exc
 
 
 def _run_window(tick: Any, get: Get) -> Any:
@@ -176,23 +219,30 @@ def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
     """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it."""
-    expected = cast(dict[str, Any], write.expected or {})
-    task = read(write.key)
-    moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
-    if moved:
-        raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
+    _write_task_check(write, read(write.key))
     try:
         ledger.update_task(slug, write.key, write.value)
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
 
 
+def _write_task_check(write: Write, task: dict[str, Any] | None) -> None:
+    """Raise RevisionConflict naming each field ``write`` expects that ``task`` no longer holds; no task passes."""
+    expected = cast(dict[str, Any], write.expected or {})
+    moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
+    if moved:
+        raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
+
+
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
-    """Return the appliers of a task group site: tasks and groups when the site holds a ledger and a swarm."""
+    """Return the appliers of a tick group site: tasks and groups with a ledger and a swarm, fleet red with a store too."""
     slug, ledger = state.get("slug"), state.get("ledger")
     if ledger is None or not slug:
         return {}
-    return {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+    found = {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+    if (store := state.get("store")) is not None:
+        found[FLEET_RED] = fleet_red_writer(slug, store, ledger, _fresh_task)
+    return found
 
 
 def _fresh_task(task_id: str) -> dict[str, Any] | None:
@@ -262,7 +312,7 @@ STEPS = (
     CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"})),
     CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),
     CallStep("release alert", REOPENS, held(_release_alert)),
-    CallStep("fleet red notice", REOPENS, held(_fleet_red_notice)),
+    WriteStep("fleet red notice", REOPENS, held(_fleet_red_notice), writes=frozenset({FLEET_RED})),
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
     WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),
