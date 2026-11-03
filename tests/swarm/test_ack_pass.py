@@ -92,6 +92,23 @@ def test_a_foreign_hive_lease_leaves_the_acknowledgements_alone(store: RedisStor
     assert collected == []
 
 
+@pytest.mark.parametrize("authority", [None, "trusted-tick-fixture"])
+def test_a_remote_ledger_swarm_is_collected_only_with_tick_authority(
+    store: RedisStore, collected: list[Any], monkeypatch: pytest.MonkeyPatch, authority: str | None
+) -> None:
+    from scripts.swarm_ledger import authority_context
+
+    _launch(store, "acknowledging")
+    store.redis.hset(store.key("sw", "config"), "api_url", "https://hosted.example")
+    acquired: list[str] = []
+    real = lease.acquire
+    monkeypatch.setattr(lease, "acquire", lambda own, slug, owner: acquired.append(slug) or real(own, slug, owner))
+    with authority_context.bound(authority):
+        found = ack_pass.run(store, "sw", ledger="ledger", runtime="runtime")
+    assert acquired == (["sw"] if authority else [])
+    assert found == (["spawned engineer@a1b2c3-0001 for t1"] if authority else [])
+
+
 def test_a_stopped_swarm_collects_nothing(store: RedisStore, collected: list[Any]) -> None:
     _launch(store, "acknowledging")
     store.update("sw", state="stopped")
@@ -103,7 +120,7 @@ def test_the_lock_is_released_only_by_its_own_holder(store: RedisStore) -> None:
     key = store.key("sw", ack_pass.LOCK)
     with ack_pass.collecting(store, "sw") as taken:
         assert taken is True
-        assert 0 < store.redis.pttl(key) <= ack_pass.LOCK_MS
+        assert 59_000 < store.redis.pttl(key) <= 60_000
         with ack_pass.collecting(store, "sw") as second:
             assert second is False
         assert store.redis.get(key)

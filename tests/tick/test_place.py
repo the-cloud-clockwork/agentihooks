@@ -39,7 +39,7 @@ class _Redis:
             self.log.append(("delete", key))
 
     def set(self, key: str, value: str, nx: bool, px: int) -> bool:
-        assert (key, nx, px) == (LOCK_KEY, True, 120_000)
+        assert (key, nx, px) == (LOCK_KEY, True, 60_000)
         if self.log.count("acks held"):
             return False
         self.token = value

@@ -14,7 +14,7 @@ from typing import Any
 from scripts.swarm.store import RedisStore
 
 LOCK = "acks-lock"
-LOCK_MS = 120_000
+LOCK_MS = 60_000
 COLLECTING = ("acknowledging", "launching")
 
 
@@ -63,9 +63,7 @@ def _collect(store: RedisStore, slug: str, ledger: Any, runtime: Any) -> list[st
     with collecting(store, slug) as taken:
         if not taken:
             return []
-        from scripts.swarm.ledger_client import LedgerClient
-
-        ledger = ledger or LedgerClient()
+        ledger = ledger or ledger_client.LedgerClient()
         doc = ledger_client.pass_state(ledger, slug)
         fenced = controller.FencedRuntime(
             store, slug, held, runtime or _runtime(), controller.deployment_for(config, os.environ)

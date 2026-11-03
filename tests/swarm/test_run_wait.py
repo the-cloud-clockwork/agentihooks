@@ -309,7 +309,7 @@ def test_the_wait_command_checks_other_swarms_despite_a_failure_or_slow_pass(mon
 
     monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
 
-    def acks(store, slug):
+    def acks(store: object, slug: str) -> list[str]:
         if slug == "fast":
             raise RuntimeError("acks unavailable")
         return [f"acks collected for {slug}"]
