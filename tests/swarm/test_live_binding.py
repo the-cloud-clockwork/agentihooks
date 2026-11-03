@@ -1480,3 +1480,80 @@ def test_local_agent_without_validation_still_expects_the_profile_home(
         "home": {"expected": str(tmp_path / ".agentihooks" / "profiles" / "engineer" / "claude"), "actual": HIVE_HOME}
     }
     assert live_binding.unknown(agent, facts) == []
+
+
+def _login_report(path: Path, state: str, home: Path) -> Path:
+    validated = {"profile": "master", "harness": "claude", "home": str(home), "state": "validated", "pid": 7}
+    data = {"profile": "master", "harness": "claude", "state": state, "rendered": {"home": str(home)}}
+    path.write_text(json.dumps({**data, **({"validation": validated} if state == "validated" else {})}))
+    return path
+
+
+def _login_master(report: Path, home: str = "") -> AgentRecord:
+    pending = {"state": "pending", "report": str(report), "profile": "master", "harness": "claude", "account": ""}
+    return AgentRecord(
+        "master@zz-1",
+        "master",
+        "master",
+        harness="claude",
+        profile="master",
+        model="opus",
+        effort="high",
+        account="team",
+        profile_decision={"validation": {**pending, **({"home": home} if home else {})}},
+    )
+
+
+def _login_facts(home: Path) -> dict:
+    return {
+        "harness": "claude",
+        "home": str(home),
+        "profile": "master",
+        "model": "opus",
+        "effort": "high",
+        "account": "team",
+        "hooks": True,
+    }
+
+
+def test_master_launched_on_the_login_home_has_no_home_difference(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "operator")
+    login = tmp_path / "master-login-2" / "claude"
+    login.mkdir(parents=True)
+    master = _login_master(_login_report(tmp_path / "report.json", "validated", login))
+    assert live_binding.assignment(master)["home"] == str(login.resolve())
+    assert live_binding.compare(master, _login_facts(login)) == {}
+
+
+@pytest.mark.parametrize("state", ["pending", "failed"])
+def test_an_unvalidated_launch_report_keeps_the_profile_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "operator")
+    login = tmp_path / "master-login-2" / "claude"
+    login.mkdir(parents=True)
+    master = _login_master(_login_report(tmp_path / "report.json", state, login))
+    expected = tmp_path / "operator" / ".agentihooks" / "profiles" / "master" / "claude"
+    assert live_binding.assignment(master)["home"] == str(expected)
+
+
+@pytest.mark.parametrize("content", [None, "not json", "[]"])
+def test_an_unreadable_launch_report_keeps_the_profile_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, content: str | None
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "operator")
+    report = tmp_path / "report.json"
+    if content is not None:
+        report.write_text(content)
+    expected = tmp_path / "operator" / ".agentihooks" / "profiles" / "master" / "claude"
+    assert live_binding.assignment(_login_master(report))["home"] == str(expected)
+
+
+def test_a_recorded_home_is_kept_over_the_launch_report(tmp_path: Path) -> None:
+    login, rendered = tmp_path / "login", tmp_path / "rendered"
+    login.mkdir()
+    rendered.mkdir()
+    master = _login_master(_login_report(tmp_path / "report.json", "validated", login), str(rendered))
+    assert live_binding.assignment(master)["home"] == str(rendered.resolve())
