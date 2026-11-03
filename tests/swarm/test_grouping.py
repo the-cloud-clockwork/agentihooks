@@ -10,7 +10,7 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable, tick
 from scripts.tick.step import Write
-from scripts.tick.steps import tasks
+from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 PAGE = "scripts/swarm_ledger/static/js/render.js"
@@ -443,9 +443,9 @@ def release(store, found, claim=None, handoff=None):
 def released(store: RedisStore, ledger: ReleaseLedger, found: dict) -> list[str]:
     """Apply the grouping release writes through the groups applier and drop what the ledger released from ``found``."""
     known = {t["id"]: t for t in found["tasks"]}
-    apply = tasks.group_writer("sw", ledger, known.get)
+    apply = task_steps.group_writer("sw", ledger, known.get)
     actions = []
-    for item in tasks.release_writes(SimpleNamespace(grouping=grouping), "sw", store, found):
+    for item in task_steps.release_writes(SimpleNamespace(grouping=grouping), "sw", store, found):
         if not isinstance(item, Write):
             actions.append(item)
             continue
