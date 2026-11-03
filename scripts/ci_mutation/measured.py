@@ -221,6 +221,17 @@ def probe_shard_count(plan: dict[str, Any]) -> int:
     return max(1, min(BATCH_RUNNERS, len(heads), wanted))
 
 
+def observed_unit(memory: KillMemory | None, name: str, split: dict[str, Any], tests: Collection[str]) -> float | None:
+    """Return a unit's observed cost with its head, adding the head estimate to a slice a probed shard ran alone."""
+    if memory is None:
+        return None
+    observed = memory.cost(name, {*split["head"], *tests})
+    if observed is not None:
+        return observed
+    alone = memory.cost(name, tests)
+    return None if alone is None else alone + 1.25 * split.get("head_seconds", 0.0)
+
+
 def measured_plan(
     groups: list[tuple[list[str], list[dict]]],
     memory: KillMemory | None = None,
@@ -239,7 +250,7 @@ def measured_plan(
             split = group_splits[function]
             unit_costs[name] = []
             for tests, fallback in zip(split["slices"], split["costs"], strict=True):
-                observed = memory.cost(name, {*split["head"], *tests}) if memory is not None else None
+                observed = observed_unit(memory, name, split, tests)
                 unit_costs[name].append(observed if observed is not None else split.get("first", fallback))
     plan = plan_shards(costs, limit=limit, splits=splits, unit_costs=unit_costs)
     return {**plan, "probe_shards": probe_shard_count(plan)} if plan["splits"] else plan

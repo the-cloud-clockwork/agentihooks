@@ -176,6 +176,31 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
     assert "scripts.sample.x_plain__mutmut_1" in mixed["assignments"]
 
 
+def test_a_slice_a_probed_shard_ran_alone_is_reused_with_its_head_estimate(tmp_path, monkeypatch):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(2)]
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0], "head_seconds": 2.0}
+    memory = killers.KillMemory(tmp_path)
+    for tests, seconds in ((["left"], 4.0), (["fast", "right"], 7.0), (["right"], 50.0)):
+        path = memory._cost_path(names[0], tests)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"tests": sorted(tests), "seconds": seconds}))
+    assert measured.observed_unit(memory, names[0], split, ["left"]) == 6.5
+    assert measured.observed_unit(memory, names[0], split, ["right"]) == 7.0
+    assert measured.observed_unit(memory, names[1], split, ["left"]) is None
+    assert measured.observed_unit(None, names[0], split, ["left"]) is None
+    headless = {key: value for key, value in split.items() if key != "head_seconds"}
+    assert measured.observed_unit(memory, names[0], headless, ["left"]) == 4.0
+    monkeypatch.setattr(measured, "measured_splits", lambda *args: {function: split})
+    results = [
+        {"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}
+    ]
+    plan = measured.measured_plan([(names, results)], memory, limit=2)
+    assert plan["unit_costs"] == {names[0]: [6.5, 7.0], names[1]: [100.0, 100.0]}
+
+
 def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_drift(tmp_path, monkeypatch):
     from scripts.ci_mutation import killers, measured
 
