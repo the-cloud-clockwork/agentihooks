@@ -2138,7 +2138,7 @@ def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memo
         "key": prefix + "${{ github.run_id }}-${{ github.run_attempt }}-preflight",
     }
     for name in ("mutation-shard", "mutation"):
-        restore = next(step for step in jobs[name]["steps"] if step.get("uses") == "actions/cache/restore@v4")
+        restore = next(step for step in jobs[name]["steps"] if step.get("name") == order[0])
         assert restore["with"]["restore-keys"] == prefix
 
 
