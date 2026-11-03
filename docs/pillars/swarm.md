@@ -4441,6 +4441,32 @@ minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks
 own thread; while one swarm's tick runs long, a quicker swarm ticks again each minute until every swarm's first
 tick of the pass ends; no extra tick starts after seven minutes.
 
+`AGENTIHOOKS_TICK_CADENCE` sets the slow lane cadence in whole minutes, one to five, one when unset; the cron stays
+every minute. `scripts.tick.engine.interval_s` gives a slow lane step the larger of its declared interval and the
+cadence, and leaves critical lane steps at their own interval. Every guard must outlast one missed slow pass, so
+`scripts.tick.engine.cadence_s` refuses a cadence when twice it exceeds the 690 second delivery guard or the ten minute
+heartbeat limit, when the lease TTL is below two cron minutes, or when the stale watcher's pass and slug window no
+longer fit inside the heartbeat limit less the cadence. Six minutes breaks the delivery guard and the heartbeat
+limit. No step is skipped on its interval yet, so the setting is validated but does not change a pass today.
+
+Check a cadence before setting it, from the repository root with the workspace Python:
+
+```bash
+AGENTIHOOKS_TICK_CADENCE=5 ~/dev/tcc-ecosystem/.venv/bin/python -c 'from scripts.tick.engine import cadence_s; print(cadence_s())'   # 300.0
+```
+
+To record a cadence, add or edit one `AGENTIHOOKS_TICK_CADENCE=2` line in `~/.agentihooks/.env`; keep a single line
+per key.
+
+| Refusal | Cause |
+|---|---|
+| `AGENTIHOOKS_TICK_CADENCE must be whole minutes, got 'abc'` | The value is not an integer; minutes only, no unit. |
+| `AGENTIHOOKS_TICK_CADENCE must be at least 1 minute, got 0` | Zero or a negative number. |
+| `AGENTIHOOKS_TICK_CADENCE of 6 minutes breaks the delivery guard, heartbeat limit` | Two missed passes of that cadence last longer than the named guards allow; five minutes is the largest accepted value. |
+
+Both tick settings are listed under [Swarm Tick](../reference/configuration.md#swarm-tick) in the configuration
+reference.
+
 Swarm thresholds are durations since the event that started them, so a pass that runs late, or a slower cadence,
 acts at the same wall time; see [Swarm elapsed thresholds](../reference/swarm-thresholds.md).
 

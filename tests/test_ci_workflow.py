@@ -2195,6 +2195,7 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
         '  (( $(wc -l < "$ATTEMPTS") > FAILURES )) || exit 1\n'
         '  mkdir -p "$9/mutation-killers-0" "$9/mutation-killers-1"\n'
         '  echo "killer of $3" > "$9/mutation-killers-0/a"\n'
+        '  echo "killer of $3" > "$9/mutation-killers-1/a"\n'
         '  echo "cost of $3" > "$9/mutation-killers-1/b.cost"\n'
         "  exit 0\n"
         "fi\n"
