@@ -392,5 +392,5 @@ def test_a_doctor_fix_task_under_a_focus_elsewhere_is_recorded_as_claimable(stor
     ]
     urgent_hold.observe(store, SLUG, found, 0)
     rows = urgent_hold.read(store, SLUG)["tasks"]
-    assert rows["fix"]["why"] == ""
+    assert rows["fix"]["why"] is False
     assert rows["plain"]["why"] == "a focus elsewhere holds it"
