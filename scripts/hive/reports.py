@@ -72,6 +72,15 @@ class Reports:
             return True
         return bool(agent.pane_id) and agent.pane_id not in panes
 
+    def vanished(self, agent: "AgentRecord", now_ms: int) -> bool:
+        """True when the beating hive ``agent`` was admitted to lists other members but not it past startup."""
+        report = self.read(agent.hive) if agent.hive else None
+        launched = agent.launched_at or agent.started_at
+        if report is None or not launched or now_ms - launched < STARTUP_MS:
+            return False
+        names = report.get("names")
+        return isinstance(names, list) and bool(names) and agent.name not in names
+
     def lost(self, agent: "AgentRecord", now_ms: int, after_ms: int) -> bool:
         hive = host(agent)
         if not hive or self.read(hive) is not None:
