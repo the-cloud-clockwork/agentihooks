@@ -454,6 +454,27 @@ See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every proces
 
 ---
 
+## Swarm Tick
+
+See [The minute tick](../pillars/swarm.md#the-minute-tick) and [Tick report](tick-report.md). Each tick pass reads
+`AGENTIHOOKS_TICK_STAGE` from the environment of the process that runs `agentihooks swarm tick`, so set it in
+`~/.agentihooks/.env` on the machine whose scheduler ticks. `AGENTIHOOKS_TICK_CADENCE` is validated by
+`scripts.tick.engine.cadence_s`, which no pass calls yet.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_TICK_CADENCE` | `1` | Slow lane cadence in whole minutes, `1` to `5`. `scripts.tick.engine.cadence_s` refuses a value that is not a whole number, is below one, or breaks a guard: from six minutes the delivery guard and heartbeat limit, from eight the stale watcher as well; the lease TTL check does not depend on the cadence. No pass reads it yet, so it changes nothing today; the scheduler cron stays every minute |
+| `AGENTIHOOKS_TICK_STAGE` | `S1` | Rollout stage whose pass p95 target holds new spawns: `S1` 384, `S2` 240, `S3` 120, `S4` 60 seconds, matched exactly, so `s2` is refused. Any other value makes `update_pass_budget` raise `KeyError` inside the tick pass, before the observe group runs |
+
+Set the stage by adding or editing one `AGENTIHOOKS_TICK_STAGE=S2` line in `~/.agentihooks/.env`; keep a single line
+per key. Check a cadence from the repository root with the workspace Python:
+
+```bash
+AGENTIHOOKS_TICK_CADENCE=2 ~/dev/tcc-ecosystem/.venv/bin/python -c 'from scripts.tick.engine import cadence_s; print(cadence_s())'   # 120.0
+```
+
+---
+
 ## Swarm Grafana Alerts
 
 See [Grafana bottleneck alerts](grafana-bottleneck-alerts.md). The swarm tick reads alert state through the gateway with these; no listener, token or secret path of its own.

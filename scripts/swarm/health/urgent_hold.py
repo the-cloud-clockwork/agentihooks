@@ -1,9 +1,11 @@
 """Urgent tasks the tick cannot claim: each tick records why, and a hold past ten minutes is a health finding."""
 
 import json
+from typing import Any
 
-from scripts.swarm import claim_hold, release_wait, timing
+from scripts.swarm import claim_hold, freeze, release_wait, timing
 from scripts.swarm.health.findings import MINUTE_MS, Finding
+from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger.repository import hierarchy
 
 HOLD_MS = 600_000
@@ -16,15 +18,16 @@ def read(store, slug: str) -> dict:
     return json.loads(raw) if raw else {}
 
 
-def observe(store, slug: str, doc: dict, at: int) -> dict:
+def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[str, Any]:
     before = read(store, slug).get("tasks", {})
     graph, released = hierarchy.project(doc)[0], release_wait.checker(store.config(slug).repo)
+    fix = freeze.fix_phase(store.config(slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     held = {}
     for task in rows.values():
         if task.get("rank") != "urgent" or task.get("state") != "open" or task.get("out_of_scope"):
             continue
-        why = claim_hold.urgent(task, rows, doc, graph) or (not released(task) and RELEASE.format(**task))
+        why = claim_hold.urgent(task, rows, doc, graph, fix) or (not released(task) and RELEASE.format(**task))
         if task.get("merged_into"):
             continue
         previous = before.get(task["id"], {})

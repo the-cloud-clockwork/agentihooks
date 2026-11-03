@@ -351,24 +351,24 @@ def test_the_claim_key_yields_focus_when_the_lane_share_is_full(store):
     assert key(known["a"]) < key(known["h"])
 
 
-@pytest.mark.parametrize("weight,head", [(50, ["a", "h"]), (100, ["h", "a"])])
-def test_at_delegate_the_queue_head_follows_the_lane_cap_and_focus_weight(store, home, shipped, weight, head):
+@pytest.mark.parametrize("weight,head", [(50, ["h"]), (100, ["h"])])
+def test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight(store, home, shipped, weight, head):
     config = store.update(SLUG, autonomy="delegate", max_eng=2, focus_weight=weight)
     ledger = Ledger()
     dispatcher.rank_pass(SLUG, config, store, ledger, focus_split(), NOW)
     assert [comment[0] for comment in ledger.comments] == head
 
 
-def test_below_delegate_proposals_follow_the_swarm_focus_weight(store, home, shipped):
+def test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight(store, home, shipped):
     config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=100)
     proposals = dispatcher.rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
-    assert proposed(proposals) == ["h", "a"]
+    assert proposed(proposals) == ["h"]
 
 
-def test_below_delegate_proposals_yield_focus_when_the_lane_share_is_full(store, home, shipped):
+def test_below_delegate_proposals_never_name_free_work_while_the_focus_is_open(store, home, shipped):
     config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=50)
     proposals = dispatcher.rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
-    assert proposed(proposals) == ["a", "h"]
+    assert proposed(proposals) == ["h"]
 
 
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
@@ -847,7 +847,7 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
     from scripts.doctor import loop
 
     assert dispatcher.guarded(held_fix_chain(), "") == set()
-    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == set()
+    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == {"b"}
     assert dispatcher.guarded(held_fix_chain(FOCUS), loop.FIX_PHASE) == set()
     tasks = [
         task("a", state="done"),
@@ -860,7 +860,7 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
         task("w", depends_on=["c"]),
     ]
     phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "depends_on": []}]
-    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"t"}
+    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"c", "t"}
 
 
 def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_report(store, home, shipped):
@@ -869,8 +869,8 @@ def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_r
     found, ledger = held_fix_chain(FOCUS), Ledger()
     claimed = found["tasks"][1]
     config = store.update(SLUG, autonomy="delegate")
-    assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
+    assert dispatcher.claim_key(config, found)(claimed)[0] == dispatcher.GUARD
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) != []
     config = store.update(SLUG, template=priming.TEMPLATE)
     assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
@@ -883,7 +883,7 @@ def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_
     found = held_fix_chain(FOCUS)
     found["tasks"] += [task("v", phase=fix, depends_on=["s"]), task("w", depends_on=["b"])]
     claimed = found["tasks"][1]
-    assert dispatcher.queue(found, "")[0] == "p"
+    assert dispatcher.queue(found, "")[0] == "b"
     assert dispatcher.queue(found, fix)[0] == "p"
     config = store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE, max_eng=1)
     key = dispatcher.claim_key(config, found)
