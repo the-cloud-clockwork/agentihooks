@@ -2047,6 +2047,7 @@ def test_tests_mutation_carries_kill_memory_to_the_next_plan() -> None:
         step = jobs[name]["steps"][names.index(restore)]
         assert step["uses"] == "actions/cache/restore@v4"
         assert step["with"] == {"path": ".mutation-stats/killers", "key": key, "restore-keys": prefix}
+        assert step["env"] == {"SEGMENT_DOWNLOAD_TIMEOUT_MINS": "1"}
         assert names.index(restore) < names.index(before)
     shard = {step.get("name"): step for step in jobs["mutation-shard"]["steps"]}
     forwarded = "needs.mutation-plan.outputs.forwarded != 'true'"
@@ -2287,6 +2288,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
                 "Check for merged test stats",
                 "Check out the protected mutation grader",
                 "Grade the shard report from the protected grader",
+                "Restore the tests that killed this branch's earlier mutants",
             )
         )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
