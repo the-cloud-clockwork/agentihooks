@@ -9,6 +9,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from scripts.ci_mutation.mutant_shards import function_name, holds
 from scripts.ci_mutation.stats import SharedStats
@@ -16,19 +17,20 @@ from scripts.ci_mutation.stats import SharedStats
 SHARD_PLAN = "shard-plan.json"
 
 
-def plan_fingerprint(plan: dict) -> str:
+def plan_fingerprint(plan: dict[str, Any]) -> str:
     content = {key: value for key, value in plan.items() if key != "probe"}
     return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
 
 
-def probe_plan(plan: dict, shard: tuple[int, int]) -> dict:
-    if shard[1] != plan["shards"] or not 0 <= shard[0] < shard[1]:
+def probe_plan(plan: dict[str, Any], shard: tuple[int, int]) -> dict[str, Any]:
+    if shard[1] != plan.get("probe_shards", plan["shards"]) or not 0 <= shard[0] < shard[1]:
         raise ValueError("early mutation shard does not match the measured plan")
     names = sorted(name for name in plan["assignments"] if function_name(name) in plan["splits"])
     assignments = {name: [] for name in plan["assignments"]}
     assignments.update({name: index % shard[1] for index, name in enumerate(names)})
     return {
         **{key: value for key, value in plan.items() if key != "probe"},
+        "shards": shard[1],
         "assignments": assignments,
         "probe_mode": True,
     }
@@ -83,8 +85,8 @@ def worker_failure(work: Path, reason: str) -> RuntimeError:
     return RuntimeError(f"early mutation failed: {reason}\n{detail}")
 
 
-def merge_probes(plan: dict, records: list[dict]) -> dict:
-    total = plan["shards"]
+def merge_probes(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
+    total = plan.get("probe_shards", plan["shards"])
     if len(records) != total or {record["index"] for record in records} != set(range(total)):
         raise ValueError("early mutation results are missing or duplicated")
     results = {}

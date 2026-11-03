@@ -114,9 +114,10 @@ def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) 
 
 
 def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context) -> None:
-    """Run ``step`` in the caller's copied context and append its result or the error it raised."""
+    """Run ``step`` in the caller's copied context, recorded under its registered name, and append its result or the
+    error it raised."""
     try:
-        outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane))
+        outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name))
     except BaseException as exc:
         outcome.append(exc)
 

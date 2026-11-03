@@ -1,14 +1,22 @@
 import inspect
+import json
 import subprocess
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from scripts.swarm import fleet_red, panic
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable
+from scripts.tick import engine
 from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.ports.source_control import OpenChange, RollupCheck
+from scripts.tick.step import Context, View, Write
+from scripts.tick.steps import actions, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -219,6 +227,15 @@ class Ledger:
         self.notices.append((slug, task_id, text))
 
 
+def _notice(store, ledger, rows, now_ms, reader=None):
+    found, cleared, saves = fleet_red.holds("sw", store, rows, now_ms, reader)
+    for save in saves:
+        fleet_red.saver(store)(save)
+    if cleared:
+        store.redis.delete(*cleared)
+    return [action for hold in found if (action := fleet_red.post("sw", store, ledger, *hold))]
+
+
 def test_the_notice_pass_declares_each_hold_once_and_again_after_it_lifts(store):
     rows = {t["id"]: t for t in [task("red", pr_url=MINE), task("plain"), task("gone", state="done", pr_url=MINE)]}
     both = [run("Tests", "FAILURE"), run("Semgrep", "FAILURE")]
@@ -229,17 +246,17 @@ def test_the_notice_pass_declares_each_hold_once_and_again_after_it_lifts(store)
         reads.append(repo)
         return red
 
-    actions = fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, reader)
+    actions = _notice(store, ledger, rows, NOW_MS, reader)
     assert actions == [f"task red held unclaimed, {MINE} is red only from Semgrep, Tests"]
     assert ledger.notices == [("sw", "red", fleet_red.NOTICE.format(url=MINE, checks="Semgrep, Tests"))]
     assert reads == ["o/r"]
     assert store.redis.get(store.key("sw", "fleet-red:red")) == MINE
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, reader) == []
+    assert _notice(store, ledger, rows, NOW_MS, reader) == []
     assert len(ledger.notices) == 1
     green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: green) == []
+    assert _notice(store, ledger, rows, NOW_MS, lambda repo: green) == []
     assert store.redis.get(store.key("sw", "fleet-red:red")) is None
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, reader) == actions
+    assert _notice(store, ledger, rows, NOW_MS, reader) == actions
     assert len(ledger.notices) == 2
 
 
@@ -248,20 +265,20 @@ def test_the_notice_pass_skips_claimed_tasks_and_forgets_a_hold_once_its_task_le
     red = fleet(both, *[both] * 3)
     ledger = Ledger()
     rows = {"red": task("red", pr_url=MINE)}
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: red)
+    assert _notice(store, ledger, rows, NOW_MS, lambda repo: red)
     key = store.key("sw", "fleet-red:red")
     for moved in ({"state": "pr"}, {"claimed_by": "engineer@a"}, {"pr_url": ""}):
         store.redis.set(key, MINE)
         rows = {"red": {**task("red", pr_url=MINE), **moved}}
-        assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: red) == []
+        assert _notice(store, ledger, rows, NOW_MS, lambda repo: red) == []
         assert store.redis.get(key) is None
     store.redis.set(key, MINE)
     store.redis.set(store.key("sw", "claim", "red"), "engineer@b")
     rows = {"red": task("red", pr_url=MINE)}
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: red) == []
+    assert _notice(store, ledger, rows, NOW_MS, lambda repo: red) == []
     assert store.redis.get(key) is None
     store.redis.delete(store.key("sw", "claim", "red"))
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, lambda repo: red)
+    assert _notice(store, ledger, rows, NOW_MS, lambda repo: red)
     assert len(ledger.notices) == 2
 
 
@@ -271,9 +288,7 @@ def test_the_notice_pass_reads_each_repository_once_and_judges_each_task_against
     green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
     listings, reads, ledger = {"o/r": green, "x/y": elsewhere}, [], Ledger()
     rows = {t["id"]: t for t in [task("home", pr_url=MINE), task("away", pr_url=away), task("odd", pr_url="x")]}
-    actions = fleet_red.notice_pass(
-        "sw", store, ledger, rows, NOW_MS, lambda repo: reads.append(repo) or listings[repo]
-    )
+    actions = _notice(store, ledger, rows, NOW_MS, lambda repo: reads.append(repo) or listings[repo])
     assert actions == [f"task away held unclaimed, {away} is red only from Tests"]
     assert sorted(reads) == ["o/r", "x/y"]
 
@@ -288,7 +303,7 @@ def test_the_notice_pass_still_judges_a_repository_whose_neighbour_failed_to_rea
         return elsewhere
 
     rows = {t["id"]: t for t in [task("home", pr_url=MINE), task("away", pr_url=away)]}
-    actions = fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, reader)
+    actions = _notice(store, Ledger(), rows, NOW_MS, reader)
     assert actions == [f"task away held unclaimed, {away} is red only from Tests"]
 
 
@@ -297,7 +312,7 @@ def test_the_notice_pass_reads_nothing_without_an_open_task_with_a_pull_request(
         raise AssertionError("read")
 
     rows = {"plain": task("plain"), "gone": task("gone", state="done", pr_url=MINE)}
-    assert fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, reader) == []
+    assert _notice(store, Ledger(), rows, NOW_MS, reader) == []
 
 
 @pytest.mark.parametrize(
@@ -311,7 +326,7 @@ def test_the_notice_pass_declares_nothing_when_the_read_fails(store, error):
     rows = {"red": task("red", pr_url=MINE)}
     key = store.key("sw", "fleet-red:red")
     store.redis.set(key, MINE)
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS, reader) == []
+    assert _notice(store, ledger, rows, NOW_MS, reader) == []
     assert ledger.notices == []
     assert store.redis.get(key) == MINE
 
@@ -336,7 +351,7 @@ def test_the_notice_pass_declares_a_hold_listed_after_a_task_that_is_not_held(st
     both = [run("Tests", "FAILURE")]
     red = fleet(both, *[both] * 3)
     rows = {t["id"]: t for t in [task("green", pr_url="https://github.com/o/r/pull/99"), task("red", pr_url=MINE)]}
-    actions = fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, lambda repo: red)
+    actions = _notice(store, Ledger(), rows, NOW_MS, lambda repo: red)
     assert actions == [f"task red held unclaimed, {MINE} is red only from Tests"]
 
 
@@ -355,7 +370,7 @@ def test_the_notice_pass_reads_claims_and_clears_hold_marks_in_one_call_each_how
             store.redis, name, lambda *a, _real=real, _name=name, **k: calls.append(_name) or _real(*a, **k)
         )
     green = fleet([run("Tests", "FAILURE")], *[[run("Tests", "SUCCESS")]] * 3)
-    assert fleet_red.notice_pass("sw", store, Ledger(), rows, NOW_MS, lambda repo: green) == []
+    assert _notice(store, Ledger(), rows, NOW_MS, lambda repo: green) == []
     assert calls == ["mget", "delete"]
     assert [key for key in store.redis.scan_iter(store.key("sw", "fleet-red:*"))] == []
 
@@ -373,15 +388,123 @@ def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, m
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
     seen = []
-    monkeypatch.setattr(fleet_red, "notice_pass", lambda *args: seen.append(args) or ["noticed"])
+    lifted = store.key("sw", "fleet-red:gone")
+    store.redis.set(lifted, MINE)
+    monkeypatch.setattr(fleet_red, "holds", lambda *args: seen.append(args) or ([("a", MINE, "Tests")], [lifted], []))
     ledger = FakeLedger([{"id": "a"}])
     actions = tick.tick("sw", store, ledger, FakeRuntime(), now_ms=4_321)
-    [(slug, got_store, got_ledger, rows, now_ms)] = seen
-    assert (slug, got_store, got_ledger, list(rows), now_ms) == ("sw", store, ledger, ["a"], 4_321)
-    assert "noticed" in actions
+    [(slug, got_store, rows, now_ms)] = seen
+    assert (slug, got_store, list(rows), now_ms) == ("sw", store, ["a"], 4_321)
+    assert f"task a held unclaimed, {MINE} is red only from Tests" in actions
+    assert ("a", fleet_red.NOTICE.format(url=MINE, checks="Tests"), "swarm") in ledger.comments
+    assert store.redis.get(lifted) is None
 
 
 SAVED = [pull(1, run("Tests", "FAILURE")), pull(2, run("Lint", None, None), status("Gate", "SUCCESS"))]
+
+
+def listed(store: RedisStore, slug: str, repo: str, reader: fleet_red.Reader | None = None) -> fleet_red.Pulls | None:
+    """List through the cache and apply its save as the engine would, returning the listing."""
+    pulls, saves = fleet_red.cached(store, slug, repo, reader)
+    for save in saves:
+        fleet_red.saver(store)(save)
+    return pulls
+
+
+def test_the_cache_returns_a_fresh_listing_with_its_save_and_writes_nothing(store: RedisStore) -> None:
+    key = store.key("sw", "fleet-red-pulls:o/r")
+
+    pulls, saves = fleet_red.cached(store, "sw", "o/r", lambda repo: SAVED)
+
+    assert pulls == tuple(SAVED)
+    listing = [[p.url, [[c.name, c.result, c.at] for c in p.checks]] for p in SAVED]
+    assert saves == (Write(fleet_red.LISTINGS, key, json.dumps(listing)),)
+    assert store.redis.get(key) is None
+
+
+def test_a_saved_listing_returns_no_save(store: RedisStore) -> None:
+    listed(store, "sw", "o/r", lambda repo: SAVED)
+
+    assert fleet_red.cached(store, "sw", "o/r", lambda repo: []) == (tuple(SAVED), ())
+
+
+def test_the_saver_keeps_a_listing_saved_since_the_step_read_none(store: RedisStore) -> None:
+    key = store.key("sw", "fleet-red-pulls:o/r")
+    store.redis.set(key, "[]", ex=60)
+
+    with pytest.raises(
+        RevisionConflict, match=f"^another pass saved the listing under {key} since the step read none$"
+    ):
+        fleet_red.saver(store)(Write(fleet_red.LISTINGS, key, "null"))
+
+    assert store.redis.get(key) == "[]"
+    assert store.redis.ttl(key) == 60
+
+
+def test_the_saver_drops_its_write_on_a_redis_timeout() -> None:
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    def timed_out(*args: object, **kwargs: object) -> object:
+        raise RedisTimeoutError("slow")
+
+    store = cast(fleet_red.Listings, SimpleNamespace(redis=SimpleNamespace(set=timed_out)))
+
+    with pytest.raises(RevisionConflict, match="^Redis timed out saving the listing under key$"):
+        fleet_red.saver(store)(Write(fleet_red.LISTINGS, "key", "[]"))
+
+
+def test_holds_carry_the_listing_saves_out_and_write_nothing(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    both = [run("Tests", "FAILURE")]
+    monkeypatch.setattr(fleet_red, "read", lambda repo: fleet(both, *[both] * 3))
+    rows = {"red": task("red", pr_url=MINE), "away": task("away", pr_url="https://github.com/o/r/pull/9")}
+    key = store.key("sw", "fleet-red-pulls:o/r")
+
+    found, cleared, saves = fleet_red.holds("sw", store, rows, NOW_MS)
+
+    assert (found, cleared) == ([("red", MINE, "Tests")], [store.key("sw", "fleet-red:away")])
+    assert [(save.domain, save.key) for save in saves] == [(fleet_red.LISTINGS, key)]
+    assert json.loads(str(saves[0].value))[0][0] == MINE
+    assert store.redis.get(key) is None
+
+
+def test_the_engine_saves_the_listing_the_notice_step_returns(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    both = [run("Tests", "FAILURE"), run("Semgrep", "FAILURE")]
+    reads: list[str] = []
+
+    def read_once(repo: str) -> list[OpenChange]:
+        reads.append(repo)
+        return fleet(both, *[both] * 3)
+
+    monkeypatch.setattr(fleet_red, "read", read_once)
+    (step,) = [step for step in tasks.STEPS if step.name == "fleet red notice"]
+    ledger = Ledger()
+    state = {"slug": "sw", "store": store, "ledger": ledger, "rows": {"red": task("red", pr_url=MINE)}}
+    state |= {"now_ms": NOW_MS, "box": {}}
+    view = cast(View, SimpleNamespace(read=lambda domain, key: state.get(key)))
+    listing = store.key("sw", "fleet-red-pulls:o/r")
+
+    found = step.run(Context(view, Deadline.after(60.0)))
+    assert fleet_red.LISTINGS in {write.domain for write in found.writes}
+    assert store.redis.get(listing) is None
+
+    (record,) = engine.run_group(
+        tasks.REOPENS, Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state)
+    )
+
+    assert record.dropped == ()
+    assert json.loads(store.redis.get(listing))[0][0] == MINE
+    assert store.redis.ttl(listing) == fleet_red.TTL
+    assert ledger.notices == [("sw", "red", fleet_red.NOTICE.format(url=MINE, checks="Semgrep, Tests"))]
+    assert actions([record]) == [f"task red held unclaimed, {MINE} is red only from Semgrep, Tests"]
+    (again,) = engine.run_group(tasks.REOPENS, Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state))
+    assert again.result is not None
+    assert fleet_red.LISTINGS not in {write.domain for write in again.result.writes}
+    assert reads == ["o/r", "o/r"]
+    assert len(ledger.notices) == 1
 
 
 def test_the_cache_lists_once_and_keeps_the_listing_ten_minutes(store: RedisStore) -> None:
@@ -391,8 +514,8 @@ def test_the_cache_lists_once_and_keeps_the_listing_ten_minutes(store: RedisStor
         reads.append(repo)
         return SAVED
 
-    assert fleet_red.cached(store, "sw", "o/r", reader) == tuple(SAVED)
-    assert fleet_red.cached(store, "sw", "o/r", reader) == tuple(SAVED)
+    assert listed(store, "sw", "o/r", reader) == tuple(SAVED)
+    assert listed(store, "sw", "o/r", reader) == tuple(SAVED)
     assert reads == ["o/r"]
     assert store.redis.ttl(store.key("sw", "fleet-red-pulls:o/r")) == 600
     assert fleet_red.TTL == 600
@@ -405,9 +528,9 @@ def test_the_cache_keeps_each_swarm_and_repository_apart(store: RedisStore) -> N
         reads.append(repo)
         return SAVED
 
-    fleet_red.cached(store, "sw", "o/r", reader)
-    fleet_red.cached(store, "sw", "o/s", reader)
-    fleet_red.cached(store, "other", "o/r", reader)
+    listed(store, "sw", "o/r", reader)
+    listed(store, "sw", "o/s", reader)
+    listed(store, "other", "o/r", reader)
     assert reads == ["o/r", "o/s", "o/r"]
 
 
@@ -421,8 +544,8 @@ def test_the_cache_keeps_a_failed_listing_as_none_for_ten_minutes(store: RedisSt
         reads.append(repo)
         raise error
 
-    assert fleet_red.cached(store, "sw", "o/r", reader) is None
-    assert fleet_red.cached(store, "sw", "o/r", reader) is None
+    assert listed(store, "sw", "o/r", reader) is None
+    assert listed(store, "sw", "o/r", reader) is None
     assert reads == ["o/r"]
     assert store.redis.ttl(store.key("sw", "fleet-red-pulls:o/r")) == 600
 
@@ -434,14 +557,14 @@ def test_the_cache_keeps_an_empty_listing(store: RedisStore) -> None:
         reads.append(repo)
         return []
 
-    assert fleet_red.cached(store, "sw", "o/r", reader) == ()
-    assert fleet_red.cached(store, "sw", "o/r", reader) == ()
+    assert listed(store, "sw", "o/r", reader) == ()
+    assert listed(store, "sw", "o/r", reader) == ()
     assert reads == ["o/r"]
 
 
 def test_the_cache_lists_through_read_without_a_reader(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fleet_red, "read", lambda repo: SAVED if repo == "o/r" else [])
-    assert fleet_red.cached(store, "sw", "o/r") == tuple(SAVED)
+    assert listed(store, "sw", "o/r") == tuple(SAVED)
 
 
 def test_the_notice_pass_reads_through_the_cache_without_a_reader(
@@ -457,10 +580,10 @@ def test_the_notice_pass_reads_through_the_cache_without_a_reader(
 
     monkeypatch.setattr(fleet_red, "read", reader)
     ledger = Ledger()
-    held = fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS)
+    held = _notice(store, ledger, rows, NOW_MS)
     assert held == [f"task red held unclaimed, {MINE} is red only from Semgrep, Tests"]
     store.redis.delete(store.key("sw", "fleet-red:red"))
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS) == held
+    assert _notice(store, ledger, rows, NOW_MS) == held
     assert reads == ["o/r"]
 
 
@@ -472,5 +595,22 @@ def test_the_notice_pass_declares_nothing_while_the_cache_holds_a_failed_listing
 
     monkeypatch.setattr(fleet_red, "read", reader)
     ledger = Ledger()
-    assert fleet_red.notice_pass("sw", store, ledger, {"red": task("red", pr_url=MINE)}, NOW_MS) == []
+    assert _notice(store, ledger, {"red": task("red", pr_url=MINE)}, NOW_MS) == []
     assert ledger.notices == []
+
+
+def test_holds_leave_out_a_noticed_task_and_post_notices_it_only_once(store):
+    both = [run("Tests", "FAILURE")]
+    red = fleet(both, *[both] * 3)
+    rows = {"red": task("red", pr_url=MINE)}
+    ledger = Ledger()
+    assert fleet_red.holds("sw", store, rows, NOW_MS, lambda repo: red) == ([("red", MINE, "Tests")], [], [])
+    assert store.redis.get(store.key("sw", "fleet-red:red")) is None
+    assert (
+        fleet_red.post("sw", store, ledger, "red", MINE, "Tests")
+        == f"task red held unclaimed, {MINE} is red only from Tests"
+    )
+    assert fleet_red.post("sw", store, ledger, "red", MINE, "Tests") == ""
+    assert ledger.notices == [("sw", "red", fleet_red.NOTICE.format(url=MINE, checks="Tests"))]
+    assert fleet_red.holds("sw", store, rows, NOW_MS, lambda repo: red) == ([], [], [])
+    assert store.redis.get(store.key("sw", "fleet-red:red")) == MINE
