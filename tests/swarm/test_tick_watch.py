@@ -789,7 +789,7 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
     release = threading.Event()
 
     def herdr_read() -> dict:
-        release.wait(30)
+        release.wait(2)
         return {}
 
     daemons = []
@@ -808,13 +808,13 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
     elapsed = time.monotonic() - started
 
     assert actions == ["restarted", "left the master respawn running after 0.4 seconds"]
-    assert 0.4 <= elapsed < 10
+    assert 0.4 <= elapsed < 1.9
     assert daemons == [True]
 
 
 def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_bound():
     release = threading.Event()
-    repair = tick_watch.Repair(lambda: release.wait(30) and "restarted", lambda slug: [f"spawned {slug}"], (0.1, 5))
+    repair = tick_watch.Repair(lambda: release.wait(2) and "restarted", lambda slug: [f"spawned {slug}"], (0.1, 5))
     try:
         actions = repair("sw", START)
     finally:
@@ -864,7 +864,7 @@ def test_a_hung_master_placement_in_a_cluster_returns_the_watch_repair_within_it
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setattr(cli, "routed", lambda herdr: object())
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: "herdr")
-    monkeypatch.setattr(tick, "place_master", lambda *args: release.wait(30) and ["placed"])
+    monkeypatch.setattr(tick, "place_master", lambda *args: release.wait(2) and ["placed"])
     monkeypatch.setattr(tick_watch, "REPAIR_S", 0.2)
     ran = []
     monkeypatch.setattr(tick_watch, "run", lambda *args: ran.append(args))
