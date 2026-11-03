@@ -592,6 +592,15 @@ def test_a_rank_decision_takes_no_step_until_it_is_applied(store, home, shipped)
     assert dispatcher.rank_decision(SLUG, store.config(SLUG), store, ledger, doc(ladder()), NOW).head == saved
 
 
+def test_a_proposing_rank_decision_lands_no_heads(store, home, shipped):
+    store.update(SLUG, autonomy="assist")
+    store.redis.set(store.key(SLUG, "dispatch-head"), '{"eng": ["z"]}')
+    decided = dispatcher.rank_decision(SLUG, store.config(SLUG), store, Ledger(), doc(ladder()), NOW)
+    assert (decided.at_ms, decided.head, decided.landed) == (NOW, '{"eng": ["z"]}', None)
+    dispatcher.apply_ranking(SLUG, store, decided)
+    assert store.redis.get(store.key(SLUG, "dispatch-head")) == '{"eng": ["z"]}'
+
+
 def test_a_refused_head_comment_still_logs_the_change(store, home, shipped):
     store.update(SLUG, autonomy="delegate", max_eng=2)
     ledger = Ledger(refused={"comment:a"}, broken={"comment:b"})
@@ -1217,7 +1226,11 @@ def test_the_tick_hands_its_clock_to_the_dispatcher_steps(monkeypatch):
     saved.create(SwarmConfig(SLUG, "/repo", max_eng=0, max_ci=0))
     seen = []
     monkeypatch.setattr(dispatcher, "group", lambda *a: seen.append(("group", a[-1])) or [])
-    monkeypatch.setattr(dispatcher, "rank_pass", lambda *a: seen.append(("rank", a[-1])) or [])
+    monkeypatch.setattr(
+        dispatcher,
+        "rank_decision",
+        lambda *a: seen.append(("rank", a[-1])) or dispatcher.Ranking(a[-1], None, [], None),
+    )
     tick.tick(SLUG, saved, FakeLedger([{"id": "a"}]), FakeRuntime(), now_ms=4_321)
     assert seen == [("group", 4_321), ("rank", 4_321)]
 

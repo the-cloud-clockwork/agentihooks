@@ -73,15 +73,25 @@ def test_the_rank_applier_takes_a_first_pass_with_no_saved_heads(monkeypatch: py
     assert tasks.rank_writer(Store())(Write(tasks.RANK, "sw", ranking(None), expected=None)) == ["sw"]
 
 
-@pytest.mark.parametrize("value", [ranking('{"eng": []}'), {"head": '{"eng": []}'}])
-def test_the_rank_applier_drops_a_pass_whose_heads_moved_or_that_is_no_ranking(
-    monkeypatch: pytest.MonkeyPatch, value: object
-) -> None:
+def test_the_rank_applier_drops_a_pass_whose_heads_moved(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dispatcher, "apply_ranking", lambda *args: pytest.fail("took a dropped pass"))
     store = Store(Redis({HEAD: '{"eng": ["b"]}'}))
-    expected = '{"eng": ["b"]}' if isinstance(value, dict) else '{"eng": []}'
     with pytest.raises(RevisionConflict, match="^the claim queue heads of swarm sw changed since the rank pass read"):
-        tasks.rank_writer(store)(Write(tasks.RANK, "sw", value, expected=expected))
+        tasks.rank_writer(store)(Write(tasks.RANK, "sw", ranking('{"eng": []}'), expected='{"eng": []}'))
+
+
+def test_the_rank_applier_takes_a_proposing_pass_whatever_the_saved_heads(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dispatcher, "apply_ranking", lambda slug, store, decided: ["proposed"])
+    store = Store(Redis({HEAD: '{"eng": ["b"]}'}))
+    proposing = dispatcher.Ranking(7, None, [], None)
+    assert tasks.rank_writer(store)(Write(tasks.RANK, "sw", proposing, expected=None)) == ["proposed"]
+
+
+def test_the_rank_applier_drops_a_write_that_carries_no_rank_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dispatcher, "apply_ranking", lambda *args: pytest.fail("took a dropped pass"))
+    store = Store(Redis({HEAD: '{"eng": []}'}))
+    with pytest.raises(RevisionConflict, match="^the rank write of swarm sw carries no rank pass$"):
+        tasks.rank_writer(store)(Write(tasks.RANK, "sw", {"head": '{"eng": []}'}, expected='{"eng": []}'))
 
 
 def test_appliers_add_rank_only_with_a_store() -> None:
@@ -99,6 +109,17 @@ def test_the_engine_keeps_the_actions_an_applier_returns_after_the_step_actions(
     assert found.applied == ("one", "two")
     assert actions([found]) == ["one", "two"]
     assert engine._applied(record, {Domain("b"): lambda write: None}) is record
+
+
+def test_the_engine_keeps_applied_actions_beside_a_later_dropped_write() -> None:
+    def conflict(write: Write) -> list[str] | None:
+        raise RevisionConflict("moved")
+
+    first, second = Write(Domain("a"), "k", 1), Write(Domain("b"), "k", 2)
+    record = engine.StepRecord("rank pass", 0.0, 1.0, result=Result((first, second)))
+    found = engine._applied(record, {Domain("a"): lambda write: ["one"], Domain("b"): conflict})
+    assert (found.applied, found.dropped, found.conflicts) == (("one",), (second,), ("moved",))
+    assert actions([found]) == ["one", "dropped write b k of step rank pass: moved; the next pass recomputes it"]
 
 
 class _State:

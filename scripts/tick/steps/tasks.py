@@ -210,14 +210,19 @@ def rank_writer(store: Any) -> Callable[[Write], list[str]]:
 
 
 def _apply_ranking(store: Any, write: Write) -> list[str]:
-    """Take the rank pass of ``write`` and return its actions, dropping it as a conflict once the saved heads moved."""
+    """Take the rank pass of ``write`` and return its actions, dropping it as a conflict once the saved heads moved.
+
+    A pass that lands no heads only proposes ranks, so it takes no guard on the saved heads.
+    """
     match write.value:
-        case dispatcher.Ranking() as ranking if (
-            store.redis.get(store.key(write.key, dispatcher.HEAD)) == write.expected
-        ):
+        case dispatcher.Ranking() as ranking:
+            if ranking.landed is not None and store.redis.get(store.key(write.key, dispatcher.HEAD)) != write.expected:
+                raise RevisionConflict(
+                    f"the claim queue heads of swarm {write.key} changed since the rank pass read them"
+                )
             return dispatcher.apply_ranking(write.key, store, ranking)
         case _:
-            raise RevisionConflict(f"the claim queue heads of swarm {write.key} changed since the rank pass read them")
+            raise RevisionConflict(f"the rank write of swarm {write.key} carries no rank pass")
 
 
 def _run_window(tick: Any, get: Get) -> Any:
