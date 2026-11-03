@@ -6,7 +6,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from scripts.swarm import panic
 from scripts.swarm.ledger_events import RED, iso_ms
@@ -14,7 +14,9 @@ from scripts.swarm.stack import PORT_ERRORS
 from scripts.swarm.store import RedisStore
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.ports.source_control import OpenChange, RollupCheck
+from scripts.tick.step import Domain, Write
 
 MIN_OTHERS = 3
 PULL = re.compile(r"https://github\.com/([^/]+/[^/]+)/pull/\d+")
@@ -27,8 +29,11 @@ NOTICE = (
     "most other open pull requests. It is claimed again once those checks stop failing elsewhere."
 )
 
+LISTINGS = Domain("fleet red listings")
+
 Pulls = Sequence[OpenChange]
 Reader = Callable[[str], Pulls]
+Listed = tuple[Pulls | None, tuple[Write, ...]]
 
 
 def failing(pull: OpenChange) -> set[str]:
@@ -63,8 +68,8 @@ class Saved(Protocol):
         """Return the value saved under the name, none when nothing is saved."""
         ...
 
-    def set(self, name: str, value: str, *, ex: int) -> object:
-        """Save the value under the name for ex seconds."""
+    def set(self, name: str, value: str, *, ex: int, nx: bool) -> object:
+        """Save the value under the name for ex seconds, only while nothing is saved there when nx holds."""
         ...
 
 
@@ -78,22 +83,40 @@ class Listings(Protocol):
         ...
 
 
-def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) -> Pulls | None:
-    """Return the repository's open pull requests saved in the last ten minutes, else list and save them, a failed listing as none."""
+def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) -> Listed:
+    """Return the repository's open pull requests saved in the last ten minutes with no save, else list them.
+
+    A fresh listing comes back with the write that saves it, a failed listing as none; the engine's applier saves it.
+    """
     key = store.key(slug, f"fleet-red-pulls:{repo}")
     saved = store.redis.get(key)
     if saved is not None:
         rows = json.loads(saved)
         if rows is None:
-            return None
-        return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows)
+            return None, ()
+        return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows), ()
     try:
         pulls: Pulls | None = tuple((reader or read)(repo))
     except ERRORS:
         pulls = None
     listing = None if pulls is None else [[p.url, [[c.name, c.result, c.at] for c in p.checks]] for p in pulls]
-    store.redis.set(key, json.dumps(listing), ex=TTL)
-    return pulls
+    return pulls, (Write(LISTINGS, key, json.dumps(listing)),)
+
+
+def saver(store: Listings) -> Callable[[Write], None]:
+    """Return the listings applier: it saves a listing for ten minutes only while no listing is saved under its key."""
+    return partial(_save, store)
+
+
+def _save(store: Listings, write: Write) -> None:
+    """Save the listing of ``write`` unless another pass saved one since the step read none."""
+    if not store.redis.set(write.key, cast(str, write.value), ex=TTL, nx=True):
+        raise RevisionConflict(f"another pass saved the listing under {write.key} since the step read none")
+
+
+def _unsaved(reader: Reader, repo: str) -> Listed:
+    """Return the reader's listing of ``repo`` with nothing to save."""
+    return tuple(reader(repo)), ()
 
 
 def shared(pulls: Pulls, url: str, now_ms: int) -> set[str]:
@@ -136,8 +159,11 @@ def notice_pass(
     rows: dict[str, dict[str, Any]],
     now_ms: int,
     reader: Reader | None = None,
-) -> list[str]:
-    """Post one notice per unclaimed open task newly held by fleet red, and forget holds that lifted."""
+) -> list[str | Write]:
+    """Post one notice per unclaimed open task newly held by fleet red, and forget holds that lifted.
+
+    Return the action lines and the listing saves the engine applies, saving no listing itself.
+    """
     unclaimed = [
         task["id"]
         for task in rows.values()
@@ -146,16 +172,17 @@ def notice_pass(
     waiting = set(unclaimed) - store.claimed(slug, unclaimed)
     cleared = [store.key(slug, f"fleet-red:{task['id']}") for task in rows.values() if task["id"] not in waiting]
     listings: dict[str, Pulls | None] = {}
-    fetch: Callable[[str], Pulls | None] = reader or partial(cached, store, slug)
-    actions = []
+    fetch: Callable[[str], Listed] = partial(_unsaved, reader) if reader else partial(cached, store, slug)
+    actions: list[str | Write] = []
     for task_id in [task_id for task_id in unclaimed if task_id in waiting]:
         url, key = rows[task_id]["pr_url"], store.key(slug, f"fleet-red:{task_id}")
         repo = repository(url)
         if repo not in listings:
             try:
-                listings[repo] = fetch(repo) if repo else []
+                listings[repo], saves = fetch(repo) if repo else ((), ())
             except ERRORS:
-                listings[repo] = None
+                listings[repo], saves = None, ()
+            actions.extend(saves)
         pulls = listings[repo]
         if pulls is None:
             continue

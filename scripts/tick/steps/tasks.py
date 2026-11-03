@@ -188,11 +188,15 @@ def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
-    """Return the appliers of a task group site: tasks and groups when the site holds a ledger and a swarm."""
-    slug, ledger = state.get("slug"), state.get("ledger")
-    if ledger is None or not slug:
-        return {}
-    return {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+    """Return the appliers of a task group site: tasks and groups when the site holds a ledger and a swarm, and
+    fleet red listings when it holds a store."""
+    slug, ledger, store = state.get("slug"), state.get("ledger"), state.get("store")
+    found = (
+        {}
+        if ledger is None or not slug
+        else {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+    )
+    return found if store is None else found | {fleet_red.LISTINGS: fleet_red.saver(store)}
 
 
 def _fresh_task(task_id: str) -> dict[str, Any] | None:
@@ -262,7 +266,7 @@ STEPS = (
     CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"})),
     CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),
     CallStep("release alert", REOPENS, held(_release_alert)),
-    CallStep("fleet red notice", REOPENS, held(_fleet_red_notice)),
+    WriteStep("fleet red notice", REOPENS, held(_fleet_red_notice), writes=frozenset({fleet_red.LISTINGS})),
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
     WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),
