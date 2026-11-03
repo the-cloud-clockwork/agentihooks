@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 
+import scripts.tick.steps.report  # noqa: F401
 from scripts.inbox import exits, wake
 from scripts.inbox.store import CLOSED, SETTLED_EXITS, InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
