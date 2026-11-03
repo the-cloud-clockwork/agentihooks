@@ -1411,13 +1411,13 @@ def autoscale_lines(config, decision):
 def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     from scripts.swarm import capacity, local_slots
 
-    known = args.slug in store.slugs()
-    config = store.config(args.slug) if known else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
+    config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
     if args.fixture:
         inputs = capacity.fixture_inputs(json.loads(Path(args.fixture).read_text()))
     else:
         inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
     _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs)
+    known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     if args.json:
         print(
