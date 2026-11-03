@@ -12,7 +12,14 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.killers import KillMemory, is_direct
 from scripts.ci_mutation.mutant_shards import function_name
-from scripts.ci_mutation.plan import BATCH_RUNNERS, MUTANT_SECONDS, shard_count, shard_workers
+from scripts.ci_mutation.plan import (
+    BATCH_RUNNERS,
+    MUTANT_SECONDS,
+    SHARD_SETUP_SECONDS,
+    shard_capacity,
+    shard_count,
+    shard_workers,
+)
 from scripts.ci_mutation.scope import discover_changes, select_tests
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -183,7 +190,7 @@ def plan_shards(
     fits = (
         count
         for count in range(count, ceiling)
-        if max(assign_units(items, units, count)[1]) <= shard_workers() * budget
+        if max(assign_units(items, units, count)[1]) <= shard_capacity(shard_workers(), budget)
     )
     count = next(fits, ceiling)
     assignments, loads = assign_units(items, units, count)
@@ -263,16 +270,16 @@ def budget_overrun(plan: dict[str, Any], budget: float) -> str:
     """Describe a plan whose slowest shard cannot finish within the shard budget, or return an empty string."""
     slowest: float = max(plan["shard_worker_seconds"])
     workers: int = plan["workers"]
-    if slowest <= workers * budget:
+    if slowest <= shard_capacity(workers, budget):
         return ""
     total: float = plan["estimated_worker_seconds"]
-    capacity = SHARD_LIMIT * workers * budget
+    capacity = SHARD_LIMIT * shard_capacity(workers, budget)
     parts = max(2, math.ceil(total / capacity))
     return (
         f"The slowest mutation shard needs {slowest:.0f} worker seconds, {slowest / workers:.0f} seconds on"
-        f" {workers} workers, against the {budget:.0f} second shard budget. The change needs {total:.0f} worker"
-        f" seconds and {SHARD_LIMIT} shards hold at most {capacity:.0f}, so split it into at least {parts} pull"
-        " requests."
+        f" {workers} workers, against the {budget:.0f} second shard budget less {SHARD_SETUP_SECONDS:.0f} seconds"
+        f" of setup. The change needs {total:.0f} worker seconds and {SHARD_LIMIT} shards hold at most"
+        f" {capacity:.0f}, so split it into at least {parts} pull requests."
     )
 
 
