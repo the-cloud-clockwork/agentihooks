@@ -229,7 +229,9 @@ def run_group(name: str, **state: Any) -> list[str]:
     ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
     box: Mapping[str, object] = state.get("box", {})
     printing = partial(_print_actions, box)
-    return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=printing))
+    records = engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=printing)
+    steps.note_left(box, records)
+    return steps.actions(records)
 
 
 def _print_actions(box: Mapping[str, object], records: tuple[engine.StepRecord, ...]) -> None:
