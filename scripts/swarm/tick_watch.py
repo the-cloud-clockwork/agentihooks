@@ -20,8 +20,8 @@ PASS_S = 60
 SLUG_PASS_S = 120
 BEAT_S = 30
 BLOCKED_LIMIT = 5
-RESTART_S = scheduled_tick.STOP_S + 30
-RESPAWN_S = 120
+REPAIR_S = SLUG_PASS_S - 20
+RESTART_S = scheduled_tick.STOP_S + 5
 WATCHDOG = "WATCHDOG=1"
 ALERT = (
     "The tick of swarm {slug} is stale: {evidence}. Until it recovers no swarm alert, nudge, merge or spawn happens; "
@@ -78,14 +78,15 @@ def watch_pass(
 class Repair:
     """The scheduler serves every swarm on the machine, so it restarts at most once per stale window.
 
-    Each step runs under its own bound, so a hung herdr read or spawn never holds the repair past the bounds.
+    The restart runs under its own bound and the respawn under what is left of the repair bound, so a hung herdr
+    read or spawn returns the repair inside the pass deadline and never counts as a blocked pass.
     """
 
     def __init__(
         self,
         restart: Callable[[], str],
         respawn: Callable[[str], list[str]],
-        bounds: tuple[float, float] = (RESTART_S, RESPAWN_S),
+        bounds: tuple[float, float] = (RESTART_S, REPAIR_S),
     ):
         self.restart, self.respawn, self.restarted, self.lock = restart, respawn, None, Lock()
         self.bounds = bounds
@@ -96,9 +97,11 @@ class Repair:
             due = self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS
             if due:
                 self.restarted = now
+        deadline = time.monotonic() + self.bounds[1]
         if due:
-            actions += bounded(lambda: [self.restart()], self.bounds[0], "the scheduler restart")
-        return actions + bounded(lambda: self.respawn(slug), self.bounds[1], "the master respawn")
+            actions += bounded(lambda: [self.restart()], min(self.bounds), "the scheduler restart")
+        left = max(deadline - time.monotonic(), 0)
+        return actions + bounded(lambda: self.respawn(slug), left, "the master respawn")
 
 
 def bounded(call: Callable[[], list[str]], limit_s: float, step: str) -> list[str]:
@@ -125,7 +128,7 @@ def bounded(call: Callable[[], list[str]], limit_s: float, step: str) -> list[st
     abandoned.set()
     if failed:
         raise failed[0]
-    return done[0] if done else [f"left {step} running after {limit_s:g} seconds"]
+    return done[0] if done else [f"left {step} running after {limit_s:.1f} seconds"]
 
 
 def _alert(store: RedisStore, slug: str, now: int, episode: dict[str, Any] | None, evidence: list[str]) -> list[str]:

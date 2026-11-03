@@ -669,7 +669,7 @@ def cmd_tick_watch(store, args):
 
         def repair(slug: str, now: int) -> list[str]:
             return tick_watch.bounded(
-                lambda: place_master(slug, store, runtime, now), tick_watch.RESPAWN_S, "the master placement"
+                lambda: place_master(slug, store, runtime, now), tick_watch.REPAIR_S, "the master placement"
             )
 
     tick_watch.run(store, now_ms, repair)

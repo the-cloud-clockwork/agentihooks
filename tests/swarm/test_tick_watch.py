@@ -796,7 +796,7 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
         herdr_read()
         return ["spawned"]
 
-    repair = tick_watch.Repair(lambda: "restarted", respawn, bounds=(0.2, 0.2))
+    repair = tick_watch.Repair(lambda: "restarted", respawn, bounds=(0.2, 0.4))
     started = time.monotonic()
     try:
         actions = repair("sw", START)
@@ -804,8 +804,8 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
         release.set()
     elapsed = time.monotonic() - started
 
-    assert actions == ["restarted", "left the master respawn running after 0.2 seconds"]
-    assert 0.2 <= elapsed < 10
+    assert actions == ["restarted", "left the master respawn running after 0.4 seconds"]
+    assert 0.4 <= elapsed < 10
 
 
 def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_bound():
@@ -846,10 +846,32 @@ def test_a_step_failing_after_its_bound_reports_the_error_on_stderr(capsys):
 
 
 def test_the_repair_bounds_cover_the_supervisor_stop_and_sum_to_well_under_the_watchdog():
-    assert tick_watch.RESTART_S == scheduled_tick.STOP_S + 30 == 120
-    assert tick_watch.RESPAWN_S == 120
-    assert tick_watch.RESTART_S + tick_watch.RESPAWN_S <= tick_heartbeat.LIMIT_MS / 1000 / 2
-    assert tick_watch.Repair(lambda: "", lambda slug: []).bounds == (120, 120)
+    assert tick_watch.RESTART_S == scheduled_tick.STOP_S + 5 == 95
+    assert tick_watch.REPAIR_S == tick_watch.SLUG_PASS_S - 20 == 100
+    assert tick_watch.RESTART_S < tick_watch.REPAIR_S < tick_watch.SLUG_PASS_S
+    assert tick_watch.Repair(lambda: "", lambda slug: []).bounds == (95, 100)
+
+
+def test_a_hung_master_placement_in_a_cluster_returns_the_watch_repair_within_its_bound(monkeypatch):
+    from scripts.swarm import tick
+
+    release = threading.Event()
+    monkeypatch.setenv("LEDGER_URL", "https://hub.example:8765")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setattr(cli, "routed", lambda herdr: object())
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: "herdr")
+    monkeypatch.setattr(tick, "place_master", lambda *args: release.wait(30) and ["placed"])
+    monkeypatch.setattr(tick_watch, "REPAIR_S", 0.2)
+    ran = []
+    monkeypatch.setattr(tick_watch, "run", lambda *args: ran.append(args))
+
+    cli.cmd_tick_watch("store", None)
+    try:
+        actions = ran[0][2]("sw", START)
+    finally:
+        release.set()
+
+    assert actions == ["left the master placement running after 0.2 seconds"]
 
 
 def test_the_scheduler_restart_stops_the_running_supervisor_then_registers_the_tick_again():
