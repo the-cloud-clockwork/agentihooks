@@ -468,6 +468,7 @@ def test_the_head_takes_the_fastest_tests_to_its_budget_and_slices_balance_the_r
         "head": ["h1", "h2", "h3"],
         "slices": [["a1", "a4"], ["a2", "a3"]],
         "costs": [pytest.approx(5.6 + 1.25 * 150), pytest.approx(5.6 + 1.25 * 130)],
+        "head_seconds": 20.0,
     }
     assert split_tests(set(seconds) - {"a1", "a2", "a3"}, seconds, 10) is None
     over = split_tests({"a4", "a3", "a2"}, seconds, 10)
@@ -651,8 +652,15 @@ def test_measured_cli_requires_bases_and_statistics(monkeypatch, args):
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize(("splits", "flag"), [({}, "false"), ({"scripts.sample.x_f": {"head": ["early"]}}, "true")])
-def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path, monkeypatch, splits, flag):
+@pytest.mark.parametrize(
+    ("splits", "early", "flag"),
+    [
+        ({}, {}, "false"),
+        ({"scripts.sample.x_f": {"head": ["early"]}}, {}, "true\nprobe_shards=[0, 1]"),
+        ({"scripts.sample.x_f": {"head": ["early"]}}, {"probe_shards": 3}, "true\nprobe_shards=[0, 1, 2]"),
+    ],
+)
+def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path, monkeypatch, splits, early, flag):
     from scripts.ci_mutation import measured
 
     monkeypatch.chdir(tmp_path)
@@ -672,6 +680,7 @@ def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path
             "splits": splits,
             "shard_worker_seconds": [0.5, 0.5],
             "workers": 3,
+            **early,
         },
     )
     monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(folder)])
@@ -1002,6 +1011,7 @@ def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota():
     planners = (
         "scripts.ci_mutation.plan ",
         "scripts.ci_mutation.measured ",
+        "scripts.ci_mutation.probed ",
         "scripts.ci_mutation.replay prepare",
         "python .refinement-proof/run.py",
     )

@@ -29,6 +29,7 @@ from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 # Traced test seconds: every unit of a split mutant reruns the fastest tests, where most mutants die, then one slice.
 HEAD_SECONDS = 20.0
 SLICE_SECONDS = 120.0
+PROBE_SECONDS = 120.0
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
@@ -112,6 +113,7 @@ def split_tests(
         "head": sorted(head),
         "slices": [sorted(chosen) for chosen in slices],
         "costs": [MUTANT_SECONDS + 1.25 * (spent + load) for load in loads],
+        "head_seconds": spent,
     }
 
 
@@ -137,7 +139,7 @@ def measured_splits(
             costs = [
                 MUTANT_SECONDS + 1.25 * (spent + sum(seconds[node] for node in chosen)) for chosen in kept["slices"]
             ]
-            splits[function] = {**kept, "costs": costs}
+            splits[function] = {**kept, "costs": costs, "head_seconds": spent}
         elif split:
             splits[function] = split
         if early := [
@@ -169,10 +171,10 @@ def plan_shards(
     costs: dict[str, float],
     target: float = 240,
     limit: int = 10,
-    splits: dict | None = None,
-    unit_costs: dict | None = None,
+    splits: dict[str, Any] | None = None,
+    unit_costs: dict[str, list[float]] | None = None,
     budget: float = 1080,
-) -> dict:
+) -> dict[str, Any]:
     splits = splits or {}
     units = {
         name: (unit_costs or {}).get(name, splits[function]["costs"])
@@ -208,12 +210,23 @@ def plan_shards(
     }
 
 
+def probe_shard_count(plan: dict[str, Any]) -> int:
+    """Size the early stage so each job runs its share of split mutant heads within the early wall target."""
+    heads = [
+        MUTANT_SECONDS + 1.25 * plan["splits"][function]["head_seconds"]
+        for name in plan["assignments"]
+        if (function := function_name(name)) in plan["splits"]
+    ]
+    wanted = math.ceil(sum(heads) / (shard_workers() * PROBE_SECONDS))
+    return max(1, min(BATCH_RUNNERS, len(heads), wanted))
+
+
 def measured_plan(
     groups: list[tuple[list[str], list[dict]]],
     memory: KillMemory | None = None,
     limit: int = 10,
     direct: Mapping[str, Collection[str]] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     limit = min(limit, sum(len(names) for names, _ in groups))
     costs, splits, unit_costs = {}, {}, {}
     for names, results in groups:
@@ -228,7 +241,8 @@ def measured_plan(
             for tests, fallback in zip(split["slices"], split["costs"], strict=True):
                 observed = memory.cost(name, {*split["head"], *tests}) if memory is not None else None
                 unit_costs[name].append(observed if observed is not None else split.get("first", fallback))
-    return plan_shards(costs, limit=limit, splits=splits, unit_costs=unit_costs)
+    plan = plan_shards(costs, limit=limit, splits=splits, unit_costs=unit_costs)
+    return {**plan, "probe_shards": probe_shard_count(plan)} if plan["splits"] else plan
 
 
 def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
@@ -323,6 +337,8 @@ def main() -> int:
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(plan['shards'])))}\n")
             stream.write(f"probe={json.dumps(bool(plan['splits']))}\n")
+            if plan["splits"]:
+                stream.write(f"probe_shards={json.dumps(list(range(plan.get('probe_shards', plan['shards']))))}\n")
     return 0
 
 
