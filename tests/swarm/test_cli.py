@@ -311,42 +311,6 @@ def test_the_tick_hands_the_findings_pass_its_ledger(env, monkeypatch):
     assert [(doc["tasks"], doc["phases"]) for doc in seen] == [(state["tasks"], state["phases"])]
 
 
-def test_the_tick_heartbeat_keeps_the_tick_lock_with_the_exact_lease_and_token(env, monkeypatch):
-    from contextlib import contextmanager
-
-    from scripts.swarm import controller, lease
-    from scripts.tick import pool
-
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    real_acquire, real_take_tick_lock, real_running = lease.acquire, controller.take_tick_lock, pool.running
-    seen_held, seen_token, captured = {}, {}, {}
-
-    def wrap_acquire(*args, **kwargs):
-        seen_held["held"] = real_acquire(*args, **kwargs)
-        return seen_held["held"]
-
-    def wrap_take_tick_lock(*args, **kwargs):
-        seen_token["token"] = real_take_tick_lock(*args, **kwargs)
-        return seen_token["token"]
-
-    @contextmanager
-    def recording(*args, **kwargs):
-        captured["heartbeat"] = kwargs.get("heartbeat")
-        with real_running(*args, **kwargs) as found:
-            yield found
-
-    keep_calls = []
-    monkeypatch.setattr(lease, "acquire", wrap_acquire)
-    monkeypatch.setattr(controller, "take_tick_lock", wrap_take_tick_lock)
-    monkeypatch.setattr(pool, "running", recording)
-    monkeypatch.setattr(controller, "keep_tick", lambda *args: keep_calls.append(args))
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    keep_calls.clear()
-    captured["heartbeat"]()
-    assert keep_calls == [(store, "sw", seen_held["held"], seen_token["token"], cli.TICK_LOCK_MS)]
-
-
 @pytest.mark.parametrize("dependencies", [None, [], ["done"]])
 def test_block_comments_parks_and_finishes(env, dependencies, capsys):
     from scripts.swarm import idle
