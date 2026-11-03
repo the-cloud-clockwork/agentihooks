@@ -70,6 +70,11 @@ def test_tick_report_prints_each_lane_share(capsys: pytest.CaptureFixture[str]) 
     assert "Lane critical  2 steps  41.50% CPU share" in capsys.readouterr().out
 
 
+def test_lane_share_is_zero_when_no_step_cpu_was_spent() -> None:
+    rows = [{**step("a", "spawn", 1.0, 0.0, 0.0), "lane": "critical"}]
+    assert tick_report.lane_shares(rows, 0.0) == [{"lane": "critical", "count": 1, "cpu_share": 0.0}]
+
+
 def step(pass_id: str, name: str, wall: float, own: float, child: float) -> dict[str, Any]:
     return {"pass_id": pass_id, "step": name, "wall_s": wall, "own_cpu_s": own, "reaped_child_cpu_s": child}
 
