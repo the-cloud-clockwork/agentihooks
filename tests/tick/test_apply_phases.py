@@ -1,6 +1,6 @@
 """The phase pass returns a write per phase checkbox that its applier takes while the done state it read holds."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
 
@@ -38,12 +38,14 @@ def node(address: str, depth: int, state: str = "open") -> dict[str, Any]:
     return {"node": address, "kind": address.split("/")[0][:-1], "depth": depth, "state": state}
 
 
-@pytest.fixture
-def held_phases() -> Iterator[list[dict[str, Any]]]:
-    rows: list[dict[str, Any]] = []
-    token = view.CURRENT.set(view.LedgerView(1, {"phases": rows}))
+def held_phases() -> Iterator[Callable[..., None]]:
+    token = view.CURRENT.set(view.LedgerView(1, {"phases": []}))
     kept = view.HELD.set(None)
-    yield rows
+
+    def hold(*rows: dict[str, Any]) -> None:
+        view.CURRENT.set(view.LedgerView(1, {"phases": list(rows)}))
+
+    yield hold
     view.HELD.reset(kept)
     view.CURRENT.reset(token)
 
@@ -51,7 +53,7 @@ def held_phases() -> Iterator[list[dict[str, Any]]]:
 def test_the_phase_step_returns_a_write_per_checkbox_guarded_on_the_done_state_it_read() -> None:
     ledger = Ledger([node("phases/p1", 0), node("tasks/t1", 1, "done"), node("phases/p2", 0), node("tasks/t2", 1)])
     doc = {"phases": [{"id": "p1", "title": "Build"}, {"id": "p2", "title": "Ship", "done": True}]}
-    assert tasks.phase_writes("sw", doc, ledger) == [
+    assert tasks.phase_writes(phases.phase_changes("sw", doc, ledger)) == [
         Write(tasks.PHASES, "p1", phases.PhaseChange("p1", "Build", True, 1, ()), expected=False),
         Write(tasks.PHASES, "p2", phases.PhaseChange("p2", "Ship", False, 1, ("t2",)), expected=True),
     ]
@@ -63,12 +65,12 @@ def test_the_phase_step_passes_a_skipped_hierarchy_read_through_as_an_action() -
         def hierarchy(self, slug: str) -> list[dict[str, Any]]:
             raise OSError("refused")
 
-    found = tasks.phase_writes("sw", {"phases": [{"id": "p1", "title": "Build"}]}, Broken([]))
+    found = tasks.phase_writes(phases.phase_changes("sw", {"phases": [{"id": "p1", "title": "Build"}]}, Broken([])))
     assert found == ["phase pass skipped, the hierarchy read failed: refused"]
 
 
 def test_the_phase_applier_sets_the_checkbox_marks_the_box_and_returns_its_action(
-    monkeypatch: pytest.MonkeyPatch, held_phases: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, held_phases: Callable[..., None]
 ) -> None:
     taken: list[tuple[Any, ...]] = []
 
@@ -77,7 +79,7 @@ def test_the_phase_applier_sets_the_checkbox_marks_the_box_and_returns_its_actio
         return "phase p1 ticked"
 
     monkeypatch.setattr(phases, "apply_change", apply_change)
-    held_phases.append({"id": "p1", "done": False})
+    held_phases({"id": "p1", "done": False})
     box: dict[str, Any] = {}
     writer = tasks.phase_writer("sw", "ledger", "inbox", "store", box)
     assert writer(Write(tasks.PHASES, "p1", TICK, expected=False)) == ["phase p1 ticked"]
@@ -96,10 +98,10 @@ def test_the_phase_applier_writes_through_without_a_held_view(monkeypatch: pytes
 
 
 def test_the_phase_applier_drops_a_checkbox_another_writer_moved(
-    monkeypatch: pytest.MonkeyPatch, held_phases: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, held_phases: Callable[..., None]
 ) -> None:
     monkeypatch.setattr(phases, "apply_change", lambda *args: pytest.fail("set a moved checkbox"))
-    held_phases.append({"id": "p1", "done": True})
+    held_phases({"id": "p1", "done": True})
     box: dict[str, Any] = {}
     with pytest.raises(RevisionConflict, match="^phase p1 changed its checkbox since the phase pass read it$"):
         tasks.phase_writer("sw", "ledger", "inbox", "store", box)(Write(tasks.PHASES, "p1", TICK, expected=False))
@@ -107,7 +109,7 @@ def test_the_phase_applier_drops_a_checkbox_another_writer_moved(
 
 
 def test_the_phase_applier_drops_a_phase_the_held_view_lost(
-    monkeypatch: pytest.MonkeyPatch, held_phases: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, held_phases: Callable[..., None]
 ) -> None:
     monkeypatch.setattr(phases, "apply_change", lambda *args: pytest.fail("set a lost phase"))
     with pytest.raises(RevisionConflict, match="^phase p2 changed its checkbox"):
@@ -115,13 +117,13 @@ def test_the_phase_applier_drops_a_phase_the_held_view_lost(
 
 
 def test_the_phase_applier_drops_a_checkbox_the_ledger_refused(
-    monkeypatch: pytest.MonkeyPatch, held_phases: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, held_phases: Callable[..., None]
 ) -> None:
     def refuse(*args: Any) -> str:
         raise LedgerRefused("no")
 
     monkeypatch.setattr(phases, "apply_change", refuse)
-    held_phases.append({"id": "p1"})
+    held_phases({"id": "p1"})
     box: dict[str, Any] = {}
     with pytest.raises(RevisionConflict, match="^the ledger refused the checkbox of phase p1$"):
         tasks.phase_writer("sw", "ledger", "inbox", "store", box)(Write(tasks.PHASES, "p1", TICK, expected=False))
@@ -129,13 +131,13 @@ def test_the_phase_applier_drops_a_checkbox_the_ledger_refused(
 
 
 def test_the_phase_applier_marks_the_box_before_a_notice_that_fails(
-    monkeypatch: pytest.MonkeyPatch, held_phases: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, held_phases: Callable[..., None]
 ) -> None:
     def fail(*args: Any) -> str:
         raise RuntimeError("redis down")
 
     monkeypatch.setattr(phases, "apply_change", fail)
-    held_phases.append({"id": "p1"})
+    held_phases({"id": "p1"})
     box: dict[str, Any] = {}
     with pytest.raises(RuntimeError, match="redis down"):
         tasks.phase_writer("sw", "ledger", "inbox", "store", box)(Write(tasks.PHASES, "p1", TICK, expected=False))
@@ -167,7 +169,7 @@ def _phase_pass(ledger: Ledger, doc: dict[str, Any], box: dict[str, Any]) -> lis
     step = tasks.WriteStep(
         "planning and phase pass",
         "phase writes",
-        lambda tick, get: tasks.phase_writes(get("slug"), get("doc"), get("ledger")),
+        lambda tick, get: tasks.phase_writes(phases.phase_changes(get("slug"), get("doc"), get("ledger"))),
         writes=frozenset({tasks.PHASES}),
     )
     ctx = Context(_State({"slug": "sw", "doc": doc, "ledger": ledger}), Deadline.after(60.0))
@@ -177,7 +179,7 @@ def _phase_pass(ledger: Ledger, doc: dict[str, Any], box: dict[str, Any]) -> lis
 
 
 def test_a_conflicting_checkbox_is_dropped_then_recomputed_on_the_next_pass(
-    monkeypatch: pytest.MonkeyPatch, held_phases: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, held_phases: Callable[..., None]
 ) -> None:
     def apply_change(inbox: Any, store: Any, slug: str, ledger: Ledger, change: phases.PhaseChange) -> str:
         ledger.set_phase(slug, change.phase_id, change.done, "")
@@ -186,7 +188,7 @@ def test_a_conflicting_checkbox_is_dropped_then_recomputed_on_the_next_pass(
     monkeypatch.setattr(phases, "apply_change", apply_change)
     ledger = Ledger([node("phases/p1", 0), node("tasks/t1", 1, "done")])
     stale = {"phases": [{"id": "p1", "title": "Build"}]}
-    held_phases.append({"id": "p1", "done": True})
+    held_phases({"id": "p1", "done": True})
     box: dict[str, Any] = {}
     first = _phase_pass(ledger, stale, box)
     assert ledger.set == [] and box == {}

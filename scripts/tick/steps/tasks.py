@@ -232,13 +232,11 @@ def _apply_ranking(store: Any, write: Write) -> list[str]:
             raise RevisionConflict(f"the rank write of swarm {write.key} carries no rank pass")
 
 
-def phase_writes(slug: str, doc: dict[str, Any], ledger: Any) -> list[str | Write]:
-    """Return a write for each phase the phase pass ticks or reopens, guarded on the done state it read."""
+def phase_writes(found: list[str | phases.PhaseChange]) -> list[str | Write]:
+    """Return a write for each phase change ``found`` names, guarded on the done state it read, and its other lines."""
     return [
-        Write(PHASES, change.phase_id, change, expected=not change.done)
-        if isinstance(change, phases.PhaseChange)
-        else change
-        for change in phases.phase_changes(slug, doc, ledger)
+        Write(PHASES, item.phase_id, item, expected=not item.done) if isinstance(item, phases.PhaseChange) else item
+        for item in found
     ]
 
 

@@ -2084,7 +2084,9 @@ def test_newly_open_phase_sends_its_planning_notice_on_the_same_tick(store, monk
     ledger.add_task = lambda slug, row, by: ledger.rows.update(
         {row["task"]: {**row, "id": row["task"], "state": "open"}}
     )
-    ledger.set_phase = lambda slug, phase_id, done, status: ledger.phases[0].update(done=done)
+    monkeypatch.setattr(
+        ledger, "set_phase", lambda slug, phase_id, done, status: ledger.phases[0].update(done=done), raising=False
+    )
     monkeypatch.setattr(phases, "phase_changes", lambda *args: [phases.PhaseChange("p1", "First", True, 1, ())])
     inbox = InboxStore(store.redis)
     passing = {"store": store, "slug": "sw", "runtime": None, "box": PassBox(), "ledger": ledger}
