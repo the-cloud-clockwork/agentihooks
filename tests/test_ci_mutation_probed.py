@@ -155,7 +155,7 @@ def test_the_cli_refuses_a_plan_the_remaining_budget_cannot_hold(tmp_path, monke
     monkeypatch.setattr("sys.argv", ["probed", "--stats", str(folder), "--budget", "237"])
     assert probed.main() == 1
     assert not output.exists()
-    assert capsys.readouterr().out.splitlines()[-1] == OVERRUN
+    assert capsys.readouterr().out.splitlines()[-1].startswith("::error title=Mutation plan over budget::")
 
 
 @pytest.mark.parametrize(("cost", "status"), [(2674.5, 1), (2673.0, 0)])
