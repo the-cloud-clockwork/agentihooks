@@ -147,7 +147,7 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
 
     function = "scripts.sample.x_f"
     names = [f"{function}__mutmut_{index}" for index in range(3)]
-    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0]}
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0], "head_seconds": 1.0}
     memory = killers.KillMemory(tmp_path)
     ticks = iter([0.0, 9.0, 20.0, 21.0, 30.0, 39.0, 40.0, 41.0])
     monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))

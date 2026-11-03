@@ -567,7 +567,7 @@ def test_single_shard_collection_preserves_both_supported_workflow_states():
 def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
-    assert job["needs"] == ["plan", "stats", "refine", "mutation-shard"]
+    assert job["needs"] == ["plan", "stats", "refine", "replan", "mutation-shard"]
     assert job["if"] == "${{ !cancelled() && needs.plan.outputs.graded == 'true' }}"
     assert job["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
     steps, names = _steps(job)
