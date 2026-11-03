@@ -73,8 +73,9 @@ def test_unfreezing_a_task_leaves_it_free() -> None:
     ],
 )
 def test_a_malformed_queue_field_is_refused_at_check(fields: dict[str, object], message: str) -> None:
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError) as raised:
         core.check_op({"op": "freeze_set", "id": "f1", "target": "plans/a", **fields})
+    assert str(raised.value) == message
 
 
 def test_focus_bottom_moves_a_queued_target_to_the_end_and_a_plain_refocus_keeps_its_place() -> None:
@@ -108,5 +109,12 @@ def test_an_unfrozen_task_waits_for_the_open_focus_before_it_may_be_claimed() ->
 
 
 def test_only_must_be_a_boolean() -> None:
-    with pytest.raises(ValueError, match="position is top or bottom and only is true or false"):
+    with pytest.raises(ValueError) as raised:
         core.check_op({"op": "freeze_set", "id": "f1", "verb": "focus", "target": "plans/a", "only": 1})
+    assert str(raised.value) == "position is top or bottom and only is true or false"
+
+
+def test_focus_top_with_no_other_focus_goes_after_the_freezes() -> None:
+    freeze("lane:ci")
+    state, _ = freeze("tasks/t2", verb="focus", position="top")
+    assert targets(state) == [("freeze", "lane:ci"), ("focus", "tasks/t2")]

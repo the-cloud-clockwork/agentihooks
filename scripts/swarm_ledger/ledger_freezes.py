@@ -116,13 +116,13 @@ def _displaced(row: dict[str, Any], op: dict[str, Any], graph: dict[str, Any]) -
     return row["target"] == target or target in _above(row["target"], graph)
 
 
-def _above(node: str, graph: dict[str, Any]) -> list[str]:
-    chain: list[str] = []
+def _above(node: str, graph: dict[str, Any], below: tuple[str, ...] = ()) -> tuple[str, ...]:
     up: str | None = (graph.get(node) or (None, None))[1]
-    while up and up not in chain:
-        chain.append(up)
-        up = (graph.get(up) or (None, None))[1]
-    return chain
+    if up is None:
+        return below
+    if up in below:
+        return below
+    return _above(up, graph, (*below, up))
 
 
 def _clear(doc, op, ctx, by):

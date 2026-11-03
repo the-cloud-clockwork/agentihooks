@@ -105,7 +105,7 @@ def test_the_admitted_set_is_computed_once_per_ledger_view(monkeypatch: pytest.M
 
 
 def test_the_tasks_of_a_phase_the_focused_phase_waits_on_join_the_focus() -> None:
-    phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}, {"id": "p3", "depends_on": ["p2"]}]
+    phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1", "empty"]}, {"id": "p3", "depends_on": ["p2"]}]
     rows = [task("early", phase="p1"), task("middle", phase="p2"), task("late", phase="p3"), task("other", phase="p4")]
     found = {**doc(record("tasks/late", "focus"), tasks=rows), "phases": phases}
     assert freeze.admitted(found, hierarchy.project(found)[0]) == {"late", "middle", "early"}
@@ -124,6 +124,12 @@ def test_a_focused_task_waiting_on_frozen_work_never_holds_the_queue_open() -> N
         "middle",
         "cold",
     }
+
+
+def test_done_work_between_a_focused_task_and_frozen_work_keeps_the_focus_open() -> None:
+    rows = [task("hot", phase="p2", depends_on=["middle"]), task("middle", state="done", depends_on=["cold"])]
+    found = doc(record("tasks/hot", "focus"), record("tasks/cold"), tasks=[*rows, task("cold")])
+    assert freeze.admitted(found, {}) == {"hot", "middle"}
 
 
 def test_focus_weight_never_lets_free_work_take_a_seat_from_focused_work(store: RedisStore) -> None:
@@ -208,6 +214,7 @@ def test_an_urgent_task_held_by_the_focus_names_the_focus() -> None:
     found = doc(record("tasks/hot", "focus"), tasks=[row, hot])
     rows = {t["id"]: t for t in found["tasks"]}
     assert claim_hold.urgent(row, rows, found, hierarchy.project(found)[0], "") == claim_hold.FOCUS
+    assert claim_hold.urgent(row, rows, found, hierarchy.project(found)[0], "p1") == ""
 
 
 def test_the_focus_command_passes_only_and_the_queue_position(
@@ -244,7 +251,7 @@ def test_the_client_sends_the_queue_fields_only_on_a_focus(monkeypatch: pytest.M
     sent: list[dict[str, Any]] = []
     monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops: sent.append(ops[0]))
     LedgerClient().freeze("demo", "focus", "plans/a", position="top", only=True)
-    LedgerClient().freeze("demo", "unfreeze", "plans/a", position="top", only=True)
+    LedgerClient().freeze("demo", "unfreeze", "plans/a", position="top", only=True, quote="his words")
     assert {key: sent[0][key] for key in ("op", "verb", "target", "position", "only")} == {
         "op": "freeze_set",
         "verb": "focus",
@@ -253,3 +260,4 @@ def test_the_client_sends_the_queue_fields_only_on_a_focus(monkeypatch: pytest.M
         "only": True,
     }
     assert "position" not in sent[1] and "only" not in sent[1]
+    assert sent[1]["quote"] == "his words"

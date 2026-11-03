@@ -3,7 +3,7 @@
 import operator
 import sys
 from collections.abc import Callable, Iterable
-from typing import Any, cast
+from typing import Any
 
 from scripts.doctor import loop, priming
 from scripts.swarm import notice_text
@@ -86,11 +86,8 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     rows = {task["id"]: task for task in tasks}
     waits_on = _waits(doc, tasks)
     cold: set[str] = _cold(tasks, records, graph) if any(r["verb"] == "freeze" for r in records) else set()
-    stuck: dict[str, bool] = {}
     queue = [
-        task["id"]
-        for task in tasks
-        if _open_focus(task, records, focus, graph) and not _stuck(task["id"], rows, cold, waits_on, stuck)
+        task["id"] for task in tasks if _open_focus(task, focus, graph) and not _stuck(task["id"], rows, cold, waits_on)
     ]
     seen: set[str] = set()
     for task_id in queue:
@@ -116,8 +113,7 @@ def _reach(
 def _cold(tasks: list[dict[str, Any]], records: list[dict[str, Any]], graph: dict[str, Any]) -> set[str]:
     found: set[str] = set()
     for task in tasks:
-        chain = cast("list[str]", ancestry(task, graph))
-        if task.get("state") == "open" and frozen(task, records, chain):
+        if task.get("state") == "open" and frozen(task, records, ancestry(task, graph)):
             found.add(task["id"])
     return found
 
@@ -126,14 +122,14 @@ def _waits(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[s
     """What a task waits on: its dependencies, the tasks it is parked on and every task of each phase its phase
     waits on."""
     phases: list[dict[str, Any]] = doc.get("phases") or []
-    after: dict[str, list[str]] = {p["id"]: p.get("depends_on") or [] for p in phases}
-    members: dict[str, list[str]] = {}
+    after: dict[str | None, list[str]] = {p["id"]: p.get("depends_on") or [] for p in phases}
+    members: dict[str | None, list[str]] = {}
     for task in tasks:
-        members.setdefault(task.get("phase") or "", []).append(task["id"])
+        members.setdefault(task.get("phase"), []).append(task["id"])
 
     def waits_on(row: dict[str, Any]) -> list[str]:
         named: list[str] = [*(row.get("depends_on") or []), *(row.get("parked_on") or [])]
-        return named + [member for phase in after.get(row.get("phase") or "", []) for member in members.get(phase, [])]
+        return named + [member for phase in after.get(row.get("phase"), []) for member in members.get(phase, [])]
 
     return waits_on
 
@@ -143,25 +139,18 @@ def _stuck(
     rows: dict[str, dict[str, Any]],
     cold: set[str],
     waits_on: Callable[[dict[str, Any]], list[str]],
-    memo: dict[str, bool],
 ) -> bool:
     """Whether the task waits, directly or through other open work, on a frozen task, so it can never run."""
-    if task_id in memo:
-        return memo[task_id]
-    row = rows.get(task_id) or {}
-    memo[task_id] = False
-    if row.get("state") == "done":
-        return False
-    memo[task_id] = any(dep in cold or _stuck(dep, rows, cold, waits_on, memo) for dep in waits_on(row))
-    return memo[task_id]
+    reached: set[str] = set()
+    _reach(task_id, rows, set(), lambda row: [] if row.get("state") == "done" else waits_on(row), reached)
+    return bool(reached & cold)
 
 
-def _open_focus(task: dict[str, Any], records: list[dict[str, Any]], focus: list[str], graph: dict[str, Any]) -> bool:
+def _open_focus(task: dict[str, Any], focus: list[str], graph: dict[str, Any]) -> bool:
     if task.get("state") == "done" or task.get("out_of_scope"):
         return False
     chain = ancestry(task, graph)
-    cold = task.get("state") == "open" and frozen(task, records, chain)
-    return any(covers(target, task, chain) for target in focus) and not cold
+    return any(covers(target, task, chain) for target in focus)
 
 
 def exempt(task: dict[str, Any], fix_phase: str) -> bool:
@@ -172,7 +161,7 @@ def _fix(task: dict[str, Any], fix_phase: str) -> bool:
     return bool(fix_phase) and task.get("phase") == fix_phase
 
 
-def ancestry(task: dict, graph: dict) -> list:
+def ancestry(task: dict[str, Any], graph: dict[str, Any]) -> list[str]:
     chain = [f"tasks/{task['id']}"]
     roots = [hierarchy.parent("tasks", task)]
     if task.get("merged_into"):
