@@ -461,6 +461,15 @@ def test_a_schema_mismatch_names_the_first_unknown_key_and_the_top_field(live):
         )
 
 
+def test_a_focus_posted_with_only_true_is_stored_over_http(live: dict) -> None:
+    operation = {"op": "freeze_set", "id": "focus-only", "verb": "focus", "target": "phases/p1", "only": True}
+    status, _ = request(live, "POST", "operations", {"ops": [operation], "guards": {}})
+    assert status == 200
+    status, reply = request(live, "GET", "freezes")
+    assert status == 200
+    assert [(row["verb"], row["target"]) for row in reply["data"]] == [("focus", "phases/p1")]
+
+
 def test_stale_cursor_missing_guard_and_origin_are_rejected(live):
     status, page = request(live, "GET", "chat?limit=1")
     assert status == 200

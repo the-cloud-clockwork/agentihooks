@@ -461,11 +461,17 @@ def test_the_api_takes_freeze_ops_against_the_freezes_collection():
 
 def test_the_api_stores_a_focus_posted_with_only_true() -> None:
     freeze("plans/b", verb="focus")
-    ops = [{"op": "freeze_set", "id": "f3", "verb": "focus", "target": "plans/a", "only": True, "position": "top"}]
+    ops = [{"op": "freeze_set", "id": "f3", "verb": "focus", "target": "plans/a", "only": True}]
     assert schemas.check_operations({"operation_id": "o2", "ops": ops, "guards": {}}, core, ()) == ops
     state, rejected = core.sync(SLUG, ops=ops)
     assert rejected == []
     assert targets(state) == [("focus", "plans/a")]
+
+
+@pytest.mark.parametrize("position", ["top", "bottom"])
+def test_the_api_accepts_a_focus_at_the_top_or_bottom(position: str) -> None:
+    ops = [{"op": "freeze_set", "id": "f6", "verb": "focus", "target": "plans/a", "position": position}]
+    assert schemas.check_operations({"operation_id": "o5", "ops": ops, "guards": {}}, core, ()) == ops
 
 
 def test_the_api_refuses_a_focus_position_outside_top_and_bottom() -> None:
