@@ -2045,9 +2045,4 @@ def _end_awaiting_seats(
 ) -> None:
     for agent in agents:
         if agent.state == resume.AWAITING:
-            store.release(slug, agent.task, agent.name)
-            store.drop_agent(slug, agent.name)
-            row = rows.get(agent.task, {})
-            if row.get("state") in ACTIVE and row.get("claimed_by") == agent.name:
-                _reopen(slug, ledger, rows, agent.task)
-            exits.settle(InboxStore(store.redis), agent.name, "", "stopped")
+            _drop(slug, store, ledger, rows, agent)

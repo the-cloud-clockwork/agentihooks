@@ -17,6 +17,10 @@ def _awaiting(name: str, lane: str, task: str) -> AgentRecord:
     [
         ({"state": "claimed", "claimed_by": ENGINEER}, {"state": "open", "claimed_by": ""}),
         ({"state": "pr", "claimed_by": ENGINEER}, {"state": "open", "claimed_by": ""}),
+        (
+            {"state": "pr", "claimed_by": ENGINEER, "awaiting": "merge"},
+            {"state": "pr", "claimed_by": ENGINEER, "awaiting": "merge"},
+        ),
         ({"state": "done", "claimed_by": ENGINEER}, {"state": "done", "claimed_by": ENGINEER}),
         ({"state": "claimed", "claimed_by": "other"}, {"state": "claimed", "claimed_by": "other"}),
     ],
