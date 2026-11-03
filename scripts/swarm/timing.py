@@ -141,6 +141,7 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
     except BaseException as exc:
         outcome = "error"
         record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
+        record.update(getattr(exc, "step_fields", dict)())
         if report and (record_failure := ON_FAILURE.get()):
             record_failure(name, exc)
         raise

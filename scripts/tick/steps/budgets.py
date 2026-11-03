@@ -80,7 +80,7 @@ MEASURED: dict[str, Timing] = {
     "prerequisite reopen": Timing(UNMEASURED_S, CRITICAL_S),
     "promotion refresh": Timing(UNMEASURED_S, CRITICAL_S),
     "release alert": Timing(UNMEASURED_S, CRITICAL_S),
-    "fleet red notice": Timing(UNMEASURED_S, CRITICAL_S),
+    "fleet red notice": Timing(19.981, CRITICAL_S),
     "quota notice": Timing(UNMEASURED_S, CRITICAL_S),
     "lost runner": Timing(UNMEASURED_S, CRITICAL_S),
     "time left": Timing(UNMEASURED_S, CRITICAL_S),

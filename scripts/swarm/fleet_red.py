@@ -89,9 +89,9 @@ def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) 
     A fresh listing comes back with the write that saves it, a failed listing as none; the engine's applier saves it.
     """
     key = store.key(slug, f"fleet-red-pulls:{repo}")
-    raw = store.redis.get(key)
-    if raw is not None:
-        return _decoded(raw), ()
+    saved = store.redis.get(key)
+    if saved is not None:
+        return _decoded(saved), ()
     try:
         pulls: Pulls | None = tuple((reader or read)(repo))
     except ERRORS:
@@ -100,21 +100,25 @@ def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) 
     return pulls, (Write(LISTINGS, key, json.dumps(listing)),)
 
 
-def saved(store: Listings, slug: str) -> Reader:
-    """Return a reader of the listings saved in the last ten minutes: nothing where none or a failed one is saved."""
-    return partial(_saved, store, slug)
-
-
-def _saved(store: Listings, slug: str, repo: str) -> Pulls:
-    raw = store.redis.get(store.key(slug, f"fleet-red-pulls:{repo}"))
-    return (_decoded(raw) if raw is not None else None) or ()
-
-
-def _decoded(raw: str | bytes) -> Pulls | None:
-    rows = json.loads(raw)
+def _decoded(saved: str | bytes) -> Pulls | None:
+    """Return the open pull requests of a saved listing, none when the save records a failed listing."""
+    rows = json.loads(saved)
     if rows is None:
         return None
     return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows)
+
+
+def saved_reader(store: Listings, slug: str) -> Reader:
+    """Return a reader serving the repository's saved listing, listing it live without saving when none is saved."""
+    return partial(_saved_or_read, store, slug)
+
+
+def _saved_or_read(store: Listings, slug: str, repo: str) -> Pulls:
+    """Return the saved listing of ``repo``, nothing for a saved failed listing, else its live listing."""
+    saved = store.redis.get(store.key(slug, f"fleet-red-pulls:{repo}"))
+    if saved is None:
+        return read(repo)
+    return _decoded(saved) or ()
 
 
 def saver(store: Listings) -> Callable[[Write], None]:
