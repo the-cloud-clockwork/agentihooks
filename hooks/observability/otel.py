@@ -28,6 +28,8 @@ _log_emitter = None
 _initialized = False
 _gauges: dict[str, Any] = {}
 _counters: dict[str, Any] = {}
+_histograms: dict[str, Any] = {}
+SECONDS_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 45, 60, 90, 120, 180, 240, 300, 384, 600, 900)
 _providers: list = []
 FLUSH_TIMEOUT_SEC = 1.0
 FLUSH_COOLDOWN_SEC = 60
@@ -131,6 +133,8 @@ def _dispatch_op(op: tuple) -> None:
         _gauges[name].set(value, {**_correlation(attrs), **attrs})
     elif kind == "counter":
         _add_counter(cast(tuple[str, str, float, dict[str, str]], op))
+    elif kind == "histogram":
+        _record_histogram(cast(tuple[str, str, float, dict[str, str]], op))
     elif kind == "flush":
         try:
             succeeded = True
@@ -152,6 +156,26 @@ def _add_counter(op: tuple[str, str, float, dict[str, str]]) -> None:
     if name not in _counters:
         _counters[name] = meter.create_counter(name)
     _counters[name].add(value, attrs)
+
+
+def _record_histogram(op: tuple[str, str, float, dict[str, str]]) -> None:
+    """Records a queued histogram value in seconds, creating the histogram on first use."""
+    _, name, value, attrs = op
+    meter: Any = _meter
+    if meter is None:
+        _count(attrs, "histograms", "unsupported")
+        return
+    if name not in _histograms:
+        _histograms[name] = meter.create_histogram(name, unit="s", explicit_bucket_boundaries_advisory=SECONDS_BUCKETS)
+    _histograms[name].record(value, attrs)
+
+
+def temporality() -> dict[type, Any]:
+    """Delta temporality for counters and histograms, so each short lived process exports only what it added."""
+    from opentelemetry.sdk.metrics import Counter, Histogram
+    from opentelemetry.sdk.metrics.export import AggregationTemporality
+
+    return {Counter: AggregationTemporality.DELTA, Histogram: AggregationTemporality.DELTA}
 
 
 def _correlation(attrs: dict) -> dict:
@@ -218,7 +242,8 @@ def _init_sdk() -> None:
 
         # Metrics — periodic export, flushed on atexit
         reader = PeriodicExportingMetricReader(
-            OTLPMetricExporter(endpoint=endpoints["metrics"]), export_interval_millis=60_000
+            OTLPMetricExporter(endpoint=endpoints["metrics"], preferred_temporality=temporality()),
+            export_interval_millis=60_000,
         )
         mp = MeterProvider(resource=resource, metric_readers=[reader])
         metrics.set_meter_provider(mp)
@@ -305,6 +330,11 @@ def record_gauge(name: str, value: float, attributes: dict[str, str] | None = No
 def add_counter(name: str, value: float, attributes: dict[str, str] | None = None) -> None:
     """Enqueue a counter increment for the worker thread. Always non-blocking."""
     _enqueue("counters", ("counter", name, float(value), dict(attributes or {})))
+
+
+def record_histogram(name: str, value: float, attributes: dict[str, str] | None = None) -> None:
+    """Enqueue a histogram value in seconds for the worker thread. Always non-blocking."""
+    _enqueue("histograms", ("histogram", name, float(value), dict(attributes or {})))
 
 
 def _count(attrs: dict, signal: str, outcome: str) -> None:

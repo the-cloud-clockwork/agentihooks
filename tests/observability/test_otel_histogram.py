@@ -9,15 +9,17 @@ pytestmark = pytest.mark.unit
 
 def test_a_histogram_op_creates_one_seconds_histogram_and_records(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[tuple[float, dict[str, str]]] = []
-    made: list[tuple[str, str]] = []
+    made: list[tuple[str, str, tuple[float, ...]]] = []
 
     class Histogram:
         def record(self, value: float, attrs: dict[str, str]) -> None:
             recorded.append((value, attrs))
 
     class Meter:
-        def create_histogram(self, name: str, unit: str) -> Histogram:
-            made.append((name, unit))
+        def create_histogram(
+            self, name: str, unit: str, explicit_bucket_boundaries_advisory: tuple[float, ...]
+        ) -> Histogram:
+            made.append((name, unit, explicit_bucket_boundaries_advisory))
             return Histogram()
 
     monkeypatch.setattr(otel, "_meter", Meter())
@@ -25,7 +27,9 @@ def test_a_histogram_op_creates_one_seconds_histogram_and_records(monkeypatch: p
     otel._dispatch_op(("histogram", "h", 1.5, {"swarm": "sw"}))
     otel._dispatch_op(("histogram", "h", 2.0, {"swarm": "sw"}))
     assert recorded == [(1.5, {"swarm": "sw"}), (2.0, {"swarm": "sw"})]
-    assert made == [("h", "s")]
+    assert made == [("h", "s", otel.SECONDS_BUCKETS)]
+    assert otel.SECONDS_BUCKETS[0] == 0.05 and otel.SECONDS_BUCKETS[-1] == 900
+    assert list(otel.SECONDS_BUCKETS) == sorted(set(otel.SECONDS_BUCKETS))
 
 
 def test_a_histogram_op_without_a_meter_counts_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
