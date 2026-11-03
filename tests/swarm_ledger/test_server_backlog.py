@@ -34,7 +34,8 @@ def listening(monkeypatch, ledger_port, tmp_path):
     monkeypatch.setattr(server, "PORT", ledger_port)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
-    monkeypatch.setattr(server, "watch_ledgers", lambda *args: None)
+    watched = threading.Event()
+    monkeypatch.setattr(server, "watch_ledgers", lambda *args: watched.set())
     monkeypatch.setattr(server, "HUB", server.Hub())
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
     monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
@@ -48,6 +49,7 @@ def listening(monkeypatch, ledger_port, tmp_path):
     worker.start()
     httpd = created.get(timeout=10)
     try:
+        assert watched.wait(10), "the ledger watcher stand-in never returned"
         yield httpd, admitted, token
     finally:
         admitted.set()
