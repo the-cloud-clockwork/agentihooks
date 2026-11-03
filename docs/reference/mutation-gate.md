@@ -1459,7 +1459,7 @@ These are implementation defaults, with no environment variable or workflow disp
 | `HEAD_SECONDS` | 20 traced seconds | Select the fastest covering tests up to this budget, always including at least one test when available |
 | `SLICE_SECONDS` | 120 traced seconds | Divide the remaining duration by this value, rounding up to choose the slice count |
 | Split limit | 10 slices | Cap a mutant's units; fewer than two slices leaves it unsplit |
-| Shard target and limit | 240 seconds, 10 shards | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
+| Shard target and limit | 240 seconds, 10 shards wanted; up to 80 shards when the budget needs them ([Shards past the batch runner pool](#shards-past-the-batch-runner-pool)) | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
 
 For example, ten covering tests of one second each form a ten-second head. Thirty more tests of twenty seconds each make a 600-second tail, split into five 120-second slices. Each unit runs the ten head tests and six tail tests on its own shard. All forty distinct tests remain covered, although the head runs five times. Unit cost is estimated as `5.6 + 1.25 * (head_seconds + slice_seconds)`, or 168.1 worker seconds here. A split mutant's total estimated cost includes every repeated head.
 

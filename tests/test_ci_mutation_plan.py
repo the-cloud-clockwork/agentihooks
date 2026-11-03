@@ -381,7 +381,9 @@ def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preser
     assert plan_shards({str(i): 1000 for i in range(11)})["shards"] == 10
 
 
-def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_shards(monkeypatch):
+def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_shards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from scripts.ci_mutation.measured import SHARD_CEILING, SHARD_SETUP_SECONDS, plan_shards, shard_capacity
 
     monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
