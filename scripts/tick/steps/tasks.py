@@ -240,12 +240,12 @@ def phase_writes(found: list[str | phases.PhaseChange]) -> list[str | Write]:
     ]
 
 
-def phase_writer(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, Any]) -> Callable[[Write], list[str]]:
+def phase_writer(slug: str, ledger: Any, inbox: Any, store: Any, box: Any) -> Callable[[Write], list[str]]:
     """Return the phases applier: it sets a phase checkbox only while the done state the step read still holds."""
     return partial(_apply_phase, slug, ledger, inbox, store, box)
 
 
-def _apply_phase(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, Any], write: Write) -> list[str]:
+def _apply_phase(slug: str, ledger: Any, inbox: Any, store: Any, box: Any, write: Write) -> list[str]:
     """Mark the pass box and set the checkbox of ``write``, dropping it as a conflict once the phase moved.
 
     The phase is read from the held view after the pass's latest write; without a held view the write goes through.
@@ -253,8 +253,7 @@ def _apply_phase(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, 
     match write.value:
         case phases.PhaseChange() as change:
             held = view.current()
-            fresh = None if held is None else cast(dict[str, Any], held.read("phases", change.phase_id) or {})
-            if fresh is not None and bool(fresh.get("done")) != write.expected:
+            if held is not None and _done_of(held.read("phases", change.phase_id)) != write.expected:
                 raise RevisionConflict(f"phase {change.phase_id} changed its checkbox since the phase pass read it")
             box[PHASE_CHANGED] = True
             try:
@@ -263,6 +262,15 @@ def _apply_phase(slug: str, ledger: Any, inbox: Any, store: Any, box: dict[str, 
                 raise RevisionConflict(f"the ledger refused the checkbox of phase {change.phase_id}") from exc
         case _:
             raise RevisionConflict(f"the phase write of {write.key} carries no phase change")
+
+
+def _done_of(row: object) -> bool:
+    """Return the done state of a phase row, false for a row that is missing or carries no done flag."""
+    match row:
+        case {"done": bool() as done}:
+            return done
+        case _:
+            return False
 
 
 def _run_window(tick: Any, get: Get) -> Any:
@@ -357,7 +365,7 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] 
         found[fleet_red.LISTINGS] = fleet_red.saver(store)
         found[RANK] = rank_writer(store)
         if (inbox := state.get("inbox")) is not None and (box := state.get("box")) is not None:
-            found[PHASES] = phase_writer(slug, ledger, inbox, store, cast(dict[str, Any], box))
+            found[PHASES] = phase_writer(slug, ledger, inbox, store, box)
     return found
 
 
