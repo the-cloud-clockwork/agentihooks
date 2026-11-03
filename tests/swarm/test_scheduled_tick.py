@@ -247,7 +247,7 @@ def test_a_tick_that_exits_clean_after_its_timeout_still_ends_its_group(monkeypa
     monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
     group = _Group(members=1, stubborn=True)
     assert scheduled_tick._finish(_Tick([None, 0]), group, group.alive) == 0
-    assert group.sent == [(PID, signal.SIGTERM), (PID, signal.SIGKILL)]
+    assert group.sent == [(PID, signal.SIGTERM), (PID, signal.SIGTERM), (PID, signal.SIGKILL)]
     assert not group.alive(PID)
 
 
