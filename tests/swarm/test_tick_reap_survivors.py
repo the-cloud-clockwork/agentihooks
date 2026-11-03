@@ -90,6 +90,110 @@ def test_reap_agent_forwards_its_own_now_ms_to_lost(store: RedisStore, monkeypat
     assert seen["now_ms"] == now_ms
 
 
+class _LiveRuntime:
+    def __init__(self, names: set[str]) -> None:
+        self.names = names
+        self.named: list[str] = []
+
+    def live_names(self) -> set[str]:
+        return self.names
+
+    def name_pane(self, agent: AgentRecord) -> None:
+        self.named.append(agent.name)
+
+
+def _local_judging(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tick_module, "_acknowledging", lambda slug, store, agent: False)
+    monkeypatch.setattr(tick_module, "_remote_gone_reason", lambda slug, store, runtime, agent, now_ms: None)
+    monkeypatch.setattr(tick_module.reports, "host", lambda agent: "")
+    monkeypatch.setattr(tick_module, "_elsewhere", lambda agent: False)
+
+
+def test_reap_agent_does_not_count_an_agent_lost_at_exactly_the_startup_grace(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _local_judging(monkeypatch)
+    called: list[int] = []
+    monkeypatch.setattr(
+        tick_module,
+        "_lost",
+        lambda slug, store, ledger, runtime, rows, agent, now_ms: called.append(now_ms) or ["lost"],
+    )
+    agent = AgentRecord(name="agent-a", lane="eng", task="t1", state="working", started_at=1000)
+    judging = tick_module._Reaping("sw", store, object(), _StubRuntime(), {}, set(), 1000 + STARTUP_GRACE_MS)
+
+    assert tick_module._reap_agent(judging, agent) == []
+    assert called == []
+
+
+def test_reap_agent_forwards_its_own_ledger_to_watch_agent_for_a_live_master(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _local_judging(monkeypatch)
+    seen: list[tuple[object, ...]] = []
+
+    def spying_watch_agent(
+        slug: str, store: object, ledger: object, runtime: object, rows: object, agent: object, now_ms: int
+    ) -> list[str]:
+        seen.append((slug, store, ledger, runtime, rows, agent, now_ms))
+        return ["watched"]
+
+    monkeypatch.setattr(tick_module, "_watch_agent", spying_watch_agent)
+    ledger, rows = object(), {}
+    runtime = _LiveRuntime({"master-a"})
+    agent = AgentRecord(name="master-a", lane=tick_module.MASTER, task="", state="working")
+    judging = tick_module._Reaping("sw", store, ledger, runtime, rows, {"master-a"}, 7)
+
+    assert tick_module._reap_agent(judging, agent) == ["watched"]
+    assert seen == [("sw", store, ledger, runtime, rows, agent, 7)]
+    assert runtime.named == ["master-a"]
+
+
+def test_reap_agent_retires_a_live_agent_whose_task_ended_after_its_owner_was_restored(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _local_judging(monkeypatch)
+    answers = iter([False, True])
+    monkeypatch.setattr(tick_module, "_ended", lambda agent, rows: next(answers))
+    monkeypatch.setattr(tick_module, "_restore_owner", lambda slug, store, ledger, rows, agent: None)
+    seen: list[tuple[object, ...]] = []
+
+    def spying_retire_ended(
+        slug: str, store: object, ledger: object, runtime: object, rows: object, agent: object, now_ms: int
+    ) -> list[str]:
+        seen.append((slug, store, ledger, runtime, rows, agent, now_ms))
+        return ["retired"]
+
+    monkeypatch.setattr(tick_module, "_retire_ended", spying_retire_ended)
+    ledger, rows = object(), {}
+    runtime = _LiveRuntime({"agent-a"})
+    agent = AgentRecord(name="agent-a", lane="eng", task="t1", state="working")
+    judging = tick_module._Reaping("sw", store, ledger, runtime, rows, {"agent-a"}, 9)
+
+    assert tick_module._reap_agent(judging, agent) == ["retired"]
+    assert seen == [("sw", store, ledger, runtime, rows, agent, 9)]
+
+
+def test_reap_agent_forwards_every_argument_to_watch_remote(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tick_module, "_acknowledging", lambda slug, store, agent: False)
+    monkeypatch.setattr(tick_module, "_remote_gone_reason", lambda slug, store, runtime, agent, now_ms: None)
+    seen: list[tuple[object, ...]] = []
+
+    def spying_watch_remote(
+        slug: str, store: object, ledger: object, runtime: object, rows: object, agent: object, now_ms: int
+    ) -> list[str]:
+        seen.append((slug, store, ledger, runtime, rows, agent, now_ms))
+        return ["remote"]
+
+    monkeypatch.setattr(tick_module, "_watch_remote", spying_watch_remote)
+    ledger, rows, runtime = object(), {}, _StubRuntime()
+    agent = AgentRecord(name="agent-a", lane="eng", task="t1", state="working", runtime_backend="remote")
+    judging = tick_module._Reaping("sw", store, ledger, runtime, rows, set(), 11)
+
+    assert tick_module._reap_agent(judging, agent) == ["remote"]
+    assert seen == [("sw", store, ledger, runtime, rows, agent, 11)]
+
+
 def test_tick_hands_the_close_group_its_freshly_spawned_rows(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
