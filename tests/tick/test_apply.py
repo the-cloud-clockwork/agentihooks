@@ -169,9 +169,9 @@ def test_appliers_save_fleet_red_listings_wherever_the_site_holds_a_store() -> N
     redis = SimpleNamespace(set=lambda name, value, *, ex, nx: saved.append((name, value, ex, nx)) or True)
     store = SimpleNamespace(redis=redis)
 
-    assert list(tasks.appliers({"store": store})) == [fleet_red.LISTINGS]
+    assert list(tasks.appliers({"store": store})) == [fleet_red.LISTINGS, fleet_red.RELEASES]
     found = tasks.appliers({"slug": "sw", "ledger": Ledger(), "store": store})
-    assert list(found) == [tasks.SIZES, tasks.GROUPS, fleet_red.LISTINGS]
+    assert list(found) == [tasks.SIZES, tasks.GROUPS, fleet_red.HOLDS, fleet_red.LISTINGS, fleet_red.RELEASES]
 
     found[fleet_red.LISTINGS](Write(fleet_red.LISTINGS, "key", "[]"))
 
