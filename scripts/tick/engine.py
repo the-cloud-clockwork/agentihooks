@@ -87,7 +87,7 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     started = clock()
     outcome: list[Result | BaseException] = []
     caller = copy_context()
-    key = (None, step.name)
+    key = (timing.SWARM.get(), step.name)
     with _RUNNING_LOCK:
         earlier = _RUNNING.get(key)
         if earlier is not None and earlier.is_alive():
