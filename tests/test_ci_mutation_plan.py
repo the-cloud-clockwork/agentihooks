@@ -1041,6 +1041,24 @@ def test_two_shards_of_one_statistics_part_measure_without_a_measured_plan(
     assert json.loads((gate / "report.json").read_text())["failed"] is False
 
 
+def test_a_shard_without_a_plan_slices_each_mutmut_run_on_its_own(tmp_path: Path) -> None:
+    from scripts.ci_mutation import runner
+    from scripts.ci_mutation.stats import SharedStats
+
+    stats = tmp_path / "stats"
+    stats.mkdir()
+    output = tmp_path / "output"
+    for run, name in (("0-a", "scripts.a.x_f__mutmut_1"), ("1-b", "scripts.b.x_f__mutmut_1")):
+        meta = output / run / "mutants/scripts/sample.py.meta"
+        meta.parent.mkdir(parents=True)
+        meta.write_text(json.dumps({"exit_code_by_key": {name: 1}}))
+    report: dict = {"files": [], "not_mutated": []}
+    runner.record_shard_measurement(report, output, SharedStats(stats, "head"), 0.0, 1080, (0, 2))
+    assert report["shard"]["expected"] == 2
+    assert report["shard"]["graded"] == 2
+    assert report["shard"]["complete"] is True
+
+
 def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp_path, monkeypatch):
     from scripts.ci_mutation.runner import run_gate
     from scripts.ci_mutation.stats import SharedStats
