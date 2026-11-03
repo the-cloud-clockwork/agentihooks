@@ -24,8 +24,9 @@ def test_the_tick_heartbeat_keeps_the_tick_lock_with_the_exact_lease_and_token(
     seen: dict[str, Any] = {}
 
     def wrap_acquire(*args: Any, **kwargs: Any) -> Any:
-        seen["held"] = real_acquire(*args, **kwargs)
-        return seen["held"]
+        held = real_acquire(*args, **kwargs)
+        seen.setdefault("held", held)
+        return held
 
     def wrap_take_tick_lock(*args: Any, **kwargs: Any) -> Any:
         seen["token"] = real_take_tick_lock(*args, **kwargs)

@@ -1,5 +1,8 @@
 """Mutation-killing tests for scripts.swarm.tick: _reap, _reap_agent and tick."""
 
+from collections.abc import Callable, Iterable
+from typing import Any
+
 import pytest
 
 from scripts.swarm import tick as tick_module
@@ -32,7 +35,7 @@ def test_reap_groups_agents_by_task_falling_back_to_name(store: RedisStore, monk
     monkeypatch.setattr(reconciler, "legacy_agents", lambda store_arg, slug_arg: agents)
     captured: list[list[list[int]]] = []
 
-    def spying_fan_out(action: object, items: object) -> list[object]:
+    def spying_fan_out(action: Callable[[list[int]], object], items: Iterable[Iterable[int]]) -> list[object]:
         values = [list(item) for item in items]
         captured.append(values)
         return [action(value) for value in values]
@@ -45,7 +48,7 @@ def test_reap_groups_agents_by_task_falling_back_to_name(store: RedisStore, monk
     assert captured == [[[0, 1], [2]]]
 
 
-def test_reap_agent_forwards_its_own_ledger_to_watch_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reap_agent_forwards_its_own_ledger_to_watch_remote(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, object] = {}
 
     def spying_watch_remote(
@@ -58,7 +61,7 @@ def test_reap_agent_forwards_its_own_ledger_to_watch_remote(monkeypatch: pytest.
 
     ledger = object()
     agent = AgentRecord(name="agent-a", lane="eng", task="t1", state="working", runtime_backend="remote")
-    judging = tick_module._Reaping("sw", object(), ledger, _StubRuntime(), {}, set(), 5)
+    judging = tick_module._Reaping("sw", store, ledger, _StubRuntime(), {}, set(), 5)
 
     actions = tick_module._reap_agent(judging, agent)
 
@@ -97,7 +100,7 @@ def test_tick_hands_the_close_group_its_freshly_spawned_rows(
     seen: dict[str, str] = {}
     original_run_group = tick_module.run_group
 
-    def spying_run_group(name: str, **state: object) -> list[str]:
+    def spying_run_group(name: str, **state: Any) -> list[str]:
         if name == task_steps_module.CLOSE:
             seen["claimed_by"] = state["rows"]["t1"]["claimed_by"]
         return original_run_group(name, **state)
