@@ -2081,6 +2081,137 @@ def test_tests_mutation_carries_kill_memory_to_the_next_plan() -> None:
     assert merged.index(download["name"]) < merged.index(keep["name"]) < merged.index("Merge the shard reports")
 
 
+def _preflight_seed_steps() -> dict:
+    return {step.get("name"): step for step in _mutation_workflow()["jobs"]["mutation-refine"]["steps"]}
+
+
+def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory() -> None:
+    jobs = _mutation_workflow()["jobs"]
+    names = [step.get("name") for step in jobs["mutation-refine"]["steps"]]
+    steps = _preflight_seed_steps()
+    mint = steps["Mint the token that reads the branch preflight kill memory"]
+    find = steps["Find the branch preflight that kept kill memory"]
+    download = steps["Download the branch preflight kill memory"]
+    retry = steps["Download the branch preflight kill memory, attempt 2"]
+    keep = steps["Keep the branch preflight kill memory for this run's shards"]
+    order = [
+        "Restore the tests that killed this branch's earlier mutants",
+        mint["name"],
+        find["name"],
+        download["name"],
+        retry["name"],
+        keep["name"],
+        "Refine mutation shards from measured statistics",
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    assert mint["id"] == "app-token"
+    assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
+    assert mint["if"] == (
+        "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
+        " && hashFiles('.mutation-stats/killers/*') == ''"
+    )
+    assert {key: value for key, value in mint["with"].items() if key.startswith("permission-")} == {
+        "permission-actions": "read"
+    }
+    assert find["if"] == "steps.app-token.outcome == 'success'"
+    assert find["continue-on-error"] is True
+    assert find["env"] == {
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+        "HEAD": "${{ github.event.pull_request.head.sha }}",
+        "BRANCH": "${{ github.head_ref }}",
+    }
+    assert download["if"] == "steps.preflight.outputs.id != ''"
+    assert download["with"] == {
+        "pattern": "mutation-killers-*",
+        "path": ".mutation-stats/killers",
+        "merge-multiple": True,
+        "run-id": "${{ steps.preflight.outputs.id }}",
+        "repository": "${{ github.repository }}",
+        "github-token": "${{ steps.app-token.outputs.token }}",
+    }
+    assert retry["with"] == download["with"]
+    assert keep["uses"] == "actions/cache/save@v4"
+    assert keep["if"] == "steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''"
+    prefix = "mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-"
+    assert keep["with"] == {
+        "path": ".mutation-stats/killers",
+        "key": prefix + "${{ github.run_id }}-${{ github.run_attempt }}-preflight",
+    }
+    for name in ("mutation-shard", "mutation"):
+        restore = next(step for step in jobs[name]["steps"] if step.get("uses") == "actions/cache/restore@v4")
+        assert restore["with"]["restore-keys"] == prefix
+
+
+@pytest.mark.parametrize(
+    ("same", "kept", "chosen"),
+    [
+        (["41"], {"41": 2, "42": 3}, "41"),
+        (["41"], {"41": 0, "42": 3}, "42"),
+        ([], {"42": 1}, "42"),
+        (["41"], {}, ""),
+    ],
+    ids=["same-head", "same-head-without-memory", "newest-on-branch", "none"],
+)
+def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
+    tmp_path: Path, same: list[str], kept: dict[str, int], chosen: str
+) -> None:
+    find = _preflight_seed_steps()["Find the branch preflight that kept kill memory"]
+    branch = [{"id": int(run), "head_branch": "topic"} for run in ("42", "41", "40")]
+    head = [{"id": int(run), "head_branch": "topic"} for run in same] + [{"id": 7, "head_branch": "other"}]
+    responses = {
+        "head_sha=abc": {"workflow_runs": head},
+        "branch=topic": {"workflow_runs": branch},
+        **{
+            f"runs/{run}/artifacts": {
+                "artifacts": [{"name": f"mutation-killers-{shard}", "expired": False} for shard in range(count)]
+                + [{"name": "mutation-killers-9", "expired": True}, {"name": "mutation-report-0", "expired": False}]
+            }
+            for run, count in kept.items()
+        },
+    }
+    (tmp_path / "responses.json").write_text(json.dumps(responses))
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "$2" >> "$CALLS"\n'
+        "python3 -c 'import json, sys\n"
+        "url = sys.argv[1]\n"
+        "found = [body for key, body in json.load(open(sys.argv[2])).items() if key in url]\n"
+        'print(json.dumps(found[0] if found else {"artifacts": [], "workflow_runs": []}))\' "$2" "$RESPONSES"'
+        ' | jq -r "$4"\n'
+    )
+    (binary / "gh").chmod(0o755)
+    output = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", "-e", "-c", find["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{binary}:{os.environ['PATH']}",
+            "CALLS": str(tmp_path / "calls"),
+            "RESPONSES": str(tmp_path / "responses.json"),
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_REPOSITORY": "o/r",
+            "HEAD": "abc",
+            "BRANCH": "topic",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (output.read_text() if output.exists() else "") == (f"id={chosen}\n" if chosen else "")
+    calls = (tmp_path / "calls").read_text().splitlines()
+    assert calls[:2] == [
+        "repos/o/r/actions/workflows/mutation-preflight.yml/runs?head_sha=abc&event=push&per_page=20",
+        "repos/o/r/actions/workflows/mutation-preflight.yml/runs?branch=topic&event=push&per_page=20",
+    ]
+    assert "runs/7/artifacts" not in "".join(calls)
+    if chosen:
+        assert f"kill memory of Mutation preflight run {chosen}" in result.stdout
+    else:
+        assert "No Mutation preflight run of topic kept kill memory" in result.stdout
+
+
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
     job = spec["jobs"]["mutation-shard"]

@@ -4274,6 +4274,71 @@ jobs:
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
+      - name: Mint the token that reads the branch preflight kill memory
+        id: app-token
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('.mutation-stats/killers/*') == ''
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Find the branch preflight that kept kill memory
+        id: preflight
+        if: steps.app-token.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          runs="repos/$GITHUB_REPOSITORY/actions/workflows/mutation-preflight.yml/runs"
+          same=$(gh api "$runs?head_sha=$HEAD&event=push&per_page=20" --jq '.workflow_runs[] | select(.head_branch == env.BRANCH) | .id')
+          newest=$(gh api "$runs?branch=$BRANCH&event=push&per_page=20" --jq '.workflow_runs[].id')
+          while read -r run; do
+            [[ -n "$run" ]] || continue
+            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select((.expired | not) and (.name | startswith("mutation-killers-")))] | length')
+            if (( kept > 0 )); then
+              echo "Seeding the first plan with the kill memory of Mutation preflight run $run"
+              echo "id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done < <(printf '%s\n%s\n' "$same" "$newest" | awk 'NF && !seen[$0]++')
+          echo "No Mutation preflight run of $BRANCH kept kill memory, so the first plan prices units without it."
+
+      - name: Download the branch preflight kill memory
+        id: download-the-branch-preflight-kill-memory
+        if: steps.preflight.outputs.id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &mutation-refine-download-the-branch-preflight-kill-memory
+          pattern: mutation-killers-*
+          path: .mutation-stats/killers
+          merge-multiple: true
+          run-id: ${{ steps.preflight.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download the branch preflight kill memory, wait before attempt 2
+        if: steps.download-the-branch-preflight-kill-memory.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the branch preflight kill memory failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the branch preflight kill memory, attempt 2
+        if: steps.download-the-branch-preflight-kill-memory.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-refine-download-the-branch-preflight-kill-memory
+
+      - name: Keep the branch preflight kill memory for this run's shards
+        if: steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}-preflight
+
       - name: Refine mutation shards from measured statistics
         id: refine
         env:
