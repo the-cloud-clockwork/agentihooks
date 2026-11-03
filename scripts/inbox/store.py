@@ -19,6 +19,7 @@ from scripts.swarm.naming import NameRegistry
 PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
+SETTLED_EXITS = "exits-settled"
 # The swarm Redis over TLS closes connections mid pipeline on reads of a thousand item rows or more.
 ROW_BATCH = 500
 STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
@@ -225,6 +226,7 @@ class InboxStore:
             pipe.hset(key, mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})
             pipe.zadd(self.key("open", address), {item.id: at})
+            pipe.srem(self.key(SETTLED_EXITS), address)
             pipe.incr(self.key("open-size", address))
             if masters:
                 self.pool.stage_add(pipe, item)
@@ -292,6 +294,20 @@ class InboxStore:
             for address, (indexed, size, total, opened) in zip(addresses, zip(*[iter(rows)] * 4))
             if not opened and (total == 0 or _index_current(indexed, size, total))
         }
+
+    def settled_exits(self) -> set[str]:
+        """Gone agents whose exit this world settled, with no mail opened at any of them since."""
+        return set(self.redis.smembers(self.key(SETTLED_EXITS)))
+
+    def quiet_exits(self, names: list[str]) -> set[str]:
+        """Mark names settled, then return the quiet ones: mail that opens at a name after the mark clears it."""
+        if names:
+            self.redis.sadd(self.key(SETTLED_EXITS), *names)
+        return self.quiet(names)
+
+    def unsettle_exits(self, names: list[str]) -> None:
+        """Clear the settled mark of names the sweep still has to settle."""
+        self.redis.srem(self.key(SETTLED_EXITS), *names)
 
     def _open_ids(self, address):
         from redis.exceptions import WatchError
@@ -623,6 +639,7 @@ class InboxStore:
             pipe.set(dest.key("entry", item.id), about)
         pipe.zadd(dest.key("address", moved.address), {item.id: item.created_at})
         pipe.zadd(dest.key("open", moved.address), {item.id: item.created_at})
+        pipe.srem(dest.key(SETTLED_EXITS), moved.address)
         pipe.incr(dest.key("open-size", moved.address))
         pipe.zadd(dest.key("pending", moved.address), {item.id: item.created_at})
         pipe.sadd(dest.key("waiting"), moved.address)
@@ -671,6 +688,7 @@ class InboxStore:
                 pipe.set(target.key("entry", item_id), entry)
             pipe.zadd(target.key("address", item.address), {item_id: item.created_at})
             pipe.zadd(target.key("open", item.address), {item_id: item.created_at})
+            pipe.srem(target.key(SETTLED_EXITS), item.address)
             pipe.incr(target.key("open-size", item.address))
             pipe.zadd(target.key("pending", item.address), {item_id: item.created_at})
             pipe.sadd(target.key("waiting"), item.address)
@@ -685,6 +703,7 @@ class InboxStore:
         pipe.zrem(self.key("address", item.address), item.id)
         pipe.zadd(self.key("address", address), {item.id: item.created_at})
         pipe.zadd(self.key("open", address), {item.id: item.created_at})
+        pipe.srem(self.key(SETTLED_EXITS), address)
         if address != item.address:
             pipe.zrem(self.key("open", item.address), item.id)
             pipe.decr(self.key("open-size", item.address))
@@ -849,6 +868,7 @@ class InboxStore:
             pipe.hset(key, mapping=_fields(moved))
             pipe.hdel(key, f"reply:{answer.sender}")
             pipe.zadd(self.key("open", item.address), {item.id: item.created_at})
+            pipe.srem(self.key(SETTLED_EXITS), item.address)
             pipe.rpush(self.key("history", item.id), _entry("read", by, reason, moved.updated_at))
             pipe.publish(NOTIFY, item.address)
             pipe.execute()
