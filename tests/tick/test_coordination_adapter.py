@@ -63,12 +63,7 @@ def test_lock_holds_the_named_lock_until_the_deadline_ends(store: RedisStore) ->
     assert adapter.lock("other", deadline=_deadline()) not in (None, token)
 
 
-@pytest.mark.parametrize("repeat", range(500))
-def test_a_lock_with_under_a_millisecond_left_still_expires(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch, repeat: int
-) -> None:
-    import time
-
+def test_a_lock_with_under_a_millisecond_left_still_expires(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     expiries: list[object] = []
     set_key = store.redis.set
 
@@ -78,7 +73,6 @@ def test_a_lock_with_under_a_millisecond_left_still_expires(
 
     monkeypatch.setattr(store.redis, "set", recording_set)
     token = _adapter(store).lock("short", deadline=Deadline(0.0004, _clock([0.0])))
-    time.sleep(0.002)
     assert token is not None
     assert expiries == [1]
 
