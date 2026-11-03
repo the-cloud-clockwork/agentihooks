@@ -492,4 +492,9 @@ def test_publish_hands_the_tick_view_to_the_status_report(store, monkeypatch):
 
     command_runner.publish(store, "sw", {"tasks": []}, view)
     command_runner.publish(store, "sw", {"tasks": []})
-    assert seen == [(store, "sw", {"tasks": []}, None, view), (store, "sw", {"tasks": []}, None, None)]
+    command_runner.publish(store, "sw", {"tasks": []}, view, ["found"])
+    assert seen == [
+        (store, "sw", {"tasks": []}, None, view, None),
+        (store, "sw", {"tasks": []}, None, None, None),
+        (store, "sw", {"tasks": []}, None, view, ["found"]),
+    ]

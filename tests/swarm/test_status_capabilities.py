@@ -50,6 +50,20 @@ def test_status_report_carries_only_the_latest_hundred_ended_lives(saved):
     assert [row["name"] for row in history] == [f"life-{n}" for n in range(5, 105)]
 
 
+def test_status_report_carries_the_findings_it_is_given_without_finding_again(
+    saved: tuple[RedisStore, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _ = saved
+    calls: list[object] = []
+    monkeypatch.setattr(status, "findings", lambda *args: calls.append(args) or [])
+    found = [{"kind": "stale", "subject": "t1"}]
+
+    report = status.status_report(store, "sw", {"tasks": []}, None, None, found)
+
+    assert report["findings"] == found
+    assert calls == []
+
+
 def test_status_text_prints_push_inbox_and_native_terminal_per_agent(saved, capsys):
     store, names = saved
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
