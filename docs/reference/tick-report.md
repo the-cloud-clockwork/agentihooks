@@ -71,7 +71,7 @@ Without `--passes` the report reads 100 passes.
 
 | Reading | Window | Source | Result |
 |---|---|---|---|
-| `Lane tick` 43.61 percent, no step in the slow lane | 50 passes on dev, before the move | pull request 9517, 3 November 2026 | The post spawn report steps moved to the slow lane |
+| `Lane tick` 43.61 percent, no step in the slow lane | 50 passes on dev, before the move | stated in the pull request 9517 body, 3 November 2026; the command output and pass window were not retained | The post spawn report steps moved to the slow lane |
 | `Lane tick` after the move | 60 parallel passes | not yet recorded | Decides whether lane processes are built |
 
 Until the second reading is taken lane processes are not built: both lanes run as threads of one tick process (see

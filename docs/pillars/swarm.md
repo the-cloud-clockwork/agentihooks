@@ -4385,7 +4385,7 @@ A parallel pass has two lanes, each with its own deadline from the start of the 
 | Lane | Deadline | Steps |
 |---|---|---|
 | critical | 110 seconds | Every step whose lane is not `slow`. A step declares lane `tick` unless it names another. |
-| slow | 400 seconds | Steps that declare lane `slow`: today the eleven report steps that run after spawn, which the `tick call` step of the `wrapper reboot` group starts. |
+| slow | 400 seconds | Steps that declare lane `slow`: today the eleven report steps of the `wrapper events` and `wrapper metrics` groups, which run after the `tick call` step of the `wrapper reboot` group has spawned. |
 
 The slow lane holds the ledger event pass, done recheck, progress checks, waits end, merge pass, doc report,
 priorities sweep, health findings, findings pass, metrics record and bottleneck status. They call the ledger,
