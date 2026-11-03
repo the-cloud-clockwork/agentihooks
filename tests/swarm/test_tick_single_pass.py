@@ -19,5 +19,5 @@ def test_host_runs_each_swarm_once_while_another_swarm_is_slow(monkeypatch: pyte
             release.set()
         return []
 
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=0.01)
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
     assert ticks == {"fast": 1, "slow": 1}
