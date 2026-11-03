@@ -70,7 +70,7 @@ def test_get_tasks_prints_every_task_row_as_json_through_the_collection_read(
     ledger.main()
     rows = json.loads(capsys.readouterr().out)
     assert [row["id"] for row in rows] == ["t1", "t2", "t3", "t4", "t5"]
-    assert rows[3] == {"id": "t4", "title": "Hive docs", "lane": "eng", "state": "done"}
+    assert {key: value for key, value in rows[3].items() if key != "revision"} == STATE["tasks"][3]
     assert reads == [(SLUG, "tasks", True)]
 
 
@@ -80,7 +80,8 @@ def test_get_freezes_prints_every_freeze_and_focus_record_as_json(
 ) -> None:
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "get", "freezes"])
     ledger.main()
-    assert json.loads(capsys.readouterr().out) == STATE["freezes"]
+    rows = json.loads(capsys.readouterr().out)
+    assert [{key: value for key, value in row.items() if key != "revision"} for row in rows] == STATE["freezes"]
     assert reads == [(SLUG, "freezes", True)]
 
 
