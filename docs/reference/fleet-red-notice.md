@@ -35,7 +35,7 @@ not held: that check points at the change itself.
 | Site | Function | Listing |
 | --- | --- | --- |
 | Claim filter | `fleet_red.checker()`, used by the tick's claim view and by swarm readiness | Read live through the source control port once per repository per call; a failed listing admits every task and logs `fleet red hold skipped` |
-| Notice pass | `fleet_red.notice_pass`, called once per tick pass after the task group and before the task passes group | Read through the listing cache below |
+| Notice step | The `fleet red notice` tick step: `fleet_red.holds` computes the new holds and the lifted ones, and the step returns them as writes. The engine applies each hold through the fleet red applier, which posts it with `fleet_red.post` only while the task is still open, unclaimed and on the same pull request, and drops it for the next pass otherwise | Read through the listing cache below |
 
 The notice pass looks only at open, unclaimed tasks with a pull request. For
 each newly held task it posts one ledger notice:
@@ -116,11 +116,11 @@ Pass a reader to call the notice pass or the cache without GitHub:
 ```python
 from scripts.swarm import fleet_red
 
-held = fleet_red.notice_pass(slug, store, ledger, rows, now_ms, reader=lambda repo: pulls)
+found, lifted = fleet_red.holds(slug, store, rows, now_ms, reader=lambda repo: pulls)
 listing = fleet_red.cached(store, slug, "owner/repo", reader=lambda repo: pulls)
 ```
 
-A `reader` passed to `notice_pass` replaces the cache, so the pass lists on
+A `reader` passed to `holds` replaces the cache, so it lists on
 every call.
 
 ## Configuration
@@ -158,6 +158,7 @@ The constants are code: change them through a pull request.
 | Test file | Covers |
 | --- | --- |
 | `tests/swarm/test_fleet_red.py` | Hold rules, the notice pass, the cache listing once per ten minutes, one cache entry per swarm and repository, a failed listing cached as none for each port error, an empty listing cached, the default reader, the notice pass reading through the cache, and no notice while a failed listing is cached |
+| `tests/tick/test_apply_fleet_red.py` | The notice step's guarded hold writes and lifted write, the applier posting while the task stays open and unclaimed, dropping a hold whose task moved or a seat claimed, forgetting a failed notice, and a claimed hold dropped then posted on the next pass |
 | `tests/tick/test_source_control.py` | The GitHub open listing: one page when there is no next page, and the stop after eight pages of twenty five |
 
 Related: [Tick engine steps](tick-engine-steps.md), [Tick adapters](tick-adapters.md),
