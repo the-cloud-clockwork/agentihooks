@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.599 · 2026-11-03
+
+### 2026-11-03 · c92aed7e72a6 · #9485 · @nestorcolt
+
+**Document the default on hive host projection read and its failed projection cleanup**
+
+This change documents the real behavior shipped in PR 9474 so operators know exactly what to expect when rolling out the host projection read. It records that the projection read now defaults on (only `false`/`0`/`no`/`off` disable it), explains how a failed write after fenced commit gets cleaned up via `forget_hosts` with fallback to the registry, lists the gaps cleanup can't cover, spells out the safe rollout order, and gives a concrete acceptance command with a measured passing result, so future operators can trust and verify the rollout without re-deriving behavior from code.
+
+### 2026-11-03 · f7bf73ebb7a7 · #9482 · @nestorcolt
+
+**Carry mutation kill memory between Tests runs**
+
+This change makes the Tests workflow cache and reuse mutation kill-memory across runs, the same way mutation-preflight already does. Previously every shard was priced using a generic head-kill estimate instead of observed timings, causing 11 of 36 shards to blow their 1080s budget despite accurate per-unit costs existing. Now shards restore prior kill memory, upload their own observations even on failure or timeout, and the mutation job merges and saves them, so later runs plan from real data. First runs on a new PR still plan blind, but subsequent runs should stop exhausting budget.
+
 ## v2.17.598 · 2026-11-03
 
 ### 2026-11-03 · 761b429e81c4 · #9479 · @nestorcolt
