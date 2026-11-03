@@ -48,6 +48,31 @@ def test_reap_groups_agents_by_task_falling_back_to_name(store: RedisStore, monk
     assert captured == [[[0, 1], [2]]]
 
 
+def test_reap_keeps_taskless_agents_in_groups_of_their_own_names(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hub import reconciler
+
+    agents = [
+        AgentRecord(name="agent-a", lane="eng", task="", state="awaiting-decision"),
+        AgentRecord(name="agent-b", lane="eng", task="", state="awaiting-decision"),
+        AgentRecord(name="agent-c", lane="eng", task="t1", state="awaiting-decision"),
+        AgentRecord(name="agent-d", lane="eng", task="t1", state="awaiting-decision"),
+    ]
+    monkeypatch.setattr(reconciler, "legacy_agents", lambda store_arg, slug_arg: agents)
+    groups: list[list[str]] = []
+
+    def spying_fan_out(action: Callable[[list[int]], object], items: Iterable[Iterable[int]]) -> list[object]:
+        values = [list(item) for item in items]
+        groups.extend([agents[index].name for index in value] for value in values)
+        return [action(value) for value in values]
+
+    monkeypatch.setattr(tick_module.pool, "fan_out", spying_fan_out)
+
+    assert tick_module._reap("sw", store, None, _StubRuntime(), {}, 0) == []
+    assert groups == [["agent-a"], ["agent-b"], ["agent-c", "agent-d"]]
+
+
 def test_reap_agent_forwards_its_own_ledger_to_watch_remote(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, object] = {}
 
