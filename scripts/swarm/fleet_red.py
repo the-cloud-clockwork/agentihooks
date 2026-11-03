@@ -129,15 +129,17 @@ def checker(reader: Reader | None = None, clock: Callable[[], float] = time.time
     return admits
 
 
-def notice_pass(
+def holds(
     slug: str,
     store: RedisStore,
-    ledger: Any,
     rows: dict[str, dict[str, Any]],
     now_ms: int,
     reader: Reader | None = None,
-) -> list[str]:
-    """Post one notice per unclaimed open task newly held by fleet red, and forget holds that lifted."""
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Return the task, pull request and red checks of each unclaimed open task newly held, and the lifted hold keys.
+
+    A task whose hold was already noticed is left out, so the pass posts nothing for it. Nothing is posted or forgotten.
+    """
     unclaimed = [
         task["id"]
         for task in rows.values()
@@ -147,7 +149,7 @@ def notice_pass(
     cleared = [store.key(slug, f"fleet-red:{task['id']}") for task in rows.values() if task["id"] not in waiting]
     listings: dict[str, Pulls | None] = {}
     fetch: Callable[[str], Pulls | None] = reader or partial(cached, store, slug)
-    actions = []
+    found: list[tuple[str, str, str]] = []
     for task_id in [task_id for task_id in unclaimed if task_id in waiting]:
         url, key = rows[task_id]["pr_url"], store.key(slug, f"fleet-red:{task_id}")
         repo = repository(url)
@@ -162,10 +164,19 @@ def notice_pass(
         if not held(pulls, url, now_ms):
             cleared.append(key)
             continue
-        if store.redis.set(key, url, nx=True):
-            checks = ", ".join(sorted(own(pulls, url)))
-            ledger.notice(slug, task_id, NOTICE.format(url=url, checks=checks))
-            actions.append(f"task {task_id} held unclaimed, {url} is red only from {checks}")
-    if cleared:
-        store.redis.delete(*cleared)
-    return actions
+        if not store.redis.exists(key):
+            found.append((task_id, url, ", ".join(sorted(own(pulls, url)))))
+    return found, cleared
+
+
+def post(slug: str, store: RedisStore, ledger: Any, task_id: str, url: str, checks: str) -> str:
+    """Post the hold notice of ``task_id`` once, returning its action, or nothing when it was already posted."""
+    if not store.redis.set(store.key(slug, f"fleet-red:{task_id}"), url, nx=True):
+        return ""
+    ledger.notice(slug, task_id, NOTICE.format(url=url, checks=checks))
+    return held_action(task_id, url, checks)
+
+
+def held_action(task_id: str, url: str, checks: str) -> str:
+    """Return the action line naming the hold fleet red puts on ``task_id``."""
+    return f"task {task_id} held unclaimed, {url} is red only from {checks}"
