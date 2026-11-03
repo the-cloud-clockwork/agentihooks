@@ -11,6 +11,7 @@ from tests.swarm.tick_scenarios.test_characterisation import replay
 
 TODAY = {
     "start": ["config load", "stopped branch"],
+    "pass setup": ["spawn hold clear", "pass budget"],
     "observe": [
         "pane evidence",
         "execution reconcile",
@@ -26,7 +27,16 @@ TODAY = {
         "verify",
     ],
     "agents": ["reap", "recover outages", "strays", "failed panes"],
+    "drained resume": ["sleeping", "drained resume"],
     "tasks": ["orphans"],
+    "reopen passes": [
+        "dev red reopen",
+        "prerequisite reopen",
+        "promotion refresh",
+        "release alert",
+        "fleet red notice",
+    ],
+    "placement notices": ["quota notice", "lost runner", "time left"],
     "task passes": ["run window", "verification notices", "size pass", "grouping release", "dispatcher group"],
     "placement acks": ["collect acks", "codex hook order"],
     "placement": ["rank pass", "bottleneck remedy", "preempt", "spawn"],
@@ -56,6 +66,8 @@ EDGES = (
     ("stall watch", "overrun pass"),
     ("health findings", "findings pass"),
     ("health findings", "metrics record"),
+    ("sleeping", "drained resume"),
+    ("dev red reopen", "prerequisite reopen"),
 )
 
 

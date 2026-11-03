@@ -5,13 +5,15 @@ from functools import partial
 from types import MappingProxyType
 from typing import Any
 
+from scripts.swarm import lost_runner, quota_notice, time_left
 from scripts.tick import registry
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets
 from scripts.tick.steps.tasks import held
 
-__all__ = ["ACKS", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
+__all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
 
 Get = Callable[[str], Any]
+NOTICES = "placement notices"
 ACKS = "placement acks"
 PLACEMENT = "placement"
 PREEMPT_NEEDS = frozenset({"reap"})
@@ -19,6 +21,21 @@ PLACED = frozenset({AGENTS, TASKS})
 
 
 _SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
+
+
+def _quota_notice(tick: Any, get: Get) -> Any:
+    keys = ("slug", "config", "store", "ledger", "runtime", "now_ms")
+    return tick.skip_refused(quota_notice.refresh, *map(get, keys))
+
+
+def _lost_runner(tick: Any, get: Get) -> Any:
+    keys = ("slug", "config", "store", "now_ms")
+    return tick.skip_refused(lost_runner.sweep, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
+
+
+def _time_left(tick: Any, get: Get) -> Any:
+    keys = ("slug", "store", "ledger", "runtime", "config", "doc")
+    return tick.skip_refused(time_left.refresh, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _collect_acks(tick: Any, get: Get) -> Any:
@@ -71,6 +88,9 @@ def _spawn(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
+    CallStep("quota notice", NOTICES, held(_quota_notice)),
+    CallStep("lost runner", NOTICES, held(_lost_runner)),
+    CallStep("time left", NOTICES, held(_time_left)),
     CallStep("collect acks", ACKS, held(_collect_acks)),
     CallStep("codex hook order", ACKS, held(_codex_hook_order)),
     CallStep("rank pass", PLACEMENT, held(_rank_pass)),
