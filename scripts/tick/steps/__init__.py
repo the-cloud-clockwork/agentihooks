@@ -28,8 +28,11 @@ class CallStep:
         needs: frozenset[str] = frozenset(),
         reads: frozenset[Domain] = frozenset(),
         writes: frozenset[Domain] = frozenset(),
+        lane: Lane = lane,
     ) -> None:
-        """Name the step in tick group ``group``, keep its call, its needs and the domains it reads and writes."""
+        """Name the step in tick group ``group`` and its ``lane``, keep its call, its needs and the domains it reads
+        and writes."""
+        self.lane = lane
         self.name = name
         self.needs = needs
         self.group = group
