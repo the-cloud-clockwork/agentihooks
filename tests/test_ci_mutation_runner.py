@@ -93,6 +93,28 @@ def test_every_group_reached_after_the_deadline_is_reported_over_budget(tmp_path
     assert "hooks/sample.py: not mutated, over budget" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("stage", ["scripts.ci_mutation.selection", "scripts.ci_mutation.report"])
+def test_a_mutation_child_killed_at_the_shard_deadline_turns_the_gate_red_as_over_budget(tmp_path, monkeypatch, stage):
+    timeouts = []
+
+    def process(command, cwd, timeout, log):
+        timeouts.append(timeout)
+        log.write_text("")
+        return None if stage in command else 0
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", lambda root, work, paths, tests: None)
+    monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
+    report = run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 600)
+    assert report["failed"] is True
+    assert report["files"] == []
+    assert report["not_mutated"] == [
+        {"path": "hooks/sample.py", "reason": "over budget"},
+        {"path": "scripts/ci_mutation/identity.py", "reason": "over budget"},
+    ]
+    assert len(timeouts) == (2 if stage.endswith("selection") else 4)
+    assert all(0 < timeout <= 600 for timeout in timeouts)
+
+
 def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_run(tmp_path, monkeypatch):
     calls = []
 
@@ -208,6 +230,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "profiles",
         "docs",
         ".github",
+        ".semgrep",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -235,6 +258,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "profiles/",
         "docs/",
         ".github/",
+        ".semgrep/",
         "evidence/",
         "observability/",
         "docker/swarm-node/",
@@ -266,6 +290,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "profiles",
         "docs",
         ".github",
+        ".semgrep",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -871,6 +896,7 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
     monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
+    (tmp_path / ".mutation-direct.json").write_text(json.dumps({"hooks/sample.py": ["tests/test_sample.py::test_f"]}))
     rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20, (1, 4), None)
     expected = reason
     if reason.startswith("mutmut failed"):
@@ -888,8 +914,12 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         "4",
     ]
     assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {
-        "hooks/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]},
-        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"]},
+        "hooks/sample.py": {
+            "lines": [2],
+            "tests": ["tests/test_sample.py"],
+            "direct": ["tests/test_sample.py::test_f"],
+        },
+        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"], "direct": []},
     }
     if len(commands) == 2:
         assert commands[1] == [

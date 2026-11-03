@@ -29,7 +29,7 @@ JOBS = [
     _job("unit (3.11, 4)", "02:10", "06:30"),
     _job("swarm-image / smoke", "00:05", "01:00"),
     _job("swarm-image / hive-join", "00:05", "01:40"),
-    _job("mutation", "00:05", "10:05"),
+    _job("mutation-shard", "00:05", "10:05"),
     _job("helm-kind / kind", "00:30", "00:30", "skipped"),
     _job("Gate — Required", "11:00", None, None),
     _job("stage-budget", "10:30", None, None),
@@ -67,7 +67,7 @@ def test_a_stage_spans_first_job_creation_to_last_job_end():
         "select": 35,
         "unit": 270,
         "swarm-image": 95,
-        "mutation": 600,
+        "mutation-shard": 600,
         "brand-new": 10,
     }
 
@@ -124,7 +124,7 @@ def test_render_prints_every_stage_and_the_run_against_the_budget():
     result = ci_budget.report({"run_started_at": START}, JOBS, ci_budget.seconds("2026-10-09T07:16:00Z"))
     assert [line.split() for line in ci_budget.render(result)] == [
         ["stage", "wall", "budget", "verdict"],
-        ["mutation", "10m00s", "8m00s", "over"],
+        ["mutation-shard", "10m00s", "3m30s", "over"],
         ["unit", "4m30s", "5m00s", "ok"],
         ["swarm-image", "1m35s", "3m00s", "ok"],
         ["select", "0m35s", "1m00s", "ok"],
@@ -133,8 +133,9 @@ def test_render_prints_every_stage_and_the_run_against_the_budget():
     ]
 
 
-def test_every_job_of_the_tests_workflow_has_a_budget():
-    assert set(_workflow_jobs()) == set(ci_budget.BUDGETS)
+def test_every_job_of_the_tests_workflow_has_a_budget() -> None:
+    jobs = set(_workflow_jobs())
+    assert jobs <= set(ci_budget.BUDGETS) <= jobs | {"type-gate"}
 
 
 def test_the_longest_chain_of_budgets_to_gate_required_fits_fifteen_minutes():
@@ -164,7 +165,7 @@ def test_cli_prints_the_table_summary_and_annotations(tmp_path, monkeypatch, cap
     assert capsys.readouterr().out == "\n".join(
         [
             *ci_budget.render(ci_budget.report({"run_started_at": START}, jobs, end)),
-            "::warning title=Stage over budget::mutation took 10m00s against its budget of 8m00s",
+            "::warning title=Stage over budget::mutation-shard took 10m00s against its budget of 3m30s",
             "::warning title=Stage without a budget::brand-new took 0m10s and has no budget",
             "::error title=Run over fifteen minutes::push to this report took 16m00s against 15m00s",
             "",
@@ -176,7 +177,7 @@ def test_cli_prints_the_table_summary_and_annotations(tmp_path, monkeypatch, cap
             "",
             "| Stage | Wall | Budget | Verdict |",
             "| --- | ---: | ---: | --- |",
-            "| mutation | 10m00s | 8m00s | over |",
+            "| mutation-shard | 10m00s | 3m30s | over |",
             "| select | 0m35s | 1m00s | ok |",
             "| brand-new | 0m10s | none | no budget |",
             "| push to this report | 16m00s | 15m00s | over |",

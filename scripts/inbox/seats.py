@@ -8,6 +8,7 @@ Each swarm keeps one culture text that every occupant of every seat reads.
 import json
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.swarm import naming
 from scripts.swarm.keyspace import ROOT
@@ -58,13 +59,13 @@ def master_of(address, names=None):
 
 
 class SeatRegistry:
-    def __init__(self, redis):
+    def __init__(self, redis: Any) -> None:
         self.redis = redis
 
     def key(self, address):
         return f"{PREFIX}:{address}"
 
-    def occupy(self, address, occupant, at):
+    def occupy(self, address: str, occupant: str, at: int) -> int:
         from redis.exceptions import WatchError
 
         key = self.key(address)
@@ -77,6 +78,8 @@ class SeatRegistry:
                     entry = {"generation": generation, "occupant": occupant, "at": at}
                     pipe.rpush(f"{key}:history", json.dumps(entry))
                     pipe.set(f"{PREFIX}-of:{occupant}", address)
+                    if legacy := naming.legacy_slug(occupant):
+                        pipe.sadd(f"{PREFIX}-legacy:{legacy}", occupant)
                     pipe.execute()
                     return generation
                 except WatchError:
@@ -90,12 +93,18 @@ class SeatRegistry:
     def occupant(self, address):
         return _occupancy(self.redis.hgetall(self.key(address)))
 
-    def seat_of(self, name, reader=None):
+    def seat_of(self, name: str, reader: Any = None) -> str:
         reader = reader if reader is not None else self.redis
         name = naming.NameRegistry(self.redis).resolve(name, reader)
         address = reader.get(f"{PREFIX}-of:{name}") or ""
         occupant = _occupancy(reader.hgetall(self.key(address))) if address else None
         return address if occupant and occupant.occupant == name else ""
+
+    def recipient(self, address: str) -> str:
+        address = naming.NameRegistry(self.redis).resolve(address)
+        if naming.lane_of(address) == "master":
+            return self.seat_of(address) or address
+        return address
 
     def known_seat(self, name: str) -> str:
         return self.redis.get(f"{PREFIX}-of:{name}") or ""
@@ -105,14 +114,32 @@ class SeatRegistry:
         return [name for name, _ in self.agent_seats(slug)]
 
     def agent_seats(self, slug: str) -> list[tuple[str, str]]:
-        prefix = f"{PREFIX}-of:"
-        legacy = self.redis.scan_iter(match=f"{prefix}{slug}-*", count=SCAN_PAGE)
-        old = [name for key in legacy if naming.legacy_slug(name := key[len(prefix) :]) == slug]
+        old = self._legacy_names(slug)
         named = [row["name"] for row in naming.NameRegistry(self.redis).names(slug)]
         seats = self._known_seats(old + named)
-        legacy = list(zip(old, seats[: len(old)]))
+        legacy = [(name, seat) for name, seat in zip(old, seats[: len(old)]) if seat]
         seated = [(name, seat) for name, seat in zip(named, seats[len(old) :]) if seat]
         return legacy + seated
+
+    def _legacy_names(self, slug: str) -> list[str]:
+        """The swarm's names from before the registry: scanned from the keyspace once, then kept in a set that
+        seating a name of that style adds to."""
+        key = f"{PREFIX}-legacy:{slug}"
+        if not self.redis.exists(self.legacy_listed(slug)):
+            prefix = f"{PREFIX}-of:"
+            found = self.redis.scan_iter(match=f"{prefix}{slug}-*", count=SCAN_PAGE)
+            old = [name for pointer in found if naming.legacy_slug(name := pointer[len(prefix) :]) == slug]
+            with self.redis.pipeline() as pipe:
+                if old:
+                    pipe.sadd(key, *old)
+                pipe.set(self.legacy_listed(slug), 1)
+                pipe.execute()
+        return sorted(self.redis.smembers(key))
+
+    def legacy_listed(self, slug: str) -> str:
+        """The key marking that the swarm's old style names were scanned into their set; without it the next listing
+        scans again."""
+        return f"{PREFIX}-legacy:{slug}:listed"
 
     def _known_seats(self, names):
         return [seat or "" for seat in self.redis.mget([f"{PREFIX}-of:{name}" for name in names])] if names else []
@@ -146,10 +173,11 @@ class SeatRegistry:
         entry = {"generation": seat.generation, "occupant": seat.occupant, "at": at, "event": event, "detail": detail}
         self.redis.rpush(f"{self.key(address)}:history", json.dumps(entry))
 
-    def swarm_keys(self, slug):
+    def swarm_keys(self, slug: str) -> list[str]:
         """The swarm's seats with their history and memory, and the seat pointers of its agents."""
         seat = re.compile(rf"{re.escape(PREFIX)}:[^:@]+@{re.escape(slug)}(:({'|'.join(MEMORY_KINDS)}))?")
-        keys = [key for key in self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*") if seat.fullmatch(key)]
+        found = self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*", count=SCAN_PAGE)
+        keys = [key for key in found if seat.fullmatch(key)]
         agents = sorted(f"{PREFIX}-of:{name}" for name in self.agent_names(slug))
         return sorted(keys) + agents + [f"{key}:exit" for key in agents if self.redis.exists(f"{key}:exit")]
 

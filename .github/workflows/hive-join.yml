@@ -1,0 +1,46 @@
+name: Hive join smoke
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow == 'Hive join smoke' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('hive-join-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Hive join smoke' && 'max' || 'single' }}
+
+jobs:
+  smoke:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      SWARM_SMOKE_IMAGE: local/agentihooks-swarm:clients-check
+      SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Pull the Python base with bounded retries
+        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+      - name: Restore the swarm smoke layers
+        id: layers
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/swarm-smoke-layers
+          key: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', 'pyproject.toml', 'README.md', 'docker/swarm/requirements.lock', 'docker/swarm-node/versions.lock', 'docker/swarm-node/requirements.lock', 'scripts/swarm_v2/worker_image.py') }}
+          restore-keys: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-
+      - name: Build the hive join image and acquire Redis in parallel
+        env:
+          LAYERS_FROM: ${{ steps.layers.outputs.cache-matched-key && format('type=local,src={0}/swarm-smoke-layers', runner.temp) || '' }}
+        run: |
+          docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed \
+            ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} . &
+          build=$!
+          status=0
+          bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
+            docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
+          wait "$build" || status=$?
+          exit "$status"
+      - name: Run the hive join scenario
+        run: bash scripts/packaging/hive-join-smoke.sh

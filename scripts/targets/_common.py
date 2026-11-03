@@ -14,25 +14,12 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Braced references only. Stripping unbraced `$VAR` too was a scan bypass: it
-# eats the `$`-containing tail of a LITERAL credential (`pa$sword123` →
-# `pa`), splitting it below the patterns' minimum lengths. A bare `$VAR` that
-# really is a reference carries nothing credential-shaped, so leaving it in
-# the scanned text costs no false positives — the scanner just finds no hit.
-#
-# `${VAR:-default}` substitutes its default text rather than vanishing: the
-# fallback is a literal value on disk, and `${DB_PASS:-<real token>}` hiding
-# from the scan would be an embedded credential in a reference costume. A
-# fallback like `:-changeme` in a db URL therefore flags — that is a literal
-# password and the flag is correct, not a false positive.
 _PLACEHOLDER = re.compile(r"\$\{(\w+)(?::-([^}]*))?\}")
 
-# What counts as "contains a reference" for functional handling (headers the
-# CLI will not expand, env passthrough) — deliberately wider than what
-# scanning strips: braced with or without a default, or unbraced.
 _ANY_REFERENCE = re.compile(r"\$\{\w+[^}]*\}|\$\w+")
 
 
@@ -43,12 +30,26 @@ def scannable(value: str) -> str:
     merely *contains* one lets ``${SAFE}-and-<literal token>`` through
     unscanned. Strip the references, keep any literal fallback text, and scan
     what is left; an empty result means the value was nothing but references.
+
+    Braced references only. Stripping unbraced `$VAR` too was a scan bypass: it eats the `$`-containing tail of a
+    LITERAL credential (`pa$sword123` → `pa`), splitting it below the patterns' minimum lengths. A bare `$VAR` that
+    really is a reference carries nothing credential-shaped, so leaving it in the scanned text costs no false positives
+    — the scanner just finds no hit.
+
+    `${VAR:-default}` substitutes its default text rather than vanishing: the fallback is a literal value on disk, and
+    `${DB_PASS:-<real token>}` hiding from the scan would be an embedded credential in a reference costume. A fallback
+    like `:-changeme` in a db URL therefore flags — that is a literal password and the flag is correct, not a false
+    positive.
     """
     return _PLACEHOLDER.sub(lambda m: m.group(2) or "", value).strip()
 
 
 def has_env_reference(value: str) -> bool:
-    """Whether *value* contains a ``${VAR}``/``${VAR:-x}``/``$VAR`` reference."""
+    """Whether *value* contains a ``${VAR}``/``${VAR:-x}``/``$VAR`` reference.
+
+    What counts as "contains a reference" for functional handling (headers the CLI will not expand, env passthrough) —
+    deliberately wider than what scanning strips: braced with or without a default, or unbraced.
+    """
     return bool(_ANY_REFERENCE.search(value))
 
 
@@ -186,9 +187,6 @@ def managed_mcp_names(target: str) -> list[str]:
     return list(_i._global_record(_i._load_state(), target).get("managed_mcp", []))
 
 
-# The agentihooks MCP server's registration name, and the names earlier releases
-# registered it under. `agentihooks init` replaces a legacy entry it can prove is
-# its own; an entry under a legacy name that runs something else is left alone.
 MCP_SERVER_NAME = "agentihooks"
 LEGACY_MCP_SERVER_NAMES = ("hooks-utils",)
 
@@ -203,7 +201,12 @@ def is_own_mcp_entry(entry, own_url: str | None = None) -> bool:
 
 
 def migrate_legacy_mcp(table: dict, target: str, where: str, own_url: str | None = None) -> list[str]:
-    """Drop legacy-named agentihooks entries from *table* in place; returns the names removed."""
+    """Drop legacy-named agentihooks entries from *table* in place; returns the names removed.
+
+    The agentihooks MCP server's registration name, and the names earlier releases registered it under. `agentihooks
+    init` replaces a legacy entry it can prove is its own; an entry under a legacy name that runs something else is left
+    alone.
+    """
     _i = _install_module()
     removed = []
     for legacy in LEGACY_MCP_SERVER_NAMES:
@@ -273,12 +276,6 @@ def agents_skills_home() -> Path:
     return Path.home() / ".agents" / "skills"
 
 
-# Commands translated into ~/.agents/skills by the copilot adapter are REAL
-# directories in a directory every target also symlinks real skills into. The
-# manifest is the ownership record for them, and it is shared: any target
-# installing skills there must clear a translated command whose name a real
-# skill now claims, or the symlinker (which correctly refuses to replace a
-# non-symlink) silently drops that skill forever.
 TRANSLATED_COMMANDS_MANIFEST = ".agentihooks-copilot-commands.json"
 
 
@@ -299,6 +296,11 @@ def reap_translated_commands(names: set[str], *, reason: str) -> set[str]:
     Only entries the manifest claims are touched, and only real directories —
     a symlink of the same name belongs to a skills installer and is never
     followed.
+
+    Commands translated into ~/.agents/skills by the copilot adapter are REAL directories in a directory every target
+    also symlinks real skills into. The manifest is the ownership record for them, and it is shared: any target
+    installing skills there must clear a translated command whose name a real skill now claims, or the symlinker (which
+    correctly refuses to replace a non-symlink) silently drops that skill forever.
     """
     if not names:
         return set()
@@ -337,14 +339,17 @@ def linked_profile_names() -> set[str]:
 
 
 def read_manifestos(
-    bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None, user_dir: Path | None = None
+    bundle_dir: Path | None = None,
+    profile_dirs: list[tuple[str, Path]] | None = None,
+    user_dir: Path | None = None,
+    shared_dir: Path | None = None,
 ) -> str:
     try:
         from hooks.config import manifesto_body
         from scripts.profiles import manifestos
 
         parts = []
-        for path in manifestos.paths(bundle_dir, profile_dirs or [], user_dir):
+        for path in manifestos.paths(bundle_dir, profile_dirs or [], user_dir, shared_dir):
             if path.is_file():
                 parts.append(f"<!-- manifesto: {path.name} -->\n{manifesto_body(path).strip()}")
         return "\n\n---\n\n".join(parts)
@@ -365,12 +370,16 @@ def identity_preamble(profile_chain: list[str]) -> str:
     never configured. Name matching is case/whitespace-insensitive:
     linked_profiles stores the alias as typed, and a chain written with
     different casing would otherwise leak a layer into the persona name.
+
+    Every element is registered as linked — inconsistent state (a stale link entry naming what is now the base). The
+    chain is written base-first, so chain[0] is the recovery.
+
+    Scoped to identity only. The Precedence section of the shared directives below claims first-load authority for the
+    floors (Security, Safety Protocol, HARD FLOOR); this preamble must defer to it explicitly rather than compete with
+    it — two documents each claiming "read me first" is how a floor gets argued away.
     """
     linked = {n.strip().casefold() for n in linked_profile_names()}
     base = next((p for p in profile_chain if p.strip().casefold() not in linked), "") or (
-        # Every element is registered as linked — inconsistent state (a stale
-        # link entry naming what is now the base). The chain is written
-        # base-first, so chain[0] is the recovery.
         profile_chain[0] if profile_chain else "default"
     )
     layers = [p for p in profile_chain if p != base]
@@ -381,11 +390,6 @@ def identity_preamble(profile_chain: list[str]) -> str:
         if layers
         else ""
     )
-    # Scoped to identity only. The Precedence section of the shared directives
-    # below claims first-load authority for the floors (Security, Safety
-    # Protocol, HARD FLOOR); this preamble must defer to it explicitly rather
-    # than compete with it — two documents each claiming "read me first" is how
-    # a floor gets argued away.
     return (
         "# Identity — who you are (read first; it does not outrank anything below)\n\n"
         f"You are **{base}** — the persona this operator's fleet runs, "
@@ -410,6 +414,9 @@ def strip_persona(dst: Path, managed_header: str, managed_footer: str) -> None:
 
     A file that is entirely ours is deleted; a non-managed file is left alone
     (it is the operator's, whatever its name).
+
+    Header without footer: the managed region cannot be separated from whatever the operator appended, so nothing here
+    is safely deletable. Preserve the whole file as a backup instead of destroying content.
     """
     _i = _install_module()
     if not dst.exists():
@@ -419,9 +426,6 @@ def strip_persona(dst: Path, managed_header: str, managed_footer: str) -> None:
         _i._cprint(f"  [--] {dst.name} is not agentihooks-managed — left in place")
         return
     if managed_footer not in text:
-        # Header without footer: the managed region cannot be separated from
-        # whatever the operator appended, so nothing here is safely deletable.
-        # Preserve the whole file as a backup instead of destroying content.
         backup = dst.with_suffix(f"{dst.suffix}.bak.{datetime.now(timezone.utc):%Y%m%d%H%M%S}")
         shutil.move(str(dst), str(backup))
         _i._cprint(
@@ -462,15 +466,20 @@ def build_persona(
     pending_rules: list[tuple[str, str, str]],
     managed_header: str,
     managed_footer: str,
-    user_dir: Path | None = None,
+    user_dir: Path | None | Mapping[str, Path | None] = None,
 ) -> str:
-    """Assemble the managed region of a compiled instruction file."""
+    """Assemble the managed region of a compiled instruction file.
+
+    ``user_dir`` is the user bundle, or a mapping of label to directory for every bundle after the
+    root, in precedence order (``shared bundle`` then ``user bundle``).
+    """
     from hooks.context.profile_chain import inherited
 
+    later = user_dir if isinstance(user_dir, Mapping) else {"user bundle": user_dir}
     parents = inherited(profile_dirs)
     parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]
 
-    for label, directory in (("bundle", bundle_dir), ("user bundle", user_dir)):
+    for label, directory in (("bundle", bundle_dir), *later.items()):
         if content := shared_directive(directory):
             parts.append(f"<!-- {label} shared directives -->\n{content}")
 
@@ -485,7 +494,7 @@ def build_persona(
         rule_parts = [f"<!-- rule: {name} ({label}) -->\n{text.strip()}" for label, name, text in pending_rules]
         parts.append("# Rules\n\n" + "\n\n---\n\n".join(rule_parts))
 
-    manifesto_text = read_manifestos(bundle_dir, profile_dirs, user_dir)
+    manifesto_text = read_manifestos(bundle_dir, profile_dirs, later.get("user bundle"), later.get("shared bundle"))
     if manifesto_text:
         parts.append(f"<!-- ci-manifesto -->\n{manifesto_text.strip()}")
 

@@ -70,7 +70,7 @@ def test_trace_plan_on_a_hosted_ledger_files_the_cut_piece_as_the_pinned_agent(h
     with ledger_route.scoped(SLUG, url):
         filed = [item for item in ledger.request(SLUG)["followups"] if item["text"] == CUT]
     assert len(filed) == 1
-    events = storage.default().events_since(SLUG, 0)
+    events = storage.default().export_document(SLUG)["_meta"]["events"]
     added = [event for event in events if event["target"] == f"followups/{filed[0]['id']}"]
     assert [(event["by"], event["kind"]) for event in added] == [(name, "added")]
 
@@ -85,7 +85,7 @@ def _filed(url, text):
 
 
 def _added(item_id):
-    events = storage.default().events_since(SLUG, 0)
+    events = storage.default().export_document(SLUG)["_meta"]["events"]
     return [event for event in events if event["target"] == f"followups/{item_id}" and event["kind"] == "added"]
 
 

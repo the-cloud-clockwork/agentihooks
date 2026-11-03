@@ -124,6 +124,23 @@ def test_failure_outside_the_repository_names_its_caller_here(capsys):
     assert finished["raised_at"] == f"tests/swarm/test_timing.py:{here.__code__.co_firstlineno + 2} {here.__name__}"
 
 
+def test_a_failed_launch_records_its_detail_and_status(capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.swarm.tick import SpawnError
+
+    with pytest.raises(SpawnError), timing.tick("sw"), timing.step("launch"):
+        raise SpawnError("hive acknowledgement pending", "pending")
+    finished = json.loads(capsys.readouterr().err.splitlines()[-1])
+    assert finished["error"] == "scripts.swarm.tick.SpawnError"
+    assert finished["detail"] == "hive acknowledgement pending"
+    assert finished["status"] == "pending"
+
+
+def test_a_failed_launch_defaults_to_the_refused_status() -> None:
+    from scripts.swarm.tick import SpawnError
+
+    assert SpawnError("no room").step_fields() == {"detail": "no room", "status": "refused"}
+
+
 def test_a_failure_inside_a_timed_call_names_the_call_frame(capsys):
     with pytest.raises(json.JSONDecodeError), timing.tick("sw"):
         timing.call(json.loads, "{")
@@ -249,3 +266,21 @@ def test_timed_returns_the_result_of_its_call(capsys):
         ("started", "builtins.divmod", None),
         ("finished", "builtins.divmod", "success"),
     ]
+
+
+@pytest.mark.parametrize(("ended", "late"), [(12.5, False), (12.6, True)])
+def test_within_records_its_budget_and_reads_late_only_past_it(
+    monkeypatch: pytest.MonkeyPatch, ended: float, late: bool
+) -> None:
+    output = Output()
+    monkeypatch.setattr(timing.sys, "stderr", output)
+    monkeypatch.setattr(timing, "time", SimpleNamespace(monotonic=iter([9.0, 10.0, ended, ended]).__next__))
+    with timing.tick("sw"):
+        assert timing.within(2.5, sorted, [2, 1]) == [1, 2]
+    record = json.loads(output.getvalue().splitlines()[-1])
+    assert (record["outcome"], record["budget_s"], record["late"]) == ("success", 2.5, late)
+
+
+def test_within_outside_a_tick_runs_the_call_and_records_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    assert timing.within(1.0, sorted, [2, 1]) == [1, 2]
+    assert capsys.readouterr().err == ""

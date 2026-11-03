@@ -217,7 +217,12 @@ def _spawn(session_id: str) -> None:
 def run(session_id: str) -> None:
     signal.alarm(0)
     os.nice(10)
-    print(f"trace_flush {session_id}: {supervise(session_id)}", file=sys.stderr)
+    try:
+        result = supervise(session_id)
+    except Exception as error:
+        print(f"trace_flush {session_id}: FAILED: {type(error).__name__}: {error}", file=sys.stderr)
+        raise
+    print(f"trace_flush {session_id}: {result}", file=sys.stderr)
 
 
 def _transcript(session_id: str, record: dict) -> str:
@@ -286,12 +291,28 @@ def _lock(session_id: str, wait: float, clock: Callable[[], float], sleep: Calla
             sleep(POLL_SEC)
 
 
-def scheduled_wait(delay: float) -> None:
-    from redis.exceptions import ConnectionError, TimeoutError
+def scheduled_wait(delay: float, session_id: str = "unknown") -> None:
+    from redis.exceptions import ConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
 
+    from scripts.events.bus import StateConflict
+
+    def expired(_signum, _frame):
+        raise TimeoutError("scheduler lifecycle deadline exceeded")
+
+    previous = signal.signal(signal.SIGALRM, expired)
+    started = time.monotonic()
+    remaining, interval = signal.setitimer(signal.ITIMER_REAL, POLL_LIMIT_SEC, POLL_LIMIT_SEC)
     try:
-        timer_wait(delay, timeout=POLL_LIMIT_SEC)
-    except (ConnectionError, TimeoutError):
+        try:
+            timer_wait(delay, timeout=POLL_LIMIT_SEC)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+            if remaining:
+                signal.setitimer(signal.ITIMER_REAL, max(0.001, remaining - (time.monotonic() - started)), interval)
+    except (ConnectionError, RedisTimeoutError, StateConflict, TimeoutError) as error:
+        print(f"trace_flush {session_id}: scheduler fallback: {type(error).__name__}: {error}", file=sys.stderr)
         time.sleep(delay)
 
 
@@ -302,9 +323,10 @@ def supervise(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     is_alive: Callable[[Owner], bool] = alive,
-    timer_wait: Callable[[float], None] = scheduled_wait,
+    timer_wait: Callable[[float], None] | None = None,
 ) -> str:
     limits = limits or budget()
+    timer_wait = timer_wait or sleep
     handle = _lock(session_id, limits.attempts * limits.attempt_timeout + limits.interval, clock, sleep)
     if handle is None:
         return "another exporter owns the session"
@@ -316,8 +338,8 @@ def supervise(
             record = _read(request_path(session_id))
             owner_alive = is_alive(_owner(record, "owner_"))
             fresh = record.get("at") != seen
-            if (failing or not fresh) and owner_alive and clock() < due:
-                timer_wait(POLL_SEC)
+            if (failing or not fresh) and owner_alive and (remaining := due - clock()) > 0:
+                timer_wait(min(POLL_SEC, remaining))
                 continue
             seen = record.get("at")
             trigger = "final" if not owner_alive else f"request:{record.get('reason', '')}" if fresh else "interval"

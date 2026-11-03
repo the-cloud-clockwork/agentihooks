@@ -335,7 +335,8 @@ def _state(
 ) -> tuple[str, float | None]:
     if provider_status == "rejected":
         return "BLOCKED", 0.0
-    windows = [five_hour, seven_day, *([fable] if fable is not None else [])]
+    reported = [five_hour] if five_hour.used is not None else []
+    windows = [*reported, seven_day, *([fable] if fable is not None else [])]
     usages = [window.used for window in windows if window.used is not None]
     if len(usages) != len(windows):
         return "UNKNOWN", None

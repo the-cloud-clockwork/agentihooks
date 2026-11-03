@@ -24,6 +24,15 @@ def test_controller_reads_unhealthy_once_a_swarm_lease_goes_stale():
     assert "lease.current" in probe and "slugs()" in probe
 
 
+def test_the_controller_and_hive_keep_scheduler_state_in_the_nats_bucket():
+    for name in ("controller", "hive"):
+        environment = SERVICES[name]["environment"]
+        assert environment["AGENTIHOOKS_SCHEDULER_STATE_BACKEND"] == "${AGENTIHOOKS_SCHEDULER_STATE_BACKEND:-bus}"
+        assert environment["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+        assert SERVICES[name]["depends_on"]["nats"]["condition"] == "service_healthy"
+    assert "--jetstream" in SERVICES["nats"]["command"]
+
+
 def test_redis_starts_from_an_acl_file_with_optional_tls():
     start = (ROOT / "deploy/compose/redis/start.sh").read_text()
     assert "--aclfile" in start

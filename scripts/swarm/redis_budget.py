@@ -54,9 +54,10 @@ def bounded(store, budget: Budget):
     for name, value in vars(store).items():
         if value is source:
             setattr(bound, name, budget)
-        elif getattr(value, "redis", None) is source:
+        elif getattr(value, "redis", None) is source or getattr(value, "store", None) is store:
             part = copy.copy(value)
-            part.redis = budget
+            if getattr(value, "redis", None) is source:
+                part.redis = budget
             if getattr(value, "store", None) is store:
                 part.store = bound
             setattr(bound, name, part)

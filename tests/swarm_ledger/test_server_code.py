@@ -1,6 +1,10 @@
 import hashlib
 import json
 import os
+import threading
+from pathlib import Path
+
+import pytest
 
 from scripts.swarm_ledger import ledger_server, server_code
 
@@ -38,6 +42,8 @@ def test_the_server_and_the_swarm_share_one_list_of_code_folders():
         "events",
         "hub",
         "workflows",
+        "auth",
+        "tick",
         "hooks",
     ]
 
@@ -130,8 +136,12 @@ def test_a_server_is_current_only_while_its_own_record_matches_the_code_on_disk(
     assert not server_code.stale(tmp_path, 4242)
 
 
-def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch, tmp_path):
+def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from unittest.mock import ANY, Mock
+
     recorded = []
+    closing = Mock(wraps=ledger_server.close_server)
+    monkeypatch.setattr(ledger_server, "close_server", closing)
 
     class Server:
         def __init__(self, *args, **kwargs):
@@ -163,7 +173,36 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch, tmp_p
         lambda *args, **kwargs: recorded.append((*args, kwargs, (tmp_path / ".server.pid").exists())),
     )
     ledger_server.serve()
+    closing.assert_called_once_with(ANY, True)
     assert recorded == [
-        (tmp_path, os.getpid(), ledger_server.LOADED_STAMP, {"digest": ledger_server.LOADED_DIGEST}, False)
+        (
+            tmp_path,
+            os.getpid(),
+            ledger_server.LOADED_STAMP,
+            {"digest": ledger_server.LOADED_DIGEST, "files": ledger_server.LOADED_CODE.files},
+            False,
+        )
     ]
     assert ledger_server.LOADED_STAMP > 0
+
+
+def test_two_threads_of_one_server_record_at_once_and_leave_one_whole_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    replace = Path.replace
+    nested: list[None] = []
+
+    def interleaved(self: Path, target: Path) -> Path:
+        if not nested:
+            nested.append(None)
+            other = threading.Thread(target=lambda: server_code.record(tmp_path, 7, 2, (), digest="watch"))
+            other.start()
+            other.join()
+        return replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", interleaved)
+    server_code.record(tmp_path, 7, 1, (), digest="main")
+    held = server_code.loaded(tmp_path)
+    assert held is not None
+    assert held["stamp"] == 1
+    assert sorted(p.name for p in tmp_path.glob(f"{server_code.RECORD}*")) == [server_code.RECORD]

@@ -150,7 +150,7 @@ def _reached_source(path: Path) -> str:
     return "\n".join(lines)
 
 
-def test_no_script_a_step_runs_calls_the_api():
+def test_no_script_a_step_runs_calls_the_api() -> None:
     calls = _api_calls((step.get("run", ""), here) for _, step, here in _all_steps())
     expected = [
         ".github/actions/browser-cache/select-artifacts.sh",
@@ -169,8 +169,8 @@ def test_no_script_a_step_runs_calls_the_api():
         "hooks/__main__.py",
         "hooks/context/conditions.py",
         "hooks/hook_manager.py",
-        "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
+        "scripts/ci_batch_runner_ceiling.py",
         "scripts/ci_branch_coverage.py",
         "scripts/ci_budget/__main__.py",
         "scripts/ci_budget/jobs.py",
@@ -182,13 +182,20 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
         "scripts/ci_mutation/__main__.py",
+        "scripts/ci_mutation/identity.py",
+        "scripts/ci_mutation/measured.py",
+        "scripts/ci_mutation/merge.py",
         "scripts/ci_mutation/plan.py",
+        "scripts/ci_mutation/probe.py",
+        "scripts/ci_mutation/probed.py",
+        "scripts/ci_mutation/regrade.py",
         "scripts/ci_mutation/reuse.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
         "scripts/ci_stats_seed.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
+        "scripts/feature_map.py",
         "scripts/hive/nats_grant.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/compose-recovery-drill.sh",
@@ -204,6 +211,8 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/dead_code.py",
         "scripts/design_rules.py",
         "scripts/locked_tests.py",
+        "scripts/no_comments.py",
+        "scripts/no_whole_ledger.py",
         "scripts/size_limits.py",
         "scripts/swallowed_exceptions.py",
         "scripts/threshold_pins.py",
@@ -220,6 +229,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/chart_nats.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
+        "tests/chart_scheduler_state.py",
         "tests/chart_scratch_swarms.py",
         "tests/chart_secrets.py",
         "tests/chart_workers.py",
@@ -229,6 +239,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/coverage_grade.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
+        "tests/coverage_summary.py",
         "tests/branch_record.py",
         "tests/dep_manifest.py",
         "tests/dev_durations.py",
@@ -276,7 +287,11 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/test_ci_runner_classes.py",
         "tests/test_ci_runner_trust.py",
     ]
-    expected += [name for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py") if ROOT / name in calls]
+    expected += [
+        name
+        for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py", "scripts/type_gate.py")
+        if ROOT / name in calls
+    ]
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),
@@ -536,7 +551,10 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")
     assert download["if"] == merge["if"] == "needs.select.outputs.scope != 'none'"
     assert download["uses"].startswith("actions/download-artifact@")
-    assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
+    assert download["with"] == {
+        "pattern": "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}",
+        "path": ".coverage-shards",
+    }
     assert steps.index(download) < steps.index(merge)
     assert merge["env"] == {
         "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}",

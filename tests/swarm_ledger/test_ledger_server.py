@@ -105,6 +105,7 @@ def test_home_spans_the_full_window_width():
     assert "max-width" not in rule("ul")
 
 
+@pytest.mark.feature("ledger-home")
 def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(browser, updated_at):
     found = row(home(browser, now=updated_at + 5 * MINUTE), SLUG)
     assert (
@@ -145,6 +146,7 @@ def test_a_ledger_without_a_swarm_says_so_in_its_row(browser, updated_at):
     assert '<span class="state s-none" role="cell">no swarm</span>' in found
 
 
+@pytest.mark.feature("ledger-home")
 def test_a_closed_ledger_shows_closed_and_a_reopen_button(browser, updated_at):
     make("closed-row")
     storage.apply_ops("closed-row", ops=[{"op": "close", "id": "c1", "by": "swarm"}])
@@ -195,6 +197,7 @@ def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(bro
     assert '</li><li class="row" role="row" data-slug=' in page
 
 
+@pytest.mark.feature("ledger-home")
 def test_the_bin_lists_days_left_and_a_restore_button(browser, updated_at):
     ledger_bin.delete(SLUG, now=updated_at)
     assert f'href="/{SLUG}"' not in home(browser)
@@ -551,43 +554,30 @@ def test_a_reload_with_an_unreadable_ready_payload_carries_every_ledger(monkeypa
     assert server.HANDOFF == {"since": {}}
 
 
-def test_a_container_s_main_server_reloads_in_place(monkeypatch):
+def test_a_container_s_main_server_reloads_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
     ran = []
     monkeypatch.setattr(server, "container_main", lambda: True)
-    monkeypatch.setattr(server, "metrics_journal", lambda step: ran.append(step))
-
-    def execv(path, argv):
-        ran.append((path, argv))
-        raise SystemExit(0)
-
-    monkeypatch.setattr(server.os, "execv", execv)
-    with pytest.raises(SystemExit):
-        server.reload_if_changed(1, Handed(), (), lambda *args, **kwargs: ran.append("handed"), force=True)
-    assert ran == [
-        server.request_metrics.stop,
-        (sys.executable, [sys.executable, str(server.CODE_DIR / "ledger_server.py"), "--serve"]),
-    ]
+    monkeypatch.setattr(server, "HANDOFF", {})
+    monkeypatch.setattr(server.os, "execv", lambda *args: ran.append(args))
+    handed = SimpleNamespace(shutdown=lambda: ran.append("stopped"))
+    assert server.reload_if_changed(1, handed, (), force=True) is None
+    assert ran == ["stopped"]
+    assert server.HANDOFF == {"exec": [sys.executable, str(server.CODE_DIR / "ledger_server.py"), "--serve"]}
+    server.finish_reload()
+    assert ran == ["stopped", (sys.executable, [sys.executable, str(server.CODE_DIR / "ledger_server.py"), "--serve"])]
+    assert server.HANDOFF == {}
 
 
-def test_a_container_s_main_server_that_cannot_restart_in_place_keeps_serving(monkeypatch, capsys):
-    journal = []
-    monkeypatch.setattr(server, "container_main", lambda: True)
-    monkeypatch.setattr(server, "metrics_journal", lambda step, *args: journal.append((step, *args)))
+def test_a_container_reexec_failure_exits_after_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "HANDOFF", {"exec": ["server"]})
 
-    def execv(path, argv):
+    def execv(path: str, argv: list[str]) -> None:
         raise OSError("exec format error")
 
     monkeypatch.setattr(server.os, "execv", execv)
-    started = server.code_stamp(())
-    handed = server.reload_if_changed(1, Handed(), (), lambda *args, **kwargs: pytest.fail("handed off"), force=True)
-    assert handed == started
-    assert capsys.readouterr().err == (
-        "reload: could not restart in place: exec format error; this server keeps serving\n"
-    )
-    assert journal == [
-        (server.request_metrics.stop,),
-        (server.request_metrics.restore, server.core.LEDGER_DIR / server.request_metrics.JOURNAL_NAME),
-    ]
+    with pytest.raises(OSError, match="exec format error"):
+        server.finish_reload()
+    assert server.HANDOFF == {}
 
 
 @pytest.mark.parametrize(("comm", "main"), [("containerd-shim\n", True), ("python\n", False), (None, False)])

@@ -31,6 +31,7 @@ MOVED = {
     ("changelog.yml", "changelog"): LIGHT,
     ("changelog-seed.yml", "seed"): LIGHT,
     ("chaos.yml", "chaos"): STANDARD,
+    ("chart-release.yml", "package"): LIGHT,
     ("chart-release.yml", "publish"): LIGHT,
     ("mutation-line-selection-proof.yml", "compare"): BATCH,
     ("test.yml", "docs"): QUEUED,
@@ -43,6 +44,7 @@ MOVED = {
     ("codex-cache.yml", "seed"): STANDARD,
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
+    ("tick-equivalence.yml", "tick-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,
     ("helm-kind-published.yml", "kind"): STANDARD,
     ("hierarchy-cpu.yml", "grade"): LIGHT,
@@ -57,6 +59,7 @@ MOVED = {
     ("mutation-preflight.yml", "plan"): STANDARD,
     ("mutation-preflight.yml", "probe"): BATCH,
     ("mutation-preflight.yml", "refine"): LIGHT,
+    ("mutation-preflight.yml", "replan"): LIGHT,
     ("mutation-replay.yml", "plan"): LIGHT,
     ("mutation-replay.yml", "grade"): BATCH,
     ("mutation-replay.yml", "verify"): LIGHT,
@@ -90,17 +93,23 @@ MOVED = {
     ("test.yml", "gate-required"): LIGHT,
     ("test.yml", "kind-due"): QUEUED,
     ("test.yml", "lint"): QUEUED,
-    ("test.yml", "mutation"): BATCH,
+    ("test.yml", "mutation"): LIGHT,
     ("test.yml", "mutation-plan"): LIGHT,
+    ("test.yml", "mutation-refine"): LIGHT,
+    ("test.yml", "mutation-probe"): BATCH,
+    ("test.yml", "mutation-replan"): LIGHT,
+    ("test.yml", "mutation-shard"): BATCH,
     ("test.yml", "mutation-stats"): BATCH,
     ("test.yml", "mutation-stats-seed"): LIGHT,
     ("test.yml", "queue-fail-fast"): LIGHT,
     ("test.yml", "refresh-durations"): QUEUED,
     ("count-record.yml" if (WORKFLOWS / "count-record.yml").exists() else "test.yml", "count-record"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
+    ("test.yml", "type-gate"): BATCH,
     ("test.yml", "select"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
     ("test.yml", "sonar"): QUEUED,
+    ("test.yml", "dep-manifest"): QUEUED,
     ("test.yml", "split"): QUEUED,
     ("test.yml", "stage-budget"): LIGHT,
     ("test.yml", "test-count"): QUEUED,
@@ -111,6 +120,7 @@ MOVED = {
     ("test.yml", "unit-selected"): STANDARD,
     ("writer-lock.yml", "inputs"): LIGHT,
     ("writer-lock.yml", "scenario"): QUEUED,
+    ("feature-suite.yml", "features"): QUEUED,
     ("worker-resources.yml", "measure"): BATCH,
 }
 if (WORKFLOWS / "actions-storage.yml").exists():
@@ -119,6 +129,9 @@ if (WORKFLOWS / "ci-minutes.yml").exists():
     MOVED[("ci-minutes.yml", "measure")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
+if (WORKFLOWS / "hive-join.yml").exists():
+    MOVED[("hive-join.yml", "smoke")] = QUEUED
+
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}
 
 # The runner trust loader contract fixes this job's runner.

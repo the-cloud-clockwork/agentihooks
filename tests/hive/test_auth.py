@@ -98,7 +98,11 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:state:hive-m1:*",
                     f"~{ROOT}:swarm:state:scheduler-m1:*",
                     f"~{ROOT}:swarm:*:agents",
+                    f"~{ROOT}:swarm:*:hosts",
                     f"~{ROOT}:swarm:*:executions",
+                    f"~{ROOT}:swarm:*:lease-cache",
+                    f"~{ROOT}:swarm:state:fencing:*",
+                    f"~{ROOT}:swarm:state:counters:*",
                     f"~{ROOT}:swarm:*:execution-publishing",
                     f"~{ROOT}:swarm:*:codex-transport",
                     f"~{ROOT}:swarm:*:codex-endpoints",
@@ -165,6 +169,7 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
     [
         ("swarm:proof:claim:t1", True),
         ("swarm:proof:agents", True),
+        ("swarm:proof:hosts", True),
         ("swarm:proof:executions", True),
         ("swarm:proof:identity-conflicts", True),
         ("swarm:proof:desired-routes", True),
@@ -656,8 +661,11 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
     updates = []
 
     class Ledger:
-        def state(self, slug):
-            return {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}], "phases": []}
+        def task(self, slug, task):
+            return {"id": "t1", "lane": "eng", "state": "claimed"}
+
+        def metadata(self, slug):
+            return {"overview": ""}
 
         def update_task(self, slug, task, fields, by=None):
             updates.append((task, fields, by))
@@ -722,8 +730,11 @@ def test_a_member_credential_records_its_pull_request_before_a_lift_cleanup_refu
     updates = []
 
     class Ledger:
-        def state(self, slug):
-            return {"tasks": [{"id": "t1", "lane": "eng", "state": "claimed"}], "phases": []}
+        def task(self, slug, task):
+            return {"id": "t1", "lane": "eng", "state": "claimed"}
+
+        def metadata(self, slug):
+            return {"overview": ""}
 
         def update_task(self, slug, task, fields, by=None):
             updates.append((task, fields, by))

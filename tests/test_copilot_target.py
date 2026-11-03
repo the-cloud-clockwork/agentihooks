@@ -129,7 +129,8 @@ class TestHooksJson:
         for event, hooks in doc["hooks"].items():
             assert hooks[-1]["command"].endswith(f"agentihooks-hook.sh {event}")
             assert hooks[-1]["type"] == "command"
-            assert hooks[-1]["timeoutSeconds"] > 0
+            assert hooks[-1]["timeoutSeconds"] == 30
+            assert "timeoutSec" not in hooks[-1]
         wrapper = (copilot_home() / "agentihooks-hook.sh").read_text()
         assert "AGENTIHOOKS_TARGET=copilot" in wrapper
         assert 'AGENTIHOOKS_COPILOT_EVENT="${1:-}"' in wrapper

@@ -11,6 +11,7 @@ from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 
 RUNS = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=20"
+NEWER_RUNS = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&per_page=20"
 JOBS_JQ = ".jobs[] | {id, name, conclusion, check_run_url, steps} | @json"
 SHA = "c0ffee" + "0" * 34
 RED = {"id": 900, "conclusion": "failure", "head_sha": SHA, "html_url": "https://github.com/o/r/actions/runs/900"}
@@ -270,6 +271,7 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
             ],
             kwargs,
         ),
+        (["gh", "api", NEWER_RUNS, "--jq", ".workflow_runs[] | {id, head_sha} | @json"], kwargs),
     ]
     assert {(slug, by) for slug, _, by in ledger.added} == {(SLUG, "swarm")}
     assert [fields for _, fields, _ in ledger.added] == [
@@ -321,6 +323,134 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
         "and raised a promotion alert: https://github.com/o/r/actions/runs/900"
     ]
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
+
+
+NEWER = {"id": 902, "head_sha": "a" * 40}
+
+
+def history(newer, jobs_by_run, compare="ahead", calls=None):
+    def run(argv, **kwargs):
+        endpoint = argv[2]
+        if calls is not None:
+            calls.append((argv, kwargs))
+        if "/compare/" in endpoint:
+            body = [{"status": compare if isinstance(compare, str) else compare[endpoint.rsplit("...", 1)[1]]}]
+        elif "/jobs" in endpoint:
+            body = jobs_by_run[int(endpoint.split("/runs/")[1].split("/")[0])]
+        elif endpoint == NEWER_RUNS:
+            body = newer
+        else:
+            body = [RED]
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
+
+    return run
+
+
+PASSED = [{"name": "helm-kind", "conclusion": "success"}, {"name": "unit (3.11, 1)", "conclusion": "success"}]
+
+
+@pytest.mark.parametrize("newer", [[NEWER, RED], [RED, NEWER]])
+def test_an_older_red_run_files_nothing_for_checks_a_newer_run_containing_its_head_already_passed(store, newer):
+    calls, ledger = [], Ledger()
+    actions = refresh(store, ledger, history(newer, {900: JOBS, 902: PASSED}, calls=calls))
+    kwargs = {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
+    compare = f"repos/{{owner}}/{{repo}}/compare/{SHA}...{NEWER['head_sha']}"
+    assert (["gh", "api", compare, "--jq", "{status} | @json"], kwargs) in calls
+    jobs = "repos/{owner}/{repo}/actions/runs/902/jobs?per_page=100"
+    assert (["gh", "api", jobs, "--paginate", "--jq", JOBS_JQ, "--include"], kwargs) in calls
+    assert ledger.added == []
+    assert ledger.raised == []
+    assert master_items(store) == []
+    assert actions == ["dev push run 900 failed only on checks a newer dev push run already passed"]
+    assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
+
+
+OTHER = {"id": 903, "head_sha": "b" * 40}
+
+
+def test_a_newer_run_off_the_red_head_does_not_stop_the_scan_of_older_ones(store):
+    ledger = Ledger()
+    compare = {OTHER["head_sha"]: "diverged", NEWER["head_sha"]: "ahead"}
+    refresh(store, ledger, history([OTHER, NEWER], {900: JOBS, 902: PASSED, 903: PASSED}, compare))
+    assert ledger.added == []
+    assert ledger.raised == []
+
+
+def test_checks_passed_across_several_newer_runs_add_up(store):
+    ledger = Ledger()
+    runs = {900: JOBS, 902: [PASSED[1]], 903: [PASSED[0]]}
+    refresh(store, ledger, history([OTHER, NEWER], runs))
+    assert ledger.added == []
+    assert ledger.raised == []
+
+
+def test_older_newer_runs_are_not_read_once_every_failed_check_passed(store):
+    calls = []
+    refresh(store, Ledger(), history([OTHER, NEWER], {900: JOBS, 902: PASSED, 903: PASSED}, calls=calls))
+    assert not any("/runs/902/" in argv[2] for argv, _ in calls)
+
+
+@pytest.mark.parametrize(
+    "read",
+    [lambda: sonar_run(SUPERSEDED), lambda: gh([RED], [{"name": "lint", "conclusion": "cancelled"}])],
+    ids=["superseded", "no failed job"],
+)
+def test_a_run_with_nothing_to_hold_reads_no_newer_runs(store, read):
+    calls, inner = [], read()
+
+    def run(argv, **kwargs):
+        calls.append(argv[2])
+        return inner(argv, **kwargs)
+
+    refresh(store, Ledger(), run)
+    assert NEWER_RUNS not in calls
+
+
+def test_an_older_red_run_still_files_the_checks_no_newer_run_passed(store):
+    ledger = Ledger()
+    newer_jobs = [{"name": "helm-kind", "conclusion": "success"}, {"name": "unit (3.11, 1)", "conclusion": "failure"}]
+    refresh(store, ledger, history([NEWER], {900: JOBS, 902: newer_jobs}))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: unit (3.11, 1)"]
+    assert len(ledger.raised) == 1
+
+
+def test_a_red_run_on_the_newest_head_still_files_every_failed_check(store):
+    ledger = Ledger()
+    refresh(store, ledger, history([RED], {900: JOBS}))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: helm-kind",
+        "Promotion red: unit (3.11, 1)",
+    ]
+    assert len(ledger.raised) == 1
+
+
+@pytest.mark.parametrize("status", ["behind", "diverged"])
+def test_a_newer_run_whose_head_does_not_contain_the_red_head_does_not_hold_its_checks(store, status):
+    ledger = Ledger()
+    refresh(store, ledger, history([NEWER], {900: JOBS, 902: PASSED}, compare=status))
+    assert len(ledger.added) == 2
+    assert len(ledger.raised) == 1
+
+
+def test_a_failed_compare_read_still_files_every_failed_check(store):
+    ledger, read = Ledger(), history([NEWER], {900: JOBS, 902: PASSED})
+
+    def run(argv, **kwargs):
+        if "/compare/" in argv[2]:
+            raise subprocess.CalledProcessError(1, argv)
+        return read(argv, **kwargs)
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 2
+    assert len(ledger.raised) == 1
+
+
+def test_a_newer_run_on_the_same_head_holds_the_checks_it_passed_without_a_compare(store):
+    calls, ledger = [], Ledger()
+    refresh(store, ledger, history([{"id": 902, "head_sha": SHA}], {900: JOBS, 902: PASSED}, calls=calls))
+    assert ledger.added == []
+    assert ledger.raised == []
+    assert not any("/compare/" in argv[2] for argv, _ in calls)
 
 
 def test_a_job_with_an_open_promotion_task_is_not_filed_again_and_done_ones_are_forgotten(store):
@@ -777,13 +907,31 @@ def test_the_same_cause_on_a_held_job_files_nothing_and_stays_quiet_while_its_al
     assert len(master_items(store)) == 1
 
 
+def test_a_new_run_whose_every_cause_has_an_open_fixer_raises_no_alert_after_the_master_closed_the_last(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", ["layer 3 failed"]))
+    ledger.close_alert(SLUG, ledger.alerts[0]["id"], "judged")
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer 4 failed"], 901), NOW * 2) == []
+    assert len(ledger.added) == 1 and len(ledger.raised) == 1
+    assert len(master_items(store)) == 1
+
+
+def test_a_newly_failing_job_beside_held_ones_on_a_new_run_still_files_and_alerts(store):
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], JOBS))
+    ledger.close_alert(SLUG, ledger.alerts[0]["id"], "judged")
+    jobs = [*JOBS, {"name": "ledger-load / load", "conclusion": "failure"}]
+    actions = refresh(store, ledger, gh([{**RED, "id": 901}], jobs), NOW * 2)
+    assert [fields["task"] for _, fields, _ in ledger.added][-1:] == ["promo-901-1"]
+    assert len(ledger.raised) == 2 and "ledger-load / load" in ledger.raised[1][2]
+    assert "raised the promotion alert for dev push run 901" in actions
+
+
 def test_a_fixer_filed_before_causes_were_kept_still_holds_its_job(store):
     store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-800-0", "swarm-image / smoke")
     ledger = Ledger([{"id": "promo-800-0", "title": "Promotion red: swarm-image smoke", "state": "claimed"}])
-    assert refresh(store, ledger, smoke_run("Build the image", ["layer failed"])) == [
-        "raised the promotion alert for dev push run 900"
-    ]
-    assert ledger.added == [] and master_items(store) == []
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer failed"])) == []
+    assert ledger.added == [] and ledger.raised == [] and master_items(store) == []
 
 
 def test_a_long_cause_is_cut_so_the_alert_fits_the_ledger_and_keeps_the_run_link(store):

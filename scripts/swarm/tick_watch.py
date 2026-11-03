@@ -6,14 +6,16 @@ import sys
 import time
 from collections.abc import Callable
 from threading import Lock, Thread
+from typing import Any
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import sd_notify, tick_heartbeat, timing
+from scripts.swarm import blockers, panic, sd_notify, tick_heartbeat, timing
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
 
 KEY = "tick-watch"
 SENDER = "swarm"
+STALE_TICK = "stale tick"
 PASS_S = 60
 SLUG_PASS_S = 120
 BEAT_S = 30
@@ -88,13 +90,15 @@ class Repair:
         return actions + self.respawn(slug)
 
 
-def _alert(store, slug, now, episode, evidence) -> list[str]:
+def _alert(store: RedisStore, slug: str, now: int, episode: dict[str, Any] | None, evidence: list[str]) -> list[str]:
     episode = episode or {"since": now, "told": []}
     fresh = [address for address in recipients(store, slug) if address not in episode["told"]]
     text = ALERT.format(slug=slug, evidence="; ".join(evidence))
     for address in fresh:
         _send(store, address, text, _item_id(slug, episode["since"], address, "alert"))
     _save(store, slug, {**episode, "told": sorted([*episode["told"], *fresh])})
+    blockers.record(store, slug, STALE_TICK, "; ".join(evidence), now)
+    panic.count_error(store, slug, STALE_TICK, now)
     return [f"told {address} the tick is stale" for address in fresh]
 
 

@@ -74,6 +74,7 @@ def test_the_startup_retry_stays_bounded_inside_the_down_window(store):  # noqa:
     assert runtime.master_spawns == 2
 
 
+@pytest.mark.feature("swarm-master-seat")
 def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promoted(store):  # noqa: F811
     runtime, ledger = outage(store, startup=False)
     runtime.broken = False
@@ -87,6 +88,7 @@ def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promote
     assert mail(store, ENGINEER) == [("swarm", NOTICE), ("swarm", master_alarm.BACK.format(slug="sw"))]
 
 
+@pytest.mark.feature("swarm-master-seat")
 def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
     runtime, ledger = outage(store, startup=False)
     actions = tick("sw", store, ledger, runtime, 1 + DOWN)
@@ -289,7 +291,7 @@ def test_no_live_engineer_is_told_once(store):  # noqa: F811
 @pytest.mark.parametrize("state", ["finished", "awaiting-decision"])
 def test_a_finished_or_awaiting_engineer_is_never_promoted(state):
     swarm, runtime = direct(AgentRecord(ENGINEER, "eng", "t1", state=state, seat="eng-1@sw"))
-    actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, 1 + DOWN, lambda: [BROKEN])
+    actions = tick_master.run("sw", swarm, tasks(), runtime, 1 + DOWN, lambda: [BROKEN], {})
     assert actions == ["master down 5 minutes, forced a master launch", BROKEN, "no live engineer to promote"]
 
 
@@ -308,7 +310,7 @@ def direct(*agents):
 
 def test_a_master_starting_before_any_forced_launch_is_not_a_failure():
     swarm, runtime = direct(AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting", seat=MASTER_SEAT))
-    actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, DOWN, lambda: [])
+    actions = tick_master.run("sw", swarm, tasks(), runtime, DOWN, lambda: [], {})
     assert actions == []
     assert tick_master.read(swarm, "sw") == {"since": 1}
 
@@ -341,7 +343,7 @@ def test_a_finished_master_record_counts_as_no_master():
     engineer = AgentRecord(ENGINEER, "eng", "t1", state="working", seat="eng-1@sw")
     finished = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="finished", seat=MASTER_SEAT)
     swarm, runtime = direct(engineer, finished)
-    actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, 1 + DOWN, lambda: [BROKEN])
+    actions = tick_master.run("sw", swarm, tasks(), runtime, 1 + DOWN, lambda: [BROKEN], {})
     assert actions == [
         "master down 5 minutes, forced a master launch",
         BROKEN,
@@ -352,7 +354,7 @@ def test_a_finished_master_record_counts_as_no_master():
 
 def test_every_launch_action_names_the_failure(store):  # noqa: F811
     runtime, ledger = outage(store)
-    tick_master.run("sw", store.config("sw"), store, ledger, runtime, 1 + DOWN, lambda: ["first", "second"])
+    tick_master.run("sw", store, ledger, runtime, 1 + DOWN, lambda: ["first", "second"], {})
     assert tick_master.read(store, "sw")["failure"] == "first; second"
 
 

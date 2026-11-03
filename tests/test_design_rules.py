@@ -1,3 +1,4 @@
+import ast
 import subprocess
 from pathlib import Path
 
@@ -41,7 +42,7 @@ def _inherits(key: str, target: str) -> str:
 
 def test_a_new_public_function_without_hints_is_red_naming_each_missing_hint(tmp_path):
     assert _errors(tmp_path, {"scripts/job.py": UNTYPED}) == [
-        "untyped: public scripts/job.py::load lacks type hints on path, return"
+        "untyped: scripts/job.py::load lacks type hints on path, return"
     ]
 
 
@@ -62,7 +63,7 @@ def test_a_changed_signature_is_graded(tmp_path):
     changed = UNTYPED.replace("count: int = 1", "count: int = 2")
     assert _grade(tmp_path, {"scripts/job.py": UNTYPED}, {"scripts/job.py": changed}) == (
         1,
-        ["untyped: public scripts/job.py::load lacks type hints on path, return"],
+        ["untyped: scripts/job.py::load lacks type hints on path, return"],
     )
 
 
@@ -70,16 +71,62 @@ def test_a_redefined_function_is_graded_under_its_own_numbered_key(tmp_path):
     head = {"scripts/job.py": TYPED + "\n\n" + UNTYPED}
     assert _grade(tmp_path, {"scripts/job.py": TYPED}, head) == (
         1,
-        ["untyped: public scripts/job.py::load#2 lacks type hints on path, return"],
+        ["untyped: scripts/job.py::load#2 lacks type hints on path, return"],
     )
 
 
-def test_private_and_nested_functions_are_not_graded_for_hints(tmp_path):
+def test_private_and_nested_functions_are_graded_for_hints(tmp_path):
     source = (
         "def _load(path):\n    def inner(x):\n        return x\n    return inner(path)\n\n\n"
         "def load(path: str) -> str:\n    def inner(x):\n        return x\n    return inner(path)\n"
     )
-    assert _grade(tmp_path, KEEP, {"scripts/job.py": source}) == (4, [])
+    assert _grade(tmp_path, KEEP, {"scripts/job.py": source}) == (
+        4,
+        [
+            "untyped: scripts/job.py::_load lacks type hints on path, return",
+            "untyped: scripts/job.py::_load.inner lacks type hints on x, return",
+            "untyped: scripts/job.py::load.inner lacks type hints on x, return",
+        ],
+    )
+
+
+def test_a_new_private_function_without_hints_is_red_on_star_parameters_and_return(tmp_path):
+    assert _errors(tmp_path, {"scripts/job.py": "def _run(*items, **options):\n    pass\n"}) == [
+        "untyped: scripts/job.py::_run lacks type hints on items, options, return"
+    ]
+
+
+def test_a_bare_signature_is_the_signature_with_every_annotation_removed():
+    typed = "@staticmethod\ndef f(a: int, /, b: str, *c: str, d: int = 1, **e: bytes) -> int:\n    pass\n"
+    plain = "@staticmethod\ndef f(a, /, b, *c, d=1, **e):\n    pass\n"
+    bare = design_rules._bare_signature(ast.parse(typed).body[0])
+    assert bare == design_rules._signature(ast.parse(plain).body[0])
+
+
+def test_a_fully_typed_private_function_is_green(tmp_path):
+    source = "def _run(*items: int, **options: object) -> None:\n    pass\n"
+    assert _grade(tmp_path, KEEP, {"scripts/job.py": source}) == (1, [])
+
+
+def test_a_body_change_keeps_an_untyped_private_signature_ungraded(tmp_path):
+    before = "def _run(path):\n    return path\n"
+    after = "def _run(path):\n    return path * 2\n"
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (0, [])
+
+
+def test_an_annotation_only_edit_is_not_graded_by_the_config_rule(tmp_path):
+    before = "def run(name, **options) -> None:\n    pass\n"
+    after = "def run(name: str, **options: object) -> None:\n    pass\n"
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (1, [])
+
+
+def test_a_keyword_bag_added_with_annotations_is_still_graded_by_the_config_rule(tmp_path):
+    before = "def run(name) -> None:\n    pass\n"
+    after = "def run(name: str, **options: object) -> None:\n    pass\n"
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (
+        1,
+        ["config: public scripts/job.py::run takes **options as a plain dict; take a typed configuration object"],
+    )
 
 
 def test_functions_under_a_statement_block_keep_their_scope(tmp_path):
@@ -91,8 +138,8 @@ def test_functions_under_a_statement_block_keep_their_scope(tmp_path):
         "        def stop(self, n):\n            return n\n"
     )
     assert _errors(tmp_path, {"scripts/job.py": source}) == [
-        "untyped: public scripts/job.py::load lacks type hints on path, return",
-        "untyped: public scripts/job.py::Job.stop lacks type hints on n, return",
+        "untyped: scripts/job.py::load lacks type hints on path, return",
+        "untyped: scripts/job.py::Job.stop lacks type hints on n, return",
     ]
 
 
@@ -106,20 +153,29 @@ def test_methods_skip_the_receiver_but_grade_every_other_parameter(tmp_path):
         "    def __init__(self, n):\n        self.n = n\n"
     )
     assert _errors(tmp_path, {"scripts/job.py": source}) == [
-        "untyped: public scripts/job.py::Job.parse lacks type hints on text",
-        "untyped: public scripts/job.py::Job.stop lacks type hints on n",
+        "untyped: scripts/job.py::Job.parse lacks type hints on text",
+        "untyped: scripts/job.py::Job.stop lacks type hints on n",
+        "untyped: scripts/job.py::Job.__init__ lacks type hints on n, return",
     ]
 
 
-def test_methods_of_a_private_class_are_not_public(tmp_path):
+def test_methods_of_a_private_class_are_graded_for_hints(tmp_path):
     source = "class _Job:\n    def run(self, n):\n        return self.n\n"
-    assert _errors(tmp_path, {"scripts/job.py": source}) == []
+    assert _errors(tmp_path, {"scripts/job.py": source}) == [
+        "untyped: scripts/job.py::_Job.run lacks type hints on n, return"
+    ]
+
+
+def test_an_annotation_only_edit_of_a_method_does_not_regrade_its_class(tmp_path):
+    before = GROUPED.replace("def run(self, n: int) -> int", "def run(self, n)")
+    head = {"scripts/tools.py": GROUPED}
+    assert _grade(tmp_path, {"scripts/tools.py": before}, head) == (1, [])
 
 
 def test_star_args_and_keyword_only_parameters_need_hints(tmp_path):
     source = "def run(*items, flag) -> None:\n    pass\n"
     assert _errors(tmp_path, {"scripts/job.py": source}) == [
-        "untyped: public scripts/job.py::run lacks type hints on items, flag"
+        "untyped: scripts/job.py::run lacks type hints on items, flag"
     ]
 
 
@@ -179,7 +235,7 @@ def test_a_typed_configuration_or_a_plain_data_dict_is_green(tmp_path, parameter
 
 
 def test_a_private_function_may_take_a_keyword_bag(tmp_path):
-    assert _errors(tmp_path, {"scripts/job.py": "def _run(**options) -> None:\n    pass\n"}) == []
+    assert _errors(tmp_path, {"scripts/job.py": "def _run(**options: object) -> None:\n    pass\n"}) == []
 
 
 def test_a_class_inheriting_a_concrete_project_class_in_its_module_is_red(tmp_path):
@@ -258,7 +314,7 @@ def test_a_concrete_project_class_named_like_a_root_is_red(tmp_path):
 
 def test_turning_a_function_async_grades_it(tmp_path):
     assert _errors(tmp_path, {"scripts/job.py": "async " + UNTYPED}, {"scripts/job.py": UNTYPED}) == [
-        "untyped: public scripts/job.py::load lacks type hints on path, return"
+        "untyped: scripts/job.py::load lacks type hints on path, return"
     ]
 
 
@@ -335,6 +391,15 @@ def test_an_inheritance_cycle_is_red_and_terminates(tmp_path):
         _inherits("scripts/job.py::A", "scripts.job.B"),
         _inherits("scripts/job.py::B", "scripts.job.A"),
     ]
+
+
+def test_an_existing_class_that_gains_a_concrete_base_is_graded(tmp_path):
+    before = CONCRETE + "\n\nclass Cache:\n    pass\n"
+    after = CONCRETE + "\n\nclass Cache(Store):\n    pass\n"
+    assert _grade(tmp_path, {"scripts/store.py": before}, {"scripts/store.py": after}) == (
+        1,
+        [_inherits("scripts/store.py::Cache", "scripts.store.Store")],
+    )
 
 
 def test_an_existing_subclass_whose_body_changes_is_not_graded(tmp_path):
@@ -561,7 +626,7 @@ def test_main_names_every_rule_and_exits_red(tmp_path, capsys):
     assert capsys.readouterr().out == (
         "4 new or changed units graded on the design rules, 3 errors\n"
         f"::error::{_inherits('scripts/store.py::Cache', 'scripts.store.Store')}\n"
-        "::error::untyped: public scripts/store.py::run lacks type hints on path, options\n"
+        "::error::untyped: scripts/store.py::run lacks type hints on path, options\n"
         "::error::config: public scripts/store.py::run takes **options as a plain dict; "
         "take a typed configuration object\n"
     )
@@ -578,7 +643,7 @@ def test_main_grades_the_working_directory_by_default(tmp_path, capsys, monkeypa
     head = _tree(tmp_path / "head", {**KEEP, "scripts/job.py": UNTYPED})
     monkeypatch.chdir(head)
     assert design_rules.main(["--base", str(base)]) == 1
-    assert "::error::untyped: public scripts/job.py::load" in capsys.readouterr().out
+    assert "::error::untyped: scripts/job.py::load" in capsys.readouterr().out
 
 
 def test_main_requires_a_base(capsys):

@@ -1130,8 +1130,7 @@ def test_a_hive_member_refuses_a_replaced_execution(store, server, clock, root, 
 def test_a_hive_member_refuses_an_archived_execution(store, server, clock, root, tmp_path, monkeypatch):
     from dataclasses import asdict
 
-    from scripts.swarm import commands
-    from scripts.swarm.execution import ARCHIVE
+    from scripts.swarm import commands, fencing
 
     monkeypatch.setattr(commands, "hive_id", lambda: "m1")
     spec = launch_spec(store, server, tmp_path)
@@ -1145,6 +1144,6 @@ def test_a_hive_member_refuses_an_archived_execution(store, server, clock, root,
         hive="m1",
         runtime_target={"host_id": "m1"},
     )
-    store.redis.hset(store.key(SLUG, ARCHIVE), "exe-archived", json.dumps(asdict(archived)))
+    fencing.write(store, SLUG, lambda doc: doc["archive"].update({"exe-archived": asdict(archived)}))
     failed(store, server, clock, root, replace(spec, execution_id="exe-archived"), "execution")
     assert server.commands == []

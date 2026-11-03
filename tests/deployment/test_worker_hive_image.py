@@ -409,19 +409,88 @@ def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_relea
     assert jobs["image"]["outputs"]["latest"] == "${{ steps.main.outputs.latest }}"
     assert hive["env"]["IMAGE"] == "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker"
     steps = {step.get("name", step.get("uses")): step for step in hive["steps"]}
-    build = steps["Build the hive worker on the released worker image"]["run"]
-    assert 'WORKER_IMAGE="ghcr.io/the-cloud-clockwork/agentihooks-worker:${RELEASE#v}"' in build
-    assert 'AGENTIHOOKS_REF="$GITHUB_SHA"' in build
     names = list(steps)
-    assert names.index("Prove the hive worker installs its profile") < names.index(
-        "Publish the release version and move the release tag when it is the newest"
-    )
-    publish = steps["Publish the release version and move the release tag when it is the newest"]
+    assert names.index("docker/login-action@v3") < names.index("Publish the hive worker once per release version")
+    publish = steps["Publish the hive worker once per release version"]
     assert publish["env"]["LATEST"] == "${{ needs.image.outputs.latest }}"
-    assert 'if [[ "$LATEST" == true ]]; then' in publish["run"]
-    assert publish["run"].index('docker push "$IMAGE:release"') < publish["run"].index(
-        'docker push "$IMAGE:${RELEASE#v}"'
+    assert publish["run"] == 'bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$LATEST" "$GITHUB_SHA"\n'
+
+
+def release_hive(tmp_path, *, version, candidate="not found", latest="true"):
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    log = tmp_path / "commands"
+    (tools / "docker").write_text(
+        '#!/usr/bin/env bash\nprintf "docker %s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [[ "$1 $2 $3" == "buildx imagetools inspect" ]]; then\n'
+        '  if [[ "$4" == *:2.1.7 ]]; then answer="$FAKE_VERSION"; else answer="$FAKE_CANDIDATE"; fi\n'
+        '  [[ "$answer" == published ]] && exit 0\n'
+        '  echo "ERROR: $4: $answer" >&2; exit 1\nfi\n'
     )
+    (tools / "docker").chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{tools}:{os.environ['PATH']}",
+        "COMMAND_LOG": str(log),
+        "FAKE_VERSION": version,
+        "FAKE_CANDIDATE": candidate,
+    }
+    result = subprocess.run(
+        ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", "v2.1.7", latest, "abc123"],
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    return result, log.read_text().splitlines() if log.exists() else []
+
+
+def test_a_rerun_of_a_published_hive_release_pushes_no_digest(tmp_path):
+    result, commands = release_hive(tmp_path, version="published")
+    assert result.returncode == 0, result.stderr
+    assert commands == ["docker buildx imagetools inspect registry/hive:2.1.7"]
+    assert "already published" in result.stdout
+
+
+def test_a_rerun_after_a_partial_hive_release_retags_the_built_digest_without_building(tmp_path):
+    result, commands = release_hive(tmp_path, version="not found", candidate="published")
+    assert result.returncode == 0, result.stderr
+    assert commands == [
+        "docker buildx imagetools inspect registry/hive:2.1.7",
+        "docker buildx imagetools inspect registry/hive:abc123",
+        "docker buildx imagetools create --tag registry/hive:release registry/hive:abc123",
+        "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
+    ]
+
+
+@pytest.mark.parametrize("latest", ["true", "false"])
+def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its_version(tmp_path, latest):
+    result, commands = release_hive(tmp_path, version="not found", latest=latest)
+    assert result.returncode == 0, result.stderr
+    assert commands[:2] == [
+        "docker buildx imagetools inspect registry/hive:2.1.7",
+        "docker buildx imagetools inspect registry/hive:abc123",
+    ]
+    build, proof = commands[2], commands[3]
+    assert build.startswith("docker build -f deploy/worker/Dockerfile ")
+    assert "--build-arg WORKER_IMAGE=ghcr.io/the-cloud-clockwork/agentihooks-worker:2.1.7" in build
+    assert "--build-arg AGENTIHOOKS_REF=abc123" in build
+    assert build.endswith("--tag registry/hive:abc123 .")
+    assert proof.startswith("docker run --rm ") and "agentihooks init --profile engineer" in proof
+    release = ["docker buildx imagetools create --tag registry/hive:release registry/hive:abc123"]
+    assert commands[4:] == [
+        "docker push registry/hive:abc123",
+        *(release if latest == "true" else []),
+        "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
+    ]
+
+
+@pytest.mark.parametrize(("version", "candidate"), [("unauthorized", "not found"), ("not found", "unauthorized")])
+def test_a_registry_error_other_than_not_found_fails_the_hive_release_without_building(tmp_path, version, candidate):
+    result, commands = release_hive(tmp_path, version=version, candidate=candidate)
+    assert result.returncode != 0
+    assert "unauthorized" in result.stderr
+    assert all(command.startswith("docker buildx imagetools inspect ") for command in commands)
 
 
 def test_the_proven_image_skips_the_artifact_round_trip():

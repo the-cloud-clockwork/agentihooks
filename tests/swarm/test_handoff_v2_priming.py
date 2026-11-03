@@ -22,6 +22,7 @@ Seam two test red for the expected reason.
 
 
 @pytest.mark.parametrize("caller,seat", [("engineer@a1b2c3-0001", "eng-1@sw"), ("master@a1b2c3-0001", "master@sw")])
+@pytest.mark.feature("swarm-handoff")
 def test_handoff_derives_the_seat_recap_without_another_file(env, tmp_path, caller, seat):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -125,6 +126,7 @@ def test_take_master_renders_the_stored_envelope(taker, capsys):  # noqa: F811
         "run all tests becauseof failures",
     ],
 )
+@pytest.mark.feature("swarm-learned-notes")
 def test_learned_refuses_a_missing_reason_and_writes_nothing(env, capsys, text):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")

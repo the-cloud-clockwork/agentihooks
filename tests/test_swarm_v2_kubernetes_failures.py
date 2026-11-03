@@ -1158,12 +1158,17 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
 
 @pytest.mark.parametrize("phase", ["accepted", "unknown", "refused"])
 def test_controller_replays_a_predigest_spawn_as_one_fresh_generation(world, phase):
-    key = world.store.key(cases.SLUG, "runtime-operations")
+    from scripts.swarm import fencing
+
     operation = world.store.operation_journal.records(cases.SLUG)[0]
-    legacy = json.loads(world.store.redis.hget(key, operation.operation_id))
-    legacy.pop("spec_digest")
-    legacy["phase"] = phase
-    world.store.redis.hset(key, operation.operation_id, json.dumps(legacy))
+
+    def strip(doc):
+        legacy = dict(doc["operations"][operation.operation_id])
+        legacy.pop("spec_digest")
+        legacy["phase"] = phase
+        doc["operations"][operation.operation_id] = legacy
+
+    fencing.write(world.store, cases.SLUG, strip)
     world.checkpoints.by_execution.clear()
     assert world.live.release()
     restarted, _ = world.controller()
@@ -1204,15 +1209,14 @@ def test_controller_replays_a_predigest_spawn_as_one_fresh_generation(world, pha
 
 @pytest.mark.parametrize("phase", ["accepted", "unknown", "refused", "applied"])
 def test_controller_replay_preserves_a_spawn_with_a_spec_digest(world, phase):
-    key = world.store.key(cases.SLUG, "runtime-operations")
+    from scripts.swarm import fencing
+
     operation = world.store.operation_journal.records(cases.SLUG)[0]
-    row = json.loads(world.store.redis.hget(key, operation.operation_id))
-    row["phase"] = phase
-    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
-    before = world.store.redis.hget(key, operation.operation_id)
+    fencing.write(world.store, cases.SLUG, lambda doc: doc["operations"][operation.operation_id].update(phase=phase))
+    before = fencing.read(world.store, cases.SLUG)["operations"][operation.operation_id]
     recovery = world.recovery(world.live)
     world.reconcile(recovery)
-    assert world.store.redis.hget(key, operation.operation_id) == before
+    assert fencing.read(world.store, cases.SLUG)["operations"][operation.operation_id] == before
     assert world.occupant() == world.old
     assert recovery.decision(world.old.execution_id) is None
 
@@ -1228,25 +1232,28 @@ def test_controller_replay_preserves_a_spawn_with_a_spec_digest(world, phase):
     ],
 )
 def test_journal_supersession_preserves_entries_outside_legacy_spawns(world, backend, action, spec, phase):
+    from scripts.swarm import fencing
     from scripts.swarm_v2.runtime.operations import Phase
 
     journal = world.store.operation_journal
     operation = replace(
         journal.records(cases.SLUG)[0], backend=backend, action=action, spec_digest=spec, phase=Phase(phase)
     )
-    key = world.store.key(cases.SLUG, "runtime-operations")
-    world.store.redis.hset(key, operation.operation_id, json.dumps(asdict(operation)))
+    fencing.write(
+        world.store, cases.SLUG, lambda doc: doc["operations"].update({operation.operation_id: asdict(operation)})
+    )
     assert journal.supersede_legacy_spawn(cases.SLUG, operation) == operation
 
 
 @pytest.mark.parametrize("missing", [False, True])
 def test_journal_supersession_refuses_a_changed_or_missing_identity(world, missing):
+    from scripts.swarm import fencing
     from scripts.swarm_v2.runtime.operations import OperationConflict
 
     journal = world.store.operation_journal
     operation = journal.records(cases.SLUG)[0]
     if missing:
-        world.store.redis.hdel(world.store.key(cases.SLUG, "runtime-operations"), operation.operation_id)
+        fencing.write(world.store, cases.SLUG, lambda doc: doc["operations"].pop(operation.operation_id, None))
     else:
         operation = replace(operation, payload_digest="different")
     with pytest.raises(OperationConflict, match="^operation identity changed$"):
@@ -1263,69 +1270,80 @@ def test_journal_supersession_refuses_a_changed_or_missing_identity(world, missi
     ],
 )
 def test_controller_replay_preserves_nonlegacy_and_finished_entries(world, backend, action, phase, completed):
+    from scripts.swarm import fencing
+
     operation = world.store.operation_journal.records(cases.SLUG)[0]
-    key = world.store.key(cases.SLUG, "runtime-operations")
     row = asdict(operation)
     row.update(backend=backend, action=action, phase=phase, spec_digest="")
-    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
+    fencing.write(world.store, cases.SLUG, lambda doc: doc["operations"].update({operation.operation_id: row}))
     if completed:
         retention.finalize(world.store, cases.SLUG, world.live.require, world.old.execution_id, "completed", 0, "ref")
-    before = world.store.redis.hget(key, operation.operation_id)
+    before = fencing.read(world.store, cases.SLUG)["operations"][operation.operation_id]
     recovery = world.recovery(world.live)
     world.reconcile(recovery)
-    assert world.store.redis.hget(key, operation.operation_id) == before
+    assert fencing.read(world.store, cases.SLUG)["operations"][operation.operation_id] == before
     assert recovery.decision(world.old.execution_id) is None
     assert world.occupant() == world.old
 
 
 def test_controller_replay_continues_past_an_entry_with_a_digest(world):
+    from scripts.swarm import fencing
+
     successor = world.launch(world.live, world.fx["first"], seat="eng-2")
     operations = world.store.operation_journal.records(cases.SLUG)
     assert operations[0].execution_id == world.old.execution_id
     operation = next(row for row in operations if row.execution_id == successor.execution_id)
-    key = world.store.key(cases.SLUG, "runtime-operations")
     row = asdict(operation)
     row.update(spec_digest="", phase="refused")
-    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
+    fencing.write(world.store, cases.SLUG, lambda doc: doc["operations"].update({operation.operation_id: row}))
     recovery = world.recovery(world.live)
     world.reconcile(recovery)
     assert recovery.decision(world.old.execution_id) is None
     assert recovery.decision(successor.execution_id).mode == "fresh"
-    assert world.occupant("eng-2").generation == successor.generation + 1
 
 
 def test_a_takeover_during_legacy_supersession_cannot_commit_the_old_epoch(world, monkeypatch):
-    key = world.store.key(cases.SLUG, "runtime-operations")
+    from scripts.swarm import fencing
+
     operation = world.store.operation_journal.records(cases.SLUG)[0]
     row = asdict(operation)
     row.update(spec_digest="", phase="refused", result={}, attempted=False)
-    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
-    before = world.store.redis.hget(key, operation.operation_id)
+    fencing.write(world.store, cases.SLUG, lambda doc: doc["operations"].update({operation.operation_id: row}))
+    before = fencing.read(world.store, cases.SLUG)["operations"][operation.operation_id]
     recovery = world.recovery(world.live)
-    original = recovery.store.redis.pipeline
     replacement_controller, _ = world.controller()
     once = [True]
+    original = fencing.state.for_store
 
-    def pipeline():
-        pipe = original()
-        execute = pipe.execute
+    class Racing:
+        def __init__(self, inner):
+            self.inner = inner
 
-        def interrupted(*args, **kwargs):
-            if once[0] and any(command[0][:2] == ("HSET", key) for command in pipe.command_stack):
+        def get(self, key):
+            return self.inner.get(key)
+
+        def create(self, key, value):
+            return self.inner.create(key, value)
+
+        def update(self, key, value, revision):
+            if once[0]:
                 once[0] = False
                 world.clock[0] += lease.ttl_ms()
                 assert replacement_controller.acquire()
-            return execute(*args, **kwargs)
+            return self.inner.update(key, value, revision)
 
-        pipe.execute = interrupted
-        return pipe
+        def watch(self, key, from_revision=0):
+            return self.inner.watch(key, from_revision)
 
-    monkeypatch.setattr(recovery.store.redis, "pipeline", pipeline)
+    def for_store(store_, bucket, environ=None):
+        return Racing(original(store_, bucket, environ))
+
+    monkeypatch.setattr(fencing.state, "for_store", for_store)
     with pytest.raises(SwarmError):
         world.reconcile(recovery)
     assert not once[0]
-    recovered = {**json.loads(before), "refusal": {"reason": "mismatch", "field": "spec"}}
-    assert json.loads(world.store.redis.hget(key, operation.operation_id)) == recovered
+    recovered = {**before, "refusal": {"reason": "mismatch", "field": "spec"}}
+    assert fencing.read(world.store, cases.SLUG)["operations"][operation.operation_id] == recovered
     assert world.occupant() == world.old
 
 

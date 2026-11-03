@@ -16,7 +16,7 @@ from pathlib import Path
 
 try:
     import fcntl
-except ImportError:  # non-POSIX (e.g. Windows) — locking degrades to a no-op
+except ImportError:
     fcntl = None
 
 
@@ -66,10 +66,6 @@ from hooks.context import injection_trace, quarantine, worker_mode
 
 _SEVERITY_RANK = {"nuclear": 0, "critical": 1, "alert": 2, "warning": 3, "info": 4, "resolved": 5}
 
-# Display label for the BROADCAST header. Source severity stays canonical
-# (info/alert/critical) for routing; the display map prevents low-priority
-# `info` content from rendering as `[ALERT]`-style framing that Claude Code
-# treats as a hook-error contamination signal (issue #34713).
 _SEVERITY_DISPLAY_LABEL = {
     "nuclear": "NUCLEAR",
     "critical": "CRITICAL",
@@ -79,9 +75,6 @@ _SEVERITY_DISPLAY_LABEL = {
     "resolved": "RESOLVED",
 }
 
-# Bodies that signal "no content to deliver" — emitted by the brain adapter
-# when the upstream feed is empty. Suppressed before formatting so the model
-# does not see noise framed as an alert.
 _EMPTY_BODY_SENTINELS = frozenset(
     {
         "no active signals.",
@@ -94,12 +87,10 @@ _EMPTY_BODY_SENTINELS = frozenset(
 
 
 def _body_is_empty(msg: dict) -> bool:
-    """Return True for messages whose body conveys no signal."""
+    """Return True for messages whose body conveys no signal, a leading title line ignored."""
     body = (msg.get("message") or "").strip()
     if not body:
         return True
-    # Strip leading "[Title]\n" prefix if present so titled empty bodies
-    # like "[Active Signals]\nNo active signals." are also caught.
     if body.startswith("[") and "]\n" in body:
         body = body.split("]\n", 1)[1].strip()
     return body.lower() in _EMPTY_BODY_SENTINELS
@@ -151,16 +142,11 @@ def _save_delivery_state(state: dict) -> None:
 
 
 def _msg_hash(msg: dict) -> str:
-    # Content-only hash. Intentionally omits `id` (random UUID regenerated on
-    # every clear+create cycle) and `expires_at` (changes every creation).
-    # Channel + severity + message uniquely identify semantic content. Two
-    # broadcasts with identical content on the same channel are the same
-    # broadcast for dedup purposes, even if they carry different UUIDs.
-    # The second field is always "" now that target_session no longer exists —
-    # kept as a slot so the hash format matches what's already persisted in
-    # ~/.agentihooks/broadcast.json and the delivery-state file. Dropping it
-    # would reshape every existing hash and dump every live persistent
-    # broadcast back into the "new content" path on the next tick.
+    """Hash channel, severity and message, omitting the regenerated id and expiry.
+
+    The second field is always empty and stays as a slot: dropping it would reshape every
+    persisted hash and re-deliver every live persistent broadcast as new content.
+    """
     raw = "|".join(
         [
             str(msg.get("channel", "")),
@@ -173,12 +159,7 @@ def _msg_hash(msg: dict) -> str:
 
 
 def _should_skip(msg: dict, sess_state: dict, now_ts: float) -> str:
-    # Dedup per-message, not per-channel. A channel like "brain" carries many
-    # distinct entries (hot-arcs, operator-intent, tick-diff, signals…); keying
-    # on channel collapses them all into one bucket and throttles 4-5 entries
-    # as if they were duplicates of a single broadcast — agents end up seeing
-    # only the first 1-2 to land. Keying on message id keeps each entry on its
-    # own throttle clock.
+    """Throttle per message id, never per channel, so each entry on a shared channel keeps its own clock."""
     key = msg.get("id") or msg.get("channel") or "_global"
     prev = sess_state.get(key)
     persistent = bool(msg.get("persistent"))
@@ -199,13 +180,11 @@ def _record_delivery(sid: str, msg: dict, now_ts: float) -> None:
     with _file_lock(_delivery_state_path()):
         state = _load_delivery_state()
         sess = state.setdefault(sid, {})
-        # Match _should_skip: per-message id, not per-channel.
         key = msg.get("id") or msg.get("channel") or "_global"
         sess[key] = {"hash": _msg_hash(msg), "ts": now_ts}
         _save_delivery_state(state)
 
 
-# Default TTL per severity (seconds). 0 = use default.
 _DEFAULT_TTL = {"nuclear": 1800, "critical": 1800, "alert": 3600, "warning": 3600, "info": 14400, "resolved": 1800}
 _DEFAULT_PERSISTENT = {
     "nuclear": True,
@@ -217,17 +196,6 @@ _DEFAULT_PERSISTENT = {
 }
 _VALID_SEVERITIES = frozenset({"nuclear", "critical", "alert", "warning", "info", "resolved"})
 
-# BASE_CHANNELS is imported from hooks.config (env-driven via
-# AGENTIHOOKS_BASE_CHANNELS). Layered: profile env → repo settings.json → repo
-# settings.local.json → container ENV. Empty / unset → session only receives
-# global broadcasts (no `channel` field). Re-exported here so callers can
-# `from hooks.context.broadcast import BASE_CHANNELS` without changes.
-
-
-# ---------------------------------------------------------------------------
-# File paths
-# ---------------------------------------------------------------------------
-
 
 def _broadcast_path() -> Path:
     return Path(BROADCAST_FILE)
@@ -235,11 +203,6 @@ def _broadcast_path() -> Path:
 
 def _sessions_path() -> Path:
     return Path(BROADCAST_FILE).parent / "active-sessions.json"
-
-
-# ---------------------------------------------------------------------------
-# File I/O — broadcasts
-# ---------------------------------------------------------------------------
 
 
 def _read_broadcasts() -> list[dict]:
@@ -302,11 +265,6 @@ def _is_expired(msg: dict, now: datetime | None = None) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# File I/O — sessions
-# ---------------------------------------------------------------------------
-
-
 def _save_sessions(sessions: dict) -> None:
     path = _sessions_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -324,11 +282,6 @@ def _load_sessions() -> dict:
         return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
         return {}
-
-
-# ---------------------------------------------------------------------------
-# Channel subscription resolution
-# ---------------------------------------------------------------------------
 
 
 def _get_session_channels(session_id: str) -> list[str]:
@@ -358,17 +311,14 @@ def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
     if msg.get("target_session"):
         return False
     msg_channel = msg.get("channel")
-    # Global messages (no channel) → always deliver
     if not msg_channel:
         return True
     from hooks.config import BRAIN_CHANNEL
 
     if msg_channel.startswith(f"{BRAIN_CHANNEL}@"):
         return msg_channel in session_channels
-    # Wildcard subscription → deliver everything
     if "*" in session_channels:
         return True
-    # Channel match
     return msg_channel in session_channels
 
 
@@ -386,11 +336,6 @@ def _message_matches_project(msg: dict, session: dict) -> bool:
         project = session["project"]["project"]
         return bool(re.search(r"(?<![\w-])" + re.escape(project) + r"(?![\w-])", msg.get("message", ""), re.IGNORECASE))
     return True
-
-
-# ---------------------------------------------------------------------------
-# Message lifecycle
-# ---------------------------------------------------------------------------
 
 
 def _build_broadcast(
@@ -483,7 +428,6 @@ def create_broadcast(
         if not delivery_id:
             msgs.append(entry)
 
-        # Enforce max messages — keep newest
         if len(msgs) > BROADCAST_MAX_MESSAGES:
             msgs = msgs[-BROADCAST_MAX_MESSAGES:]
 
@@ -629,11 +573,6 @@ def clear_broadcasts(message_id: str | None = None, channel: str | None = None) 
         count = len(msgs) - len(remaining)
         _save_broadcasts(remaining)
         return count
-
-
-# ---------------------------------------------------------------------------
-# Delivery tracking
-# ---------------------------------------------------------------------------
 
 
 def _admitted(session_id: str, msgs: list[dict]) -> list[dict]:
@@ -789,12 +728,7 @@ def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
-# Session registry
-# ---------------------------------------------------------------------------
-
-
-SESSION_MAX_AGE_SECONDS = 86400  # 24h retention for crash recovery
+SESSION_MAX_AGE_SECONDS = 86400
 SESSION_SUSPECT_SECONDS = 300
 LAUNCHER = "launcher"
 
@@ -833,6 +767,12 @@ def register_session(
     supersede: bool = True,
     name: str = "",
 ) -> None:
+    """Register a live session.
+
+    One Claude Code pid hosts one active session, so a new session id from the same pid
+    supersedes earlier live entries; subagents share the parent's pid and pass
+    supersede=False. started_at survives re-registration so age reflects the true start.
+    """
     from hooks.context.project_identity import resolve_project
     from hooks.context.project_sessions import record_session
     from hooks.targets import is_codex_memory_thread
@@ -842,11 +782,6 @@ def register_session(
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         now = _now_iso()
-        # A single Claude Code PID only hosts ONE active session at a time.
-        # When a new session_id registers from the same pid, supersede any
-        # previously-alive entries for that pid (they're from an earlier
-        # session lifecycle — /resume or /clear). Subagents share their
-        # parent's pid and pass supersede=False.
         rivals = (
             [
                 info
@@ -862,9 +797,6 @@ def register_session(
             info["status"] = "superseded"
             info["superseded_at"] = now
             info["superseded_by"] = session_id
-        # Preserve started_at across re-registrations (SessionStart can fire
-        # multiple times per session — resume, reconnect — and we want the
-        # age to reflect the true session start, not the last event).
         started_at = existing.get("started_at", now) if existing else now
         sessions[session_id] = {
             **named,
@@ -955,11 +887,11 @@ def session_status(session_id: str) -> dict:
 def mark_session_closed(session_id: str, pid: int | None = None) -> None:
     """Flip a session to status=closed on clean SessionEnd. Keeps the entry
     for the 24h crash-recovery retention window (see SESSION_MAX_AGE_SECONDS)
-    instead of deleting it outright."""
+    instead of deleting it outright. A resumed conversation keeps its id under a new
+    process; only that process closes it."""
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         entry = sessions.get(session_id)
-        # A resumed conversation keeps its id under a new process; only that process closes it.
         if entry is None or (pid is not None and entry.get("pid") not in (None, pid)):
             return
         entry["status"] = "closed"
@@ -1097,11 +1029,6 @@ def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dic
     return {sid: info for sid, info in sessions.items() if info.get("status") == "alive"}
 
 
-# ---------------------------------------------------------------------------
-# Formatting
-# ---------------------------------------------------------------------------
-
-
 def format_broadcast_banner(msg: dict) -> str:
     severity_raw = msg.get("severity", "alert")
     severity = _display_label(severity_raw)
@@ -1120,15 +1047,12 @@ def format_broadcast_banner(msg: dict) -> str:
 
 
 def format_critical_context(msgs: list[dict], session_id: str = "") -> str:
+    """Format broadcasts, dropping empty bodies and keeping the newest message per content hash."""
     if not msgs:
         return ""
-    # Drop empty-body messages — `[ALERT] No active signals.` is a #34713
-    # contamination vector and conveys zero signal.
     msgs = [m for m in msgs if not _body_is_empty(m)]
     if not msgs:
         return ""
-    # Dedup within one formatting pass: when multiple messages share a
-    # content_hash, keep only the most recent (highest created_at).
     seen: dict[str, dict] = {}
     for m in msgs:
         h = m.get("content_hash") or _msg_hash(m)
@@ -1162,11 +1086,6 @@ def format_critical_context(msgs: list[dict], session_id: str = "") -> str:
     if len(lines) == 1:
         return ""
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Hook entry points
-# ---------------------------------------------------------------------------
 
 
 def check_and_inject_broadcasts(session_id: str) -> None:
@@ -1231,8 +1150,7 @@ def context_kind(context: str) -> str:
 
 
 def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:
-    # get_pretool_broadcasts owns the BROADCAST_CRITICAL_ON_PRETOOL gate; this
-    # layer only checks whether broadcasts are enabled at all.
+    """Return PreToolUse broadcast context; get_pretool_broadcasts owns the BROADCAST_CRITICAL_ON_PRETOOL gate."""
     if not BROADCAST_ENABLED or worker_mode.active():
         return None
 

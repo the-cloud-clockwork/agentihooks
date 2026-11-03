@@ -159,6 +159,7 @@ def enforce(store, rows, pulls, now=5_000, forge=None):
 
 
 @pytest.mark.parametrize("pull, kind", [(OPEN, "checks"), (QUEUED, "merge")])
+@pytest.mark.feature("swarm-push-wait")
 def test_the_tick_sets_a_checked_wait_on_the_pushed_task_pull_request(store, pull, kind):
     mark(store)
     assert enforce(store, ROWS, {URL: pull}) == [f"set the wait of {ME} on {kind} of {URL} from its push"]
@@ -293,6 +294,7 @@ def test_an_agent_the_pass_skips_never_stops_it_for_the_next(skip):
     ]
 
 
+@pytest.mark.feature("swarm-push-wait")
 def test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge(store):
     inbox = InboxStore(store.redis)
     assert swarm_heartbeat.outcome(shell("git push -u origin HEAD"), ENV, store.redis, 100) is True

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.codex_session.binding import TransportRecord
+from scripts.swarm import session_model
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -77,10 +78,10 @@ def hooks(home: Path, harness: str) -> bool:
 
 
 def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
-    from hooks.context import profile_chain
+    from scripts import master_claude_login
     from scripts.profiles import binding
     from scripts.select_profile import _native_options
-    from scripts.swarm import launch_check, launch_model
+    from scripts.swarm import launch_model
 
     try:
         found, harness, env, account = binding.process(proc, pid)
@@ -99,8 +100,8 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
             "effort": effort,
             "account": account,
             "hooks": bool(home) and hooks(Path(home), harness),
-            "chain": launch_check.chain(home) if home else [],
-            "overlays": profile_chain.rendered_overlays(home) if home else [],
+            "chain": master_claude_login.rendered_chain(Path(home), agent.name) if home else [],
+            "overlays": master_claude_login.rendered_overlays(Path(home), agent.name) if home else [],
         }
     except (OSError, ValueError, StopIteration):
         return {"process": False}
@@ -220,8 +221,25 @@ def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None
     return min(registered or named.values(), key=lambda s: s.process.start_time, default=None)
 
 
+def hosted_home(store: RedisStore, agent: AgentRecord) -> AgentRecord:
+    """Record the home a hive agent's join report names as its validated home when the launch recorded none."""
+    from scripts.hive import join_report, reports
+
+    validation = agent.profile_decision.get("validation", {})
+    if validation.get("home") or not reports.host(agent):
+        return agent
+    home = join_report.read(store.redis, agent).get("context", {}).get("home")
+    if not home:
+        return agent
+    return replace(agent, profile_decision={**agent.profile_decision, "validation": {**validation, "home": home}})
+
+
 def _unheld(agent: AgentRecord) -> list[str]:
-    homeless = not agent.profile_decision.get("validation", {}).get("home") and not (agent.profile and agent.harness)
+    from scripts.hive import reports
+
+    homeless = not agent.profile_decision.get("validation", {}).get("home") and (
+        not (agent.profile and agent.harness) or bool(reports.host(agent))
+    )
     return [field for field, value in assignment(agent).items() if not value or (field == "home" and homeless)]
 
 
@@ -237,13 +255,20 @@ def unobserved(agent: AgentRecord, facts: dict) -> dict:
 def compare(agent: AgentRecord, facts: dict) -> dict:
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
-    expected = {**assignment(agent), "hooks": True}
+    expected: dict[str, object] = {**assignment(agent), "hooks": True}
+    observed: dict[str, object] = facts
     missing = [*_unheld(agent), *unobserved(agent, facts)]
     return {
-        field: {"expected": value, "actual": facts.get(field)}
+        field: {"expected": value, "actual": observed.get(field)}
         for field, value in expected.items()
-        if field not in missing and facts.get(field) != value
+        if field not in missing and not _same(field, value, observed.get(field))
     }
+
+
+def _same(field: str, expected: object, actual: object) -> bool:
+    if field == "model":
+        return session_model.same(str(expected), str(actual))
+    return actual == expected
 
 
 def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms: int) -> dict:

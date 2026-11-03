@@ -3,6 +3,7 @@ import json
 import re
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -26,7 +27,7 @@ def triggers(workflow: dict) -> dict[str, dict]:
     return {event: config or {} for event, config in on.items()}
 
 
-def needs_of(job: dict) -> set[str]:
+def needs_of(job: dict[str, Any]) -> set[str]:
     needs = job.get("needs") or []
     return {needs} if isinstance(needs, str) else set(needs)
 
@@ -130,6 +131,12 @@ def check(workflows: dict[str, dict], config: dict, today: date) -> list[str]:
     jobs = workflows[gate_file]["jobs"]
     problems += _gate_problems(gate_file, workflows[gate_file])
     problems += _job_problems(gate_file, gate_id, jobs, not_gates)
+    if "feature-suite" in jobs:
+        problems += [
+            f"{gate_file}/feature-suite is not a need of {job_id}."
+            for job_id in ("promotion-ready", "promote")
+            if "feature-suite" not in needs_of(jobs.get(job_id, {}))
+        ]
     problems += _outside_problems(workflows, gate_file, outside)
     return problems
 

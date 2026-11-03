@@ -50,6 +50,22 @@ goes to a lane as a task.
 - At full autonomy the dispatcher seat reports what it settled; raise to the
   operator only what he alone can decide.
 
+## Focus and freeze
+
+Every open task is focused, free or frozen. Focused tasks form an ordered
+queue and run first; free tasks run only once no focused task is left undone;
+frozen tasks never run. Urgent rank orders work inside its state and never
+passes the focus queue.
+
+- "Focus only this plan": `agentihooks swarm <slug> focus plans/<id> --only
+  --quote "<his words>"` drops every other focus.
+- "Focus this task too": `focus tasks/<id> --bottom` appends it; `--top` puts
+  it first.
+- A focus unfreezes its target and everything under it. The work a focused
+  task waits on joins the focus, so the queue can empty.
+- "Unfreeze": `unfreeze <target>` frees the task; it never focuses it, so it
+  runs after the focus queue empties.
+
 ## Join
 
 - `agentihooks ledger --slug <slug> --as <name> join --role orchestrator`, once.

@@ -49,6 +49,7 @@ def test_only_the_addressee_reads(store):
 
 
 @pytest.mark.parametrize("kind", ["", "unknown"])
+@pytest.mark.feature("inbox-close-outcomes")
 def test_closing_without_a_reason_is_refused(store, kind):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):
@@ -57,6 +58,7 @@ def test_closing_without_a_reason_is_refused(store, kind):
 
 
 @pytest.mark.parametrize("kind", ["handoff", "blocked"])
+@pytest.mark.feature("inbox-close-outcomes")
 def test_handoff_and_blocked_need_their_detail(store, kind):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):
@@ -110,6 +112,7 @@ def test_a_closed_item_stays_closed(store):
         store.read(item.id, "bob")
 
 
+@pytest.mark.feature("inbox-close-outcomes")
 def test_history_keeps_every_transition_in_order(store):
     item = store.send("alice", "bob", "hi")
     store.read(item.id, "bob")
@@ -185,6 +188,7 @@ def test_two_racing_deliveries_have_one_winner(server, monkeypatch):
     assert [e["state"] for e in first.history(item.id)] == ["pending", "delivered"]
 
 
+@pytest.mark.feature("inbox-close-outcomes")
 def test_reply_goes_to_the_sender_and_closes_the_original_done(store):
     item = store.send("operator", "master", "how far along are we")
     answer = store.reply(item.id, "master", "two tasks left")
@@ -542,7 +546,7 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
     store.send("sender", "other", "another swarm request")
     store.open_items("receiver")
     store.pending_items("receiver")
-    keys, memberships = store.keys_for(lambda address: address == "receiver")
+    keys, memberships = store.keys_at(["receiver"])
     assert set(keys) == {
         store.key("address", "receiver"),
         store.key("pending", "receiver"),
@@ -562,13 +566,13 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
 
 def test_open_index_cleanup_keeps_empty_addresses_and_redirected_mail(store):
     assert store.open_items("empty") == []
-    keys, memberships = store.keys_for(lambda address: address == "empty")
+    keys, memberships = store.keys_at(["empty"])
     assert set(keys) == {store.key(kind, "empty") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {store.key("open-indexed"): ["empty"]}
     item = store.send("sender", "old", "work")
     store.open_items("old")
     store.redirect(item.id, "swarm", "new", "moved", "old")
-    keys, memberships = store.keys_for(lambda address: address == "old")
+    keys, memberships = store.keys_at(["old"])
     assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {store.key("open-indexed"): ["old"]}
 
@@ -620,7 +624,7 @@ def test_open_index_observes_writes_from_a_channel_using_the_previous_protocol(s
 def test_open_index_cleanup_finds_a_redirected_address_before_first_read(store):
     item = store.send("sender", "old", "work")
     store.redirect(item.id, "swarm", "new", "moved", "old")
-    keys, memberships = store.keys_for(lambda address: address == "old")
+    keys, memberships = store.keys_at(["old"])
     assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {}
 
@@ -675,7 +679,7 @@ def test_cleanup_reads_legacy_addresses_and_index_members_without_size_stamps(st
     store.redis.delete(store.key("open", "legacy"), store.key("open-size", "legacy"))
     store.open_items("empty")
     store.redis.delete(store.key("open-size", "empty"))
-    keys, memberships = store.keys_for(lambda address: True)
+    keys, memberships = store.keys_at(["empty", "legacy"])
     expected = {
         store.key(kind, address)
         for address in ("empty", "legacy")

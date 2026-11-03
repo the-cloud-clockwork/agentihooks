@@ -14,28 +14,10 @@ Environment Variables:
     IS_EVALUATION: Skip write in evaluation mode (default: false)
 
 Usage:
-    # Python import
-    from hooks.integrations.postgres import insert
-
-    # Simple insert (as JSONB)
-    result = insert("hook_events", {"session_id": "uuid-123", "status": "success"})
-
-    # With state enrichment
-    result = insert(
-        "hook_events",
-        {"session_id": "uuid-123", "transcript_path": "/path"},
-        enrich_from_state=True
-    )
-
-    # CLI - Check configuration
-    /app/hooks/integrations/postgres.py check [--json]
-
-    # CLI - As hook (reads from stdin)
-    /app/hooks/integrations/postgres.py hook --table hook_events < stop_event.json
-    /app/hooks/integrations/postgres.py hook --demo
-
-    # CLI - Direct insert
-    /app/hooks/integrations/postgres.py insert --table logs --data '{"session_id": "...", "message": "..."}'
+    insert("hook_events", {"session_id": "uuid-123", "status": "success"}, enrich_from_state=True)
+    postgres.py check [--json]
+    postgres.py hook [--table hook_events] [--demo] < stop_event.json
+    postgres.py insert --table logs --data '{"session_id": "...", "message": "..."}'
 """
 
 import json
@@ -46,9 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-# Add parent directories to path for direct script execution
 _script_dir = Path(__file__).resolve().parent
-_app_dir = _script_dir.parent.parent  # /app
+_app_dir = _script_dir.parent.parent
 if str(_app_dir) not in sys.path:
     sys.path.insert(0, str(_app_dir))
 
@@ -63,10 +44,6 @@ except ImportError:
 
 from hooks.common import get_correlation_id, log
 from hooks.integrations.base import IntegrationBase, IntegrationRegistry
-
-# =============================================================================
-# INTEGRATION DEFINITION
-# =============================================================================
 
 
 @IntegrationRegistry.register
@@ -87,17 +64,8 @@ class PostgresIntegration(IntegrationBase):
     }
 
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
 DEFAULT_STATE_FILE = Path.home() / "conversation_map.json"
 DEFAULT_PORT = 5432
-
-
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
 
 
 @dataclass
@@ -110,13 +78,10 @@ class PostgresResult:
     error: Optional[str] = None
 
 
-# =============================================================================
-# STATE MANAGEMENT
-# =============================================================================
-
-
 def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, Any]:
     """Load state data for a session from conversation_map.json.
+
+    A legacy state stored as a plain string is converted to a dict.
 
     Uses correlation ID (external UUID) for lookup since the API stores state
     under the external UUID, which may differ from Claude's session ID.
@@ -134,13 +99,11 @@ def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, 
         if not state_path.exists():
             return {}
 
-        # Use correlation ID (external UUID) for lookup
         correlation_id = get_correlation_id(session_id)
 
         mappings = json.loads(state_path.read_text())
         state = mappings.get(correlation_id, {})
 
-        # Handle legacy format (string only) - convert to dict
         if isinstance(state, str):
             return {"conversation_id": state, "wait": False}
 
@@ -149,11 +112,6 @@ def load_state(session_id: str, state_file: Optional[Path] = None) -> Dict[str, 
     except Exception as e:
         log("Failed to load state", {"session_id": session_id, "error": str(e)})
         return {}
-
-
-# =============================================================================
-# POSTGRES CLIENT
-# =============================================================================
 
 
 class PostgresClient:
@@ -194,7 +152,6 @@ class PostgresClient:
         self._state_file = state_file or DEFAULT_STATE_FILE
         self._connection = None
 
-        # Check if we should skip (evaluation mode)
         self._is_evaluation = os.getenv("IS_EVALUATION", "false").lower() == "true"
 
     @classmethod
@@ -225,11 +182,14 @@ class PostgresClient:
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Clear cached instance (for testing)."""
+        """Clear cached instance (for testing).
+
+        A failing close is ignored, because hooks must never crash the parent process.
+        """
         if cls._instance and cls._instance._connection:
             try:
                 cls._instance._connection.close()
-            except Exception:  # NOSONAR — hooks must never crash the parent process
+            except Exception:  # NOSONAR
                 pass
         cls._instance = None
 
@@ -253,7 +213,6 @@ class PostgresClient:
 
     def should_skip(self) -> bool:
         """Check if write should be skipped."""
-        # Skip if not configured
         if not all([self._host, self._database, self._username, self._password]):
             missing = []
             if not self._host:
@@ -271,7 +230,6 @@ class PostgresClient:
             )
             return True
 
-        # Skip if evaluation mode
         if self._skip_evaluation and self._is_evaluation:
             log(
                 "PostgreSQL write skipped: IS_EVALUATION=true",
@@ -290,7 +248,14 @@ class PostgresClient:
         """Insert a row into PostgreSQL table as JSONB.
 
         The table should have a column named 'data' of type JSONB.
-        Optionally can have 'session_id' and 'created_at' columns.
+        The parameterized insert writes session_id, data and created_at, so the
+        table should have id SERIAL, session_id TEXT, data JSONB and created_at
+        TIMESTAMPTZ.
+
+        State fields fill gaps in the payload and payload keys win. A state with
+        wait true skips the write, because the caller takes a synchronous
+        response. Failures roll back and are logged and returned, never raised,
+        because hooks must never crash the parent process.
 
         Args:
             table: Table name (uses default_table if None)
@@ -303,7 +268,6 @@ class PostgresClient:
         """
         table_name = table or self._default_table
 
-        # Check if we should skip write
         if self.should_skip():
             return PostgresResult(
                 success=True,
@@ -317,14 +281,12 @@ class PostgresClient:
             )
 
         try:
-            # Enrich with state if requested
             enriched_payload = payload.copy()
 
             if enrich_from_state and "session_id" in payload:
                 session_id = payload["session_id"]
                 state = load_state(session_id, self._state_file)
 
-                # Check if wait=true (skip PostgreSQL for synchronous responses)
                 if state.get("wait", False):
                     log(
                         "Skipping PostgreSQL insert",
@@ -338,7 +300,6 @@ class PostgresClient:
                         table_name=table_name,
                     )
 
-                # Merge state into payload (payload overrides state)
                 enriched_payload = {**state, **payload}
 
                 log(
@@ -349,7 +310,6 @@ class PostgresClient:
                     },
                 )
 
-            # Add metadata
             enriched_payload["_created_at"] = datetime.now(timezone.utc).isoformat()
             enriched_payload["_integration"] = "postgres"
 
@@ -362,16 +322,12 @@ class PostgresClient:
                 },
             )
 
-            # Insert into table
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Use parameterized query with JSONB
-            # Table should have: id SERIAL, session_id TEXT, data JSONB, created_at TIMESTAMPTZ
             session_id = enriched_payload.get("session_id", "")
             created_at = datetime.now(timezone.utc)
 
-            # Insert with ON CONFLICT DO NOTHING for safety
             query = f"""
                 INSERT INTO {table_name} (session_id, data, created_at)
                 VALUES (%s, %s, %s)
@@ -398,14 +354,12 @@ class PostgresClient:
             )
 
         except Exception as e:
-            # Rollback on error
             if self._connection and not self._connection.closed:
                 try:
                     self._connection.rollback()
-                except Exception:  # NOSONAR — hooks must never crash the parent process
+                except Exception:  # NOSONAR
                     pass
 
-            # Silent failure - log but don't raise
             error_msg = str(e)
             log(
                 "PostgreSQL insert failed",
@@ -428,6 +382,9 @@ class PostgresClient:
     ) -> PostgresResult:
         """Execute a parameterized SQL query.
 
+        Failures roll back and are returned, never raised, because hooks must
+        never crash the parent process.
+
         Args:
             query: SQL query with %s placeholders
             params: Tuple of parameters for the query
@@ -435,7 +392,6 @@ class PostgresClient:
         Returns:
             PostgresResult with success status and rows affected
         """
-        # Check if we should skip
         if self.should_skip():
             return PostgresResult(
                 success=True,
@@ -471,11 +427,10 @@ class PostgresClient:
             )
 
         except Exception as e:
-            # Rollback on error
             if self._connection and not self._connection.closed:
                 try:
                     self._connection.rollback()
-                except Exception:  # NOSONAR — hooks must never crash the parent process
+                except Exception:  # NOSONAR
                     pass
 
             error_msg = str(e)
@@ -488,11 +443,6 @@ class PostgresClient:
                 success=False,
                 error=error_msg,
             )
-
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
 
 
 def insert(
@@ -559,11 +509,6 @@ def execute(
     return client.execute(query, params)
 
 
-# =============================================================================
-# TRANSCRIPT HELPER
-# =============================================================================
-
-
 def get_last_assistant_response(transcript_path: str) -> Optional[str]:
     """Extract the last assistant response from transcript JSONL."""
     try:
@@ -589,13 +534,12 @@ def get_last_assistant_response(transcript_path: str) -> Optional[str]:
         return None
 
 
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
-
-
 def main():
-    """CLI entry point for PostgreSQL operations."""
+    """CLI entry point for PostgreSQL operations.
+
+    Hook mode prints a missing configuration warning to stdout, where Claude Code
+    shows it, and exits 0 on any failure, so a hook never breaks Claude Code.
+    """
     if len(sys.argv) < 2:
         print("Usage: /app/hooks/integrations/postgres.py <command> [args]")
         print("")
@@ -644,33 +588,27 @@ def main():
     command = sys.argv[1]
 
     if command == "check":
-        # Check configuration status
         integration = PostgresIntegration()
         as_json = "--json" in sys.argv
         integration.print_status(as_json=as_json)
         sys.exit(0 if integration.is_configured else 1)
 
     elif command == "hook":
-        # Hook mode: Read from stdin, insert to PostgreSQL
         try:
-            # Check for demo flag (testing mode)
             if "--demo" in sys.argv:
                 log("[DEMO] PostgreSQL hook triggered - PostgreSQL integration ready")
                 sys.exit(0)
 
-            # Early validation - fail loudly if not configured
             integration = PostgresIntegration()
             if not integration.is_configured:
                 missing = integration.get_missing_required()
                 error_msg = f"PostgreSQL hook SKIPPED - missing env vars: {missing}"
                 log(error_msg, {"integration": "postgres", "missing": missing})
-                # Print to STDOUT so Claude Code shows it
                 print(f"\n{'=' * 60}")
                 print(f"[POSTGRES] ERROR: {error_msg}")
                 print(f"{'=' * 60}\n")
-                sys.exit(0)  # Exit cleanly but warn
+                sys.exit(0)
 
-            # Parse --table flag
             table_name = None
             i = 2
             while i < len(sys.argv):
@@ -688,24 +626,20 @@ def main():
 
             payload = json.load(sys.stdin)
 
-            # Extract last assistant response from transcript
             transcript_path = payload.get("transcript_path", "")
             if transcript_path:
                 last_response = get_last_assistant_response(transcript_path)
                 if last_response:
                     payload["last_response"] = last_response
 
-            # Add integration identifier
             payload["integration"] = "postgres"
 
-            # Insert with state enrichment
             insert(table_name, payload, enrich_from_state=True)
             sys.exit(0)
         except Exception:
-            sys.exit(0)  # Silent failure for hooks
+            sys.exit(0)
 
     elif command == "insert":
-        # Parse flags
         table_name = None
         data_json = None
         enrich = "--enrich" in sys.argv or "-e" in sys.argv

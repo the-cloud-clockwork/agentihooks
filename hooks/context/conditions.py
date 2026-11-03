@@ -38,11 +38,6 @@ _CODE_ROOT = Path(__file__).resolve().parents[2]
 _UNSET = object()
 
 
-# ---------------------------------------------------------------------------
-# Filenames
-# ---------------------------------------------------------------------------
-
-
 def is_ignored(filename: str) -> bool:
     return filename.startswith((".", "_")) or filename.endswith("~") or filename.lower().endswith(".md")
 
@@ -79,11 +74,6 @@ def parse_filename(filename: str) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Layers and index
-# ---------------------------------------------------------------------------
-
-
 def _cache_path(repo: Path | None = None) -> Path:
     from hooks.config import AGENTIHOOKS_HOME
     from hooks.targets import current_target
@@ -114,21 +104,26 @@ def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[s
     """Condition dirs in layer order, plus every profile-dir candidate probed to find them."""
     bundle = profile_chain.bundle_path(state)
     user = profile_chain.user_bundle_path(state)
+    shared = profile_chain.shared_bundle_path(state)
     profile_csv = profile_chain.active_profile(state)
     linked = profile_chain.linked_profiles(state)
     layers: list[tuple[str, Path]] = [("package", profile_chain.BUILT_IN_PROFILES / "package" / "conditions")]
     if bundle is not None:
         layers.append(("bundle", bundle / ".claude" / "conditions"))
+    if shared is not None:
+        layers.append(("shared-bundle", shared / ".claude" / "conditions"))
     if user is not None:
         layers.append(("user-bundle", user / ".claude" / "conditions"))
-    for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked, user):
+    for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked, user, shared):
         layers.append((f"profile:{name}", profile_dir / ".claude" / "conditions"))
     layers.append(("runtime", runtime_dir()))
     root = repo_root(cwd)
     if root is not None:
         layers.append(("directory", root / ".agentihooks" / "conditions"))
     probed = [
-        path for _, paths in profile_chain.profile_candidates(bundle, profile_csv, linked, user) for path in paths
+        path
+        for _, paths in profile_chain.profile_candidates(bundle, profile_csv, linked, user, shared)
+        for path in paths
     ]
     return layers, probed
 
@@ -332,11 +327,6 @@ def matching(
     return sorted(unique.values(), key=lambda e: e["order"])
 
 
-# ---------------------------------------------------------------------------
-# Execution
-# ---------------------------------------------------------------------------
-
-
 def _command(entry: dict) -> list[str] | None:
     runner = _RUNNERS.get(entry["ext"])
     if runner:
@@ -473,11 +463,6 @@ def _run_synchronous(entries: list[dict], step: str, payload: dict) -> list[dict
     return [runs[id(entry)] for entry in entries]
 
 
-# ---------------------------------------------------------------------------
-# Results
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class StepResult:
     contexts: list[str] = field(default_factory=list)
@@ -600,11 +585,6 @@ def run_step(step: str, payload: dict) -> StepResult | None:
     return merge(step, payload, list(zip(synchronous, _run_synchronous(synchronous, step, payload))))
 
 
-# ---------------------------------------------------------------------------
-# Policy per step — what the host is told
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class PreEffect:
     contexts: list[str]
@@ -699,11 +679,6 @@ def start_effect(payload: dict) -> StartEffect | None:
         return None
     return StartEffect(contexts=list(result.contexts))
 
-
-# ---------------------------------------------------------------------------
-# Operator gate — conditions are created or removed only when the operator
-# asks: his prompt this turn, his ledger comment or the master's relay of it
-# ---------------------------------------------------------------------------
 
 _ARTICLE = r"a|an|the|this|that|these|those|my"
 _DETERMINER = rf"(?:{_ARTICLE}|new|another|one)"
@@ -808,6 +783,7 @@ class ConditionError(ValueError):
 
 
 def contains_condition_signal(prompt: str) -> bool:
+    """Return True when the operator asks for a condition; only his prompt, ledger comment or the master's relay opens the gate."""
     from hooks.context.ci_manifesto import _NEGATION_PREFIXES
 
     for match in _SIGNAL.finditer(prompt or ""):
@@ -965,12 +941,15 @@ def _read_only_shell(command: str, cwd: str | None = None) -> bool:
 
 
 def _requested_on_task(session_id: str) -> bool:
-    """Open the gate from the operator's comment or the master's relay on this agent's ledger task."""
+    """Open the gate from the operator's comment or the master's relay on this agent's ledger task.
+
+    The hook lets a raising guard through, so a lookup that fails refuses.
+    """
     from hooks.context import ledger_request
 
     try:
         opened = ledger_request.find(contains_condition_signal)
-    except Exception:  # the hook lets a raising guard through, so a lookup that fails must refuse
+    except Exception:
         return False
     if opened:
         arm_gate(session_id, *opened)
@@ -1006,16 +985,12 @@ def write_guard(tool_name: str, tool_input: dict | None, session_id: str, cwd: s
     return None
 
 
-# ---------------------------------------------------------------------------
-# Inventory, creation and removal (MCP tools and the CLI)
-# ---------------------------------------------------------------------------
-
 _LANGUAGES = {
     "bash": (".sh", "#!/usr/bin/env bash\n", 0o755),
     "python": (".py", "#!/usr/bin/env python3\n", 0o755),
     "filter": (FILTER_SUFFIX, "", 0o644),
 }
-_SCOPES = ("global", "user", "profile", "directory")
+_SCOPES = ("global", "shared", "user", "profile", "directory")
 
 
 def _check_filter(script: str, run_async: bool) -> None:
@@ -1093,12 +1068,18 @@ def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> 
         if user is None:
             raise ConditionError("scope 'user' needs a linked user bundle")
         return "user-bundle", user / ".claude" / "conditions"
+    if scope == "shared":
+        shared = profile_chain.shared_bundle_path(state)
+        if shared is None:
+            raise ConditionError("scope 'shared' needs a linked shared bundle")
+        return "shared-bundle", shared / ".claude" / "conditions"
     if scope == "profile":
         chain = profile_chain.profile_dirs(
             profile_chain.bundle_path(state),
             profile_chain.active_profile(state),
             profile_chain.linked_profiles(state),
             profile_chain.user_bundle_path(state),
+            profile_chain.shared_bundle_path(state),
         )
         if not chain:
             raise ConditionError("no active profile chain")

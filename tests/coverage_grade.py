@@ -4,6 +4,7 @@ import functools
 import itertools
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,18 +36,37 @@ class Result:
     unconfirmed: dict[str, dict[int, int]] = field(default_factory=dict)
 
 
-def executed(shards: list[Path]) -> dict[str, set[int]]:
+def executed(shards: list[Path], workers: int = 1) -> dict[str, set[int]]:
     lines: dict[str, set[int]] = {}
-    for shard in shards:
-        data = CoverageData(basename=str(shard))
-        data.read()
-        measured = {path: data.lines(path) for path in data.measured_files() if path.startswith(GRADED)}
-        measured = {path: ran for path, ran in measured.items() if ran}
-        if not measured:
-            raise Unmeasured(f"shard {shard} measured no line under {', '.join(GRADED)}")
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            parts = list(pool.map(_shard_lines, shards))
+    else:
+        parts = [_shard_lines(shard) for shard in shards]
+    for measured in parts:
         for path, ran in measured.items():
             lines.setdefault(path, set()).update(ran)
     return lines
+
+
+def _shard_lines(shard: Path) -> dict[str, set[int]]:
+    measured = measured_lines(shard)
+    if not measured:
+        raise Unmeasured(f"shard {shard} measured no line under {', '.join(GRADED)}")
+    return measured
+
+
+def measured_lines(shard: Path) -> dict[str, set[int]]:
+    """Lines one coverage database ran under the graded trees, leaving out modules it ran no line of."""
+    data = CoverageData(basename=str(shard))
+    data.read()
+    measured = {path: data.lines(path) for path in data.measured_files() if path.startswith(GRADED)}
+    return {path: set(ran) for path, ran in measured.items() if ran}
+
+
+def graded_modules(head: Path) -> list[str]:
+    """Every Python module under the graded trees of a checkout, as sorted paths relative to it."""
+    return sorted(str(path.relative_to(head)) for root in GRADED for path in (head / root).rglob("*.py"))
 
 
 @functools.lru_cache(maxsize=512)
@@ -54,8 +74,22 @@ def line_map(old: str, new: str) -> dict[int, int]:
     old_lines, new_lines = old.splitlines(), new.splitlines()
     if old_lines == new_lines:
         return {n: n for n in range(1, len(old_lines) + 1)}
-    matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
-    return {a + k + 1: b + k + 1 for a, b, size in matcher.get_matching_blocks() for k in range(size)}
+    limit = min(len(old_lines), len(new_lines))
+    head = 0
+    while head < limit and old_lines[head] == new_lines[head]:
+        head += 1
+    tail = 0
+    while tail < limit - head and old_lines[-1 - tail] == new_lines[-1 - tail]:
+        tail += 1
+    matcher = difflib.SequenceMatcher(
+        None, old_lines[head : len(old_lines) - tail], new_lines[head : len(new_lines) - tail], autojunk=False
+    )
+    mapped = {n: n for n in range(1, head + 1)}
+    mapped.update(
+        {head + a + k + 1: head + b + k + 1 for a, b, size in matcher.get_matching_blocks() for k in range(size)}
+    )
+    mapped.update({len(old_lines) - k: len(new_lines) - k for k in range(tail)})
+    return mapped
 
 
 def _defined(source: str) -> set[str]:

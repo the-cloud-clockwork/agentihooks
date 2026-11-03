@@ -1,0 +1,22 @@
+name: Test environment key
+description: Name the day stamped shared test environment cache key. Every workflow that restores or saves the venv the Tests jobs share reads its key here, so the key has one definition.
+inputs:
+  python-version:
+    description: Interpreter version setup-python resolved
+    required: true
+outputs:
+  key:
+    description: Cache key of the shared test environment
+    value: ${{ steps.key.outputs.key }}
+runs:
+  using: composite
+  steps:
+    - name: Name the test environment key
+      id: key
+      shell: bash
+      env:
+        KEY_PREFIX: venv-${{ runner.os }}-${{ inputs.python-version }}
+        KEY_INPUTS: ${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}-${{ hashFiles('.github/test-requirements.lock') }}
+      run: |
+        date=$(date -u +%F)
+        echo "key=$KEY_PREFIX-$date-$KEY_INPUTS" >> "$GITHUB_OUTPUT"

@@ -23,6 +23,8 @@ def capture(monkeypatch):
     monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=64))
     monkeypatch.setattr(metrics, "STARTED_AT", now[0] - metrics.RETENTION_SECONDS)
     monkeypatch.setattr(metrics, "EVICTED_THROUGH", float("-inf"))
+    monkeypatch.setattr(metrics, "HELD_SINCE", None)
+    monkeypatch.setattr(metrics, "LOST", [])
     monkeypatch.setattr(
         metrics,
         "time",

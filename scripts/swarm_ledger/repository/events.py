@@ -1,9 +1,11 @@
 import hashlib
 import json
+import sqlite3
 
 from .rows import changes, encode
 
 LAST = "SELECT MAX(position) FROM events WHERE slug=?"
+READ = "SELECT value FROM events WHERE slug=? ORDER BY position"
 APPEND = "INSERT INTO events VALUES (?, ?, ?, ?, ?)"
 TRIM = (
     "DELETE FROM events WHERE slug=? AND position NOT IN "
@@ -11,15 +13,8 @@ TRIM = (
 )
 
 
-def read_events(connection, slug: str, revision: int | None = None) -> list:
-    query = "SELECT value FROM events WHERE slug=?"
-    parameters = (slug,)
-    if revision is not None:
-        if connection.execute("SELECT 1 FROM events WHERE slug=? AND revision IS NULL LIMIT 1", (slug,)).fetchone():
-            raise KeyError("rev")
-        query += " AND revision>?"
-        parameters += (revision,)
-    return [json.loads(value) for (value,) in connection.execute(query + " ORDER BY position", parameters)]
+def read_events(connection: sqlite3.Connection, slug: str) -> list[dict[str, object]]:
+    return [json.loads(value) for (value,) in connection.execute(READ, (slug,))]
 
 
 def write_events(connection, slug: str, events: list) -> None:

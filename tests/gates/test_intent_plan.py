@@ -94,6 +94,7 @@ def test_a_fitting_plan_passes_and_records_its_stage_criterion_and_model(tmp_pat
         "at": NOW,
         "phase": "p1",
         "planned": "h1",
+        "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
         "stage": "plan",
         "criterion": None,
         "model": "liquid-d1",
@@ -104,6 +105,30 @@ def test_a_fitting_plan_passes_and_records_its_stage_criterion_and_model(tmp_pat
     assert (history["stage"], history["definition"], history["model"]) == ("plan", "intent-check-plan", "liquid-d1")
     assert list(json.loads(history["classifier_input"])["questions"]) == ["aligned", "covers", "weakens"]
     assert log_rows(tmp_path) == []
+
+
+def test_task_text_rewrites_invalidate_the_intent_plan_verdict(tmp_path, monkeypatch):
+    doc = json.loads(json.dumps(DOC))
+    seen = []
+
+    def judge(state):
+        seen.append(state)
+        return {"verdict": "pass", "reason": state["task"] + ": " + state["task_text"]}
+
+    monkeypatch.setattr(intent, "judged", judge)
+    task = doc["tasks"][0]
+    for at, field in enumerate(("title", "description"), 1):
+        before = intent.plan_check(SLUG, doc, TASK, TRACED, "observe", at, home=tmp_path)
+        task[field] += " rewritten"
+        after = intent.plan_check(SLUG, doc, TASK, TRACED, "observe", at + 10, home=tmp_path)
+        assert after != before
+        assert after["reason"] == task["title"] + ": " + task["description"]
+        stored = Verdicts(SLUG, "intent", tmp_path).read(TASK)
+        assert stored["at"] == at + 10
+        count = len(seen)
+        assert intent.plan_check(SLUG, doc, TASK, TRACED, "observe", at + 20, home=tmp_path) == after
+        assert len(seen) == count
+    assert len(seen) == 3
 
 
 def test_a_plan_serving_another_phase_fails_on_phase_fit(tmp_path, monkeypatch):

@@ -205,10 +205,12 @@ def test_interruption_cancels_the_timer(state, monkeypatch):
 
 
 def test_a_timer_without_a_store_opens_the_scheduler_bucket(state, monkeypatch):
-    from scripts.events import state as states
+    from scripts.events import scheduler_state
+    from scripts.swarm import store
 
     opened = []
-    monkeypatch.setattr(states, "open_state", lambda bucket: opened.append(bucket) or state)
+    monkeypatch.setattr(store, "redis_client", lambda *_: pytest.fail("the timer dialled Redis"))
+    monkeypatch.setattr(scheduler_state, "open_scheduler_state", lambda bucket: opened.append(bucket) or state)
     monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
     with process_timer.Timer(0) as timer:
         Scheduler(state).run_due(now=timer.entry.record["due"])

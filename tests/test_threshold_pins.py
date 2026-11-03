@@ -37,8 +37,16 @@ def committed(tmp_path_factory) -> Path:
     archive = subprocess.run(["git", "-C", str(_ROOT), "archive", "HEAD"], capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(root, filter="data")
+    common_dir, tree = subprocess.run(
+        ["git", "-C", str(_ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir", "HEAD^{tree}"],
+        capture_output=True,
+        check=True,
+        text=True,
+    ).stdout.splitlines()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
-    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    # Do not git add here: hashing every file exceeds the shard timeout.
+    (root / ".git/objects/info/alternates").write_text(f"{common_dir}/objects\n")
+    subprocess.run(["git", "-C", str(root), "read-tree", tree], check=True)
     return root
 
 
@@ -191,7 +199,9 @@ def test_the_check_requires_both_trees():
 
 def test_an_unchanged_repository_is_green(committed, capsys):
     assert threshold_pins.main(["--base", str(committed), "--head", str(committed)]) == 0
-    pins, allowlists = len(threshold_pins.PINS), len(threshold_pins.SHRINK_ONLY)
+    graded = {path for path, _ in threshold_pins.GRADED_BY}
+    pins = len(threshold_pins.PINS)
+    allowlists = len([path for path in threshold_pins.SHRINK_ONLY if path not in graded])
     assert f"{pins} thresholds compared, {allowlists} allowlists compared, 0 errors" in capsys.readouterr().out
 
 
@@ -240,9 +250,59 @@ def test_an_unregistered_floor_or_allowlist_is_red(tmp_path):
     ]
 
 
+def test_a_new_allowlist_registered_in_the_head_is_green(tmp_path):
+    path = "tests/NEW_ALLOWLIST.json"
+    head = _tree(
+        tmp_path / "head",
+        {"scripts/threshold_pins.py": f"SHRINK_ONLY = ({path!r},)\n", path: "{}"},
+    )
+    assert threshold_pins.registry_errors(head, (), ()) == []
+
+
+def test_head_graded_by_does_not_register_a_new_allowlist(tmp_path):
+    path = "tests/NEW_ALLOWLIST.json"
+    head = _tree(
+        tmp_path / "head",
+        {"scripts/threshold_pins.py": f"SHRINK_ONLY = ()\nGRADED_BY = (({path!r}, 'gate'),)\n", path: "{}"},
+    )
+    assert threshold_pins.registry_errors(head, (), ()) == [
+        f"{path} is a floor or allowlist the threshold pin does not register"
+    ]
+
+
+def test_a_registered_allowlist_still_cannot_grow(tmp_path):
+    path = ALLOWLIST
+    source = f"SHRINK_ONLY = ({path!r},)\n"
+    base = _tree(tmp_path / "base", {"scripts/threshold_pins.py": source, path: "{}"})
+    head = _tree(tmp_path / "head", {"scripts/threshold_pins.py": source, path: '{"new": 1}'})
+    assert threshold_pins.registry_errors(head, (), ()) == []
+    errors, compared = threshold_pins.allowlist_errors(base, head, (path,))
+    assert compared == 1
+    assert errors == [f"{path}: new is new; the base does not allow it; allowlists only shrink"]
+
+
+def test_an_allowlist_its_own_gate_grades_may_rise(tmp_path):
+    base = _tree(tmp_path / "base", {ALLOWLIST: json.dumps({"a.py": 0})})
+    head = _tree(tmp_path / "head", {ALLOWLIST: json.dumps({"a.py": 169, "b.py": 202})})
+    assert threshold_pins.allowlist_errors(base, head, (ALLOWLIST,), ((ALLOWLIST, "scripts.gate"),)) == ([], 0)
+
+
+def test_a_type_baseline_refresh_passes_the_check(committed, tmp_path, capsys):
+    path = "tests/TYPE_BASELINE.json"
+    head = tmp_path / "head"
+    subprocess.run(["cp", "-a", str(committed), str(head)], check=True)
+    raised = json.loads((head / path).read_text())
+    raised["scripts/swarm_ledger/api/store.py"] = raised.get("scripts/swarm_ledger/api/store.py", 0) + 169
+    (head / path).write_text(json.dumps(raised, indent=2) + "\n")
+    assert threshold_pins.main(["--base", str(committed), "--head", str(head)]) == 0
+    assert "TYPE_BASELINE" not in capsys.readouterr().out
+
+
 def test_every_pin_and_allowlist_names_a_real_literal_in_this_repository(committed):
     assert threshold_pins.pin_errors(committed, committed) == ([], len(threshold_pins.PINS))
-    assert threshold_pins.allowlist_errors(committed, committed) == ([], len(threshold_pins.SHRINK_ONLY))
+    graded = {path for path, _ in threshold_pins.GRADED_BY}
+    shrink_only = [path for path in threshold_pins.SHRINK_ONLY if path not in graded]
+    assert threshold_pins.allowlist_errors(committed, committed) == ([], len(shrink_only))
     assert threshold_pins.registry_errors(committed) == []
     for path in threshold_pins.SHRINK_ONLY:
         assert (committed / path).is_file(), path

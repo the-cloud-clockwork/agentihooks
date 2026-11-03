@@ -53,7 +53,8 @@ def register(mcp):
             language: "bash", "python" or "filter" (script is the filter YAML, checked against the
                 filter schema; written as <step>-<matcher>-<name>.filter.yaml).
             scope: "global" (bundle-wide; ~/.agentihooks when no bundle is linked),
-                "user" (the personal user bundle), "profile" (one profile of the chain), or "directory"
+                "shared" (the shared bundle), "user" (the personal user bundle), "profile" (one profile of
+                the chain), or "directory"
                 (<git-root>/.agentihooks/conditions of the current repository).
             profile: profile name for scope="profile"; defaults to the chain's first.
             cwd: directory inside the target repository for scope="directory".
@@ -149,7 +150,7 @@ def register(mcp):
         Args:
             file: the condition's file name.
             session_id: your session id (from the SessionStart banner).
-            scope: "global", "user", "profile" or "directory" when the name exists in several layers.
+            scope: "global", "shared", "user", "profile" or "directory" when the name exists in several layers.
             cwd: as in condition_list.
         """
         try:

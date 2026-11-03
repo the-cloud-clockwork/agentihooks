@@ -1,4 +1,3 @@
-import json
 from unittest import mock
 
 import pytest
@@ -125,13 +124,15 @@ def test_waiting_names_the_missing_outcome_before_the_archive(attempt):
 
 
 def test_retain_keeps_the_execution_record_archive_watermark_and_removal(attempt):
+    from dataclasses import asdict
+
     world, record = attempt
     entry = retention.finalize(world.store, SLUG, world.require, record.execution_id, "cancelled", 5, "ledger:one")
     world.acknowledge(record.execution_id, 5)
     removed = {"pods": [{"name": "p", "uid": "u", "outcome": "deleted"}], "services": []}
     kept = retention.retain(world.store, SLUG, entry, removed)
     assert kept == {
-        "execution": json.loads(world.store.redis.hget(world.store.key(SLUG, "executions"), record.execution_id)),
+        "execution": asdict(world.store.execution(SLUG, record.execution_id)),
         "final": {
             "execution_id": record.execution_id,
             "generation": record.generation,

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck_status, cli, commands, stages, status
+from scripts.swarm import bottleneck_status, cli, commands, metrics, stages, status
 from scripts.swarm.health import standing
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_cli import env as env
@@ -252,7 +252,7 @@ def test_tick_delivers_new_metric_stage_once_before_status_publication(env, monk
         detect(store, (next(samples), 3600.0, "rising"))
         return []
 
-    monkeypatch.setattr(cli.metrics, "record_pass", collect)
+    monkeypatch.setattr(metrics, "record_pass", collect)
     for _ in range(3):
         cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     items = [

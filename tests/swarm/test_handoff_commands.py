@@ -11,6 +11,7 @@ _fixture = env
 DOC = "# Handoff v2\n## Next\nRead the saved proof.\n## Read first\nNone\n"
 
 
+@pytest.mark.feature("swarm-handoff-continuity")
 def test_confirmation_command_records_continuity_but_never_infers_binding(env, capsys):
     store, ledger, runtime = env
     cli.main(["sw", "create", "--repo", "/repo"])
@@ -28,6 +29,7 @@ def test_confirmation_command_records_continuity_but_never_infers_binding(env, c
     assert cli.main(["sw", "--as", agent.name, "confirm-handoff", row["id"], "--next", "Read the saved proof."]) == 1
 
 
+@pytest.mark.feature("swarm-restore-decision")
 def test_a_worker_cannot_decide_another_seats_restore(env, capsys):
     store, _, _ = env
     cli.main(["sw", "create", "--repo", "/repo"])

@@ -14,10 +14,12 @@ from difflib import SequenceMatcher
 from functools import cache
 from itertools import accumulate
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
+from scripts.ci_mutation import scope
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import file_seconds, mutation_counts, partition, stats_shards
@@ -37,6 +39,10 @@ from tests.dep_manifest import changes as recorded_changes
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
 WORKERS = 4
+BATCH_RUNNERS = 40
+RUNNER_WAVES = 2
+SHARD_CEILING = BATCH_RUNNERS * RUNNER_WAVES
+SHARD_SETUP_SECONDS = 180.0
 RECORD_RETRY_SECONDS = 10
 STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
@@ -53,12 +59,18 @@ def shard_workers() -> int:
     return quota_workers(WORKERS, float(quota) if quota else None)
 
 
+def shard_capacity(workers: int, budget: float) -> float:
+    """Return the worker seconds a shard can spend on mutants once its setup and tail are paid from the budget."""
+    return workers * (budget - SHARD_SETUP_SECONDS)
+
+
 def estimate(
     root: Path,
     changes: dict[str, set[int]],
     selection: dict[str, list[str]] | None = None,
     manifest: dict | None = None,
     everything: bool = False,
+    direct: dict[str, list[str]] | None = None,
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     drift = record_drift(root, manifest) if manifest is not None else None
@@ -66,7 +78,7 @@ def estimate(
         stale, drifted, paths = drift
         units, unrecorded = changed_recorded_units(root, manifest, changes)
         if "lines" in manifest:
-            covering = line_covering_tests(root, manifest, changes, paths)
+            covering = line_covering_tests(root, manifest, changes, paths, direct)
         else:
             covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
@@ -523,8 +535,16 @@ def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
     }
 
 
-def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]], paths: set[str]) -> set[str]:
+def line_covering_tests(
+    root: Path,
+    manifest: dict,
+    changes: dict[str, set[int]],
+    paths: set[str],
+    direct: dict[str, list[str]] | None = None,
+) -> set[str]:
     lines, fallback, tables = recorded_lines(root, manifest, changes)
+    if direct is not None:
+        direct.update(direct_tests(manifest, lines, changes))
     return {
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
@@ -537,6 +557,30 @@ def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]]
             for path, name in tables
         )
     }
+
+
+def direct_tests(manifest: dict, lines: dict[str, set[int]], changes: dict[str, set[int]]) -> dict[str, list[str]]:
+    return {
+        path: sorted(
+            {
+                node(test).partition("[")[0]
+                for test, covered in manifest["lines"].items()
+                if lines[path].intersection(covered.get(path, ()))
+            }
+        )
+        for path in changes
+    }
+
+
+def recorded_direct(root: Path, manifest: dict[str, Any] | None, changes: dict[str, set[int]]) -> dict[str, list[str]]:
+    if not manifest or "lines" not in manifest or not manifest.get("commit"):
+        return {}
+    return direct_tests(manifest, recorded_lines(root, manifest, changes)[0], changes)
+
+
+def first_tests(root: Path, changes: dict[str, set[int]], direct: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Name each changed file's direct tests, or the test modules importing it when no recorded line names any."""
+    return {path: direct.get(path) or scope.select_tests(root, Path(path), helpers=False) for path in changes}
 
 
 @cache
@@ -563,8 +607,10 @@ def narrow(
     return sorted(kept) or chosen
 
 
-def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
-    return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
+def shard_count(seconds: float, mutants: int, target: float, limit: int, budget: float = 1080) -> int:
+    wanted = min(limit, math.ceil(seconds / (shard_workers() * target)))
+    needed = min(SHARD_CEILING, math.ceil(seconds / shard_capacity(shard_workers(), budget)))
+    return max(1, min(mutants, max(wanted, needed)))
 
 
 def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, float] | None = None) -> float:
@@ -638,11 +684,14 @@ def main() -> int:
             else:
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
-    selection = {}
-    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
+    selection: dict[str, list[str]] = {}
+    direct: dict[str, list[str]] = {}
+    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure), direct)
+    direct = first_tests(root, changes, direct or recorded_direct(root, manifest, changes))
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
+    (root / ".mutation-direct.json").write_text(json.dumps(direct) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(

@@ -6,6 +6,9 @@ on:
       version:
         type: string
         required: true
+      chart-artifact:
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       version:
@@ -43,7 +46,13 @@ jobs:
           fi
           helm version --short
           kubectl version --client
-      - name: Pull the published chart by its version and install it in kind
+      - uses: actions/download-artifact@v4
+        if: inputs.chart-artifact != ''
+        with:
+          name: ${{ inputs.chart-artifact }}
+          path: ${{ runner.temp }}/packaged
+      - name: Install the chart of this version in kind
         env:
           VERSION: ${{ inputs.version }}
+          CHART_DIR: ${{ inputs.chart-artifact != '' && format('{0}/packaged', runner.temp) || '' }}
         run: bash deploy/helm/agentihooks-swarm/ci/kind-published.sh "$VERSION"

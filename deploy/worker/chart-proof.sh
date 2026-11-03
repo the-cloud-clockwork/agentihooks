@@ -83,3 +83,27 @@ if helm template proof "$chart" --set workers.replicas=1 \
 fi
 grep -q 'workers.ssh.port must be 1024 or higher' "$out/port.err"
 echo 'privileged worker hive sshd port: refused'
+helm template proof "$chart" --set workers.replicas=1 \
+  --set workers.credentialSecret.name=member --set workers.credentialSecret.key=credential \
+  --set workers.brainBinding.secretName=approved-brain --set workers.brainBinding.key=binding.json \
+  --set workers.brainBinding.credentials.SWARM_BRAIN_API_TOKEN.secretName=brain-client \
+  --set workers.brainBinding.credentials.SWARM_BRAIN_API_TOKEN.key=api-token \
+  --set workers.brainBinding.credentials.SWARM_BRAIN_MCP_KEY.secretName=brain-client \
+  --set workers.brainBinding.credentials.SWARM_BRAIN_MCP_KEY.key=mcp-key > "$out/brain.yaml"
+python3 - "$out/brain.yaml" <<'PY'
+import sys, yaml
+
+objects = list(yaml.safe_load_all(open(sys.argv[1])))
+worker = next(o for o in objects if o and o.get('kind') == 'Deployment' and o['metadata']['name'].endswith('-worker-hive'))
+pod = worker['spec']['template']['spec']
+container = pod['containers'][0]
+env = {v['name']: v for v in container['env']}
+assert env['HIVE_BRAIN_BINDING_FILE']['value'] == '/run/swarm-brain/binding.json'
+for name, key in [('SWARM_BRAIN_API_TOKEN', 'api-token'), ('SWARM_BRAIN_MCP_KEY', 'mcp-key')]:
+    assert env[name] == {'name': name, 'valueFrom': {'secretKeyRef': {'name': 'brain-client', 'key': key}}}
+mount = next(m for m in container['volumeMounts'] if m['name'] == 'swarm-brain')
+assert mount == {'name': 'swarm-brain', 'mountPath': '/run/swarm-brain', 'readOnly': True}
+volume = next(v for v in pod['volumes'] if v['name'] == 'swarm-brain')
+assert volume['secret'] == {'secretName': 'approved-brain', 'defaultMode': 288, 'items': [{'key': 'binding.json', 'path': 'binding.json'}]}
+print('worker hive approved brain binding and credential references: passed')
+PY

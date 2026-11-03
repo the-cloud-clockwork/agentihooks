@@ -795,6 +795,18 @@ shards and the Proofs `tests` proof use to choose their pytest workers.
 The rule is `max(1, min(4, int(quota)))`, with four as the CPU count, so the
 variable can lower the planned workers but never raise them above four.
 
+### Shards past the batch runner pool
+
+The batch pool holds forty runners (`BATCH_RUNNERS` in `scripts.ci_mutation.plan`), and the planners may ask for twice that, eighty shards (`SHARD_CEILING`, two `RUNNER_WAVES`). Shards past the fortieth queue on the pool and start as the first wave finishes, so a change whose work exceeds forty shards is still graded whole; it takes about two shard budgets of wall time instead of one. The measured planner raises the shard count until the slowest shard fits its budget less setup, up to that ceiling.
+
+Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. When one mutant, or one unit of a split mutant, alone needs more than a shard holds, the message names that mutant and asks for its covering tests to be shortened or split, since no shard count or pull request split can grade it. Otherwise the message names the eighty shards in two waves of forty runners and asks for at least the change's worker seconds divided by what those eighty shards hold, and never fewer than two, pull requests.
+
+| Measured worker seconds at three workers | Shards | Result |
+|---|---|---|
+| up to 108000 | up to 40 | one wave |
+| 108001 to 216000 | 41 to 80 | two waves, every mutant graded |
+| over 216000, or one unit over 2700 | 80 | refused at plan time |
+
 ### What the worker count sizes
 
 | Planner call | Step | Effect of fewer workers |
@@ -1447,7 +1459,7 @@ These are implementation defaults, with no environment variable or workflow disp
 | `HEAD_SECONDS` | 20 traced seconds | Select the fastest covering tests up to this budget, always including at least one test when available |
 | `SLICE_SECONDS` | 120 traced seconds | Divide the remaining duration by this value, rounding up to choose the slice count |
 | Split limit | 10 slices | Cap a mutant's units; fewer than two slices leaves it unsplit |
-| Shard target and limit | 240 seconds, 10 shards | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
+| Shard target and limit | 240 seconds, 10 shards wanted; up to 80 shards when the budget needs them ([Shards past the batch runner pool](#shards-past-the-batch-runner-pool)) | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
 
 For example, ten covering tests of one second each form a ten-second head. Thirty more tests of twenty seconds each make a 600-second tail, split into five 120-second slices. Each unit runs the ten head tests and six tail tests on its own shard. All forty distinct tests remain covered, although the head runs five times. Unit cost is estimated as `5.6 + 1.25 * (head_seconds + slice_seconds)`, or 168.1 worker seconds here. A split mutant's total estimated cost includes every repeated head.
 
@@ -1519,6 +1531,20 @@ There is no setting for the ratio, and no log line prints it. Compare `Measured 
 | One group's mutants are priced differently from another's | Each statistics group the plan loads has its own ratio |
 
 [Pull request 4786](https://github.com/the-cloud-clockwork/agentihooks/pull/4786) delivered the adjustment. Replaying the planner on the same statistics artifacts, the account scan head of [run 39207424222](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39207424222) fell from 48.2 to 16.2 estimated minutes per mutant and from 100 to 60 units on ten shards; five other recent pull request runs fell between two and four times, and two of them needed fewer shards (10 to 6, and 5 to 3). Predicted over actual shard wall stayed between 1.6 and 4.9 across all six runs, so the estimate still exceeds observed work. On the account scan head every one of the 1881 traced tests executes the changed one statement function, so line level narrowing could not have cut its test set.
+
+### Early stage and shards sized after it
+
+A preflight plan with split mutants runs two stages. In the early stage (`probe`), each split mutant runs only its head tests once. The shards then skip the head and run only what the early stage left. Each stage is sized for its own work, so neither stage is sized for the worst case of the other.
+
+| Stage | Job count | Work priced |
+|---|---|---|
+| `probe` | `probe_shards` in `plan.json`: the split mutants' head cost, `5.6 + 1.25 * head_seconds` each, divided by the planned workers times 120 seconds, rounded up. It is at least 1 and at most 40 (the batch runner pool) or the number of split mutants | One head run per split mutant |
+| `replan` | One job on the light pool, after every `probe` job succeeds | Merges the early results into the plan, replans the shards and uploads `mutation-plan-probed` |
+| `mutation-shard` | `shards` in the probed plan, sized against the shard budget less the longest early job | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
+
+On the e2 proof, [run 41605474823](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41605474823) sized both stages at 49 jobs from 130220 estimated worker seconds. Its early stage killed 451 of 493 split mutants. The 356 surviving units then took 16849 observed worker seconds; their head plus slice estimate was 69876.
+
+The `replan` log prints `Early mutation kills: K of N split mutants` and `Probed mutation worker seconds: S; probed shards: C`. When the remaining budget cannot hold the slowest shard, `replan` fails with **Mutation plan over budget** and the shards do not start. A plan without split mutants skips `probe` and `replan`, and the shards use the `refine` plan as before. The pull request Tests workflow runs the same two stages as `mutation-probe` and `mutation-replan`, after `mutation-refine` and before `mutation-shard`. `mutation-replan` uploads `mutation-plan-probed`, the shards download it over the measured plan, and the `mutation` job counts shards from it first. A refine plan without split mutants, or a head whose planner predates `probe_shards`, skips both stages. The longest chain of Tests stage budgets to Gate Required runs through the mutation stages and already took the whole fifteen minutes, so the two new stages take their budget from the shard stage: `mutation-probe` 120 seconds, `mutation-replan` 30 seconds and `mutation-shard` 210 seconds, which together keep the former 360. The shards no longer rerun each split mutant's head, so they need less of it.
 
 ### Combined grading
 

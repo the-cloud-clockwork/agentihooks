@@ -671,7 +671,10 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
         tests = list(tests)
         return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory, runner)
 
-    memory = KillMemory(Path.cwd() / "killers")
+    memory = KillMemory(
+        Path.cwd() / "killers",
+        {get_mutant_name(Path(path), ""): change.get("direct", ()) for path, change in changes.items()},
+    )
 
     runner.collect_or_load_stats = collect_selected_stats
     # Every shard generates the same mutants, so names and clearance keys match an unsharded run; each runs its share.

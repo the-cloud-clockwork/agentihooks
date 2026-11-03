@@ -24,6 +24,7 @@ def setup():
     return store, old
 
 
+@pytest.mark.feature("swarm-handoff-binding")
 def test_tick_binds_a_successor_without_claiming_continuity(setup):
     store, old = setup
     transfer = transfers.record(store, "sw", old, "recycle", DOC, 2)
@@ -38,6 +39,7 @@ def test_tick_binds_a_successor_without_claiming_continuity(setup):
 
 
 @pytest.mark.parametrize("lane", ["eng", "master"])
+@pytest.mark.feature("swarm-handoff-binding")
 def test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start(setup, monkeypatch, lane):
     store, old = setup
     store.drop_agent("sw", old.name)

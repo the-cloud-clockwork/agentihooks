@@ -275,8 +275,10 @@ def test_a_launching_exit_keeps_its_original_revision_after_a_slot_outage(rig):
 
 
 def successor(rig):
+    from scripts.swarm import fencing
+
     agent = replace(rig.agent, execution_id="successor", generation=4)
-    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    fencing.write(rig.store, "rig", lambda doc: doc["executions"].update({agent.execution_id: asdict(agent)}))
     rig.store.redis.hset(rig.store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
     return agent
 
@@ -341,12 +343,16 @@ def test_legacy_hive_exit_events_remain_owned_by_the_legacy_tick(rig):
     assert rig.store.execution_registry.get("rig", "execution") == rig.agent
 
 
-@pytest.mark.parametrize("guard", ["task-authority", "claim-journal"])
+@pytest.mark.parametrize("guard", ["claims", "journals"])
 def test_returning_capacity_preserves_a_protected_task_claim(rig, guard):
-    rig.store.redis.set(rig.store.key("rig", guard, "task"), "protected")
+    from scripts.swarm import fencing
+
+    sentinel = {"protected": True} if guard == "claims" else [{"protected": True}]
+    fencing.write(rig.store, "rig", lambda doc: doc[guard].update({"task": sentinel}))
     rig.react.handle(rig.event)
     assert rig.store.redis.get(rig.store.key("rig", "claim", "task")) == "engineer"
     assert rig.store.execution_registry.get("rig", "execution").state == "ended"
+    assert fencing.read(rig.store, "rig")[guard]["task"] == sentinel
 
 
 def test_an_exited_unqueued_pull_request_reopens_for_another_engineer(rig):

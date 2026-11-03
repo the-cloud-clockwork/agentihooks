@@ -44,6 +44,7 @@ def test_scan_keeps_the_reusable_workflow_steps():
     assert [step.get("name") for step in steps[2:]] == [
         "Install Semgrep",
         "Own rules hold on their fixtures and the code",
+        "Source control exceptions only shrink",
         "Resolve the merge base of the head and the base",
         "Fail on findings new against the base",
     ]
@@ -80,6 +81,61 @@ def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step():
     runs = [step.get("run") for step in _jobs()["feature-tests"]["steps"]]
     assert "semgrep --metrics off --test .semgrep-incidents" in runs
     assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
+
+
+@pytest.mark.feature("semgrep-feature-tests")
+def test_feature_fixture_command_runs_recursively():
+    job = _jobs()["feature-tests"]
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert "semgrep --metrics off --test .semgrep/features" in commands
+    assert "if" not in job and "continue-on-error" not in job
+    assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+
+
+def test_feature_map_links_are_required_alongside_feature_rule_fixtures():
+    steps = _jobs()["feature-tests"]["steps"]
+    assert any(step.get("run") == "python -m scripts.feature_map" for step in steps)
+    assert any(step.get("run") == 'python -m pip install semgrep==1.177.0 "pyyaml>=6.0"' for step in steps)
+
+
+def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -> None:
+    import json
+
+    rule = yaml.safe_load((_ROOT / ".semgrep/source-control.yml").read_text())["rules"][0]
+    assert rule["id"] == "swarm-source-control-port"
+    assert rule["languages"] == ["python"]
+    assert rule["severity"] == "ERROR"
+    assert rule["pattern-either"] == [
+        {"pattern": '["gh", ...]'},
+        {"pattern": "scripts.tick.adapters.github.command(...)"},
+    ]
+    assert rule["paths"]["include"] == ["/scripts/swarm/**", "*.test.py"]
+    allowed = json.loads((_ROOT / ".semgrep/source-control-allowlist.json").read_text())
+    assert rule["paths"]["exclude"] == allowed
+    assert "/scripts/tick/adapters/github.py" in allowed
+    assert all(path.endswith(".py") and "*" not in path for path in allowed)
+    assert "/scripts/swarm/publish.py" not in allowed
+    assert "/scripts/swarm/github_sampler.py" not in allowed
+    assert "/scripts/swarm/stack.py" not in allowed
+    assert "/scripts/swarm/panic.py" not in allowed
+    assert "/scripts/swarm/linked_issues.py" not in allowed
+    assert "/scripts/swarm/ready.py" not in allowed
+    assert "/scripts/swarm/ledger_host.py" not in allowed
+    assert "/scripts/swarm/health/checks.py" not in allowed
+    assert "/scripts/swarm/fleet_red.py" not in allowed
+    assert "/scripts/swarm/cli.py" not in allowed
+    assert "/scripts/swarm/ci_speed.py" not in allowed
+    assert "/scripts/swarm/mutation_wait.py" not in allowed
+    assert "/scripts/swarm/ledger_events.py" not in allowed
+    assert allowed == ["/scripts/swarm/github_reads.py", "/scripts/tick/adapters/github.py"]
+
+
+def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
+    steps = _jobs()["scan"]["steps"]
+    step = next(step for step in steps if step.get("name") == "Source control exceptions only shrink")
+    assert step["env"]["BASE"] == "${{ inputs.base }}"
+    assert 'git show "$BASE:.semgrep/source-control-allowlist.json"' in step["run"]
+    assert "current <= previous" in step["run"]
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():
@@ -228,7 +284,7 @@ def test_scan_holds_the_status_the_dev_rulesets_require():
     assert gate["name"] == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
     assert "semgrep" in gate["needs"]
     grader = next(step for step in gate["steps"] if step.get("name") == "Require every gate to succeed")
-    assert '["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]' in grader["run"]
+    assert '["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]' in grader["run"]
     for ruleset in ("dev-history.json", "dev-no-delete.json"):
         rules = json.loads((_ROOT / ".github/rulesets" / ruleset).read_text())["rules"]
         checks = next(rule for rule in rules if rule["type"] == "required_status_checks")

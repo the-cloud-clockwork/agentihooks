@@ -3,8 +3,12 @@
 import json
 import os
 import re
+import socket
+import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from scripts.events import state
 from scripts.hive import hive_state, scope
@@ -14,6 +18,7 @@ from scripts.swarm_v2.keyspace import INSTALLATION_FILE
 
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
+BEAT_WINDOW_MS = 300_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 JSON_FIELDS = {
@@ -26,8 +31,10 @@ JSON_FIELDS = {
     "master_login": dict,
     "repos": list,
     "capabilities": list,
+    "drains": list,
 }
-INT_FIELDS = ("max_agents", "heartbeat_at")
+DRAINS_KEPT = 20
+INT_FIELDS = ("max_agents", "heartbeat_at", "beat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
@@ -49,7 +56,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "ephemeral": "no",
         "excluded": ["master"] if headless else [],
         "prefer": {},
-        "max_agents": 20 if headless else 10,
+        "max_agents": 20 if headless else 15,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
@@ -186,12 +193,51 @@ def _settle(hive_id: str, record: dict) -> dict:
     return {**settled, "name": MASTER_NAME} if settled["ui"] == "yes" else settled
 
 
+@dataclass(frozen=True)
+class Drain:
+    """Who changed a hive's drain flag, why, and the time by which its agents must be gone."""
+
+    owner: str
+    reason: str
+    deadline_at: int = 0
+
+
+def wall_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def drain_owner(environ: Mapping[str, str] = os.environ) -> str:
+    return environ.get("AGENTIHOOKS_AGENT_NAME") or socket.gethostname()
+
+
+def _ready(record: dict[str, Any], at: int) -> bool:
+    return "heartbeat_at" in record and live(record, at) and record.get("draining") != "yes"
+
+
+def _drained(record: dict[str, Any], stored: dict[str, Any], drain: Drain | None) -> dict[str, Any]:
+    """Appends a drain flag change to the record's retained history, keeping the newest DRAINS_KEPT entries."""
+    if record.get("draining", "no") == stored.get("draining", "no"):
+        return record
+    drain = drain or Drain(drain_owner(), "hive set")
+    at = wall_ms()
+    entry = {
+        "at": at,
+        "draining": record["draining"],
+        "owner": drain.owner,
+        "reason": drain.reason,
+        "deadline_at": drain.deadline_at,
+        "ready_before": _ready(stored, at),
+        "ready_after": _ready(record, at),
+    }
+    return {**record, "drains": [*stored.get("drains", []), entry][-DRAINS_KEPT:]}
+
+
 def show(client, hive_id: str) -> dict | None:
     stored = _stored(client, hive_id)
     return None if stored is None else _settle(hive_id, stored)
 
 
-def update(client, hive_id: str, pairs: list[str], keep: bool = False) -> dict:
+def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, drain: Drain | None = None) -> dict:
     if not HIVE_ID.fullmatch(hive_id):
         raise HiveError(f"hive id {hive_id!r} must be letters, digits, dots, dashes or underscores")
     if not pairs:
@@ -206,7 +252,7 @@ def update(client, hive_id: str, pairs: list[str], keep: bool = False) -> dict:
             if not (keep and f in stored and (f in KEPT or (f == "name" and stored[f] != hive_id)))
         }
         _check(_settle(hive_id, {**stored, **fields}))
-        return {**_seeded(hive_id), **stored, **fields}
+        return _drained({**_seeded(hive_id), **stored, **fields}, stored, drain)
 
     record = _settle(hive_id, _amend(client, hive_id, write))
     if hive_id != scope.member():
@@ -234,16 +280,35 @@ def hives(client) -> list[dict]:
     return [record for hive_id in hive_state.index(client) if (record := show(client, hive_id))]
 
 
-def live(record: dict, now_ms: int) -> bool:
-    return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] <= LIVE_MS
+def live(record: Any, now_ms: int) -> bool:
+    """A fresh heartbeat counts only while the last finished beat, where the record carries one, is within the window."""
+    finished_at: int = record.get("beat_at", record["heartbeat_at"])
+    return (
+        record["heartbeat_at"] > 0
+        and now_ms - record["heartbeat_at"] <= LIVE_MS
+        and now_ms - finished_at <= BEAT_WINDOW_MS
+    )
 
 
-def touch(client, hive_id: str, now_ms: int) -> None:
-    def refresh(stored: dict | None):
-        return {**stored, "heartbeat_at": now_ms} if stored and "heartbeat_at" in stored else hive_state.KEEP
+def touch(client: Any, hive_id: str, now_ms: int) -> None:
+    """Refreshes the heartbeat and seeds the finished beat once, so a first beat that never ends ages out."""
+
+    def refresh(stored: dict[str, Any] | None) -> object:
+        if not stored or "heartbeat_at" not in stored:
+            return hive_state.KEEP
+        return {"beat_at": now_ms, **stored, "heartbeat_at": now_ms}
 
     if "heartbeat_at" in (_amend(client, hive_id, refresh) or {}):
         client.pexpire(f"{key(hive_id)}:sessions", LIVE_MS)
+
+
+def finished(client: Any, hive_id: str, now_ms: int) -> None:
+    """Records the end of a whole daemon beat, which the headroom heartbeat never refreshes."""
+
+    def stamp(stored: dict[str, Any] | None) -> object:
+        return {**stored, "beat_at": now_ms} if stored else hive_state.KEEP
+
+    _amend(client, hive_id, stamp)
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:

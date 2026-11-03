@@ -1,10 +1,12 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from scripts.swarm import idle, outage, profile_choice, prompt, resume
+from scripts.swarm import fencing, idle, outage, profile_choice, prompt, resume
 from scripts.swarm.pane import PaneObservation
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -250,14 +252,13 @@ def test_a_new_task_generation_fences_the_recovery_pass(store):
         "generation": 1,
         "lease_deadline_ms": 20 * MINUTE,
     }
-    key = store.key("sw", "task-authority", agent.task)
-    store.redis.set(key, json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     rows = {task["id"]: task for task in ledger.state("sw")["tasks"]}
     resume.track_outages("sw", store, runtime, rows, 8 * MINUTE)
     assert resume.recovery_pending(store, "sw", agent)
     authority["generation"] += 1
-    store.redis.set(key, json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     outage.observe("sw", "provider", [], 9 * MINUTE)
     resume.recover_outages("sw", store, ledger, runtime, rows, 9 * MINUTE)
     assert not resume.recovery_pending(store, "sw", agent)
@@ -348,7 +349,7 @@ def test_an_owner_that_loses_its_task_drops_its_pending_recovery(store, tmp_path
             "generation": 0,
             "lease_deadline_ms": 20 * MINUTE if released else 10 * MINUTE,
         }
-        store.redis.set(store.key("sw", "task-authority", agent.task), json.dumps(authority))
+        fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     resume.track_outages("sw", store, runtime, rows, 10 * MINUTE)
     assert recovery_state(store, agent.name) is None
     assert not resume.recovery_pending(store, "sw", agent)
@@ -391,7 +392,7 @@ def test_an_unchanged_owner_does_not_stop_rerecording_a_later_owner_with_a_new_i
         "generation": 1,
         "lease_deadline_ms": 20 * MINUTE,
     }
-    store.redis.set(store.key("sw", "task-authority", last.task), json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({last.task: authority}))
     assert not resume.recovery_pending(store, "sw", last)
     resume.track_outages("sw", store, runtime, rows_of(ledger), 9 * MINUTE)
     assert resume.recovery_pending(store, "sw", agents[0])
@@ -505,6 +506,33 @@ def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_s
     fresh = runtime.tasks[-1]
     assert (fresh["seat"], fresh["handoff"], fresh["transfer"]["handoff"]) == (dead.seat, handoff, handoff)
     assert handoff in "\n".join(prompt.priming_lines(fresh))
+    assert recovery_state(store, dead.name) == "done"
+
+
+def test_an_unsupported_handoff_restart_retries_fresh_on_the_same_seat(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.tick import SpawnError as RestartError
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    native_spawn = runtime.spawn
+    launched = []
+
+    def spawn(config: SwarmConfig, lane: str, name: str, task: dict[str, object]) -> Placed:
+        launched.append(task)
+        if len(launched) == 1:
+            raise RestartError("saved run options unavailable", "unsupported")
+        return native_spawn(config, lane, name, task)
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
+    actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert f"outage resume for {dead.name}" in actions
+    assert len(launched) == 2
+    assert not launched[0].get(profile_choice.FRESH)
+    assert launched[1] == {**launched[0], profile_choice.FRESH: True}
+    assert launched[1]["seat"] == dead.seat
     assert recovery_state(store, dead.name) == "done"
 
 

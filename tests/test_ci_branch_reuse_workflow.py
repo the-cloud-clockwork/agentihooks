@@ -560,3 +560,91 @@ def test_combine_adds_every_carried_branch_database_that_holds_data(tmp_path):
         ".coverage-shards/branch-5/1-2/.coverage.host.pid7.a",
         ".coverage-shards/coverage-3.12-1/.coverage",
     ]
+
+
+@pytest.mark.parametrize(
+    ("values", "recorded", "measured", "uploaded"),
+    [
+        ({}, True, True, False),
+        ({}, False, True, True),
+        ({}, True, False, True),
+        ({"github.base_ref": "main"}, True, True, True),
+        ({"github.event.pull_request.head.repo.full_name": "fork/r"}, True, True, True),
+    ],
+)
+def test_a_selected_leg_uploads_its_coverage_once_when_its_branch_coverage_carries_it(
+    values, recorded, measured, uploaded
+):
+    step = _step("unit-selected", "Upload coverage")
+    condition = (
+        step["if"]
+        .replace("hashFiles('branch-record/record.json')", repr("abc" if recorded else ""))
+        .replace("hashFiles('.coverage')", repr("def" if measured else ""))
+    )
+    assert _evaluate(condition, {**SAME_REPO, "matrix.python-version": "3.12", **values}) is uploaded
+    assert not _evaluate(condition, {**SAME_REPO, "matrix.python-version": "3.13", **values})
+
+
+def test_sonar_downloads_the_branch_coverage_only_for_a_selected_scope():
+    download = _step("sonar", "Download shard coverage")
+    assert download["with"]["pattern"] == (
+        "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}"
+    )
+    take = _step("sonar", "Take each selected leg's latest branch coverage")
+    assert take["if"] == "needs.select.outputs.scope == 'selected'"
+    names = [step.get("name") for step in _jobs()["sonar"]["steps"]]
+    assert (
+        names.index("Download shard coverage, attempt 2")
+        < names.index(take["name"])
+        < names.index("Merge shard coverage")
+    )
+
+
+def test_sonar_takes_each_legs_newest_branch_coverage_over_an_older_uploaded_attempt(tmp_path: Path) -> None:
+    shards = tmp_path / ".coverage-shards"
+    for folder, text, stamp in (
+        ("branch-coverage-3.12-1-1", "old", ""),
+        ("branch-coverage-3.12-1-2", "new", ""),
+        ("branch-coverage-3.12-2-1", "branch", ""),
+        ("coverage-3.12-2", "uploaded", "1"),
+        ("branch-coverage-3.12-3-2", "newer", ""),
+        ("coverage-3.12-3", "older", "1"),
+        ("branch-coverage-3.12-4-1", "measured", ""),
+        ("coverage-3.12-4", "", ""),
+        ("branch-coverage-3.12-5-1", "kept", ""),
+        ("branch-coverage-3.12-5-2", "", ""),
+        ("branch-coverage-3.12-12-1", "twelve", ""),
+    ):
+        (shards / folder / "js-coverage").mkdir(parents=True)
+        if text:
+            (shards / folder / ".coverage").write_text(text)
+        if stamp:
+            (shards / folder / "coverage-attempt").write_text(f"{stamp}\n")
+    run = _step("sonar", "Take each selected leg's latest branch coverage")["run"]
+    subprocess.run(["bash", "-e", "-c", run], cwd=tmp_path, check=True)
+    legs = (1, 2, 3, 4, 5, 12)
+    assert sorted(path.name for path in shards.iterdir()) == sorted(f"coverage-3.12-{leg}" for leg in legs)
+    assert [(shards / f"coverage-3.12-{leg}/.coverage").read_text() for leg in legs] == [
+        "new",
+        "uploaded",
+        "newer",
+        "measured",
+        "kept",
+        "twelve",
+    ]
+    assert (shards / "coverage-3.12-1/js-coverage").is_dir()
+
+
+def test_a_selected_leg_stamps_the_attempt_that_measured_its_uploaded_coverage(tmp_path: Path) -> None:
+    upload = _step("unit-selected", "Upload coverage")
+    stamp = _step("unit-selected", "Stamp coverage with its attempt")
+    assert stamp["if"] == upload["if"]
+    assert "coverage-attempt" in upload["with"]["path"].splitlines()
+    names = [step.get("name") for step in _jobs()["unit-selected"]["steps"]]
+    assert names.index(stamp["name"]) + 1 == names.index(upload["name"])
+    environment = {**os.environ, "GITHUB_RUN_ATTEMPT": "3"}
+    subprocess.run(["bash", "-e", "-c", stamp["run"]], cwd=tmp_path, env=environment, check=True)
+    assert not (tmp_path / "coverage-attempt").exists()
+    (tmp_path / ".coverage").write_text("database")
+    subprocess.run(["bash", "-e", "-c", stamp["run"]], cwd=tmp_path, env=environment, check=True)
+    assert (tmp_path / "coverage-attempt").read_text() == "3\n"

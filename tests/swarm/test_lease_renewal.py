@@ -4,7 +4,9 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
-from scripts.swarm import cli, controller, lease, timing
+from scripts.gates import progress
+from scripts.inbox import wake
+from scripts.swarm import cli, controller, fencing, lease, timing
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -31,7 +33,7 @@ def test_renew_extends_the_live_lease_and_keeps_its_epoch(store, clock):
     clock[0] = 150000
     assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 330000)
     assert lease.current(store, "sw") == lease.Lease("home", 1, 330000)
-    assert store.redis.pttl(store.key("sw", "control-owner")) > 179000
+    assert fencing.read(store, "sw")["lease"]["expires_at"] - clock[0] > 179000
 
 
 def test_renew_refuses_a_lease_taken_by_another_owner(store, clock):
@@ -63,33 +65,87 @@ def test_renew_refuses_an_expired_lease(store, clock):
 
 def test_renew_retries_a_conflicting_transaction(store, clock, monkeypatch):
     held = lease.acquire(store, "sw", "home")
-    pipeline, conflicts = store.redis.pipeline, [1]
+    real, conflicts = fencing.state.for_store(store, fencing.BUCKET), [1]
 
-    def interleaved():
-        pipe = pipeline()
-        execute = pipe.execute
+    class Racing:
+        def get(self, key):
+            return real.get(key)
 
-        def commit():
+        def create(self, key, value):
+            return real.create(key, value)
+
+        def update(self, key, value, revision):
             if conflicts:
                 conflicts.pop()
-                store.redis.pexpire(store.key("sw", "control-owner"), lease.ttl_ms())
-            return execute()
+                entry = real.get(key)
+                doc = fencing._decode(entry.value)
+                doc["orphans"]["race"] = doc["orphans"].get("race", 0) + 1
+                real.update(key, fencing._encode(doc), entry.revision)
+            return real.update(key, value, revision)
 
-        pipe.execute = commit
-        return pipe
-
-    monkeypatch.setattr(store.redis, "pipeline", interleaved)
-    clock[0] = 2000
-    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 182000)
+    monkeypatch.setattr(fencing.state, "for_store", lambda *args, **kwargs: Racing())
+    clock[0] = 70000
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 250000)
+    assert conflicts == []
 
 
-def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
+def test_a_renewal_within_one_tick_of_the_last_writes_nothing(store, clock):
+    held = lease.acquire(store, "sw", "home")
+    before = fencing.state.for_store(store, fencing.BUCKET).get("sw").revision
+    clock[0] = 61000
+    assert lease.renew(store, "sw", held) == held
+    assert fencing.state.for_store(store, fencing.BUCKET).get("sw").revision == before
+    clock[0] = 61001
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 241001)
+
+
+def test_renew_refuses_a_stolen_lease_without_writing_through_the_cheap_cache(store, clock):
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    before_entry = fencing.state.for_store(store, fencing.BUCKET).get("sw")
+    assert before_entry is not None
+    before = before_entry.revision
+    clock[0] = held.expires_at
+    stolen = lease.acquire(store, "sw", "other")
+    assert stolen is not None
+    clock[0] = stolen.expires_at - 1
+    with pytest.raises(SwarmError) as error:
+        lease.renew(store, "sw", held)
+    assert str(error.value) == "the controller lease is stale"
+    after_entry = fencing.state.for_store(store, fencing.BUCKET).get("sw")
+    assert after_entry is not None
+    assert after_entry.revision == before + 1
+    assert lease.current(store, "sw") == stolen
+
+
+def test_renew_falls_back_to_the_full_document_when_the_cache_is_missing(store, clock, monkeypatch):
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    monkeypatch.setattr(fencing, "read_lease", lambda store, slug: None)
+    clock[0] = 61000
+    assert lease.renew(store, "sw", held) == held
+    clock[0] = 61001
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 241001)
+    assert lease.current(store, "sw") == lease.Lease("home", 1, 241001)
+
+
+def test_renew_falls_back_once_another_writer_bumps_the_bucket_revision(store, clock):
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    fencing.write(store, "peer", lambda doc: doc.update(epoch=doc["epoch"] + 1))
+    clock[0] = 61000
+    assert lease.renew(store, "sw", held) == held
+    clock[0] = 61001
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 241001)
+
+
+def test_a_pass_renews_once_and_keeps_one_beat_however_many_runtime_calls_it_makes(store, clock, monkeypatch):
     store.create(SwarmConfig("sw", ".", 1, 0))
     held = lease.acquire(store, "sw", "home")
-    writes = []
-    ledger = controller.FencedLedger(
-        store, "sw", held, SimpleNamespace(update_task=lambda *args: writes.append(args) or "accepted")
-    )
+    renewals, beats = [], []
+    renew = lease.renew
+    monkeypatch.setattr(lease, "renew", lambda *args: renewals.append(args) or renew(*args))
+    monkeypatch.setattr(lease, "beat", lambda store, slug, held, stop: beats.append((slug, held)))
     runtime = controller.FencedRuntime(
         store,
         "sw",
@@ -101,74 +157,85 @@ def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
         ),
         "local",
     )
-    for step in range(5):
-        clock[0] += 120000
-        assert ledger.update_task("sw", "t", {"step": step}) == "accepted"
-    assert clock[0] - 1000 > lease.ttl_ms()
-    assert runtime.has_capacity(store.config("sw")) is True
-    clock[0] += 120000
-    assert runtime.retire("one", homes=["home"]) == ("one", ["home"])
-    clock[0] += 120000
-    assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
-    assert len(writes) == 5
-    assert lease.current(store, "sw") == lease.Lease("home", 1, clock[0] + lease.ttl_ms())
+    with lease.held_pass(store, "sw", held):
+        assert runtime.has_capacity(store.config("sw")) is True
+        assert runtime.retire("one", homes=["home"]) == ("one", ["home"])
+        assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
+        assert runtime.spawn(store.config("sw"), "eng", "two", {"id": "t"}) == "placed"
+    assert renewals == [(store, "sw", held)]
+    assert beats == [("sw", held)]
 
 
-def test_a_tick_whose_lease_was_stolen_stops(store, clock):
+def test_a_pass_whose_lease_was_stolen_refuses_to_start(store, clock):
     store.create(SwarmConfig("sw", ".", 1, 0))
     held = lease.acquire(store, "sw", "home")
-    writes, spawned = [], []
-    ledger = controller.FencedLedger(store, "sw", held, SimpleNamespace(update_task=lambda *args: writes.append(args)))
-    runtime = controller.FencedRuntime(
-        store, "sw", held, SimpleNamespace(spawn=lambda *args: spawned.append(args), retire=spawned.append), "local"
-    )
-    ledger.update_task("sw", "t", {"step": 0})
     clock[0] += lease.ttl_ms()
     stolen = lease.acquire(store, "sw", "other")
-    for write in (
-        lambda: ledger.update_task("sw", "t", {"step": 1}),
-        lambda: runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}),
-        lambda: runtime.retire("one"),
-    ):
-        with pytest.raises(SwarmError) as error:
-            write()
-        assert str(error.value) == "the controller lease is stale"
-    assert len(writes) == 1
-    assert spawned == []
+    ran = []
+    with pytest.raises(SwarmError) as error, lease.held_pass(store, "sw", held):
+        ran.append("pass")
+    assert str(error.value) == "the controller lease is stale"
+    assert ran == []
+    assert lease.PASS.get() is None
     assert lease.current(store, "sw") == stolen
 
 
-def test_a_tick_fences_each_ledger_write_with_the_lease_of_the_swarm_that_owns_it(store, clock):
+def test_a_spawn_after_the_lease_was_stolen_mid_pass_refuses_to_launch(store, clock, monkeypatch):
+    store.create(SwarmConfig("sw", ".", 1, 0))
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    monkeypatch.setattr(lease, "beat", lambda store, slug, held, stop: None)
+    launched = []
+    runtime = controller.FencedRuntime(
+        store, "sw", held, SimpleNamespace(spawn=lambda *args: launched.append(args[2]) or "placed"), "local"
+    )
+    with lease.held_pass(store, "sw", held):
+        assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
+        clock[0] += lease.ttl_ms()
+        lease.acquire(store, "sw", "other")
+        with pytest.raises(SwarmError) as error:
+            runtime.spawn(store.config("sw"), "eng", "two", {"id": "t"})
+    assert str(error.value) == "the controller lease is stale"
+    assert launched == ["one"]
+
+
+@pytest.mark.parametrize("operation", ["collect", "expire"])
+def test_a_hive_launch_call_after_the_lease_was_stolen_mid_pass_is_refused(store, clock, monkeypatch, operation):
+    store.create(SwarmConfig("sw", ".", 1, 0))
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    monkeypatch.setattr(lease, "beat", lambda store, slug, held, stop: None)
+    calls = []
+    launch = SimpleNamespace(
+        collect=lambda request: calls.append(request.name) or SimpleNamespace(ok=True, value="placed"),
+        expire=lambda request: calls.append(request.name) or "expired",
+    )
+    runtime = controller.FencedRuntime(store, "sw", held, SimpleNamespace(hive_launch=launch), "local")
+    with lease.held_pass(store, "sw", held):
+        assert getattr(runtime, operation)(store.config("sw"), "eng", "one", {"id": "t"}) in ("placed", "expired")
+        clock[0] += lease.ttl_ms()
+        lease.acquire(store, "sw", "other")
+        with pytest.raises(SwarmError) as error:
+            getattr(runtime, operation)(store.config("sw"), "eng", "two", {"id": "t"})
+    assert str(error.value) == "the controller lease is stale"
+    assert calls == ["one"]
+
+
+def test_a_pass_fences_each_ledger_write_with_the_lease_of_the_swarm_that_owns_it(store, clock):
     for slug in ("sw", "peer", "idle"):
         store.create(SwarmConfig(slug, ".", 1, 0))
     peer = lease.acquire(store, "peer", "peer-hive")
     store.redis.set(store.key("sw", "control-epoch"), peer.epoch + 4)
     held = lease.acquire(store, "sw", "home")
-    seen = []
-    ledger = controller.FencedLedger(
-        store,
-        "sw",
-        held,
-        SimpleNamespace(
-            update_task=lambda *args, **kwargs: seen.append((args, kwargs, lease.EPOCH.get())),
-            read=lambda: seen.append(((), {}, lease.EPOCH.get())),
-        ),
-    )
-    ledger.update_task("sw", "t", {})
-    ledger.update_task(slug="sw", task_id="t", fields={})
-    ledger.update_task("peer", "t", {})
-    ledger.update_task(slug="peer", task_id="t", fields={})
-    ledger.update_task("idle", "t", {})
-    ledger.read()
-    assert seen == [
-        (("sw", "t", {}), {}, held.epoch),
-        ((), {"slug": "sw", "task_id": "t", "fields": {}}, held.epoch),
-        (("peer", "t", {}), {}, peer.epoch),
-        ((), {"slug": "peer", "task_id": "t", "fields": {}}, peer.epoch),
-        (("idle", "t", {}), {}, None),
-        ((), {}, held.epoch),
-    ]
+    assert lease.epoch_for("sw") is None
+    with lease.held_pass(store, "sw", held):
+        seen = [lease.epoch_for(slug) for slug in ("sw", "peer", "idle")]
+        with lease.fencing(77):
+            fenced = [lease.epoch_for(slug) for slug in ("sw", "peer")]
+    assert seen == [held.epoch, peer.epoch, None]
+    assert fenced == [77, 77]
     assert held.epoch != peer.epoch
+    assert lease.epoch_for("sw") is None
     assert lease.EPOCH.get() is None
 
 
@@ -182,7 +249,7 @@ def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # no
         return []
 
     monkeypatch.setattr(cli.phase_planning, "planning_pass", slow)
-    monkeypatch.setattr(cli.wake, "maintenance", slow)
+    monkeypatch.setattr(wake, "maintenance", slow)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started > lease.ttl_ms()
     assert lease.current(store, "sw").epoch == 1
@@ -254,7 +321,7 @@ def test_run_tick_with_slow_steps_that_never_touch_the_ledger_finishes(env, cloc
         clock[0] += 120000
         return []
 
-    for module, name in ((cli.progress, "checks_pass"), (cli.waits, "end_pass"), (cli.quiet, "quiet_pass")):
+    for module, name in ((progress, "checks_pass"), (cli.waits, "end_pass"), (cli.quiet, "quiet_pass")):
         monkeypatch.setattr(module, name, slow)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started == 360000
@@ -273,7 +340,7 @@ def test_run_tick_stops_between_steps_when_another_controller_took_the_lease(env
         lease.acquire(store, "sw", "other")
         return []
 
-    monkeypatch.setattr(cli.progress, "checks_pass", stolen)
+    monkeypatch.setattr(progress, "checks_pass", stolen)
     monkeypatch.setattr(cli.waits, "end_pass", lambda *args: later.append(args) or [])
     with pytest.raises(SwarmError) as error:
         cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
@@ -289,7 +356,7 @@ def test_default_tick_gives_a_three_minute_lease(store, clock, monkeypatch):
     assert (lease.tick_ms(), lease.ttl_ms()) == (60000, 180000)
     held = lease.acquire(store, "sw", "home")
     assert held == lease.Lease("home", 1, 181000)
-    assert 179000 < store.redis.pttl(store.key("sw", "control-owner")) <= 180000
+    assert 179000 < fencing.read(store, "sw")["lease"]["expires_at"] - clock[0] <= 180000
 
 
 def test_a_shorter_tick_shortens_the_lease_life_to_three_of_its_ticks(store, clock, monkeypatch):
@@ -297,10 +364,10 @@ def test_a_shorter_tick_shortens_the_lease_life_to_three_of_its_ticks(store, clo
     assert (lease.tick_ms(), lease.ttl_ms()) == (2500, 7500)
     held = lease.acquire(store, "sw", "home")
     assert held == lease.Lease("home", 1, 8500)
-    assert 7000 < store.redis.pttl(store.key("sw", "control-owner")) <= 7500
+    assert 7000 < fencing.read(store, "sw")["lease"]["expires_at"] - clock[0] <= 7500
     clock[0] = 5000
     assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 12500)
-    assert 7000 < store.redis.pttl(store.key("sw", "control-owner")) <= 7500
+    assert 7000 < fencing.read(store, "sw")["lease"]["expires_at"] - clock[0] <= 7500
 
 
 @pytest.mark.parametrize("seconds", ["abc", "0", "-5", "0.999", "nan", "inf"])
@@ -423,8 +490,9 @@ def test_a_fenced_launch_slower_than_the_lease_keeps_it(store, clock, monkeypatc
         return "placed"
 
     runtime = controller.FencedRuntime(store, "sw", held, SimpleNamespace(spawn=slow, relaunch=slow), "local")
-    assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
-    assert runtime.relaunch("one") == "placed"
+    with lease.held_pass(store, "sw", held):
+        assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
+        assert runtime.relaunch("one") == "placed"
     assert beats == [True] * 10
     assert lease.current(store, "sw") == lease.Lease("home", 1, clock[0] + lease.ttl_ms())
 

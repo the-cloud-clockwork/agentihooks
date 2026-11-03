@@ -8,6 +8,7 @@ from scripts.swarm import cli
 
 
 @pytest.mark.parametrize("excluded", ["binned", "closed", "unavailable", "slow"])
+@pytest.mark.feature("swarm-tick-pass-scope")
 def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch, excluded, capsys):
     ticked, checked = [], []
     active_ticked = Event()

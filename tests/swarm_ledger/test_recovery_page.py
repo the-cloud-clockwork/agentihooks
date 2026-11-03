@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.swarm import recovery_view as rv
 from tests.swarm_ledger import test_swarm_layout as layout
 from tests.swarm_ledger.test_swarm_layout import status
@@ -56,6 +58,7 @@ def test_the_recovery_row_shows_material_diagnosis_and_three_choices(open_page):
     assert page.text("#recovery-count").lower() == "1 seat"
 
 
+@pytest.mark.feature("ledger-restore-choice")
 def test_a_choice_is_sent_as_a_restore_decision_and_the_handoff_row_points_to_recovery(open_page):
     page = open_page(payload(card()))
     assert page.tab.locator("#swarm-handoffs a", has_text="recovery").get_attribute("href") == f"#recovery-{SEAT}"

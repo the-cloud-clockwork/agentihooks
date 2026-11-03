@@ -1,5 +1,9 @@
 import inspect
+import io
+import os
 import subprocess
+import time
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -550,3 +554,48 @@ def test_a_silent_event_stream_inside_the_window_stays_red(monkeypatch):
     assert clock.now == ledger_load.TIMEOUT_S
     assert results["errors"] == ["event stream: TimeoutError: silent event stream"]
     assert stream.closed
+
+
+def preflight_client(sent: list, refusal=None) -> type:
+    class Api:
+        def __init__(self, base, credentials, timeout):
+            pass
+
+        def mutate(self, slug, operations):
+            sent.append(operations[0]["op"])
+            if refusal and operations[0]["op"] != "join":
+                raise refusal()
+            return {"data": {}}
+
+        def request(self, slug, path):
+            return {"data": {}}
+
+    return Api
+
+
+@pytest.mark.wall_clock
+def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkeypatch):
+    body = b'{"error": {"code": "invalid_operation", "message": "the thread is not on this ledger"}}'
+    sent = []
+    monkeypatch.setattr(
+        ledger_load,
+        "ResourceClient",
+        preflight_client(sent, lambda: urllib.error.HTTPError("http://x", 400, "Bad Request", {}, io.BytesIO(body))),
+    )
+    monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
+    began = time.monotonic()
+    with pytest.raises(SystemExit, match=r"HTTP 400 Bad Request.*the thread is not on this ledger"):
+        ledger_load.load(0, "token", os.getpid(), 15.0)
+    assert time.monotonic() - began < 5
+    assert sent == ["join"] * ledger_load.CLIENTS + ["add"]
+
+
+def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ledger_load, "ResourceClient", preflight_client(sent))
+    monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
+    monkeypatch.setattr(ledger_load, "watcher", lambda base, credentials, deadline, results: None)
+    results = ledger_load.load(0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
+    assert sent == ["join"] * ledger_load.CLIENTS + ["add"] * 3
+    assert len(results["writes"]) == 2
+    assert results["errors"] == []

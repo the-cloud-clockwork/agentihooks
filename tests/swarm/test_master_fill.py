@@ -191,6 +191,7 @@ def test_a_placement_refusal_holds_the_seat_and_says_why(store):
     assert runtime.asked == [(MASTER, {"id": "master-2"})] and runtime.masters == []
 
 
+@pytest.mark.feature("swarm-session-cap")
 def test_no_session_slot_holds_the_seat_and_says_why(store):
     MasterSeats(store.redis).set_count("sw", 2)
     runtime = FakeRuntime(full=True)

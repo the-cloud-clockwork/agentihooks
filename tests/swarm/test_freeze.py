@@ -29,8 +29,11 @@ def task(task_id="t1", **fields):
     return {"id": task_id, "lane": "eng", "state": "open", "phase": "p1", **fields}
 
 
-def held(row, *freezes, fix_phase=""):
-    found = doc(*freezes, tasks=[row])
+ELSEWHERE = {"id": "t9", "lane": "ci", "state": "open", "phase": "p2", "kind": "research"}
+
+
+def held(row, *freezes, fix_phase="", tasks=()):
+    found = doc(*freezes, tasks=[row, *tasks])
     return freeze.held(row, found, hierarchy.project(found)[0], fix_phase)
 
 
@@ -38,6 +41,7 @@ def held(row, *freezes, fix_phase=""):
     "target",
     ["plans/a", "phases/p1", "slices/a.first", "tasks/t1", "lane:eng", "kind:troubleshoot"],
 )
+@pytest.mark.feature("swarm-freeze")
 def test_a_task_under_a_frozen_node_or_matching_a_frozen_selector_is_held(target):
     row = task(slice="slices/a.first", kind="troubleshoot")
     assert held(row, record(target))
@@ -63,8 +67,9 @@ def test_a_direct_freeze_holds_an_urgent_task_and_a_doctor_fix():
 
 
 @pytest.mark.parametrize("target", ["plans/b", "phases/p2", "lane:ci", "kind:research"])
+@pytest.mark.feature("swarm-focus")
 def test_a_focus_elsewhere_holds_a_normal_task(target):
-    assert held(task(), record(target, "focus"))
+    assert held(task(), record(target, "focus"), tasks=[ELSEWHERE])
 
 
 @pytest.mark.parametrize("target", ["plans/a", "phases/p1", "slices/a.first", "tasks/t1", "lane:eng", "kind:code"])
@@ -73,12 +78,13 @@ def test_a_task_inside_any_focus_is_free(target):
     assert not held(row, record("plans/b", "focus"), record(target, "focus"))
 
 
-def test_an_urgent_task_and_a_doctor_fix_pass_a_focus():
-    assert not held(task(rank="urgent"), record("plans/b", "focus"))
-    assert not held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"), fix_phase=loop.FIX_PHASE)
-    assert held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"))
-    assert held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"), fix_phase="p7")
-    assert held(task(rank="high"), record("plans/b", "focus"))
+@pytest.mark.feature("swarm-focus")
+def test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it():
+    assert held(task(rank="urgent"), record("plans/b", "focus"), tasks=[ELSEWHERE])
+    assert not held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"), fix_phase=loop.FIX_PHASE, tasks=[ELSEWHERE])
+    assert held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"), tasks=[ELSEWHERE])
+    assert held(task(phase=loop.FIX_PHASE), record("lane:ci", "focus"), fix_phase="p7", tasks=[ELSEWHERE])
+    assert held(task(rank="high"), record("plans/b", "focus"), tasks=[ELSEWHERE])
 
 
 @pytest.mark.parametrize("state", ["claimed", "pr", "blocked", "done"])
@@ -88,11 +94,12 @@ def test_claimed_pull_request_and_blocked_work_is_never_held(state):
 
 
 @pytest.mark.parametrize("target", ["plans/b", "phases/p2", "lane:ci", "kind:research"])
-def test_claim_gate_never_holds_an_unfocused_task(target):
+def test_claim_gate_holds_an_unfocused_task_only_while_the_focus_has_open_work(target):
     row = task()
-    found = doc(record(target, "focus"), tasks=[row])
-    assert not freeze.claim_gate(row, found, hierarchy.project(found)[0], "")
-    assert held(row, record(target, "focus"))
+    found = doc(record(target, "focus"), tasks=[row, ELSEWHERE])
+    assert freeze.claim_gate(row, found, hierarchy.project(found)[0], "")
+    finished = doc(record(target, "focus"), tasks=[row, {**ELSEWHERE, "state": "done"}])
+    assert not freeze.claim_gate(row, finished, hierarchy.project(finished)[0], "")
 
 
 def test_claim_gate_still_holds_a_frozen_or_watched_task():
@@ -176,7 +183,7 @@ def test_the_drain_notice_counts_held_work_and_names_only_the_freezes_holding_it
     assert freeze.notice(one, one["tasks"], "") == (
         "The swarm has no task it may start: 1 open task is held by the freeze on plan Swarm v2"
     )
-    rows = [task(), task("t2", phase="p2"), task("t3", out_of_scope=True), task("t4", state="claimed")]
+    rows = [task(), task("t2", phase="p2"), task("t3", out_of_scope=True), task("t4", state="claimed", lane="ci")]
     two = doc(record("plans/a"), record("plans/b"), record("lane:ci", "focus"), tasks=rows)
     assert freeze.notice(two, rows, "") == (
         "The swarm has no task it may start: 2 open tasks are held by the freeze on plan Swarm v2, "
@@ -189,7 +196,7 @@ def test_the_drain_notice_counts_held_work_and_names_only_the_freezes_holding_it
         "The swarm has no task it may start: 1 open task is held by the freeze on plan Ledger polish"
     )
     fix = task("t2", phase=loop.FIX_PHASE)
-    passing = doc(record("plans/b"), record("plans/a", "focus"), tasks=[fix])
+    passing = doc(record("plans/b"), record("plans/a", "focus"), tasks=[fix, task()])
     assert freeze.notice(passing, [fix], loop.FIX_PHASE) == (
         "The swarm has no task it may start: 1 open task is held by the freeze on plan Ledger polish"
     )
@@ -262,7 +269,7 @@ def test_a_group_member_follows_its_leads_freeze(target):
     assert ledger_stats.frozen(found, rows, {}) == set()
 
 
-def test_a_focused_plan_elsewhere_still_claims_an_urgent_task_and_a_normal_one(store):
+def test_a_focused_plan_without_open_work_leaves_an_urgent_task_and_a_normal_one_claimable(store):
     ledger = FrozenLedger(
         [{"id": "normal", "phase": "p2"}, {"id": "urgent", "phase": "p2", "rank": "urgent"}],
         record("plans/a", "focus"),
@@ -273,6 +280,7 @@ def test_a_focused_plan_elsewhere_still_claims_an_urgent_task_and_a_normal_one(s
     assert ledger.rows["normal"]["state"] != "open"
 
 
+@pytest.mark.feature("swarm-freeze")
 def test_a_claimed_task_under_a_new_freeze_keeps_its_agent(store):
     ledger, runtime = FrozenLedger([{"id": "t1", "phase": "p1"}]), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -293,10 +301,15 @@ def test_a_claimed_task_under_a_new_freeze_keeps_its_agent(store):
 def test_a_doctor_swarm_claims_its_fix_task_under_a_focus(store):
     store.update("sw", template=priming.TEMPLATE)
     ledger = FrozenLedger(
-        [{"id": "fix", "phase": loop.FIX_PHASE}, {"id": "watch", "phase": "p1"}], record("lane:ci", "focus")
+        [
+            {"id": "fix", "phase": loop.FIX_PHASE},
+            {"id": "watch", "phase": "p1"},
+            {"id": "focused", "phase": "p2", "lane": "ci", "state": "blocked"},
+        ],
+        record("lane:ci", "focus"),
     )
     _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
-    assert [t["id"] for t in ready["eng"]] == ["fix", "watch"]
+    assert [t["id"] for t in ready["eng"]] == ["fix"]
 
 
 def test_autoscale_demand_counts_no_held_task(store):
@@ -305,26 +318,24 @@ def test_autoscale_demand_counts_no_held_task(store):
     assert [t["id"] for t in ready["eng"]] == ["t2"]
 
 
-def test_a_frozen_task_is_never_ready_but_an_unfocused_and_a_focused_task_both_are(store):
+def test_a_frozen_task_is_never_ready_and_an_unfocused_task_waits_for_the_focused_one(store):
     ledger = FrozenLedger(
         [{"id": "cold", "phase": "p2"}, {"id": "hot", "phase": "p1"}, {"id": "plain", "phase": "p1"}],
         record("plans/b"),
         record("tasks/hot", "focus"),
     )
     _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
-    assert {t["id"] for t in ready["eng"]} == {"hot", "plain"}
+    assert {t["id"] for t in ready["eng"]} == {"hot"}
 
 
+@pytest.mark.feature("swarm-freeze")
 def test_only_held_work_drains_with_a_notice_naming_the_freezes_and_unfreezing_runs_again(store):
     ledger = FrozenLedger([{"id": "t1", "phase": "p1"}], record("plans/a"), record("lane:ci", "focus"))
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert store.config("sw").state == "drained"
     assert runtime.spawned == []
-    assert ledger.notes == [
-        "The swarm has no task it may start: 1 open task is held by the freeze on plan Swarm v2 "
-        "and the focus on the ci lane"
-    ]
+    assert ledger.notes == ["The swarm has no task it may start: 1 open task is held by the freeze on plan Swarm v2"]
     ledger.freezes = []
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert store.config("sw").state == "running"

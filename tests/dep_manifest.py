@@ -235,6 +235,7 @@ def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]
     hit = set()
     source_changed = False
     for path, old, new in changed:
+        hit.update(test for test, found in tests.items() if path in found["files"])
         if path.startswith(MEASURED):
             source_changed = True
             if path.endswith(".py"):
@@ -249,7 +250,6 @@ def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]
             continue
         if path.startswith(("tests/", ".github/workflows/")):
             source_changed = True
-        hit.update(test for test, found in tests.items() if path in found["files"])
     for test, found in tests.items():
         if (source_changed and found["escapes"]) or units.intersection(found["units"]):
             hit.add(test)

@@ -414,7 +414,7 @@ def test_quota_handoff_requires_an_account_other_than_its_predecessor(stalled, m
 
 
 def test_lost_controller_lease_blocks_final_alarm_delivery(stalled, monkeypatch):
-    from scripts.swarm import lease
+    from scripts.swarm import fencing, lease
     from scripts.swarm.store import SwarmError
 
     store, ledger, _, clock, _ = stalled
@@ -424,7 +424,7 @@ def test_lost_controller_lease_blocks_final_alarm_delivery(stalled, monkeypatch)
     clock[0] += 600_000
 
     def takeover(*args):
-        store.redis.delete(store.key("sw", "control-owner"))
+        fencing.write(store, "sw", lambda doc: doc.update(lease=None))
         lease.acquire(store, "sw", "replacement")
         raise RuntimeError("old tick failed after takeover")
 
@@ -524,6 +524,33 @@ def test_a_quota_warning_hold_is_not_available_capacity(stalled, monkeypatch):
     account = capacity.Account("claude", "acct", "OPEN", 0, 80, 9, 6)
     monkeypatch.setattr(capacity, "accounts", lambda *args, **kwargs: [account])
     assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+def test_a_front_door_master_pinned_to_its_declared_account_holds_no_worker_seat(stalled, monkeypatch):
+    from scripts.routing.master_account import MasterAccount
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", lanes={"master": {"agent": "claude"}})
+    boss = AgentRecord(
+        "boss",
+        "master",
+        "master",
+        state="working",
+        seat="master@sw",
+        harness="claude",
+        account="pinned",
+        profile="master",
+    )
+    store.put_agent("sw", boss)
+    rows = [
+        capacity.Account("claude", "open", "OPEN", 0, 80, 80, 1),
+        capacity.Account("claude", "pinned", "OPEN", 1, 80, 5, 6),
+    ]
+    monkeypatch.setattr(capacity, "accounts", lambda *args, **kwargs: rows)
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {})
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": MasterAccount("claude", "pinned")})
+    assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
 
 
 def test_autoscaling_with_no_host_room_offers_no_launch_seat(stalled, monkeypatch):

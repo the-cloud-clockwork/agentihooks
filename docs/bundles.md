@@ -79,15 +79,20 @@ my-tools/                                   <- the bundle directory
 3. Profiles inside `profiles/` are **auto-discovered** by `--list-profiles`
 4. `agentihooks init --profile <name>` checks built-in profiles first, then bundle
 
-Only **one root bundle** can be linked at a time. A second, personal **user bundle** is linked beside it:
+Only **one root bundle** can be linked at a time. Two more slots sit beside it: a **shared bundle** for a team's common configuration, and a personal **user bundle**:
 
 ```bash
+agentihooks bundle link --shared ~/dev/team-bundle       # between the root and the user bundle
+agentihooks bundle list --shared
+agentihooks bundle unlink --shared                       # the other links and every bundle file stay
 agentihooks bundle link --user ~/dev/my-user-bundle      # or: agentihooks init --user-bundle <path>
 agentihooks bundle list --user
 agentihooks bundle unlink --user                         # the root link and every bundle file stay
 ```
 
-The root bundle holds shared configuration; the user bundle holds personal configuration. Sources apply in the order package, root bundle, user bundle, profile chain, so a user-bundle file wins over a root-bundle file of the same name. A configured user bundle whose directory is missing is reported on `init` and not applied. `AGENTIHOOKS_USER_BUNDLE_PATH` names a user bundle when none is linked.
+`--shared` and `--user` are never combined, and one directory fills one slot only.
+
+The root bundle holds the core configuration, the shared bundle a team's, and the user bundle personal configuration. Sources apply in the order package, root bundle, shared bundle, user bundle, profile chain, so content is later-wins: a shared-bundle file wins over a root-bundle file of the same name and a user-bundle file wins over both. Profile names are first-wins in the order built-in, root, shared, user, linked, package role, so neither a shared nor a personal bundle can shadow a core profile. A configured bundle whose directory is missing is reported on `init` and not applied. `AGENTIHOOKS_SHARED_BUNDLE_PATH` and `AGENTIHOOKS_USER_BUNDLE_PATH` name a shared or user bundle when none is linked. A machine with no shared bundle resolves exactly as before.
 
 ## 3-Layer Merge
 
@@ -97,14 +102,15 @@ When `agentihooks init` runs, skills, agents, commands, rules, and MCP servers a
 |-------|--------|-------------|
 | 1 (base) | agentihooks `.claude/` | Built-in assets from the agentihooks repo |
 | 2 (bundle) | bundle `.claude/` | Bundle-global customizations |
-| 2b (user bundle) | user bundle `.claude/` | Personal customizations, applied after the root bundle |
+| 2a (shared bundle) | shared bundle `.claude/` | Team customizations, applied after the root bundle |
+| 2b (user bundle) | user bundle `.claude/` | Personal customizations, applied after the shared bundle |
 | 3 (profile) | `profiles/<name>/.claude/` | Profile-specific overrides |
 
 Later layers override earlier ones. This lets you start with the agentihooks base, add team customizations via the bundle, and fine-tune per profile.
 
-For settings, the merge order is: `_base/settings.base.json` -> bundle -> user bundle -> profile `.claude/settings.overrides.json` -> OTEL. Hook arrays append in that order.
+For settings, the merge order is: `_base/settings.base.json` -> bundle -> shared bundle -> user bundle -> profile `.claude/settings.overrides.json` -> OTEL. Hook arrays append in that order.
 
-For MCP servers: agentihooks + bundle `.claude/.mcp.json` + user bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
+For MCP servers: agentihooks + bundle `.claude/.mcp.json` + shared bundle `.claude/.mcp.json` + user bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
 
 ## Shared `CLAUDE.md`
 
@@ -114,7 +120,7 @@ For MCP servers: agentihooks + bundle `.claude/.mcp.json` + user bundle `.claude
 [ bundle .claude/CLAUDE.md ]  ->  [ profile CLAUDE.md (one per chained profile) ]  ->  [ all enabled bundle manifestos ]
 ```
 
-An **optional** `<bundle>/.claude/CLAUDE.md` (and the user bundle's, after it) holds directives every profile should
+An **optional** `<bundle>/.claude/CLAUDE.md` (and the shared bundle's, then the user bundle's, after it) holds directives every profile should
 share, so they are written once instead of duplicated into each profile. It is
 prepended exactly once per install — including for a chained
 `--profile a,b` — inside these markers:
@@ -131,19 +137,21 @@ is genuinely profile-specific.
 
 A worker pod and a remote hive carry only the root bundle, so a seat is refused, before any order or pod is created, when a user bundle is registered on the host that launches it and the seat would run on another machine (`bundle unlink --user` clears it). A seat on the launching hive keeps its user bundle. The refusal applies to new placements: a launch order published before the user bundle was registered is answered as it stands and is not revoked, so unlink before launching to be sure nothing is placed remotely without its user source.
 
-A pinned render (`--bundle-revision`, used by swarm overlay launches) rebuilds from the recorded root and user commits, copies both into the profile home and records both in its render stamp. It never reads the live user bundle, and refuses a revision that names no user commit while a user bundle is linked.
+A linked shared bundle never refuses a launch or a remote placement. It is carried the way the root bundle is: by repository and commit, in the revision the launch records. A host that has no shared bundle linked prints a warning that names the recorded commit and renders without it.
+
+A pinned render (`--bundle-revision`, used by swarm overlay launches) rebuilds from the recorded commits, copies each into the profile home and records each in its render stamp (`bundle_commit`, `shared_bundle_commit` when a shared bundle is linked, `user_bundle_commit`). It never reads the live shared or user bundle. The revision has three parts whenever a shared bundle is linked, `<root>:<shared>:<user>`, with an empty user field when no user bundle is linked (`<root>:<shared>:`), and the two parts `<root>:<user>` otherwise; a three-part revision never parses as `<root>:<user>`. The shared field is `-` when a shared bundle is linked but has no commit to record, such as a directory that is not a git repository: `<root>:-:<user>`, or `<root>:-:` with no user. That launch prints one warning and is not refused, and a render of `-` prints a warning and renders without the shared bundle. A two-part revision recorded before the shared bundle was linked, rendered while one is linked, renders with the shared bundle's current commit, pinned like a recorded one, prints a warning and stamps `shared_bundle_commit` with the commit it used; root and user stay pinned. A render refuses a revision that names no user commit while a user bundle is linked, and a three-part revision with an empty shared field (`<root>::<user>`) while a shared bundle is linked.
 
 Re-running `agentihooks init` replaces the block in place — it never stacks. If the
 bundle has no `.claude/CLAUDE.md`, or no profile in the chain has a `CLAUDE.md` to
 prepend onto, the step is a no-op.
 
-Every `*.md` file under the linked bundle's `manifestos/` directory, and under the user bundle's `manifestos/` directory, is appended
+Every `*.md` file under the linked bundle's `manifestos/` directory, and under the shared and user bundles' `manifestos/` directories, is appended
 in filename order; `README.md` is excluded. Set
 `AGENTIHOOKS_SKIP_MANIFESTO=uno,dos,tres` to omit named manifestos. Names may
 include or omit `.md`. `CI_MANIFESTO_PATH` remains a single-file compatibility
-override, and `MANIFESTOS_DIR` can replace the bundle directory. A user-bundle manifesto replaces a root-bundle manifesto with the same file stem; `MANIFESTOS_DIR` and `CI_MANIFESTO_PATH` bypass the user bundle.
+override, and `MANIFESTOS_DIR` can replace the bundle directory. A later bundle's manifesto replaces an earlier one with the same file stem (root, then shared, then user); `MANIFESTOS_DIR` and `CI_MANIFESTO_PATH` bypass the shared and user bundles.
 
-`deps.json` is read from the root bundle and then the user bundle; a user-bundle entry replaces the root entry with the same `id`, and the dependency stamp is invalidated by a change to either file.
+`deps.json` is read from the root bundle, then the shared bundle, then the user bundle; a later entry replaces an earlier one with the same `id`, and the dependency stamp is invalidated by a change to any of the files.
 
 A manifesto may open with front matter naming the package roles that receive it:
 
@@ -179,11 +187,12 @@ When you run `agentihooks init --profile X`:
 
 1. Check `profiles/X` in the agentihooks repo (built-in)
 2. Check `profiles/X` in the linked bundle
-3. Check `profiles/X` in the linked user bundle
-4. Check profiles registered with `link-profile`, then the packaged base roles
-5. Error if not found
+3. Check `profiles/X` in the linked shared bundle
+4. Check `profiles/X` in the linked user bundle
+5. Check profiles registered with `link-profile`, then the packaged base roles
+6. Error if not found
 
-Built-in profiles always take precedence. Name your bundle profiles to avoid conflicts; a name defined in both the root and the user bundle resolves to the root's and `init` warns.
+Built-in profiles always take precedence. Name your bundle profiles to avoid conflicts; a name defined in more than one bundle resolves to the earliest of root, shared and user, and `init` warns.
 
 ## Permission Tiers
 

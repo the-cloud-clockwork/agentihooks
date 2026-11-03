@@ -3,7 +3,7 @@ import json
 import pytest
 
 from scripts.inbox import cli
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import ROW_BATCH, InboxStore, Item, _fields
 
 
 @pytest.fixture
@@ -116,6 +116,7 @@ def test_a_message_sent_to_the_operator_with_a_clock_time_is_refused_at_send(sto
         ("send", "bob", "--sender=mallory", "hi"),
     ],
 )
+@pytest.mark.feature("inbox-sender-identity")
 def test_a_forged_sender_argument_is_ignored(store, argv):
     assert run(*argv) == 0
     [item] = store.inbox("bob")
@@ -129,6 +130,7 @@ def test_a_sender_option_before_the_address_sends_nothing(store):
     assert store.inbox("bob") == []
 
 
+@pytest.mark.feature("inbox-sender-identity")
 def test_the_session_id_is_the_sender_without_an_agent_name(store, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-1")
@@ -144,6 +146,7 @@ def test_a_session_named_on_its_record_speaks_under_that_name(store, monkeypatch
     assert store.inbox("bob")[0].sender == "sw-master-1"
 
 
+@pytest.mark.feature("inbox-sender-identity")
 def test_a_session_without_identity_is_refused(store, monkeypatch, capsys):
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
     assert run("send", "bob", "hi") == 1
@@ -218,6 +221,7 @@ def test_empty_reply_to_tick_refuses_done_without_mutation(store):
     assert store.history(notice.id) == history
 
 
+@pytest.mark.feature("inbox-fyi")
 def test_send_and_reply_with_fyi_mark_the_item_as_needing_no_work(store, capsys):
     assert run("send", "bob", "--fyi", "thanks,", "merged") == 0
     [thanks] = store.inbox("bob")
@@ -271,3 +275,95 @@ def test_multi_agent_chat_rooms_are_retired_without_dangling_references():
         ["git", "grep", "-l", "multi-agent-chat"], cwd=root, capture_output=True, text=True
     ).stdout.split()
     assert set(tracked) <= {"CHANGELOG.md", "profiles/_base/lifecycle.json", "tests/inbox/test_cli.py"}
+
+
+def _seed(store: InboxStore, counts: dict[str, int]) -> list[str]:
+    ids: list[str] = []
+    with store.redis.pipeline() as pipe:
+        for address, count in counts.items():
+            for _ in range(count):
+                item_id = f"message-{len(ids):05}"
+                item = Item(item_id, "alice", address, item_id, "pending", len(ids), len(ids), sequence=len(ids))
+                pipe.hset(store.key("item", item_id), mapping=_fields(item))
+                pipe.zadd(store.key("address", address), {item_id: len(ids)})
+                ids.append(item_id)
+        pipe.execute()
+    return ids
+
+
+def _record_reads(store: InboxStore, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    real = store.redis.pipeline
+    reads: list[int] = []
+
+    def pipeline(*args: object, **kwargs: object) -> object:
+        pipe = real(*args, **kwargs)
+        execute = pipe.execute
+
+        def counted() -> list[object]:
+            reads.append(sum(1 for command, _ in pipe.command_stack if command[0].upper() == "HGETALL"))
+            return execute()
+
+        pipe.execute = counted
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    return reads
+
+
+def test_a_listing_across_name_alias_and_seat_reads_no_pipeline_above_the_batch(
+    store: InboxStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store.names.mint_code("sw", "sw", "/repo")
+    name = store.names.next("sw", "eng")
+    store.names.alias("old-bob", name)
+    store.seats.occupy("eng-1@sw", name, 1)
+    ids = _seed(store, {name: ROW_BATCH + 1, "old-bob": ROW_BATCH, "eng-1@sw": ROW_BATCH + 7})
+    reads = _record_reads(store, monkeypatch)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    assert run("inbox") == 0
+    assert [line.split("\t")[0] for line in capsys.readouterr().out.splitlines()] == ids
+    assert max(reads) == ROW_BATCH
+    assert sum(reads) == len(ids)
+
+
+@pytest.mark.parametrize(
+    "argv, window",
+    [
+        ((), slice(0, 7)),
+        (("--page", "1"), slice(0, 7)),
+        (("--page", "2"), slice(7, 7)),
+        (("--page", "1", "--size", "3"), slice(0, 3)),
+        (("--page", "2", "--size", "3"), slice(3, 6)),
+        (("--page", "3", "--size", "3"), slice(6, 7)),
+        (("--page", "4", "--size", "3"), slice(7, 7)),
+    ],
+)
+def test_inbox_lists_one_page_of_the_ordered_listing(
+    store: InboxStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    argv: tuple[str, ...],
+    window: slice,
+) -> None:
+    ids = _seed(store, {"bob": 7})
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "bob")
+    assert run("inbox", *argv) == 0
+    assert [line.split("\t")[0] for line in capsys.readouterr().out.splitlines()] == ids[window]
+
+
+@pytest.mark.parametrize(
+    "argv, error",
+    [
+        (("--page", "0"), "0 must be at least 1"),
+        (("--page", "1", "--size", "0"), "0 must be at least 1"),
+        (("--size", "-1"), "-1 must be at least 1"),
+        (("--page", "abc"), "invalid positive_int value: 'abc'"),
+    ],
+)
+def test_inbox_refuses_a_page_or_size_below_one(
+    store: InboxStore, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...], error: str
+) -> None:
+    with pytest.raises(SystemExit) as refused:
+        run("inbox", *argv)
+    assert refused.value.code == 2
+    assert error in capsys.readouterr().err

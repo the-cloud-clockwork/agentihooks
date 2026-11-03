@@ -155,6 +155,13 @@ def test_a_lane_envelope_records_its_exact_launch_effort(store):
     assert envelope["launch"]["effort"] == "max"
 
 
+@pytest.mark.parametrize("missing", ["profile", "harness"])
+def test_a_lane_envelope_omits_a_launch_identity_its_agent_never_received(store, missing):
+    agent = replace(_agent(), **{missing: ""}, model="claude-opus-5-5", effort="medium")
+    envelope = build(store, "sw", agent, "recycle", [], 0, run=_run([]))
+    assert envelope["launch"] == {}
+
+
 def test_facts_the_runtime_cannot_find_are_named_unknown(store):
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", seat="eng-1@sw")
     envelope = build(store, "sw", agent, "quota", None, 0, run=lambda argv, **_: _done(code=1))

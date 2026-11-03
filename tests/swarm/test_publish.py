@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -527,7 +528,6 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         "repository_branches": {str(repository): "predecessor"},
         hint: {"continue_from": f"origin/{continued}", "source": "origin/predecessor"},
     }
-    native = publish.execute
     native_git = publish.git
 
     def git_call(root, *args):
@@ -537,13 +537,14 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
 
     monkeypatch.setattr(publish, "git", git_call)
 
-    def execute(command, root):
-        if command[:3] == ["gh", "pr", "view"]:
-            assert command == ["gh", "pr", "view", pr_url, "--json", "state,headRefName"]
-            return json.dumps({"state": state, "headRefName": head})
-        return native(command, root)
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
-    monkeypatch.setattr(publish, "execute", execute)
+    def change(url: str, refused: str) -> ChangeState:
+        assert (url, refused) == (pr_url, f"cannot read pull request {pr_url}")
+        lowered = "open" if state == "OPEN" else "closed"
+        return ChangeState(ChangeRef("example/repo", 7), lowered, "a" * 40, "dev", state == "MERGED", url, head)
+
+    monkeypatch.setattr(publish.stack, "change", change)
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: head if state == "OPEN" else "")
 
     def update_task(slug, task_id, fields, by):
@@ -1701,29 +1702,111 @@ def test_hive_successor_publishes_its_own_branch_over_the_predecessor_hive_key(p
     assert git(p.root, "rev-parse", "--abbrev-ref", "HEAD") == "engineer-test"
 
 
-@pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
-def test_successor_publishes_past_a_settled_pull_request_only(publication, monkeypatch, state):
+@pytest.mark.parametrize("command", ["mapped", "scoped", "prepare", "publish"])
+@pytest.mark.parametrize("local_stale", [True, False])
+def test_conflicting_host_branches_keep_the_open_pull_delivery(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, command: str, local_stale: bool
+) -> None:
     from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:pull-head")
+    git(p.root, "push", "origin", "HEAD:stale-branch")
+    foreign = f"/workstation/dev/{p.repo.name}"
+    stale_key = str(p.repo) if local_stale else f"/hive/previous/{p.repo.name}"
+    p.task.update(
+        branch="pull-head",
+        repository_branches={stale_key: "stale-branch", foreign: "pull-head", "/hive/bundle": "kept"},
+        pr_url="https://github.com/example/repo/pull/7",
+    )
+
+    def open_head(remote: str, url: str) -> str:
+        assert remote == str(p.repo.parent / "remote.git")
+        assert url == p.task["pr_url"]
+        return "pull-head"
+
+    monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
+    monkeypatch.chdir(p.root)
+    if command == "mapped":
+        assert publish.mapped_branch(p.repo, p.task) == "pull-head"
+    elif command == "scoped":
+        assert publish.repository_task(p.repo, p.task)["branch"] == "pull-head"
+    else:
+        if command == "prepare":
+            result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+        else:
+            result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue delivery", ["chosen.txt"])
+            assert git(p.repo, "ls-remote", "origin", "refs/heads/pull-head").split()[0] == result["head"]
+            assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+        assert result["branch"] == p.task["branch"] == "pull-head"
+        assert p.task["repository_branches"] == {str(p.repo): "pull-head", "/hive/bundle": "kept"}
+
+
+@pytest.mark.parametrize(
+    ("branches", "url", "head", "expected", "queries"),
+    [
+        ({"repo": "local", "foreign/repo": "other"}, "pull", "", "local", 1),
+        ({"foreign/repo": "first", "elsewhere/repo": "second"}, "pull", "", "first", 1),
+        ({"repo": "local", "foreign/repo": "other"}, "", "unexpected", "local", 0),
+        ({"repo": "same", "foreign/repo": "same"}, "pull", "unexpected", "same", 0),
+        ({"repo": "local", "foreign/other": "other"}, "pull", "unexpected", "local", 0),
+        ({"foreign/repo": "first"}, "pull", "unexpected", "first", 0),
+        ({}, "pull", "unexpected", None, 0),
+        ({"repo": "local", "foreign/repo": "other"}, "pull", "new-head", "new-head", 1),
+    ],
+)
+def test_branch_mapping_only_queries_conflicting_delivery_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    branches: dict[str, str],
+    url: str,
+    head: str,
+    expected: str | None,
+    queries: int,
+) -> None:
+    from scripts.swarm import publish
+
+    repo = tmp_path / "repo"
+    calls = []
+
+    def git_call(root: Path, *args: str) -> str:
+        assert root == repo
+        assert args == ("remote", "get-url", "origin")
+        return "git@github.com:example/repo.git"
+
+    def open_head(remote: str, pull: str) -> str:
+        calls.append((remote, pull))
+        return head
+
+    monkeypatch.setattr(publish, "git", git_call)
+    monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
+    mapping = {str(tmp_path / key): value for key, value in branches.items()}
+    assert publish.mapped_branch(repo, {"repository_branches": mapping, "pr_url": url}) == expected
+    assert calls == [("git@github.com:example/repo.git", url)] * queries
+
+
+@pytest.mark.parametrize(("state", "merged"), [("open", False), ("closed", False), ("closed", True)])
+def test_successor_publishes_past_a_settled_pull_request_only(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, state: str, merged: bool
+) -> None:
+    from scripts.swarm import publish
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
     p = publication
     git(p.root, "push", "origin", "HEAD:predecessor")
     url = "https://github.com/example/repo/pull/7"
     p.task.update(branch="predecessor", pr_url=url)
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, pull: "")
-    native = publish.execute
     viewed = []
 
-    def execute(argv, root):
-        if argv[:3] == ["gh", "pr", "view"]:
-            assert argv == ["gh", "pr", "view", url, "--json", "state"]
-            assert root == p.root
-            viewed.append(argv)
-            return json.dumps({"state": state})
-        return native(argv, root)
+    def change(asked: str, refused: str) -> ChangeState:
+        assert (asked, refused) == (url, f"cannot read pull request {url}")
+        viewed.append(asked)
+        return ChangeState(ChangeRef("example/repo", 7), state, "a" * 40, "dev", merged, url)
 
-    monkeypatch.setattr(publish, "execute", execute)
+    monkeypatch.setattr(publish.stack, "change", change)
     monkeypatch.chdir(p.root)
-    if state == "OPEN":
+    if state == "open":
         with pytest.raises(publish.SwarmError, match="differs from registered branch predecessor"):
             publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue as successor", ["chosen.txt"])
         assert p.updates == []
@@ -1806,6 +1889,101 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
     assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
     assert git(predecessor, "rev-parse", "HEAD") == parked
+    assert (root / "task.txt").read_text() == "parked work"
+
+
+@pytest.mark.parametrize(
+    ("stacked", "replayed", "failure"),
+    [
+        ("rebased", "2", ""),
+        ("dependency", "1", ""),
+        ("dependency-rebased", "1", ""),
+        ("dependency-modified", "1", ""),
+        ("dependency-spaced", "1", ""),
+        ("dependency-modified", "1", "the task shares no history with dev"),
+        ("dependency-modified", "1", "cannot resolve the completed rebase tree"),
+        ("dependency-modified", "1", "the stacked base shares no history with dev"),
+        ("dependency-modified", "1", "cannot list dependency files"),
+        ("dependency-modified", "1", "cannot read completed dependency history"),
+    ],
+)
+def test_a_restack_after_a_manual_rebase_replays_only_the_task_commits(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, stacked: str, replayed: str, failure: str
+) -> None:
+    from scripts.swarm import stack
+
+    p = publication
+    root, repository = p.root, p.repo
+    (root / "chosen.txt").write_text("before")
+    base = git(repository, "rev-parse", "dev")
+    dependency_file = "dependency work\nfile.txt" if stacked == "dependency-spaced" else "blocker.txt"
+    if stacked.startswith("dependency"):
+        (root / dependency_file).write_text("dependency")
+        git(root, "add", dependency_file)
+        git(root, "commit", "-qm", "Dependency work")
+        (root / dependency_file).write_text("completed dependency")
+        git(root, "commit", "-qam", "Finish dependency")
+        base = git(root, "rev-parse", "HEAD")
+        git(repository, "merge", "--squash", base)
+        git(repository, "commit", "-qm", "Squash dependency")
+        if stacked in {"dependency-modified", "dependency-spaced"}:
+            (repository / dependency_file).write_text("newer dependency")
+            git(repository, "commit", "-qam", "Advance dependency after squash")
+    (root / "task.txt").write_text("parked work")
+    git(root, "add", "task.txt")
+    git(root, "commit", "-qm", "Parked task work")
+    for number in range(21):
+        (repository / f"upstream{number}.txt").write_text(str(number))
+        git(repository, "add", f"upstream{number}.txt")
+        git(repository, "commit", "-qm", f"Upstream {number}")
+    git(repository, "push", "origin", "dev")
+    if stacked != "dependency":
+        git(root, "fetch", "origin")
+        git(root, "rebase", "--onto", "origin/dev", base)
+        (repository / "later.txt").write_text("after manual rebase")
+        git(repository, "add", "later.txt")
+        git(repository, "commit", "-qm", "Advance dev after manual rebase")
+        git(repository, "push", "origin", "dev")
+    git(root, "push", "origin", "HEAD:engineer-test")
+    p.task.update(parked_on=["dependency"], stacked_base=base)
+    p.ledger.state = lambda slug: {"tasks": [p.task, {"id": "dependency", "state": "done"}]}
+    counted = []
+    native = stack._rebase
+
+    def rebase(start: str) -> None:
+        counted.append(git(root, "rev-list", "--count", f"{start}..HEAD"))
+        native(start)
+
+    native_shell = stack.shell
+
+    def shell(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        failures = {
+            "the task shares no history with dev": argv[1:] == ["merge-base", "HEAD", "origin/dev"],
+            "cannot resolve the completed rebase tree": argv[1:2] == ["rev-parse"] and argv[-1].endswith("^{tree}"),
+            "the stacked base shares no history with dev": argv[1:3] == ["merge-base", base],
+            "cannot list dependency files": argv[1:3] == ["diff", "--name-only"],
+            "cannot read completed dependency history": argv[1:3] == ["--literal-pathspecs", "rev-list"],
+        }
+        if failures.get(failure):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="deliberate failure")
+        return native_shell(argv)
+
+    monkeypatch.setattr(stack, "_rebase", rebase)
+    monkeypatch.setattr(stack, "shell", shell)
+    monkeypatch.chdir(root)
+
+    if failure:
+        with pytest.raises(stack.SwarmError) as caught:
+            stack.restack("swarm", p.agent, p.ledger)
+        assert str(caught.value) == f"{failure}: deliberate failure"
+        assert p.task["parked_on"] == ["dependency"]
+        assert counted == []
+        return
+
+    stack.restack("swarm", p.agent, p.ledger)
+
+    assert counted == [replayed]
+    assert git(root, "rev-list", "--count", "origin/dev..HEAD") == replayed
     assert (root / "task.txt").read_text() == "parked work"
 
 

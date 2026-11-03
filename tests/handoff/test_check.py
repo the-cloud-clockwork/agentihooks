@@ -45,6 +45,7 @@ def test_missing_title_is_refused():
     assert any("# Handoff v2" in p for p in problems(_swap("# Handoff v2\n", ""), lambda a: True))
 
 
+@pytest.mark.feature("swarm-handoff")
 def test_missing_heading_is_refused():
     found = problems(_swap("## Stopped at\nSeam two test written, not yet run.\n", ""), lambda a: True)
     assert any("Stopped at" in p and "missing" in p for p in found)
@@ -55,6 +56,7 @@ def test_duplicate_heading_is_refused():
     assert any("Next" in p and "more than once" in p for p in found)
 
 
+@pytest.mark.feature("swarm-handoff")
 def test_headings_out_of_order_are_refused():
     text = _swap("## Intent\nRefuse a malformed handoff, as part of the Handoff v2 phase.\n", "")
     text = _swap("## Next\n", "## Intent\nRefuse a malformed handoff.\n## Next\n", text)

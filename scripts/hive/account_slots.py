@@ -197,7 +197,7 @@ def _reading(hive: str) -> dict:
 
     processes = account_sessions.local_processes()
     report = daemon.observe(processes=processes)
-    report["sessions"]["_executions"] = daemon._executions(connect(), hive, processes)
+    report["sessions"]["_executions"] = daemon._executions(connect().redis, hive, processes)
     return report
 
 

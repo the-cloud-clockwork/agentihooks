@@ -147,7 +147,7 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
 
     function = "scripts.sample.x_f"
     names = [f"{function}__mutmut_{index}" for index in range(3)]
-    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0]}
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0], "head_seconds": 1.0}
     memory = killers.KillMemory(tmp_path)
     ticks = iter([0.0, 9.0, 20.0, 21.0, 30.0, 39.0, 40.0, 41.0])
     monkeypatch.setattr(killers.time, "monotonic", lambda: next(ticks))
@@ -174,6 +174,33 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
     mixed = measured.measured_plan([(["scripts.sample.x_plain__mutmut_1", *names], results)], memory, limit=2)
     assert mixed["unit_costs"] == plan["unit_costs"]
     assert "scripts.sample.x_plain__mutmut_1" in mixed["assignments"]
+
+
+def test_a_slice_a_probed_shard_ran_alone_is_reused_with_its_head_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    names = [f"{function}__mutmut_{index}" for index in range(2)]
+    split = {"head": ["fast"], "slices": [["left"], ["right"]], "costs": [100.0, 100.0], "head_seconds": 2.0}
+    memory = killers.KillMemory(tmp_path)
+    for tests, seconds in ((["left"], 4.0), (["fast", "right"], 7.0), (["right"], 50.0)):
+        path = memory._cost_path(names[0], tests)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"tests": sorted(tests), "seconds": seconds}))
+    assert measured.observed_unit(memory, names[0], split, ["left"]) == 6.5
+    assert measured.observed_unit(memory, names[0], split, ["right"]) == 7.0
+    assert measured.observed_unit(memory, names[1], split, ["left"]) is None
+    assert measured.observed_unit(None, names[0], split, ["left"]) is None
+    headless = {key: value for key, value in split.items() if key != "head_seconds"}
+    assert measured.observed_unit(memory, names[0], headless, ["left"]) == 4.0
+    monkeypatch.setattr(measured, "measured_splits", lambda *args: {function: split})
+    results = [
+        {"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}
+    ]
+    plan = measured.measured_plan([(names, results)], memory, limit=2)
+    assert plan["unit_costs"] == {names[0]: [6.5, 7.0], names[1]: [100.0, 100.0]}
 
 
 def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_drift(tmp_path, monkeypatch):
@@ -206,6 +233,7 @@ def test_a_kept_split_is_reused_so_its_unit_costs_stay_observed_when_durations_d
     seconds = drifted_durations[0]["durations"]
     expected = [plan.MUTANT_SECONDS + 1.25 * (1.0 + sum(seconds[node] for node in chosen)) for chosen in slices]
     assert drifted["splits"][function]["costs"] == pytest.approx(expected)
+    assert drifted["splits"][function]["head_seconds"] == 1.0
     fresh = measured.measured_plan([(names, drifted_durations)], killers.KillMemory(tmp_path / "empty"), limit=3)
     assert fresh["splits"][function]["slices"] != first["splits"][function]["slices"]
     changed = [{"tests": {function: [*nodes, "t6"]}, "durations": {**drifted_durations[0]["durations"], "t6": 50.0}}]
@@ -276,6 +304,40 @@ def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_i
     )
 
 
+def test_a_mutant_without_a_killer_costs_the_direct_tests_it_runs_first_and_one_without_them_its_traced_sum():
+    from scripts.ci_mutation.measured import measured_costs, measured_plan
+
+    names = ["scripts.sample.x_f__mutmut_1", "scripts.sample.x_g__mutmut_1", "scripts.other.x_h__mutmut_1"]
+    sample = ["tests/test_sample.py::test_f[1]", "tests/test_sample.py::test_g", "tests/test_sample.py::test_h"]
+    results = [
+        {
+            "tests": {
+                "scripts.sample.x_f": [*sample, "tests/test_tick.py::test_slow"],
+                "scripts.sample.x_g": ["tests/test_tick.py::test_slow", "tests/test_tick.py::test_other"],
+                "scripts.other.x_h": [sample[0], "tests/test_tick.py::test_slow"],
+            },
+            "durations": {
+                sample[0]: 2.0,
+                sample[1]: 18.0,
+                sample[2]: 30.0,
+                "tests/test_tick.py::test_slow": 50.0,
+                "tests/test_tick.py::test_other": 6.0,
+            },
+        }
+    ]
+    direct = {"scripts.sample.": ["tests/test_sample.py::test_f", sample[1], sample[2]], "scripts.other.": []}
+    expected = {names[0]: 5.6 + 1.25 * 20.0, names[1]: 5.6 + 1.25 * 56.0, names[2]: 5.6 + 1.25 * 52.0}
+    assert measured_costs(names, results, direct=direct) == pytest.approx(expected)
+    assert measured_plan([(names, results)], direct=direct)["costs"] == pytest.approx(expected)
+    assert measured_costs(names[:1], results) == pytest.approx({names[0]: 5.6 + 1.25 * 100.0})
+    importing = {"scripts.other.": ["tests/test_sample.py"]}
+    assert measured_costs(names[2:], results, direct=importing) == pytest.approx({names[2]: 5.6 + 1.25 * 2.0})
+    untimed = [{**results[0], "tests": {"scripts.other.x_h": ["tests/test_sample.py::test_new"]}}]
+    assert measured_costs(names[2:], untimed, direct=importing) == pytest.approx({names[2]: 5.6 + 1.25 * 50.0})
+    alone = {"scripts.sample.": [sample[2]]}
+    assert measured_costs(names[:1], results, direct=alone) == pytest.approx({names[0]: 5.6 + 1.25 * 30.0})
+
+
 def test_refinement_prices_mutants_from_killers_kept_beside_the_shared_stats(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
@@ -344,7 +406,52 @@ def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preser
         "splits": {},
     }
     assert plan_shards({"a": 480, "b": 481})["shards"] == 2
-    assert plan_shards({str(i): 10000 for i in range(11)})["shards"] == 10
+    assert plan_shards({str(i): 1000 for i in range(11)})["shards"] == 10
+
+
+def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_shards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.ci_mutation.measured import SHARD_CEILING, SHARD_SETUP_SECONDS, plan_shards, shard_capacity
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    assert SHARD_SETUP_SECONDS == 180.0
+    assert shard_capacity(3, 1080) == 3 * (1080 - 180) == 2700
+    costs = {f"scripts.sample.x__mutmut_{index}": 160.0 for index in range(240)}
+    planned = plan_shards(costs, limit=10, budget=1080)
+    assert planned["shards"] == 15
+    assert max(planned["shard_worker_seconds"]) == 2560 <= 3 * (1080 - 180)
+    assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == 60
+    assert plan_shards({str(index): 5000 for index in range(90)}, budget=1080)["shards"] == SHARD_CEILING == 80
+    assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
+    assert plan.shard_count(3 * 900 * 15, 500, 120, 10) == 15
+    assert plan.shard_count(3 * 900 * 15 + 1, 500, 120, 10) == 16
+    assert plan.shard_count(3 * 900 * 15, 12, 120, 10) == 12
+    assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == SHARD_CEILING
+    assert plan.shard_count(3 * 900 * 50, 500, 120, 10) == 50
+    assert plan.shard_count(3 * 120 * 4, 500, 120, 10) == 4
+    assert plan_shards({"a": 3241, "b": 1}, target=10**6, limit=1)["shards"] == 2
+    assert plan_shards({"a": 2700, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 2
+    assert plan_shards({"a": 2701, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 3
+    uneven = plan_shards({"a": 2000, "b": 2000, "c": 2000, "d": 1500}, target=10**6, limit=1)
+    assert uneven["shards"] == 4 and max(uneven["shard_worker_seconds"]) == 2000
+    roomy = plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2180)
+    assert roomy["shards"] == 2
+    assert plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2000)["shards"] == 3
+
+
+def test_a_plan_over_the_runner_pool_grades_every_mutant_in_a_second_wave(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.ci_mutation.measured import BATCH_RUNNERS, budget_overrun, plan_shards, shard_capacity
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    costs = {f"scripts.sample.x__mutmut_{index}": 170.0 for index in range(680)}
+    planned = plan_shards(costs, budget=1080)
+    assert planned["estimated_worker_seconds"] == 115600 > BATCH_RUNNERS * shard_capacity(3, 1080) == 108000
+    assert planned["shards"] == 46 > BATCH_RUNNERS
+    assert sorted(planned["assignments"]) == sorted(costs)
+    assert set(planned["assignments"].values()) == set(range(46))
+    assert max(planned["shard_worker_seconds"]) == 2550
+    assert budget_overrun(planned, 1080) == ""
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():
@@ -389,15 +496,55 @@ def test_the_head_takes_the_fastest_tests_to_its_budget_and_slices_balance_the_r
         "head": ["h1", "h2", "h3"],
         "slices": [["a1", "a4"], ["a2", "a3"]],
         "costs": [pytest.approx(5.6 + 1.25 * 150), pytest.approx(5.6 + 1.25 * 130)],
+        "head_seconds": 20.0,
     }
     assert split_tests(set(seconds) - {"a1", "a2", "a3"}, seconds, 10) is None
-    assert split_tests({"a4", "a3", "a2"}, seconds, 10)["head"] == ["a2"]
+    over = split_tests({"a4", "a3", "a2"}, seconds, 10)
+    assert over is not None and over["head"] == ["a2"]
+
+
+def test_the_head_takes_the_direct_tests_of_a_changed_line_first_within_its_budget():
+    from scripts.ci_mutation.measured import split_tests
+
+    seconds = {"h1": 5.0, "h2": 5.0, "h3": 10.0, "d1[x]": 15.0, "d2": 40.0, "a3": 60.0, "a2": 50.0, "a1": 30.0}
+    split = split_tests(set(seconds), seconds, 10, {"d1", "d2"})
+    assert split is not None
+    assert split["head"] == ["d1[x]", "h1"]
+    assert sorted([*split["head"], *(node for chosen in split["slices"] for node in chosen)]) == sorted(seconds)
+    assert split["costs"] == pytest.approx(
+        [5.6 + 1.25 * (20.0 + sum(seconds[node] for node in chosen)) for chosen in split["slices"]]
+    )
+    assert split_tests(set(), seconds, 10, {"d1"}) is None
+    late = {"z1": 30.0, "a2": 60.0, "a3": 70.0}
+    for direct in ({"a3"}, {"d1"}):
+        fallback = split_tests(set(late), late, 10, direct)
+        assert fallback is not None and fallback["head"] == ["z1"]
+
+
+def test_a_kept_split_whose_head_lacks_a_fitting_direct_test_is_cut_again(tmp_path):
+    from scripts.ci_mutation import killers, measured
+
+    function = "scripts.sample.x_f"
+    nodes = ["fast", "a", "b", "c[p[1]]"]
+    durations = {"fast": 1.0, "a": 150.0, "b": 150.0, "c[p[1]]": 19.5}
+    memory = killers.KillMemory(tmp_path)
+    memory.keep_splits({function: {"head": ["fast"], "slices": [["a", "c[p[1]]"], ["b"]], "costs": [1.0] * 2}})
+    results = [{"tests": {function: nodes}, "durations": durations}]
+    names = [f"{function}__mutmut_1"]
+    kept = {"head": ["fast"], "slices": [["a", "c[p[1]]"], ["b"]]}
+    assert measured.measured_splits(names, results, 10, memory)[function].items() >= kept.items()
+    split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["fast"]})[function]
+    assert split.items() >= kept.items()
+    split = measured.measured_splits(names, results, 10, memory, {"scripts.sample.": ["c"]})[function]
+    assert split["head"] == ["c[p[1]]"]
+    assert sorted(node for chosen in split["slices"] for node in chosen) == ["a", "b", "fast"]
 
 
 def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan(tmp_path, monkeypatch):
     from scripts.ci_mutation import measured
     from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
 
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "4")
     nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
     results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 130.0)}]
     names = ["scripts.sample.x_f__mutmut_1"]
@@ -413,15 +560,57 @@ def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan
     write_part(stats.group(0).folder / "part-0.json", stats_key("head", selected), (0, 1), results)
     refined = measured.refine_plan(tmp_path, selected, stats)
     assert list(refined["splits"]) == ["scripts.sample.x_f"]
-    assert len(refined["assignments"]) >= 10 and refined["shards"] == 10
+    assert len(refined["assignments"]) >= 10 and refined["shards"] > 10
+    assert max(refined["shard_worker_seconds"]) <= 4 * 1080
     assert all(len(shards) == 10 for shards in refined["assignments"].values())
 
 
-def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mutants_and_covers_every_test():
+def test_the_refined_plan_heads_each_split_with_the_planned_direct_tests(tmp_path, monkeypatch):
+    from scripts.ci_mutation import measured
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
+    durations = {**dict.fromkeys(nodes, 130.0), nodes[0]: 1.0, nodes[1]: 5.0, nodes[12]: 15.0}
+    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": durations}]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    (tmp_path / "scripts/sample.py").write_text("def f(a, b):\n    return a - b + 1 - 2 + 3 - 4 + 5 - 6\n")
+    selected = {"scripts/sample.py": ({2}, ["tests/test_sample.py"])}
+    stats = SharedStats(tmp_path / "stats", "head")
+    write_part(stats.group(0).folder / "part-0.json", stats_key("head", selected), (0, 1), results)
+    assert measured.refine_plan(tmp_path, selected, stats)["splits"]["scripts.sample.x_f"]["head"] == nodes[:2]
+    (tmp_path / ".mutation-direct.json").write_text(json.dumps({"scripts/sample.py": [nodes[12]]}))
+    refined = measured.refine_plan(tmp_path, selected, stats)
+    assert refined["splits"]["scripts.sample.x_f"]["head"] == [nodes[0], nodes[12]]
+
+
+def test_each_unit_of_a_split_whose_head_holds_direct_tests_costs_those_direct_tests():
     from scripts.ci_mutation.measured import measured_plan
 
     nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
-    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 130.0)}]
+    durations = {**dict.fromkeys(nodes, 130.0), nodes[0]: 1.0, nodes[1]: 5.0, nodes[12]: 15.0}
+    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": durations}]
+    names = [f"scripts.sample.x_f__mutmut_{index}" for index in range(1, 11)]
+    plain = measured_plan([(names, results)])
+    assert all(cost > 100.0 for cost in plain["unit_costs"][names[0]])
+    assert "first" not in plain["splits"]["scripts.sample.x_f"]
+    planned = measured_plan([(names, results)], direct={"scripts.sample.": [nodes[12]]})
+    split = planned["splits"]["scripts.sample.x_f"]
+    assert split["head"] == [nodes[0], nodes[12]]
+    assert split["first"] == pytest.approx(5.6 + 1.25 * 15.0)
+    assert planned["unit_costs"][names[0]] == pytest.approx([5.6 + 1.25 * 15.0] * len(split["slices"]))
+    assert planned["costs"][names[0]] == pytest.approx((5.6 + 1.25 * 15.0) * len(split["slices"]))
+
+
+def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mutants_and_covers_every_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.ci_mutation.measured import measured_plan
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "4")
+    nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
+    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 100.0)}]
     single = measured_plan([(["scripts.sample.x_f__mutmut_1"], results)])
     assert single["shards"] == 1 and single["assignments"] == {"scripts.sample.x_f__mutmut_1": 0}
     assert not single["splits"]
@@ -491,8 +680,15 @@ def test_measured_cli_requires_bases_and_statistics(monkeypatch, args):
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize(("splits", "flag"), [({}, "false"), ({"scripts.sample.x_f": {"head": ["early"]}}, "true")])
-def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path, monkeypatch, splits, flag):
+@pytest.mark.parametrize(
+    ("splits", "early", "flag"),
+    [
+        ({}, {}, "false"),
+        ({"scripts.sample.x_f": {"head": ["early"]}}, {}, "true\nprobe_shards=[0, 1]"),
+        ({"scripts.sample.x_f": {"head": ["early"]}}, {"probe_shards": 3}, "true\nprobe_shards=[0, 1, 2]"),
+    ],
+)
+def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path, monkeypatch, splits, early, flag):
     from scripts.ci_mutation import measured
 
     monkeypatch.chdir(tmp_path)
@@ -505,11 +701,148 @@ def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path
     monkeypatch.setattr(
         measured,
         "refine_plan",
-        lambda *args: {"estimated_worker_seconds": 1.0, "shards": 2, "assignments": {}, "splits": splits},
+        lambda *args: {
+            "estimated_worker_seconds": 1.0,
+            "shards": 2,
+            "assignments": {},
+            "splits": splits,
+            "shard_worker_seconds": [0.5, 0.5],
+            "workers": 3,
+            **early,
+        },
     )
     monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(folder)])
     assert measured.main() == 0
     assert output.read_text() == f"shards=[0, 1]\nprobe={flag}\n"
+
+
+def _measured_plan_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    loads: list[float],
+    budget: int | None,
+    costs: dict[str, float] | None = None,
+    splits: dict[str, object] | None = None,
+) -> tuple[int, Path, Path]:
+    from scripts.ci_mutation import measured
+
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "stats"
+    folder.mkdir()
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(measured, "discover_changes", lambda *args: {})
+    monkeypatch.setattr(measured.subprocess, "check_output", lambda *args, **kwargs: "revision\n")
+    planned = {
+        "estimated_worker_seconds": sum(loads),
+        "shards": len(loads),
+        "assignments": {},
+        "costs": costs or {"scripts.sample.x__mutmut_1": 10.0},
+        "splits": splits or {},
+        "shard_worker_seconds": loads,
+        "workers": 3,
+        **({"probe_shards": 2} if splits else {}),
+    }
+    monkeypatch.setattr(measured, "refine_plan", lambda *args: planned)
+    budget_args = [] if budget is None else ["--budget", str(budget)]
+    monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(folder), *budget_args])
+    return measured.main(), folder, output
+
+
+def test_measured_cli_fails_at_plan_time_when_the_shard_ceiling_cannot_fit_the_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status, folder, output = _measured_plan_cli(tmp_path, monkeypatch, [31000.0] * 10, None)
+    text = capsys.readouterr().out
+    assert status == 1
+    assert json.loads((folder / "plan.json").read_text())["shard_worker_seconds"] == [31000.0] * 10
+    assert not output.exists()
+    assert (
+        "::error title=Mutation plan over budget::The slowest mutation shard needs 31000 worker seconds,"
+        " 10333 seconds on 3 workers, against the 1080 second shard budget less 180 seconds of setup. The change"
+        " needs 310000 worker seconds and 80 shards in 2 waves of 40 runners hold at most 216000, so split it into"
+        " at least 2 pull requests." in text
+    )
+
+
+def test_measured_cli_names_a_mutant_that_no_shard_can_hold_instead_of_asking_for_pull_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    costs = {"scripts.sample.x__mutmut_1": 2701.0, "scripts.sample.x__mutmut_2": 10.0}
+    status, _, output = _measured_plan_cli(tmp_path, monkeypatch, [2701.0, 10.0], None, costs)
+    text = capsys.readouterr().out
+    assert status == 1
+    assert not output.exists()
+    assert (
+        "::error title=Mutation plan over budget::Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker"
+        " seconds on one shard, against the 1080 second shard budget less 180 seconds of setup, so no shard"
+        " count or pull request split can grade it; shorten or split the tests that cover it." in text
+    )
+    assert "pull requests." not in text
+
+
+def test_measured_cli_leaves_the_budget_to_the_replan_when_split_mutants_reach_the_early_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    splits: dict[str, object] = {"scripts.sample.x": {"head": ["fast"], "slices": [["slow"]], "costs": [31000.0]}}
+    status, folder, output = _measured_plan_cli(tmp_path, monkeypatch, [31000.0] * 10, None, splits=splits)
+    text = capsys.readouterr().out
+    assert status == 0
+    assert json.loads((folder / "plan.json").read_text())["splits"] == splits
+    assert "::error" not in text
+    assert "Before the early stage: The slowest mutation shard" in text
+    assert output.read_text() == (
+        f"shards={json.dumps(list(range(10)))}\nprobe=true\nprobe_shards={json.dumps([0, 1])}\n"
+    )
+
+
+def test_measured_cli_still_refuses_a_mutant_no_shard_can_hold_when_split_mutants_reach_the_early_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    splits: dict[str, object] = {"scripts.sample.y": {"head": ["fast"], "slices": [["slow"]], "costs": [10.0]}}
+    costs = {"scripts.sample.x__mutmut_1": 2701.0, "scripts.sample.x__mutmut_2": 10.0}
+    status, _, output = _measured_plan_cli(tmp_path, monkeypatch, [2701.0, 10.0], None, costs, splits=splits)
+    text = capsys.readouterr().out
+    assert status == 1
+    assert not output.exists()
+    assert "::error title=Mutation plan over budget::Mutant scripts.sample.x__mutmut_1 alone" in text
+
+
+def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_shard() -> None:
+    from scripts.ci_mutation.measured import budget_overrun
+
+    planned = {
+        "costs": {"scripts.sample.x__mutmut_1": 3000.0, "scripts.sample.x__mutmut_2": 100.0},
+        "estimated_worker_seconds": 3100.0,
+        "shard_worker_seconds": [2800.0, 300.0],
+        "workers": 3,
+    }
+    split = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2000.0, 1000.0]}}, 1080)
+    assert split.startswith("The slowest mutation shard needs 2800 worker seconds")
+    assert split.endswith("hold at most 216000, so split it into at least 2 pull requests.")
+    fits = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2700.0, 300.0]}}, 1080)
+    assert fits.startswith("The slowest mutation shard needs 2800 worker seconds")
+    whole = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2701.0, 299.0]}}, 1080)
+    assert whole.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker seconds on one shard")
+    assert budget_overrun(planned, 1080).startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000")
+
+
+@pytest.mark.parametrize(
+    ("loads", "budget", "status"), [([2700.0, 10.0], None, 0), ([2701.0, 10.0], None, 1), ([2700.0, 10.0], 1079, 1)]
+)
+def test_measured_cli_gates_a_shard_against_its_budget_less_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    loads: list[float],
+    budget: int | None,
+    status: int,
+) -> None:
+    result, _, output = _measured_plan_cli(tmp_path, monkeypatch, loads, budget)
+    text = capsys.readouterr().out
+    assert result == status
+    assert output.exists() is (status == 0)
+    assert ("split it into at least 2 pull requests" in text) is bool(status)
 
 
 @pytest.mark.parametrize("identity_only", [False, True])
@@ -707,10 +1040,14 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
         (961, 500, 2),
         (4800, 500, 5),
         (4800, 3, 3),
-        (10**6, 10**4, 10),
+        (36000, 10**4, 10),
+        (36001, 10**4, 11),
+        (10**6, 10**4, 80),
     ],
 )
-def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(seconds, mutants, expected):
+def test_shard_count_fills_each_shard_to_its_target_within_the_limit_unless_the_budget_needs_more(
+    seconds, mutants, expected
+):
     assert plan.shard_count(seconds, mutants, 240, 10) == expected
 
 
@@ -731,6 +1068,7 @@ def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota():
     planners = (
         "scripts.ci_mutation.plan ",
         "scripts.ci_mutation.measured ",
+        "scripts.ci_mutation.probed ",
         "scripts.ci_mutation.replay prepare",
         "python .refinement-proof/run.py",
     )
@@ -1153,10 +1491,10 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
         (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
-        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(10))), json.dumps(list(range(10)))),
+        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(40))), json.dumps(list(range(10)))),
     ],
 )
-def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_ten_shards(
+def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_the_shard_budget(
     tmp_path, monkeypatch, seconds, timed, shards, parts
 ):
     monkeypatch.chdir(tmp_path)

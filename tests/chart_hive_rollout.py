@@ -36,6 +36,7 @@ def test_every_roll_acquires_before_sync_and_releases_after_serving():
     jobs = [item for item in objects if item["kind"] == "Job"]
     assert {item["metadata"]["annotations"]["argocd.argoproj.io/hook"] for item in jobs} == {"PreSync", "PostSync"}
     for job in jobs:
+        assert job["spec"]["ttlSecondsAfterFinished"] == 3600
         pod = job["spec"]["template"]["spec"]
         assert pod["automountServiceAccountToken"] is True
         command = pod["containers"][0]["command"]
@@ -45,7 +46,7 @@ def test_every_roll_acquires_before_sync_and_releases_after_serving():
         assert command[command.index("--owner") + 1] == "hive/proof"
     worker = next(item for item in objects if item["kind"] == "Deployment")
     pod = worker["spec"]["template"]["spec"]
-    assert pod["terminationGracePeriodSeconds"] == 330
+    assert pod["terminationGracePeriodSeconds"] == 1230
     assert "ready" in pod["containers"][0]["readinessProbe"]["exec"]["command"]
     assert pod["automountServiceAccountToken"] is False
     permissions = [item for item in objects if item["kind"] in ("Role", "RoleBinding", "ServiceAccount")]
@@ -98,9 +99,9 @@ def test_storage_preparation_is_not_suppressed_by_native_rollout_hooks():
 
 def test_a_drain_that_consumes_the_rollout_budget_is_refused():
     try:
-        render("workers.rollout.drainSeconds=600")
+        render("workers.rollout.drainSeconds=1800")
     except subprocess.CalledProcessError as error:
-        assert "workers.rollout.drainSeconds must be between 0 and 300" in error.stderr
+        assert "workers.rollout.drainSeconds must be between 0 and 1500" in error.stderr
     else:
         raise AssertionError("an hour long drain must not render")
 

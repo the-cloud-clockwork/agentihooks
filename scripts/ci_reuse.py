@@ -197,6 +197,13 @@ def postgres_required(steps: list[dict]) -> list[dict]:
     return [{**aggregation, "run": aggregation["run"].replace(*POSTGRES_REQUIRED)}, *rest]
 
 
+def typing_required(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = aggregation["run"].replace('"lint", ', '"lint", "type-gate", ')
+    run = run.replace('.key == "lint" or ', '.key == "type-gate" or .key == "lint" or ')
+    return [{**aggregation, "run": run}, *rest]
+
+
 def test_only_sonar(steps: list[dict]) -> list[dict]:
     [aggregation, *rest] = steps
     run = aggregation["run"]

@@ -5,9 +5,11 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from hooks.secrets import redact
 from scripts.hive import reports
+from scripts.tick import pool
 
 SCREEN_LIMIT = 64_000
 RECORD_LIMIT = 192
@@ -21,7 +23,8 @@ def sweep(slug: str, store, runtime, at: int) -> list[str]:
         return [f"pane evidence sweep failed: {type(error).__name__}"]
 
 
-def _sweep(slug: str, store, runtime, at: int) -> list[str]:
+def _sweep(slug: str, store: Any, runtime: Any, at: int) -> list[str]:
+    """Capture pane evidence of every local agent, fanned out over the pass workers within an eight second budget."""
     if not callable(getattr(runtime, "herdr", None)):
         return []
     directory = runtime.home / slug / "pane-evidence"
@@ -31,15 +34,22 @@ def _sweep(slug: str, store, runtime, at: int) -> list[str]:
         for agent in store.agents(slug)
         if agent.runtime_backend == "local" and not reports.host(agent) and agent.pane_id
     ]
-    actions = []
-    for agent in sorted(agents, key=lambda agent: _last_capture(directory, agent)):
+
+    def one(agent: Any) -> list[str] | None:
+        """Return the capture actions of ``agent``, or None once the budget is spent."""
         if time.monotonic() >= deadline:
+            return None
+        try:
+            return capture(directory, runtime, agent, at)
+        except Exception as error:
+            return [f"pane evidence failed for {agent.name}: {type(error).__name__}"]
+
+    actions: list[str] = []
+    for found in pool.fan_out(one, sorted(agents, key=lambda agent: _last_capture(directory, agent))):
+        if found is None:
             actions.append("pane evidence capture budget exhausted")
             break
-        try:
-            actions += capture(directory, runtime, agent, at)
-        except Exception as error:
-            actions.append(f"pane evidence failed for {agent.name}: {type(error).__name__}")
+        actions += found
     return actions
 
 

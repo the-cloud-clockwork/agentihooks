@@ -135,3 +135,38 @@ def test_check_output_is_redacted_normalized_and_bounded(monkeypatch):
         "output: " + "x" * 300,
     )
     assert calls == [(line, "strict") for line in lines]
+
+
+def test_only_entries_with_a_live_check_run(tmp_path, monkeypatch):
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1, "", "")
+
+    monkeypatch.setattr(features.subprocess, "run", execute)
+    path = tmp_path / "feature-map.json"
+    unchecked = {"id": "inventory-only", "origin": "inventory", "behaviour": "Seats outlive agents."}
+    checked = {"id": "inventory-checked", "origin": "inventory", "behaviour": "Ticks run.", "live_check": ["check"]}
+    path.write_text(json.dumps({"features": [unchecked, checked]}))
+    [found] = features.findings(path)
+    assert calls == [["check"]]
+    assert found.subject == "inventory-checked"
+    assert found.evidence == ("live check check exited 1",)
+
+
+def test_a_regression_names_its_incident_ledger_item(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        features.subprocess, "run", lambda command, **_: subprocess.CompletedProcess(command, 2, "", "")
+    )
+    path = tmp_path / "feature-map.json"
+    entry = {
+        "id": "front-door-seat",
+        "origin": "regression",
+        "ledger_item": "ledger:rig-grade-swarm/tasks/rpin1",
+        "behaviour": "The front door seat is bound to a live session.",
+        "live_check": ["check"],
+    }
+    path.write_text(json.dumps({"features": [entry]}))
+    [found] = features.findings(path)
+    assert found.evidence == ("from ledger:rig-grade-swarm/tasks/rpin1", "live check check exited 2")

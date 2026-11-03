@@ -54,9 +54,10 @@ agentihooks overlay new backtest-tuner \
 ```
 
 With a user bundle linked, `overlay new` refuses until you choose where it lands:
-add `--dest root` for the shared bundle or `--dest user` for the personal one.
+add `--dest root` for the root bundle or `--dest user` for the personal one.
 `overlay check NAME --dest user` validates a personal overlay. The swarm offers the
-overlays of both bundles; a name in both resolves to the root bundle's.
+overlays of every linked bundle, including a linked shared bundle; a name in more
+than one resolves to the earliest of root, shared and user.
 
 The scaffold writes:
 

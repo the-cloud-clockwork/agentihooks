@@ -149,6 +149,11 @@ class TestExpiry:
         assert rules_refresh._load_marker("a") is None
         assert rules_refresh._load_marker("b") is not None
 
+    @pytest.mark.parametrize("marker", [{}, {"ts": "yesterday"}])
+    def test_malformed_marker_counts_as_expired(self, marker: dict) -> None:
+        """A marker without a parseable timestamp is expired so the sweep removes it."""
+        assert rules_refresh._is_expired(marker) is True
+
 
 class TestPayloadCollection:
     def test_collects_rules_and_claude_md(self, tmp_path):

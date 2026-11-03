@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -182,12 +183,13 @@ def test_a_worker_task_update_lands_on_the_hosted_server(deployed):
 
 def test_a_claim_lost_before_hosted_apply_cannot_change_the_task(deployed, store):
     _, read = _read(deployed)
+    from scripts.swarm import fencing
     from scripts.swarm_ledger.api import worker_writes
 
     original = worker_writes.check
 
     def lose_claim(slug, doc, operation):
-        store.redis.delete(store.key(SLUG, "task-authority", "t1"))
+        fencing.write(store, SLUG, lambda fencing_doc: fencing_doc["claims"].pop("t1", None))
         return original(slug, doc, operation)
 
     with patch.object(worker_writes, "check", lose_claim):
@@ -204,11 +206,12 @@ def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
 
     _, read = _read(deployed)
     original = ResourceClient.request
-    stamp = store.redis.time()
+    expired = time.time() + DEFAULT_LEASE_MS / 1000 + 1
 
     def expire_claim(client, slug, path, *args, **kwargs):
         if path == "operations":
-            store.redis.time = lambda: (stamp[0] + DEFAULT_LEASE_MS // 1000 + 1, stamp[1])
+            with patch("time.time", return_value=expired):
+                return original(client, slug, path, *args, **kwargs)
         return original(client, slug, path, *args, **kwargs)
 
     with patch.object(ResourceClient, "request", expire_claim):

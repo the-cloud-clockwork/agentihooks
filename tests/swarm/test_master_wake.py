@@ -60,6 +60,7 @@ def woke(name):
 
 @pytest.mark.parametrize("state", ["idle", "done"])
 @pytest.mark.parametrize("source", ["inbox", "seat", "read", "priority", "followup", "blocked"])
+@pytest.mark.feature("swarm-master-wake")
 def test_ready_master_with_work_wakes_at_twenty_minutes_and_retries(setup, source, state):
     store, master, runtime, doc, sent = setup
     runtime.statuses[master.name] = state
@@ -105,6 +106,7 @@ def test_idle_without_waiting_work_is_never_woken(setup, doc):
     assert setup[4] == []
 
 
+@pytest.mark.feature("swarm-master-wake")
 def test_typed_input_prevents_wake(setup):
     _, master, runtime, doc, sent = setup
     doc["followups"] = [{"done": False}]
@@ -173,6 +175,7 @@ def test_retry_stops_when_waiting_work_is_resolved(setup):
     assert sent == []
 
 
+@pytest.mark.feature("swarm-master-wake")
 def test_tick_runs_the_master_wake_pass(setup):
     store, master, runtime, _, sent = setup
     ledger = FakeLedger([{"id": "t", "state": "blocked"}])

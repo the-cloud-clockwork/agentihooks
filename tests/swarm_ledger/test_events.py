@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -6,18 +7,16 @@ from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from tests.swarm_ledger.test_sqlite import document
 
 
-def test_ordered_event_rows_keep_duplicates_and_revision_filter(tmp_path):
+def test_ordered_event_rows_keep_duplicates_in_their_stored_order(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
     state = document()
     state["_meta"]["events"] = [{"rev": 2, "id": "repeat"}, {"rev": 1, "id": "first"}, {"rev": 2, "id": "repeat"}]
     repo.import_document("events", state)
-    assert repo.events_since("events", 0) == state["_meta"]["events"]
-    assert repo.events_since("events", 1) == [{"rev": 2, "id": "repeat"}, {"rev": 2, "id": "repeat"}]
+    assert repo.export_document("events")["_meta"]["events"] == state["_meta"]["events"]
     after = copy.deepcopy(state)
     after["_meta"]["events"] = [{"rev": 1, "id": "first"}, {"rev": 2, "id": "repeat"}, {"rev": 3, "id": "last"}]
     repo.import_document("events", after, replace=True)
     assert repo.export_document("events") == after
-    assert repo.events_since("events", 2) == [{"rev": 3, "id": "last"}]
 
 
 def test_unversioned_event_records_are_refused(tmp_path):
@@ -30,7 +29,7 @@ def test_unversioned_event_records_are_refused(tmp_path):
         repo.export_document("events")
 
 
-def test_stored_unversioned_event_is_readable_but_cannot_be_revision_filtered(tmp_path):
+def test_stored_unversioned_event_is_readable(tmp_path: Path) -> None:
     from scripts.swarm_ledger.repository.events import read_events
 
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
@@ -42,8 +41,6 @@ def test_stored_unversioned_event_is_readable_but_cannot_be_revision_filtered(tm
         )
         connection.commit()
         assert read_events(connection, "events")[-1] == {"kind": "legacy"}
-    with pytest.raises(KeyError, match="^'rev'$"):
-        repo.events_since("events", 0)
 
 
 def test_appending_an_unversioned_event_reports_the_refusal(tmp_path):
@@ -63,7 +60,6 @@ def test_three_identical_events_remain_distinct_records(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
     repo.import_document("events", state)
     assert repo.export_document("events") == state
-    assert repo.events_since("events", 1) == state["_meta"]["events"]
 
 
 def test_event_rows_keep_canonical_identity_after_restart(tmp_path):

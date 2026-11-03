@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -82,7 +83,8 @@ def test_a_member_beat_lands_below_its_own_hive_key_and_the_controller_reads_it_
     assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
     assert idle.heartbeat(redis, "fixture", name) == {"state": "working", "at": 5}
     assert idle.last_prompt(redis, "fixture", name) == 6
-    assert idle.wait(redis, "fixture", name)["reason"] == "checks"
+    wait = idle.wait(redis, "fixture", name)
+    assert wait is not None and wait["reason"] == "checks"
     assert idle.waited(redis, "fixture", name) == 100
     assert [entry["at"] for entry in idle.wait_history(redis, "fixture", name)] == [7]
     idle.end_wait(redis, "fixture", name, 60)
@@ -175,11 +177,17 @@ def test_members_of_an_empty_index_opens_no_pipeline(redis, monkeypatch):
     assert scope.members(redis) == []
 
 
-def relaunch(redis, store, name, hive, generation):
-    key = store.key("fixture", "executions")
-    row = next(json.loads(raw) for raw in redis.hvals(key) if json.loads(raw)["name"] == name)
-    row.update(execution_id=f"exe-{hive}-{generation}", generation=generation, hive=hive)
-    redis.hset(key, row["execution_id"], json.dumps(row))
+def relaunch(redis: Any, store: Any, name: str, hive: str, generation: int) -> None:
+    from scripts.swarm import fencing
+
+    def change(doc: dict) -> None:
+        execution_id, row = next((eid, row) for eid, row in doc["executions"].items() if row["name"] == name)
+        updated = {**row, "execution_id": f"exe-{hive}-{generation}", "generation": generation, "hive": hive}
+        del doc["executions"][execution_id]
+        doc["executions"][updated["execution_id"]] = updated
+
+    fencing.write(store, "fixture", change)
+    redis.hdel(store.key("fixture", "hosts"), name)
 
 
 def test_host_reads_one_agents_latest_placement_without_the_agent_list(redis, swarm, monkeypatch):
@@ -234,7 +242,8 @@ def test_member_session_model_progress_and_stop_blocks_stay_below_the_member(red
     assert sorted(redis.keys(f"{own}:*")) == sorted(
         f"{own}:{kind}:{name}" for kind in ("session-model", "progress", "stop-blocks")
     )
-    assert session_model.get(redis, "fixture", name)["model"] == "opus"
+    model = session_model.get(redis, "fixture", name)
+    assert model is not None and model["model"] == "opus"
     assert Progress(redis, "fixture").read(name).outcome == "pushed"
     assert Streak(swarm, "fixture", name).key == f"{own}:stop-blocks:{name}"
 
@@ -404,3 +413,165 @@ def test_the_master_pool_holds_only_masters_whose_inboxes_share_its_world(redis,
     monkeypatch.setattr(pool, "live_masters", lambda client, slug: ["master@fixture", "master-2@fixture"])
 
     assert InboxStore(redis, world="").pool.masters_for("engineer@0001-0001", "master@fixture") == pooled
+
+
+def test_host_hash_hit_uses_one_field_read(redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import scope
+    from scripts.swarm.execution import ExecutionRegistry
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    calls = []
+    original = redis.hget
+
+    def read(key: str, field: str) -> str | None:
+        calls.append((key, field))
+        return original(key, field)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("host lookup scanned the execution registry")
+
+    monkeypatch.delenv("SWARM_HOST_PROJECTION_ENABLED", raising=False)
+    monkeypatch.setattr(ExecutionRegistry, "hive", forbidden)
+    with scope.one_pass():
+        scope.joined(redis)
+        monkeypatch.setattr(redis, "hget", read)
+        assert scope.host(redis, "fixture", name) == "m1"
+    assert calls == [(swarm.key("fixture", "hosts"), name)]
+
+
+def test_host_hash_miss_keeps_legacy_lookup(redis: Any, swarm: Any) -> None:
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    redis.delete(swarm.key("fixture", "hosts"))
+    assert scope.host(redis, "fixture", name) == "m1"
+
+
+def test_removing_an_agent_removes_its_host(redis: Any, swarm: Any) -> None:
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+    swarm.drop_agent("fixture", name)
+    assert redis.hget(swarm.key("fixture", "hosts"), name) is None
+    assert scope.host(redis, "fixture", name) == ""
+
+
+def lost_projection(*args: object, **kwargs: object) -> None:
+    """Stand in for a writer that dies between the fenced commit and the host projection."""
+    raise RuntimeError("writer died before the projection")
+
+
+def test_a_hive_move_that_loses_its_projection_reads_the_registry_host(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    join(redis, "m2")
+    name = place(swarm, "m1")
+    current = swarm.agents("fixture")[0]
+    monkeypatch.setattr(swarm, "project_agent", lost_projection)
+    with pytest.raises(RuntimeError):
+        swarm.execution_registry.update("fixture", replace(current, hive="m2"))
+    assert redis.hget(swarm.key("fixture", "hosts"), name) is None
+    assert scope.host(redis, "fixture", name) == "m2"
+
+
+def test_a_replacement_that_loses_its_projection_leaves_no_host_for_either_name(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import scope
+    from scripts.swarm.store import AgentRecord
+
+    join(redis, "m1")
+    join(redis, "m2")
+    old = place(swarm, "m1")
+    previous = swarm.agents("fixture")[0]
+    new = swarm.next_name("fixture", "eng")
+    monkeypatch.setattr(swarm, "project_agent", lost_projection)
+    with pytest.raises(RuntimeError):
+        swarm.execution_registry.start(
+            "fixture", AgentRecord(new, "eng", "task", seat="eng-1@fixture", hive="m2"), previous.execution_id
+        )
+    assert redis.hmget(swarm.key("fixture", "hosts"), [old, new]) == [None, None]
+    assert scope.host(redis, "fixture", old) == "m1"
+
+
+@pytest.mark.parametrize("off", ["false", "0", "no", " OFF "])
+@pytest.mark.parametrize("legacy_change", ["remove", "move"])
+def test_host_projection_off_switch_keeps_the_legacy_registry_lookup(
+    redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch, legacy_change: str, off: str
+) -> None:
+    from scripts.hive import scope
+    from scripts.swarm import fencing
+
+    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", off)
+    join(redis, "m1")
+    join(redis, "m2")
+    name = place(swarm, "m1")
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+
+    def move(doc: dict) -> None:
+        row = next(row for row in doc["executions"].values() if row["name"] == name)
+        row["hive"] = "m2"
+
+    if legacy_change == "remove":
+        redis.hdel(swarm.key("fixture", "agents"), name)
+        expected = ""
+    else:
+        fencing.write(swarm, "fixture", move)
+        expected = "m2"
+    assert redis.hget(swarm.key("fixture", "hosts"), name) == "m1"
+    assert scope.host(redis, "fixture", name) == expected
+
+
+def test_renaming_an_agent_removes_only_its_old_host_projection(redis: Any, swarm: Any) -> None:
+    from dataclasses import replace
+
+    join(redis, "m1")
+    old = place(swarm, "m1")
+    current = swarm.agents("fixture")[0]
+    other = place(swarm, "m1", seat="eng-2@fixture")
+    renamed = replace(current, name="renamed-agent", hive="m2")
+    swarm.project_agent("fixture", renamed, previous=current, removed=old)
+    assert redis.hgetall(swarm.key("fixture", "hosts")) == {other: "m1", renamed.name: "m2"}
+    assert not redis.hexists(swarm.key("fixture", "agents"), old)
+
+
+def test_a_cold_host_read_issues_five_redis_commands(redis: Any, swarm: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import scope
+
+    join(redis, "m1")
+    name = place(swarm, "m1")
+    monkeypatch.setenv("SWARM_HOST_PROJECTION_ENABLED", "true")
+    issued: list[object] = []
+    direct = redis.execute_command
+    opened = redis.pipeline
+
+    def command(*args: Any, **kwargs: Any) -> Any:
+        issued.append(args[0])
+        return direct(*args, **kwargs)
+
+    def pipeline(*args: Any, **kwargs: Any) -> Any:
+        pipe = opened(*args, **kwargs)
+        run = pipe.execute
+
+        def execute(*inner: Any, **options: Any) -> Any:
+            issued.append(tuple(entry[0][0] for entry in pipe.command_stack))
+            return run(*inner, **options)
+
+        monkeypatch.setattr(pipe, "execute", execute)
+        return pipe
+
+    monkeypatch.setattr(redis, "execute_command", command)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+    assert scope.PASS.get() is None
+    assert scope.host(redis, "fixture", name) == "m1"
+    assert issued == ["HGET", "SMEMBERS", "HGET", "HGETALL", "HGET"]
+    assert len(issued) == 5

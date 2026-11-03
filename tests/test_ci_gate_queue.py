@@ -33,6 +33,7 @@ def complete():
         "ledger-load",
         "stage-budget",
         "reuse",
+        "dep-manifest",
     ]
     if "install-smoke" in ci_gate_queue.SKIPPED:
         skipped.append("install-smoke")
@@ -141,6 +142,7 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
                         "ledger-load",
                         "stage-budget",
                         "reuse",
+                        "dep-manifest",
                         "queue-fail-fast",
                     ],
                 },
@@ -166,6 +168,8 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
         ci_gate_queue.normalize(changed)
     announced = copy.deepcopy(workflow)
     announced["test.yml"]["jobs"]["gate-required"]["needs"].append("install-smoke")
+    ci_gate_queue.normalize(announced)
+    announced["test.yml"]["jobs"]["gate-required"]["needs"].append("dep-manifest")
     ci_gate_queue.normalize(announced)
     announced["test.yml"]["jobs"]["gate-required"]["needs"].append("unannounced")
     with pytest.raises(ValueError):

@@ -65,18 +65,25 @@ def registered_codes(store):
 
 
 def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(store):
+    from scripts.swarm import fencing
+
     seed(store, "sw")
-    alone = everything(store.redis)
+    fencing.read(store, "sw")
+    alone, names = everything(store.redis), store.names.export("sw")
     seed(store, "other")
     state = store.export("sw")
     store.redis.flushall()
     store.restore("sw", json.loads(json.dumps(state)))
     assert everything(store.redis) == alone
+    assert store.names.export("sw") == names
     assert store.redis.pttl(store.key("sw", "claim", "t1")) > 0
 
 
 def test_a_snapshot_taken_before_names_were_exported_still_restores(store):
+    from scripts.swarm import fencing
+
     seed(store, "sw")
+    fencing.read(store, "sw")
     alone = everything(store.redis)
     state = store.export("sw")
     del state["names"]
@@ -89,6 +96,7 @@ def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
     seed(store, "sw")
     seed(store, "other")
     before, codes = everything(store.redis), registered_codes(store)
+    names = {slug: store.names.export(slug) for slug in ("sw", "other")}
     state = store.export("sw")
     for agent in store.agents("sw"):
         store.drop_agent("sw", agent.name)
@@ -97,6 +105,17 @@ def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
     store.restore("sw", json.loads(json.dumps(state)))
     assert everything(store.redis) == before
     assert registered_codes(store) == codes
+    assert {slug: store.names.export(slug) for slug in ("sw", "other")} == names
+
+
+def test_a_restore_over_a_listed_swarm_lists_its_old_style_names_again(store: RedisStore) -> None:
+    seed(store, "sw")
+    store.seats.occupy("eng-2@sw", "sw-eng-7", 11)
+    state = store.export("sw")
+    store.redis.flushall()
+    assert store.seats.agent_names("sw") == []
+    store.restore("sw", json.loads(json.dumps(state)))
+    assert ("sw-eng-7", "eng-2@sw") in store.seats.agent_seats("sw")
 
 
 def test_export_leaves_out_another_swarms_seats_and_inbox(store):
@@ -104,6 +123,69 @@ def test_export_leaves_out_another_swarms_seats_and_inbox(store):
     seed(store, "sw-b")
     keys = set(store.export("sw")["keys"])
     assert keys and not any("sw-b" in key for key in keys)
+
+
+def test_export_reads_no_key_of_another_swarm() -> None:
+    import re
+
+    import fakeredis
+
+    from scripts.inbox.seats import SCAN_PAGE
+
+    class Recording(fakeredis.FakeRedis):
+        touched: list[tuple[str, ...]] = []
+        scans: list[tuple[str, ...]] = []
+        on = False
+
+        def execute_command(self, *args: object, **options: object) -> object:
+            if self.on:
+                words = tuple(str(arg) for arg in args)
+                (self.scans if words[0].upper() == "SCAN" else self.touched).append(words)
+            return super().execute_command(*args, **options)
+
+    store = RedisStore(Recording(decode_responses=True))
+    seed(store, "sw")
+    seed(store, "sw-b")
+    other = store.names.code_of("sw-b")
+    theirs = set(store.export("sw-b")["keys"])
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    Recording.touched.clear()
+    Recording.on = True
+    keys = set(store.export("sw")["keys"])
+    Recording.on = False
+    assert InboxStore(store.redis).key("address", eng) in keys
+    read = {arg for words in Recording.touched for arg in words[1:]}
+    assert theirs and not read & theirs
+    assert [arg for arg in read if "sw-b" in arg or re.search(rf"\b{other}\b", arg)] == []
+    assert Recording.scans and all("COUNT" in words[-2] and words[-1] == str(SCAN_PAGE) for words in Recording.scans)
+    assert all(any("MATCH" in word for word in words) for words in Recording.scans)
+
+
+def test_export_keeps_the_mail_of_a_named_agent_without_a_seat(store: RedisStore) -> None:
+    seed(store, "sw")
+    name = store.next_name("sw", "eng")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", name, "start on the parser")
+    assert inbox.key("item", item.id) in store.export("sw")["keys"]
+
+
+def test_export_keeps_the_mail_of_a_seat_that_holds_only_memory(store: RedisStore) -> None:
+    seed(store, "sw")
+    store.memory.learn("eng-3@sw", "someone", "read the plan first", 30)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", "eng-3@sw", "pick this up")
+    assert inbox.key("item", item.id) in store.export("sw")["keys"]
+
+
+def test_export_leaves_out_the_tick_lock_and_keeps_its_other_keys(store: RedisStore) -> None:
+    seed(store, "sw")
+    store.redis.set(store.key("sw", "tick-lock"), "held")
+    store.redis.set(store.key("sw", ""), "bare")
+    store.culture.set("sw", "ship small")
+    keys = store.export("sw")["keys"]
+    assert store.key("sw", "tick-lock") not in keys
+    assert store.key("sw", "") in keys
+    assert store.culture.key("sw") in keys
 
 
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
@@ -155,13 +237,14 @@ def test_restore_refuses_while_an_agent_of_the_swarm_is_live(store):
     assert everything(store.redis) == before
 
 
-def test_pending_inbox_items_survive_a_lost_redis(store):
+def test_pending_inbox_items_survive_a_lost_redis(store: RedisStore) -> None:
     item = seed(store, "sw")
+    pending = [i.id for i in InboxStore(store.redis).pending_items("master@sw")]
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
     snapshot.restore(store, "sw", live=set())
     inbox = InboxStore(store.redis)
-    assert [i.id for i in inbox.pending_items("master@sw")] == [item.id]
+    assert [i.id for i in inbox.pending_items("master@sw")] == pending
     assert item.id in {i.id for i in inbox.pending()}
     assert [h["state"] for h in inbox.history(item.id)] == ["pending"]
 

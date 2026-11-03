@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import tomlkit
 
@@ -248,6 +249,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "profiles",
         "docs",
         ".github",
+        ".semgrep",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -289,6 +291,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "profiles/",
             "docs/",
             ".github/",
+            ".semgrep/",
             "evidence/",
             "observability/",
             "docker/swarm-node/",
@@ -331,8 +334,15 @@ def mutate_files(
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
     prepare_workspace(root, work, list(selected), tests)
     selection = work / "changed-lines.json"
+    direct_path = root / ".mutation-direct.json"
+    direct = json.loads(direct_path.read_text()) if direct_path.is_file() else {}
     selection.write_text(
-        json.dumps({path: {"lines": sorted(lines), "tests": chosen} for path, (lines, chosen) in selected.items()})
+        json.dumps(
+            {
+                path: {"lines": sorted(lines), "tests": chosen, "direct": direct.get(path, [])}
+                for path, (lines, chosen) in selected.items()
+            }
+        )
     )
     log = work / "run.log"
     shard_args = [str(part) for part in shard]
@@ -412,11 +422,18 @@ def record_shard_measurement(
 
 
 def grade_shard_rows(
-    report: dict, path: str, rows: list[dict], lines: set[int], cleared: dict, split: set[str]
-) -> dict:
+    report: dict[str, Any],
+    path: str,
+    rows: list[dict],
+    lines: set[int],
+    cleared: dict,
+    split: set[str],
+) -> dict[str, Any]:
     if units := [row for row in rows if row["name"] in split]:
         report.setdefault("units", []).append({"path": path, "lines": sorted(lines), "rows": units})
-    return evaluate(path, [row for row in rows if row["name"] not in split], lines, cleared)
+    graded = [row for row in rows if row["name"] not in split]
+    report.setdefault("graded", []).append({"path": path, "lines": sorted(lines), "rows": graded})
+    return evaluate(path, graded, lines, cleared)
 
 
 def split_plan_names(stats: SharedStats | None) -> set[str]:

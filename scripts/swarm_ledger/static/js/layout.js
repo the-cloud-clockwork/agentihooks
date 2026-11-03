@@ -214,7 +214,10 @@ function mirrorLayout() {
   try {
     if (Object.keys(layout).length) localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
     else localStorage.removeItem(LAYOUT_KEY);
-  } catch (e) { /* storage blocked: the server copy paints after its read */ }
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function saveLayout(delay) {

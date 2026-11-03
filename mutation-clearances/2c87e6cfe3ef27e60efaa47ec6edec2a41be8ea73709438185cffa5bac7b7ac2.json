@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_legs_for:aba93ae9bedc7bc46ee1ec9954a57fa693520ce24978a3b4fbfbb7e2e23bf206": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. legs_for passes the work dict as both seconds and serial with no serial groups, so every unit shares one group and the serial load and peak of each leg equal its load; the leg cost max((load + s) / workers, peak, load + s) is load + s and the sort key max(s / workers, s) is s for any workers of at least one and nonnegative durations, so assignment, order and tie break are unchanged when workers is two."
+  }
+}

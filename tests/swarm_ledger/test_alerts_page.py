@@ -79,6 +79,7 @@ def test_the_alert_icon_sits_directly_under_the_bell_with_a_count(tab):
     assert tab.locator("#alert-badge").inner_text() == "2"
 
 
+@pytest.mark.feature("ledger-alerts-panel")
 def test_the_panel_lists_open_alerts_and_who_holds_a_claimed_one(tab):
     tab.locator("#alert-fab").click()
     assert tab.locator("#alert-panel").is_visible()
@@ -88,6 +89,7 @@ def test_the_panel_lists_open_alerts_and_who_holds_a_claimed_one(tab):
     assert WARNING in tab.locator("#alert-al-3-0").inner_text()
 
 
+@pytest.mark.feature("ledger-alerts-panel")
 def test_claim_and_close_from_the_panel_send_their_ops(tab):
     tab.locator("#alert-fab").click()
     row = tab.locator("#alert-al-3-0")

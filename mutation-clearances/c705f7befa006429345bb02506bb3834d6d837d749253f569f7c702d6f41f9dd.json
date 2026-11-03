@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/scope.py:scripts.ci_mutation.scope.x_moved_lines:7e0f3e1a21f73c42ad59c05375c9db999b56f83a1a1618bd70cece24f7ed873a": {
+    "reader": "standards_reader",
+    "reason": "Starts the line counter at 1. The counter is read only on an added line, and git emits an @@ hunk header that assigns it before any added line, so the initial value is never read."
+  }
+}

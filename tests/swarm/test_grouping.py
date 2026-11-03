@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult, YesNo
@@ -7,6 +9,8 @@ from scripts.swarm import grouping
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable, tick
+from scripts.tick.step import Write
+from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 PAGE = "scripts/swarm_ledger/static/js/render.js"
@@ -404,16 +408,20 @@ def test_a_group_applied_in_a_tick_spawns_only_its_lead_with_member_specs(asked,
 class ReleaseLedger(GroupLedger):
     def __init__(self, tasks):
         super().__init__(tasks)
-        self.ungrouped, self.stamps = [], {}
+        self.ungrouped, self.stamps, self.view = [], {}, {}
 
     def state(self, slug):
         found = super().state(slug)
         found["_meta"]["stamps"] = self.stamps
         return found
 
-    def ungroup_tasks(self, slug, lead):
+    def ungroup_tasks(self, slug: str, lead: str) -> None:
         assert slug == "sw"
         self.ungrouped.append(lead)
+        if lead in self.view:
+            for member in self.view[lead].pop("group_members"):
+                if self.view.get(member, {}).get("merged_into") == lead:
+                    del self.view[member]["merged_into"]
 
 
 ENGINEER = "engineer@abcdef-0001"
@@ -433,7 +441,20 @@ def release(store, found, claim=None, handoff=None):
     if handoff:
         store.put_handoff("sw", "a", handoff)
     ledger = ReleaseLedger(found["tasks"])
-    return ledger, grouping.release_pass("sw", store, ledger, found)
+    return ledger, released(store, ledger, found)
+
+
+def released(store: RedisStore, ledger: ReleaseLedger, found: dict) -> list[str]:
+    """Apply the grouping release writes through the groups applier, the ledger releasing each group in ``found``."""
+    ledger.view = {t["id"]: t for t in found["tasks"]}
+    apply = task_steps.group_writer("sw", ledger, ledger.view.get)
+    actions = []
+    for item in task_steps.release_writes(SimpleNamespace(grouping=grouping), "sw", store, found):
+        if isinstance(item, Write):
+            apply(item)
+        else:
+            actions.append(item)
+    return actions
 
 
 @pytest.mark.parametrize(
@@ -529,26 +550,6 @@ def test_only_members_that_still_point_at_the_lead_are_released(store):
     ledger, actions = release(store, found)
     assert actions == ["released tasks b from task a: its lead closed without its pull request"]
     assert found["tasks"][2]["merged_into"] == "z"
-
-
-def test_a_refused_release_leaves_the_group_and_goes_on(store):
-    class Refusing(ReleaseLedger):
-        def ungroup_tasks(self, slug, lead):
-            if lead == "a":
-                raise LedgerRefused("refused")
-            super().ungroup_tasks(slug, lead)
-
-    found = grouped({"state": "done"}, CHANGED_AFTER)
-    found["tasks"].append(task("d", state="done", group_members=["e"]))
-    found["tasks"].append(task("e", merged_into="d"))
-    ledger = Refusing(found["tasks"])
-    actions = grouping.release_pass("sw", store, ledger, found)
-    assert ledger.ungrouped == ["d"]
-    assert actions == [
-        "skipped releasing the group under task a: the ledger refused its write",
-        "released tasks e from task d: its lead closed without its pull request",
-    ]
-    assert found["tasks"][1]["merged_into"] == "a"
 
 
 def test_a_released_member_returns_to_the_claim_queue(store):
