@@ -8,7 +8,7 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import difficulty, grouping
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.tick import engine, pool
+from scripts.tick import engine, pool, view
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Lane, Result, Write
@@ -281,3 +281,75 @@ def test_the_release_pass_still_releases_through_the_ledger_directly() -> None:
     assert grouping.release_pass(
         "sw", None, GroupLedger(refuse=True), {"tasks": [{"id": "l1", "state": "done", "group_members": ["m1"]}]}
     ) == ["skipped releasing the group under task l1: the ledger refused its write"]
+
+
+def test_the_fresh_task_reads_the_held_view_and_is_none_without_one() -> None:
+    with view.holding():
+        assert tasks._fresh_task("t1") is None
+        view.CURRENT.set(view.LedgerView(1, {"tasks": [{"id": "t1", "difficulty": "L"}], "phases": [{"id": "t1"}]}))
+        assert tasks._fresh_task("t1") == {"id": "t1", "difficulty": "L"}
+        assert tasks._fresh_task("t2") == {}
+
+
+def test_the_tasks_applier_names_every_moved_field_in_order() -> None:
+    ledger = Ledger()
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1", "difficulty": "L", "size": "big"}}.get)
+
+    with pytest.raises(RevisionConflict, match="^task t1 changed difficulty, size since the step read it$"):
+        apply(Write(TASKS, "t1", {"difficulty": "M"}, expected={"size": "", "difficulty": ""}))
+    assert ledger.updates == []
+
+
+def test_the_groups_applier_reads_no_expected_members_as_none() -> None:
+    ledger = GroupLedger()
+    apply = tasks.group_writer("sw", ledger, {"l1": {"id": "l1", "group_members": []}}.get)
+
+    apply(Write(tasks.GROUPS, "l1", []))
+
+    assert ledger.ungrouped == [("sw", "l1")]
+
+
+def test_the_grouping_release_returns_a_write_for_every_stopped_lead() -> None:
+    doc = {
+        "tasks": [
+            {"id": "l1", "state": "done", "group_members": ["m1"]},
+            {"id": "m1", "state": "open", "merged_into": "l1"},
+            {"id": "l2", "state": "done", "group_members": ["m2"]},
+            {"id": "m2", "state": "open", "merged_into": "l2"},
+        ]
+    }
+
+    found = tasks.release_writes(SimpleNamespace(grouping=grouping), "sw", None, doc)
+
+    assert [item.key for item in found if isinstance(item, Write)] == ["l1", "l2"]
+    assert len(found) == 4
+
+
+def test_dropped_writes_and_their_conflicts_must_pair_up() -> None:
+    write = Write(TASKS, "t1", "M")
+    record = engine.StepRecord("size", 0.0, 1.0, result=Result(()), dropped=(write, write), conflicts=("moved",))
+
+    with pytest.raises(ValueError, match="zip"):
+        actions([record])
+
+
+class ShortPool:
+    def __init__(self, max_workers: int) -> None:
+        self.max_workers = max_workers
+
+    def __enter__(self) -> "ShortPool":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def map(self, function: object, items: list[object]) -> list[object]:
+        return []
+
+
+def test_the_size_pass_refuses_a_pool_that_loses_a_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(difficulty, "ThreadPoolExecutor", ShortPool)
+    doc = {"tasks": [{"id": "t1", "state": "open", "territory": [], "kind": "ops"}]}
+
+    with pytest.raises(ValueError, match="zip"):
+        list(difficulty.sizes(doc))
