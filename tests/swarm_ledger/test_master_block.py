@@ -76,7 +76,7 @@ def test_incident_worker_publication_cannot_feed_ownerless_recovery():
 
     client = SimpleNamespace(update_task=guarded_update)
     store = SimpleNamespace(agents=lambda slug: [], claimant=lambda slug, task_id: None)
-    actions = tick._orphans("sw", store, client, rows)
+    actions = tick.agent_steps._orphans("sw", store, client, rows)
     assert actions == []
     assert doc["tasks"][0]["state"] == "blocked"
     assert not readiness.ready(rows["t1"], rows, doc, {}, "")

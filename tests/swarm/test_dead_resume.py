@@ -607,7 +607,7 @@ def test_reap_reports_every_lost_engineer_in_the_pass(store):
         runtime.live.discard(agent.name)
     rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
 
-    actions = tick_module._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
+    actions = tick_module.agent_steps._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
 
     assert actions == [f"lost {agent.name}, task {agent.task} reopened" for agent in engineers]
     assert len(engineers) == 2
@@ -628,7 +628,7 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     runtime.live.discard(agent.name)
     rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
 
-    actions = tick_module._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
+    actions = tick_module.agent_steps._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
 
     assert actions == [f"retired {agent.name} after a deliberate terminate, task t1 reopened"]
     assert runtime.homes[agent.name] == ["sw/t1"]
@@ -655,7 +655,7 @@ def test_a_deliberate_exit_overrides_a_pending_outage_recovery(store):
 
     assert resume.recovery_pending(store, "sw", agent) is False
     assert resume.recover_outages("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2) == []
-    actions = tick_module._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
+    actions = tick_module.agent_steps._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
 
     assert actions == [f"retired {agent.name} after a deliberate terminate, task t1 reopened"]
     assert runtime.resumed == []

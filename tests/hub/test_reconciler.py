@@ -277,7 +277,8 @@ def test_legacy_tick_leaves_event_owned_execution_recovery_to_the_reconciler(rig
     runtime = Mock()
     runtime.live_names.return_value = set()
     runtime.bindings.return_value = {}
-    assert getattr(tick, sweep)("rig", rig.store, rig.ledger, runtime, {"task": rig.row}, rig.clock()) == []
+    owner = {"_verify": tick.observe_steps, "_reap": tick.agent_steps}[sweep]
+    assert getattr(owner, sweep)("rig", rig.store, rig.ledger, runtime, {"task": rig.row}, rig.clock()) == []
     runtime.observe.assert_not_called()
     runtime.retire.assert_not_called()
     assert rig.store.agents("rig") == [rig.agent]

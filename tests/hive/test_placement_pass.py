@@ -78,7 +78,7 @@ def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setu
 
 
 def test_spawn_pass_ends_the_placement_cache_for_later_launches(setup):  # noqa: F811
-    from scripts.swarm.tick import _placement_pass, _spawn
+    from scripts.tick.steps.place import _placement_pass, _spawn
 
     task = {"id": "task", "title": "Launch on a hive"}
     write_hive(setup, excluded=["engineer"])

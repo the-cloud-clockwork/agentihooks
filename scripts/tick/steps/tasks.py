@@ -370,14 +370,36 @@ def _dispatcher_group(tick: Any, get: Get) -> Any:
     )
 
 
-def _settle(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(
-        tick._settle, get("slug"), get("config"), get("store"), get("ledger"), get("rows"), get("doc")
-    )
+def _settle(slug: Any, config: Any, store: Any, ledger: Any, rows: Any, doc: Any) -> Any:
+    agents = store.agents(slug)
+    if config.state == "stopping":
+        if agents:
+            return []
+        store.update(slug, state="stopped")
+        return ["stopped"]
+    if any(a.lane != tick.MASTER for a in agents):
+        return []
+    if config.state != "running" or any(tick._claimable(slug, store, rows, doc, lane) for lane in tick.LANES):
+        return []
+    store.update(slug, state="drained")
+    blocked = sum(1 for t in rows.values() if t.get("state") == "blocked" and not t.get("out_of_scope"))
+    waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
+    ledger.notify(slug, tick.freeze.notice(doc, rows.values(), tick.freeze.fix_phase(config)) + waiting)
+    return ["drained"]
 
 
-def _close_space(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(tick._close_space, get("slug"), get("config"), get("store"), get("runtime"))
+def _close_space(slug: Any, config: Any, store: Any, runtime: Any) -> Any:
+    if not store.agents(slug):
+        runtime.close_space(config)
+    return []
+
+
+def _settle_step(tick: Any, get: Get) -> Any:
+    return tick.skip_refused(_settle, get("slug"), get("config"), get("store"), get("ledger"), get("rows"), get("doc"))
+
+
+def _close_space_step(tick: Any, get: Get) -> Any:
+    return tick.skip_refused(_close_space, get("slug"), get("config"), get("store"), get("runtime"))
 
 
 STEPS = (
@@ -399,10 +421,12 @@ STEPS = (
     WriteStep("grouping release", TASK_PASSES, held(_grouping_release), writes=frozenset({GROUPS})),
     CallStep("dispatcher group", TASK_PASSES, held(_dispatcher_group)),
     CallStep(
-        "settle", CLOSE, held(_settle), frozenset({"spawn"}), frozenset({AGENTS, TASKS, SWARM}), frozenset({SWARM})
+        "settle", CLOSE, held(_settle_step), frozenset({"spawn"}), frozenset({AGENTS, TASKS, SWARM}), frozenset({SWARM})
     ),
-    CallStep("close space", CLOSE, held(_close_space)),
+    CallStep("close space", CLOSE, held(_close_space_step)),
 )
 
 for _step in STEPS:
     registry.register(_step)
+
+tick: Any = steps.import_module("scripts.swarm.tick")

@@ -117,7 +117,7 @@ def test_the_tick_master_wake_pass_completes_past_a_dangling_id(store, capsys):
     gone = dangle(store, seat)
     kept = store.send("operator", seat, "wake up")
     swarm = SimpleNamespace(redis=store.redis)
-    assert tick._woken("sw", SimpleNamespace(template="plain"), swarm, None) is True
+    assert tick.observe_steps._woken("sw", SimpleNamespace(template="plain"), swarm, None) is True
     assert_dropped(store, seat, [kept.id], capsys, gone)
 
 

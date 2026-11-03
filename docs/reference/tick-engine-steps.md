@@ -27,7 +27,11 @@ Every `CallStep` runs in lane `tick` with a declared budget and interval from
 spawn declares the prerequisites described below. Its constructor takes the step name, group, order and the
 call, `call(tick_module, get)`, where `get(key)` reads one value of the pass
 state. The call looks up the tick module's functions at run time, so tests
-that patch a function on `scripts.swarm.tick` still reach it.
+that patch a function on `scripts.swarm.tick` still reach it. An operation only
+steps call, such as `_reap`, `_spawn`, `_settle` or `_close_space`, lives in the
+step module that owns its step (`agents`, `masters`, `observe`, `place`,
+`tasks`), and a test patches it there; the moved body still reaches tick seams
+through the imported tick module.
 
 ## Measured budgets and declared intervals
 

@@ -181,9 +181,9 @@ def test_the_tick_leaves_a_live_operator_agent_until_it_exits(swarm):
     name = agent_up.up(swarm, "sw", OperatorRuntime(), "planner", 1000).name
     rt.live.add(name)
     config = swarm.config("sw")
-    assert tick._strays("sw", config, swarm, rt) == []
+    assert tick.agent_steps._strays("sw", config, swarm, rt) == []
     agent_up.retire(swarm, "sw", name, 2000)
-    assert tick._strays("sw", config, swarm, rt) == [f"reaped stray {name}"]
+    assert tick.agent_steps._strays("sw", config, swarm, rt) == [f"reaped stray {name}"]
 
 
 def _operator_launch(tmp_path, monkeypatch, **bounds):

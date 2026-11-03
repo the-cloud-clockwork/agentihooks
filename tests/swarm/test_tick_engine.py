@@ -37,7 +37,7 @@ def test_an_events_engine_swarm_still_reaps_a_worker_the_legacy_path_launched(st
 
 
 def test_an_events_engine_swarm_collects_no_worker_hive_acknowledgement(store):  # noqa: F811
-    from scripts.swarm.tick import _collect_acks
+    from scripts.tick.steps.place import _collect_acks
     from tests.swarm.test_tick import HiveAcks
 
     ledger, runtime = tasks(("t1", "eng")), HiveAcks()

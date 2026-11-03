@@ -352,7 +352,7 @@ def test_a_ready_task_no_longer_holds_a_busy_seat_and_is_never_reopened(released
     rows = {t["id"]: t for t in ledger.tasks("sw")}
     store.release("sw", "t1", AGENT)
     store.drop_agent("sw", AGENT)
-    assert tick._orphans("sw", store, ledger, rows) == []
+    assert tick.agent_steps._orphans("sw", store, ledger, rows) == []
     assert ledger.rows["t1"]["state"] == "pr" and ledger.rows["t1"]["claimed_by"] == AGENT
 
 
@@ -360,7 +360,7 @@ def test_the_reaper_retires_a_ready_agent_without_reopening_its_task(released):
     store, ledger, _, doc = released
     assert release(doc) == 0
     rows = {t["id"]: t for t in ledger.tasks("sw")}
-    assert tick._reap("sw", store, ledger, cli.HerdrRuntime(), rows, NOW) == [f"retired {AGENT}"]
+    assert tick.agent_steps._reap("sw", store, ledger, cli.HerdrRuntime(), rows, NOW) == [f"retired {AGENT}"]
     assert ledger.rows["t1"]["state"] == "pr" and ledger.rows["t1"]["claimed_by"] == AGENT
     assert store.handoff("sw", "t1") == doc.read_text()
 

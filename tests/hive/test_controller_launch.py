@@ -817,7 +817,8 @@ def live_order(setup, route="subscription"):
 @pytest.mark.parametrize("restart", ["reclaimed", ""])
 def test_a_finished_worker_receipt_is_collected_once_without_reviving_it(setup, restart, task_state):
     from scripts.swarm import controller
-    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
+    from scripts.swarm.tick import ACKNOWLEDGING
+    from scripts.tick.steps.place import _collect_acks
 
     request, order, ack = live_order(setup)
     store, slug = setup.store, setup.config.slug
@@ -864,7 +865,8 @@ def test_a_finished_worker_receipt_is_collected_once_without_reviving_it(setup, 
 @pytest.mark.parametrize("task_state", ["blocked", "claimed"])
 def test_a_live_worker_on_a_blocked_task_still_collects_its_runtime(setup, task_state):
     from scripts.swarm import controller
-    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
+    from scripts.swarm.tick import ACKNOWLEDGING
+    from scripts.tick.steps.place import _collect_acks
 
     _, order, _ = live_order(setup)
     store, slug = setup.store, setup.config.slug
@@ -920,7 +922,8 @@ def test_an_ended_worker_receipt_is_still_refused(setup):
 
 def test_all_successful_finished_blocked_collections_are_counted_in_one_pass(setup):
     from scripts.swarm.store import AgentRecord
-    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
+    from scripts.swarm.tick import ACKNOWLEDGING
+    from scripts.tick.steps.place import _collect_acks
 
     store, slug = setup.store, setup.config.slug
     workers = []

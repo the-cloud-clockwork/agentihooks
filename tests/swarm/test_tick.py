@@ -749,7 +749,7 @@ def test_a_refused_hive_acknowledgement_reopens_its_task(store, monkeypatch):
 
 
 def test_a_refused_acknowledgement_of_a_task_gone_from_the_ledger_names_the_task(store):
-    from scripts.swarm.tick import _collect_acks
+    from scripts.tick.steps.place import _collect_acks
 
     ledger, runtime = tasks(("t1", "eng")), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -2011,7 +2011,7 @@ def test_only_reopened_swarms_run_normal_tick_passes(store, monkeypatch, state):
     store.update("sw", state=state)
     seen = []
     monkeypatch.setattr(module.resume, "track_outages", lambda *args: seen.append("outages"))
-    monkeypatch.setattr(module, "_verify", lambda *args: seen.append("verify") or [])
+    monkeypatch.setattr(module.observe_steps, "_verify", lambda *args: seen.append("verify") or [])
     monkeypatch.setattr(module.pane_evidence, "sweep", lambda *args: seen.append("panes") or [])
     monkeypatch.setattr(store.execution_registry, "reconcile", lambda *args: seen.append("executions") or [])
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)

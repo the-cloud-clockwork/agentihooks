@@ -205,7 +205,7 @@ def test_tick_matches_golden(scenario: str, entry: str, monkeypatch: pytest.Monk
 @pytest.mark.feature("swarm-tick-characterisation")
 @pytest.mark.parametrize("entry", ["tick", "run_tick"])
 def test_dropped_reap_action_breaks_golden(entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    original = tick_module._reap
+    original = tick_module.agent_steps._reap
     dropped = []
 
     def drop_action(*args: Any, **kwargs: Any) -> list[str]:
@@ -214,7 +214,7 @@ def test_dropped_reap_action_breaks_golden(entry: str, monkeypatch: pytest.Monke
         dropped.append(actions[0])
         return actions[1:]
 
-    monkeypatch.setattr(tick_module, "_reap", drop_action)
+    monkeypatch.setattr(tick_module.agent_steps, "_reap", drop_action)
     record = replay("finished", entry, monkeypatch, tmp_path)
     assert dropped
     if os.environ.get("TICK_CHARACTERISATION_PLANT") == "1":

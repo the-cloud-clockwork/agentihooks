@@ -98,12 +98,12 @@ def _observe_fakes(monkeypatch: pytest.MonkeyPatch, store: _Store) -> list[tuple
     monkeypatch.setattr(tick_module, "_recover_master", _fake(seen, "recover", ["recovered"]))
     monkeypatch.setattr(tick_module.freeze, "watched", lambda slug, store, ledger, doc: {**doc, "watched": True})
     monkeypatch.setattr(automated_gc, "run", _fake(seen, "cleanup", ["cleaned"]))
-    monkeypatch.setattr(tick_module, "_spawn", _fake(seen, "spawn", ["spawned"]))
+    monkeypatch.setattr(tick_module.place, "_spawn", _fake(seen, "spawn", ["spawned"]))
     monkeypatch.setattr(tick_module.exits, "sweep", _fake(seen, "exits", ["exited"]))
     monkeypatch.setattr(tick_module.master_start, "observe", _fake(seen, "start watch", ["watched"]))
-    monkeypatch.setattr(tick_module, "_launch_checks", _fake(seen, "launch checks", ["checked"]))
+    monkeypatch.setattr(tick_module.observe_steps, "_launch_checks", _fake(seen, "launch checks", ["checked"]))
     monkeypatch.setattr(tick_module.resume, "track_outages", _fake(seen, "outages", None))
-    monkeypatch.setattr(tick_module, "_verify", _fake(seen, "verify", ["verified"]))
+    monkeypatch.setattr(tick_module.observe_steps, "_verify", _fake(seen, "verify", ["verified"]))
     monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: False)
 
     @contextmanager
@@ -111,7 +111,7 @@ def _observe_fakes(monkeypatch: pytest.MonkeyPatch, store: _Store) -> list[tuple
         seen.append(("placement", (runtime,)))
         yield
 
-    monkeypatch.setattr(tick_module, "_placement_pass", placement)
+    monkeypatch.setattr(tick_module.place, "_placement_pass", placement)
     return seen
 
 
@@ -171,9 +171,9 @@ def test_a_stopped_swarm_that_sleeps_finishes_the_pass(monkeypatch: pytest.Monke
     store = _Store("stopped")
     state, box = _state(store)
     monkeypatch.setattr(automated_gc, "run", _fake(seen, "cleanup", ["cleaned"]))
-    monkeypatch.setattr(tick_module, "_woken", lambda slug, config, store, ledger: False)
-    monkeypatch.setattr(tick_module, "_close_space", _fake(seen, "close", ["closed"]))
-    monkeypatch.setattr(tick_module, "_bin_closed", _fake(seen, "bin", ["binned"]))
+    monkeypatch.setattr(tick_module.observe_steps, "_woken", lambda slug, config, store, ledger: False)
+    monkeypatch.setattr(tick_module.task_steps, "_close_space", _fake(seen, "close", ["closed"]))
+    monkeypatch.setattr(tick_module.observe_steps, "_bin_closed", _fake(seen, "bin", ["binned"]))
     assert actions(engine.run_group("start", _ctx(state))) == ["cleaned", "closed", "binned"]
     assert box["finished"] is True
     assert [name for name, _ in seen] == ["cleanup", "close", "bin"]
@@ -187,10 +187,10 @@ def test_a_stopped_swarm_with_retired_tasks_awake_keeps_finishing(monkeypatch: p
     store = _Store("stopped", {"sw:master-retired-tasks": "1"})
     state, box = _state(store)
     monkeypatch.setattr(automated_gc, "run", lambda *args: [])
-    monkeypatch.setattr(tick_module, "_woken", lambda slug, config, store, ledger: False)
+    monkeypatch.setattr(tick_module.observe_steps, "_woken", lambda slug, config, store, ledger: False)
     monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: True)
-    monkeypatch.setattr(tick_module, "_close_space", lambda *args: [])
-    monkeypatch.setattr(tick_module, "_bin_closed", lambda *args: ["binned"])
+    monkeypatch.setattr(tick_module.task_steps, "_close_space", lambda *args: [])
+    monkeypatch.setattr(tick_module.observe_steps, "_bin_closed", lambda *args: ["binned"])
     assert actions(engine.run_group("start", _ctx(state))) == ["binned"]
     assert box["finished"] is True
 
@@ -199,7 +199,7 @@ def test_a_stopped_swarm_the_operator_wrote_to_pauses_to_start_the_master(monkey
     store = _Store("stopped", {"sw:master-retired-tasks": "1"})
     state, box = _state(store)
     monkeypatch.setattr(automated_gc, "run", lambda *args: ["cleaned"])
-    monkeypatch.setattr(tick_module, "_woken", lambda slug, config, store, ledger: False)
+    monkeypatch.setattr(tick_module.observe_steps, "_woken", lambda slug, config, store, ledger: False)
     monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: False)
     assert actions(engine.run_group("start", _ctx(state))) == [
         "cleaned",

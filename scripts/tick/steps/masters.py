@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from functools import partial
+from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
 
@@ -36,6 +37,45 @@ __all__ = [
 ]
 
 Get = Callable[[str], Any]
+
+tick: Any = import_module("scripts.swarm.tick")
+
+
+def _master_down(slug: Any, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: Any) -> Any:
+    """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
+    master took but never closed to pending so the next master receives it."""
+    live = runtime.live_names()
+    masters = [a for a in store.agents(slug) if a.lane == tick.MASTER and a.state != "finished"]
+    if config.state == "stopping" or any(
+        m.name in live or now_ms - m.started_at <= tick.STARTUP_GRACE_MS for m in masters
+    ):
+        return []
+    inbox, seat = tick.InboxStore(store.redis), tick.seat_address(slug, tick.MASTER)
+    waiting = [item for item in inbox.inbox(seat) if item.state not in tick.CLOSED and tick._operator_line(item)]
+    for item in waiting:
+        if item.state != "pending":
+            inbox.redirect(item.id, "swarm", seat, tick.REDELIVERED)
+    told = [item for item in waiting if tick.DOWN_TOLD not in (e.get("event") for e in inbox.history(item.id))]
+    for item in told:
+        inbox.note(item.id, tick.DOWN_TOLD, "swarm", tick.MASTER_DOWN, now_ms)
+    if not told:
+        return []
+    ledger.notify(slug, tick.MASTER_DOWN)
+    return [f"master down, told the operator about {len(told)} waiting lines"]
+
+
+def _night_watch(slug: Any, store: Any, ledger: Any, runtime: Any, doc: Any, now_ms: Any, sleeping: Any) -> Any:
+    from scripts.swarm.health import night_watch
+
+    def respawn() -> Any:
+        if tick.master_start.read(store, slug).get("alerted"):
+            store.redis.delete(store.key(slug, "master-start"))
+        with tick.PLACING:
+            return tick._master(slug, store.config(slug), store, runtime, now_ms, past_host=True)
+
+    return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
+
+
 MASTERS = "masters"
 SEATS = "master seats"
 DISPATCH = "dispatch seat"
@@ -145,9 +185,9 @@ def _prompt_stall(tick: Any, get: Get) -> Any:
     )
 
 
-def _master_down(tick: Any, get: Get) -> Any:
+def _master_down_step(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        tick._master_down, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
+        _master_down, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
     )
 
 
@@ -189,9 +229,9 @@ def _dispatch_seat(tick: Any, get: Get) -> Any:
     )
 
 
-def _night_watch(tick: Any, get: Get) -> Any:
+def _night_watch_step(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        tick._night_watch,
+        _night_watch,
         get("slug"),
         get("store"),
         get("ledger"),
@@ -212,12 +252,12 @@ STEPS = (
     CallStep("retire idle master", MASTERS, _held(_retire_idle_master)),
     CallStep("master stall", MASTERS, _held(_master_stall)),
     CallStep("prompt stall", MASTERS, _held(_prompt_stall)),
-    CallStep("master down", SEATS, _held(_master_down)),
+    CallStep("master down", SEATS, _held(_master_down_step)),
     CallStep("tick master", SEATS, _held(_tick_master)),
     CallStep("master scale", SEATS, _held(_master_scale)),
     CallStep("seat alarm", SEATS, _held(_seat_alarm)),
     CallStep("dispatch seat", DISPATCH, _held(_dispatch_seat)),
-    CallStep("night watch", WATCH, _held(_night_watch)),
+    CallStep("night watch", WATCH, _held(_night_watch_step)),
     CallStep("master alarm", WATCH, _held(_master_alarm)),
 )
 

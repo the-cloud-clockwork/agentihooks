@@ -56,7 +56,7 @@ def test_a_spawn_pass_times_each_part_inside_the_spawn_step(store, capsys):
         timing.named(tick_module._started),
     ]
     assert [part for part in parts if part not in steps] == []
-    spawn = steps.index(timing.named(tick_module._spawn))
+    spawn = steps.index(timing.named(tick_module.place._spawn))
     assert all(steps.index(part) < spawn for part in parts)
     assert {row["outcome"] for row in rows if row["step"] in parts} == {"success"}
     assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
@@ -67,7 +67,7 @@ def test_a_failed_launch_times_its_settlement_inside_the_spawn_step(store, capsy
     with timing.tick("sw"):
         tick("sw", store, ledger, runtime, now_ms=1_000)
     steps = [row["step"] for row in finished(capsys)]
-    assert steps.index(timing.named(tick_module._not_launched)) < steps.index(timing.named(tick_module._spawn))
+    assert steps.index(timing.named(tick_module._not_launched)) < steps.index(timing.named(tick_module.place._spawn))
     assert timing.named(tick_module._started) not in steps
     assert ledger.rows["t1"]["state"] == "open"
 
@@ -103,7 +103,7 @@ def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
     with timing.tick("sw"):
         tick("sw", store, ledger, runtime, now_ms=2_000)
     rows = finished(capsys)
-    reap = next(row for row in rows if row["step"] == timing.named(tick_module._reap))
+    reap = next(row for row in rows if row["step"] == timing.named(tick_module.agent_steps._reap))
     inside = [row for row in rows if reap["started"] <= row["started"] and row is not reap]
     inside = [row for row in inside if row["started"] + row["wall_s"] <= reap["started"] + reap["wall_s"]]
     pass_wide = [timing.named(tick_module._live_names), timing.named(legacy_agents)]
@@ -136,7 +136,7 @@ def test_a_reap_pass_goes_on_to_the_next_agent_after_a_skipped_one(store, capsys
         monkeypatch.setattr(reconciler, "legacy_agents", lambda *_: agents)
         capsys.readouterr()
         with timing.tick("sw"):
-            tick_module._reap("sw", store, ledger, runtime, rows, 2_000)
+            tick_module.agent_steps._reap("sw", store, ledger, runtime, rows, 2_000)
         return [row.get("agent") for row in finished(capsys) if row["step"] == timing.named(tick_module._watch_agent)]
 
     alone = watched(live)

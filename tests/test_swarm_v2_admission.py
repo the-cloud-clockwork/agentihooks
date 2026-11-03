@@ -434,7 +434,9 @@ def test_a_passed_launch_check_activates_the_task_reservation(monkeypatch):
         "clear_relaunched": lambda *args: None,
     }.items():
         monkeypatch.setattr(launch_check, name, value)
-    actions = tick_module._launch_checks("sw", store, ledger, runtime, ledger.rows, {}, data["clock_ms"] + 1)
+    actions = tick_module.observe_steps._launch_checks(
+        "sw", store, ledger, runtime, ledger.rows, {}, data["clock_ms"] + 1
+    )
     assert actions == [f"{agent.name} passed its launch check in 4 seconds"]
     assert sorted(gate.pending("sw", data["clock_ms"] + 1)) == ["t02", "t03"]
     assert gate.pending_execution_admission_total("sw")["activated"] == 1

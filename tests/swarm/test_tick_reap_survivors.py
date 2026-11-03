@@ -42,7 +42,7 @@ def test_reap_groups_agents_by_task_falling_back_to_name(store: RedisStore, monk
 
     monkeypatch.setattr(tick_module.pool, "fan_out", spying_fan_out)
 
-    actions = tick_module._reap("sw", store, None, _StubRuntime(), {}, 0)
+    actions = tick_module.agent_steps._reap("sw", store, None, _StubRuntime(), {}, 0)
 
     assert actions == []
     assert captured == [[[0, 1], [2]]]
@@ -69,7 +69,7 @@ def test_reap_keeps_taskless_agents_in_groups_of_their_own_names(
 
     monkeypatch.setattr(tick_module.pool, "fan_out", spying_fan_out)
 
-    assert tick_module._reap("sw", store, None, _StubRuntime(), {}, 0) == []
+    assert tick_module.agent_steps._reap("sw", store, None, _StubRuntime(), {}, 0) == []
     assert groups == [["agent-a"], ["agent-b"], ["agent-c", "agent-d"]]
 
 

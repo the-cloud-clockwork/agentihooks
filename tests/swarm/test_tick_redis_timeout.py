@@ -32,10 +32,14 @@ class TimingOutRuntime(FakeRuntime):
 def test_a_redis_timeout_in_the_conversations_step_lets_the_pass_finish(store, monkeypatch, capsys):
     observed, models, closed, failures = [], [], [], []
     monkeypatch.setattr(transfers, "observe", lambda *args: observed.append(args[1]))
-    real_models = tick_module._session_models
-    monkeypatch.setattr(tick_module, "_session_models", lambda *args: models.append(args) or real_models(*args))
-    real_close = tick_module._close_space
-    monkeypatch.setattr(tick_module, "_close_space", lambda *args: closed.append(args[0]) or real_close(*args))
+    real_models = tick_module.agent_steps._session_models
+    monkeypatch.setattr(
+        tick_module.agent_steps, "_session_models", lambda *args: models.append(args) or real_models(*args)
+    )
+    real_close = tick_module.task_steps._close_space
+    monkeypatch.setattr(
+        tick_module.task_steps, "_close_space", lambda *args: closed.append(args[0]) or real_close(*args)
+    )
     runtime = TimingOutRuntime()
     token = timing.ON_FAILURE.set(lambda name, exc: failures.append((name, type(exc).__name__)))
     try:
@@ -49,11 +53,11 @@ def test_a_redis_timeout_in_the_conversations_step_lets_the_pass_finish(store, m
     assert len(models) == 1
     assert closed == ["sw"]
     assert [failure for failure in failures if failure[1] == "TimeoutError"] == [
-        ("scripts.swarm.tick._conversations", "TimeoutError")
+        ("scripts.tick.steps.agents._conversations", "TimeoutError")
     ]
-    assert "skipped scripts.swarm.tick._conversations: its Redis read timed out" in actions
+    assert "skipped scripts.tick.steps.agents._conversations: its Redis read timed out" in actions
     assert (
-        "scripts.swarm.tick._conversations skipped, its Redis read timed out: Timeout reading from socket"
+        "scripts.tick.steps.agents._conversations skipped, its Redis read timed out: Timeout reading from socket"
         in capsys.readouterr().err
     )
 
