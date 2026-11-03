@@ -1242,7 +1242,7 @@ def test_the_pod_start_time_is_process_one_start_after_boot(tmp_path, monkeypatc
 
 
 def _member_reap(remote: SimpleNamespace, names: list[str]) -> SimpleNamespace:
-    """Reap a paneless hive member twice against a beating hive listing ``names``; return the agent, ledger and actions."""
+    """Reap a paneless hive member twice against a hive listing ``names``; return agent, ledger and actions."""
     from scripts.swarm import tick
     from scripts.swarm.pane import PaneObservation
 
