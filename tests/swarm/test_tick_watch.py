@@ -783,34 +783,45 @@ def test_the_repair_restarts_the_scheduler_once_per_stale_window_and_respawns_ev
     assert (len(restarts), respawns) == (2, ["sw", "other", "sw"])
 
 
-@pytest.mark.wall_clock
-def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its_bound():
-    import time
-
+def hung_repair(daemons: list[bool]) -> tuple[tick_watch.Repair, threading.Event]:
     release = threading.Event()
 
     def herdr_read() -> dict:
         release.wait(2)
         return {}
 
-    daemons = []
-
     def respawn(slug: str) -> list[str]:
         daemons.append(threading.current_thread().daemon)
         herdr_read()
         return ["spawned"]
 
-    repair = tick_watch.Repair(lambda: "restarted", respawn, bounds=(0.2, 0.4))
-    started = time.monotonic()
+    return tick_watch.Repair(lambda: "restarted", respawn, bounds=(0.2, 0.4)), release
+
+
+def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its_bound():
+    daemons = []
+    repair, release = hung_repair(daemons)
     try:
         actions = repair("sw", START)
     finally:
         release.set()
-    elapsed = time.monotonic() - started
 
     assert actions == ["restarted", "left the master respawn running after 0.4 seconds"]
-    assert 0.4 <= elapsed < 1.9
     assert daemons == [True]
+
+
+@pytest.mark.wall_clock
+def test_a_hung_herdr_read_returns_the_repair_before_the_read_ends():
+    import time
+
+    repair, release = hung_repair([])
+    started = time.monotonic()
+    try:
+        repair("sw", START)
+    finally:
+        release.set()
+
+    assert 0.4 <= time.monotonic() - started < 1.9
 
 
 def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_bound():
