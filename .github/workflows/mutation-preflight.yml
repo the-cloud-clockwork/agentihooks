@@ -730,7 +730,7 @@ jobs:
         if: always()
         run: |
           mkdir -p .mutation-killers
-          [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +
+          [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp {} .mutation-killers/ \;
           echo "Functions with a recorded killing test: $(find .mutation-killers -type f | wc -l)"
 
       - name: Upload the tests that killed mutants

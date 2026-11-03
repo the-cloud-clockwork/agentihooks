@@ -40,6 +40,8 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 BATCH_RUNNERS = 40
+RUNNER_WAVES = 2
+SHARD_CEILING = BATCH_RUNNERS * RUNNER_WAVES
 SHARD_SETUP_SECONDS = 180.0
 RECORD_RETRY_SECONDS = 10
 STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
@@ -607,7 +609,7 @@ def narrow(
 
 def shard_count(seconds: float, mutants: int, target: float, limit: int, budget: float = 1080) -> int:
     wanted = min(limit, math.ceil(seconds / (shard_workers() * target)))
-    needed = min(BATCH_RUNNERS, math.ceil(seconds / shard_capacity(shard_workers(), budget)))
+    needed = min(SHARD_CEILING, math.ceil(seconds / shard_capacity(shard_workers(), budget)))
     return max(1, min(mutants, max(wanted, needed)))
 
 

@@ -795,6 +795,18 @@ shards and the Proofs `tests` proof use to choose their pytest workers.
 The rule is `max(1, min(4, int(quota)))`, with four as the CPU count, so the
 variable can lower the planned workers but never raise them above four.
 
+### Shards past the batch runner pool
+
+The batch pool holds forty runners (`BATCH_RUNNERS` in `scripts.ci_mutation.plan`), and the planners may ask for twice that, eighty shards (`SHARD_CEILING`, two `RUNNER_WAVES`). Shards past the fortieth queue on the pool and start as the first wave finishes, so a change whose work exceeds forty shards is still graded whole; it takes about two shard budgets of wall time instead of one. The measured planner raises the shard count until the slowest shard fits its budget less setup, up to that ceiling.
+
+Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. When one mutant, or one unit of a split mutant, alone needs more than a shard holds, the message names that mutant and asks for its covering tests to be shortened or split, since no shard count or pull request split can grade it. Otherwise the message names the eighty shards in two waves of forty runners and asks for at least the change's worker seconds divided by what those eighty shards hold, and never fewer than two, pull requests.
+
+| Measured worker seconds at three workers | Shards | Result |
+|---|---|---|
+| up to 108000 | up to 40 | one wave |
+| 108001 to 216000 | 41 to 80 | two waves, every mutant graded |
+| over 216000, or one unit over 2700 | 80 | refused at plan time |
+
 ### What the worker count sizes
 
 | Planner call | Step | Effect of fewer workers |
@@ -1447,7 +1459,7 @@ These are implementation defaults, with no environment variable or workflow disp
 | `HEAD_SECONDS` | 20 traced seconds | Select the fastest covering tests up to this budget, always including at least one test when available |
 | `SLICE_SECONDS` | 120 traced seconds | Divide the remaining duration by this value, rounding up to choose the slice count |
 | Split limit | 10 slices | Cap a mutant's units; fewer than two slices leaves it unsplit |
-| Shard target and limit | 240 seconds, 10 shards | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
+| Shard target and limit | 240 seconds, 10 shards wanted; up to 80 shards when the budget needs them ([Shards past the batch runner pool](#shards-past-the-batch-runner-pool)) | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
 
 For example, ten covering tests of one second each form a ten-second head. Thirty more tests of twenty seconds each make a 600-second tail, split into five 120-second slices. Each unit runs the ten head tests and six tail tests on its own shard. All forty distinct tests remain covered, although the head runs five times. Unit cost is estimated as `5.6 + 1.25 * (head_seconds + slice_seconds)`, or 168.1 worker seconds here. A split mutant's total estimated cost includes every repeated head.
 
