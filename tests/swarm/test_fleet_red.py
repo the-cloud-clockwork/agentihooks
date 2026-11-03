@@ -458,6 +458,20 @@ def test_the_holder_marks_a_hold_and_posts_its_notice_once(store: RedisStore) ->
     assert ledger.notices == [("sw", "red", "held")]
 
 
+def test_the_holder_turns_a_refused_notice_into_a_conflict(store: RedisStore) -> None:
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    class Refusing:
+        def notice(self, slug: str, task_id: str, text: str) -> None:
+            raise LedgerRefused("refused")
+
+    key = store.key("sw", "fleet-red:red")
+
+    with pytest.raises(RevisionConflict, match="^the ledger refused the fleet red notice of task red$"):
+        fleet_red.holder(store, Refusing(), "sw")(Write(fleet_red.HOLDS, key, ("red", MINE, "held")))
+    assert store.redis.get(key) == MINE
+
+
 def test_the_releaser_forgets_every_lifted_hold_in_one_call(store: RedisStore) -> None:
     keys = tuple(store.key("sw", f"fleet-red:{name}") for name in ("a", "b"))
     for key in (*keys, store.key("sw", "fleet-red:c")):

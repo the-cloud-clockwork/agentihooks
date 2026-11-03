@@ -106,7 +106,7 @@ def _release_alert(tick: Any, get: Get) -> Any:
 
 
 def _fleet_red_notice(tick: Any, get: Get) -> Any:
-    keys = ("slug", "store", "ledger", "rows", "now_ms")
+    keys = ("slug", "store", "rows", "now_ms")
     return tick.skip_refused(fleet_red.notice_pass, *map(get, keys))
 
 
@@ -188,15 +188,17 @@ def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
-    """Return the appliers of a task group site: tasks and groups when the site holds a ledger and a swarm, and
-    fleet red listings when it holds a store."""
+    """Return the appliers of a task group site: tasks, groups and fleet red holds when the site holds a ledger and a
+    swarm, and fleet red listings and releases when it holds a store."""
     slug, ledger, store = state.get("slug"), state.get("ledger"), state.get("store")
-    found = (
-        {}
-        if ledger is None or not slug
-        else {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
-    )
-    return found if store is None else found | {fleet_red.LISTINGS: fleet_red.saver(store)}
+    found: dict[Domain, Callable[[Write], None]] = {}
+    if ledger is not None and slug:
+        found |= {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+        if store is not None:
+            found[fleet_red.HOLDS] = fleet_red.holder(store, ledger, slug)
+    if store is not None:
+        found |= {fleet_red.LISTINGS: fleet_red.saver(store), fleet_red.RELEASES: fleet_red.releaser(store)}
+    return found
 
 
 def _fresh_task(task_id: str) -> dict[str, Any] | None:
@@ -266,7 +268,7 @@ STEPS = (
     CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"})),
     CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),
     CallStep("release alert", REOPENS, held(_release_alert)),
-    WriteStep("fleet red notice", REOPENS, held(_fleet_red_notice), writes=frozenset({fleet_red.LISTINGS})),
+    WriteStep("fleet red notice", REOPENS, held(_fleet_red_notice), writes=fleet_red.DOMAINS),
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
     WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),
