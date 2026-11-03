@@ -255,25 +255,6 @@ def test_the_grouping_release_returns_guarded_group_writes_and_leaves_the_docume
     assert repr(doc) == before
 
 
-def test_the_release_pass_still_releases_through_the_ledger_directly() -> None:
-    doc = {
-        "tasks": [
-            {"id": "l1", "state": "done", "group_members": ["m1"]},
-            {"id": "m1", "state": "open", "merged_into": "l1"},
-        ]
-    }
-    ledger = GroupLedger()
-
-    assert grouping.release_pass("sw", None, ledger, doc) == [
-        f"released tasks m1 from task l1: its lead {grouping.RELEASE_CLOSED}"
-    ]
-    assert ledger.ungrouped == [("sw", "l1")]
-    assert doc["tasks"] == [{"id": "l1", "state": "done"}, {"id": "m1", "state": "open"}]
-    assert grouping.release_pass(
-        "sw", None, GroupLedger(refuse=True), {"tasks": [{"id": "l1", "state": "done", "group_members": ["m1"]}]}
-    ) == ["skipped releasing the group under task l1: the ledger refused its write"]
-
-
 def test_the_fresh_task_reads_the_held_view_and_is_none_without_one() -> None:
     with view.holding():
         assert tasks._fresh_task("t1") is None

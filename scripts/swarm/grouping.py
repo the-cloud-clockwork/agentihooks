@@ -50,22 +50,6 @@ def group_pass(slug, config, store, ledger, doc):
     return actions
 
 
-def release_pass(slug: str, store: Any, ledger: Any, doc: dict) -> list[str]:
-    known = {t["id"]: t for t in doc["tasks"]}
-    actions = []
-    for lead_id, why, released in releases(slug, store, doc):
-        try:
-            ledger.ungroup_tasks(slug, lead_id)
-        except LedgerRefused:
-            actions.append(f"skipped releasing the group under task {lead_id}: the ledger refused its write")
-            continue
-        known[lead_id].pop("group_members")
-        for member in released:
-            del known[member]["merged_into"]
-        actions.append(released_action(lead_id, why, released))
-    return actions
-
-
 def releases(slug: str, store: Any, doc: dict) -> list[tuple[str, str, list[str]]]:
     """Return each group lead that stopped, why, and the members it releases, computed from ``doc`` without writing."""
     known = {t["id"]: t for t in doc["tasks"]}

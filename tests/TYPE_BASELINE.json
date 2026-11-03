@@ -597,7 +597,7 @@
   "scripts/swarm/github_reads.py": 91,
   "scripts/swarm/github_sampler.py": 2,
   "scripts/swarm/grafana_alerts.py": 84,
-  "scripts/swarm/grouping.py": 252,
+  "scripts/swarm/grouping.py": 244,
   "scripts/swarm/health/activity.py": 209,
   "scripts/swarm/health/checks.py": 65,
   "scripts/swarm/health/findings.py": 439,
