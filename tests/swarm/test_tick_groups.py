@@ -206,7 +206,7 @@ def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
     assert [name for name, _ in seen][-2:] == ["wrapper commands", "wrapper status"]
 
 
-def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
+def test_a_wrapper_value_left_past_its_budget_ends_the_tick_naming_the_value_and_the_step(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -226,7 +226,10 @@ def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
 
     monkeypatch.setattr(snapshot_job, "start", start)
     try:
-        assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == []
+        assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == [
+            "pass ended early: no step stored started, the pass left snapshot job"
+        ]
+        assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
     finally:
         release.set()
         running = engine._RUNNING.get(("sw", "snapshot job"))
