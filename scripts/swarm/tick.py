@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -216,10 +217,27 @@ class _PassView:
         return self._state.get(key) if domain == steps.PASS else None
 
 
-def run_group(name: str, **state: object) -> list[str]:
-    """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions."""
+def run_group(name: str, **state: Any) -> list[str]:
+    """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions.
+
+    Actions of slow lane steps that end after the group returns are printed when they end.
+    """
     ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
-    return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state)))
+    box: Mapping[str, object] = state.get("box", {})
+    printing = partial(_print_actions, box)
+    return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=printing))
+
+
+def _print_actions(box: Mapping[str, object], records: tuple[engine.StepRecord, ...]) -> None:
+    """Print each action the handed off steps returned, each step that failed with its error, and the exception a
+    held step stored in the pass ``box``, one per line."""
+    for action in steps.actions(records):
+        print(action)
+    for record in records:
+        if record.error:
+            print(f"slow lane step {record.name} failed: {record.error}")
+    if "raised" in box:
+        print(f"a slow lane step held {box['raised']!r}")
 
 
 @reaper.scanning_pass
