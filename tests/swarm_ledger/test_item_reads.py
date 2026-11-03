@@ -21,6 +21,7 @@ STATE = {
         {"id": "t4", "title": "Hive docs", "lane": "eng", "state": "done"},
         {"id": "t5", "title": "Hive chart", "lane": "eng", "state": "open", "out_of_scope": True},
     ],
+    "freezes": [{"id": "z1", "verb": "freeze", "target": "phases/p1", "by": "operator", "at": 1, "reason": ""}],
     "_meta": {"rev": 1},
 }
 
@@ -61,8 +62,26 @@ def test_get_prints_one_item_read_through_the_ledger_api(reads, capsys, monkeypa
     assert reads == [(SLUG, item, False)]
 
 
+@pytest.mark.feature("ledger-item-reads")
+def test_get_tasks_prints_every_task_row_as_json_through_the_collection_read(reads, capsys, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "get", "tasks"])
+    ledger.main()
+    rows = json.loads(capsys.readouterr().out)
+    assert [row["id"] for row in rows] == ["t1", "t2", "t3", "t4", "t5"]
+    assert rows[3] == {"id": "t4", "title": "Hive docs", "lane": "eng", "state": "done"}
+    assert reads == [(SLUG, "tasks", True)]
+
+
+@pytest.mark.feature("ledger-item-reads")
+def test_get_freezes_prints_every_freeze_and_focus_record_as_json(reads, capsys, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "get", "freezes"])
+    ledger.main()
+    assert json.loads(capsys.readouterr().out) == STATE["freezes"]
+    assert reads == [(SLUG, "freezes", True)]
+
+
 @pytest.mark.parametrize(
-    "item", ["chat/c1", "tasks/", "tasks/a/b", "tasks/t1?state=done", "tasks/a#b", "tasks/.", "tasks/.."]
+    "item", ["chat", "phases", "followups", "priorities", "freezes/z1", "tasksx", "chat/c1", "tasks/", "tasks/a/b", "tasks/t1?state=done", "tasks/a#b", "tasks/.", "tasks/.."]
 )
 @pytest.mark.feature("ledger-item-reads")
 def test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities(item):
@@ -108,7 +127,7 @@ def test_get_names_the_item_forms_when_it_refuses_one(capsys):
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["--slug", SLUG, "get", "chat/c1"])
     err = capsys.readouterr().err
-    assert "argument item: name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>\n" in err
+    assert "argument item: name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes\n" in err
 
 
 def test_get_and_tasks_document_their_forms(capsys):
@@ -117,6 +136,6 @@ def test_get_and_tasks_document_their_forms(capsys):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
     out = " ".join(capsys.readouterr().out.split())
-    assert "get print one task, phase, follow up or priority through the ledger API" in out
-    assert "item tasks/<id>, phases/<id>, followups/<id> or priorities/<id>" in out
+    assert "get print one task, phase, follow up or priority, or every task or freeze, through the ledger API" in out
+    assert "item tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes" in out
     assert "tasks list open tasks, one line each, filtered by state, lane or title text" in out
