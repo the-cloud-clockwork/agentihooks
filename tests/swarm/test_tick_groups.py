@@ -23,12 +23,16 @@ pytestmark = pytest.mark.unit
 
 TICK_GROUPS = [
     "start",
+    "pass setup",
     "observe",
     "agents",
     "masters",
+    "drained resume",
     "tasks",
+    "reopen passes",
     "task passes",
     "place",
+    "placement notices",
     "placement acks",
     "master seats",
     "placement",

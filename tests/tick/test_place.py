@@ -127,12 +127,52 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
     assert declared["spawn"] == (budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), frozenset({AGENTS, TASKS}))
     assert {name: value for name, value in declared.items() if name not in {"preempt", "spawn"}} == {
         name: (frozenset(), frozenset(), frozenset())
-        for name in ("collect acks", "codex hook order", "rank pass", "bottleneck remedy")
+        for name in (
+            "quota notice",
+            "lost runner",
+            "time left",
+            "collect acks",
+            "codex hook order",
+            "rank pass",
+            "bottleneck remedy",
+        )
     }
+    assert [step.name for step in engine.group_steps(place.NOTICES)] == ["quota notice", "lost runner", "time left"]
     registered = [step for wave in registry.waves() for step in wave]
     for step in place.STEPS:
         assert step in registered
         assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
+
+
+def test_the_placement_notices_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import lost_runner, quota_notice, time_left
+
+    calls: list[tuple[Any, ...]] = []
+
+    def skip_refused(function: Any, *args: Any) -> list[str]:
+        calls.append((function, *args))
+        return [f"ran {len(calls)}"]
+
+    state = {
+        "slug": "sw",
+        "config": "config",
+        "store": "store",
+        "ledger": "ledger",
+        "runtime": "runtime",
+        "doc": "doc",
+        "now_ms": 7,
+        "box": {},
+    }
+    assert _run(place.NOTICES, SimpleNamespace(skip_refused=skip_refused), state, monkeypatch) == [
+        "ran 1",
+        "ran 2",
+        "ran 3",
+    ]
+    assert calls == [
+        (quota_notice.refresh, "sw", "config", "store", "ledger", "runtime", 7),
+        (lost_runner.sweep, "sw", "config", "store", 7),
+        (time_left.refresh, "sw", "store", "ledger", "runtime", "config", "doc"),
+    ]
 
 
 def test_collect_acks_then_the_codex_hook_order_while_awake(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
