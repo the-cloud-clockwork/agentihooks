@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from scripts.inbox import wake
-from scripts.swarm import cli, command_runner, controller, snapshot_job
+from scripts.swarm import cli, command_runner, controller, reboot, snapshot_job
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
@@ -203,10 +203,47 @@ def test_the_wrapper_runs_the_tick_with_the_fenced_pass_state_and_keeps_its_acti
 
     monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
     monkeypatch.setattr(cli, "tick", ticked)
-    assert "tick acted" in cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    monkeypatch.setattr(reboot, "boot_pass", lambda *args: ["rebooted"])
+    found = cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert found[found.index("rebooted") :][:2] == ["rebooted", "tick acted"]
     [(slug, held, used, runtime, now)] = calls
     assert (slug, held, used, now) == ("sw", swarm, ledger, 9_000_000)
     assert isinstance(runtime, controller.FencedRuntime)
+
+
+def test_a_failed_reboot_pass_raises_before_the_tick_runs(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    calls: list[tuple[Any, ...]] = []
+
+    def failed(*args: Any) -> list[str]:
+        raise RuntimeError("reboot failed")
+
+    monkeypatch.setattr(cli, "tick", lambda *args: calls.append(args) or [])
+    monkeypatch.setattr(reboot, "boot_pass", failed)
+    with pytest.raises(RuntimeError, match="^reboot failed$"):
+        cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert calls == []
+
+
+def test_a_failed_tick_raises_out_of_the_tick_wrapper(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+
+    def failed(*args: Any) -> list[str]:
+        raise RuntimeError("tick failed")
+
+    monkeypatch.setattr(cli, "tick", failed)
+    with pytest.raises(RuntimeError, match="^tick failed$"):
+        cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert "wrapper relay" not in [name for name, _ in seen]
 
 
 def test_a_tick_value_left_past_its_budget_drops_the_tick_actions_and_the_wrapper_goes_on(
