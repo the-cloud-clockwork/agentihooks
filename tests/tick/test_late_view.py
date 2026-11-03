@@ -85,6 +85,6 @@ def test_a_late_view_keeps_events_metrics_and_heartbeat_running(
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
     finally:
         release.set()
-        worker = engine._RUNNING.get("tick view")
+        worker = engine._RUNNING.get(("sw", "tick view"))
         if worker is not None:
             worker.join(30.0)
