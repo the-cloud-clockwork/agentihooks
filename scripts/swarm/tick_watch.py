@@ -92,14 +92,12 @@ class Repair:
         self.bounds = bounds
 
     def __call__(self, slug: str, now: int) -> list[str]:
-        actions = []
         with self.lock:
             due = self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS
             if due:
                 self.restarted = now
         deadline = time.monotonic() + self.bounds[1]
-        if due:
-            actions += bounded(lambda: [self.restart()], min(self.bounds), "the scheduler restart")
+        actions = bounded(lambda: [self.restart()], min(self.bounds), "the scheduler restart") if due else []
         left = max(deadline - time.monotonic(), 0)
         return actions + bounded(lambda: self.respawn(slug), left, "the master respawn")
 

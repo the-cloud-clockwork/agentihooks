@@ -792,7 +792,10 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
         release.wait(30)
         return {}
 
+    daemons = []
+
     def respawn(slug: str) -> list[str]:
+        daemons.append(threading.current_thread().daemon)
         herdr_read()
         return ["spawned"]
 
@@ -806,6 +809,7 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
 
     assert actions == ["restarted", "left the master respawn running after 0.4 seconds"]
     assert 0.4 <= elapsed < 10
+    assert daemons == [True]
 
 
 def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_bound():
@@ -839,7 +843,7 @@ def test_a_step_failing_after_its_bound_reports_the_error_on_stderr(capsys):
     release.set()
     assert ended.wait(5)
     for _ in range(100):
-        if "failed after its bound" in capsys.readouterr().err:
+        if "the master respawn failed after its bound: ValueError: herdr gone" in capsys.readouterr().err:
             return
         threading.Event().wait(0.05)
     pytest.fail("the late error never reached stderr")
