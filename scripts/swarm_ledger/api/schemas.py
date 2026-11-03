@@ -132,6 +132,7 @@ TYPES = {
     "follow_up": {"type": "boolean"},
     "workstation": {"type": "boolean"},
     "release": {"type": "boolean"},
+    "only": {"type": "boolean"},
     "if_plan_lines_missing": {"type": "boolean"},
     "rounds": {"type": "integer", "minimum": 0},
     "escalated": {"type": "boolean"},
