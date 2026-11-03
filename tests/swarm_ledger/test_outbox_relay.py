@@ -1,8 +1,9 @@
 import pytest
 
 from scripts.events import memory
+from scripts.events.bus import PayloadTooLarge
 from scripts.events.config import BusConfig
-from scripts.events.envelope import Envelope
+from scripts.events.envelope import Envelope, create
 from scripts.swarm_ledger.repository import outbox, sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
@@ -112,3 +113,46 @@ def test_a_row_another_relay_marked_while_this_one_published_stays_sent_once(rep
     assert outbox.relay(repo, RacingRelay(), batch=1) == 1
     assert [event.id for _, event in bus.events.entries] == [row_id for row_id, *_ in created]
     assert sent(repo) == sorted(row_id for row_id, *_ in created)
+
+
+class RefuseFirst:
+    def __init__(self, events):
+        self.events = events
+        self.refused = []
+
+    def publish(self, subject, event):
+        if not self.refused:
+            self.refused.append(event.id)
+            raise PayloadTooLarge(f"{subject}: payload 1048800 exceeds server limit 1048576")
+        self.events.publish(subject, event)
+
+
+@pytest.mark.feature("ledger-event-relay")
+def test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it(repo, bus, capsys):
+    ordered = [row_id for row_id, *_ in rows(repo)]
+    refusing = RefuseFirst(bus.events)
+    assert outbox.relay(repo, refusing) == 2
+    assert refusing.refused == ordered[:1]
+    assert [event.id for _, event in bus.events.entries] == ordered[1:]
+    assert sent(repo) == sorted(ordered)
+    assert f"row {ordered[0]} skipped" in capsys.readouterr().err
+    assert outbox.relay(repo, bus.events) == 0
+
+
+@pytest.mark.feature("ledger-event-relay")
+def test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields(repo, bus):
+    fat = create(
+        type="phase.changed",
+        swarm="ledger",
+        entity="phase",
+        key="p9",
+        version=9,
+        author="ledger",
+        data={"id": "p9", "title": "Nine", "description": "", "done": False, "comments": ["x" * 2_000_000]},
+    )
+    with repo.connect() as connection, connection:
+        connection.execute(outbox.INSERT, (fat.id, "ledger", 9, "swarm.ledger.phase.p9", fat.encode().decode()))
+    outbox.relay(repo, bus.events)
+    [published] = [event for _, event in bus.events.entries if event.id == fat.id]
+    assert published.data == {"id": "p9", "title": "Nine", "description": "", "done": False}
+    assert (published.type, published.key, published.version) == ("phase.changed", "p9", 9)

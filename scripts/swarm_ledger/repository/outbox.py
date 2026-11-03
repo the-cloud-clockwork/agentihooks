@@ -1,9 +1,13 @@
+import dataclasses
 import re
 import sqlite3
+import sys
 import time
 from collections.abc import Callable
+from typing import Any
 
 from scripts.events import catalogue, envelope, subjects
+from scripts.events.bus import EventLog, PayloadTooLarge
 
 ENTITIES = {"tasks": "task", "phases": "phase"}
 INSERT = "INSERT INTO outbox VALUES (?, ?, ?, ?, ?)"
@@ -58,15 +62,28 @@ def now_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
-def relay(repository, events, batch: int = BATCH, clock: Callable[[], int] = now_ms) -> int:
-    """Publish up to a batch of unsent rows under their row id, which the bus dedupes within its window."""
+def relay(repository: Any, events: EventLog, batch: int = BATCH, clock: Callable[[], int] = now_ms) -> int:
+    """Publish up to a batch of unsent rows under their row id, which the bus dedupes within its window.
+
+    A row the bus refuses as too large is marked sent and reported, so it never holds back the rows after it.
+    """
     with repository.connect() as connection:
         pending = connection.execute(PENDING, (batch,)).fetchall()
         for row_id, subject, value in pending:
-            events.publish(subject, envelope.Envelope.decode(value.encode()))
+            try:
+                events.publish(subject, slim(envelope.Envelope.decode(value.encode())))
+            except PayloadTooLarge as error:
+                sys.stderr.write(f"ledger outbox: row {row_id} skipped: {error}\n")
             with connection:
                 connection.execute(SENT, (row_id, clock()))
     return len(pending)
+
+
+def slim(event: envelope.Envelope) -> envelope.Envelope:
+    """The event with a changed entity's data cut to its catalogued fields, for rows written before the cut."""
+    if not event.type.endswith(".changed") or event.type not in catalogue.LEDGER:
+        return event
+    return dataclasses.replace(event, data=catalogue.filled(event.entity, event.data))
 
 
 def migrate(connection) -> None:

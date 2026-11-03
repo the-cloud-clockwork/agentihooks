@@ -48,5 +48,5 @@ def refusal(event: Envelope) -> str | None:
 
 
 def filled(entity: str, item: dict) -> dict:
-    """The item with each catalogued field it lacks set to its default; present values are kept."""
-    return {**DEFAULTS[entity], **item}
+    """The item's catalogued fields, each one it lacks set to its default; fields outside the catalogue are left out."""
+    return {"id": item["id"], **{key: item.get(key, default) for key, default in DEFAULTS[entity].items()}}

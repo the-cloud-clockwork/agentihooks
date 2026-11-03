@@ -932,12 +932,14 @@
     {
       "id": "ledger-event-relay",
       "origin": "inventory",
-      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order, and a crash between publish and mark never duplicates an event.",
+      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
       "seam": "The ledger outbox relay",
       "tests": [
         "tests/swarm_ledger/test_outbox_relay.py::test_the_relay_publishes_each_unsent_row_on_its_subject_with_the_row_id_and_marks_it_sent",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_sent_row_is_never_published_again",
-        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event"
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields"
       ]
     },
     {
