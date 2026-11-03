@@ -799,7 +799,7 @@ variable can lower the planned workers but never raise them above four.
 
 The batch pool holds forty runners (`BATCH_RUNNERS` in `scripts.ci_mutation.plan`), and the planners may ask for twice that, eighty shards (`SHARD_CEILING`, two `RUNNER_WAVES`). Shards past the fortieth queue on the pool and start as the first wave finishes, so a change whose work exceeds forty shards is still graded whole; it takes about two shard budgets of wall time instead of one. The measured planner raises the shard count until the slowest shard fits its budget less setup, up to that ceiling.
 
-Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. Its message names the eighty shards in two waves of forty runners and asks for at least the change's worker seconds divided by what those eighty shards hold, and never fewer than two, pull requests.
+Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. When one mutant, or one unit of a split mutant, alone needs more than a shard holds, the message names that mutant and asks for its covering tests to be shortened or split, since no shard count or pull request split can grade it. Otherwise the message names the eighty shards in two waves of forty runners and asks for at least the change's worker seconds divided by what those eighty shards hold, and never fewer than two, pull requests.
 
 | Measured worker seconds at three workers | Shards | Result |
 |---|---|---|

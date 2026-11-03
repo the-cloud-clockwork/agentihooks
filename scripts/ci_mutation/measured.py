@@ -271,16 +271,28 @@ def budget_overrun(plan: dict[str, Any], budget: float) -> str:
     """Describe a plan whose slowest shard cannot finish within the shard budget, or return an empty string."""
     slowest: float = max(plan["shard_worker_seconds"])
     workers: int = plan["workers"]
-    if slowest <= shard_capacity(workers, budget):
+    shard = shard_capacity(workers, budget)
+    if slowest <= shard:
         return ""
+    units: dict[str, list[float]] = plan.get("unit_costs", {})
+    largest, name = max(
+        [(cost, name) for name, cost in plan["costs"].items() if name not in units]
+        + [(max(costs), name) for name, costs in units.items()]
+    )
+    budgeted = f"against the {budget:.0f} second shard budget less {SHARD_SETUP_SECONDS:.0f} seconds of setup"
+    if largest > shard:
+        return (
+            f"Mutant {name} alone needs {largest:.0f} worker seconds on one shard, {budgeted}, so no shard count"
+            " or pull request split can grade it; shorten or split the tests that cover it."
+        )
     total: float = plan["estimated_worker_seconds"]
-    capacity = SHARD_CEILING * shard_capacity(workers, budget)
+    capacity = SHARD_CEILING * shard
     parts = max(2, math.ceil(total / capacity))
     return (
         f"The slowest mutation shard needs {slowest:.0f} worker seconds, {slowest / workers:.0f} seconds on"
-        f" {workers} workers, against the {budget:.0f} second shard budget less {SHARD_SETUP_SECONDS:.0f} seconds"
-        f" of setup. The change needs {total:.0f} worker seconds and {SHARD_CEILING} shards in {RUNNER_WAVES} waves"
-        f" of {BATCH_RUNNERS} runners hold at most {capacity:.0f}, so split it into at least {parts} pull requests."
+        f" {workers} workers, {budgeted}. The change needs {total:.0f} worker seconds and {SHARD_CEILING} shards in"
+        f" {RUNNER_WAVES} waves of {BATCH_RUNNERS} runners hold at most {capacity:.0f}, so split it into at least"
+        f" {parts} pull requests."
     )
 
 

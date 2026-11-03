@@ -680,7 +680,11 @@ def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path
 
 
 def _measured_plan_cli(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loads: list[float], budget: int | None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    loads: list[float],
+    budget: int | None,
+    costs: dict[str, float] | None = None,
 ) -> tuple[int, Path, Path]:
     from scripts.ci_mutation import measured
 
@@ -695,6 +699,7 @@ def _measured_plan_cli(
         "estimated_worker_seconds": sum(loads),
         "shards": len(loads),
         "assignments": {},
+        "costs": costs or {"scripts.sample.x__mutmut_1": 10.0},
         "splits": {},
         "shard_worker_seconds": loads,
         "workers": 3,
@@ -705,7 +710,7 @@ def _measured_plan_cli(
     return measured.main(), folder, output
 
 
-def test_measured_cli_fails_at_plan_time_when_ten_shards_cannot_fit_the_budget(
+def test_measured_cli_fails_at_plan_time_when_the_shard_ceiling_cannot_fit_the_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     status, folder, output = _measured_plan_cli(tmp_path, monkeypatch, [31000.0] * 10, None)
@@ -719,6 +724,39 @@ def test_measured_cli_fails_at_plan_time_when_ten_shards_cannot_fit_the_budget(
         " needs 310000 worker seconds and 80 shards in 2 waves of 40 runners hold at most 216000, so split it into"
         " at least 2 pull requests." in text
     )
+
+
+def test_measured_cli_names_a_mutant_that_no_shard_can_hold_instead_of_asking_for_pull_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    costs = {"scripts.sample.x__mutmut_1": 2701.0, "scripts.sample.x__mutmut_2": 10.0}
+    status, _, output = _measured_plan_cli(tmp_path, monkeypatch, [2701.0, 10.0], None, costs)
+    text = capsys.readouterr().out
+    assert status == 1
+    assert not output.exists()
+    assert (
+        "::error title=Mutation plan over budget::Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker"
+        " seconds on one shard, against the 1080 second shard budget less 180 seconds of setup, so no shard"
+        " count or pull request split can grade it; shorten or split the tests that cover it." in text
+    )
+    assert "pull requests." not in text
+
+
+def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_shard() -> None:
+    from scripts.ci_mutation.measured import budget_overrun
+
+    planned = {
+        "costs": {"scripts.sample.x__mutmut_1": 3000.0, "scripts.sample.x__mutmut_2": 100.0},
+        "estimated_worker_seconds": 3100.0,
+        "shard_worker_seconds": [2800.0, 300.0],
+        "workers": 3,
+    }
+    split = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2000.0, 1000.0]}}, 1080)
+    assert split.startswith("The slowest mutation shard needs 2800 worker seconds")
+    assert split.endswith("hold at most 216000, so split it into at least 2 pull requests.")
+    whole = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2701.0, 299.0]}}, 1080)
+    assert whole.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker seconds on one shard")
+    assert budget_overrun(planned, 1080).startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000")
 
 
 @pytest.mark.parametrize(
