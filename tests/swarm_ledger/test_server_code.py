@@ -202,5 +202,7 @@ def test_two_threads_of_one_server_record_at_once_and_leave_one_whole_record(
 
     monkeypatch.setattr(Path, "replace", interleaved)
     server_code.record(tmp_path, 7, 1, (), digest="main")
-    assert server_code.loaded(tmp_path)["stamp"] == 1
+    held = server_code.loaded(tmp_path)
+    assert held is not None
+    assert held["stamp"] == 1
     assert sorted(p.name for p in tmp_path.glob(f"{server_code.RECORD}*")) == [server_code.RECORD]
