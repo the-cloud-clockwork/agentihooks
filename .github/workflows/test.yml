@@ -4277,6 +4277,7 @@ jobs:
       - name: Mint the token that reads the branch preflight kill memory
         id: app-token
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('.mutation-stats/killers/*') == ''
+        continue-on-error: true
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -4294,11 +4295,11 @@ jobs:
           BRANCH: ${{ github.head_ref }}
         run: |
           runs="repos/$GITHUB_REPOSITORY/actions/workflows/mutation-preflight.yml/runs"
-          same=$(gh api "$runs?head_sha=$HEAD&event=push&per_page=20" --jq '.workflow_runs[] | select(.head_branch == env.BRANCH) | .id')
-          newest=$(gh api "$runs?branch=$BRANCH&event=push&per_page=20" --jq '.workflow_runs[].id')
+          same=$(gh api "$runs?head_sha=$HEAD&event=push&per_page=20" --jq '.workflow_runs[] | select(.head_branch == env.BRANCH) | .id') || same=""
+          newest=$(gh api "$runs?branch=$BRANCH&event=push&per_page=20" --jq '.workflow_runs[].id') || newest=""
           while read -r run; do
             [[ -n "$run" ]] || continue
-            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select((.expired | not) and (.name | startswith("mutation-killers-")))] | length')
+            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select((.expired | not) and (.name | startswith("mutation-killers-")))] | length') || continue
             if (( kept > 0 )); then
               echo "Seeding the first plan with the kill memory of Mutation preflight run $run"
               echo "id=$run" >> "$GITHUB_OUTPUT"

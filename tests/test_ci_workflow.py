@@ -2113,6 +2113,7 @@ def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memo
     assert {key: value for key, value in mint["with"].items() if key.startswith("permission-")} == {
         "permission-actions": "read"
     }
+    assert mint["continue-on-error"] is True
     assert find["if"] == "steps.app-token.outcome == 'success'"
     assert find["continue-on-error"] is True
     assert find["env"] == {
@@ -2149,8 +2150,9 @@ def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memo
         (["41"], {"41": 0, "42": 3}, "42"),
         ([], {"42": 1}, "42"),
         (["41"], {}, ""),
+        (["41"], {"41": -1, "42": 2}, "42"),
     ],
-    ids=["same-head", "same-head-without-memory", "newest-on-branch", "none"],
+    ids=["same-head", "same-head-without-memory", "newest-on-branch", "none", "artifact-listing-fails"],
 )
 def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
     tmp_path: Path, same: list[str], kept: dict[str, int], chosen: str
@@ -2162,7 +2164,9 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
         "head_sha=abc": {"workflow_runs": head},
         "branch=topic": {"workflow_runs": branch},
         **{
-            f"runs/{run}/artifacts": {
+            f"runs/{run}/artifacts": None
+            if count < 0
+            else {
                 "artifacts": [{"name": f"mutation-killers-{shard}", "expired": False} for shard in range(count)]
                 + [{"name": "mutation-killers-9", "expired": True}, {"name": "mutation-report-0", "expired": False}]
             }
@@ -2174,10 +2178,12 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
     binary.mkdir()
     (binary / "gh").write_text(
         "#!/usr/bin/env bash\n"
+        "set -o pipefail\n"
         'echo "$2" >> "$CALLS"\n'
         "python3 -c 'import json, sys\n"
         "url = sys.argv[1]\n"
         "found = [body for key, body in json.load(open(sys.argv[2])).items() if key in url]\n"
+        "if found and found[0] is None: sys.exit(1)\n"
         'print(json.dumps(found[0] if found else {"artifacts": [], "workflow_runs": []}))\' "$2" "$RESPONSES"'
         ' | jq -r "$4"\n'
     )
