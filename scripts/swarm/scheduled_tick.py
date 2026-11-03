@@ -34,6 +34,7 @@ KEEP = ("HOME", "LANG", "LOGNAME", "SHELL", "USER", "XDG_RUNTIME_DIR", "XDG_DATA
 ROOT = Path(__file__).resolve().parents[2]
 LOCK = "swarm-tick"
 HELD_FD = "AGENTIHOOKS_SWARM_TICK_LOCK_FD"
+PROC = Path("/proc")
 
 
 def ensure(scheduler: Scheduler) -> str:
@@ -137,23 +138,42 @@ def _signal_group(pgid: int, number: int, killpg: Callable[[int, int], None]) ->
     return True
 
 
-def _sweep(pgid: int, killpg: Callable[[int, int], None]) -> None:
-    """End every process left in a failed pass's group: SIGTERM, then SIGKILL after the sweep grace."""
+def _group_alive(pgid: int) -> bool:
+    """True while any process other than a zombie still sits in the process group, read from /proc."""
+    for entry in PROC.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        if fields[2] == str(pgid) and fields[0] != "Z":
+            return True
+    return False
+
+
+def _sweep(pgid: int, killpg: Callable[[int, int], None], alive: Callable[[int], bool]) -> None:
+    """End every process left in a pass's group: SIGTERM, then SIGKILL after the sweep grace."""
     for number in (signal.SIGTERM, signal.SIGKILL):
-        if not _signal_group(pgid, number, killpg):
+        if not alive(pgid):
             return
+        _signal_group(pgid, number, killpg)
         deadline = time.monotonic() + SWEEP_S
         while time.monotonic() < deadline:
-            if not _signal_group(pgid, 0, killpg):
+            if not alive(pgid):
                 return
             time.sleep(0.2)
 
 
-def _finish(tick: subprocess.Popen, killpg: Callable[[int, int], None] = os.killpg) -> int:
+def _finish(
+    tick: subprocess.Popen,
+    killpg: Callable[[int, int], None] = os.killpg,
+    alive: Callable[[int], bool] = _group_alive,
+) -> int:
     """Wait for the tick pass, and after a timed out or failed pass end every child left in its process group."""
     code, timed_out = _ended(tick, killpg)
     if code or timed_out:
-        _sweep(tick.pid, killpg)
+        _sweep(tick.pid, killpg, alive)
     return code
 
 
