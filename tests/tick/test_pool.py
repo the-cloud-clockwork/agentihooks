@@ -264,7 +264,7 @@ def test_eager_refuses_steps_whose_needs_never_end() -> None:
 
     steps = (Step("a", action, frozenset({"b"})), Step("b", action, frozenset({"a"})))
     with pool.running(workers=2) as found, pytest.raises(ValueError) as raised:
-        engine._eager(steps, context(), found)
+        engine._eager(steps, context(), found, {})
     assert str(raised.value) == "steps ['a', 'b'] wait on needs that never end"
 
 

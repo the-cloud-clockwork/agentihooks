@@ -4,10 +4,8 @@ import math
 import re
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 
 from hooks.classifier import Answer, ClassifierError, code_rules, decide, definitions, runner
-from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm_ledger import ledger_kinds
 
 PER_TICK = 5
@@ -25,18 +23,6 @@ INFRA_RE = re.compile(
     r"(?<![a-z0-9])(kubernetes|k8s|helm|argo|argocd|deploy(?:s|ing|ment|ments)?|infra(?:structure)?)(?![a-z0-9])",
     re.IGNORECASE,
 )
-
-
-def size_pass(slug: str, ledger: Any, doc: dict) -> list[str]:
-    actions = []
-    for task_id, fields in sizes(doc):
-        try:
-            ledger.update_task(slug, task_id, fields)
-        except LedgerRefused:
-            actions.append(f"skipped sizing task {task_id}: the ledger refused its write")
-            continue
-        actions.append(sized_action(task_id, fields))
-    return actions
 
 
 def sizes(doc: dict) -> Iterator[tuple[str, dict]]:

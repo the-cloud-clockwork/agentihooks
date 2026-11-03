@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -11,7 +12,7 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import engine, pool, view
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.records import RevisionConflict
-from scripts.tick.step import Context, Domain, Lane, Result, Write
+from scripts.tick.step import Context, Domain, Lane, Result, View, Write
 from scripts.tick.steps import actions, actions_of, tasks
 
 pytestmark = pytest.mark.unit
@@ -167,11 +168,12 @@ def test_the_size_pass_returns_its_sizes_as_guarded_task_writes() -> None:
     fields = {"difficulty": "S", "difficulty_source": "rule"}
     tick = SimpleNamespace(
         difficulty=SimpleNamespace(
-            sizes=lambda doc: [("t1", fields)] if doc == "doc" else [], sized_action=difficulty.sized_action
+            sizes=lambda doc: [("t1", fields)] if doc is marker else [], sized_action=difficulty.sized_action
         )
     )
+    marker: dict[str, object] = {"tasks": []}
 
-    assert tasks.size_writes(tick, "doc") == [
+    assert tasks.size_writes(tick, marker) == [
         Write(tasks.SIZES, "t1", fields, expected={"difficulty": ""}),
         "sized task t1 S by rule",
     ]
@@ -187,7 +189,9 @@ def test_the_size_step_splits_actions_from_writes(monkeypatch: pytest.MonkeyPatc
     (step,) = [step for step in tasks.STEPS if step.name == "size pass"]
     state: dict[str, object] = {"doc": "doc", "box": {}}
 
-    found = step.run(Context(SimpleNamespace(read=lambda domain, key: state.get(key)), Deadline.after(60.0)))
+    found = step.run(
+        Context(cast(View, SimpleNamespace(read=lambda domain, key: state.get(key))), Deadline.after(60.0))
+    )
 
     assert found.writes == (
         Write(actions_of("size pass"), "size pass", ["sized task t1 S by rule"]),
@@ -195,19 +199,6 @@ def test_the_size_step_splits_actions_from_writes(monkeypatch: pytest.MonkeyPatc
     )
     assert tasks.SIZES in step.writes
     assert TASKS not in step.writes
-
-
-def test_the_size_pass_sizes_then_writes_through_the_ledger_directly() -> None:
-    ledger = Ledger()
-    doc = {"tasks": [{"id": "t1", "state": "open", "territory": [], "kind": "ops"}]}
-
-    assert difficulty.size_pass("sw", ledger, doc) == ["sized task t1 L by rule"]
-    assert ledger.updates == [
-        ("sw", "t1", {"difficulty": "L", "difficulty_source": "rule", "difficulty_confidence": 1.0})
-    ]
-    assert difficulty.size_pass("sw", Ledger(refuse=True), doc) == [
-        "skipped sizing task t1: the ledger refused its write"
-    ]
 
 
 class GroupLedger:

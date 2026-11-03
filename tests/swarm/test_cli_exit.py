@@ -26,7 +26,8 @@ def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, mon
     else:
         ledger.rows["t1"]["depends_on"] = ["t2"]
         ledger.rows["t2"].update(state="blocked")
-    difficulty.size_pass("sw", ledger, ledger.state("sw"))
+    for task_id, fields in difficulty.sizes(ledger.state("sw")):
+        ledger.update_task("sw", task_id, fields)
     before = copy.deepcopy(ledger.rows)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")

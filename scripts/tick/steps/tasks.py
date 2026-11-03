@@ -84,12 +84,33 @@ def size_writes(tick: Any, doc: dict[str, Any]) -> list[str | Write]:
     return found
 
 
-class WriteStep(CallStep):
+class WriteStep:
     """A task step whose call returns action lines and the task writes the engine applies with compare and set."""
+
+    def __init__(
+        self,
+        name: str,
+        group: str,
+        call: Callable[[Any, Get], Any],
+        writes: frozenset[Domain] = frozenset(),
+    ) -> None:
+        """Take the name, group, budgets and domains of the call step running ``call``."""
+        base = CallStep(name, group, call, writes=writes)
+        self.name = base.name
+        self.group = base.group
+        self.call = base.call
+        self.lane = base.lane
+        self.budget_s = base.budget_s
+        self.interval_s = base.interval_s
+        self.needs = base.needs
+        self.reads = base.reads
+        self.writes = base.writes
 
     def run(self, ctx: Context) -> Result:
         """Run the call against the pass state, returning its actions and its writes."""
-        found = self.call(steps.import_module("scripts.swarm.tick"), partial(ctx.view.read, PASS)) or []
+        found = cast(
+            list[object], self.call(steps.import_module("scripts.swarm.tick"), partial(ctx.view.read, PASS)) or []
+        )
         writes = tuple(item for item in found if isinstance(item, Write))
         lines = [item for item in found if not isinstance(item, Write)]
         return Result((Write(actions_of(self.name), self.name, lines), *writes))
