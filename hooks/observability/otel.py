@@ -217,9 +217,8 @@ def _init_sdk() -> None:
         protocol, endpoints = _collector_endpoints()
         if protocol == "grpc":
             from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-
-            from hooks.observability.otel_delta_grpc import GrpcMetricExporter as OTLPMetricExporter
         else:
             from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter

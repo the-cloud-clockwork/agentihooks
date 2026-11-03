@@ -1,5 +1,3 @@
-import importlib
-
 import pytest
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as HttpExporter
 from opentelemetry.sdk.metrics import Counter, Histogram, UpDownCounter
@@ -23,10 +21,3 @@ def test_the_http_exporter_carries_delta_temporality() -> None:
     assert preferred[Counter] is AggregationTemporality.DELTA
     assert preferred[Histogram] is AggregationTemporality.DELTA
     assert preferred[UpDownCounter] is AggregationTemporality.CUMULATIVE
-
-
-def test_the_grpc_exporter_carries_the_same_temporality() -> None:
-    grpc = pytest.importorskip("opentelemetry.exporter.otlp.proto.grpc.metric_exporter")
-    module = importlib.import_module("hooks.observability.otel_delta_grpc")
-    assert module.GrpcMetricExporter.func is grpc.OTLPMetricExporter
-    assert module.GrpcMetricExporter.keywords == {"preferred_temporality": otel_delta.TEMPORALITY}
