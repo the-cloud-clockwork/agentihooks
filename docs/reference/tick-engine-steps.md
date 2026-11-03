@@ -46,10 +46,13 @@ that update automatically when new reports arrive.
 | `metrics record` | 18.905 s | 29 s | 600 s |
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
-seconds. This change declares the intervals; the sequential group runner
-still runs each group at its existing site and does not skip a step merely
-because its interval has not elapsed. Interval scheduling belongs to the
-later cadence executor.
+seconds. The group runner runs each group at its site on every pass and does
+not skip a step because its interval has not elapsed.
+`scripts.tick.engine.interval_s(step, cadence)` gives a step in lane `slow`
+the larger of its declared interval and the slow lane cadence from
+`AGENTIHOOKS_TICK_CADENCE`, and leaves every other step at its own interval;
+no pass reads it yet. See
+[Cadence](../pillars/swarm.md#cadence).
 
 A step with no report row uses `UNMEASURED_S`, a ten second p95, giving a
 fifteen second budget. It still needs an explicit timing table entry. An
@@ -294,7 +297,7 @@ The delivered proof and limitations are recorded in
 | `Undeclared step timing` at import | Declare that exact step name in `MEASURED` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
-| Changing `interval_s` does not reduce call frequency | The interval is declared metadata until cadence scheduling is applied |
+| Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |

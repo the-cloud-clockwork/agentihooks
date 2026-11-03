@@ -64,6 +64,10 @@ orphan and left out of every row.
 - **Load budget.** CI runs a simulated pass and grades its `pass_p95_s` against a budget that only shrinks; see
   [Tick load budget](tick-load-budget.md).
 
+`AGENTIHOOKS_TICK_CADENCE` does not change any figure in the report today: it sets the slow lane cadence, which no
+pass reads yet, the scheduler cron stays every minute, and every pass still runs every step. See
+[Cadence](../pillars/swarm.md#cadence) and [Swarm Tick](configuration.md#swarm-tick).
+
 ## Troubleshooting
 
 | Symptom | Cause and action |
