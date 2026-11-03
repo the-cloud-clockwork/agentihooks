@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.596 · 2026-11-03
+
+### 2026-11-03 · 01e7409aacec · #9473 · @nestorcolt
+
+**Document the source control port tools, its swarm callers and the gh command gate**
+
+This change adds documentation to the tick adapters reference covering the full source control port delivered under task tc-d4: all twenty `SourceControl` operations and their underlying GitHub calls and records, the enqueue-before-merge rule for branches with a merge queue, every swarm caller of the port with its builder, deadline and refusal, and the `swarm-source-control-port` Semgrep gate with its now-minimal allowlist. It matters because it gives operators a single, accurate reference for how GitHub access is gated, declared, and tested, closing the loop on the port work and making the gate's intent auditable going forward.
+
 ## v2.17.595 · 2026-11-02
 
 ### 2026-11-02 · 93312a65d28c · #9292 · @agenticore-app
