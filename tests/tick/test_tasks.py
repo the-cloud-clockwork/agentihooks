@@ -6,7 +6,16 @@ from typing import Any
 import pytest
 
 import scripts.swarm.cli  # noqa: F401
-from scripts.swarm import claim_hold, difficulty, grouping
+from scripts.swarm import (
+    claim_hold,
+    dev_red,
+    difficulty,
+    fleet_red,
+    grouping,
+    prerequisite_wait,
+    promotion_watch,
+    release_wait,
+)
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -76,7 +85,9 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
         "dispatcher group",
     ]
     assert [step.name for step in engine.group_steps(tasks.CLOSE)][-2:] == ["settle", "close space"]
-    assert [step.group for step in tasks.STEPS] == [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
+    assert [step.group for step in tasks.STEPS] == (
+        [tasks.DRAINED] * 2 + [tasks.REOPENS] * 5 + [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
+    )
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
         assert step in registered
@@ -94,6 +105,66 @@ def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest
         (grouping.release_pass, "sw", "store", "ledger", "doc"),
         ("dispatcher group", "sw", "config", "store", "ledger", "doc", 7),
     ]
+
+
+def test_the_reopen_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    found = _run(tasks.REOPENS, _tick(calls), _pass(), monkeypatch)
+    assert found == ["ran 1", "ran 2", "ran 3", "ran 4", "ran 5"]
+    assert calls == [
+        (dev_red.reopen_pass, "sw", "config", "store", "ledger", "rows"),
+        (prerequisite_wait.reopen_pass, "sw", "store", "ledger", "rows"),
+        (promotion_watch.refresh, "sw", "config", "store", "ledger", "doc", 7),
+        (release_wait.alert_pass, "sw", "config", "ledger", "doc"),
+        (fleet_red.notice_pass, "sw", "store", "ledger", "rows", 7),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sleeping", "state", "claimable", "expected", "asked"),
+    [
+        (False, "drained", ("ci",), ["new tasks, running again"], ["eng", "ci"]),
+        (False, "drained", ("eng",), ["new tasks, running again"], ["eng"]),
+        (True, "drained", ("eng", "ci"), [], []),
+        (False, "running", ("eng", "ci"), [], []),
+        (False, "drained", (), [], ["eng", "ci"]),
+    ],
+)
+def test_a_drained_swarm_with_claimable_work_runs_again(
+    monkeypatch: pytest.MonkeyPatch,
+    sleeping: bool,
+    state: str,
+    claimable: tuple[str, ...],
+    expected: list[str],
+    asked: list[str],
+) -> None:
+    updates: list[tuple[str, str]] = []
+    seen: list[tuple[Any, ...]] = []
+    store = SimpleNamespace(update=lambda slug, state: updates.append((slug, state)) or "resumed")
+
+    def claimable_in(slug: str, store_seen: Any, rows: Any, doc: Any, lane: str) -> bool:
+        seen.append((slug, store_seen, rows, doc, lane))
+        return lane in claimable
+
+    def sleeping_of(slug: str, store_seen: Any, rows: Any) -> bool:
+        seen.append((slug, store_seen, rows))
+        return sleeping
+
+    lifetime = SimpleNamespace(sleeping=sleeping_of)
+    tick = SimpleNamespace(LANES=("eng", "ci"), _claimable=claimable_in, lifetime=lifetime)
+    box: dict[str, Any] = {"config": "old"}
+    state_of = {**_pass(box), "store": store, "config": SimpleNamespace(state=state)}
+    assert _run(tasks.DRAINED, tick, state_of, monkeypatch) == expected
+    assert box["sleeping"] is sleeping
+    assert seen.pop(0) == ("sw", store, "rows")
+    assert box["config"] == ("resumed" if expected else "old")
+    assert updates == ([("sw", "running")] if expected else [])
+    assert seen == [("sw", store, "rows", "doc", lane) for lane in asked]
+
+
+@pytest.mark.parametrize(("box", "expected"), [({"sleeping": False}, False), ({"sleeping": True}, True), ({}, True)])
+def test_a_swarm_reads_asleep_when_the_sleeping_step_left_no_answer(box: dict[str, Any], expected: bool) -> None:
+    assert tasks.sleeping_of(box) is expected
 
 
 def test_settle_then_close_space_close_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
