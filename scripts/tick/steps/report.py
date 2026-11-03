@@ -230,7 +230,7 @@ STEPS = (
     CallStep("metrics record", "wrapper metrics", held(_metrics), frozenset({"health findings"}), lane=SLOW),
     CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
     CallStep("inbox wake", "wrapper metrics", held(_inbox_wake)),
-    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), lane=SLOW),
+    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job)),
     CallStep("last tick", "wrapper metrics", held(_last_tick)),
     CallStep("heartbeat", "after", held(_heartbeat)),
     CallStep("status publish", "wrapper status", held(_status_publish)),
