@@ -142,6 +142,18 @@
       ]
     },
     {
+      "id": "swarm-tick-early-end-stamp",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-early-end-stamp",
+      "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick.",
+      "seam": "scripts.swarm.cli.run_tick ending on scripts.tick.steps.Left, with the left step names kept on scripts.tick.steps.PassBox",
+      "tests": [
+        "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
+        "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
+        "tests/tick/test_early_end.py::test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once"
+      ]
+    },
+    {
       "id": "swarm-tick-late-view",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2334",
