@@ -2033,6 +2033,54 @@ def test_tests_mutation_refines_shards_and_merges_split_units():
     assert "exit 1" in finish["run"]
 
 
+def test_tests_mutation_carries_kill_memory_to_the_next_plan() -> None:
+    jobs = _mutation_workflow()["jobs"]
+    restore = "Restore the tests that killed this branch's earlier mutants"
+    key = "mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    prefix = "mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-"
+    for name, before in (
+        ("mutation-refine", "Refine mutation shards from measured statistics"),
+        ("mutation-shard", "Mutate changed Python files"),
+        ("mutation", "Merge the shard reports"),
+    ):
+        names = [step.get("name") for step in jobs[name]["steps"]]
+        step = jobs[name]["steps"][names.index(restore)]
+        assert step["uses"] == "actions/cache/restore@v4"
+        assert step["with"] == {"path": ".mutation-stats/killers", "key": key, "restore-keys": prefix}
+        assert step["env"] == {"SEGMENT_DOWNLOAD_TIMEOUT_MINS": "1"}
+        assert names.index(restore) < names.index(before)
+    shard = {step.get("name"): step for step in jobs["mutation-shard"]["steps"]}
+    forwarded = "needs.mutation-plan.outputs.forwarded != 'true'"
+    assert shard[restore]["if"] == forwarded
+    assert "if" not in {step.get("name"): step for step in jobs["mutation-refine"]["steps"]}[restore]
+    collect = shard["Collect the tests that killed mutants"]
+    assert collect["if"] == f"always() && {forwarded}"
+    assert "find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +" in collect["run"]
+    upload = shard["Upload the tests that killed mutants"]
+    assert upload["if"] == f"always() && {forwarded}"
+    assert upload["with"]["name"] == "mutation-killers-${{ matrix.shard }}"
+    assert upload["with"]["path"] == ".mutation-killers/"
+    merged = [step.get("name") for step in jobs["mutation"]["steps"]]
+    steps = {step.get("name"): step for step in jobs["mutation"]["steps"]}
+    assert steps[restore]["if"] == forwarded
+    download = steps["Download the tests that killed mutants"]
+    assert download["if"] == forwarded
+    assert download["continue-on-error"] is True
+    retry = steps["Download the tests that killed mutants, attempt 2"]
+    assert retry["if"] == "steps.download-the-tests-that-killed-mutants.outcome == 'failure'"
+    assert retry["with"] == download["with"]
+    assert download["with"] == {
+        "pattern": "mutation-killers-*",
+        "path": ".mutation-stats/killers",
+        "merge-multiple": True,
+    }
+    keep = steps["Keep the tests that killed mutants for this branch's next plan"]
+    assert keep["uses"] == "actions/cache/save@v4"
+    assert keep["with"] == {"path": ".mutation-stats/killers", "key": key}
+    assert keep["if"] == "${{ !cancelled() && " + forwarded + " && hashFiles('.mutation-stats/killers/*') != '' }}"
+    assert merged.index(download["name"]) < merged.index(keep["name"]) < merged.index("Merge the shard reports")
+
+
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
     job = spec["jobs"]["mutation-shard"]
@@ -2240,6 +2288,8 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
                 "Check for merged test stats",
                 "Check out the protected mutation grader",
                 "Grade the shard report from the protected grader",
+                "Restore the tests that killed this branch's earlier mutants",
+                "Collect the tests that killed mutants",
             )
         )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
