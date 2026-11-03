@@ -703,7 +703,7 @@ def test_measured_cli_fails_at_plan_time_when_ten_shards_cannot_fit_the_budget(
 @pytest.mark.parametrize(
     ("loads", "budget", "status"), [([2700.0, 10.0], None, 0), ([2701.0, 10.0], None, 1), ([2700.0, 10.0], 1079, 1)]
 )
-def test_measured_cli_accepts_a_shard_that_exactly_fills_its_budget(
+def test_measured_cli_gates_a_shard_against_its_budget_less_setup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
