@@ -169,11 +169,28 @@ def test_step_runs_through_timing_call() -> None:
     with mock.patch.object(engine.timing, "within", return_value=Result()) as call:
         record = engine.run_step(step, context(clock))
     budget, function, ctx = call.call_args.args
-    assert call.call_args.kwargs == {"lane": "main"}
+    assert call.call_args.kwargs == {"lane": "main", "name": "timed"}
     assert budget == 5.0
     assert function == step.run
     assert ctx.deadline.expires_at == 105.0
     assert record.result == Result()
+
+
+def test_registered_step_records_and_reports_under_its_own_name() -> None:
+    import json
+
+    import fakeredis
+
+    from scripts.swarm import tick_report, timing
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    with timing.tick("sw", store), timing.pass_record(store, "sw"):
+        engine.run_step(FakeStep("spawn", done), context(Clock()))
+    steps = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
+    passes = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:passes"))]
+    assert [row["step"] for row in steps] == ["spawn"]
+    assert [row["step"] for row in tick_report.summarize(passes, steps)["steps"]] == ["spawn"]
 
 
 def test_tick_stop_is_not_swallowed() -> None:
