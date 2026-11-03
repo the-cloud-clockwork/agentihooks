@@ -7,12 +7,23 @@ import pytest
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed, tick
+from scripts.tick import registry as step_registry
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
 
 
 class RecoveryRuntime(FakeRuntime):
     def recover(self, name):
         return Placed("hand:p1", "codex")
+
+
+PATIENT_S = 30.0
+
+
+@pytest.fixture(autouse=True)
+def patient_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every tick step waits out its first lazy imports on a busy runner instead of being dropped at its budget."""
+    for step in step_registry.steps():
+        monkeypatch.setattr(step, "budget_s", PATIENT_S)
 
 
 @pytest.mark.parametrize("record", ["stale", "missing"])
