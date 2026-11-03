@@ -381,8 +381,10 @@ def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preser
     assert plan_shards({str(i): 1000 for i in range(11)})["shards"] == 10
 
 
-def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_shards(monkeypatch):
-    from scripts.ci_mutation.measured import BATCH_RUNNERS, SHARD_SETUP_SECONDS, plan_shards, shard_capacity
+def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_shards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.ci_mutation.measured import SHARD_CEILING, SHARD_SETUP_SECONDS, plan_shards, shard_capacity
 
     monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
     assert SHARD_SETUP_SECONDS == 180.0
@@ -391,12 +393,14 @@ def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_s
     planned = plan_shards(costs, limit=10, budget=1080)
     assert planned["shards"] == 15
     assert max(planned["shard_worker_seconds"]) == 2560 <= 3 * (1080 - 180)
-    assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == BATCH_RUNNERS == 40
+    assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == 60
+    assert plan_shards({str(index): 5000 for index in range(90)}, budget=1080)["shards"] == SHARD_CEILING == 80
     assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
     assert plan.shard_count(3 * 900 * 15, 500, 120, 10) == 15
     assert plan.shard_count(3 * 900 * 15 + 1, 500, 120, 10) == 16
     assert plan.shard_count(3 * 900 * 15, 12, 120, 10) == 12
-    assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == BATCH_RUNNERS
+    assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == SHARD_CEILING
+    assert plan.shard_count(3 * 900 * 50, 500, 120, 10) == 50
     assert plan.shard_count(3 * 120 * 4, 500, 120, 10) == 4
     assert plan_shards({"a": 3241, "b": 1}, target=10**6, limit=1)["shards"] == 2
     assert plan_shards({"a": 2700, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 2
@@ -406,6 +410,20 @@ def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_s
     roomy = plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2180)
     assert roomy["shards"] == 2
     assert plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2000)["shards"] == 3
+
+
+def test_a_plan_over_the_runner_pool_grades_every_mutant_in_a_second_wave(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.ci_mutation.measured import BATCH_RUNNERS, budget_overrun, plan_shards, shard_capacity
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    costs = {f"scripts.sample.x__mutmut_{index}": 170.0 for index in range(680)}
+    planned = plan_shards(costs, budget=1080)
+    assert planned["estimated_worker_seconds"] == 115600 > BATCH_RUNNERS * shard_capacity(3, 1080) == 108000
+    assert planned["shards"] == 46 > BATCH_RUNNERS
+    assert sorted(planned["assignments"]) == sorted(costs)
+    assert set(planned["assignments"].values()) == set(range(46))
+    assert max(planned["shard_worker_seconds"]) == 2550
+    assert budget_overrun(planned, 1080) == ""
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():
@@ -662,7 +680,11 @@ def test_measured_cli_asks_for_early_probes_only_when_a_mutant_is_split(tmp_path
 
 
 def _measured_plan_cli(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loads: list[float], budget: int | None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    loads: list[float],
+    budget: int | None,
+    costs: dict[str, float] | None = None,
 ) -> tuple[int, Path, Path]:
     from scripts.ci_mutation import measured
 
@@ -677,6 +699,7 @@ def _measured_plan_cli(
         "estimated_worker_seconds": sum(loads),
         "shards": len(loads),
         "assignments": {},
+        "costs": costs or {"scripts.sample.x__mutmut_1": 10.0},
         "splits": {},
         "shard_worker_seconds": loads,
         "workers": 3,
@@ -687,7 +710,7 @@ def _measured_plan_cli(
     return measured.main(), folder, output
 
 
-def test_measured_cli_fails_at_plan_time_when_ten_shards_cannot_fit_the_budget(
+def test_measured_cli_fails_at_plan_time_when_the_shard_ceiling_cannot_fit_the_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     status, folder, output = _measured_plan_cli(tmp_path, monkeypatch, [31000.0] * 10, None)
@@ -698,9 +721,44 @@ def test_measured_cli_fails_at_plan_time_when_ten_shards_cannot_fit_the_budget(
     assert (
         "::error title=Mutation plan over budget::The slowest mutation shard needs 31000 worker seconds,"
         " 10333 seconds on 3 workers, against the 1080 second shard budget less 180 seconds of setup. The change"
-        " needs 310000 worker seconds and 10 shards hold at most 27000, so split it into at least 12 pull requests."
-        in text
+        " needs 310000 worker seconds and 80 shards in 2 waves of 40 runners hold at most 216000, so split it into"
+        " at least 2 pull requests." in text
     )
+
+
+def test_measured_cli_names_a_mutant_that_no_shard_can_hold_instead_of_asking_for_pull_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    costs = {"scripts.sample.x__mutmut_1": 2701.0, "scripts.sample.x__mutmut_2": 10.0}
+    status, _, output = _measured_plan_cli(tmp_path, monkeypatch, [2701.0, 10.0], None, costs)
+    text = capsys.readouterr().out
+    assert status == 1
+    assert not output.exists()
+    assert (
+        "::error title=Mutation plan over budget::Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker"
+        " seconds on one shard, against the 1080 second shard budget less 180 seconds of setup, so no shard"
+        " count or pull request split can grade it; shorten or split the tests that cover it." in text
+    )
+    assert "pull requests." not in text
+
+
+def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_shard() -> None:
+    from scripts.ci_mutation.measured import budget_overrun
+
+    planned = {
+        "costs": {"scripts.sample.x__mutmut_1": 3000.0, "scripts.sample.x__mutmut_2": 100.0},
+        "estimated_worker_seconds": 3100.0,
+        "shard_worker_seconds": [2800.0, 300.0],
+        "workers": 3,
+    }
+    split = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2000.0, 1000.0]}}, 1080)
+    assert split.startswith("The slowest mutation shard needs 2800 worker seconds")
+    assert split.endswith("hold at most 216000, so split it into at least 2 pull requests.")
+    fits = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2700.0, 300.0]}}, 1080)
+    assert fits.startswith("The slowest mutation shard needs 2800 worker seconds")
+    whole = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2701.0, 299.0]}}, 1080)
+    assert whole.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker seconds on one shard")
+    assert budget_overrun(planned, 1080).startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000")
 
 
 @pytest.mark.parametrize(
@@ -918,7 +976,7 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
         (4800, 3, 3),
         (36000, 10**4, 10),
         (36001, 10**4, 11),
-        (10**6, 10**4, 40),
+        (10**6, 10**4, 80),
     ],
 )
 def test_shard_count_fills_each_shard_to_its_target_within_the_limit_unless_the_budget_needs_more(
