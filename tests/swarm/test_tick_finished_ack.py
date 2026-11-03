@@ -4,8 +4,7 @@ import pytest
 
 from scripts.swarm import failed_panes
 from scripts.swarm import tick as tick_module
-from scripts.swarm.tick import _acknowledging, tick
-from scripts.tick.steps.place import _collect_acks
+from scripts.swarm.tick import _acknowledging, _collect_acks, tick
 from tests.swarm.test_tick import HiveAcks, tasks
 from tests.swarm.test_tick import store as store
 

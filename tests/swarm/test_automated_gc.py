@@ -202,9 +202,9 @@ def test_stopped_proof_swarm_still_collects_its_automated_master(world, monkeypa
     store, inbox, agent, runtime, ledger = world
     config = SimpleNamespace(state="stopped")
     monkeypatch.setattr(store, "ensure_code", lambda _: config)
-    monkeypatch.setattr(tick.observe_steps, "_woken", lambda *_: False)
+    monkeypatch.setattr(tick, "_woken", lambda *_: False)
     monkeypatch.setattr(tick.task_steps, "_close_space", lambda *_: [])
-    monkeypatch.setattr(tick.observe_steps, "_bin_closed", lambda *_: [])
+    monkeypatch.setattr(tick, "_bin_closed", lambda *_: [])
     ledger.state = lambda _: {"tasks": []}
 
     def receive(actual, text):
@@ -296,7 +296,7 @@ def test_collected_master_sleeps_until_new_task_or_operator_inbox(world):
     from scripts.swarm import lifetime, tick
 
     store, inbox, agent, _, ledger = world
-    tick.observe_steps._collected(SLUG, store, ledger, {}, agent)
+    tick._collected(SLUG, store, ledger, {}, agent)
     assert lifetime.sleeping(SLUG, store, {})
     assert not lifetime.sleeping(SLUG, store, {"new-task": {}})
     store.redis.set(store.key(SLUG, "master-retired-tasks"), "[]")
@@ -341,15 +341,15 @@ def test_tick_collects_with_the_current_ledger_rows(world, monkeypatch, swarm_st
     rows = {"work": {"id": "work", "state": "done"}}
     ledger.state.return_value = {"tasks": list(rows.values())}
     monkeypatch.setattr(store, "ensure_code", lambda slug: config if slug == SLUG else None)
-    monkeypatch.setattr(tick.observe_steps, "_woken", lambda *_: False)
-    monkeypatch.setattr(tick.observe_steps, "_bin_closed", lambda *_: [])
+    monkeypatch.setattr(tick, "_woken", lambda *_: False)
+    monkeypatch.setattr(tick, "_bin_closed", lambda *_: [])
     monkeypatch.setattr(tick, "skip_refused", lambda *_: [])
     monkeypatch.setattr(tick, "skip_dropped", lambda *_: [])
     monkeypatch.setattr(tick.freeze, "watched", lambda slug, actual_store, actual_ledger, doc: doc)
     monkeypatch.setattr(tick.lifetime, "sleeping", lambda *_: True)
     monkeypatch.setattr(tick.timing, "call", lambda fn, *args: fn(*args) if fn is tick.pass_state else [])
     collected = Mock()
-    monkeypatch.setattr(tick.observe_steps, "_collected", collected)
+    monkeypatch.setattr(tick, "_collected", collected)
     record = automated_gc.state(store, SLUG, agent)
     record["idle_answers"] = idle_answers
     automated_gc._save(store, SLUG, agent, record)
@@ -472,7 +472,7 @@ def test_collected_worker_forwards_its_ledger_to_claim_cleanup(world, monkeypatc
     rows = {"work": {"id": "work"}}
     drop = Mock(return_value="task reopened")
     monkeypatch.setattr(tick, "_drop", drop)
-    assert tick.observe_steps._collected(SLUG, store, ledger, rows, worker) == "task reopened"
+    assert tick._collected(SLUG, store, ledger, rows, worker) == "task reopened"
     drop.assert_called_once_with(SLUG, store, ledger, rows, worker)
 
 

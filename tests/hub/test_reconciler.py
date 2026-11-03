@@ -267,7 +267,7 @@ def test_default_registry_preserves_timers_and_lifecycle_and_registers_reconcile
     assert callable(reactors["reconciler"].poll)
 
 
-@pytest.mark.parametrize(("owner", "sweep"), [("observe_steps", "_verify"), ("agent_steps", "_reap")])
+@pytest.mark.parametrize(("owner", "sweep"), [("tick", "_verify"), ("agent_steps", "_reap")])
 def test_legacy_tick_leaves_event_owned_execution_recovery_to_the_reconciler(rig, monkeypatch, owner, sweep):
     from scripts.hub import reconciler
     from scripts.swarm import tick
@@ -278,7 +278,9 @@ def test_legacy_tick_leaves_event_owned_execution_recovery_to_the_reconciler(rig
     runtime.live_names.return_value = set()
     runtime.bindings.return_value = {}
     assert (
-        getattr(getattr(tick, owner), sweep)("rig", rig.store, rig.ledger, runtime, {"task": rig.row}, rig.clock())
+        getattr(tick if owner == "tick" else getattr(tick, owner), sweep)(
+            "rig", rig.store, rig.ledger, runtime, {"task": rig.row}, rig.clock()
+        )
         == []
     )
     runtime.observe.assert_not_called()

@@ -264,7 +264,7 @@ def test_events_tick_does_not_run_placement_without_workstation_tasks(
 
 
 def test_under_events_the_tick_collects_acknowledgements_only_for_workstation_launches(store: RedisStore) -> None:  # noqa: F811
-    from scripts.tick.steps.place import _collect_acks
+    from scripts.swarm.tick import _collect_acks
     from tests.swarm.test_tick import HiveAcks
 
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
