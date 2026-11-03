@@ -1241,12 +1241,8 @@ def test_the_pod_start_time_is_process_one_start_after_boot(tmp_path, monkeypatc
     assert process.started_ms(tmp_path / "missing") == 0
 
 
-@pytest.mark.parametrize(("listed", "reopened"), [(["someone-else"], True), (None, False)])
-@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
-def test_a_claim_whose_agent_left_its_hive_member_list_is_reopened_once(
-    remote: SimpleNamespace, listed: list[str] | None, reopened: bool
-) -> None:
-    from scripts.inbox.store import InboxStore
+def _member_reap(remote: SimpleNamespace, names: list[str]) -> SimpleNamespace:
+    """Reap a paneless hive member twice against a beating hive listing ``names``; return the agent, ledger and actions."""
     from scripts.swarm import tick
     from scripts.swarm.pane import PaneObservation
 
@@ -1254,7 +1250,7 @@ def test_a_claim_whose_agent_left_its_hive_member_list_is_reopened_once(
     remote.store.put_agent("fixture", agent)
     _publish(remote, state="unknown")
     report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
-    report["names"] = listed or [agent.name]
+    report["names"] = names or [agent.name]
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
     remote.store.claim("fixture", "task", agent.name, 60000)
     rows = {"task": {"state": "claimed", "claimed_by": agent.name, "branch": "kept"}}
@@ -1263,26 +1259,39 @@ def test_a_claim_whose_agent_left_its_hive_member_list_is_reopened_once(
     remote.runtime.observe = Mock(return_value=PaneObservation("unknown"))
     remote.runtime.retire = Mock(side_effect=AssertionError("a vanished hive member needs no remote command"))
     now = LAUNCHED + remote.reports.STARTUP_MS
-
     actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, now)
     again = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, now + 1)
+    return SimpleNamespace(agent=agent, ledger=ledger, rows=rows, actions=actions, again=again)
 
-    if reopened:
-        assert actions == [f"retired {agent.name}: its hive no longer lists it, task task reopened"]
-        assert again == []
-        ledger.update_task.assert_called_once()
-        assert ledger.update_task.call_args.args[2] == {"state": "open", "claimed_by": ""}
-        assert rows["task"]["branch"] == "kept"
-        assert remote.store.agents("fixture") == []
-        assert remote.store.claimant("fixture", "task") is None
-        assert remote.store.execution_registry.occupants("fixture")[agent.seat].state == "ended"
-        exit_record = InboxStore(remote.redis).seats.exit_of(agent.name)
-        assert (exit_record["reason"], exit_record["seat"]) == ("stopped", agent.seat)
-    else:
-        assert actions == [f"suspect {agent.name}: its runtime did not answer"]
-        ledger.update_task.assert_not_called()
-        assert [found.name for found in remote.store.agents("fixture")] == [agent.name]
-        assert remote.store.claimant("fixture", "task") == agent.name
+
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
+def test_a_claim_whose_agent_left_its_hive_member_list_is_reopened_once(remote: SimpleNamespace) -> None:
+    from scripts.inbox.store import InboxStore
+
+    reaped = _member_reap(remote, ["someone-else"])
+    agent = reaped.agent
+
+    assert reaped.actions == [f"retired {agent.name}: its hive no longer lists it, task task reopened"]
+    assert reaped.again == []
+    reaped.ledger.update_task.assert_called_once()
+    assert reaped.ledger.update_task.call_args.args[2] == {"state": "open", "claimed_by": ""}
+    assert reaped.rows["task"]["branch"] == "kept"
+    assert remote.store.agents("fixture") == []
+    assert remote.store.claimant("fixture", "task") is None
+    assert remote.store.execution_registry.occupants("fixture")[agent.seat].state == "ended"
+    exit_record = InboxStore(remote.redis).seats.exit_of(agent.name)
+    assert (exit_record["reason"], exit_record["seat"]) == ("stopped", agent.seat)
+
+
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
+def test_a_claim_whose_agent_its_hive_still_lists_is_kept(remote: SimpleNamespace) -> None:
+    reaped = _member_reap(remote, [])
+    agent = reaped.agent
+
+    assert reaped.actions == [f"suspect {agent.name}: its runtime did not answer"]
+    reaped.ledger.update_task.assert_not_called()
+    assert [found.name for found in remote.store.agents("fixture")] == [agent.name]
+    assert remote.store.claimant("fixture", "task") == agent.name
 
 
 @pytest.mark.parametrize(
