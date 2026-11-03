@@ -8,7 +8,7 @@ import pytest
 from scripts.swarm import cli, status, tick_heartbeat
 from scripts.swarm.health import early_ends
 from scripts.swarm.health.findings import Finding
-from scripts.tick.steps import Left
+from scripts.tick.steps import Left, report
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -121,7 +121,7 @@ def store() -> Any:
 @pytest.mark.parametrize(
     ("environ", "limit"),
     [({}, 3), ({"AGENTIHOOKS_HEALTH_EARLY_ENDS": "5"}, 5), ({"AGENTIHOOKS_HEALTH_EARLY_ENDS": "1"}, 1)]
-    + [({"AGENTIHOOKS_HEALTH_EARLY_ENDS": raw}, 3) for raw in ("0", "-2", "x", "")],
+    + [({"AGENTIHOOKS_HEALTH_EARLY_ENDS": raw}, 3) for raw in ("0", "-2", "x", "", "²")],
 )
 def test_the_threshold_takes_only_a_positive_whole_number(environ: dict[str, str], limit: int) -> None:
     assert early_ends.threshold(environ) == limit
@@ -145,3 +145,10 @@ def test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_o
     ]
     early_ends.clear(store, "sw")
     assert store.redis.get(store.key("sw", "early-end-streak")) is None
+
+
+@pytest.mark.feature("swarm-tick-early-end-streak")
+def test_each_early_end_of_the_report_step_counts_the_missing_value(store: Any) -> None:
+    report.early_end(store, "sw", 1000, {}, Left("agents"), [])
+    report.early_end(store, "sw", 2000, {}, Left("agents"), [])
+    assert early_ends.read(store, "sw") == {"value": "agents", "count": 2}
