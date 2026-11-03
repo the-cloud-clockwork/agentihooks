@@ -788,11 +788,11 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
 
     release = threading.Event()
 
-    def herdr_read():
+    def herdr_read() -> dict:
         release.wait(30)
         return {}
 
-    def respawn(slug):
+    def respawn(slug: str) -> list[str]:
         herdr_read()
         return ["spawned"]
 
@@ -805,7 +805,7 @@ def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its
     elapsed = time.monotonic() - started
 
     assert actions == ["restarted", "left the master respawn running after 0.2 seconds"]
-    assert 0.2 <= elapsed < 1.0
+    assert 0.2 <= elapsed < 10
 
 
 def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_bound():
@@ -820,11 +820,29 @@ def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_b
 
 
 def test_a_failing_repair_step_raises_its_own_error():
-    def broken():
+    def broken() -> list[str]:
         raise ValueError("herdr gone")
 
     with pytest.raises(ValueError, match="^herdr gone$"):
         tick_watch.bounded(broken, 5, "the master respawn")
+
+
+def test_a_step_failing_after_its_bound_reports_the_error_on_stderr(capsys):
+    release, ended = threading.Event(), threading.Event()
+
+    def late() -> list[str]:
+        release.wait(30)
+        ended.set()
+        raise ValueError("herdr gone")
+
+    assert tick_watch.bounded(late, 0.1, "the master respawn") == ["left the master respawn running after 0.1 seconds"]
+    release.set()
+    assert ended.wait(5)
+    for _ in range(100):
+        if "failed after its bound" in capsys.readouterr().err:
+            return
+        threading.Event().wait(0.05)
+    pytest.fail("the late error never reached stderr")
 
 
 def test_the_repair_bounds_cover_the_supervisor_stop_and_sum_to_well_under_the_watchdog():

@@ -5,7 +5,7 @@ import json
 import sys
 import time
 from collections.abc import Callable
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 
 from scripts.inbox.store import DuplicateItem, InboxStore
@@ -102,19 +102,27 @@ class Repair:
 
 
 def bounded(call: Callable[[], list[str]], limit_s: float, step: str) -> list[str]:
-    """Return the actions of one repair step, or the plain words of its timeout when it outlasts ``limit_s``."""
+    """Return the actions of one repair step, or the plain words of its timeout when it outlasts ``limit_s``.
+
+    A step left running finishes on its own thread while the repair goes on, so the next step can overlap it,
+    and an error it raises after its bound is reported on stderr.
+    """
     done: list[list[str]] = []
     failed: list[Exception] = []
+    abandoned = Event()
 
     def work() -> None:
         try:
             done.append(call())
         except Exception as exc:
+            if abandoned.is_set():
+                timing.emit(sys.stderr, f"{step} failed after its bound: {type(exc).__name__}: {exc}")
             failed.append(exc)
 
     worker = Thread(target=work, daemon=True)
     worker.start()
     worker.join(limit_s)
+    abandoned.set()
     if failed:
         raise failed[0]
     return done[0] if done else [f"left {step} running after {limit_s:g} seconds"]
