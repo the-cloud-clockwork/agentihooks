@@ -9,7 +9,7 @@ from threading import Lock, Thread
 from typing import Any
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import blockers, panic, sd_notify, tick_heartbeat, timing
+from scripts.swarm import blockers, panic, scheduled_tick, sd_notify, tick_heartbeat, timing
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
 
@@ -20,6 +20,8 @@ PASS_S = 60
 SLUG_PASS_S = 120
 BEAT_S = 30
 BLOCKED_LIMIT = 5
+RESTART_S = scheduled_tick.STOP_S + 30
+RESPAWN_S = 120
 WATCHDOG = "WATCHDOG=1"
 ALERT = (
     "The tick of swarm {slug} is stale: {evidence}. Until it recovers no swarm alert, nudge, merge or spawn happens; "
@@ -74,10 +76,19 @@ def watch_pass(
 
 
 class Repair:
-    """The scheduler serves every swarm on the machine, so it restarts at most once per stale window."""
+    """The scheduler serves every swarm on the machine, so it restarts at most once per stale window.
 
-    def __init__(self, restart: Callable[[], str], respawn: Callable[[str], list[str]]):
+    Each step runs under its own bound, so a hung herdr read or spawn never holds the repair past the bounds.
+    """
+
+    def __init__(
+        self,
+        restart: Callable[[], str],
+        respawn: Callable[[str], list[str]],
+        bounds: tuple[float, float] = (RESTART_S, RESPAWN_S),
+    ):
         self.restart, self.respawn, self.restarted, self.lock = restart, respawn, None, Lock()
+        self.bounds = bounds
 
     def __call__(self, slug: str, now: int) -> list[str]:
         actions = []
@@ -86,8 +97,27 @@ class Repair:
             if due:
                 self.restarted = now
         if due:
-            actions.append(self.restart())
-        return actions + self.respawn(slug)
+            actions += bounded(lambda: [self.restart()], self.bounds[0], "the scheduler restart")
+        return actions + bounded(lambda: self.respawn(slug), self.bounds[1], "the master respawn")
+
+
+def bounded(call: Callable[[], list[str]], limit_s: float, step: str) -> list[str]:
+    """Return the actions of one repair step, or the plain words of its timeout when it outlasts ``limit_s``."""
+    done: list[list[str]] = []
+    failed: list[Exception] = []
+
+    def work() -> None:
+        try:
+            done.append(call())
+        except Exception as exc:
+            failed.append(exc)
+
+    worker = Thread(target=work, daemon=True)
+    worker.start()
+    worker.join(limit_s)
+    if failed:
+        raise failed[0]
+    return done[0] if done else [f"left {step} running after {limit_s:g} seconds"]
 
 
 def _alert(store: RedisStore, slug: str, now: int, episode: dict[str, Any] | None, evidence: list[str]) -> list[str]:

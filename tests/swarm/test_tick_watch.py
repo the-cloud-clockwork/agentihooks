@@ -783,6 +783,57 @@ def test_the_repair_restarts_the_scheduler_once_per_stale_window_and_respawns_ev
     assert (len(restarts), respawns) == (2, ["sw", "other", "sw"])
 
 
+def test_a_hung_herdr_read_in_the_respawn_leaves_the_repair_returning_within_its_bound():
+    import time
+
+    release = threading.Event()
+
+    def herdr_read():
+        release.wait(30)
+        return {}
+
+    def respawn(slug):
+        herdr_read()
+        return ["spawned"]
+
+    repair = tick_watch.Repair(lambda: "restarted", respawn, bounds=(0.2, 0.2))
+    started = time.monotonic()
+    try:
+        actions = repair("sw", START)
+    finally:
+        release.set()
+    elapsed = time.monotonic() - started
+
+    assert actions == ["restarted", "left the master respawn running after 0.2 seconds"]
+    assert 0.2 <= elapsed < 1.0
+
+
+def test_a_hung_scheduler_restart_still_lets_the_master_respawn_run_within_its_bound():
+    release = threading.Event()
+    repair = tick_watch.Repair(lambda: release.wait(30) and "restarted", lambda slug: [f"spawned {slug}"], (0.1, 5))
+    try:
+        actions = repair("sw", START)
+    finally:
+        release.set()
+
+    assert actions == ["left the scheduler restart running after 0.1 seconds", "spawned sw"]
+
+
+def test_a_failing_repair_step_raises_its_own_error():
+    def broken():
+        raise ValueError("herdr gone")
+
+    with pytest.raises(ValueError, match="^herdr gone$"):
+        tick_watch.bounded(broken, 5, "the master respawn")
+
+
+def test_the_repair_bounds_cover_the_supervisor_stop_and_sum_to_well_under_the_watchdog():
+    assert tick_watch.RESTART_S == scheduled_tick.STOP_S + 30 == 120
+    assert tick_watch.RESPAWN_S == 120
+    assert tick_watch.RESTART_S + tick_watch.RESPAWN_S <= tick_heartbeat.LIMIT_MS / 1000 / 2
+    assert tick_watch.Repair(lambda: "", lambda slug: []).bounds == (120, 120)
+
+
 def test_the_scheduler_restart_stops_the_running_supervisor_then_registers_the_tick_again():
     from contextlib import ExitStack
 
