@@ -4,6 +4,7 @@ from collections.abc import Callable
 from importlib import import_module
 from typing import Any
 
+from scripts.swarm.store import AgentRecord
 from scripts.tick import registry
 from scripts.tick.steps import AGENTS, TASKS, CallStep
 
@@ -71,7 +72,7 @@ def _conversations(slug: str, store: Any, runtime: Any) -> None:
     local = runtime.conversations()
     found: dict[str, str] = {**(local or {}), **tick.reports.Reports(store.redis).conversations()}
 
-    def one(agent: Any) -> None:
+    def one(agent: AgentRecord) -> None:
         """Pin and record the conversation the pane of ``agent`` reports."""
         if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
             return
