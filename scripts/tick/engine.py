@@ -133,18 +133,19 @@ def run_group(
     A failed or late step never stops the next. Outside a parallel pass steps run one at a time in group order. In a
     parallel pass each step starts as soon as every step it needs has ended, records keep group order, writes are
     applied on the scheduling thread as each step ends, and a lane past its deadline drops its unfinished steps and
-    every step that needs them. Slow lane steps, and the steps that need them, run on after the group returns: the
-    pass joins them when it ends and hands their records to ``finished``.
+    every step that needs them. Slow lane steps, and the steps that need them, start once the group's other steps
+    end and run on after the group returns: the pass joins them when it ends and hands their records to ``finished``.
     """
     ordered = group_steps(name, steps)
     found = pool.active()
     if found is None or not found.parallel:
         return tuple(_applied(run_step(step, ctx), apply or {}) for step in ordered)
     later = _slow_lane(ordered)
+    names = {step.name for step in later}
+    records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
     if later:
         found.detach(partial(_run_later, later, ctx, found, apply or {}, finished))
-    names = {step.name for step in later}
-    return _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
+    return records
 
 
 def _slow_lane(ordered: tuple[Step, ...]) -> tuple[Step, ...]:

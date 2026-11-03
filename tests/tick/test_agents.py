@@ -203,3 +203,18 @@ def test_the_tick_prints_the_actions_of_slow_steps_that_end_after_their_group(
     with pool.running(workers=2):
         assert tick_module.run_group("agents", slug="sw") == ["critical"]
     assert capsys.readouterr().out == "slow one\nslow two\n"
+
+
+def test_the_tick_prints_each_slow_step_that_failed_after_its_group(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.tick import pool
+
+    def boom(tick: object, get: object) -> list[str]:
+        raise RuntimeError("panes broke")
+
+    monkeypatch.setattr(registry, "registry", registry.Registry())
+    registry.register(CallStep("failed panes", "agents", boom, lane=engine.SLOW))
+    with pool.running(workers=2):
+        assert tick_module.run_group("agents", slug="sw") == []
+    assert capsys.readouterr().out == "slow lane step failed panes failed: builtins.RuntimeError\n"

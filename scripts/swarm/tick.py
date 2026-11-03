@@ -224,9 +224,12 @@ def run_group(name: str, **state: object) -> list[str]:
 
 
 def _print_actions(records: tuple[engine.StepRecord, ...]) -> None:
-    """Print each action the handed off steps returned, one per line."""
+    """Print each action the handed off steps returned, then each step that failed with its error, one per line."""
     for action in steps.actions(records):
         print(action)
+    for record in records:
+        if record.error:
+            print(f"slow lane step {record.name} failed: {record.error}")
 
 
 @reaper.scanning_pass

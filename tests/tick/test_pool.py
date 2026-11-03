@@ -569,7 +569,9 @@ def test_a_group_returns_its_critical_steps_while_its_slow_step_still_runs() -> 
     with pool.running(workers=3):
         rows = engine.run_group("load", context(), steps, finished=later.append)
         assert [(row.name, row.outcome) for row in rows] == [("quick", engine.OK)]
-        assert engine.run_group("next", context(), (Step("next", quick, group="next"),)) != ()
+        assert [row.name for row in engine.run_group("next", context(), (Step("next", quick, group="next"),))] == [
+            "next"
+        ]
         assert later == []
         release.set()
     assert [[(row.name, row.outcome) for row in records] for records in later] == [
@@ -577,6 +579,7 @@ def test_a_group_returns_its_critical_steps_while_its_slow_step_still_runs() -> 
     ]
 
 
+@pytest.mark.wall_clock
 def test_the_pass_waits_for_a_hung_slow_step_only_until_the_slow_deadline() -> None:
     from scripts.tick import pool
 
@@ -607,3 +610,27 @@ def test_a_sequential_pass_runs_slow_steps_in_the_group() -> None:
             "load", context(), (Step("slow", lambda ctx: Result(), lane=Lane("slow")),), later.append
         )
     assert ([row.name for row in rows], later) == (["slow"], [])
+
+
+def test_a_handed_off_step_starts_after_the_critical_step_it_needs() -> None:
+    from scripts.tick import pool
+
+    ran: list[str] = []
+
+    def note(name: str) -> Callable[[Context], Result]:
+        def action(ctx: Context) -> Result:
+            ran.append(name)
+            return Result()
+
+        return action
+
+    steps = (
+        Step("critical", note("critical")),
+        Step("slow", note("slow"), lane=Lane("slow")),
+        Step("both", note("both"), frozenset({"critical", "slow"})),
+    )
+    later: list[tuple[engine.StepRecord, ...]] = []
+    with pool.running(workers=3):
+        assert [row.name for row in engine.run_group("load", context(), steps, finished=later.append)] == ["critical"]
+    assert ran == ["critical", "slow", "both"]
+    assert [[row.name for row in records] for records in later] == [["slow", "both"]]
