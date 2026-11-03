@@ -137,10 +137,20 @@ workers. A handed off step that needs a step recorded late or dropped is
 dropped and recorded late. Their records go to the `finished` callback; the
 tick site passes one that prints their actions, then
 `slow lane step <name> failed: <error>` for each failed step and
-`a slow lane step held <error>` when the pass box holds an exception. When the
+`a slow lane step held <repr>` when the pass box holds a held exception, printed
+with its repr. When the
 pass ends, `scripts.tick.pool.running` joins each handed off thread for at
-most the slow lane time left plus `LATER_GRACE_S` (one second). In sequential
-mode every step runs in group order on the calling thread, slow lane included.
+most the slow lane time left plus `LATER_GRACE_S` (one second), one thread
+after another, so each extra hung thread adds about one second. A handed off
+step waits only for the steps of its own group: a need on a step of another
+group is not waited for in a parallel pass. In sequential mode every step runs
+in group order, each in its own daemon thread the caller waits on up to its
+budget, slow lane included.
+
+Lanes are threads, not processes. No lane process is spawned or killed at its
+deadline; a hung slow step stays alive in its daemon thread after the pass has
+joined it, and the next pass holds that step while it runs. Whether each lane
+becomes a process is decided by the critical lane share in the tick report.
 
 Give a new step the slow lane only when no critical step needs it:
 
@@ -150,8 +160,9 @@ from scripts.tick.engine import SLOW
 CallStep("example", "wrapper events", held(_example), lane=SLOW)
 ```
 
-A critical step that needs a slow step is handed off with it and loses the
-critical deadline. The registry checks domains across lanes, so a slow step
+A critical step that needs a slow step is handed off with it, so it starts only
+after that slow step ends, yet it keeps the critical deadline: if the critical
+lane expires first it is dropped and recorded late. The registry checks domains across lanes, so a slow step
 and a critical step that touch the same domain need a dependency between them:
 
 ```text
@@ -159,8 +170,9 @@ ValueError: Unordered writers in lanes tick and slow for tasks: other, example
 ValueError: Unordered reader and writer in lanes tick and slow for tasks: other, example
 ```
 
-The lanes and step names follow registration order. Two steps in the same lane
-name it once, as in `Unordered writers in lane tick for tasks: other, example`.
+The message names both lanes, in registration order, when the two steps sit in
+different lanes, and one lane when they share it, as in
+`Unordered writers in lane tick for tasks: other, example`.
 
 `agentihooks swarm <slug> tick-report` prints each lane's share of step CPU
 (see [Lane lines](tick-report.md#lane-lines)).
@@ -356,8 +368,8 @@ The delivered proof and limitations are recorded in
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
 | Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
-| `Unordered writers in lanes tick and slow` at import | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`, or move both into one lane |
-| A critical step finishes after the heartbeat | It needs a slow lane step, so it was handed off with it and runs under the slow deadline. Drop the need or keep the needed step critical |
+| `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
+| A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |

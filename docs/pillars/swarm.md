@@ -4385,7 +4385,7 @@ A parallel pass has two lanes, each with its own deadline from the start of the 
 | Lane | Deadline | Steps |
 |---|---|---|
 | critical | 110 seconds | Every step whose lane is not `slow`. A step declares lane `tick` unless it names another. |
-| slow | 400 seconds | Steps that declare lane `slow`: today the eleven report steps that run after spawn. |
+| slow | 400 seconds | Steps that declare lane `slow`: today the eleven report steps that run after spawn, which the `tick call` step of the `wrapper reboot` group starts. |
 
 The slow lane holds the ledger event pass, done recheck, progress checks, waits end, merge pass, doc report,
 priorities sweep, health findings, findings pass, metrics record and bottleneck status. They call the ledger,
@@ -4397,9 +4397,11 @@ lane steps, and every step that needs one of them, then start on a daemon thread
 them eagerly on up to 8 workers, so the next group, and spawn with it, never waits for them. A handed off step
 that needs a critical step recorded late or dropped is dropped too and recorded late. When the handed off steps
 of a group have all ended, the tick prints their actions, one line per failed step as
-`slow lane step <name> failed: <error>`, and `a slow lane step held <error>` when one of them stored a held
-exception. When the pass ends it joins every handed off thread for at most what is left of the slow lane
-deadline plus one second (`LATER_GRACE_S`). A sequential pass runs every step in group order, as before.
+`slow lane step <name> failed: <error>`, and `a slow lane step held <repr>` when the pass box holds a held
+exception, printed with its repr. When the pass ends it joins each handed off thread in turn for at most what is left of the slow lane
+deadline plus one second (`LATER_GRACE_S`), so every extra hung thread adds about one second. A need on a step of
+another group is not waited for: a handed off step is ordered only against the steps of its own group. A
+sequential pass runs every step in group order, as before.
 
 When a lane's deadline passes, its unfinished steps and every step that needs them are dropped and recorded late.
 A parallel pass writes the controller heartbeat at the critical deadline, or when the pass ends if that comes
@@ -4407,7 +4409,8 @@ first, so slow work never delays it.
 
 The share of CPU each lane takes is printed by the tick report (see
 [Lane lines](../reference/tick-report.md#lane-lines)); it decides whether each lane later runs in a process of
-its own.
+its own. That is not built: both lanes run as threads of the one tick process, no lane process is spawned or
+killed, and a hung slow step keeps running in its daemon thread after the pass has joined it up to the deadline.
 
 Work a step does per agent or per task fans out on the same 8 worker slots the pass holds; a fan out started inside a
 fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed number of slots in the tick process,

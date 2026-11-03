@@ -19,6 +19,8 @@ window of the newest 10 passes.
 
 ## Output
 
+Example output; the figures are illustrative:
+
 ```text
 Tick report: 60 recorded passes
 Pass p95: 41.204s
@@ -27,8 +29,8 @@ Passes without retained steps: 0
 Step  Count  Median  P95  CPU share
 reap  60  9.112s  14.511s  21.40%
 ...
-Lane slow  720 steps  38.12% CPU share
-Lane tick  2940 steps  61.88% CPU share
+Lane slow  550 steps  64.20% CPU share
+Lane tick  2940 steps  35.80% CPU share
 CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.
 ```
 
@@ -57,15 +59,23 @@ to less than 100 percent; a window with no lane records prints no lane line. `ti
 step runs unless it declares `slow`; see [Lanes](tick-engine-steps.md#lanes) for which steps run in the slow lane.
 
 The critical lane share decides whether each lane runs in a process of its own, killed at its deadline after
-releasing its locks: that is built only when the critical lane line reads above 40 percent over a window of 60
-parallel passes. Read it with:
+releasing its locks: that is built only when the critical lane line reads above 40 percent. The window is sixty
+parallel passes after the post spawn report steps moved to the slow lane, as the pull request that moved them
+records. Read it with:
 
 ```bash
 agentihooks swarm <id> tick-report --passes 60 | grep '^Lane '
 ```
 
-Before the post spawn report steps moved to the slow lane, a 50 pass window read `Lane tick` at 43.61 percent with no
-step in the slow lane; those steps no longer count toward the critical share.
+Without `--passes` the report reads 100 passes.
+
+| Reading | Window | Source | Result |
+|---|---|---|---|
+| `Lane tick` 43.61 percent, no step in the slow lane | 50 passes on dev, before the move | pull request 9517, 3 November 2026 | The post spawn report steps moved to the slow lane |
+| `Lane tick` after the move | 60 parallel passes | not yet recorded | Decides whether lane processes are built |
+
+Until the second reading is taken lane processes are not built: both lanes run as threads of one tick process (see
+[Lanes](tick-engine-steps.md#lanes)).
 
 ## Where the numbers come from
 
@@ -101,7 +111,7 @@ pass reads yet, the scheduler cron stays every minute, and every pass still runs
 | `Tick report: 0 recorded passes` | No pass has recorded for this swarm. Check the swarm id, that the scheduler ticks (`journalctl --user -t agentihooks-swarm`), and the journal for `swarm_tick_record_failed`. |
 | Many passes without retained steps | Steps outnumber passes, so `tick:steps` trims first. Read a shorter window. |
 | No `Lane` lines | The window holds no step record with a lane. Check that the swarm runs the current tick code. |
-| `Lane tick` above 40 percent | The critical lane takes most step CPU. Find its heaviest rows and check whether each needs to finish before spawn; one that does not can move to the slow lane, see [Lanes](tick-engine-steps.md#lanes). |
+| `Lane tick` above 40 percent | The critical lane takes more step CPU than the 40 percent threshold. Find its heaviest rows and check whether each needs to finish before spawn; one that does not can move to the slow lane, see [Lanes](tick-engine-steps.md#lanes). |
 | One step dominates p95 | Compare it with its budget in the timing table; a step past its budget is recorded late and the pass continues. See [Tick engine steps](tick-engine-steps.md#when-a-step-exceeds-its-budget). |
 | Spawns stop and the master got a pass budget notice | The pass p95 is above the stage target. Read the report over 10 passes to find the slow steps; the hold clears by itself once the passes recover. |
 
