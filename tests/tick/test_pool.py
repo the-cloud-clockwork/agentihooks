@@ -162,10 +162,11 @@ def test_critical_heartbeat_does_not_wait_for_slow_lane() -> None:
         assert ctx.deadline.remaining <= 0.5
         return Result()
 
+    later: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(critical_s=0.03, slow_s=0.5, heartbeat=beat.set):
-        records = engine.run_group("load", context(), (Step("slow", slow, lane=Lane("slow")),))
+        assert engine.run_group("load", context(), (Step("slow", slow, lane=Lane("slow")),), later.append) == ()
     assert beat.is_set()
-    assert records[0].outcome == engine.OK
+    assert [[row.outcome for row in records] for records in later] == [[engine.OK]]
 
 
 def test_expired_lane_drops_late_result_and_does_not_start_dependent() -> None:
@@ -206,10 +207,11 @@ def test_an_expired_lane_drops_its_ready_step_and_every_dependent_in_another_lan
         return Result()
 
     steps = (Step("slow", action, lane=Lane("slow")), Step("after", action, frozenset({"slow"})))
+    later: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(slow_s=0.0):
-        rows = engine.run_group("load", context(), steps)
+        assert engine.run_group("load", context(), steps, later.append) == ()
     assert ran == []
-    assert [(row.name, row.outcome, row.wall_s, row.budget_s) for row in rows] == [
+    assert [(row.name, row.outcome, row.wall_s, row.budget_s) for row in later[0]] == [
         ("slow", engine.LATE, 0.0, 2.0),
         ("after", engine.LATE, 0.0, 2.0),
     ]
@@ -541,3 +543,62 @@ def test_eager_step_reads_the_caller_context_var_set_before_the_pass() -> None:
         records = engine.run_group("load", context(), (Step("a", action), Step("b", action)))
     assert seen == ["caller-value", "caller-value"]
     assert [row.name for row in records] == ["a", "b"]
+
+
+def test_a_group_returns_its_critical_steps_while_its_slow_step_still_runs() -> None:
+    from scripts.tick import pool
+
+    release, critical = Event(), Event()
+
+    def stuck(ctx: Context) -> Result:
+        assert release.wait(1)
+        return Result()
+
+    def quick(ctx: Context) -> Result:
+        critical.set()
+        return Result()
+
+    steps = (
+        Step("stuck", stuck, lane=Lane("slow")),
+        Step("needs stuck", quick, frozenset({"stuck"})),
+        Step("quick", quick),
+    )
+    later: list[tuple[engine.StepRecord, ...]] = []
+    with pool.running(workers=3):
+        rows = engine.run_group("load", context(), steps, later.append)
+        assert [(row.name, row.outcome) for row in rows] == [("quick", engine.OK)]
+        assert engine.run_group("next", context(), (Step("next", quick, group="next"),)) != ()
+        assert later == []
+        release.set()
+    assert [[(row.name, row.outcome) for row in records] for records in later] == [
+        [("stuck", engine.OK), ("needs stuck", engine.OK)]
+    ]
+
+
+def test_the_pass_waits_for_a_hung_slow_step_only_until_the_slow_deadline() -> None:
+    from scripts.tick import pool
+
+    release = Event()
+
+    def hung(ctx: Context) -> Result:
+        release.wait(5)
+        return Result()
+
+    later: list[tuple[engine.StepRecord, ...]] = []
+    try:
+        with pool.running(slow_s=0.05):
+            assert engine.run_group("load", context(), (Step("hung", hung, lane=Lane("slow")),), later.append) == ()
+        assert [[row.outcome for row in records] for records in later] == [[engine.LATE]]
+    finally:
+        release.set()
+
+
+def test_a_sequential_pass_runs_slow_steps_in_the_group() -> None:
+    from scripts.tick import pool
+
+    later: list[tuple[engine.StepRecord, ...]] = []
+    with pool.running(mode="sequential"):
+        rows = engine.run_group(
+            "load", context(), (Step("slow", lambda ctx: Result(), lane=Lane("slow")),), later.append
+        )
+    assert ([row.name for row in rows], later) == (["slow"], [])
