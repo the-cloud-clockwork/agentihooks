@@ -9,10 +9,11 @@ def ranks(doc: dict) -> dict[str, int]:
     targets = [row["target"] for row in doc.get("freezes", []) if row["verb"] == "focus"]
     graph = hierarchy.project(doc)[0]
     paths: dict[str, int] = {}
-    selected: list[tuple[int, str]] = []
+    selected: list[tuple[int, str, str]] = []
     for index, target in enumerate(targets):
-        if _selects(target):
-            selected.append((index, target))
+        selector, _, value = target.partition(":")
+        if selector in freeze.SELECTORS and value:
+            selected.append((index, selector, value))
         else:
             paths.setdefault(target, index)
     return {
@@ -20,14 +21,13 @@ def ranks(doc: dict) -> dict[str, int]:
     }
 
 
-def _selects(target: str) -> bool:
-    selector, _, value = target.partition(":")
-    return selector in freeze.SELECTORS and bool(value)
-
-
-def _rank(task: dict, chain: list[str], paths: dict[str, int], selected: list[tuple[int, str]], unfocused: int) -> int:
+def _rank(
+    task: dict, chain: list[str], paths: dict[str, int], selected: list[tuple[int, str, str]], unfocused: int
+) -> int:
     found = [paths[node] for node in chain if node in paths]
-    found += [next((index for index, target in selected if freeze.covers(target, task, chain)), unfocused)]
+    found += [
+        next((index for index, selector, value in selected if freeze.SELECTORS[selector](task) == value), unfocused)
+    ]
     return min(found)
 
 

@@ -151,8 +151,9 @@ def test_ranks_take_the_first_focus_covering_a_task_by_path_or_selector():
         work("hot", hot=True),
         {**work("both", hot=True), "phase": "p1"},
     )
+    colon, odd = work("a:b"), {**work("odd"), "kind": "x:y"}
     found = {
-        "tasks": [work("outside"), inside, hot, both, work("ci", lane="ci")],
+        "tasks": [work("outside"), inside, hot, both, work("ci", lane="ci"), colon, odd],
         "phases": [{"id": "p1"}],
         "plans": [],
         "freezes": [
@@ -162,9 +163,12 @@ def test_ranks_take_the_first_focus_covering_a_task_by_path_or_selector():
             {"verb": "focus", "target": "kind:hot"},
             {"verb": "focus", "target": "lane:ci"},
             {"verb": "focus", "target": "lane:"},
+            {"verb": "focus", "target": "tasks/a:b"},
+            {"verb": "focus", "target": "kind:x:y"},
         ],
     }
-    assert focus_budget.ranks(found) == {"outside": 5, "inside": 1, "hot": 0, "both": 0, "ci": 3}
+    ranked = {"outside": 7, "inside": 1, "hot": 0, "both": 0, "ci": 3, "a:b": 5, "odd": 6}
+    assert focus_budget.ranks(found) == ranked
 
 
 def test_ranks_match_path_focuses_without_testing_each_one_against_every_task(monkeypatch):
@@ -181,4 +185,4 @@ def test_ranks_match_path_focuses_without_testing_each_one_against_every_task(mo
         + [{"verb": "focus", "target": "kind:hot"}],
     }
     assert focus_budget.ranks(found) == {f"t{n}": n for n in range(20)}
-    assert calls == ["kind:hot"] * 20
+    assert calls == []
