@@ -448,6 +448,38 @@ def test_retiring_a_finished_hive_worker_records_its_inbox_exit(remote, handoff)
     assert exit_record["seat"] == (remote.agent.seat if handoff else "")
 
 
+@pytest.mark.parametrize(
+    ("state", "row", "said"),
+    [
+        ("finished", {"state": "done", "claimed_by": "owner"}, ""),
+        ("working", {"state": "claimed", "claimed_by": "owner"}, ", task task reopened"),
+    ],
+)
+def test_the_tick_settles_a_worker_its_restarted_hive_reports_gone_without_hive_reports(remote, state, row, said):
+    from scripts.swarm import retire_watch, tick
+
+    remote.agent = replace(remote.agent, state=state)
+    remote.store.put_agent("fixture", remote.agent)
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report.update(started_at=1, observed_at=1)
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    retire_watch.failed(remote.store, "fixture", remote.agent.name, {"process": 0, "refusal": "unsent"}, 0)
+    rows = {"task": {**row, "claimed_by": remote.agent.name}}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+    remote.runtime.hive = None
+    remote.runtime.retire = Mock(side_effect=AssertionError("a hive that reports the agent gone takes no retire"))
+
+    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, 10**9)
+
+    assert actions == [f"retired {remote.agent.name}: its hive pane is gone{said}"]
+    assert remote.store.agents("fixture") == []
+    assert remote.store.claimant("fixture", "task") is None
+    assert retire_watch.rows(remote.store, "fixture") == []
+
+
 @pytest.mark.parametrize("listed", [[], [{"pane_id": PANE}], None])
 def test_hive_report_distinguishes_an_empty_pane_listing_from_an_outage(remote, monkeypatch, listed):
     from scripts.hive import daemon
