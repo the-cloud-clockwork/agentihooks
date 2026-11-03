@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.617 · 2026-11-03
+
+### 2026-11-03 · 1977278c62f6 · #9557 · @nestorcolt
+
+**Release the claim of an agent its beating hive no longer lists**
+
+This change fixes a gap where an agent assigned to a hive before that hive reported its host target could get stuck if the hive later started beating but stopped listing the agent among its members. The tick now detects this case via a new `Reports.vanished` check, treats it the same as a hive going silent, and reaps the agent: releasing its seat and reopening its claimed task while preserving its branch and work folder, so work isn't silently lost or left stuck in limbo.
+
 ## v2.17.614 · 2026-11-03
 
 ### 2026-11-03 · a6506ccdc9b2 · #9555 · @nestorcolt
