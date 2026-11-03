@@ -170,9 +170,10 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
     live = [agent for agent in store.agents(slug) if agent.state != "finished"]
     active = {agent.name for agent in live}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
-    gone = [(name, seat) for name, seat in seats if name not in active]
-    outcomes = store.seats.exits([name for name, _ in gone])
     worlds = _WorldPass(inbox.worlds())
+    settled = _settled_everywhere(worlds)
+    gone = [(name, seat) for name, seat in seats if name not in active and name not in settled]
+    outcomes = store.seats.exits([name for name, _ in gone])
     pending = gone
     for _ in range(len(gone)):
         names = [name for name, _ in pending]
@@ -185,10 +186,23 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
         for name, seat in due:
             goes_to, exit_text = _gone_exit(seat, tasks.get(name, {}).get("state"), outcomes[name])
             settle(inbox, name, goes_to, exit_text, worlds)
+    _mark_settled(worlds, [name for name, _ in pending])
     _move_seat_mail(inbox, worlds, live)
     for world in list(worlds.up):
         worlds.run(world, lambda w: _settle_world_seats(w, slug, store, seats, live, active))
     return worlds.skipped
+
+
+def _settled_everywhere(worlds: "_WorldPass") -> set[str]:
+    """Gone agents every reachable world already found settled, which the sweep does not read again."""
+    found = [s for world in list(worlds.up) if (s := worlds.run(world, lambda w: w.settled_exits())) is not None]
+    return set.intersection(*found) if found else set()
+
+
+def _mark_settled(worlds: "_WorldPass", names: list[str]) -> None:
+    """Mark the gone agents this pass found quiet with an exit, in every world still reachable."""
+    for world in list(worlds.up):
+        worlds.run(world, lambda w: w.mark_exits_settled(names))
 
 
 def _move_seat_mail(inbox: "InboxStore", worlds: "_WorldPass", live: list) -> None:
@@ -234,7 +248,7 @@ class _WorldPass:
         self.up = list(worlds)
         self.skipped: list[str] = []
 
-    def run(self, world: "InboxStore", function):
+    def run[T](self, world: "InboxStore", function: "Callable[[InboxStore], T]") -> T | None:
         from redis.exceptions import ConnectionError as RedisConnectionError
         from redis.exceptions import TimeoutError as RedisTimeoutError
 

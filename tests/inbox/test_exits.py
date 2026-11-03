@@ -1,7 +1,10 @@
+from typing import Any
+
 import pytest
 
+import scripts.tick.steps.report  # noqa: F401
 from scripts.inbox import exits, wake
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import CLOSED, SETTLED_EXITS, InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -658,6 +661,7 @@ def test_a_sweep_of_settled_agents_reads_the_open_index_once_per_settle_step(red
     exits.sweep(inbox, "sw", store, dict)
     assert reads == [
         ["sw-eng-1", "sw-eng-2", "sw-eng-3"],
+        ["sw-eng-1", "sw-eng-2", "sw-eng-3"],
         ["eng-1@sw", "eng-2@sw", "eng-3@sw"],
         ["eng-1@sw", "eng-2@sw", "eng-3@sw"],
     ]
@@ -1047,3 +1051,77 @@ def test_the_sweep_settles_seat_mail_of_an_unknown_swarm_as_before(redis):
     item, _ = seat_mail(inbox, store, "eng-3@sw")
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).state == "pending"
+
+
+def test_a_later_sweep_runs_no_quiet_check_or_exit_read_for_an_agent_found_settled(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    for n in (1, 2, 3):
+        store.seats.occupy(f"eng-{n}@sw", f"sw-eng-{n}", n)
+    exits.sweep(inbox, "sw", store, dict)
+    exits.sweep(inbox, "sw", store, dict)
+    reads, quiet = [], inbox.quiet
+    exited, read_exits = [], store.seats.exits
+    monkeypatch.setattr(inbox, "quiet", lambda names: reads.append(sorted(names)) or quiet(names))
+    monkeypatch.setattr(store.seats, "exits", lambda names: exited.append(sorted(names)) or read_exits(names))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.settled_exits() == {"sw-eng-1", "sw-eng-2", "sw-eng-3"}
+    assert exited == [[]]
+    assert reads == [["eng-1@sw", "eng-2@sw", "eng-3@sw"], ["eng-1@sw", "eng-2@sw", "eng-3@sw"]]
+
+
+def test_an_agent_the_sweep_had_to_settle_stays_unmarked_until_a_sweep_finds_it_quiet(redis: Any) -> None:
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.settled_exits() == set()
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.settled_exits() == {"sw-eng-1"}
+
+
+def test_marking_keeps_only_the_quiet_names_settled(redis: Any) -> None:
+    inbox = InboxStore(redis)
+    inbox.send("sender", "sw-eng-2", "open")
+    inbox.mark_exits_settled(["sw-eng-1", "sw-eng-2"])
+    assert inbox.settled_exits() == {"sw-eng-1"}
+
+
+def test_marking_drops_a_name_mail_reached_before_its_recheck(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    inbox = InboxStore(redis)
+    monkeypatch.setattr(inbox, "quiet", lambda names: set())
+    inbox.mark_exits_settled(["sw-eng-1", "sw-eng-2"])
+    assert inbox.settled_exits() == set()
+
+
+def test_marking_no_names_reads_nothing(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    inbox, reads = InboxStore(redis), []
+    monkeypatch.setattr(inbox, "quiet", lambda names: reads.append(names) or set())
+    inbox.mark_exits_settled([])
+    assert (reads, inbox.settled_exits()) == ([], set())
+
+
+def test_mail_sent_to_a_settled_agent_clears_its_mark(redis: Any) -> None:
+    inbox = InboxStore(redis)
+    inbox.redis.sadd(inbox.key(SETTLED_EXITS), "sw-eng-1", "sw-eng-2")
+    inbox.send("sender", "sw-eng-1", "late")
+    assert inbox.settled_exits() == {"sw-eng-2"}
+
+
+def test_mail_redirected_to_a_settled_agent_clears_its_mark(redis: Any) -> None:
+    inbox = InboxStore(redis)
+    item = inbox.send("sender", "sw-eng-2", "contract")
+    inbox.redis.sadd(inbox.key(SETTLED_EXITS), "sw-eng-1", "sw-eng-3")
+    inbox.redirect(item.id, "swarm", "sw-eng-1", "moved")
+    assert inbox.settled_exits() == {"sw-eng-3"}
+
+
+def test_mail_reopened_at_a_settled_agent_clears_its_mark(redis: Any) -> None:
+    inbox = InboxStore(redis)
+    item = inbox.send("sender", "sw-eng-1", "question")
+    answer = inbox.reply(item.id, "sw-eng-1", "answer")
+    inbox.redis.sadd(inbox.key(SETTLED_EXITS), "sw-eng-1", "sw-eng-3")
+    inbox.reopen(answer, "swarm", "reopened")
+    assert inbox.settled_exits() == {"sw-eng-3"}
