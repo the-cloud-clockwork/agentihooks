@@ -382,13 +382,15 @@ def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preser
 
 
 def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_shards(monkeypatch):
-    from scripts.ci_mutation.measured import BATCH_RUNNERS, plan_shards
+    from scripts.ci_mutation.measured import BATCH_RUNNERS, SHARD_SETUP_SECONDS, plan_shards, shard_capacity
 
     monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
+    assert SHARD_SETUP_SECONDS == 180.0
+    assert shard_capacity(3, 1080) == 3 * (1080 - 180) == 2700
     costs = {f"scripts.sample.x__mutmut_{index}": 160.0 for index in range(240)}
     planned = plan_shards(costs, limit=10, budget=1080)
-    assert planned["shards"] == 12
-    assert max(planned["shard_worker_seconds"]) <= 3 * 1080
+    assert planned["shards"] == 15
+    assert max(planned["shard_worker_seconds"]) == 2560 <= 3 * (1080 - 180)
     assert plan_shards({str(index): 5000 for index in range(60)}, budget=1080)["shards"] == BATCH_RUNNERS == 40
     assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
     assert plan.shard_count(3 * 1080 * 15, 500, 120, 10) == 15
@@ -396,11 +398,13 @@ def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_s
     assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == BATCH_RUNNERS
     assert plan.shard_count(3 * 120 * 4, 500, 120, 10) == 4
     assert plan_shards({"a": 3241, "b": 1}, target=10**6, limit=1)["shards"] == 2
-    assert plan_shards({"a": 3240, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 2
+    assert plan_shards({"a": 2700, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 2
+    assert plan_shards({"a": 2701, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 3
     uneven = plan_shards({"a": 2000, "b": 2000, "c": 2000, "d": 1500}, target=10**6, limit=1)
     assert uneven["shards"] == 4 and max(uneven["shard_worker_seconds"]) == 2000
-    roomy = plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2000)
+    roomy = plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2180)
     assert roomy["shards"] == 2
+    assert plan_shards({str(index): 1000 for index in range(11)}, target=10**6, limit=1, budget=2000)["shards"] == 3
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():
@@ -689,12 +693,15 @@ def test_measured_cli_fails_at_plan_time_when_ten_shards_cannot_fit_the_budget(
     assert not output.exists()
     assert (
         "::error title=Mutation plan over budget::The slowest mutation shard needs 31000 worker seconds,"
-        " 10333 seconds on 3 workers, against the 1080 second shard budget. The change needs 310000 worker"
-        " seconds and 10 shards hold at most 32400, so split it into at least 10 pull requests." in text
+        " 10333 seconds on 3 workers, against the 1080 second shard budget less 180 seconds of setup. The change"
+        " needs 310000 worker seconds and 10 shards hold at most 27000, so split it into at least 12 pull requests."
+        in text
     )
 
 
-@pytest.mark.parametrize(("loads", "budget", "status"), [([3240.0, 10.0], None, 0), ([3240.0, 10.0], 1079, 1)])
+@pytest.mark.parametrize(
+    ("loads", "budget", "status"), [([2700.0, 10.0], None, 0), ([2701.0, 10.0], None, 1), ([2700.0, 10.0], 1079, 1)]
+)
 def test_measured_cli_accepts_a_shard_that_exactly_fills_its_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
