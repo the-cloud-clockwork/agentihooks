@@ -4311,7 +4311,7 @@ jobs:
                 fetch "$run" "$folder"
               fi
               mkdir -p .mutation-stats/killers
-              find "$folder" -type f -exec cp -t .mutation-stats/killers {} \;
+              find "$folder" -type f -exec cp {} .mutation-stats/killers/ \;
               echo "Seeded the first plan with $(find .mutation-stats/killers -type f | wc -l) kill memory files of Mutation preflight run $run"
               echo "id=$run" >> "$GITHUB_OUTPUT"
               exit 0
@@ -4608,7 +4608,7 @@ jobs:
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'
         run: |
           mkdir -p .mutation-killers
-          [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +
+          [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp {} .mutation-killers/ \;
           echo "Functions with a recorded killing test: $(find .mutation-killers -type f | wc -l)"
 
       - name: Upload the tests that killed mutants
