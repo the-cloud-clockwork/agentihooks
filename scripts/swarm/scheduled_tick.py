@@ -130,12 +130,11 @@ def _ended(tick: subprocess.Popen, killpg: Callable[[int, int], None]) -> tuple[
         return tick.wait(), True
 
 
-def _signal_group(pgid: int, number: int, killpg: Callable[[int, int], None]) -> bool:
+def _signal_group(pgid: int, number: int, killpg: Callable[[int, int], None]) -> None:
     try:
         killpg(pgid, number)
     except ProcessLookupError:
-        return False
-    return True
+        pass
 
 
 def _group_alive(pgid: int) -> bool:

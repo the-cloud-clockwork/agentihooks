@@ -93,7 +93,7 @@ def _current(path, text):
     return path.is_file() and path.read_text() == text
 
 
-def tick_units(binary: str) -> dict[str, str]:
+def tick_units() -> dict[str, str]:
     """The fallback tick timer, run through the tick holder so a timed out or failed pass ends its whole group."""
     from scripts.swarm.scheduled_tick import UNIT_FLAG, UNIT_TIMEOUT_S
 
@@ -126,7 +126,7 @@ def spoke_units(binary):
     return {f"{SPOKE}.service": spoke}
 
 
-ENGINE = (*units(""), *tick_units(""), *DROPPED)
+ENGINE = (*units(""), *tick_units(), *DROPPED)
 SYSTEMCTL = {"capture_output": True, "text": True, "timeout": 30}
 UNCHECKED = {**SYSTEMCTL, "check": False}
 SPOKE_ENABLE = ["systemctl", "--user", "enable", "--now", f"{SPOKE}.service"]
@@ -390,7 +390,7 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
     expected = units(binary)
     if kept:
         print(f"the {UNIT} timer stays: {kept}", file=sys.stderr)
-        changed, expected = False, {**expected, **tick_units(binary)}
+        changed, expected = False, {**expected, **tick_units()}
     else:
         changed = _retire(unit_dir, run)
     for name, text in expected.items():
@@ -427,7 +427,7 @@ def guard(binary, unit_dir=None, run=subprocess.run):
             return ensure(binary, unit_dir, run)
         return True
     enabled = ["systemctl", "--user", "is-enabled", "--quiet", f"{UNIT}.timer"]
-    if all(_current(unit_dir / name, text) for name, text in tick_units(binary).items()) and not (
+    if all(_current(unit_dir / name, text) for name, text in tick_units().items()) and not (
         run(enabled, capture_output=True, text=True, timeout=30).returncode
     ):
         return True

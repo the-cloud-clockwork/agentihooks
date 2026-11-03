@@ -117,20 +117,20 @@ def test_the_scheduler_fires_the_tick_holder_every_minute(monkeypatch):
 class _Tick:
     pid = 4_194_305
 
-    def __init__(self, codes):
+    def __init__(self, codes: list[int | None]) -> None:
         self.codes, self.waits, self.signals = list(codes), [], []
 
-    def wait(self, timeout=None):
+    def wait(self, timeout: float | None = None) -> int:
         self.waits.append(timeout)
         code = self.codes.pop(0)
         if code is None:
-            raise subprocess.TimeoutExpired("agentihooks", timeout)
+            raise subprocess.TimeoutExpired("agentihooks", timeout or 0)
         return code
 
-    def terminate(self):
+    def terminate(self) -> None:
         self.signals.append("terminate")
 
-    def kill(self):
+    def kill(self) -> None:
         self.signals.append("kill")
 
 
@@ -227,6 +227,7 @@ PID = _Tick.pid
 
 def test_a_tick_past_its_timeout_signals_its_whole_group_then_kills_it(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
     group = _Group(members=1)
     tick = _Tick([None, 143])
     assert scheduled_tick._finish(tick, group, group.alive) == 143
@@ -243,6 +244,7 @@ def test_a_tick_past_its_timeout_signals_its_whole_group_then_kills_it(monkeypat
 
 def test_a_tick_that_exits_clean_after_its_timeout_still_ends_its_group(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
     group = _Group(members=1, stubborn=True)
     assert scheduled_tick._finish(_Tick([None, 0]), group, group.alive) == 0
     assert group.sent == [(PID, signal.SIGTERM), (PID, signal.SIGKILL)]
@@ -269,6 +271,7 @@ def test_a_clean_pass_leaves_its_group_alone() -> None:
 
 def test_a_failed_pass_ends_what_is_left_of_its_group(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
     group = _Group(members=2)
     assert scheduled_tick._finish(_Tick([1]), group, group.alive) == 1
     assert group.sent == [(PID, signal.SIGTERM)]

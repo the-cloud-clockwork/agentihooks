@@ -568,9 +568,7 @@ def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_an
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is False
     assert [argv[2] for argv, _ in calls][-4:] == ["enable"] * 4
     assert calls[-1][0] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
-    assert (tmp_path / "agentihooks-swarm.timer").read_text() == timer.tick_units("/installed/bin/agentihooks")[
-        "agentihooks-swarm.timer"
-    ]
+    assert (tmp_path / "agentihooks-swarm.timer").read_text() == timer.tick_units()["agentihooks-swarm.timer"]
 
 
 def test_reconcile_reruns_ensure_while_a_retired_tick_unit_is_left(tmp_path, monkeypatch):
@@ -655,7 +653,7 @@ NONE_YET = "no scheduler has delivered a swarm tick yet"
 
 
 def test_the_tick_units_run_the_installed_tick_every_minute():
-    assert timer.tick_units("/installed/bin/agentihooks") == {
+    assert timer.tick_units() == {
         "agentihooks-swarm.service": TICK_SERVICE,
         "agentihooks-swarm.timer": TICK_TIMER,
     }
@@ -915,7 +913,7 @@ def _delivering(monkeypatch):
 
 
 def _kept_units(unit_dir):
-    for name, text in timer.tick_units("/installed/bin/agentihooks").items():
+    for name, text in timer.tick_units().items():
         (unit_dir / name).write_text(text)
 
 
