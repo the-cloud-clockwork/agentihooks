@@ -454,6 +454,24 @@ See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every proces
 
 ---
 
+## Swarm Tick
+
+See [The minute tick](../pillars/swarm.md#the-minute-tick) and [Tick report](tick-report.md). Both are read from the
+environment of the process that runs `agentihooks swarm tick`, so set them in `~/.agentihooks/.env` on the machine
+whose scheduler ticks.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_TICK_CADENCE` | `1` | Slow lane cadence in whole minutes, `1` to `5`. `scripts.tick.engine.cadence_s` refuses a value that is not a whole number, is below one, or breaks the delivery guard, heartbeat limit, lease TTL or stale watcher (six minutes and above). No pass reads it yet, so it changes nothing today; the scheduler cron stays every minute |
+| `AGENTIHOOKS_TICK_STAGE` | `S1` | Rollout stage whose pass p95 target holds new spawns: `S1` 384, `S2` 240, `S3` 120, `S4` 60 seconds. Any other value raises `KeyError` in the pass budget check and the pass ends in error |
+
+```bash
+echo 'AGENTIHOOKS_TICK_STAGE=S2' >> ~/.agentihooks/.env
+AGENTIHOOKS_TICK_CADENCE=2 python -c 'from scripts.tick.engine import cadence_s; print(cadence_s())'   # 120.0
+```
+
+---
+
 ## Swarm Grafana Alerts
 
 See [Grafana bottleneck alerts](grafana-bottleneck-alerts.md). The swarm tick reads alert state through the gateway with these; no listener, token or secret path of its own.
