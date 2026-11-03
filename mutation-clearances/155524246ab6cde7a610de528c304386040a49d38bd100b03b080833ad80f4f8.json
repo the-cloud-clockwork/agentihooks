@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/tasks.py:scripts.tick.steps.tasks.x_appliers:928e96b3382fff09f40ee1aea5a57a7c94dd5040f7f2551805331dc883affaa3": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime whatever its first argument is, so replacing the target type with None changes no output."
+  }
+}

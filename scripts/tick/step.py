@@ -18,6 +18,7 @@ class Write:
     domain: Domain
     key: str
     value: object
+    expected: object = None
 
 
 @dataclass(frozen=True)

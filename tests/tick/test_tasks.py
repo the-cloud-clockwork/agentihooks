@@ -96,13 +96,14 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
 
 def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    found = _run(tasks.TASK_PASSES, _tick(calls), _pass(), monkeypatch)
+    tick = _tick(calls)
+    found = _run(tasks.TASK_PASSES, tick, _pass(), monkeypatch)
     assert found == ["ran 1", "ran 2", "ran 3", "ran 4", "ran 5"]
     assert calls == [
         ("run window", "sw", "config", "store", "ledger", "doc", 7),
         (claim_hold.verification_notices, "sw", "store", "doc", 7),
-        (difficulty.size_pass, "sw", "ledger", "doc"),
-        (grouping.release_pass, "sw", "store", "ledger", "doc"),
+        (tasks.size_writes, tick, "doc"),
+        (tasks.release_writes, tick, "sw", "store", "doc"),
         ("dispatcher group", "sw", "config", "store", "ledger", "doc", 7),
     ]
 
@@ -180,9 +181,9 @@ def test_settle_then_close_space_close_the_pass(monkeypatch: pytest.MonkeyPatch)
 def test_a_raising_step_skips_the_rest_and_raises_at_the_site(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
-    found = _run(tasks.TASK_PASSES, _tick(calls, raises=difficulty.size_pass), _pass(box), monkeypatch)
+    found = _run(tasks.TASK_PASSES, _tick(calls, raises=tasks.size_writes), _pass(box), monkeypatch)
     assert found == ["ran 1", "ran 2"]
-    assert [call[0] for call in calls] == ["run window", claim_hold.verification_notices, difficulty.size_pass]
+    assert [call[0] for call in calls] == ["run window", claim_hold.verification_notices, tasks.size_writes]
     assert list(box) == [tasks.RAISED]
     with pytest.raises(RuntimeError, match="^boom$"):
         tasks.raise_held(box)

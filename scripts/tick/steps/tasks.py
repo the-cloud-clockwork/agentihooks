@@ -1,17 +1,41 @@
 """The task steps of the tick pass, run at their sites in today's order: task passes, then settle and close space."""
 
 from collections.abc import Callable
-from typing import Any
+from functools import partial
+from typing import Any, cast
 
 from scripts.swarm import dev_red, fleet_red, prerequisite_wait, promotion_watch, release_wait
-from scripts.tick import registry
-from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, Left
+from scripts.swarm.ledger_client import LedgerRefused
+from scripts.tick import registry, steps, view
+from scripts.tick.ports.records import RevisionConflict
+from scripts.tick.step import Context, Domain, Result, Write
+from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actions_of
 
-__all__ = ["CLOSE", "DRAINED", "RAISED", "REOPENS", "STEPS", "TASK_PASSES", "held", "raise_held", "sleeping_of"]
+__all__ = [
+    "CLOSE",
+    "DRAINED",
+    "GROUPS",
+    "SIZES",
+    "RAISED",
+    "REOPENS",
+    "STEPS",
+    "TASK_PASSES",
+    "WriteStep",
+    "appliers",
+    "group_writer",
+    "held",
+    "raise_held",
+    "release_writes",
+    "size_writes",
+    "sleeping_of",
+    "task_writer",
+]
 
 Get = Callable[[str], Any]
 DRAINED = "drained resume"
 REOPENS = "reopen passes"
+GROUPS = Domain("groups")
+SIZES = Domain("sizes")
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -97,11 +121,122 @@ def _verification_notices(tick: Any, get: Get) -> Any:
 
 
 def _size_pass(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(tick.difficulty.size_pass, get("slug"), get("ledger"), get("doc"))
+    return tick.skip_refused(size_writes, tick, get("doc"))
+
+
+def size_writes(tick: Any, doc: dict[str, Any]) -> list[str | Write]:
+    """Return a task write and an action for each task the size pass sizes, writing nothing itself."""
+    return [item for found in tick.difficulty.sizes(doc) for item in _size_write(tick, *found)]
+
+
+def _size_write(tick: Any, task_id: str, fields: dict[str, Any]) -> list[str | Write]:
+    """Return the guarded task write of the size ``fields`` give task ``task_id``, and its action."""
+    return [Write(SIZES, task_id, fields, expected={"difficulty": ""}), tick.difficulty.sized_action(task_id, fields)]
+
+
+class WriteStep:
+    """A task step whose call returns action lines and the task writes the engine applies with compare and set."""
+
+    def __init__(
+        self,
+        name: str,
+        group: str,
+        call: Callable[[Any, Get], Any],
+        writes: frozenset[Domain] = frozenset(),
+    ) -> None:
+        """Take the name, group, budgets and domains of the call step running ``call``."""
+        base = CallStep(name, group, call, writes=writes)
+        self.name = base.name
+        self.group = base.group
+        self.call = base.call
+        self.lane = base.lane
+        self.budget_s = base.budget_s
+        self.interval_s = base.interval_s
+        self.needs = base.needs
+        self.reads = base.reads
+        self.writes = base.writes
+
+    def run(self, ctx: Context) -> Result:
+        """Run the call against the pass state, returning its actions and its writes."""
+        found = cast(
+            list[object], self.call(steps.import_module("scripts.swarm.tick"), partial(ctx.view.read, PASS)) or []
+        )
+        writes = tuple(item for item in found if isinstance(item, Write))
+        lines = [item for item in found if not isinstance(item, Write)]
+        return Result((Write(actions_of(self.name), self.name, lines), *writes))
+
+
+def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None]) -> Callable[[Write], None]:
+    """Return the tasks applier: it writes a task's fields only while the fields it expects still hold.
+
+    ``read`` returns the task as the ledger holds it now. A moved field or a refused write raises RevisionConflict.
+    """
+    return partial(_write_task, slug, ledger, read)
+
+
+def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
+    """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it."""
+    expected = cast(dict[str, Any], write.expected or {})
+    task = read(write.key)
+    moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
+    if moved:
+        raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
+    try:
+        ledger.update_task(slug, write.key, write.value)
+    except LedgerRefused as exc:
+        raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
+
+
+def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
+    """Return the appliers of a task group site: tasks and groups when the site holds a ledger and a swarm."""
+    slug, ledger = state.get("slug"), state.get("ledger")
+    if ledger is None or not slug:
+        return {}
+    return {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+
+
+def _fresh_task(task_id: str) -> dict[str, Any] | None:
+    """Return the task as the held ledger view has it after the pass's latest write, empty when the view lacks it.
+
+    Without a held view there is nothing to compare against, so the result is ``None`` and the write goes through.
+    """
+    held = view.current()
+    return None if held is None else cast(dict[str, Any], held.read("tasks", task_id) or {})
 
 
 def _grouping_release(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(tick.grouping.release_pass, get("slug"), get("store"), get("ledger"), get("doc"))
+    return tick.skip_refused(release_writes, tick, get("slug"), get("store"), get("doc"))
+
+
+def release_writes(tick: Any, slug: str, store: Any, doc: dict[str, Any]) -> list[str | Write]:
+    """Return a group write and an action for each stopped group lead, writing nothing and leaving ``doc`` as read."""
+    return [item for found in tick.grouping.releases(slug, store, doc) for item in _release_write(tick, doc, *found)]
+
+
+def _release_write(tick: Any, doc: dict[str, Any], lead_id: str, why: str, released: list[str]) -> list[str | Write]:
+    """Return the guarded group write and the action releasing ``released`` from the group under ``lead_id``."""
+    lead = next(task for task in doc["tasks"] if task["id"] == lead_id)
+    return [
+        Write(GROUPS, lead_id, released, expected={"group_members": list(lead["group_members"])}),
+        tick.grouping.released_action(lead_id, why, released),
+    ]
+
+
+def group_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None]) -> Callable[[Write], None]:
+    """Return the groups applier: it releases a lead's group only while the lead still holds the members it read."""
+    return partial(_release_group, slug, ledger, read)
+
+
+def _release_group(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
+    """Release the group under the lead of ``write`` unless its members moved or the ledger refuses it."""
+    expected = cast(dict[str, Any], write.expected or {})
+    task = read(write.key)
+    if task is not None and list(task.get("group_members") or []) != expected.get("group_members", []):
+        raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
+    try:
+        ledger.ungroup_tasks(slug, write.key)
+    except LedgerRefused as exc:
+        raise RevisionConflict(f"the ledger refused the release of the group under task {write.key}") from exc
 
 
 def _dispatcher_group(tick: Any, get: Get) -> Any:
@@ -130,8 +265,8 @@ STEPS = (
     CallStep("fleet red notice", REOPENS, held(_fleet_red_notice)),
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
-    CallStep("size pass", TASK_PASSES, held(_size_pass)),
-    CallStep("grouping release", TASK_PASSES, held(_grouping_release)),
+    WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),
+    WriteStep("grouping release", TASK_PASSES, held(_grouping_release), writes=frozenset({GROUPS})),
     CallStep("dispatcher group", TASK_PASSES, held(_dispatcher_group)),
     CallStep(
         "settle", CLOSE, held(_settle), frozenset({"spawn"}), frozenset({AGENTS, TASKS, SWARM}), frozenset({SWARM})
