@@ -104,6 +104,14 @@ def test_the_admitted_set_is_computed_once_per_ledger_view(monkeypatch: pytest.M
     assert calls == ["hot", "other", "other", "other"]
 
 
+def test_a_new_focus_list_on_the_same_ledger_view_recomputes_the_admitted_set() -> None:
+    graph: dict[str, Any] = {}
+    found = doc(record("tasks/a", "focus"), tasks=[task("a"), task("b")])
+    assert freeze.admitted(found, graph) == {"a"}
+    found["freezes"] = [record("tasks/b", "focus")]
+    assert freeze.admitted(found, graph) == {"b"}
+
+
 def test_the_tasks_of_a_phase_the_focused_phase_waits_on_join_the_focus() -> None:
     phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1", "empty"]}, {"id": "p3", "depends_on": ["p2"]}]
     rows = [task("early", phase="p1"), task("middle", phase="p2"), task("late", phase="p3"), task("other", phase="p4")]

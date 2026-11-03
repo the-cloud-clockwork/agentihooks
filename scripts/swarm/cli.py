@@ -2455,7 +2455,7 @@ def build_parser() -> argparse.ArgumentParser:
         if verb == "focus":
             frozen.add_argument("--only", action="store_true")
             place = frozen.add_mutually_exclusive_group()
-            place.add_argument("--top", dest="position", action="store_const", const="top", default="")
+            place.add_argument("--top", dest="position", action="store_const", const="top")
             place.add_argument("--bottom", dest="position", action="store_const", const="bottom")
     scale = sub.add_parser("autoscale")
     scale.add_argument("--fixture", default="")
