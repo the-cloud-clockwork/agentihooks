@@ -8,7 +8,7 @@ from typing import Any
 from scripts.swarm import lost_runner, quota_notice, time_left
 from scripts.tick import registry
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets
-from scripts.tick.steps.tasks import held
+from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
 
 __all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
 
@@ -50,9 +50,8 @@ def _codex_hook_order(tick: Any, get: Get) -> Any:
 
 
 def _rank_pass(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(
-        tick.dispatcher.rank_pass, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
-    )
+    keys = ("slug", "config", "store", "ledger", "doc", "now_ms")
+    return tick.skip_refused(rank_writes, tick, *map(get, keys))
 
 
 def _bottleneck_remedy(tick: Any, get: Get) -> Any:
@@ -93,7 +92,7 @@ STEPS = (
     CallStep("time left", NOTICES, held(_time_left)),
     CallStep("collect acks", ACKS, held(_collect_acks)),
     CallStep("codex hook order", ACKS, held(_codex_hook_order)),
-    CallStep("rank pass", PLACEMENT, held(_rank_pass)),
+    WriteStep("rank pass", PLACEMENT, held(_rank_pass), writes=frozenset({RANK})),
     CallStep("bottleneck remedy", PLACEMENT, held(_bottleneck_remedy)),
     CallStep("preempt", PLACEMENT, held(_preempt), PREEMPT_NEEDS, frozenset({AGENTS}), frozenset({AGENTS})),
     CallStep("spawn", PLACEMENT, held(_spawn), budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), PLACED),

@@ -20,6 +20,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
+from typing import Any
 
 from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
@@ -198,26 +199,26 @@ def _band(task, fixed, guard):
     return ledger_rank.order(task) if task["id"] in fixed else ledger_rank.RANKS.index(ledger_rank.DEFAULT)
 
 
-def rank_pass(slug, config, store, ledger, doc, now_ms):
+@dataclass(frozen=True)
+class Ranking:
+    """A rank pass decided at ``at_ms`` from one read: the saved heads it read, its steps and the heads they land."""
+
+    at_ms: int
+    head: str | bytes | None
+    steps: list[Callable[[], Action | None]]
+    landed: dict[str, list[str]] | None
+
+
+def rank_decision(slug: str, config: Any, store: Any, ledger: Any, doc: dict[str, Any], now_ms: int) -> Ranking:
+    """Decide the rank pass from ``doc`` and the saved heads, taking no step and writing nothing."""
+    head = store.redis.get(store.key(slug, HEAD))
     known, named = {t["id"]: t for t in doc["tasks"]}, timing.timed(bottleneck.read, store, slug).get("bottleneck")
     graph, fix = timing.timed(hierarchy.project, doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, known)
     deferred = _deferred(doc)
     claimable = timing.timed(_claimable, known, doc, graph, fix, deferred, (released, applied))
     scores, fixed = timing.timed(leverage, doc), _fixed(doc)
-    if config.autonomy in APPLIES:
-        before, banded = timing.timed(_saved_heads, store, slug), _banded(doc)
-        lined_queue = timing.timed(queue, doc, fix, lane_caps(config), config.focus_weight)
-        leading = [t for t in lined_queue if t in claimable and (scores[t] or t in banded)]
-        heads = timing.timed(_heads, store, slug, config, leading, known, before)
-        landed = {
-            lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]
-            for lane, head in heads.items()
-        }
-        led = set(leading)
-        standing = {task_id: task_id in led for task_id in claimable}
-        steps = timing.timed(_head_steps, slug, ledger, doc, before, heads, standing, landed)
-    else:
+    if config.autonomy not in APPLIES:
         lined_order = timing.timed(ordered, doc, named, scores, lane_caps(config), config.focus_weight)
         lined = [t for t in lined_order if t in claimable and scores[t]]
         top = [t for t in lined if t not in fixed or known[t].get("rank") in WINDOW][:TOP]
@@ -225,16 +226,34 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
             (known[t], _work(scores[t])) for t in top if known[t].get("rank") not in WINDOW[1:] and t not in fixed
         ]
         mail = Mail(InboxStore(store.redis), store, slug)
-        steps, landed = [partial(timing.timed, _propose, slug, ledger, mail, *row) for row in raises], None
+        return Ranking(
+            now_ms, head, [partial(timing.timed, _propose, slug, ledger, mail, *row) for row in raises], None
+        )
+    before, banded = timing.timed(_saved_heads, head), _banded(doc)
+    lined_queue = timing.timed(queue, doc, fix, lane_caps(config), config.focus_weight)
+    leading = [t for t in lined_queue if t in claimable and (scores[t] or t in banded)]
+    heads = timing.timed(_heads, store, slug, config, leading, known, before)
+    landed = {
+        lane: [t for t in before.get(lane, []) if t in head_ids or known.get(t, {}).get("state") == "open"]
+        for lane, head_ids in heads.items()
+    }
+    led = set(leading)
+    standing = {task_id: task_id in led for task_id in claimable}
+    steps = timing.timed(_head_steps, slug, ledger, doc, before, heads, standing, landed)
+    return Ranking(now_ms, head, steps, landed)
+
+
+def apply_ranking(slug: str, store: Any, ranking: Ranking) -> list[str]:
+    """Take the decided steps, log them and save the heads they landed, returning their actions and log errors."""
     done = []
     try:
-        for step in steps:
+        for step in ranking.steps:
             if action := step():
                 done.append(action)
     finally:
-        errors = timing.timed(log, slug, done, now_ms)
-        if landed is not None:
-            store.redis.set(store.key(slug, HEAD), json.dumps(landed))
+        errors = timing.timed(log, slug, done, ranking.at_ms)
+        if ranking.landed is not None:
+            store.redis.set(store.key(slug, HEAD), json.dumps(ranking.landed))
     return [action.text for action in done] + errors
 
 
@@ -259,8 +278,8 @@ def _heads(store, slug, config, lined, known, before):
     }
 
 
-def _saved_heads(store, slug):
-    saved = store.redis.get(store.key(slug, HEAD))
+def _saved_heads(saved: str | bytes | None) -> dict[str, list[str]]:
+    """Return the saved claim queue heads of the head record ``saved``, empty when there is none."""
     return json.loads(saved) if saved else {}
 
 

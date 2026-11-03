@@ -33,7 +33,7 @@ __all__ = [
     "run_step",
 ]
 
-Appliers = Mapping[Domain, Callable[[Write], object]]
+Appliers = Mapping[Domain, Callable[[Write], list[str] | None]]
 
 OK = "ok"
 LATE = "late"
@@ -57,6 +57,7 @@ class StepRecord:
     held: bool = False
     dropped: tuple[Write, ...] = ()
     conflicts: tuple[str, ...] = ()
+    applied: tuple[str, ...] = ()
 
     @property
     def outcome(self) -> str:
@@ -141,21 +142,27 @@ def run_group(
 def _applied(record: StepRecord, apply: Appliers) -> StepRecord:
     """Apply the record's writes through the applier of their domain, dropping each one whose compare and set failed.
 
-    Writes for a domain with no applier pass through untouched. A dropped write is recomputed by the next pass.
+    Writes for a domain with no applier pass through untouched. A dropped write is recomputed by the next pass. The
+    action lines an applier returns are kept on the record as its applied actions.
     """
     if record.result is None:
         return record
     dropped: list[Write] = []
     conflicts: list[str] = []
+    lines: list[str] = []
     for write in record.result.writes:
         if (applier := apply.get(write.domain)) is None:
             continue
         try:
-            applier(write)
+            found = applier(write)
         except RevisionConflict as exc:
             dropped.append(write)
             conflicts.append(str(exc))
-    return replace(record, dropped=tuple(dropped), conflicts=tuple(conflicts)) if dropped else record
+            continue
+        lines += found or []
+    if not dropped and not lines:
+        return record
+    return replace(record, dropped=tuple(dropped), conflicts=tuple(conflicts), applied=tuple(lines))
 
 
 def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
