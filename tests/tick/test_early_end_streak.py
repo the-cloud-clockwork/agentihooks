@@ -61,6 +61,7 @@ def test_passes_ending_early_on_one_value_raise_one_finding_at_the_threshold(
     ]
 
 
+@pytest.mark.feature("swarm-tick-early-end-streak")
 def test_a_full_pass_clears_the_finding(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
