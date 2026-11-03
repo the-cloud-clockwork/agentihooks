@@ -224,7 +224,8 @@ def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
 def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) -> StepRecord:
     """Run ``step`` once every handed off step of an earlier group in ``earlier`` has ended or was held, dropping it
     when one of them was dropped or its lane ran out first."""
-    if earlier and not found.ended(earlier, found.lane(step.lane).remaining):
+    lane = found.lane(step.lane)
+    if earlier and (not found.ended(earlier, lane.remaining) or lane.expired):
         return StepRecord(step.name, 0.0, step.budget_s, abandoned=True)
     return run_step(step, ctx)
 

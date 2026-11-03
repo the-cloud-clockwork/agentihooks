@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from threading import Event
 
 import pytest
@@ -46,6 +47,14 @@ def _blocking(release: Event, ended: Event) -> Callable[[Context], Result]:
             release.wait(5.0)
         finally:
             ended.set()
+        return Result()
+
+    return action
+
+
+def _noting(ran: list[str], name: str) -> Callable[[Context], Result]:
+    def action(ctx: Context) -> Result:
+        ran.append(name)
         return Result()
 
     return action
@@ -104,13 +113,8 @@ def test_a_critical_step_that_needs_a_handed_off_step_of_an_earlier_group_is_han
 def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs_ran_past_the_slow_deadline() -> None:
     release, ended = Event(), Event()
     ran: list[str] = []
-
-    def note(ctx: Context) -> Result:
-        ran.append("dependent")
-        return Result()
-
     stuck = Step("cross stuck step", _blocking(release, ended), "cross stuck")
-    dependent = Step("cross dropped dependent", note, "cross dependent", frozenset({stuck.name}))
+    dependent = Step("cross dropped dependent", _noting(ran, "dependent"), "cross dependent", frozenset({stuck.name}))
     later: list[tuple[engine.StepRecord, ...]] = []
     try:
         with pool.running(workers=4, slow_s=0.1):
@@ -150,13 +154,7 @@ def test_a_step_runs_once_the_handed_off_step_of_an_earlier_group_it_needs_was_h
 
 def test_a_sequential_pass_runs_a_cross_group_dependent_after_the_step_it_needs() -> None:
     ran: list[str] = []
-
-    def note(name: str) -> Callable[[Context], Result]:
-        def action(ctx: Context) -> Result:
-            ran.append(name)
-            return Result()
-
-        return action
+    note = partial(_noting, ran)
 
     first = Step("cross sequential first", note("first"), "cross sequential one")
     second = Step("cross sequential second", note("second"), "cross sequential two", frozenset({first.name}))
@@ -170,13 +168,7 @@ def test_a_sequential_pass_runs_a_cross_group_dependent_after_the_step_it_needs(
 def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs_lost_its_critical_need() -> None:
     release, ended = Event(), Event()
     ran: list[str] = []
-
-    def note(name: str) -> Callable[[Context], Result]:
-        def action(ctx: Context) -> Result:
-            ran.append(name)
-            return Result()
-
-        return action
+    note = partial(_noting, ran)
 
     stuck = Step("cross stuck critical", _blocking(release, ended), "cross lost", lane=Lane("tick"))
     slow = Step("cross lost slow", note("slow"), "cross lost", frozenset({stuck.name}))

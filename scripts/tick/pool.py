@@ -63,7 +63,7 @@ class Pass:
             self.handed[name] = Event()
 
     def end(self, name: str, dropped: bool) -> None:
-        """Mark handed off step ``name`` ended, ``dropped`` when it never ran or ran past its lane; others are ignored."""
+        """Mark handed off step ``name`` ended, ``dropped`` when it never ran or ran past its lane; ignore others."""
         if name not in self.handed:
             return
         if dropped:
