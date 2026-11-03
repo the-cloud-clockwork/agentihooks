@@ -93,12 +93,24 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
         if _open_focus(task, records, focus, graph) and not _stuck(task["id"], rows, cold, waits_on, stuck)
     ]
     seen: set[str] = set()
-    while queue:
-        task_id = queue.pop()
-        if task_id not in seen and task_id not in cold:
-            seen.add(task_id)
-            queue += waits_on(rows.get(task_id) or {})
+    for task_id in queue:
+        _reach(task_id, rows, cold, waits_on, seen)
     return frozenset(seen) if seen else None
+
+
+def _reach(
+    task_id: str,
+    rows: dict[str, dict[str, Any]],
+    cold: set[str],
+    waits_on: Callable[[dict[str, Any]], list[str]],
+    seen: set[str],
+) -> None:
+    """Add the task and everything it waits on, short of frozen work, to the admitted set."""
+    if task_id in seen or task_id in cold:
+        return
+    seen.add(task_id)
+    for dep in waits_on(rows.get(task_id) or {}):
+        _reach(dep, rows, cold, waits_on, seen)
 
 
 def _cold(tasks: list[dict[str, Any]], records: list[dict[str, Any]], graph: dict[str, Any]) -> set[str]:

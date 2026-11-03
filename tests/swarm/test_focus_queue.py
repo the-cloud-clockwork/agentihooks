@@ -74,6 +74,12 @@ def test_the_tasks_a_focused_task_waits_on_join_the_focus() -> None:
     assert [row["id"] for row in rows if freeze.claim_gate(row, found, graph, "")] == ["other"]
 
 
+def test_tasks_that_wait_on_each_other_join_the_focus_once() -> None:
+    rows = [task("hot", phase="p2", depends_on=["loop"]), task("loop", depends_on=["hot", "tail"]), task("tail")]
+    found = doc(record("tasks/hot", "focus"), tasks=[*rows, task("other")])
+    assert freeze.admitted(found, hierarchy.project(found)[0]) == {"hot", "loop", "tail"}
+
+
 def test_a_frozen_task_inside_the_focus_never_holds_the_queue_open() -> None:
     inside = task("inside", phase="p2")
     assert not gate(task(), record("plans/b", "focus"), record("tasks/inside"), tasks=[inside])
