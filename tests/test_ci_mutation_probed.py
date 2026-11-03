@@ -126,6 +126,13 @@ def test_a_survivor_unit_runs_its_slice_alone_or_costs_what_it_last_took(tmp_pat
     assert probed.survivor_units(merged, M2, None) == [105.6, 155.6]
 
 
+def test_a_split_whose_costs_do_not_match_its_slices_is_refused():
+    merged = _merged()
+    merged["splits"]["scripts.a.x_f"]["costs"] = [105.6]
+    with pytest.raises(ValueError):
+        probed.survivor_units(merged, M2, None)
+
+
 def _stats(root: Path, plan: dict) -> Path:
     folder = root / "stats"
     folder.mkdir(parents=True)
