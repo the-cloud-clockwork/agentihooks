@@ -19,6 +19,7 @@ pytestmark = pytest.mark.unit
 URL = "https://github.com/o/r/pull/1"
 EXPECTED = {"state": "open", "pr_url": URL, "claimed_by": ""}
 HOLD = Write(tasks.FLEET_RED, "t1", {"url": URL, "checks": "Tests"}, expected=EXPECTED)
+SAVE = Write(fleet_red.LISTINGS, "sw:fleet-red-pulls:o/r", "[]")
 
 
 @dataclass
@@ -68,14 +69,17 @@ def _task(**fields: str) -> dict[str, Any]:
 def test_the_fleet_red_step_returns_guarded_hold_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[tuple[Any, ...]] = []
 
-    def holds(slug: str, store: Any, rows: Any, now_ms: int) -> tuple[list[tuple[str, str, str]], list[str]]:
+    def holds(
+        slug: str, store: Any, rows: Any, now_ms: int
+    ) -> tuple[list[tuple[str, str, str]], list[str], list[Write]]:
         seen.append((slug, store, rows, now_ms))
-        return [("t1", URL, "Tests"), ("t2", URL, "Lint, Tests")], ["sw:fleet-red:t3", "sw:fleet-red:t4"]
+        return [("t1", URL, "Tests"), ("t2", URL, "Lint, Tests")], ["sw:fleet-red:t3", "sw:fleet-red:t4"], [SAVE]
 
     monkeypatch.setattr(fleet_red, "holds", holds)
     found = tasks.fleet_red_writes("sw", "store", {"t1": {}}, 7)
     assert seen == [("sw", "store", {"t1": {}}, 7)]
     assert found == [
+        SAVE,
         HOLD,
         f"task t1 held unclaimed, {URL} is red only from Tests",
         Write(tasks.FLEET_RED, "t2", {"url": URL, "checks": "Lint, Tests"}, expected={**EXPECTED}),
@@ -85,8 +89,13 @@ def test_the_fleet_red_step_returns_guarded_hold_writes(monkeypatch: pytest.Monk
 
 
 def test_the_fleet_red_step_returns_no_lifted_write_when_no_hold_lifted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fleet_red, "holds", lambda *args: ([], []))
+    monkeypatch.setattr(fleet_red, "holds", lambda *args: ([], [], []))
     assert tasks.fleet_red_writes("sw", "store", {}, 7) == []
+
+
+def test_the_fleet_red_step_returns_listing_saves_without_holds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fleet_red, "holds", lambda *args: ([], [], [SAVE]))
+    assert tasks.fleet_red_writes("sw", "store", {}, 7) == [SAVE]
 
 
 def test_the_lifted_applier_forgets_every_hold_mark_it_names() -> None:
@@ -157,7 +166,19 @@ def test_the_fleet_red_applier_drops_a_write_that_names_no_pull_request_and_chec
 def test_appliers_add_fleet_red_only_with_a_store() -> None:
     assert sorted(tasks.appliers({"slug": "sw", "ledger": Ledger()})) == [tasks.GROUPS, tasks.SIZES]
     both = tasks.appliers({"slug": "sw", "ledger": Ledger(), "store": Store()})
-    assert sorted(both) == [tasks.FLEET_RED, tasks.FLEET_RED_LIFTED, tasks.GROUPS, tasks.RANK, tasks.SIZES]
+    assert sorted(both) == [
+        tasks.FLEET_RED,
+        tasks.FLEET_RED_LIFTED,
+        fleet_red.LISTINGS,
+        tasks.GROUPS,
+        tasks.RANK,
+        tasks.SIZES,
+    ]
+
+
+def test_the_fleet_red_step_declares_the_listings_it_returns() -> None:
+    step = next(step for step in tasks.STEPS if step.name == "fleet red notice")
+    assert step.writes == {tasks.FLEET_RED, tasks.FLEET_RED_LIFTED, fleet_red.LISTINGS, "actions:fleet red notice"}
 
 
 class _State:
@@ -174,11 +195,13 @@ def test_a_hold_a_seat_claims_mid_pass_is_dropped_and_recomputed_on_the_next_pas
     store, ledger = Store(), Ledger()
     rival = ["engineer@a"]
 
-    def holds(slug: str, held_store: Any, rows: Any, now_ms: int) -> tuple[list[tuple[str, str, str]], list[str]]:
+    def holds(
+        slug: str, held_store: Any, rows: Any, now_ms: int
+    ) -> tuple[list[tuple[str, str, str]], list[str], list[Write]]:
         if rival:
             store.claims.add("t1")
             rival.clear()
-        return [("t1", URL, "Tests")], []
+        return [("t1", URL, "Tests")], [], []
 
     monkeypatch.setattr(fleet_red, "holds", holds)
     step = next(step for step in tasks.STEPS if step.name == "fleet red notice")
