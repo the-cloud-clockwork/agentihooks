@@ -5,7 +5,8 @@ from tests.swarm_ledger.test_api_v1 import authority_live, live, request  # noqa
 
 def test_a_focus_posted_with_only_true_is_stored_over_http(live: dict) -> None:  # noqa: F811
     operation = {"op": "freeze_set", "id": "focus-only", "verb": "focus", "target": "phases/p1", "only": True}
-    status, _ = request(live, "POST", "operations", {"ops": [operation], "guards": {}})
+    revision = request(live, "GET", "freezes")[1]["revision"]
+    status, _ = request(live, "POST", "operations", {"ops": [operation], "guards": {"freezes": revision}})
     assert status == 200
     status, reply = request(live, "GET", "freezes")
     assert status == 200
