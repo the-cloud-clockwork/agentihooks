@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.608 · 2026-11-03
+
+### 2026-11-03 · 861f05a17069 · #9537 · @nestorcolt
+
+**Announce the protected grader blob that accepts the early mutation stages (Refs #9536)**
+
+This change registers a new allow-listed hash for `scripts/gate_protected.py` in the protected-blob manifest, specifically the version whose `MUTATION_STAGES` tuple includes the four early mutation phases (refine, probe, replan, shard). It's a prerequisite step: the actual grader logic update in the next pull request can't land unless its exact blob hash is pre-approved here, keeping the frozen grader file tamper-resistant while still allowing the planned probe-and-shard mutation workflow improvements to proceed.
+
+### 2026-11-03 · baf07ad8e644 · #9533 · @nestorcolt
+
+**Size mutation preflight shards after the early tests from what they left**
+
+This change fixes mutation preflight on branch pushes to size its shard jobs from what the early test stage actually leaves alive, rather than the worst-case estimate used before any tests ran. A new lightweight `replan` job merges early results, marks killed mutants as done with zero cost, and prices survivors from measured slice costs, fitting shards into the budget the slowest early job left. This collapses a two-wave, 49+49 job run into a single 40+21 job wave, cutting planned shard worker time from about 130,000 to 44,000 seconds with no mutants lost and more kills caught early.
+
 ## v2.17.606 · 2026-11-03
 
 ### 2026-11-03 · 052ed283086e · #9518 · @nestorcolt
