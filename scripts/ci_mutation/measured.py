@@ -342,8 +342,10 @@ def main() -> int:
     print(f"Measured mutation worker seconds: {plan['estimated_worker_seconds']:.1f}")
     print(f"Measured mutation shards: {plan['shards']}; assigned mutants: {len(plan['assignments'])}")
     if overrun := budget_overrun(plan, args.budget):
-        print(f"::error title=Mutation plan over budget::{overrun}")
-        return 1
+        if not plan["splits"] or overrun.startswith("Mutant "):
+            print(f"::error title=Mutation plan over budget::{overrun}")
+            return 1
+        print(f"Before the early stage: {overrun} The replan grades the budget after the early stage.")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(plan['shards'])))}\n")

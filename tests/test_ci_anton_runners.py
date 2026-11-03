@@ -96,6 +96,8 @@ MOVED = {
     ("test.yml", "mutation"): LIGHT,
     ("test.yml", "mutation-plan"): LIGHT,
     ("test.yml", "mutation-refine"): LIGHT,
+    ("test.yml", "mutation-probe"): BATCH,
+    ("test.yml", "mutation-replan"): LIGHT,
     ("test.yml", "mutation-shard"): BATCH,
     ("test.yml", "mutation-stats"): BATCH,
     ("test.yml", "mutation-stats-seed"): LIGHT,
