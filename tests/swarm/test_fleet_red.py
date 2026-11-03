@@ -533,7 +533,9 @@ def test_the_engine_applies_the_listing_the_notice_step_returns(
     assert (store.redis.get(listing), store.redis.get(hold), store.redis.get(gone)) == (None, None, MINE)
     assert ledger.notices == []
 
-    (record,) = engine.run_group("x", Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state))
+    (record,) = engine.run_group(
+        tasks.REOPENS, Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state)
+    )
 
     assert record.dropped == ()
     assert json.loads(store.redis.get(listing))[0][0] == MINE
@@ -541,7 +543,7 @@ def test_the_engine_applies_the_listing_the_notice_step_returns(
     assert (store.redis.get(hold), store.redis.get(gone)) == (MINE, None)
     assert ledger.notices == [("sw", "red", fleet_red.NOTICE.format(url=MINE, checks="Semgrep, Tests"))]
     assert actions([record]) == [f"task red held unclaimed, {MINE} is red only from Semgrep, Tests"]
-    engine.run_group("x", Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state))
+    engine.run_group(tasks.REOPENS, Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state))
     assert reads == ["o/r"]
     assert len(ledger.notices) == 1
 
