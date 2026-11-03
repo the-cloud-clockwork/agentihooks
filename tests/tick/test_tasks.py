@@ -70,6 +70,8 @@ def _tick(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespac
 
 def _run(group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: tick)
+    for moved in ("_settle", "_close_space"):
+        monkeypatch.setattr(tasks, moved, getattr(tick, moved))
     return actions(engine.run_group(group, _ctx(state)))
 
 

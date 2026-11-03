@@ -101,6 +101,8 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
 
 def _run(group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: tick)
+    for moved in ("_placement_pass", "_collect_acks", "_codex_hook_order"):
+        monkeypatch.setattr(place, moved, getattr(tick, moved))
     return actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0))))
 
 
