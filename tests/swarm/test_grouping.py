@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult, YesNo
@@ -7,6 +9,8 @@ from scripts.swarm import grouping
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable, tick
+from scripts.tick.step import Write
+from scripts.tick.steps import tasks
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 PAGE = "scripts/swarm_ledger/static/js/render.js"
@@ -436,15 +440,19 @@ def release(store, found, claim=None, handoff=None):
     return ledger, released(store, ledger, found)
 
 
-def released(store, ledger, found):
+def released(store: RedisStore, ledger: ReleaseLedger, found: dict) -> list[str]:
+    """Apply the grouping release writes through the groups applier and drop what the ledger released from ``found``."""
     known = {t["id"]: t for t in found["tasks"]}
+    apply = tasks.group_writer("sw", ledger, known.get)
     actions = []
-    for lead_id, why, members in grouping.releases("sw", store, found):
-        ledger.ungroup_tasks("sw", lead_id)
-        known[lead_id].pop("group_members")
-        for member in members:
+    for item in tasks.release_writes(SimpleNamespace(grouping=grouping), "sw", store, found):
+        if not isinstance(item, Write):
+            actions.append(item)
+            continue
+        apply(item)
+        known[item.key].pop("group_members")
+        for member in item.value:
             del known[member]["merged_into"]
-        actions.append(grouping.released_action(lead_id, why, members))
     return actions
 
 

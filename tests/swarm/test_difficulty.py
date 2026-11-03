@@ -1,9 +1,13 @@
+from types import SimpleNamespace
+
 import pytest
 
 from hooks.classifier import Answer, ClassifierRequestError, ClassifierUnavailable, DecisionResult
 from scripts.swarm import difficulty
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
+from scripts.tick.step import Write
+from scripts.tick.steps import tasks
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 DOC = {"phases": [{"id": "p1", "title": "Sizing", "description": "Every task carries a size"}]}
@@ -239,11 +243,13 @@ def test_pass_sizes_only_open_unsized_tasks_up_to_the_bound(asked):
         {**TASK, "id": "c", "state": "done"},
     ]
     ledger = FakeLedger(tasks + [{**TASK, "id": f"d{i}"} for i in range(5)])
-    found = list(difficulty.sizes({**DOC, "tasks": ledger.tasks("sw")}))
-    actions = [difficulty.sized_action(task_id, fields) for task_id, fields in found]
+    found = tasks.size_writes(SimpleNamespace(difficulty=difficulty), {**DOC, "tasks": ledger.tasks("sw")})
+    actions = [item for item in found if not isinstance(item, Write)]
     assert actions == ["sized task a L by rule"] + [f"sized task d{i} S by classifier" for i in range(4)]
-    for task_id, fields in found:
-        ledger.update_task("sw", task_id, fields)
+    apply = tasks.task_writer("sw", ledger, ledger.rows.get)
+    for item in found:
+        if isinstance(item, Write):
+            apply(item)
     assert [task_id for task_id, _ in difficulty.sizes({**DOC, "tasks": ledger.tasks("sw")})] == ["d4"]
 
 

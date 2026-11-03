@@ -189,8 +189,8 @@ the step checks it and returns no actions when it does not hold.
 | --- | --- | --- |
 | 10 | run window | `run_window.step` |
 | 20 | verification notices | `claim_hold.verification_notices` |
-| 30 | size pass | `difficulty.size_pass` |
-| 40 | grouping release | `grouping.release_pass` |
+| 30 | size pass | `tasks.size_writes` returns a `sizes` task write per task `difficulty.sizes` sizes, applied by `tasks.task_writer` only while the task is still unsized |
+| 40 | grouping release | `tasks.release_writes` returns a `groups` write per lead `grouping.releases` finds stopped, applied by `tasks.group_writer` only while the lead still holds the members it read |
 | 50 | dispatcher group | `dispatcher.group` |
 
 ### Placement (`scripts.tick.steps.place`)
