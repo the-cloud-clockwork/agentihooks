@@ -181,7 +181,7 @@ class RedisStore:
         self.names = NameRegistry(redis)
         self.execution_registry = ExecutionRegistry(self)
 
-    def key(self, slug, *parts):
+    def key(self, slug: str, *parts: str) -> str:
         return ":".join((PREFIX, slug, *parts))
 
     def put_gate_lift(self, slug: str, scope: str, subject: str, gate: str, record: dict) -> None:
@@ -509,9 +509,14 @@ class RedisStore:
             self._project_row(pipe, slug, agent, previous)
             if removed:
                 pipe.hdel(self.key(slug, "agents"), removed)
+                pipe.hdel(self.key(slug, "hosts"), removed)
             timing.timed(pipe.execute)
 
         self._projection(slug, write, PROJECTION_CONTENTION)
+
+    def forget_hosts(self, slug: str, *names: str) -> None:
+        """Drop host projections so hive scope reads fall back to the execution registry."""
+        self.redis.hdel(self.key(slug, "hosts"), *names)  # pyright: ignore[reportUnknownMemberType]
 
     def project_legacy(self, slug: str, agent: AgentRecord, managed: Callable[[], bool]) -> bool:
         def write(pipe: Any) -> bool:
@@ -545,6 +550,7 @@ class RedisStore:
 
         row = {field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}
         pipe.hset(self.key(slug, "agents"), agent.name, json.dumps(row))
+        pipe.hset(self.key(slug, "hosts"), agent.name, agent.hive)
         if agent.desired_route_kind:
             pipe.hset(self.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
         else:
@@ -618,6 +624,7 @@ class RedisStore:
                             json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
                         )
                     pipe.hdel(self.key(slug, "agents"), name)
+                    pipe.hdel(self.key(slug, "hosts"), name)
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
                     pipe.hdel(self.key(slug, "retire-failures"), name)

@@ -59,6 +59,35 @@ def test_archive_moves_only_rows_no_live_reader_returns(store):
     assert registry.archive("fixture") == 0
 
 
+@pytest.mark.parametrize("external", [False, True])
+def test_fenced_archive_and_rows_written_in_the_old_layout_reach_old_readers(store: RedisStore, external: bool) -> None:
+    from scripts.swarm import lease
+
+    first, second, third, other = history(store)
+    if external:
+        fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        assert store.execution_registry.archive("fixture") == 2
+        store.put_agent("fixture", replace(third, state="working"))
+    port = fencing.records(store, "fixture")
+    assert port.layout("fixture") == fencing.DOCUMENT
+    doc = fencing.read(store, "fixture")
+    executions = fencing.read_executions(store, "fixture")
+    assert set(doc["archive"]) == {first.execution_id, second.execution_id}
+    assert executions == doc["executions"]
+    assert executions[third.execution_id]["state"] == "working"
+    for execution_id, row in doc["archive"].items():
+        found = port.record("fixture", "archive", execution_id)
+        assert found is not None
+        assert found.value == row
+    for execution_id, row in executions.items():
+        found = port.record("fixture", "executions", execution_id)
+        assert found is not None
+        assert found.value == row
+
+
 def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
     first, second, third, other = history(store)
     registry = store.execution_registry
