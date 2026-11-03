@@ -436,7 +436,8 @@ Swarm code reaches GitHub through the port. The Semgrep rule `swarm-source-contr
 - a call to `scripts.tick.adapters.github.command`, the adapter's `gh` command builder, under any import alias.
 
 `git` commands are not matched. `.semgrep/source-control.test.py` holds the failing and passing fixtures, graded with
-`semgrep --test` in the same workflow step that scans the code.
+`semgrep --test` in the same workflow step that scans the code; the rule also includes `*.test.py` so that fixture file
+is scanned.
 
 Files that still build `gh` commands are listed twice and must match: in the rule's `paths.exclude` and in
 `.semgrep/source-control-allowlist.json`. The list only shrinks. The Semgrep workflow step
@@ -864,7 +865,7 @@ an answer for an operation it falls back as follows:
 | `capabilities` | `Capabilities(merge_queue=False)` | `Capabilities(merge_queue=True)` |
 | `checks`, `runs`, `tags` | `()` | `()` |
 | `change`, `merge`, `comment` | `None` | `None` |
-| `issue_state`, `close_issue`, `rate_limit`, `issues_enabled`, `latest_runs`, `cancel_run` | `None` | `None` |
+| `issue_state`, `close_issue`, `rate_limit`, `issues_enabled`, `latest_runs`, `cancel_run`, `merged_at`, `open_changes`, `workflow_runs`, `download`, `graph` | `None` | `None` |
 
 An entry in `answers` always wins, with or without a queue. A step that must work on a provider without a merge
 queue is tested against the default fake; give every operation that falls back to `None` an answer whenever the step
