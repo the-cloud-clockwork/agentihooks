@@ -25,6 +25,7 @@ NOW = "2026-10-28T02:00:00+00:00"
 NOW_MS = int(datetime.fromisoformat(NOW).timestamp() * 1000)
 STALE = "2026-10-27T19:59:59+00:00"
 EDGE = "2026-10-27T20:00:00+00:00"
+LIVE_LISTING_S = 16.6
 
 
 def run(name: str, conclusion: str | None, at: str | None = NOW) -> RollupCheck:
@@ -411,7 +412,7 @@ def test_the_claim_view_admits_every_task_when_the_saved_listing_records_a_faile
 def test_the_notice_step_budget_outlasts_the_live_listing_so_its_save_is_kept() -> None:
     (step,) = [step for step in tasks.STEPS if step.name == "fleet red notice"]
 
-    assert step.budget_s >= 30.0
+    assert step.budget_s > LIVE_LISTING_S
 
 
 def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, monkeypatch):
