@@ -183,9 +183,9 @@ def plan_shards(
         (cost, name, None) for name, cost in costs.items() if name not in units
     ]
     items += [(cost, name, position) for name, unit in units.items() for position, cost in enumerate(unit)]
-    seconds = sum(costs[name] for name in sorted(costs))
+    total_seconds = sum(costs[name] for name in sorted(costs))
     widest = max(map(len, units.values()), default=1)
-    count = max(min(limit, widest), shard_count(seconds, len(items), target, limit, budget))
+    count = max(min(limit, widest), shard_count(total_seconds, len(items), target, limit, budget))
     ceiling = max(count, min(BATCH_RUNNERS, len(items)))
     fits = (
         count
@@ -200,7 +200,7 @@ def plan_shards(
         "costs": costs,
         "units": "worker seconds",
         **({"unit_costs": units} if units else {}),
-        "estimated_worker_seconds": seconds,
+        "estimated_worker_seconds": total_seconds,
         "shard_worker_seconds": loads,
         "workers": shard_workers(),
         "splits": {function: splits[function] for function in sorted({function_name(name) for name in units})},
