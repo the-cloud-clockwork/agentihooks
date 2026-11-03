@@ -50,6 +50,11 @@ def test_explicit_slot_limits_still_bound_fifteen_workers(
     assert local_slots.maximum(store, "workstation", ceiling) == expected
 
 
+@pytest.mark.parametrize(
+    "sample",
+    [host_budget.HostSample(32, 8, 64_000, 15), host_budget.HostSample(0.5, 8, 100, 15)],
+)
+
 def test_fifteen_worker_configuration_keeps_host_room_guard(store: RedisStore, sample: host_budget.HostSample) -> None:
     config = replace(store.config("workstation"), local_max_agents=15)
     assert host_budget.spawn_room(config, sample, None).room == 0
