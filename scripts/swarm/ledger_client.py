@@ -257,7 +257,9 @@ class LedgerClient:
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
-    def freeze(self, slug: str, verb: str, target: str, by: str | None = None, words: FreezeWords | None = None) -> None:
+    def freeze(
+        self, slug: str, verb: str, target: str, by: str | None = None, words: FreezeWords | None = None
+    ) -> None:
         given = {key: value for key, value in asdict(words or FreezeWords()).items() if value}
         if verb == "unfreeze":
             given = {key: value for key, value in given.items() if key in ("reason", "quote")}

@@ -259,7 +259,9 @@ def test_the_client_sends_the_queue_fields_only_on_a_focus(monkeypatch: pytest.M
     sent: list[dict[str, Any]] = []
     monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops: sent.append(ops[0]))
     LedgerClient().freeze("demo", "focus", "plans/a", words=FreezeWords(position="top", only=True))
-    LedgerClient().freeze("demo", "unfreeze", "plans/a", words=FreezeWords(position="top", only=True, quote="his words"))
+    LedgerClient().freeze(
+        "demo", "unfreeze", "plans/a", words=FreezeWords(position="top", only=True, quote="his words")
+    )
     assert {key: sent[0][key] for key in ("op", "verb", "target", "position", "only")} == {
         "op": "freeze_set",
         "verb": "focus",
