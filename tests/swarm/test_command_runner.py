@@ -498,3 +498,13 @@ def test_publish_hands_the_tick_view_to_the_status_report(store, monkeypatch):
         (store, "sw", {"tasks": []}, None, None, None),
         (store, "sw", {"tasks": []}, None, view, ["found"]),
     ]
+
+
+def test_the_tick_status_publish_hands_the_found_health_findings_to_publish(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[object, ...]] = []
+    monkeypatch.setattr(command_runner, "publish", lambda *args: seen.append(args))
+    found = [{"kind": "stale"}]
+    cli._publish_tick_status(store, "sw", {"tasks": []}, "view", None, found)
+    assert seen == [(store, "sw", {"tasks": []}, "view", found)]
