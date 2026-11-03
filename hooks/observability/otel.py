@@ -19,8 +19,8 @@ import fcntl
 import hashlib
 import os
 import time
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, cast
 
 _tracer = None
