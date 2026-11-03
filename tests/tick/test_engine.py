@@ -176,6 +176,23 @@ def test_step_runs_through_timing_call() -> None:
     assert record.result == Result()
 
 
+def test_registered_step_records_and_reports_under_its_own_name() -> None:
+    import json
+
+    import fakeredis
+
+    from scripts.swarm import tick_report, timing
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    with timing.tick("sw", store), timing.pass_record(store, "sw"):
+        engine.run_step(FakeStep("spawn", done), context(Clock()))
+    steps = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
+    passes = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:passes"))]
+    assert [row["step"] for row in steps] == ["step:spawn"]
+    assert [row["step"] for row in tick_report.summarize(passes, steps)["steps"]] == ["step:spawn"]
+
+
 def test_tick_stop_is_not_swallowed() -> None:
     from scripts.swarm import tick_stop
 
