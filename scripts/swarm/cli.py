@@ -15,7 +15,7 @@ agentihooks swarm <id> master up [--last | --new | --replace]     from a termina
 agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
 agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
 agentihooks swarm <id> set hive-placement=on|off                  place this swarm's work on hives while a local machine stays local
-agentihooks swarm <id> set local-max-agents=N                     with hive placement on, workers no hive takes run locally below N (default 8)
+agentihooks swarm <id> set local-max-agents=N                     with hive placement on, workers no hive takes run locally below N (default 15)
 agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
 agentihooks swarm <id> agent-up <profile>                         the same launch in its parser form
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
