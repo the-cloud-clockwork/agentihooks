@@ -36,6 +36,19 @@ def _adapter(store: RedisStore) -> coordination_adapter.StoreCoordination:
     return coordination_adapter.StoreCoordination(store, "sw", "home")
 
 
+def _recorded_expiries(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """The px expiry of every set call on the store's Redis, in call order."""
+    expiries: list[object] = []
+    set_key = store.redis.set
+
+    def recording_set(key: str, value: str, **options: object) -> object:
+        expiries.append(options.get("px"))
+        return set_key(key, value, **options)
+
+    monkeypatch.setattr(store.redis, "set", recording_set)
+    return expiries
+
+
 def test_the_store_coordination_answers_the_coordination_port(store: RedisStore) -> None:
     assert isinstance(_adapter(store), Coordination)
 
@@ -52,21 +65,22 @@ def test_lease_acquires_the_controller_lease_for_its_owner_and_refuses_another(s
     assert coordination_adapter.StoreCoordination(store, "sw", "other").lease(deadline=_deadline()) is None
 
 
-def test_lock_holds_the_named_lock_until_the_deadline_ends(store: RedisStore) -> None:
+def test_lock_holds_the_named_lock_until_the_deadline_ends(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = _adapter(store)
-    token = adapter.lock("placement", deadline=Deadline(2.5, _clock([0.0])))
+    expiries = _recorded_expiries(store, monkeypatch)
+    token = adapter.lock("placement", deadline=Deadline(3600.0, _clock([0.0])))
     assert token is not None
-    key = store.key("sw", "lock", "placement")
-    assert store.redis.get(key) == token
-    assert 2400 < store.redis.pttl(key) <= 2500
+    assert expiries == [3600000]
+    assert store.redis.get(store.key("sw", "lock", "placement")) == token
     assert adapter.lock("placement", deadline=_deadline()) is None
     assert adapter.lock("other", deadline=_deadline()) not in (None, token)
 
 
-def test_a_lock_with_under_a_millisecond_left_still_expires(store: RedisStore) -> None:
+def test_a_lock_with_under_a_millisecond_left_still_expires(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    expiries = _recorded_expiries(store, monkeypatch)
     token = _adapter(store).lock("short", deadline=Deadline(0.0004, _clock([0.0])))
     assert token is not None
-    assert 0 < store.redis.pttl(store.key("sw", "lock", "short")) <= 1
+    assert expiries == [1]
 
 
 def test_configure_stores_only_the_settings_that_changed(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
