@@ -110,9 +110,7 @@ def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: St
     """Run ``step`` in the caller's copied context, recorded under its registered name, and append its result or the
     error it raised."""
     try:
-        outcome.append(
-            caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=f"step:{step.name}")
-        )
+        outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name))
     except BaseException as exc:
         outcome.append(exc)
 
