@@ -39,15 +39,16 @@ def test_probe_in_process() -> None:
     assert not bad, json.dumps(bad[:5], default=str)
 
 
+def test_probe_once() -> None:
+    actions, launched = _scenario()
+    assert [task.get("hive") for _, task in launched] == ["small"], json.dumps(actions, default=str)
+
+
 @pytest.mark.parametrize("attempt", range(40))
 def test_probe_cold_process(attempt: int) -> None:
-    code = (
-        "import json\n"
-        "from tests.swarm.test_master_recovery_probe import _scenario\n"
-        "actions, launched = _scenario()\n"
-        "print(json.dumps({'actions': actions, 'hives': [t.get('hive') for _, t in launched]}, default=str))\n"
-    )
-    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=os.environ.copy())
-    assert done.returncode == 0, done.stderr[-3000:]
-    result = json.loads(done.stdout.strip().splitlines()[-1])
-    assert result["hives"] == ["small"], json.dumps(result)
+    if os.environ.get("PROBE_CHILD"):
+        pytest.skip("child")
+    node = "tests/swarm/test_master_recovery_probe.py::test_probe_once"
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-x", "--tb=short", node]
+    done = subprocess.run(command, capture_output=True, text=True, env={**os.environ, "PROBE_CHILD": "1"})
+    assert done.returncode == 0, done.stdout[-4000:]
