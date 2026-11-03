@@ -81,7 +81,22 @@ def test_get_freezes_prints_every_freeze_and_focus_record_as_json(reads, capsys,
 
 
 @pytest.mark.parametrize(
-    "item", ["chat", "phases", "followups", "priorities", "freezes/z1", "tasksx", "chat/c1", "tasks/", "tasks/a/b", "tasks/t1?state=done", "tasks/a#b", "tasks/.", "tasks/.."]
+    "item",
+    [
+        "chat",
+        "phases",
+        "followups",
+        "priorities",
+        "freezes/z1",
+        "tasksx",
+        "chat/c1",
+        "tasks/",
+        "tasks/a/b",
+        "tasks/t1?state=done",
+        "tasks/a#b",
+        "tasks/.",
+        "tasks/..",
+    ],
 )
 @pytest.mark.feature("ledger-item-reads")
 def test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities(item):
