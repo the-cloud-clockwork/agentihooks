@@ -13,7 +13,7 @@ from scripts.tick import engine, pool, view
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Lane, Result, View, Write
-from scripts.tick.steps import actions, actions_of, tasks
+from scripts.tick.steps import actions, actions_of, budgets, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -199,6 +199,23 @@ def test_the_size_step_splits_actions_from_writes(monkeypatch: pytest.MonkeyPatc
     )
     assert tasks.SIZES in step.writes
     assert TASKS not in step.writes
+
+
+def test_a_write_step_keeps_every_attribute_of_its_call_step() -> None:
+    def call(tick: object, get: object) -> list[object]:
+        return []
+
+    step = tasks.WriteStep("size pass", "sizing", call, writes=frozenset({tasks.SIZES}))
+
+    assert step.name == "size pass"
+    assert step.group == "sizing"
+    assert step.call is call
+    assert step.lane == Lane("tick")
+    assert (step.budget_s, step.interval_s) == budgets.timing_of("size pass")
+    assert step.budget_s is not None
+    assert step.needs == frozenset()
+    assert step.reads == frozenset()
+    assert step.writes == frozenset({tasks.SIZES, actions_of("size pass")})
 
 
 class GroupLedger:

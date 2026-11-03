@@ -75,13 +75,12 @@ def _size_pass(tick: Any, get: Get) -> Any:
 
 def size_writes(tick: Any, doc: dict[str, Any]) -> list[str | Write]:
     """Return a task write and an action for each task the size pass sizes, writing nothing itself."""
-    found: list[str | Write] = []
-    for task_id, fields in tick.difficulty.sizes(doc):
-        found += [
-            Write(SIZES, task_id, fields, expected={"difficulty": ""}),
-            tick.difficulty.sized_action(task_id, fields),
-        ]
-    return found
+    return [item for found in tick.difficulty.sizes(doc) for item in _size_write(tick, *found)]
+
+
+def _size_write(tick: Any, task_id: str, fields: dict[str, Any]) -> list[str | Write]:
+    """Return the guarded task write of the size ``fields`` give task ``task_id``, and its action."""
+    return [Write(SIZES, task_id, fields, expected={"difficulty": ""}), tick.difficulty.sized_action(task_id, fields)]
 
 
 class WriteStep:
@@ -121,26 +120,27 @@ def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
     ``read`` returns the task as the ledger holds it now. A moved field or a refused write raises RevisionConflict.
     """
+    return partial(_write_task, slug, ledger, read)
 
-    def apply(write: Write) -> None:
-        expected = cast(dict[str, Any], write.expected or {})
-        task = read(write.key)
-        moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
-        if moved:
-            raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
-        try:
-            ledger.update_task(slug, write.key, write.value)
-        except LedgerRefused as exc:
-            raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
 
-    return apply
+def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
+    """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it."""
+    expected = cast(dict[str, Any], write.expected or {})
+    task = read(write.key)
+    moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
+    if moved:
+        raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
+    try:
+        ledger.update_task(slug, write.key, write.value)
+    except LedgerRefused as exc:
+        raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
     """Return the appliers of a task group site: tasks and groups when the site holds a ledger and a swarm."""
-    if state.get("ledger") is None or not state.get("slug"):
+    slug, ledger = state.get("slug"), state.get("ledger")
+    if ledger is None or not slug:
         return {}
-    slug, ledger = cast(str, state["slug"]), state["ledger"]
     return {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
 
 
@@ -159,31 +159,33 @@ def _grouping_release(tick: Any, get: Get) -> Any:
 
 def release_writes(tick: Any, slug: str, store: Any, doc: dict[str, Any]) -> list[str | Write]:
     """Return a group write and an action for each stopped group lead, writing nothing and leaving ``doc`` as read."""
-    found: list[str | Write] = []
-    for lead_id, why, released in tick.grouping.releases(slug, store, doc):
-        lead = next(task for task in doc["tasks"] if task["id"] == lead_id)
-        members = list(lead["group_members"])
-        found += [
-            Write(GROUPS, lead_id, released, expected={"group_members": members}),
-            tick.grouping.released_action(lead_id, why, released),
-        ]
-    return found
+    return [item for found in tick.grouping.releases(slug, store, doc) for item in _release_write(tick, doc, *found)]
+
+
+def _release_write(tick: Any, doc: dict[str, Any], lead_id: str, why: str, released: list[str]) -> list[str | Write]:
+    """Return the guarded group write and the action releasing ``released`` from the group under ``lead_id``."""
+    lead = next(task for task in doc["tasks"] if task["id"] == lead_id)
+    return [
+        Write(GROUPS, lead_id, released, expected={"group_members": list(lead["group_members"])}),
+        tick.grouping.released_action(lead_id, why, released),
+    ]
 
 
 def group_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None]) -> Callable[[Write], None]:
     """Return the groups applier: it releases a lead's group only while the lead still holds the members it read."""
+    return partial(_release_group, slug, ledger, read)
 
-    def apply(write: Write) -> None:
-        expected = cast(dict[str, Any], write.expected or {})
-        task = read(write.key)
-        if task is not None and list(task.get("group_members") or []) != expected.get("group_members", []):
-            raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
-        try:
-            ledger.ungroup_tasks(slug, write.key)
-        except LedgerRefused as exc:
-            raise RevisionConflict(f"the ledger refused the release of the group under task {write.key}") from exc
 
-    return apply
+def _release_group(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
+    """Release the group under the lead of ``write`` unless its members moved or the ledger refuses it."""
+    expected = cast(dict[str, Any], write.expected or {})
+    task = read(write.key)
+    if task is not None and list(task.get("group_members") or []) != expected.get("group_members", []):
+        raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
+    try:
+        ledger.ungroup_tasks(slug, write.key)
+    except LedgerRefused as exc:
+        raise RevisionConflict(f"the ledger refused the release of the group under task {write.key}") from exc
 
 
 def _dispatcher_group(tick: Any, get: Get) -> Any:
