@@ -574,6 +574,24 @@ def test_the_default_caps_are_the_lane_maximums_without_a_quota_decision():
     assert capacity.caps({"effective": {"eng": 1}}, config) == {"eng": 1}
 
 
+def test_a_rank_decision_takes_no_step_until_it_is_applied(store, home, shipped):
+    store.update(SLUG, autonomy="delegate", max_eng=2)
+    ledger = Ledger()
+    decided = dispatcher.rank_decision(SLUG, store.config(SLUG), store, ledger, doc(ladder()), NOW)
+    assert (decided.at_ms, decided.head, decided.landed) == (NOW, None, {"eng": []})
+    assert (ledger.comments, store.redis.get(store.key(SLUG, "dispatch-head")), shipped) == ([], None, [])
+    actions = dispatcher.apply_ranking(SLUG, store, decided)
+    assert [comment[0] for comment in ledger.comments] == ["a", "b"]
+    assert [row[2] for row in shipped] == [NOW]
+    assert [action.split(":")[0] for action in actions] == [
+        "put task a at the head of the eng claim queue",
+        "put task b at the head of the eng claim queue",
+    ]
+    saved = store.redis.get(store.key(SLUG, "dispatch-head"))
+    assert json.loads(saved)["eng"] == ["a", "b"]
+    assert dispatcher.rank_decision(SLUG, store.config(SLUG), store, ledger, doc(ladder()), NOW).head == saved
+
+
 def test_a_refused_head_comment_still_logs_the_change(store, home, shipped):
     store.update(SLUG, autonomy="delegate", max_eng=2)
     ledger = Ledger(refused={"comment:a"}, broken={"comment:b"})
