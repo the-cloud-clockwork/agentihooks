@@ -334,6 +334,14 @@ def _intent_pass(inbox, store, slug, doc, ledger, config):
     return view, skip_refused(check.run, doc)
 
 
+def _tick_groups(store: RedisStore, slug: str, ledger: Any, runtime: Any) -> list[str]:
+    """Run the tick's registered groups at the wrapper's reboot site, no actions when a value they read was left."""
+    try:
+        return tick(slug, store, ledger, runtime, now_ms())
+    except Left:
+        return []
+
+
 @timing.instrument_tick
 @scope.one_pass()
 @outage.guard_tick
@@ -426,6 +434,7 @@ def run_tick(
                 try:
                     actions += run_group("wrapper reboot", **passing)
                     host_steps.raise_held(box)
+                    actions += _tick_groups(store, slug, ledger, runtime)
                 finally:
                     judged.result()
                     host_steps.raise_held(judging)
