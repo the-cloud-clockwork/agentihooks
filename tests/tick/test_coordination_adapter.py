@@ -68,9 +68,9 @@ def test_lease_acquires_the_controller_lease_for_its_owner_and_refuses_another(s
 def test_lock_holds_the_named_lock_until_the_deadline_ends(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = _adapter(store)
     expiries = _recorded_expiries(store, monkeypatch)
-    token = adapter.lock("placement", deadline=Deadline(2.5, _clock([0.0])))
+    token = adapter.lock("placement", deadline=Deadline(3600.0, _clock([0.0])))
     assert token is not None
-    assert expiries == [2500]
+    assert expiries == [3600000]
     assert store.redis.get(store.key("sw", "lock", "placement")) == token
     assert adapter.lock("placement", deadline=_deadline()) is None
     assert adapter.lock("other", deadline=_deadline()) not in (None, token)
