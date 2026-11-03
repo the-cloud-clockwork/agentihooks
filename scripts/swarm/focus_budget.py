@@ -1,33 +1,37 @@
 from collections.abc import Callable
+from typing import Any
 
 from scripts.swarm import freeze, profile_first
 from scripts.swarm_ledger.repository import hierarchy
 
 
-def ranks(doc: dict) -> dict[str, int]:
+def ranks(doc: dict[str, Any]) -> dict[str, int]:
     """Rank each task by the first focus record covering it, the record count when none does."""
-    targets = [row["target"] for row in doc.get("freezes", []) if row["verb"] == "focus"]
-    graph = hierarchy.project(doc)[0]
+    rows: list[dict[str, str]] = doc.get("freezes", [])
+    targets = [row["target"] for row in rows if row["verb"] == "focus"]
+    graph: dict[str, Any] = hierarchy.project(doc)[0]
+    tasks: list[dict[str, Any]] = doc["tasks"]
+    selectors: dict[str, Callable[[dict[str, Any]], object]] = freeze.SELECTORS
     paths: dict[str, int] = {}
-    selected: list[tuple[int, str, str]] = []
+    selected: list[tuple[int, Callable[[dict[str, Any]], object], str]] = []
     for index, target in enumerate(targets):
         selector, _, value = target.partition(":")
-        if selector in freeze.SELECTORS and value:
-            selected.append((index, selector, value))
+        if selector in selectors and value:
+            selected.append((index, selectors[selector], value))
         else:
             paths.setdefault(target, index)
-    return {
-        task["id"]: _rank(task, freeze.ancestry(task, graph), paths, selected, len(targets)) for task in doc["tasks"]
-    }
+    return {str(task["id"]): _rank(task, freeze.ancestry(task, graph), paths, selected, len(targets)) for task in tasks}
 
 
 def _rank(
-    task: dict, chain: list[str], paths: dict[str, int], selected: list[tuple[int, str, str]], unfocused: int
+    task: dict[str, Any],
+    chain: list[str],
+    paths: dict[str, int],
+    selected: list[tuple[int, Callable[[dict[str, Any]], object], str]],
+    unfocused: int,
 ) -> int:
     found = [paths[node] for node in chain if node in paths]
-    found += [
-        next((index for index, selector, value in selected if freeze.SELECTORS[selector](task) == value), unfocused)
-    ]
+    found += [next((index for index, pick, value in selected if pick(task) == value), unfocused)]
     return min(found)
 
 
