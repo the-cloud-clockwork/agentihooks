@@ -2,11 +2,11 @@
 
 import json
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextvars import Context as ContextCopy
 from contextvars import copy_context
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Lock, Thread
 from typing import Any
 from uuid import uuid4
@@ -15,13 +15,15 @@ from scripts.swarm import tick_report, timing
 from scripts.tick import pool, registry
 from scripts.tick.adapters.inbox import notify_pass_budget
 from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Lane, Result, Step
+from scripts.tick.ports.records import RevisionConflict
+from scripts.tick.step import Context, Domain, Lane, Result, Step, Write
 
 __all__ = [
     "FAILED",
     "HELD",
     "LATE",
     "OK",
+    "Appliers",
     "StepRecord",
     "cadence_breaches",
     "cadence_s",
@@ -30,6 +32,8 @@ __all__ = [
     "run_group",
     "run_step",
 ]
+
+Appliers = Mapping[Domain, Callable[[Write], object]]
 
 OK = "ok"
 LATE = "late"
@@ -51,6 +55,8 @@ class StepRecord:
     result: Result | None = None
     abandoned: bool = False
     held: bool = False
+    dropped: tuple[Write, ...] = ()
+    conflicts: tuple[str, ...] = ()
 
     @property
     def outcome(self) -> str:
@@ -114,18 +120,41 @@ def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: St
         outcome.append(exc)
 
 
-def run_group(name: str, ctx: Context, steps: Iterable[Step] | None = None) -> tuple[StepRecord, ...]:
-    """Run every step of group ``name``; a failed or late step never stops the next.
+def run_group(
+    name: str, ctx: Context, steps: Iterable[Step] | None = None, apply: Appliers | None = None
+) -> tuple[StepRecord, ...]:
+    """Run every step of group ``name``, applying each step's writes through ``apply`` as it ends.
 
-    Outside a parallel pass steps run one at a time in group order. In a parallel pass each step starts as soon as
-    every step it needs has ended, records keep group order, and a lane past its deadline drops its unfinished steps
-    and every step that needs them.
+    A failed or late step never stops the next. Outside a parallel pass steps run one at a time in group order. In a
+    parallel pass each step starts as soon as every step it needs has ended, records keep group order, writes are
+    applied on the scheduling thread as each step ends, and a lane past its deadline drops its unfinished steps and
+    every step that needs them.
     """
     ordered = group_steps(name, steps)
     found = pool.active()
     if found is None or not found.parallel:
-        return tuple(run_step(step, ctx) for step in ordered)
-    return _eager(ordered, ctx, found)
+        return tuple(_applied(run_step(step, ctx), apply or {}) for step in ordered)
+    return _eager(ordered, ctx, found, apply or {})
+
+
+def _applied(record: StepRecord, apply: Appliers) -> StepRecord:
+    """Apply the record's writes through the applier of their domain, dropping each one whose compare and set failed.
+
+    Writes for a domain with no applier pass through untouched. A dropped write is recomputed by the next pass.
+    """
+    if record.result is None:
+        return record
+    dropped: list[Write] = []
+    conflicts: list[str] = []
+    for write in record.result.writes:
+        if (applier := apply.get(write.domain)) is None:
+            continue
+        try:
+            applier(write)
+        except RevisionConflict as exc:
+            dropped.append(write)
+            conflicts.append(str(exc))
+    return replace(record, dropped=tuple(dropped), conflicts=tuple(conflicts)) if dropped else record
 
 
 def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
@@ -135,8 +164,11 @@ def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
     return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock))
 
 
-def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass) -> tuple[StepRecord, ...]:
-    """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended."""
+def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: Appliers) -> tuple[StepRecord, ...]:
+    """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended.
+
+    Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
+    """
     clock = ctx.deadline.clock
     names = {step.name for step in ordered}
     records: dict[str, StepRecord] = {}
@@ -164,7 +196,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass) -> tuple[S
             done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
             for future in done:
                 step, _, _ = running.pop(future)
-                records[step.name] = future.result()
+                records[step.name] = _applied(future.result(), apply)
             for future, (step, started, lane) in list(running.items()):
                 if lane.expired:
                     running.pop(future)

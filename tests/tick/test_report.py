@@ -131,7 +131,32 @@ def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in report.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
+        assert step.budget_s == budgets.timing_of(step.name)[0]
+
+
+def test_the_ledger_github_findings_and_metrics_steps_run_in_the_slow_lane() -> None:
+    lanes = {step.name: step.lane for step in report.STEPS}
+    assert {name for name, lane in lanes.items() if lane == engine.SLOW} == {
+        "ledger event pass",
+        "done recheck",
+        "progress checks",
+        "waits end",
+        "merge pass",
+        "doc report",
+        "priorities sweep",
+        "health findings",
+        "findings pass",
+        "metrics record",
+        "bottleneck status",
+        "snapshot job",
+    }
+    assert {lane for lane in lanes.values() if lane != engine.SLOW} == {CallStep.lane}
+
+
+def test_a_call_step_keeps_the_lane_it_is_given() -> None:
+    call = host.held(lambda cli, get: None)
+    assert CallStep("heartbeat", "g", call).lane == "tick"
+    assert CallStep("heartbeat", "g", call, lane=engine.SLOW).lane == "slow"
 
 
 def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
