@@ -176,7 +176,9 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
     assert "scripts.sample.x_plain__mutmut_1" in mixed["assignments"]
 
 
-def test_a_slice_a_probed_shard_ran_alone_is_reused_with_its_head_estimate(tmp_path, monkeypatch):
+def test_a_slice_a_probed_shard_ran_alone_is_reused_with_its_head_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.ci_mutation import killers, measured
 
     function = "scripts.sample.x_f"
