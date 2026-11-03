@@ -4,7 +4,7 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any, cast
 
-from scripts.swarm import dev_red, fleet_red, prerequisite_wait, promotion_watch, release_wait
+from scripts.swarm import dev_red, dispatcher, fleet_red, prerequisite_wait, promotion_watch, release_wait
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import registry, steps, view
 from scripts.tick.ports.records import RevisionConflict
@@ -19,6 +19,7 @@ __all__ = [
     "GROUPS",
     "SIZES",
     "RAISED",
+    "RANK",
     "REOPENS",
     "STEPS",
     "TASK_PASSES",
@@ -30,6 +31,8 @@ __all__ = [
     "held",
     "lifted_writer",
     "raise_held",
+    "rank_writer",
+    "rank_writes",
     "release_writes",
     "size_writes",
     "sleeping_of",
@@ -43,6 +46,7 @@ GROUPS = Domain("groups")
 SIZES = Domain("sizes")
 FLEET_RED = Domain("fleet red")
 FLEET_RED_LIFTED = Domain("fleet red lifted")
+RANK = Domain("rank")
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -193,6 +197,35 @@ def _forget_holds(store: Any, write: Write) -> None:
     store.redis.delete(*str(write.value).splitlines())
 
 
+def rank_writes(
+    tick: Any, slug: str, config: Any, store: Any, ledger: Any, doc: dict[str, Any], now_ms: int
+) -> list[str | Write]:
+    """Return the rank pass decided from ``doc`` as one write guarded on the saved heads it read, taking no step."""
+    ranking = tick.dispatcher.rank_decision(slug, config, store, ledger, doc, now_ms)
+    return [Write(RANK, slug, ranking, expected=ranking.head)]
+
+
+def rank_writer(store: Any) -> Callable[[Write], list[str]]:
+    """Return the rank applier: it takes a decided rank pass only while the saved heads it read still hold."""
+    return partial(_apply_ranking, store)
+
+
+def _apply_ranking(store: Any, write: Write) -> list[str]:
+    """Take the rank pass of ``write`` and return its actions, dropping it as a conflict once the saved heads moved.
+
+    A pass that lands no heads only proposes ranks, so it takes no guard on the saved heads.
+    """
+    match write.value:
+        case dispatcher.Ranking() as ranking:
+            if ranking.landed is not None and store.redis.get(store.key(write.key, dispatcher.HEAD)) != write.expected:
+                raise RevisionConflict(
+                    f"the claim queue heads of swarm {write.key} changed since the rank pass read them"
+                )
+            return dispatcher.apply_ranking(write.key, store, ranking)
+        case _:
+            raise RevisionConflict(f"the rank write of swarm {write.key} carries no rank pass")
+
+
 def _run_window(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
         tick.run_window.step, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
@@ -270,16 +303,20 @@ def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
         raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
 
 
-def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
+def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] | None]]:
     """Return the appliers of a tick group site: tasks and groups with a ledger and a swarm, fleet red with a store."""
     slug, ledger = state.get("slug"), state.get("ledger")
     if ledger is None or not slug:
         return {}
-    found = {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+    found: dict[Domain, Callable[[Write], list[str] | None]] = {
+        SIZES: task_writer(slug, ledger, _fresh_task),
+        GROUPS: group_writer(slug, ledger, _fresh_task),
+    }
     if (store := state.get("store")) is not None:
         found[FLEET_RED] = fleet_red_writer(slug, store, ledger, _fresh_task)
         found[FLEET_RED_LIFTED] = lifted_writer(store)
         found[fleet_red.LISTINGS] = fleet_red.saver(store)
+        found[RANK] = rank_writer(store)
     return found
 
 

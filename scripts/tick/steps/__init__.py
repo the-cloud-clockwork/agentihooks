@@ -67,10 +67,14 @@ def _step_actions(record: StepRecord) -> list[str]:
         if write.domain == actions_of(record.name)
         for action in cast(list[str], write.value)
     ]
-    return found + [
-        f"dropped write {write.domain} {write.key} of step {record.name}: {why}; the next pass recomputes it"
-        for write, why in zip(record.dropped, record.conflicts, strict=True)
-    ]
+    return (
+        found
+        + list(record.applied)
+        + [
+            f"dropped write {write.domain} {write.key} of step {record.name}: {why}; the next pass recomputes it"
+            for write, why in zip(record.dropped, record.conflicts, strict=True)
+        ]
+    )
 
 
 class Left(KeyError):

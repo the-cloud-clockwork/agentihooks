@@ -90,7 +90,6 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         _ended="ended",
         _current_owner="owner",
         ready_in_order="ready in order",
-        dispatcher=SimpleNamespace(rank_pass="rank pass"),
         readiness=SimpleNamespace(
             tick_places=lambda engine_name, rows: log.append(("places", engine_name, rows)) or places
         ),
@@ -125,7 +124,8 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
     declared = {step.name: (step.needs, step.reads, step.writes - {actions_of(step.name)}) for step in place.STEPS}
     assert declared["preempt"] == (frozenset({"reap"}), frozenset({AGENTS}), frozenset({AGENTS}))
     assert declared["spawn"] == (budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), frozenset({AGENTS, TASKS}))
-    assert {name: value for name, value in declared.items() if name not in {"preempt", "spawn"}} == {
+    assert declared["rank pass"] == (frozenset(), frozenset(), frozenset({tasks.RANK}))
+    assert {name: value for name, value in declared.items() if name not in {"preempt", "spawn", "rank pass"}} == {
         name: (frozenset(), frozenset(), frozenset())
         for name in (
             "quota notice",
@@ -133,7 +133,6 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
             "time left",
             "collect acks",
             "codex hook order",
-            "rank pass",
             "bottleneck remedy",
         )
     }
@@ -198,13 +197,13 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
     state = _pass(calm)
     config, store = state["config"], state["store"]
     found = _run(place.PLACEMENT, tick, state, monkeypatch)
-    assert found == ["ran rank pass", "ran bottleneck remedy", "ran preempt", "ran spawn"]
+    assert found == ["ran rank_writes", "ran bottleneck remedy", "ran preempt", "ran spawn"]
     seats = calm[3][-1]
     assert seats.args[:4] == (ROWS, "ended", "owner", "ready in order")
     assert seats.args[4].func is _probe
     assert seats.args[4].args == ("runtime",)
     assert calm == [
-        ("rank pass", "sw", config, store, "ledger", "doc", 7),
+        (tasks.rank_writes, tick, "sw", config, store, "ledger", "doc", 7),
         ("bottleneck remedy", "sw", store, "ledger", "doc", 7),
         "panic read",
         ("preempt", "sw", config, store, "doc", 7, seats),
@@ -226,7 +225,7 @@ def test_preempt_waits_for_a_running_tick_engine(
     calm: list[Any], monkeypatch: pytest.MonkeyPatch, state: str, engine_name: str
 ) -> None:
     found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm, state, engine_name), monkeypatch)
-    assert found == ["ran rank pass", "ran bottleneck remedy"]
+    assert found == ["ran rank_writes", "ran bottleneck remedy"]
     assert "preempt" not in [entry[0] for entry in calm if isinstance(entry, tuple)]
 
 
@@ -235,19 +234,19 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(panic, "state", lambda store: "halted")
     monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
     found = _run(place.PLACEMENT, _tick(log), _pass(log), monkeypatch)
-    assert found == ["ran rank pass", "ran bottleneck remedy"]
+    assert found == ["ran rank_writes", "ran bottleneck remedy"]
     assert log[-1] == ("places", "tick", ROWS)
 
 
 def test_spawn_waits_until_the_tick_places(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
     found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm), monkeypatch)
-    assert found == ["ran rank pass", "ran bottleneck remedy", "ran preempt"]
+    assert found == ["ran rank_writes", "ran bottleneck remedy", "ran preempt"]
     assert ("delete", "due key") not in calm
 
 
 def test_a_paused_swarm_does_not_spawn(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
     found = _run(place.PLACEMENT, _tick(calm), _pass(calm, "paused"), monkeypatch)
-    assert found == ["ran rank pass", "ran bottleneck remedy"]
+    assert found == ["ran rank_writes", "ran bottleneck remedy"]
     assert ("delete", "due key") not in calm
 
 
