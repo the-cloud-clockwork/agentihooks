@@ -215,8 +215,9 @@ class _PassView:
 
 
 def run_group(name: str, **state: object) -> list[str]:
-    """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
-    return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
+    """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions."""
+    ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
+    return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state)))
 
 
 @reaper.scanning_pass
@@ -594,10 +595,10 @@ def _drop_remote(slug, store, ledger, rows, agent, reason):
     return f"retired {agent.name}: {reason}" + _drop(slug, store, ledger, rows, agent)
 
 
-def _remote_gone_reason(slug, store, runtime, agent, now_ms):
+def _remote_gone_reason(slug: str, store: RedisStore, runtime: Any, agent: AgentRecord, now_ms: int) -> str:
     if not reports.host(agent):
         return ""
-    if runtime.observe(agent).state == "exited":
+    if reports.Reports(store.redis).gone(agent) or runtime.observe(agent).state == "exited":
         return "its hive pane is gone"
     return "its hive stopped reporting" if _hive_lost(slug, store, agent, now_ms) else ""
 

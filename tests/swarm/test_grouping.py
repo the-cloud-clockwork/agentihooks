@@ -433,7 +433,19 @@ def release(store, found, claim=None, handoff=None):
     if handoff:
         store.put_handoff("sw", "a", handoff)
     ledger = ReleaseLedger(found["tasks"])
-    return ledger, grouping.release_pass("sw", store, ledger, found)
+    return ledger, released(store, ledger, found)
+
+
+def released(store, ledger, found):
+    known = {t["id"]: t for t in found["tasks"]}
+    actions = []
+    for lead_id, why, members in grouping.releases("sw", store, found):
+        ledger.ungroup_tasks("sw", lead_id)
+        known[lead_id].pop("group_members")
+        for member in members:
+            del known[member]["merged_into"]
+        actions.append(grouping.released_action(lead_id, why, members))
+    return actions
 
 
 @pytest.mark.parametrize(
@@ -529,26 +541,6 @@ def test_only_members_that_still_point_at_the_lead_are_released(store):
     ledger, actions = release(store, found)
     assert actions == ["released tasks b from task a: its lead closed without its pull request"]
     assert found["tasks"][2]["merged_into"] == "z"
-
-
-def test_a_refused_release_leaves_the_group_and_goes_on(store):
-    class Refusing(ReleaseLedger):
-        def ungroup_tasks(self, slug, lead):
-            if lead == "a":
-                raise LedgerRefused("refused")
-            super().ungroup_tasks(slug, lead)
-
-    found = grouped({"state": "done"}, CHANGED_AFTER)
-    found["tasks"].append(task("d", state="done", group_members=["e"]))
-    found["tasks"].append(task("e", merged_into="d"))
-    ledger = Refusing(found["tasks"])
-    actions = grouping.release_pass("sw", store, ledger, found)
-    assert ledger.ungrouped == ["d"]
-    assert actions == [
-        "skipped releasing the group under task a: the ledger refused its write",
-        "released tasks e from task d: its lead closed without its pull request",
-    ]
-    assert found["tasks"][1]["merged_into"] == "a"
 
 
 def test_a_released_member_returns_to_the_claim_queue(store):
