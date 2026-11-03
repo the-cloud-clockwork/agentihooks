@@ -49,18 +49,17 @@ def _validate_writers(ordered: tuple[tuple[Step, ...], ...]) -> None:
         for dependency in step.needs:
             ancestors[step.name].update(ancestors[dependency])
     for first, second in combinations(steps, 2):
-        if first.lane != second.lane or first.name in ancestors[second.name] or second.name in ancestors[first.name]:
+        if first.name in ancestors[second.name] or second.name in ancestors[first.name]:
             continue
+        where = f"lane {first.lane}" if first.lane == second.lane else f"lanes {first.lane} and {second.lane}"
         shared = first.writes & second.writes
         if shared:
             domains = ", ".join(sorted(shared))
-            raise ValueError(f"Unordered writers in lane {first.lane} for {domains}: {first.name}, {second.name}")
+            raise ValueError(f"Unordered writers in {where} for {domains}: {first.name}, {second.name}")
         crossed = (first.writes & second.reads) | (first.reads & second.writes)
         if crossed:
             domains = ", ".join(sorted(crossed))
-            raise ValueError(
-                f"Unordered reader and writer in lane {first.lane} for {domains}: {first.name}, {second.name}"
-            )
+            raise ValueError(f"Unordered reader and writer in {where} for {domains}: {first.name}, {second.name}")
 
 
 class Registry:
