@@ -110,7 +110,6 @@ MEASURED: dict[str, Timing] = {
     "refresh job": Timing(0.012, SLOW_S),
     "intent check": Timing(5.331, CRITICAL_S),
     "reboot pass": Timing(0.006, CRITICAL_S),
-    "tick call": Timing(107.841, CRITICAL_S),
     "outbox migration": Timing(0.006, CRITICAL_S),
     "page relay": Timing(0.987, CRITICAL_S),
     "tick view": Timing(_LEDGER_READ_S, CRITICAL_S),
