@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.598 · 2026-11-03
+
+### 2026-11-03 · 761b429e81c4 · #9479 · @nestorcolt
+
+**Reserve shard setup time when sizing mutation shards**
+
+This change fixes the mutation shard planner, which was packing shards to the full `workers * budget` figure without leaving room for mutant generation, clean/forced-fail runs, reporting, and tail effects, causing five shards to run out of time and leave mutants ungraded. It introduces a 180-second per-shard setup reserve so capacity is computed as `workers * (budget - 180)`, applied consistently in shard counting, the fit loop, and overrun messaging. This raises the plan from 32 to at least 38 shards, still under the 40-runner ceiling, and should eliminate budget_exhausted failures on rerun.
+
 ## v2.17.596 · 2026-11-03
 
 ### 2026-11-03 · 01e7409aacec · #9473 · @nestorcolt
