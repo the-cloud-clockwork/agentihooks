@@ -70,7 +70,7 @@ def test_the_fleet_red_step_returns_guarded_hold_writes(monkeypatch: pytest.Monk
 
     def holds(slug: str, store: Any, rows: Any, now_ms: int) -> tuple[list[tuple[str, str, str]], list[str]]:
         seen.append((slug, store, rows, now_ms))
-        return [("t1", URL, "Tests"), ("t2", URL, "Lint, Tests")], ["sw:fleet-red:t3"]
+        return [("t1", URL, "Tests"), ("t2", URL, "Lint, Tests")], ["sw:fleet-red:t3", "sw:fleet-red:t4"]
 
     monkeypatch.setattr(fleet_red, "holds", holds)
     found = tasks.fleet_red_writes("sw", "store", {"t1": {}}, 7)
@@ -80,7 +80,7 @@ def test_the_fleet_red_step_returns_guarded_hold_writes(monkeypatch: pytest.Monk
         f"task t1 held unclaimed, {URL} is red only from Tests",
         Write(tasks.FLEET_RED, "t2", {"url": URL, "checks": "Lint, Tests"}, expected={**EXPECTED}),
         f"task t2 held unclaimed, {URL} is red only from Lint, Tests",
-        Write(tasks.FLEET_RED_LIFTED, "sw", ["sw:fleet-red:t3"]),
+        Write(tasks.FLEET_RED_LIFTED, "sw", "sw:fleet-red:t3\nsw:fleet-red:t4"),
     ]
 
 
@@ -92,7 +92,7 @@ def test_the_fleet_red_step_returns_no_lifted_write_when_no_hold_lifted(monkeypa
 def test_the_lifted_applier_forgets_every_hold_mark_it_names() -> None:
     store = Store()
     store.redis.saved = {"sw:fleet-red:t1": URL, "sw:fleet-red:t2": URL, "sw:fleet-red:t3": URL}
-    tasks.lifted_writer(store)(Write(tasks.FLEET_RED_LIFTED, "sw", ["sw:fleet-red:t1", "sw:fleet-red:t3"]))
+    tasks.lifted_writer(store)(Write(tasks.FLEET_RED_LIFTED, "sw", "sw:fleet-red:t1\nsw:fleet-red:t3"))
     assert store.redis.saved == {"sw:fleet-red:t2": URL}
 
 
@@ -112,6 +112,13 @@ def test_the_fleet_red_applier_drops_a_hold_whose_task_moved(moved: dict[str, st
     with pytest.raises(RevisionConflict, match=f"^task t1 changed {names} since the step read it$"):
         tasks.fleet_red_writer("sw", store, ledger, {"t1": _task(**moved)}.get)(HOLD)
     assert (ledger.notices, store.redis.saved) == ([], {})
+
+
+def test_the_fleet_red_applier_reads_a_missing_task_field_as_empty() -> None:
+    store, ledger = Store(), Ledger()
+    task = {"id": "t1", "state": "open", "pr_url": URL}
+    tasks.fleet_red_writer("sw", store, ledger, {"t1": task}.get)(HOLD)
+    assert ledger.notices == [("sw", "t1", fleet_red.NOTICE.format(url=URL, checks="Tests"))]
 
 
 def test_the_fleet_red_applier_drops_a_hold_a_seat_claimed() -> None:
@@ -137,6 +144,14 @@ def test_the_fleet_red_applier_drops_any_failed_notice_as_a_conflict_and_forgets
     with pytest.raises(RevisionConflict, match="^the hold notice of task t1 failed: OSError$"):
         tasks.fleet_red_writer("sw", store, Broken(), {}.get)(HOLD)
     assert store.redis.saved == {}
+
+
+@pytest.mark.parametrize("value", [{"url": URL}, {"url": URL, "checks": 3}, "Tests"])
+def test_the_fleet_red_applier_drops_a_write_that_names_no_pull_request_and_checks(value: object) -> None:
+    store, ledger = Store(), Ledger()
+    with pytest.raises(RevisionConflict, match="^the hold of task t1 names no pull request and checks$"):
+        tasks.fleet_red_writer("sw", store, ledger, {}.get)(Write(tasks.FLEET_RED, "t1", value, expected=EXPECTED))
+    assert (ledger.notices, store.redis.saved) == ([], {})
 
 
 def test_appliers_add_fleet_red_only_with_a_store() -> None:

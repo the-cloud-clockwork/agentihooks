@@ -123,7 +123,7 @@ def fleet_red_writes(slug: str, store: Any, rows: dict[str, dict[str, Any]], now
     """
     found, cleared = fleet_red.holds(slug, store, rows, now_ms)
     writes = [item for hold in found for item in _fleet_red_write(*hold)]
-    return [*writes, Write(FLEET_RED_LIFTED, slug, cleared)] if cleared else writes
+    return [*writes, Write(FLEET_RED_LIFTED, slug, "\n".join(cleared))] if cleared else writes
 
 
 def _fleet_red_write(task_id: str, url: str, checks: str) -> list[str | Write]:
@@ -133,7 +133,7 @@ def _fleet_red_write(task_id: str, url: str, checks: str) -> list[str | Write]:
             FLEET_RED,
             task_id,
             {"url": url, "checks": checks},
-            expected={"state": "open", "pr_url": url, "claimed_by": ""},
+            expected=_hold_expected(url),
         ),
         fleet_red.held_action(task_id, url, checks),
     ]
@@ -149,19 +149,37 @@ def fleet_red_writer(
 def _notice_hold(
     slug: str, store: Any, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write
 ) -> None:
-    """Post the hold notice of ``write`` unless its task moved, a seat claimed it or the notice fails.
+    """Post the hold notice of ``write``, dropping as a conflict a write that names no pull request and checks."""
+    match write.value:
+        case {"url": str(url), "checks": str(checks)}:
+            _post_hold(slug, store, ledger, read(write.key), write.key, url, checks)
+        case _:
+            raise RevisionConflict(f"the hold of task {write.key} names no pull request and checks")
+
+
+def _hold_expected(url: str) -> dict[str, str]:
+    """Return the task fields a fleet red hold on ``url`` expects to still hold when it is applied."""
+    return {"state": "open", "pr_url": url, "claimed_by": ""}
+
+
+def _post_hold(
+    slug: str, store: Any, ledger: Any, task: dict[str, Any] | None, task_id: str, url: str, checks: str
+) -> None:
+    """Post the hold notice of ``task_id`` unless the task moved, a seat claimed it or the notice fails.
 
     A failed notice forgets its mark and is dropped as a conflict, so the next pass posts it again.
     """
-    _write_task_check(write, read(write.key))
-    if store.claimed(slug, [write.key]):
-        raise RevisionConflict(f"task {write.key} was claimed since the step read it")
-    fields = cast(dict[str, str], write.value)
+    expected = _hold_expected(url)
+    moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
+    if moved:
+        raise RevisionConflict(f"task {task_id} changed {', '.join(moved)} since the step read it")
+    if store.claimed(slug, [task_id]):
+        raise RevisionConflict(f"task {task_id} was claimed since the step read it")
     try:
-        fleet_red.post(slug, store, ledger, write.key, fields["url"], fields["checks"])
+        fleet_red.post(slug, store, ledger, task_id, url, checks)
     except Exception as exc:
-        store.redis.delete(store.key(slug, f"fleet-red:{write.key}"))
-        raise RevisionConflict(f"the hold notice of task {write.key} failed: {type(exc).__name__}") from exc
+        store.redis.delete(store.key(slug, f"fleet-red:{task_id}"))
+        raise RevisionConflict(f"the hold notice of task {task_id} failed: {type(exc).__name__}") from exc
 
 
 def lifted_writer(store: Any) -> Callable[[Write], None]:
@@ -170,8 +188,8 @@ def lifted_writer(store: Any) -> Callable[[Write], None]:
 
 
 def _forget_holds(store: Any, write: Write) -> None:
-    """Delete the hold marks ``write`` names."""
-    store.redis.delete(*cast(list[str], write.value))
+    """Delete the hold marks ``write`` names, one per line."""
+    store.redis.delete(*str(write.value).split("\n"))
 
 
 def _run_window(tick: Any, get: Get) -> Any:
@@ -240,19 +258,15 @@ def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
     """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it."""
-    _write_task_check(write, read(write.key))
+    expected = cast(dict[str, Any], write.expected or {})
+    task = read(write.key)
+    moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
+    if moved:
+        raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
     try:
         ledger.update_task(slug, write.key, write.value)
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
-
-
-def _write_task_check(write: Write, task: dict[str, Any] | None) -> None:
-    """Raise RevisionConflict naming each field ``write`` expects that ``task`` no longer holds; no task passes."""
-    expected = cast(dict[str, Any], write.expected or {})
-    moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
-    if moved:
-        raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
