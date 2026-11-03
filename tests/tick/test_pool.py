@@ -256,6 +256,51 @@ def test_eager_steps_run_under_the_caller_clock() -> None:
     assert seen == [clock, clock]
 
 
+def test_eager_refuses_steps_whose_needs_never_end() -> None:
+    from scripts.tick import pool
+
+    def action(ctx: Context) -> Result:
+        return Result()
+
+    steps = (Step("a", action, frozenset({"b"})), Step("b", action, frozenset({"a"})))
+    with pool.running(workers=2) as found, pytest.raises(ValueError) as raised:
+        engine._eager(steps, context(), found)
+    assert str(raised.value) == "steps ['a', 'b'] wait on needs that never end"
+
+
+def test_an_abandoned_step_keeps_running_after_its_group_returns() -> None:
+    from scripts.tick import pool
+
+    release, finished = Event(), Event()
+
+    def stuck(ctx: Context) -> Result:
+        release.wait(1)
+        finished.set()
+        return Result()
+
+    try:
+        with pool.running(critical_s=0.02):
+            rows = engine.run_group("load", context(), (Step("stuck", stuck),))
+            assert not finished.is_set()
+        assert [row.outcome for row in rows] == [engine.LATE]
+    finally:
+        release.set()
+
+
+def test_a_fan_out_inside_a_fanned_out_action_runs_inline() -> None:
+    from scripts.tick import pool
+
+    def inner(value: str) -> str:
+        return current_thread().name
+
+    def outer(index: int) -> tuple[str, list[str]]:
+        return current_thread().name, pool.fan_out(inner, ("a", "b"))
+
+    with pool.running(workers=4):
+        found = pool.fan_out(outer, range(2))
+    assert [names for _, names in found] == [[name, name] for name, _ in found]
+
+
 def test_the_heartbeat_timer_runs_on_a_daemon_thread() -> None:
     from scripts.tick import pool
 

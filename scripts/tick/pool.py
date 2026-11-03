@@ -145,7 +145,7 @@ def _slotted(slots: BoundedSemaphore, action: Callable[[Item], Found], value: It
         try:
             return action(value)
         finally:
-            _FANNED.inside = False
+            del _FANNED.inside
 
 
 @contextmanager
