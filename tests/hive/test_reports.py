@@ -108,6 +108,19 @@ def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
     assert runtime.conversations() == {PANE: "local"}
 
 
+def test_runtime_observes_a_remote_worker_its_hive_reports_gone_as_exited(remote):
+    _publish(remote)
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report.update(pane_ids=[], process_namespace="theirs")
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
+    runtime, agent = remote.runtime, remote.agent
+    assert remote.reports.Reports(remote.redis).gone(agent) is True
+    assert runtime.observe(agent).state == "exited"
+    assert runtime.status(agent) == "exited"
+    runtime.hive = None
+    assert runtime.observe(agent).state == "unknown"
+
+
 def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(remote):
     from scripts.swarm import tick
     from scripts.swarm.store import AgentRecord
