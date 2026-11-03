@@ -415,7 +415,7 @@ class ReleaseLedger(GroupLedger):
         found["_meta"]["stamps"] = self.stamps
         return found
 
-    def ungroup_tasks(self, slug, lead):
+    def ungroup_tasks(self, slug: str, lead: str) -> None:
         assert slug == "sw"
         self.ungrouped.append(lead)
         if lead in self.view:
