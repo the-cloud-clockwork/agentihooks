@@ -20,6 +20,7 @@ import hashlib
 import os
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, cast
 
 _tracer = None
@@ -178,6 +179,11 @@ def temporality() -> dict[type, Any]:
     return {Counter: AggregationTemporality.DELTA, Histogram: AggregationTemporality.DELTA}
 
 
+def metric_exporter(exporter: Callable[..., Any], endpoint: str) -> Any:
+    """Build the OTLP metric exporter for ``endpoint`` with delta counters and histograms."""
+    return exporter(endpoint=endpoint, preferred_temporality=temporality())
+
+
 def _correlation(attrs: dict) -> dict:
     from hooks.observability.correlation import resolve
 
@@ -242,7 +248,7 @@ def _init_sdk() -> None:
 
         # Metrics — periodic export, flushed on atexit
         reader = PeriodicExportingMetricReader(
-            OTLPMetricExporter(endpoint=endpoints["metrics"], preferred_temporality=temporality()),
+            metric_exporter(OTLPMetricExporter, endpoints["metrics"]),
             export_interval_millis=60_000,
         )
         mp = MeterProvider(resource=resource, metric_readers=[reader])
