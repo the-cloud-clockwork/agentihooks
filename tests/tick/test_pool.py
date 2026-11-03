@@ -2,8 +2,8 @@ from collections.abc import Callable
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event, Lock, Thread
-from time import monotonic
+from threading import Barrier, BrokenBarrierError, Event, Lock, Thread, current_thread, get_ident
+from time import monotonic, sleep
 
 import pytest
 
@@ -189,10 +189,141 @@ def test_expired_lane_drops_late_result_and_does_not_start_dependent() -> None:
         assert all(row.outcome == engine.LATE for row in rows)
         assert not dependent.is_set()
         assert all(row.result is None for row in rows)
+        assert [row.budget_s for row in rows] == [2.0, 2.0]
         assert 0.0 < rows[0].wall_s < 30.0
         assert rows[1].wall_s == 0.0
     finally:
         release.set()
+
+
+def test_an_expired_lane_drops_its_ready_step_and_every_dependent_in_another_lane() -> None:
+    from scripts.tick import pool
+
+    ran: list[str] = []
+
+    def action(ctx: Context) -> Result:
+        ran.append("ran")
+        return Result()
+
+    steps = (Step("slow", action, lane=Lane("slow")), Step("after", action, frozenset({"slow"})))
+    with pool.running(slow_s=0.0):
+        rows = engine.run_group("load", context(), steps)
+    assert ran == []
+    assert [(row.name, row.outcome, row.wall_s, row.budget_s) for row in rows] == [
+        ("slow", engine.LATE, 0.0, 2.0),
+        ("after", engine.LATE, 0.0, 2.0),
+    ]
+
+
+def test_queued_steps_of_an_expired_lane_never_start() -> None:
+    from scripts.tick import pool
+
+    release, queued = Event(), Event()
+
+    def stuck(ctx: Context) -> Result:
+        release.wait(1)
+        return Result()
+
+    def later(ctx: Context) -> Result:
+        queued.set()
+        return Result()
+
+    try:
+        with pool.running(workers=1, critical_s=0.02):
+            rows = engine.run_group("load", context(), (Step("stuck", stuck), Step("later", later)))
+        assert [row.outcome for row in rows] == [engine.LATE, engine.LATE]
+    finally:
+        release.set()
+    assert not queued.wait(0.2)
+
+
+def test_eager_steps_run_under_the_caller_clock() -> None:
+    from scripts.tick import pool
+
+    seen: list[Callable[[], float]] = []
+
+    def clock() -> float:
+        return monotonic()
+
+    def action(ctx: Context) -> Result:
+        seen.append(ctx.deadline.clock)
+        return Result()
+
+    with pool.running(workers=2):
+        engine.run_group(
+            "load", Context(View(), Deadline.after(5, clock=clock)), (Step("a", action), Step("b", action))
+        )
+    assert seen == [clock, clock]
+
+
+def test_eager_refuses_steps_whose_needs_never_end() -> None:
+    from scripts.tick import pool
+
+    def action(ctx: Context) -> Result:
+        return Result()
+
+    steps = (Step("a", action, frozenset({"b"})), Step("b", action, frozenset({"a"})))
+    with pool.running(workers=2) as found, pytest.raises(ValueError) as raised:
+        engine._eager(steps, context(), found)
+    assert str(raised.value) == "steps ['a', 'b'] wait on needs that never end"
+
+
+def test_an_abandoned_step_keeps_running_after_its_group_returns() -> None:
+    from scripts.tick import pool
+
+    release, finished = Event(), Event()
+
+    def stuck(ctx: Context) -> Result:
+        release.wait(1)
+        finished.set()
+        return Result()
+
+    try:
+        with pool.running(critical_s=0.02):
+            rows = engine.run_group("load", context(), (Step("stuck", stuck),))
+            assert not finished.is_set()
+        assert [row.outcome for row in rows] == [engine.LATE]
+    finally:
+        release.set()
+
+
+def test_a_fan_out_inside_a_fanned_out_action_runs_inline() -> None:
+    from scripts.tick import pool
+
+    def inner(value: str) -> str:
+        return current_thread().name
+
+    def outer(index: int) -> tuple[str, list[str]]:
+        return current_thread().name, pool.fan_out(inner, ("a", "b"))
+
+    with pool.running(workers=4):
+        found = pool.fan_out(outer, range(2))
+    assert [names for _, names in found] == [[name, name] for name, _ in found]
+
+
+def test_the_heartbeat_timer_runs_on_a_daemon_thread() -> None:
+    from scripts.tick import pool
+
+    daemon: list[bool] = []
+    beat = Event()
+
+    def heartbeat() -> None:
+        daemon.append(current_thread().daemon)
+        beat.set()
+
+    with pool.running(critical_s=0.01, heartbeat=heartbeat):
+        assert beat.wait(1)
+    assert daemon == [True]
+
+
+def test_a_fresh_host_lock_is_not_held(tmp_path: Path) -> None:
+    from scripts.tick import pool
+
+    lock = pool.HostLock(tmp_path / "placing.lock")
+    assert not lock.locked()
+    with lock:
+        assert lock.locked()
+    assert not lock.locked()
 
 
 @pytest.mark.parametrize(("resource", "cap"), (("herdr", 6), ("github", 4)))
@@ -220,6 +351,7 @@ def test_external_calls_obey_the_resource_cap(resource: str, cap: int) -> None:
     assert peak == cap
 
 
+@pytest.mark.wall_clock
 def test_fifteen_agent_load_finishes_under_sixty_seconds() -> None:
     from scripts.tick import pool
 
@@ -268,3 +400,144 @@ def test_host_placement_lock_serializes_distinct_lock_instances(tmp_path: Path) 
         first_worker.join(1)
         next_worker.join(1)
     assert second.is_set()
+
+
+def test_running_rejects_an_unknown_mode() -> None:
+    from scripts.tick import pool
+
+    with pytest.raises(ValueError) as raised:
+        with pool.running(mode="turbo"):
+            pass
+    assert str(raised.value) == "tick mode must be one of parallel, sequential"
+
+
+def test_running_rejects_zero_workers() -> None:
+    from scripts.tick import pool
+
+    with pytest.raises(ValueError) as raised:
+        with pool.running(workers=0):
+            pass
+    assert str(raised.value) == "a pass needs at least one worker"
+
+
+def test_host_lock_nested_with_a_callable_path_creates_the_missing_parent_and_releases(tmp_path: Path) -> None:
+    from scripts.tick import pool
+
+    parent = tmp_path / "missing" / "deeper"
+    paths = iter([parent / "a.lock", parent / "b.lock", parent / "c.lock"])
+    lock = pool.HostLock(lambda: next(paths))
+    assert not parent.exists()
+    assert not lock.locked()
+    with lock:
+        assert lock.locked()
+        with lock:
+            assert lock.locked()
+        assert lock.locked()
+    assert not lock.locked()
+    assert parent.is_dir()
+    assert (parent / "a.lock").exists()
+    assert (parent / "b.lock").exists()
+    with lock:
+        assert lock.locked()
+    assert not lock.locked()
+
+
+def test_fan_out_thread_names_and_worker_count_for_four_values() -> None:
+    from scripts.tick import pool
+
+    barrier = Barrier(2)
+    lock = Lock()
+    names: set[str] = set()
+
+    def action(value: int) -> int:
+        with lock:
+            names.add(current_thread().name)
+        try:
+            barrier.wait(timeout=2)
+        except BrokenBarrierError:
+            pytest.fail("fan_out did not run exactly two concurrent workers")
+        return value
+
+    with pool.running(workers=2):
+        found = pool.fan_out(action, range(4))
+    assert found == list(range(4))
+    assert len(names) == 2
+    assert all(name.startswith("tick-fan-out") for name in names)
+
+
+def test_fan_out_returns_at_once_and_cancels_queued_items_when_waiting_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.tick import pool
+
+    gate, lock = Event(), Lock()
+    ran: list[int] = []
+    finished: list[int] = []
+
+    def action(value: int) -> int:
+        with lock:
+            ran.append(value)
+        gate.wait(timeout=2)
+        with lock:
+            finished.append(value)
+        return value
+
+    def failing_wait(futures: object) -> None:
+        raise RuntimeError("wait failed")
+
+    monkeypatch.setattr(pool, "wait", failing_wait)
+    with pytest.raises(RuntimeError, match="wait failed"), pool.running(workers=2):
+        pool.fan_out(action, range(4))
+    assert finished == []
+    gate.set()
+    for _ in range(10):
+        if len(ran) == 4:
+            break
+        sleep(0.05)
+    assert set(ran) <= {0, 1}
+
+
+def test_fan_out_runs_in_the_caller_thread_outside_a_pass() -> None:
+    from scripts.tick import pool
+
+    caller = get_ident()
+    seen = pool.fan_out(lambda _: get_ident(), range(3))
+    assert seen == [caller, caller, caller]
+
+
+def test_fan_out_runs_in_the_caller_thread_inside_a_sequential_pass() -> None:
+    from scripts.tick import pool
+
+    caller = get_ident()
+    with pool.running(mode="sequential"):
+        seen = pool.fan_out(lambda _: get_ident(), range(3))
+    assert seen == [caller, caller, caller]
+
+
+def test_fan_out_action_sees_the_caller_context_var_and_preserves_order() -> None:
+    from scripts.tick import pool
+
+    marker: ContextVar[str] = ContextVar("order_marker", default="missing")
+    marker.set("caller-value")
+
+    def action(value: int) -> tuple[int, str]:
+        return value, marker.get()
+
+    with pool.running(workers=4):
+        found = pool.fan_out(action, range(6))
+    assert found == [(value, "caller-value") for value in range(6)]
+
+
+def test_eager_step_reads_the_caller_context_var_set_before_the_pass() -> None:
+    from scripts.tick import pool
+
+    marker: ContextVar[str] = ContextVar("eager_marker", default="missing")
+    marker.set("caller-value")
+    seen: list[str] = []
+
+    def action(ctx: Context) -> Result:
+        seen.append(marker.get())
+        return Result()
+
+    with pool.running(workers=2):
+        records = engine.run_group("load", context(), (Step("a", action), Step("b", action)))
+    assert seen == ["caller-value", "caller-value"]
+    assert [row.name for row in records] == ["a", "b"]
