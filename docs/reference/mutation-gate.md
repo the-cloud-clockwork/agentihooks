@@ -795,6 +795,18 @@ shards and the Proofs `tests` proof use to choose their pytest workers.
 The rule is `max(1, min(4, int(quota)))`, with four as the CPU count, so the
 variable can lower the planned workers but never raise them above four.
 
+### Shards past the batch runner pool
+
+The batch pool holds forty runners (`BATCH_RUNNERS` in `scripts.ci_mutation.plan`), and the planners may ask for twice that, eighty shards (`SHARD_CEILING`, two `RUNNER_WAVES`). Shards past the fortieth queue on the pool and start as the first wave finishes, so a change whose work exceeds forty shards is still graded whole; it takes about two shard budgets of wall time instead of one. The measured planner raises the shard count until the slowest shard fits its budget less setup, up to that ceiling.
+
+Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. Its message names the eighty shards in two waves of forty runners and asks for at least the change's worker seconds divided by what those eighty shards hold, and never fewer than two, pull requests.
+
+| Measured worker seconds at three workers | Shards | Result |
+|---|---|---|
+| up to 108000 | up to 40 | one wave |
+| 108001 to 216000 | 41 to 80 | two waves, every mutant graded |
+| over 216000, or one unit over 2700 | 80 | refused at plan time |
+
 ### What the worker count sizes
 
 | Planner call | Step | Effect of fewer workers |
