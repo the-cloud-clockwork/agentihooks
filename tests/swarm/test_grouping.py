@@ -408,7 +408,7 @@ def test_a_group_applied_in_a_tick_spawns_only_its_lead_with_member_specs(asked,
 class ReleaseLedger(GroupLedger):
     def __init__(self, tasks):
         super().__init__(tasks)
-        self.ungrouped, self.stamps = [], {}
+        self.ungrouped, self.stamps, self.view = [], {}, {}
 
     def state(self, slug):
         found = super().state(slug)
@@ -418,11 +418,10 @@ class ReleaseLedger(GroupLedger):
     def ungroup_tasks(self, slug, lead):
         assert slug == "sw"
         self.ungrouped.append(lead)
-        view = getattr(self, "view", {})
-        if lead in view:
-            for member in view[lead].pop("group_members"):
-                if view.get(member, {}).get("merged_into") == lead:
-                    del view[member]["merged_into"]
+        if lead in self.view:
+            for member in self.view[lead].pop("group_members"):
+                if self.view.get(member, {}).get("merged_into") == lead:
+                    del self.view[member]["merged_into"]
 
 
 ENGINEER = "engineer@abcdef-0001"
