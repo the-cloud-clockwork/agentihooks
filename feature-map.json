@@ -162,6 +162,7 @@
         "tests/swarm/test_tick_records.py::test_tick_pass_is_recorded_even_when_a_step_raises",
         "tests/swarm/test_tick_records.py::test_budgeted_step_record_reads_late_past_its_budget_and_not_failed",
         "tests/swarm/test_tick_records.py::test_budgeted_step_record_carries_its_lane_only_when_given",
+        "tests/swarm/test_tick_records.py::test_budgeted_step_records_and_fails_under_the_name_it_is_given",
         "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps",
         "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu"
       ]
@@ -1207,12 +1208,14 @@
     {
       "id": "ledger-item-reads",
       "origin": "inventory",
-      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API and refuses other items; ledger tasks lists open tasks one line each.",
+      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API, or every task or freeze as JSON, and refuses other items; ledger tasks lists open tasks one line each.",
       "seam": "agentihooks ledger get and ledger tasks",
       "tests": [
         "tests/swarm_ledger/test_item_reads.py::test_get_prints_one_item_read_through_the_ledger_api",
         "tests/swarm_ledger/test_item_reads.py::test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities",
-        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection"
+        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection",
+        "tests/swarm_ledger/test_item_reads.py::test_get_tasks_prints_every_task_row_as_json_through_the_collection_read",
+        "tests/swarm_ledger/test_item_reads.py::test_get_freezes_prints_every_freeze_and_focus_record_as_json"
       ]
     },
     {

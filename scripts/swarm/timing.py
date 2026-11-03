@@ -178,11 +178,13 @@ def call(function: Callable, *args, **kwargs) -> Any:
         return function(*args, **kwargs)
 
 
-def within(budget_s: float, function: Callable[..., Any], *args: Any, lane: str | None = None) -> Any:
-    """Run ``function`` as a timed step whose record carries ``budget_s``, its ``lane`` when given, and reads late
-    when it overruns."""
+def within(
+    budget_s: float, function: Callable[..., Any], *args: Any, lane: str | None = None, name: str | None = None
+) -> Any:
+    """Run ``function`` as a timed step recorded as ``name``, else as the function's own name, whose record carries
+    ``budget_s``, its ``lane`` when given, and reads late when it overruns."""
     keep()
-    with step(named(function)) as record:
+    with step(name or named(function)) as record:
         if record is not None:
             record["budget_s"] = budget_s
             if lane is not None:

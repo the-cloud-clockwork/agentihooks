@@ -1,6 +1,0 @@
-{
-  "scripts/swarm/fleet_red.py:scripts.swarm.fleet_red.x__save:598b8992aaa214497f95dbc49360c33dd1e64bef77d11d724dff427b71015bd1": {
-    "reader": "standards_reader",
-    "reason": "typing.cast returns its second argument unchanged at runtime, so the value passed to store.redis.set is the same object under either first argument, and no test can observe the difference; the strict type gate is the check for this line."
-  }
-}

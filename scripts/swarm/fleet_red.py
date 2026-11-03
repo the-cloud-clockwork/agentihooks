@@ -6,10 +6,9 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from scripts.swarm import panic
-from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import RED, iso_ms
 from scripts.swarm.stack import PORT_ERRORS
 from scripts.swarm.store import RedisStore
@@ -31,14 +30,10 @@ NOTICE = (
 )
 
 LISTINGS = Domain("fleet red listings")
-HOLDS = Domain("fleet red holds")
-RELEASES = Domain("fleet red releases")
-DOMAINS = frozenset({HOLDS, LISTINGS, RELEASES})
 
 Pulls = Sequence[OpenChange]
 Reader = Callable[[str], Pulls]
 Listed = tuple[Pulls | None, tuple[Write, ...]]
-Hold = tuple[str, str, str, Pulls]
 
 
 def failing(pull: OpenChange) -> set[str]:
@@ -67,23 +62,14 @@ def read(repo: str, ports: Callable[[str], SourceControl] = panic.port) -> Pulls
 
 
 class _Saved(Protocol):
-    """The Redis calls the listing cache makes."""
+    """The Redis calls the listing cache and its saver make."""
 
     def get(self, name: str) -> str | bytes | None:
         """Return the value saved under the name, none when nothing is saved."""
         ...
 
     def set(self, name: str, value: str, **kwargs: int | bool) -> object:
-        """Save the value under the name, for ex seconds when ex is given, and only while nothing is saved there when nx
-        holds."""
-        ...
-
-    def mget(self, keys: list[str]) -> list[str | bytes | None]:
-        """Return the value saved under each key, none where nothing is saved."""
-        ...
-
-    def delete(self, *names: str) -> object:
-        """Forget the values saved under the names."""
+        """Save the value under the name, for ex seconds and only while nothing is saved there when nx holds."""
         ...
 
 
@@ -119,28 +105,27 @@ def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) 
 
 def saver(store: Listings) -> Callable[[Write], None]:
     """Return the listings applier: it saves a listing for ten minutes only while no listing is saved under its key."""
-    return partial(_settled, partial(_save, store))
-
-
-def _settled(apply: Callable[[Write], None], write: Write) -> None:
-    """Apply ``write``; a Redis timeout becomes a dropped write the next pass recomputes, as the step skipped it."""
-    from redis.exceptions import TimeoutError as RedisTimeoutError
-
-    try:
-        apply(write)
-    except RedisTimeoutError as exc:
-        raise RevisionConflict(f"Redis timed out applying {write.domain} {write.key}") from exc
+    return partial(_save, store)
 
 
 def _save(store: Listings, write: Write) -> None:
-    """Save the listing of ``write`` unless another pass saved one since the step read none."""
-    if not store.redis.set(write.key, cast(str, write.value), ex=TTL, nx=True):
+    """Save the listing of ``write`` unless another pass saved one since the step read none.
+
+    A Redis timeout drops the write as a conflict, so the next pass lists and saves it again.
+    """
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    try:
+        saved = store.redis.set(write.key, str(write.value), ex=TTL, nx=True)
+    except RedisTimeoutError as exc:
+        raise RevisionConflict(f"Redis timed out saving the listing under {write.key}") from exc
+    if not saved:
         raise RevisionConflict(f"another pass saved the listing under {write.key} since the step read none")
 
 
 def _unsaved(reader: Reader, repo: str) -> Listed:
     """Return the reader's listing of ``repo`` with nothing to save."""
-    return tuple(reader(repo)), ()
+    return reader(repo), ()
 
 
 def shared(pulls: Pulls, url: str, now_ms: int) -> set[str]:
@@ -176,17 +161,18 @@ def checker(reader: Reader | None = None, clock: Callable[[], float] = time.time
     return admits
 
 
-def notice_pass(
+def holds(
     slug: str,
     store: RedisStore,
     rows: dict[str, dict[str, Any]],
     now_ms: int,
     reader: Reader | None = None,
-) -> list[str | Write]:
-    """Return a hold and its action per unclaimed open task newly held by fleet red, the release of holds that lifted
-    and the listing saves, writing nothing itself.
+) -> tuple[list[tuple[str, str, str]], list[str], list[Write]]:
+    """Return the task, pull request and red checks of each unclaimed open task newly held, the lifted hold keys and
+    the listing saves.
 
-    The engine's appliers mark each hold and post its notice, release the lifted holds and save the listings.
+    A task whose hold was already noticed is left out, so the pass posts nothing for it. Nothing is posted, forgotten
+    or saved.
     """
     unclaimed = [
         task["id"]
@@ -197,79 +183,36 @@ def notice_pass(
     cleared = [store.key(slug, f"fleet-red:{task['id']}") for task in rows.values() if task["id"] not in waiting]
     listings: dict[str, Pulls | None] = {}
     fetch: Callable[[str], Listed] = partial(_unsaved, reader) if reader else partial(cached, store, slug)
-    found: list[str | Write] = []
-    holds: list[Hold] = []
+    found: list[tuple[str, str, str]] = []
+    saves: list[Write] = []
     for task_id in [task_id for task_id in unclaimed if task_id in waiting]:
         url, key = rows[task_id]["pr_url"], store.key(slug, f"fleet-red:{task_id}")
         repo = repository(url)
         if repo not in listings:
-            listings[repo], saves = _listed(fetch, repo)
-            found.extend(saves)
+            try:
+                listings[repo], listed = fetch(repo) if repo else ([], ())
+            except ERRORS:
+                listings[repo], listed = None, ()
+            saves.extend(listed)
         pulls = listings[repo]
         if pulls is None:
             continue
         if not held(pulls, url, now_ms):
             cleared.append(key)
             continue
-        holds.append((task_id, url, key, pulls))
-    for task_id, url, key, pulls in _unmarked(store, holds):
-        found.extend(_hold_write(task_id, url, key, pulls))
-    if cleared:
-        found.append(Write(RELEASES, slug, tuple(cleared)))
-    return found
+        if not store.redis.exists(key):
+            found.append((task_id, url, ", ".join(sorted(own(pulls, url)))))
+    return found, cleared, saves
 
 
-def _listed(fetch: Callable[[str], Listed], repo: str) -> Listed:
-    """Return the listing of ``repo`` and its saves, none for a failed listing and empty for a task without a repo."""
-    if not repo:
-        return (), ()
-    try:
-        return fetch(repo)
-    except ERRORS:
-        return None, ()
+def post(slug: str, store: RedisStore, ledger: Any, task_id: str, url: str, checks: str) -> str:
+    """Post the hold notice of ``task_id`` once, returning its action, or nothing when it was already posted."""
+    if not store.redis.set(store.key(slug, f"fleet-red:{task_id}"), url, nx=True):
+        return ""
+    ledger.notice(slug, task_id, NOTICE.format(url=url, checks=checks))
+    return held_action(task_id, url, checks)
 
 
-def _unmarked(store: Listings, holds: list[Hold]) -> list[Hold]:
-    """Return the holds no pass has marked yet, reading every mark in one call and nothing without holds."""
-    marks = store.redis.mget([key for _, _, key, _ in holds]) if holds else []
-    return [hold for index, hold in enumerate(holds) if marks[index] is None]
-
-
-def _hold_write(task_id: str, url: str, key: str, pulls: Pulls) -> list[str | Write]:
-    """Return the hold of task ``task_id`` whose pull request is red only from fleet wide checks, and its action."""
-    checks = ", ".join(sorted(own(pulls, url)))
-    notice = NOTICE.format(url=url, checks=checks)
-    return [
-        Write(HOLDS, key, (task_id, url, notice)),
-        f"task {task_id} held unclaimed, {url} is red only from {checks}",
-    ]
-
-
-def holder(store: Listings, ledger: Any, slug: str) -> Callable[[Write], None]:
-    """Return the holds applier: it marks a hold and posts its notice only while no pass marked it yet."""
-    return partial(_settled, partial(_hold, store, ledger, slug))
-
-
-def _hold(store: Listings, ledger: Any, slug: str, write: Write) -> None:
-    """Mark the hold of ``write`` and post its notice unless another pass marked it since the step read none.
-
-    The mark is set before the notice, so a refused notice leaves the hold marked with no notice retried and raises
-    RevisionConflict so the engine drops the write.
-    """
-    task_id, url, notice = cast(tuple[str, str, str], write.value)
-    if not store.redis.set(write.key, url, nx=True):
-        raise RevisionConflict(f"another pass marked the fleet red hold of task {task_id} since the step read none")
-    try:
-        ledger.notice(slug, task_id, notice)
-    except LedgerRefused as exc:
-        raise RevisionConflict(f"the ledger refused the fleet red notice of task {task_id}") from exc
-
-
-def releaser(store: Listings) -> Callable[[Write], None]:
-    """Return the releases applier: it forgets every lifted hold of a pass in one call."""
-    return partial(_settled, partial(_release, store))
-
-
-def _release(store: Listings, write: Write) -> None:
-    """Forget the hold marks ``write`` names."""
-    store.redis.delete(*cast(tuple[str, ...], write.value))
+def held_action(task_id: str, url: str, checks: str) -> str:
+    """Return the action line naming the hold fleet red puts on ``task_id``."""
+    return f"task {task_id} held unclaimed, {url} is red only from {checks}"

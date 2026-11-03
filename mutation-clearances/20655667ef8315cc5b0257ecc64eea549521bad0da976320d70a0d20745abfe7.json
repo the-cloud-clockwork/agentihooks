@@ -1,6 +1,0 @@
-{
-  "scripts/swarm/fleet_red.py:scripts.swarm.fleet_red.x__release:12f36644ae4ca0b8ec28621bef7961a5edde4a9ffee8ac1082568800c88f3553": {
-    "reader": "standards_reader",
-    "reason": "typing.cast returns its second argument unchanged at runtime, so store.redis.delete receives the same unpacked keys from write.value under either first argument, and no test can observe the difference."
-  }
-}

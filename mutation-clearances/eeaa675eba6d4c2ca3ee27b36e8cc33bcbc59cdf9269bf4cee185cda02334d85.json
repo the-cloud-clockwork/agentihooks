@@ -1,6 +1,0 @@
-{
-  "scripts/swarm/fleet_red.py:scripts.swarm.fleet_red.x__hold:ca97e412bc8670470ceca909ae74a48386c485e76d52bf3076eb0cd6029eb9e0": {
-    "reader": "standards_reader",
-    "reason": "The cast result is unpacked into task_id, url, notice and typing.cast returns the same tuple under either first argument, so the mutant changes no output and no raised error; the strict type gate is the check for this line."
-  }
-}

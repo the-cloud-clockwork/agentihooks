@@ -14,6 +14,8 @@ from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actio
 __all__ = [
     "CLOSE",
     "DRAINED",
+    "FLEET_RED",
+    "FLEET_RED_LIFTED",
     "GROUPS",
     "SIZES",
     "RAISED",
@@ -22,8 +24,11 @@ __all__ = [
     "TASK_PASSES",
     "WriteStep",
     "appliers",
+    "fleet_red_writer",
+    "fleet_red_writes",
     "group_writer",
     "held",
+    "lifted_writer",
     "raise_held",
     "release_writes",
     "size_writes",
@@ -36,6 +41,8 @@ DRAINED = "drained resume"
 REOPENS = "reopen passes"
 GROUPS = Domain("groups")
 SIZES = Domain("sizes")
+FLEET_RED = Domain("fleet red")
+FLEET_RED_LIFTED = Domain("fleet red lifted")
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -106,8 +113,84 @@ def _release_alert(tick: Any, get: Get) -> Any:
 
 
 def _fleet_red_notice(tick: Any, get: Get) -> Any:
-    keys = ("slug", "store", "rows", "now_ms")
-    return tick.skip_refused(fleet_red.notice_pass, *map(get, keys))
+    return tick.skip_refused(fleet_red_writes, get("slug"), get("store"), get("rows"), get("now_ms"))
+
+
+def fleet_red_writes(slug: str, store: Any, rows: dict[str, dict[str, Any]], now_ms: int) -> list[str | Write]:
+    """Return the listing saves, a guarded hold write and an action per task fleet red newly holds, and a write
+    forgetting lifted holds.
+
+    The step saves, posts and forgets nothing itself.
+    """
+    found, cleared, saves = fleet_red.holds(slug, store, rows, now_ms)
+    writes = [*saves, *(item for hold in found for item in _fleet_red_write(*hold))]
+    return [*writes, Write(FLEET_RED_LIFTED, slug, "\n".join(cleared))] if cleared else writes
+
+
+def _fleet_red_write(task_id: str, url: str, checks: str) -> list[str | Write]:
+    """Return the hold write of ``task_id``, guarded on its staying open and unclaimed on ``url``, and its action."""
+    return [
+        Write(
+            FLEET_RED,
+            task_id,
+            {"url": url, "checks": checks},
+            expected=_hold_expected(url),
+        ),
+        fleet_red.held_action(task_id, url, checks),
+    ]
+
+
+def fleet_red_writer(
+    slug: str, store: Any, ledger: Any, read: Callable[[str], dict[str, Any] | None]
+) -> Callable[[Write], None]:
+    """Return the fleet red applier: it posts a hold notice only while the task is still open, unclaimed and red."""
+    return partial(_notice_hold, slug, store, ledger, read)
+
+
+def _notice_hold(
+    slug: str, store: Any, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write
+) -> None:
+    """Post the hold notice of ``write``, dropping as a conflict a write that names no pull request and checks."""
+    match write.value:
+        case {"url": str(url), "checks": str(checks)}:
+            _post_hold(slug, store, ledger, read(write.key), write.key, url, checks)
+        case _:
+            raise RevisionConflict(f"the hold of task {write.key} names no pull request and checks")
+
+
+def _hold_expected(url: str) -> dict[str, str]:
+    """Return the task fields a fleet red hold on ``url`` expects to still hold when it is applied."""
+    return {"state": "open", "pr_url": url, "claimed_by": ""}
+
+
+def _post_hold(
+    slug: str, store: Any, ledger: Any, task: dict[str, Any] | None, task_id: str, url: str, checks: str
+) -> None:
+    """Post the hold notice of ``task_id`` unless the task moved, a seat claimed it or the notice fails.
+
+    A failed notice forgets its mark and is dropped as a conflict, so the next pass posts it again.
+    """
+    expected = _hold_expected(url)
+    moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
+    if moved:
+        raise RevisionConflict(f"task {task_id} changed {', '.join(moved)} since the step read it")
+    if store.claimed(slug, [task_id]):
+        raise RevisionConflict(f"task {task_id} was claimed since the step read it")
+    try:
+        fleet_red.post(slug, store, ledger, task_id, url, checks)
+    except Exception as exc:
+        store.redis.delete(store.key(slug, f"fleet-red:{task_id}"))
+        raise RevisionConflict(f"the hold notice of task {task_id} failed: {type(exc).__name__}") from exc
+
+
+def lifted_writer(store: Any) -> Callable[[Write], None]:
+    """Return the lifted holds applier: it forgets the hold marks a write names, which no other step sets."""
+    return partial(_forget_holds, store)
+
+
+def _forget_holds(store: Any, write: Write) -> None:
+    """Delete the hold marks ``write`` names, one per line."""
+    store.redis.delete(*str(write.value).splitlines())
 
 
 def _run_window(tick: Any, get: Get) -> Any:
@@ -188,16 +271,15 @@ def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], None]]:
-    """Return the appliers of a task group site: tasks, groups and fleet red holds when the site holds a ledger and a
-    swarm, and fleet red listings and releases when it holds a store."""
-    slug, ledger, store = state.get("slug"), state.get("ledger"), state.get("store")
-    found: dict[Domain, Callable[[Write], None]] = {}
-    if ledger is not None and slug:
-        found = {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
-        if store is not None:
-            found[fleet_red.HOLDS] = fleet_red.holder(store, ledger, slug)
-    if store is not None:
-        found |= {fleet_red.LISTINGS: fleet_red.saver(store), fleet_red.RELEASES: fleet_red.releaser(store)}
+    """Return the appliers of a tick group site: tasks and groups with a ledger and a swarm, fleet red with a store."""
+    slug, ledger = state.get("slug"), state.get("ledger")
+    if ledger is None or not slug:
+        return {}
+    found = {SIZES: task_writer(slug, ledger, _fresh_task), GROUPS: group_writer(slug, ledger, _fresh_task)}
+    if (store := state.get("store")) is not None:
+        found[FLEET_RED] = fleet_red_writer(slug, store, ledger, _fresh_task)
+        found[FLEET_RED_LIFTED] = lifted_writer(store)
+        found[fleet_red.LISTINGS] = fleet_red.saver(store)
     return found
 
 
@@ -268,7 +350,12 @@ STEPS = (
     CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"})),
     CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),
     CallStep("release alert", REOPENS, held(_release_alert)),
-    WriteStep("fleet red notice", REOPENS, held(_fleet_red_notice), writes=fleet_red.DOMAINS),
+    WriteStep(
+        "fleet red notice",
+        REOPENS,
+        held(_fleet_red_notice),
+        writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
+    ),
     CallStep("run window", TASK_PASSES, held(_run_window)),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
     WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),

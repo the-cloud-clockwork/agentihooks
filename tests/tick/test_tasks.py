@@ -10,7 +10,6 @@ from scripts.swarm import (
     claim_hold,
     dev_red,
     difficulty,
-    fleet_red,
     grouping,
     prerequisite_wait,
     promotion_watch,
@@ -117,7 +116,7 @@ def test_the_reopen_passes_run_their_calls_with_the_pass_state(monkeypatch: pyte
         (prerequisite_wait.reopen_pass, "sw", "store", "ledger", "rows"),
         (promotion_watch.refresh, "sw", "config", "store", "ledger", "doc", 7),
         (release_wait.alert_pass, "sw", "config", "ledger", "doc"),
-        (fleet_red.notice_pass, "sw", "store", "rows", 7),
+        (tasks.fleet_red_writes, "sw", "store", "rows", 7),
     ]
 
 
