@@ -65,7 +65,7 @@ def test_tasks_without_json_keeps_the_filtered_plain_text_form(reads, capsys, mo
 
 def test_tasks_and_freezes_document_their_forms(capsys):
     parser = ledger.build_parser()
-    for argv in (["tasks", "--help"], ["freezes", "--help"]):
+    for argv in (["--help"], ["tasks", "--help"], ["freezes", "--help"]):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
     out = " ".join(capsys.readouterr().out.split())
