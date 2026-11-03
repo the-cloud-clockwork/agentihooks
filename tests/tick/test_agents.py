@@ -190,3 +190,59 @@ def test_the_tick_returns_the_actions_its_group_steps_wrote(monkeypatch: pytest.
     registry.register(CallStep("strays", "agents", lambda tick, get: [f"saw {get('slug')} at {get('now_ms')}"]))
     assert tick_module.run_group("agents", slug="sw", now_ms=3) == ["saw sw at 3"]
     assert tick_module.run_group("masters", slug="sw") == []
+
+
+def test_the_tick_prints_the_actions_of_slow_steps_that_end_after_their_group(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.tick import pool
+
+    monkeypatch.setattr(registry, "registry", registry.Registry())
+    registry.register(CallStep("strays", "agents", lambda tick, get: ["critical"]))
+    registry.register(CallStep("failed panes", "agents", lambda tick, get: ["slow one", "slow two"], lane=engine.SLOW))
+    with pool.running(workers=2):
+        assert tick_module.run_group("agents", slug="sw") == ["critical"]
+    assert capsys.readouterr().out == "slow one\nslow two\n"
+
+
+def test_the_tick_prints_each_slow_step_that_failed_after_its_group(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.tick import pool
+
+    def boom(tick: object, get: object) -> list[str]:
+        raise RuntimeError("panes broke")
+
+    monkeypatch.setattr(registry, "registry", registry.Registry())
+    registry.register(CallStep("failed panes", "agents", boom, lane=engine.SLOW))
+    with pool.running(workers=2):
+        assert tick_module.run_group("agents", slug="sw") == []
+    assert capsys.readouterr().out == "slow lane step failed panes failed: builtins.RuntimeError\n"
+
+
+def test_the_tick_prints_the_exception_a_held_slow_step_stored(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.tick import pool
+
+    def hold(tick: object, get: Any) -> list[str]:
+        get("box")["raised"] = RuntimeError("metrics broke")
+        return []
+
+    monkeypatch.setattr(registry, "registry", registry.Registry())
+    registry.register(CallStep("failed panes", "agents", hold, lane=engine.SLOW))
+    with pool.running(workers=2):
+        assert tick_module.run_group("agents", slug="sw", box={}) == []
+    assert capsys.readouterr().out == "a slow lane step held RuntimeError('metrics broke')\n"
+
+
+def test_the_tick_prints_handed_off_records_when_no_box_was_handed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def finish(name: str, ctx: Context, apply: object = None, finished: Any = None) -> tuple[StepRecord, ...]:
+        finished((StepRecord("failed panes", 0.1, 1.0),))
+        return ()
+
+    monkeypatch.setattr(tick_module.engine, "run_group", finish)
+    assert tick_module.run_group("agents", slug="sw") == []
+    assert capsys.readouterr().out == ""
