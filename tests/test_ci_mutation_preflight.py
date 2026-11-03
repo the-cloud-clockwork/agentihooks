@@ -601,7 +601,8 @@ def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded()
     assert "name" not in tests["mutation"]
     assert "strategy" not in tests["mutation"]
     assert tests["mutation-shard"]["strategy"]["matrix"] == {
-        "shard": "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+        "shard": "${{ fromJSON(needs.mutation-replan.outputs.shards || needs.mutation-refine.outputs.shards"
+        " || needs.mutation-plan.outputs.shards) }}"
     }
     assert "name" not in _workflow()["jobs"]["mutation"]
     assert "strategy" not in _workflow()["jobs"]["mutation"]
