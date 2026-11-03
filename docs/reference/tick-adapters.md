@@ -21,7 +21,7 @@ Tick step modules never import the adapted implementations. A unit test in CI wa
 |---|---|---|---|
 | `Ledger` | `ledger.ClientLedger`, built with `ledger.resource_client` | `scripts.swarm_ledger.api.client.ResourceClient` on the ledger server's export and mutate routes | `export` / `mutate` |
 | `Coordination` | `coordination.StoreCoordination` | `scripts.swarm.store.RedisStore`, `scripts.swarm.lease` and `scripts.routing.reservation.LaunchSlots` | `read`, `capacity` / `lease`, `lock`, `configure`, `mark` |
-| `SourceControl` | `github.GitHubSourceControl` | `scripts.swarm.github_reads.rest` (`gh api`) and `git ls-remote` | `change`, `checks`, `runs`, `queue_health`, `tags`, `capabilities` / `enqueue`, `merge`, `comment` |
+| `SourceControl` | `github.GitHubSourceControl` | `scripts.swarm.github_reads.rest` (`gh api`) and `git ls-remote` | `change`, `checks`, `runs`, `queue_health`, `tags`, `capabilities`, `issue_state`, `rate_limit`, `issues_enabled`, `latest_runs`, `merged_at`, `open_changes`, `workflow_runs`, `download`, `graph` / `enqueue`, `merge`, `comment`, `close_issue`, `cancel_run` |
 | `Inbox` | `inbox.StoreInbox` | `scripts.inbox.store.InboxStore` | `read` / `send`, `close` |
 | `Llm` | `llm.ApiLlm` | `hooks.classifier.api.DecisionsApiBackend` | none / `classify` |
 | `Metrics` | `metrics.SpoolMetrics` | `scripts.swarm.metrics_outbox` spool and tables | none / `emit` |
@@ -32,8 +32,9 @@ Tick step modules never import the adapted implementations. A unit test in CI wa
 The adapters exist and are tested; no tick pass builds a `Tools` bundle from them yet. Steps receive them once the
 tick engine passes a `Tools` bundle to each step. Two adapters are already in use outside a bundle: every swarm tick
 pass uses `PassProcesses` for the reaper's process scan, described under
-[One process scan per tick pass](#one-process-scan-per-tick-pass), and `scripts.swarm.stack.change` reads one pull
-request through `GitHubSourceControl`, described under [Source control adapter](#source-control-adapter). The ledger
+[One process scan per tick pass](#one-process-scan-per-tick-pass), and the swarm commands listed under
+[Swarm callers on the port](#swarm-callers-on-the-port) reach GitHub through `GitHubSourceControl`. A Semgrep rule
+keeps new `gh` commands out of swarm code, described under [The gate on gh commands](#the-gate-on-gh-commands). The ledger
 and coordination adapters have no caller outside their tests. Every pass holds one lease heartbeat, described under
 [One lease heartbeat per tick pass](#one-lease-heartbeat-per-tick-pass).
 
@@ -249,14 +250,19 @@ port.mark("last-tick", None, deadline=deadline)
 The `SourceControl` port names no provider. Steps pass and receive the provider neutral records in
 `scripts.tick.ports.source_control`, all frozen dataclasses, and only an adapter knows how a provider spells them.
 `GitHubSourceControl` in `scripts.tick.adapters.github` is the one adapter today; another provider is one more class
-with the same nine operations, and no step changes.
+with the same twenty operations, and no step changes.
 
 | Record | Fields | Meaning |
 |---|---|---|
 | `ChangeRef` | `repository`, `number` | One change, such as a pull request: `"owner/name"` and its number. |
-| `ChangeState` | `reference`, `state`, `head`, `base`, `merged`, `url` | The change's provider state (`open` or `closed` on GitHub), head commit, target branch, whether it merged, and its web address. |
+| `ChangeState` | `reference`, `state`, `head`, `base`, `merged`, `url`, `head_branch`, `body`, `draft`, `head_repository` | The change's provider state (`open` or `closed` on GitHub), head commit, target branch, whether it merged, its web address, the branch it was opened from, its description, whether it is a draft and the `owner/name` of the repository holding its head branch. `head_branch`, `body` and `head_repository` default to `""` and `draft` to `False` for records built without them; `head_repository` is `""` when the head repository was deleted. |
 | `CheckState` | `name`, `status`, `conclusion`, `url` | One check on the change's head. `conclusion` is `None` until it completes. |
 | `Run` | `id`, `name`, `head`, `status`, `conclusion`, `url` | One workflow run on the change's head. |
+| `RepositoryRun` | `id`, `branch`, `event`, `status` | One recent workflow run of the repository: its head branch, the event that started it (`merge_group` for a merge queue run) and its status. |
+| `WorkflowRun` | `id`, `event`, `status`, `conclusion`, `head_branch`, `head_sha`, `created_at`, `run_started_at`, `updated_at`, `run_attempt` | One run of a named workflow with its outcome and timing, as `workflow_runs` lists it. |
+| `OpenChange` | `url`, `checks` | One open pull request and the `RollupCheck` records of its newest commit. |
+| `RollupCheck` | `name`, `result`, `at` | One check in that rollup: a check run's name, conclusion and finish time (its start while it runs), or a commit status's context, state and creation time. |
+| `RateLimit` | `used`, `remaining`, `reset` | The login's core REST quota: calls spent, calls left and the reset time in epoch seconds. |
 | `QueueEntry` | `reference`, `position` | The change's position in the merge queue after `enqueue`. |
 | `QueueHealth` | `depth`, `states` | The number of queue entries and the state of each entry read. |
 | `Merged` | `reference`, `sha` | The commit a merge produced. |
@@ -264,7 +270,7 @@ with the same nine operations, and no step changes.
 | `Comment` | `reference`, `url` | The web address of a posted comment. |
 | `Capabilities` | `merge_queue` | Whether the provider has a merge queue on the base branch. |
 
-`GitHubSourceControl(repository, root, base, git=subprocess.run)` is a frozen dataclass:
+`GitHubSourceControl(repository, root, base, git=subprocess.run, gh=None)` is a frozen dataclass:
 
 | Argument | Meaning |
 |---|---|
@@ -272,6 +278,7 @@ with the same nine operations, and no step changes.
 | `root` | The working folder for every `gh` and `git` call; `tags` reads the `origin` remote of this checkout. |
 | `base` | The branch whose merge queue `enqueue`, `queue_health` and `capabilities` use, normally `dev`. |
 | `git` | The callable that runs `git`, with the `subprocess.run` signature. Tests pass a recorder here. |
+| `gh` | The callable `download` and `graph` run `gh` through, with the `subprocess.run` signature; `None` uses `subprocess.run`. `scripts.swarm.merge_queue` passes its own runner here. |
 
 ```python
 from pathlib import Path
@@ -307,6 +314,51 @@ releases = [tag.name for tag in port.tags(deadline=deadline) if tag.name.startsw
 | `tags()` | `git ls-remote --tags origin` in `root` | `tuple[Tag, ...]` |
 | `comment(reference, body)` | REST `POST repos/<repository>/issues/<number>/comments` | `Comment` |
 | `capabilities()` | The same GraphQL queue read as `queue_health` | `Capabilities` |
+| `issue_state(reference)` | REST `repos/<repository>/issues/<number>` | The issue's state, `open` or `closed` |
+| `close_issue(reference)` | REST `PATCH repos/<repository>/issues/<number>` with `state=closed` | The state GitHub reports after the write |
+| `rate_limit()` | REST `rate_limit` | `RateLimit` for the core REST quota |
+| `issues_enabled()` | REST `repos/<repository>` | `has_issues`, `True` when the repository takes issues |
+| `latest_runs()` | REST `repos/<repository>/actions/runs?per_page=100`, one page | `tuple[RepositoryRun, ...]`, newest first |
+| `cancel_run(run_id)` | REST `POST repos/<repository>/actions/runs/<run_id>/cancel` | `None` |
+| `merged_at(commit)` | REST `repos/<repository>/commits/<commit>/pulls` | The `merged_at` stamp of the first listed pull request that merged, or `None` |
+| `open_changes()` | GraphQL `pullRequests(states: OPEN, first: 25)` with the newest commit's `statusCheckRollup`, up to eight pages | `tuple[OpenChange, ...]`, at most 200 |
+| `workflow_runs(workflow, event, conclusion, since)` | REST `repos/<repository>/actions/workflows/<workflow>/runs?event=<event>&status=<conclusion>&exclude_pull_requests=true&created=>=<since>`, every page up to ten | `tuple[WorkflowRun, ...]` |
+| `download(path)` | REST `<path>`, the body kept as bytes | `bytes` |
+| `graph(document, variables)` | GraphQL `document` with each variable passed as a string | The whole decoded answer, `errors` included |
+
+`download` and `graph` are charged to the reader in force, `github_reads.CALLER`, instead of `tick.source_control`,
+so a caller wraps them in `github_reads.calling("<reader>")` to keep its own line in the audit. Both run `gh` through
+the adapter's `gh` field when it is set, else `subprocess.run`. `download` raises `CalledProcessError` on a non zero
+exit with the raw output kept in `stdout`. `graph` also raises `CalledProcessError` on a refused document; GitHub's
+JSON body, with its `errors`, stays in `stdout` for callers that read a partial answer. `graph` runs any document,
+mutations included, yet `Tools` lists it as a read, so a step restricted to reads can still pass it a mutation:
+treat a mutation through `graph` as a write in review.
+
+For the issue operations, `ChangeRef.number` is the issue number. `rate_limit` reads the login, not a repository, so
+an adapter built with an empty `repository` answers it. GitHub does not charge the `rate_limit` read against the
+quota it reports.
+
+```python
+from pathlib import Path
+
+from scripts.tick.adapters.github import GitHubSourceControl
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.source_control import ChangeRef
+
+port = GitHubSourceControl("the-cloud-clockwork/agentihooks", Path.cwd(), "dev")
+deadline = Deadline.after(60.0)
+issue = ChangeRef("the-cloud-clockwork/agentihooks", 9132)
+
+if port.issues_enabled(deadline=deadline) and port.issue_state(issue, deadline=deadline) == "open":
+    port.close_issue(issue, deadline=deadline)
+quota = GitHubSourceControl("", Path.cwd(), "dev").rate_limit(deadline=deadline)
+for run in port.latest_runs(deadline=deadline):
+    if run.status == "queued" and run.event != "merge_group":
+        port.cancel_run(run.id, deadline=deadline)
+```
+
+On a branch with a merge queue a caller lands a change with `enqueue`, never with `merge`: `merge` squashes straight
+into the branch and skips the queue's checks. Call `merge` only when `capabilities().merge_queue` is `False`.
 
 - Every `gh` call goes through `scripts.swarm.github_reads.rest` with the caller name `tick.source_control`
   (`github.CALLER`), so each request is charged to that caller in `github-reads/charged.jsonl` under the AgentiHooks
@@ -329,12 +381,91 @@ releases = [tag.name for tag in port.tags(deadline=deadline) if tag.name.startsw
   command's stderr, a call that outlives its timeout raises `subprocess.TimeoutExpired`, and an answer missing an
   expected field raises `KeyError`.
 
-`scripts.swarm.stack.change(url, refused)` is the first caller outside the tests. It builds the port from a GitHub
-pull request or issue address with `base` `dev` and the current folder as `root`, reads the change with a sixty second
-deadline, and turns any of the errors above into a `SwarmError` that starts with `refused`. `swarm park` reads
-through it whether each dependency pull request merged into dev when it picks the stacked base, and `swarm publish`
-reads whether the task's recorded pull request is closed before it lets a worktree on a new branch publish for the
-task.
+## Swarm callers on the port
+
+Swarm code builds the port through these builders, always with `base` `dev`:
+
+| Builder | Repository | Used for |
+|---|---|---|
+| `stack.source_control(url)` | The owner and name in a `https://github.com/<owner>/<name>/pull/<n>` or `/issues/<n>` address; returns the port and the `ChangeRef` | Reads and writes on one pull request or issue |
+| `stack.repository_source_control()` | The repository the checkout's `origin` remote names | `issues_enabled` |
+| `stack.origin_source_control(root)` | The repository the `origin` remote of the checkout at `root` names, with `root` as the working folder | `merged_at`, `workflow_runs` |
+| `stack.login_source_control()` | None (`""`) | `rate_limit`, `download`, `graph` |
+| `panic.port(repository)` | The fleet repository named | `latest_runs`, `cancel_run`, `open_changes` |
+| `merge_queue.READER` with the caller's `gh` runner | None (`""`) | `graph`, `download` |
+
+Every builder except `stack.origin_source_control` uses the current folder as `root`.
+
+`stack.source_control` raises `ValueError` for an address outside `https://github.com/`.
+`stack.repository_source_control` raises `SwarmError("cannot read the repo origin: <stderr>")` when
+`git remote get-url origin` fails.
+
+| Command | Port operations | Deadline | On a failed call |
+|---|---|---|---|
+| `swarm park` | `change` on each dependency pull request, to tell whether it merged into dev before picking the stacked base | 60 s each | `SwarmError` naming the read |
+| `swarm park`, task without a recorded issue | `issues_enabled` on the origin repository; `True` refuses the park with `the repo has issues; open one and run swarm issue before parking` | 60 s | `SwarmError("cannot tell whether the repo has issues: <detail>")` |
+| `swarm park`, task with a recorded issue | `comment` on that issue with the parked branch, its dependencies and the stacked base, posted after the ledger note | 60 s | `SwarmError("could not comment on the issue: <detail>")` |
+| `swarm publish` | `change` on the task's recorded pull request: whether it is closed, and whether it merged from the task's own branch (`head_branch`) | 60 s | `SwarmError` naming the read |
+| `swarm ready`, closing settled issues | `issue_state`, then `close_issue` only when it is `open`, then `comment` linking the merged pull request | 60 s each | An action line `could not close issue <url>: <detail>` or `closed issue <url>; could not comment on it: <detail>`; the ready step goes on |
+| GitHub rate limit sampler | `rate_limit` on the login | 30 s | The error propagates to the sampler |
+| `swarm ready` | `change` on the recorded pull request; `draft` refuses with `pull request <url> is a draft; mark it ready for review with gh pr ready first` | 60 s | `SwarmError("cannot read whether pull request <url> is a draft; run swarm ready again when it answers")` |
+| `swarm publish`, recording the branch | `change` on the recorded pull request for `head_branch` and `head_repository` (`cli.pull_branch`) | 20 s | Both values read as empty and the publish goes on |
+| Swarm health checks | `checks` on a task's pull request head | 20 s | The error propagates to the health check |
+| Fleet red notice | `open_changes` on each repository with an open task pull request | 60 s | The listing cache keeps the failure for its ten minute window |
+| Ledger host facts | `merged_at` on the newest dev commit of the ledger checkout | 10 s | `None`; the age falls back to the reflog stamp |
+| CI speed sampler | `workflow_runs` on `test.yml` for one event, once per conclusion `success` and `failure`, in parallel | 60 s each | The error propagates to the sampler |
+| Mutation wait | `download` on a run or job endpoint under the caller's reader; `rate_limit` when GitHub answers with a rate limit, to time the backoff | 20 s each | `Unreachable("gh api <endpoint>: <stderr>")`, or `RateLimited` with the hold time on a rate limit |
+| Pull request check views (`ledger_events.view` and the batched checks reader) | `graph` under the readers `swarm.checks.fresh` and `swarm.checks` | 20 s | `None` or an empty answer; a rate limit starts the mutation wait backoff |
+| `swarm merge queue` and `swarm merge priority` | `graph` for the pull request state and the `enqueuePullRequest`, `dequeuePullRequest` or `mergePullRequest` mutation, `download` for REST reads | 20 s each | `SwarmError` carrying GitHub's message |
+| Panic cancel in the tick | `change` on each `--fix` pull request for its `head_branch`, then per fleet repository `latest_runs` and `cancel_run` on every run in `queued`, `in_progress`, `waiting`, `pending` or `requested` that is neither a `merge_group` run nor on a fix branch | 60 s each | The pass reports `panic cancel failed: <error>` and retries a minute later |
+
+`swarm merge queue` lands a pull request with `enqueuePullRequest` whenever the repository has a merge queue on dev,
+and squashes it with `mergePullRequest` only when GraphQL reports none; the port's own `merge` is not used there.
+
+`<detail>` is the provider's stderr for a failed `gh` call (`stack.refusal`), else the exception text. `swarm park`,
+`swarm publish`, `swarm ready`, the fleet red notice and the ledger host facts catch `OSError`,
+`SubprocessError`, `TimeoutError`, `ValueError` and `KeyError` (`stack.PORT_ERRORS`), so an expired deadline or an
+answer missing a field reads as a refusal instead of a traceback.
+
+## The gate on gh commands
+
+Swarm code reaches GitHub through the port. The Semgrep rule `swarm-source-control-port` in
+`.semgrep/source-control.yml` fails the scan on either form of a `gh` command in a Python file under `scripts/swarm`:
+
+- a list literal starting with `"gh"`, such as `["gh", "pr", "view", url]` or `["gh", *args]`;
+- a call to `scripts.tick.adapters.github.command`, the adapter's `gh` command builder, under any import alias.
+
+`git` commands are not matched. `.semgrep/source-control.test.py` holds the failing and passing fixtures, graded with
+`semgrep --test` in the same workflow step that scans the code; the rule also includes `*.test.py` so that fixture file
+is scanned.
+
+Files that still build `gh` commands are listed twice and must match: in the rule's `paths.exclude` and in
+`.semgrep/source-control-allowlist.json`. The list only shrinks. The Semgrep workflow step
+`Source control exceptions only shrink` reads the list from the base commit and fails with
+`source control exceptions grew: [<paths>]` when the head list holds a path the base list lacks; otherwise it prints
+`source control exceptions: <head count> of <base count>`. A base without the file passes with
+`The base holds no source control exception list; the head list starts it`. A unit test in
+`tests/test_ci_semgrep.py` requires every entry to be one `.py` path with no wildcard, and names files that have left
+the list, such as `scripts/swarm/stack.py`, so they cannot return.
+
+The list holds two files: `scripts/tick/adapters/github.py`, the adapter, and `scripts/swarm/github_reads.py`, the
+audited runner the adapter calls, which builds each `gh` command with the adapter's `command`. Every swarm caller has
+moved onto port tools; the unit test pins the list to exactly those two paths and names each moved file, so none can
+return. The `swarm-tick-source-control-port`
+entry in `feature-map.json` names the port and its GitHub adapter as the seam, with the tests that prove the adapter
+builds the only `gh` command line.
+
+To move a file off the list:
+
+1. Add the operation the file needs to `SourceControl` in `scripts.tick.ports.contracts`, to `GitHubSourceControl`,
+   and to `FakeSourceControl`, and list it as a read or write in `scripts.tick.ports.tools` so `Tools.for_effects`
+   restricts it.
+2. Call the port from the file through one of the builders above, with a `Deadline`, and turn `stack.PORT_ERRORS`
+   into the command's own refusal.
+3. Delete the file from both `paths.exclude` and `source-control-allowlist.json` in the same pull request.
+
+A new `gh` command in a listed file is not caught by the rule; review it as a move in the wrong direction. A new file
+with a `gh` command fails the scan, and adding it to the list fails the shrink step.
 
 ## Inbox adapter
 
@@ -676,7 +807,7 @@ The last line raises `UndeclaredEffect("host is not a declared effect")`.
 |---|---|---|
 | `ledger` | `export` | `mutate` |
 | `coordination` | `read`, `capacity` | `lease`, `lock`, `configure`, `mark` |
-| `source_control` | `change`, `checks`, `runs`, `queue_health`, `tags`, `capabilities` | `enqueue`, `merge`, `comment` |
+| `source_control` | `change`, `checks`, `runs`, `queue_health`, `tags`, `capabilities`, `issue_state`, `rate_limit`, `issues_enabled`, `latest_runs`, `merged_at`, `open_changes`, `workflow_runs`, `download`, `graph` | `enqueue`, `merge`, `comment`, `close_issue`, `cancel_run` |
 | `inbox` | `read` | `send`, `close` |
 | `llm` | none | `classify` |
 | `metrics` | none | `emit` |
@@ -734,9 +865,11 @@ an answer for an operation it falls back as follows:
 | `capabilities` | `Capabilities(merge_queue=False)` | `Capabilities(merge_queue=True)` |
 | `checks`, `runs`, `tags` | `()` | `()` |
 | `change`, `merge`, `comment` | `None` | `None` |
+| `issue_state`, `close_issue`, `rate_limit`, `issues_enabled`, `latest_runs`, `cancel_run`, `merged_at`, `open_changes`, `workflow_runs`, `download`, `graph` | `None` | `None` |
 
 An entry in `answers` always wins, with or without a queue. A step that must work on a provider without a merge
-queue is tested against the default fake; give `change`, `merge` and `comment` an answer whenever the step reads one.
+queue is tested against the default fake; give every operation that falls back to `None` an answer whenever the step
+reads it.
 
 ```python
 from scripts.tick.adapters.fakes import FakeSourceControl
@@ -809,4 +942,8 @@ and call the port from the step.
 | `SwarmError` from `coordination.configure` | A changed field failed the store's checks, such as an unknown `state` or `autonomy`. | Pass a value the store accepts. |
 | `ledger.export` or `ledger.mutate` runs past its deadline | The deadline bounds each HTTP request, and a call can make several. | Size the deadline for the retries, or check `deadline.remaining` between calls. |
 | `Unsupported(name)` from `host.read` or `host.run` | The host has no reading or job by that name. | Add it to the `JobHost` mappings or handle the missing capability in the step. |
+| Semgrep `swarm-source-control-port` finding in a swarm file | The file builds a `gh` command, as a list or through `github.command`. | Call the matching port operation instead; add one to the port as described under [The gate on gh commands](#the-gate-on-gh-commands) when none fits. |
+| `source control exceptions grew: [<paths>]` from the Semgrep workflow | The pull request added a path to `.semgrep/source-control-allowlist.json`. | Remove it and move that file's calls onto the port. |
+| `SwarmError: cannot tell whether the repo has issues: <detail>` from `swarm park` | The `issues_enabled` read failed, timed out, or GitHub answered without `has_issues`. | Check `gh api repos/<owner>/<name>` from the worktree, then park again. |
+| `panic cancel failed: <error>` in the tick output | A fix pull request or a fleet repository's run list could not be read, or a cancel was refused. | Check the `--fix` address and the login's access to each fleet repository; the tick retries a minute later. |
 | `test_no_tick_step_module_imports_an_adapted_implementation` fails | A tick module imports one of the adapted implementations. | Route the call through the matching adapter. |
