@@ -1,6 +1,8 @@
 import argparse
 import json
+import sys
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -516,6 +518,32 @@ def test_the_lost_hive_move_places_the_master_on_the_hive_with_room(store):  # n
 
     [(_, task)] = runtime.masters
     assert task["hive"] == "small"
+
+
+def test_the_tick_loads_the_hive_launch_code_before_the_fail_over_step_starts(
+    store: RedisStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.hive.launch
+    from scripts.tick import engine
+
+    monkeypatch.setattr(scripts.hive, "launch", scripts.hive.launch)
+    monkeypatch.delitem(sys.modules, "scripts.hive.launch")
+    loaded: list[bool] = []
+    run_step = engine.run_step
+
+    def watched(step: Any, ctx: Any) -> Any:
+        if step.name == "master move fail over":
+            loaded.append("scripts.hive.launch" in sys.modules)
+        return run_step(step, ctx)
+
+    monkeypatch.setattr(engine, "run_step", watched)
+    _hive(store, "lost", NOW - GRACE_MS - 1)
+    _hive_master(store)
+
+    tick("sw", store, tasks(), RecoveryRuntime(), NOW)
+
+    assert loaded == [True]
 
 
 def test_a_failed_successor_launch_keeps_the_recovery_handoff_awaiting(store):  # noqa: F811
