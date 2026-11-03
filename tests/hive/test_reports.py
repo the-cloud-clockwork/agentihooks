@@ -449,13 +449,15 @@ def test_retiring_a_finished_hive_worker_records_its_inbox_exit(remote, handoff)
 
 
 @pytest.mark.parametrize(
-    ("state", "row", "said"),
+    ("state", "row", "said", "occupant"),
     [
-        ("finished", {"state": "done", "claimed_by": "owner"}, ""),
-        ("working", {"state": "claimed", "claimed_by": "owner"}, ", task task reopened"),
+        ("finished", {"state": "done", "claimed_by": "owner"}, "", "finished"),
+        ("working", {"state": "claimed", "claimed_by": "owner"}, ", task task reopened", "ended"),
     ],
 )
-def test_the_tick_settles_a_worker_its_restarted_hive_reports_gone_without_hive_reports(remote, state, row, said):
+def test_the_tick_settles_a_worker_its_restarted_hive_reports_gone_without_hive_reports(
+    remote, state, row, said, occupant
+):
     from scripts.swarm import retire_watch, tick
 
     remote.agent = replace(remote.agent, state=state)
@@ -476,7 +478,7 @@ def test_the_tick_settles_a_worker_its_restarted_hive_reports_gone_without_hive_
 
     assert actions == [f"retired {remote.agent.name}: its hive pane is gone{said}"]
     assert remote.store.agents("fixture") == []
-    assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == "ended"
+    assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == occupant
     assert remote.store.claimant("fixture", "task") is None
     assert retire_watch.rows(remote.store, "fixture") == []
 
