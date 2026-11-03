@@ -195,6 +195,7 @@ from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.steps import Left, PassBox
 from scripts.tick.steps import host as host_steps
+from scripts.tick.steps import report as report_steps
 from scripts.tick.steps import tasks as task_steps
 
 SETTABLE = {
@@ -372,7 +373,7 @@ def run_tick(
         tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc, view, beating = {}, None, ExitStack()
+    doc, view, beating, box = {}, None, ExitStack(), PassBox()
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.enter_context(
@@ -387,7 +388,6 @@ def run_tick(
             _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
-        box: dict[str, Any] = PassBox()
         passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         run_group("wrapper probes", **passing)
         host_steps.raise_held(box)
@@ -425,7 +425,7 @@ def run_tick(
             run_group("wrapper refresh", **passing, scheduled=scheduled)
             host_steps.raise_held(box)
             doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
-            judging: dict[str, Any] = PassBox()
+            judging: dict[str, Any] = PassBox(left=box.left)
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
                 judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
@@ -456,8 +456,8 @@ def run_tick(
             host_steps.raise_held(box)
             started = box["started"]
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
-    except Left:
-        return []
+    except Left as missing:
+        return report_steps.early_end(store, slug, now_ms(), doc, missing, box.left)
     finally:
         try:
             published: dict[str, Any] = PassBox()
