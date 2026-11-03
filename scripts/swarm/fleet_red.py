@@ -89,9 +89,9 @@ def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) 
     A fresh listing comes back with the write that saves it, a failed listing as none; the engine's applier saves it.
     """
     key = store.key(slug, f"fleet-red-pulls:{repo}")
-    saved = store.redis.get(key)
-    if saved is not None:
-        return _decoded(saved), ()
+    raw = store.redis.get(key)
+    if raw is not None:
+        return _decoded(raw), ()
     try:
         pulls: Pulls | None = tuple((reader or read)(repo))
     except ERRORS:
@@ -110,8 +110,8 @@ def _saved(store: Listings, slug: str, repo: str) -> Pulls:
     return (_decoded(raw) if raw is not None else None) or ()
 
 
-def _decoded(saved: str | bytes) -> Pulls | None:
-    rows = json.loads(saved)
+def _decoded(raw: str | bytes) -> Pulls | None:
+    rows = json.loads(raw)
     if rows is None:
         return None
     return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows)
