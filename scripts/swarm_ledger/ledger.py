@@ -35,7 +35,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed);
                                       masters never run it, it slows every write
   get ITEM                            print one item through the ledger API: tasks/<id>, phases/<id>, followups/<id>
-                                      or priorities/<id> (no --as needed)
+                                      or priorities/<id>, or every task or freeze as JSON with tasks or freezes
+                                      (no --as needed)
   tasks [--state S] [--lane L] [--text T]
                                       list open tasks, one line each, by state, lane or title text (no --as needed)
   priority add ITEM TEXT              operator and swarm only, at most 20 words; agents are refused; ITEM may
@@ -142,7 +143,7 @@ TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("ta
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-LEDGER_ITEM = re.compile(r"(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
+LEDGER_ITEM = re.compile(r"tasks|freezes|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (
@@ -438,8 +439,8 @@ def cmd_tree(args):
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
-def cmd_get(args):
-    print(SHOW_JSON(resource(args.slug, args.item)))
+def cmd_get(args: argparse.Namespace) -> None:
+    print(SHOW_JSON(resource(args.slug, args.item, collection="/" not in args.item)))
 
 
 def cmd_tasks(args):
@@ -793,7 +794,9 @@ def _duration(value):
 
 def _ledger_item(value):
     if not LEDGER_ITEM.fullmatch(value):
-        raise argparse.ArgumentTypeError("name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>")
+        raise argparse.ArgumentTypeError(
+            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"
+        )
     return value
 
 
@@ -1071,8 +1074,10 @@ def build_parser():
     sub.add_parser("tree", help="print a plan, phase, slice or task and everything under it, with states").add_argument(
         "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
     )
-    sub.add_parser("get", help="print one task, phase, follow up or priority through the ledger API").add_argument(
-        "item", type=_ledger_item, help="tasks/<id>, phases/<id>, followups/<id> or priorities/<id>"
+    sub.add_parser(
+        "get", help="print one task, phase, follow up or priority, or every task or freeze, through the ledger API"
+    ).add_argument(
+        "item", type=_ledger_item, help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"
     )
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):
