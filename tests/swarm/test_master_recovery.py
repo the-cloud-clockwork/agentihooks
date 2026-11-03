@@ -19,6 +19,7 @@ class RecoveryRuntime(FakeRuntime):
 PATIENT_S = 30.0
 
 
+@pytest.fixture(autouse=True)
 def patient_steps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Raise every registered tick step's budget to at least PATIENT_S for the test."""
     for step in step_registry.steps():
