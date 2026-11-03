@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from threading import Event
+from threading import Event, Timer
 
 import pytest
 
@@ -76,7 +76,7 @@ def test_a_slow_step_starts_only_after_the_slow_step_of_an_earlier_group_it_need
     record = Step("cross metrics record", _seeing(ended, started, seen), "cross metrics", frozenset({findings.name}))
     later: list[tuple[engine.StepRecord, ...]] = []
     try:
-        with pool.running(workers=4):
+        with pool.running(workers=4, critical_s=0.0):
             assert engine.run_group("cross events", _ctx(), (findings,), finished=later.append) == ()
             assert engine.run_group("cross metrics", _ctx(), (record,), finished=later.append) == ()
             assert not started.wait(0.2)
@@ -109,7 +109,6 @@ def test_a_critical_step_that_needs_a_handed_off_step_of_an_earlier_group_is_han
     assert [[row.name for row in records] for records in later] == [["cross slow findings"], ["cross critical wake"]]
 
 
-@pytest.mark.wall_clock
 def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs_ran_past_the_slow_deadline() -> None:
     release, ended = Event(), Event()
     ran: list[str] = []
@@ -164,23 +163,18 @@ def test_a_sequential_pass_runs_a_cross_group_dependent_after_the_step_it_needs(
     assert ran == ["first", "second"]
 
 
-@pytest.mark.wall_clock
 def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs_lost_its_critical_need() -> None:
-    release, ended = Event(), Event()
     ran: list[str] = []
     note = partial(_noting, ran)
-
-    stuck = Step("cross stuck critical", _blocking(release, ended), "cross lost", lane=Lane("tick"))
-    slow = Step("cross lost slow", note("slow"), "cross lost", frozenset({stuck.name}))
+    lost = Step("cross lost critical", note("critical"), "cross lost", lane=Lane("tick"))
+    slow = Step("cross lost slow", note("slow"), "cross lost", frozenset({lost.name}))
     dependent = Step("cross lost dependent", note("dependent"), "cross after lost", frozenset({slow.name}))
     later: list[tuple[engine.StepRecord, ...]] = []
-    try:
-        with pool.running(workers=4, critical_s=0.05):
-            engine.run_group("cross lost", _ctx(), (stuck, slow), finished=later.append)
-            engine.run_group("cross after lost", _ctx(), (dependent,), finished=later.append)
-    finally:
-        release.set()
-        assert ended.wait(5.0)
+    with pool.running(workers=4, critical_s=0.0) as found:
+        engine.run_group("cross lost", _ctx(), (lost, slow), finished=later.append)
+        assert found.pending() == frozenset()
+        assert not found.ended({slow.name}, 0.0)
+        engine.run_group("cross after lost", _ctx(), (dependent,), finished=later.append)
     assert ran == []
     assert sorted((row.name, row.abandoned) for records in later for row in records) == [
         ("cross lost dependent", True),
@@ -188,7 +182,6 @@ def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs
     ]
 
 
-@pytest.mark.wall_clock
 def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs_ran_past_its_budget() -> None:
     release, ended = Event(), Event()
     ran: list[str] = []
@@ -230,5 +223,29 @@ def test_a_critical_step_is_dropped_in_its_group_when_the_handed_off_step_it_nee
         found.hand((first.name,))
         found.end(first.name, True)
         rows = engine.run_group("cross gone wake", _ctx(), (wake,))
-    assert [(row.name, row.abandoned) for row in rows] == [("cross gone wake", True)]
+    assert rows == (engine.StepRecord("cross gone wake", 0.0, 5.0, abandoned=True),)
     assert ran == []
+
+
+def test_a_pass_reports_a_handed_off_step_ended_only_once_it_was_marked_in_time() -> None:
+    with pool.running(workers=1) as found:
+        found.hand(("cross marked late",))
+        timer = Timer(0.2, found.end, ("cross marked late", False))
+        timer.start()
+        try:
+            assert not found.ended({"cross marked late"}, 0.0)
+        finally:
+            timer.join(5.0)
+        assert found.ended({"cross marked late"}, 0.0)
+        assert found.pending() == frozenset()
+
+
+def test_a_pass_ignores_the_end_of_a_step_it_never_handed_off() -> None:
+    with pool.running(workers=1) as found:
+        found.hand(("cross handed",))
+        found.end("cross never handed", True)
+        assert found.pending() == frozenset({"cross handed"})
+        assert found.handed_of(("cross handed", "cross never handed")) == frozenset({"cross handed"})
+        found.end("cross handed", False)
+        assert found.pending() == frozenset()
+        assert found.gone == set()

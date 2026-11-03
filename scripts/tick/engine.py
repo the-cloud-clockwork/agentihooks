@@ -152,8 +152,10 @@ def run_group(
     records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
     if later:
         found.hand(names)
-        dropped = frozenset(record.name for record in records if record.abandoned)
-        found.detach(partial(_run_later, later, dropped, ctx, found, apply or {}, finished))
+        gone = _gone(later, frozenset(record.name for record in records if record.abandoned))
+        for each in gone:
+            found.end(each, True)
+        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished))
     return records
 
 
@@ -167,22 +169,25 @@ def _slow_lane(ordered: tuple[Step, ...], handed: frozenset[str]) -> tuple[Step,
     return tuple(step for step in ordered if step.name in names)
 
 
+def _gone(later: tuple[Step, ...], dropped: frozenset[str]) -> frozenset[str]:
+    """Return ``dropped`` with every step of ``later`` that needs one of them, directly or through another."""
+    gone = set(dropped)
+    for step in later:
+        if step.needs & gone:
+            gone.add(step.name)
+    return frozenset(gone)
+
+
 def _run_later(
     later: tuple[Step, ...],
-    dropped: frozenset[str],
+    gone: frozenset[str],
     ctx: Context,
     found: pool.Pass,
     apply: Appliers,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
 ) -> None:
-    """Run the handed off steps on the pass workers, dropping each that needs a ``dropped`` step, then hand their
-    records in group order to ``finished``."""
-    gone = set(dropped)
-    for step in later:
-        if step.needs & gone:
-            gone.add(step.name)
-    for name in gone:
-        found.end(name, True)
+    """Run the handed off steps on the pass workers, dropping each in ``gone``, then hand their records in group
+    order to ``finished``."""
     ran = {record.name: record for record in _eager(tuple(s for s in later if s.name not in gone), ctx, found, apply)}
     records = tuple(ran.get(step.name, StepRecord(step.name, 0.0, step.budget_s, abandoned=True)) for step in later)
     if finished is not None:
