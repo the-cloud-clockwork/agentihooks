@@ -199,7 +199,7 @@ the step checks it and returns no actions when it does not hold.
 | --- | --- | --- | --- |
 | `placement acks` | 10 | collect acks | `_collect_acks`, every pass |
 | `placement acks` | 20 | codex hook order | `_codex_hook_order`, skipped while the swarm sleeps |
-| `placement` | 10 | rank pass | `dispatcher.rank_pass` |
+| `placement` | 10 | rank pass | `tasks.rank_writes` returns `dispatcher.rank_decision` as one `rank` write; the rank applier takes it with `dispatcher.apply_ranking` only while the saved claim queue heads it read still hold, else drops it for the next pass |
 | `placement` | 20 | bottleneck remedy | `bottleneck_remedy.step` |
 | `placement` | 30 | preempt | `preempt.run` with the seats view, only when the swarm is `running`, not on the events engine and no panic is set |
 | `placement` | 40 | spawn | `_spawn` under the placement pass, only when the swarm is `running`, `readiness.tick_places` allows the engine to place and no panic is set. After it spawns, it deletes the `spawn-due` marker |

@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -53,6 +54,11 @@ class Ledger:
         if f"comment:{task_id}" in self.refused:
             raise LedgerRefused(f"ledger {slug} refused")
         self.comments.append((task_id, text, by))
+
+
+def rank_pass(slug: str, config: Any, store: Any, ledger: Any, doc: dict[str, Any], now_ms: int) -> list[str]:
+    """Decide the rank pass and take it at once, as the tick's rank applier does when the heads hold."""
+    return dispatcher.apply_ranking(slug, store, dispatcher.rank_decision(slug, config, store, ledger, doc, now_ms))
 
 
 @pytest.fixture
@@ -240,14 +246,14 @@ def test_the_order_and_the_queue_head_hold_across_ticks_with_no_input_change(sto
     first = dispatcher.ordered(found, "", dispatcher.leverage(found))
     assert all(dispatcher.ordered(found, "", dispatcher.leverage(found)) == first for _ in range(3))
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert ledger.comments == [
         entered("h1", leads("4 open tasks", "4 open tasks")),
         entered("s", leads("1 open task", "6 open tasks")),
     ]
     for tick in range(1, 4):
         again = Ledger()
-        assert dispatcher.rank_pass(SLUG, store.config(SLUG), store, again, found, NOW + tick * 60_000) == []
+        assert rank_pass(SLUG, store.config(SLUG), store, again, found, NOW + tick * 60_000) == []
         assert (again.ranks, again.comments) == ([], [])
     assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == first
 
@@ -355,27 +361,27 @@ def test_the_claim_key_yields_focus_when_the_lane_share_is_full(store):
 def test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight(store, home, shipped, weight, head):
     config = store.update(SLUG, autonomy="delegate", max_eng=2, focus_weight=weight)
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, config, store, ledger, focus_split(), NOW)
+    rank_pass(SLUG, config, store, ledger, focus_split(), NOW)
     assert [comment[0] for comment in ledger.comments] == head
 
 
 def test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight(store, home, shipped):
     config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=100)
-    proposals = dispatcher.rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
+    proposals = rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
     assert proposed(proposals) == ["h"]
 
 
 def test_below_delegate_proposals_never_name_free_work_while_the_focus_is_open(store, home, shipped):
     config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=50)
-    proposals = dispatcher.rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
+    proposals = rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
     assert proposed(proposals) == ["h"]
 
 
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
     store.update(SLUG, autonomy="assist")
     ledger, found = Ledger(), doc(ladder())
-    first = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
-    again = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
+    first = rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    again = rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
     items = InboxStore(store.redis).pending_items(seat_address(SLUG, MASTER))
     assert ledger.ranks == [] and again == []
     assert [i.text for i in items] == [
@@ -399,7 +405,7 @@ def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_r
 def test_at_delegate_a_task_entering_the_queue_head_gets_one_comment_and_a_log_row(store, home, shipped):
     store.update(SLUG, autonomy="delegate", max_eng=3)
     ledger = Ledger()
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(ladder()), NOW)
+    actions = rank_pass(SLUG, store.config(SLUG), store, ledger, doc(ladder()), NOW)
     assert ledger.ranks == []
     why = leads("1 open task", "3 open tasks")
     assert actions[0] == f"put task a at the head of the eng claim queue: {why}"
@@ -440,7 +446,7 @@ def test_the_rank_pass_reads_releases_from_the_swarm_repository(store, home, shi
 
     repos = []
     monkeypatch.setattr(release_wait, "checker", lambda repo: repos.append(repo) or (lambda task: True))
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(ladder()), NOW)
+    rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(ladder()), NOW)
     assert repos == [store.config(SLUG).repo]
 
 
@@ -457,7 +463,7 @@ def test_the_rank_pass_holds_tasks_the_applied_check_refuses(store, home, shippe
     store.update(SLUG, autonomy="delegate", max_eng=3)
     ledger = Ledger()
     found = doc(ladder())
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    actions = rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert seen == [(store.config(SLUG), sorted(t["id"] for t in found["tasks"]))]
     assert [a for a in actions if "head of" in a] == [] and ledger.comments == []
 
@@ -466,16 +472,16 @@ def test_the_queue_head_follows_claims_operator_ranks_and_freezes_with_one_comme
     store.update(SLUG, autonomy="full", max_eng=2)
     tasks = [*deep_and_wide(), task("w1", phase="", depends_on=["l1"])]
     found = doc(tasks, phases=[])
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
+    rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
     tasks[2 + 6]["state"] = "claimed"
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
     assert ledger.comments == [entered("l1", leads("1 open task", "1 open task"))]
     assert json.loads(store.redis.get(store.key(SLUG, "dispatch-head")))["eng"] == ["s", "l1"]
     tasks[-2]["rank"] = "high"
     found["_meta"] = {"stamps": {"tasks/l2/rank": {"by": "operator"}}}
     ledger = Ledger()
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 120_000)
+    actions = rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 120_000)
     assert ledger.comments == [
         left("l1", OUTRANKED_BY_TWO),
         entered("l2", "the operator ranked it high"),
@@ -487,7 +493,7 @@ def test_the_queue_head_follows_claims_operator_ranks_and_freezes_with_one_comme
     )
     found["freezes"] = [{"verb": "freeze", "target": "tasks/s"}]
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 180_000)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 180_000)
     unready = "it is no longer a claimable task in focus"
     assert ledger.comments == [left("s", unready), entered("l1", leads("1 open task", "1 open task"))]
     assert ledger.ranks == []
@@ -498,7 +504,7 @@ def test_the_queue_head_takes_the_seats_quota_leaves_each_lane(store, home, ship
     store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": {"eng": 1, "ci": 1, "plan": 0}}))
     tasks = [*ladder(), task("k", lane="ci"), task("j", lane="ci", depends_on=["k"])]
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks), NOW)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks), NOW)
     assert ledger.comments == [
         entered("a", leads("1 open task", "3 open tasks")),
         entered("k", leads("1 open task", "1 open task"), "ci"),
@@ -509,10 +515,10 @@ def test_the_queue_head_takes_the_seats_quota_leaves_each_lane(store, home, ship
 def test_a_lane_with_no_seats_keeps_its_head_and_writes_nothing(store, home, shipped):
     store.update(SLUG, autonomy="delegate", max_eng=2)
     found = doc(ladder())
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
+    rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
     store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": {"eng": 0, "ci": 0, "plan": 0}}))
     ledger = Ledger()
-    assert dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000) == []
+    assert rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000) == []
     assert ledger.comments == []
     assert json.loads(store.redis.get(store.key(SLUG, "dispatch-head")))["eng"] == ["a", "b"]
 
@@ -521,7 +527,7 @@ def test_a_task_gone_from_the_ledger_leaves_the_head_without_a_comment(store, ho
     store.update(SLUG, autonomy="delegate", max_eng=1)
     store.redis.set(store.key(SLUG, "dispatch-head"), json.dumps({"eng": ["gone"]}))
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc([task("a"), task("w", depends_on=["a"])]), NOW)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, doc([task("a"), task("w", depends_on=["a"])]), NOW)
     assert ledger.comments == [entered("a", leads("1 open task", "1 open task"))]
 
 
@@ -529,10 +535,10 @@ def test_a_step_that_raises_saves_only_the_head_changes_that_ran(store, home, sh
     store.update(SLUG, autonomy="delegate", max_eng=2)
     ledger, found = Ledger(broken={"crash:b"}), doc(ladder())
     with pytest.raises(RuntimeError):
-        dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+        rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert json.loads(store.redis.get(store.key(SLUG, "dispatch-head")))["eng"] == ["a"]
     again = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, again, found, NOW + 60_000)
+    rank_pass(SLUG, store.config(SLUG), store, again, found, NOW + 60_000)
     assert again.comments == [entered("b", leads("1 open task", "2 open tasks"))]
 
 
@@ -540,11 +546,11 @@ def test_one_seat_names_the_single_task_that_outranked_the_one_leaving(store, ho
     store.update(SLUG, autonomy="delegate", max_eng=1)
     tasks = [task("a"), task("b"), task("w", depends_on=["a"])]
     found = doc(tasks)
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
+    rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
     tasks[1]["rank"] = "urgent"
     found["_meta"] = {"stamps": {"tasks/b/rank": {"by": "operator"}}}
     ledger = Ledger()
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
+    actions = rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
     outranked = (
         "it was outranked by 1 claimable task in focus with longer chains, more unblocked work or an operator rank"
     )
@@ -559,10 +565,10 @@ def test_a_head_task_whose_waiters_finish_leaves_the_head_naming_no_open_work(st
     store.update(SLUG, autonomy="delegate", max_eng=2)
     tasks = [task("a"), task("w", depends_on=["a"]), task("b"), task("v", depends_on=["b"])]
     found = doc(tasks)
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
+    rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)
     tasks[1]["state"] = "done"
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW + 60_000)
     assert ledger.comments == [left("a", dispatcher.IDLE)]
     assert dispatcher.IDLE == "it unblocks no open work"
     assert json.loads(store.redis.get(store.key(SLUG, "dispatch-head")))["eng"] == ["b"]
@@ -578,7 +584,8 @@ def test_a_rank_decision_takes_no_step_until_it_is_applied(store, home, shipped)
     store.update(SLUG, autonomy="delegate", max_eng=2)
     ledger = Ledger()
     decided = dispatcher.rank_decision(SLUG, store.config(SLUG), store, ledger, doc(ladder()), NOW)
-    assert (decided.at_ms, decided.head, decided.landed) == (NOW, None, {"eng": []})
+    assert (decided.at_ms, decided.head) == (NOW, None)
+    assert decided.landed and not any(decided.landed.values())
     assert (ledger.comments, store.redis.get(store.key(SLUG, "dispatch-head")), shipped) == ([], None, [])
     actions = dispatcher.apply_ranking(SLUG, store, decided)
     assert [comment[0] for comment in ledger.comments] == ["a", "b"]
@@ -604,7 +611,7 @@ def test_a_proposing_rank_decision_lands_no_heads(store, home, shipped):
 def test_a_refused_head_comment_still_logs_the_change(store, home, shipped):
     store.update(SLUG, autonomy="delegate", max_eng=2)
     ledger = Ledger(refused={"comment:a"}, broken={"comment:b"})
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(ladder()), NOW)
+    actions = rank_pass(SLUG, store.config(SLUG), store, ledger, doc(ladder()), NOW)
     assert [a.endswith(dispatcher.UNCOMMENTED) for a in actions] == [True, True]
     assert [r["reason"] for r in gate_log.recent(SLUG, None, home)] == actions
     assert json.loads(store.redis.get(store.key(SLUG, "dispatch-head")))["eng"] == ["a", "b"]
@@ -616,7 +623,7 @@ def test_an_operator_ranked_task_is_never_proposed(store, home, shipped):
     found = stamped(tasks, dict.fromkeys("ab", "operator"))
     tasks[0]["rank"] = "low"
     tasks[1]["rank"] = "normal"
-    assert proposed(dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)) == ["c"]
+    assert proposed(rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)) == ["c"]
 
 
 def test_an_operator_low_rank_gives_up_its_place_in_the_window(store, home, shipped):
@@ -627,7 +634,7 @@ def test_an_operator_low_rank_gives_up_its_place_in_the_window(store, home, ship
     tasks[0]["rank"], tasks[1]["rank"] = "low", "high"
     stamps = {f"tasks/t{i}/rank": {"by": "operator"} for i in range(2)}
     found = doc(tasks, phases=[], _meta={"stamps": stamps})
-    assert proposed(dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)) == ["t2", "t3"]
+    assert proposed(rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)) == ["t2", "t3"]
 
 
 def test_only_open_tasks_that_unblock_work_are_proposed_and_at_most_the_top_count(store, home, shipped):
@@ -636,14 +643,14 @@ def test_only_open_tasks_that_unblock_work_are_proposed_and_at_most_the_top_coun
     tasks += [task("w", phase="", depends_on=[f"t{i}" for i in range(5)])]
     tasks[0]["state"] = "claimed"
     tasks[1]["out_of_scope"] = True
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks, phases=[]), NOW)
+    actions = rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks, phases=[]), NOW)
     assert proposed(actions) == ["t2", "t3", "t4"][: dispatcher.TOP]
 
 
 def test_nothing_to_rank_writes_nothing(store, home, shipped):
     store.update(SLUG, autonomy="assist")
     ledger = Ledger()
-    assert dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc([task("a")]), NOW) == []
+    assert rank_pass(SLUG, store.config(SLUG), store, ledger, doc([task("a")]), NOW) == []
     assert (ledger.ranks, ledger.comments, shipped, gate_log.recent(SLUG, None, home)) == ([], [], [], [])
 
 
@@ -652,14 +659,14 @@ def test_the_named_bottleneck_orders_the_proposals(store, home, shipped):
     store.redis.set(store.key(SLUG, "bottleneck"), json.dumps({"bottleneck": "ci"}))
     tasks = [task(f"e{i}", phase="") for i in range(3)] + [task("c0", phase="", lane="ci")]
     tasks.append(task("w", phase="", depends_on=[t["id"] for t in tasks]))
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks, phases=[]), NOW)
+    actions = rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks, phases=[]), NOW)
     assert proposed(actions) == ["c0", "e0", "e1"]
 
 
 def test_a_blocked_task_is_never_proposed_however_much_it_unblocks(store, home, shipped):
     store.update(SLUG, autonomy="assist")
     tasks = [task("a"), task("b", depends_on=["a"]), *(task(f"w{i}", depends_on=["b"]) for i in range(4))]
-    assert proposed(dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks), NOW)) == ["a"]
+    assert proposed(rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks), NOW)) == ["a"]
 
 
 def test_a_doctor_fix_phase_task_outside_the_focus_is_still_proposed(store, home, shipped):
@@ -670,7 +677,7 @@ def test_a_doctor_fix_phase_task_outside_the_focus_is_still_proposed(store, home
     found = doc(
         tasks, phases=[{"id": loop.FIX_PHASE, "depends_on": []}], freezes=[{"verb": "focus", "target": "lane:ci"}]
     )
-    assert proposed(dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)) == ["f"]
+    assert proposed(rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)) == ["f"]
 
 
 def queue_ledger(store, autonomy, **fields):
@@ -834,7 +841,7 @@ def test_a_documentation_task_takes_the_seat_when_no_urgent_or_high_task_is_clai
 def test_a_swarm_low_task_that_unblocks_work_is_never_proposed_or_put_at_the_queue_head(store, home, shipped, autonomy):
     store.update(SLUG, autonomy=autonomy, max_eng=3)
     ledger, found = Ledger(), stamped(ladder(), {"a": "swarm"}, rank="low")
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    actions = rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert proposed(actions) == (["b", "c"] if autonomy == "assist" else [])
     assert "a" not in {task_id for task_id, _, _ in ledger.comments}
     assert ledger.comments
@@ -917,7 +924,7 @@ def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_
     assert key(claimed)[0] != dispatcher.GUARD
     assert key(claimed)[1] == dispatcher.queue(found, fix).index("b") > 0
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, config, store, ledger, found, NOW)
+    rank_pass(SLUG, config, store, ledger, found, NOW)
     assert [comment[0] for comment in ledger.comments] == ["p"]
 
 
@@ -947,7 +954,7 @@ def test_the_doctor_fix_phase_reaches_the_rank_pass_queue_under_a_watched_focus(
 
     config = store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE, max_eng=1)
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, config, store, ledger, watched_fix_chain(), NOW)
+    rank_pass(SLUG, config, store, ledger, watched_fix_chain(), NOW)
     assert [comment[0] for comment in ledger.comments] == ["g"]
 
 
@@ -1018,7 +1025,7 @@ def test_a_master_urgent_fix_phase_leaf_outside_the_focus_gets_no_rank_write_and
     found["phases"] = [{"id": loop.FIX_PHASE, "depends_on": []}]
     found["freezes"] = [{"verb": "focus", "target": "lane:ci"}]
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert (ledger.ranks, ledger.comments) == ([], [])
 
 
@@ -1033,7 +1040,7 @@ def test_the_dispatcher_writes_no_rank_at_full_over_master_and_operator_ranks(st
     rows["b"]["rank"], rows["q"]["rank"], rows["p"]["rank"] = "urgent", "normal", "normal"
     rows["g"]["rank"], rows["h"]["rank"] = "urgent", "urgent"
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
     assert ledger.ranks == []
 
 
@@ -1042,7 +1049,7 @@ def test_a_rank_with_no_recorded_author_writes_no_rank_at_delegate(store, home, 
     tasks = ladder()
     tasks[2]["rank"], tasks[3]["rank"] = "low", "high"
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks), NOW)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks), NOW)
     assert ledger.ranks == []
     assert ledger.comments == [
         entered("a", leads("1 open task", "3 open tasks")),
@@ -1059,7 +1066,7 @@ def test_two_operator_high_ranks_hold_two_of_the_top_places(store, home, shipped
     tasks[0]["rank"] = tasks[1]["rank"] = "high"
     stamps = {f"tasks/t{i}/rank": {"by": "operator"} for i in range(2)}
     found = doc(tasks, phases=[], _meta={"stamps": stamps})
-    assert proposed(dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)) == ["t2"]
+    assert proposed(rank_pass(SLUG, store.config(SLUG), store, Ledger(), found, NOW)) == ["t2"]
 
 
 def test_two_operator_high_ranks_take_the_two_head_places_at_delegate(store, home, shipped):
@@ -1070,7 +1077,7 @@ def test_two_operator_high_ranks_take_the_two_head_places_at_delegate(store, hom
     tasks[0]["rank"] = tasks[1]["rank"] = "high"
     stamps = {f"tasks/t{i}/rank": {"by": "operator"} for i in range(2)}
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks, phases=[], _meta={"stamps": stamps}), NOW)
+    rank_pass(SLUG, store.config(SLUG), store, ledger, doc(tasks, phases=[], _meta={"stamps": stamps}), NOW)
     assert ledger.ranks == []
     assert ledger.comments == [entered(t, "the operator ranked it high") for t in ("t0", "t1")]
 
@@ -1079,7 +1086,7 @@ def test_below_delegate_a_top_task_already_ranked_high_is_not_proposed_again(sto
     store.update(SLUG, autonomy="assist")
     tasks = ladder()
     tasks[0]["rank"] = "high"
-    assert proposed(dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks), NOW)) == ["b", "c"]
+    assert proposed(rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(tasks), NOW)) == ["b", "c"]
 
 
 def test_below_delegate_an_own_rank_is_never_lowered(store, home, shipped):
@@ -1087,7 +1094,7 @@ def test_below_delegate_an_own_rank_is_never_lowered(store, home, shipped):
     tasks = merging()
     tasks[0]["state"] = "done"
     ledger = Ledger()
-    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, stamped(tasks, {"c": "dispatcher"}), NOW)
+    actions = rank_pass(SLUG, store.config(SLUG), store, ledger, stamped(tasks, {"c": "dispatcher"}), NOW)
     assert ledger.ranks == []
     assert [a.split(":")[0] for a in actions] == [f"proposed rank high for task {t} to the master" for t in "pbq"]
 
@@ -1252,5 +1259,5 @@ def test_a_master_urgent_task_with_no_leverage_heads_its_lane_at_delegate(store,
     config = store.update(SLUG, autonomy="delegate", max_eng=1)
     found = stamped([task("x", phase=""), task("u", phase="")], {"u": MASTER_NAME}, rank="urgent")
     ledger = Ledger()
-    dispatcher.rank_pass(SLUG, config, store, ledger, found, NOW)
+    rank_pass(SLUG, config, store, ledger, found, NOW)
     assert (ledger.ranks, ledger.comments) == ([], [entered("u", dispatcher.URGENT_RANK)])

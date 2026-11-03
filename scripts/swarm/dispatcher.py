@@ -199,11 +199,6 @@ def _band(task, fixed, guard):
     return ledger_rank.order(task) if task["id"] in fixed else ledger_rank.RANKS.index(ledger_rank.DEFAULT)
 
 
-def rank_pass(slug: str, config: Any, store: Any, ledger: Any, doc: dict[str, Any], now_ms: int) -> list[str]:
-    """Decide the rank pass from ``doc`` and take it at once, returning its actions."""
-    return apply_ranking(slug, store, rank_decision(slug, config, store, ledger, doc, now_ms))
-
-
 @dataclass(frozen=True)
 class Ranking:
     """A rank pass decided at ``at_ms`` from one read: the saved heads it read, its steps and the heads they land."""
