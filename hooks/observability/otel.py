@@ -158,7 +158,7 @@ def _add_counter(op: tuple[str, str, float, dict[str, str]]) -> None:
     _counters[name].add(value, attrs)
 
 
-def _record_histogram(op: tuple[str, str, float, dict[str, str]]) -> None:
+def _record_histogram(op: Any) -> None:
     """Records a queued histogram value in seconds, creating the histogram on first use."""
     _, name, value, attrs = op
     meter: Any = _meter
