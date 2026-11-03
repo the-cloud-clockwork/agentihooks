@@ -419,7 +419,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
-| `max-agents` | whole number, 1 or more | `20` on `ui=no`, `15` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. |
+| `max-agents` | whole number, 1 or more | `20` on `ui=no`, `15` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. The host room guard still refuses a spawn when load or free memory leaves no room. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
@@ -1082,7 +1082,7 @@ tick. On a machine in any other mode the setting changes nothing.
 
 Hives fill first. When no hive takes an eng, ci, plan or dispatch spawn, the tick runs it in the machine's own herdr
 panes while the machine runs fewer worker agents than `agentihooks swarm <id> set local-max-agents=N` (default 15),
-counted across every swarm on the machine. At the cap the spawn waits with the hive's reason and the local count.
+counted across every swarm on the machine, and only while the host room guard finds load and memory room. At the cap the spawn waits with the hive's reason and the local count.
 Masters, qa and frontend keep the UI host rule, and a task pinned to a hive never runs locally.
 
 ## Worker hives in Kubernetes
