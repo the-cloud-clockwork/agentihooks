@@ -676,7 +676,7 @@ def test_a_handed_off_chain_under_a_dropped_critical_step_is_dropped_whole_with_
         Step("critical", note),
         Step("slow", note, lane=Lane("slow")),
         Step("both", note, frozenset({"critical", "slow"}), budget_s=3.0),
-        Step("after both", note, frozenset({"both"}), budget_s=4.0),
+        Step("after both", note, frozenset({"both"}), lane=Lane("slow"), budget_s=4.0),
     )
     later: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(critical_s=0.0):
@@ -707,11 +707,9 @@ def test_a_handed_off_step_applies_its_writes_through_the_group_appliers() -> No
 def test_a_slow_lane_thread_is_a_daemon_named_for_the_slow_lane() -> None:
     from scripts.tick import pool
 
-    release = Event()
     with pool.running(workers=2) as found:
-        found.detach(release.wait)
-        assert [(thread.name, thread.daemon) for thread in found.later] == [("tick-slow-lane", True)]
-        release.set()
+        found.detach(lambda: None)
+    assert [(thread.name, thread.daemon) for thread in found.later] == [("tick-slow-lane", True)]
 
 
 class _Joined:
