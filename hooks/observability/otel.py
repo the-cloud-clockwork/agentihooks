@@ -219,7 +219,7 @@ def _init_sdk() -> None:
             from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
-            from hooks.observability.otel_delta import GrpcMetricExporter as OTLPMetricExporter
+            from hooks.observability.otel_delta_grpc import GrpcMetricExporter as OTLPMetricExporter
         else:
             from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
