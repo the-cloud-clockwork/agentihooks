@@ -229,7 +229,7 @@ def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
         assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == []
     finally:
         release.set()
-        running = engine._RUNNING.get("snapshot job")
+        running = engine._RUNNING.get(("sw", "snapshot job"))
         if running is not None:
             running.join(30.0)
     assert called == [True]
