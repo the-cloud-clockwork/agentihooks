@@ -1207,12 +1207,14 @@
     {
       "id": "ledger-item-reads",
       "origin": "inventory",
-      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API and refuses other items; ledger tasks lists open tasks one line each.",
+      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API, or every task or freeze as JSON, and refuses other items; ledger tasks lists open tasks one line each.",
       "seam": "agentihooks ledger get and ledger tasks",
       "tests": [
         "tests/swarm_ledger/test_item_reads.py::test_get_prints_one_item_read_through_the_ledger_api",
         "tests/swarm_ledger/test_item_reads.py::test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities",
-        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection"
+        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection",
+        "tests/swarm_ledger/test_item_reads.py::test_get_tasks_prints_every_task_row_as_json_through_the_collection_read",
+        "tests/swarm_ledger/test_item_reads.py::test_get_freezes_prints_every_freeze_and_focus_record_as_json"
       ]
     },
     {
