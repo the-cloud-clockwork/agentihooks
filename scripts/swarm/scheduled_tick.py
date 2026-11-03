@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from scripts.scheduler.core import Scheduler
 from scripts.scheduler.service import AlreadyRunning, machine_lock, runtime_dir
@@ -118,7 +118,15 @@ def environment(environ: Mapping[str, str]) -> dict[str, str]:
     return {**kept, "PATH": f"{home}/.local/bin:{home}/.cargo/bin:/usr/local/bin:/usr/bin:/bin"}
 
 
-def _ended(tick: subprocess.Popen, killpg: Callable[[int, int], None]) -> tuple[int, bool]:
+class Tick(Protocol):
+    """The running tick process the holder waits on and signals by its process group."""
+
+    pid: int
+
+    def wait(self, timeout: float | None = None) -> int: ...
+
+
+def _ended(tick: Tick, killpg: Callable[[int, int], None]) -> tuple[int, bool]:
     try:
         return tick.wait(TIMEOUT_S), False
     except subprocess.TimeoutExpired:
@@ -165,7 +173,7 @@ def _sweep(pgid: int, killpg: Callable[[int, int], None], alive: Callable[[int],
 
 
 def _finish(
-    tick: subprocess.Popen,
+    tick: Tick,
     killpg: Callable[[int, int], None] = os.killpg,
     alive: Callable[[int], bool] = _group_alive,
 ) -> int:
@@ -199,7 +207,7 @@ def tick_lock(environ: Mapping[str, str] = os.environ) -> Iterator[None]:
     yield
 
 
-def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen, record: bool = True) -> int:
+def main(popen: Callable[..., Tick] = subprocess.Popen, record: bool = True) -> int:
     """Hold the machine tick lock around one tick pass; the systemd fallback unit passes record=False."""
     from scripts.swarm import timer
 
