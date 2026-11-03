@@ -1,18 +1,32 @@
 import argparse
 import json
+import sys
 from dataclasses import replace
+from importlib import import_module
+from typing import Any
 
 import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed, tick
+from scripts.tick import registry as step_registry
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
 
 
 class RecoveryRuntime(FakeRuntime):
     def recover(self, name):
         return Placed("hand:p1", "codex")
+
+
+PATIENT_S = 30.0
+
+
+@pytest.fixture(autouse=True)
+def patient_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Raise every registered tick step's budget to at least PATIENT_S for the test."""
+    for step in step_registry.steps():
+        monkeypatch.setattr(step, "budget_s", max(step.budget_s, PATIENT_S))
 
 
 @pytest.mark.parametrize("record", ["stale", "missing"])
@@ -505,6 +519,34 @@ def test_the_lost_hive_move_places_the_master_on_the_hive_with_room(store):  # n
 
     [(_, task)] = runtime.masters
     assert task["hive"] == "small"
+
+
+def test_the_tick_loads_the_hive_launch_code_before_the_fail_over_step_starts(
+    store: RedisStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm.tick import MASTER_MOVE_MODULES
+    from scripts.tick import engine
+
+    for name in MASTER_MOVE_MODULES:
+        package, _, attribute = name.rpartition(".")
+        monkeypatch.setattr(import_module(package), attribute, import_module(name))
+        monkeypatch.delitem(sys.modules, name)
+    loaded: list[list[str]] = []
+    run_step = engine.run_step
+
+    def watched(step: Any, ctx: Any) -> Any:
+        if step.name == "master move fail over":
+            loaded.append([name for name in MASTER_MOVE_MODULES if name in sys.modules])
+        return run_step(step, ctx)
+
+    monkeypatch.setattr(engine, "run_step", watched)
+    _hive(store, "lost", NOW - GRACE_MS - 1)
+    _hive_master(store)
+
+    tick("sw", store, tasks(), RecoveryRuntime(), NOW)
+
+    assert loaded == [list(MASTER_MOVE_MODULES)]
 
 
 def test_a_failed_successor_launch_keeps_the_recovery_handoff_awaiting(store):  # noqa: F811

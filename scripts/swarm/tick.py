@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
+from importlib import import_module
 from typing import Any, Protocol
 
 import scripts.tick.steps.agents  # noqa: F401
@@ -108,6 +109,7 @@ MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
 GROUP_BUDGET_S = 600.0
+MASTER_MOVE_MODULES = ("scripts.hive.launch", "scripts.hive.daemon", "scripts.swarm.local_slots")
 SPAWN_DUE = "spawn-due"
 HOST_SPENDS = f"{PREFIX}:host-spends"
 HOST_SPENDS_KEPT = 1000
@@ -215,12 +217,15 @@ class _PassView:
 
 
 def run_group(name: str, **state: object) -> list[str]:
-    """Run the registered steps of tick group ``name`` in legacy order with ``state``, returning their actions."""
-    return steps.actions(engine.run_group(name, Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))))
+    """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions."""
+    ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
+    return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state)))
 
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
+    for name in MASTER_MOVE_MODULES:
+        import_module(name)
     box: dict[str, Any] = steps.PassBox()
     passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
     actions = run_group("start", **passing)
