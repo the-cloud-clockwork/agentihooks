@@ -791,7 +791,7 @@ def _duration(value):
     return minutes
 
 
-def _ledger_item(value):
+def _ledger_item(value: str) -> str:
     if not LEDGER_ITEM.fullmatch(value):
         raise argparse.ArgumentTypeError(
             "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"

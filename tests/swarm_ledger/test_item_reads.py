@@ -63,7 +63,9 @@ def test_get_prints_one_item_read_through_the_ledger_api(reads, capsys, monkeypa
 
 
 @pytest.mark.feature("ledger-item-reads")
-def test_get_tasks_prints_every_task_row_as_json_through_the_collection_read(reads, capsys, monkeypatch):
+def test_get_tasks_prints_every_task_row_as_json_through_the_collection_read(
+    reads: list[tuple[str, str, bool]], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "get", "tasks"])
     ledger.main()
     rows = json.loads(capsys.readouterr().out)
@@ -73,7 +75,9 @@ def test_get_tasks_prints_every_task_row_as_json_through_the_collection_read(rea
 
 
 @pytest.mark.feature("ledger-item-reads")
-def test_get_freezes_prints_every_freeze_and_focus_record_as_json(reads, capsys, monkeypatch):
+def test_get_freezes_prints_every_freeze_and_focus_record_as_json(
+    reads: list[tuple[str, str, bool]], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "get", "freezes"])
     ledger.main()
     assert json.loads(capsys.readouterr().out) == STATE["freezes"]
