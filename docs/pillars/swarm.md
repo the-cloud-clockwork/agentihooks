@@ -414,7 +414,7 @@ the seat's current execution. On a master seat this showed as forced launches th
 with `replacement does not match the current execution`, then as
 `master launch refused: startup pending for <name>` in the tick journal.
 
-Each tick, before step 1 of [the minute tick](#the-minute-tick), the execution reconcile ends such an orphan. It ends the current execution of
+In the observe group of each pass of [the minute tick](#the-minute-tick), the execution reconcile step ends such an orphan. It ends the current execution of
 a seat when all of these hold:
 
 | Condition | Read from |
@@ -4342,30 +4342,94 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 
 ## The minute tick
 
-Registered steps have measured budgets and declared intervals. A step still
-running at its budget is recorded late and the pass continues; its worker
-keeps running. See [Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals)
-for timing configuration, overlap limits and the conditional forty second
-spawn prerequisite bound.
+One tick pass reconciles one swarm with its agents, panes, ledger and hives. The pass is a fixed sequence of tick
+groups, and every piece of work inside a group is a registered step. The step names, the group each belongs to and
+the place each group runs in the pass are listed in
+[Tick engine steps](../reference/tick-engine-steps.md#groups-and-their-sites); this section covers how the engine runs
+them, the two lanes, the declared budgets and intervals, the records a pass leaves, the ports steps reach outside
+systems through, and the cadence the passes run at.
 
-`agentihooks swarm <id> tick-report --passes 100` reports the latest retained
-passes with per step count, median, p95 and CPU share, plus pass p95 and the
-idle gaps between consecutive passes. CPU share uses the sum of own and reaped
-child CPU across retained steps, excluding the whole pass measurement. Nested
-step measurements can overlap. The report identifies passes with no retained
-steps; a partially trimmed pass can contain only its last steps.
+In the observe group the execution reconcile step ends any orphan execution still holding a seat (see
+[Orphan executions on a seat](#orphan-executions-on-a-seat)). An outage holds the affected idle and delivery
+decisions until recovery (see [Outage holds and recovery](#outage-holds-and-recovery)).
 
-The same report holds a simulated pass to a budget in CI: one tick over fifteen
-working agents and nine hundred tasks on a virtual clock must finish within
-384 seconds, a budget a pull request may only lower. See
-[Tick load budget](../reference/tick-load-budget.md).
+### Engine and steps
 
-The tick retains at most 50,000 finished step records in its per swarm
-`tick:steps` stream and 50,000 pass records in `tick:passes`. Pass records carry
-start and end times, elapsed duration, active agent count, failed steps and
-outcome. Recording runs in the tick's instrumentation finally context, including
-early returns and exceptions. Redis recording failures leave a journal event
-and preserve the tick's result or exception.
+| Part | What it does |
+|---|---|
+| Step | Declares a name, a group, a lane, a budget, an interval, the steps it `needs`, and the domains it `reads` and `writes`. A step reads the pass state through a view and returns its writes; it never changes shared pass state in place. |
+| Registry | `scripts.tick.registry` holds every step. It refuses duplicate names, unknown or cyclic needs, a budget that is not a finite positive number, a negative interval, and two steps in one lane that write the same domain, or where one reads a domain the other writes, with no need between them. |
+| Group run | `scripts.tick.engine.run_group` runs one group. Each step runs in its own daemon thread under a copied context and a child deadline of its budget. |
+| Step record | Every step run ends as `ok`, `late` (it ran past its budget, or was left running), `failed` (it raised) or `held` (its previous run is still alive, so no new thread starts). A late or failed step never stops the next one. |
+
+A value a held or late writer never stored raises `Left` when a later step reads it from the pass box, and the tick
+raises the held error at the group's site, so a pass never continues on a value no step produced. Adding a step,
+the pass state and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+
+### Two lanes and fan out
+
+The swarm's `tick-mode` setting picks how a pass runs:
+
+```bash
+agentihooks swarm <slug> set tick-mode=parallel
+agentihooks swarm <slug> set tick-mode=sequential   # the default
+```
+
+| Mode | How a group runs |
+|---|---|
+| `sequential` | One step at a time in group order. |
+| `parallel` | Eagerly: each step starts the moment every step it needs has ended, on at most 8 workers. Records keep group order. |
+
+A parallel pass has two lanes, each with its own deadline from the start of the pass:
+
+| Lane | Deadline | Steps |
+|---|---|---|
+| critical | 110 seconds | Every step whose lane is not `slow`. Every step registered today declares lane `tick` and runs here. |
+| slow | 400 seconds | Steps that declare lane `slow`. |
+
+When a lane's deadline passes, its unfinished steps and every step that needs them are dropped and recorded late.
+A parallel pass writes the controller heartbeat at the critical deadline, or when the pass ends if that comes
+first, so slow work never delays it.
+
+Work a step does per agent or per task fans out on the same 8 worker slots the pass holds; a fan out started inside a
+fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed number of slots in the tick process,
+6 for herdr and 4 for GitHub, so a fan out never floods either.
+
+### Budgets and intervals
+
+Each step's budget is its measured p95 from a tick report over 60 passes with fifty percent headroom, rounded up to
+a whole second, and at least one second. Its declared interval is 60 seconds for a step that belongs in every pass,
+120 seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
+`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built.
+Intervals are declared and validated; no step is skipped because its interval has not elapsed, and the engine runs
+every registered step on every pass. Timing changes, overlap limits and the
+forty second spawn bound are covered in
+[Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals).
+
+### Records
+
+Every pass appends one record to the swarm's `tick:passes` stream and every finished step one record to
+`tick:steps`, each kept to the newest 50,000. A pass record carries its start and end, its wall time, the active
+agent count, the steps that failed and its outcome, and is written even when the pass returns early or raises; a
+Redis failure leaves a journal event and keeps the pass's own result or error.
+`agentihooks swarm <id> tick-report` reads both streams; see [Tick report](../reference/tick-report.md).
+
+Each pass also checks its own speed: when the p95 of the last 10 passes exceeds the target of the rollout stage
+named by `AGENTIHOOKS_TICK_STAGE` (`S1` 384, `S2` 240, `S3` 120, `S4` 60 seconds, default `S1`), the tick holds new
+spawns and sends the master one notice. The hold clears on the first pass whose p95 is back under the target.
+
+### Ports
+
+The ports in `scripts.tick.ports` name every outside system a step reaches: the ledger server, the swarm store's
+coordination keys, source control, the inbox, the decision classifier, metrics, the host, the agent runtime, the
+process table and the fenced records store. The first nine each have one adapter and one fake, and every call takes
+a deadline and is refused once it has passed; the records port has its Redis adapter. A unit test refuses a module
+under `scripts/tick` outside the adapters that imports an adapted implementation directly (see
+[The import check](../reference/tick-adapters.md#the-import-check)). Most registered steps still run a call of the tick module, which reaches those systems
+itself; every pass already scans processes through the processes adapter and holds one lease heartbeat. See
+[Tick adapters](../reference/tick-adapters.md) and [Fencing records](../reference/fencing-records.md).
+
+### Cadence
 
 An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
 registers it and starts the scheduler runner; each tick pass re-registers it if it is gone. The
@@ -4373,33 +4437,12 @@ registers it and starts the scheduler runner; each tick pass re-registers it if 
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
-again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
-An outage holds the affected idle and delivery decisions until recovery (see
-[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm, before step 1 the tick ends any orphan
-execution still holding a seat (see [Orphan executions on a seat](#orphan-executions-on-a-seat)), then:
+minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its
+own thread; while one swarm's tick runs long, a quicker swarm ticks again each minute until every swarm's first
+tick of the pass ends; no extra tick starts after seven minutes.
 
-1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
-2. Free the tasks of agents whose pane is gone, or that stayed eligible for idle retirement for nineteen minutes since the first idle observation. A stale agent is nudged through its inbox
-   (see Stale nudge).
-3. Reopen claimed tasks that have no agent.
-4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
-5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
-   under its session cap. Claimable tasks are taken highest [queue rank](#queue-rank) first. Sessions go to the
-   lanes in rounds: a lane with fewer live agents spawns before one holding more, ties in eng, ci, plan order, so
-   every lane with ready work gets an agent before any lane takes a second.
-6. Mark the swarm `stopped` when no agent is left, or `drained` when only the master is and nothing remains to do.
-7. Post inbox replies to the operator on the page chat.
-8. Run the [ledger event pass](#ledger-event-pass): agent writes and time rules become inbox items.
-9. Tick a phase whose tasks are all done, and reopen a ticked phase when a task that is not done lands in it.
-   Each change leaves a status comment from `swarm` on the phase and an information item for the master. A phase
-   with no task, or out of scope, is left to the master.
-10. Send each new health finding to the master with the `verdict` command to judge it.
-11. Wake idle panes holding unread items, except a Codex pane whose push pump owns its inbox, and climb the wake
-    ladder for items nobody reads.
-12. Start the automatic snapshot job when a snapshot is due and no job holds the swarm's snapshot lock. The job
-    runs as its own detached process, writes its errors to `~/.agentihooks/swarm/<id>/snapshot-job.log`, and the
-    tick returns without waiting for it.
+Swarm thresholds are durations since the event that started them, so a pass that runs late, or a slower cadence,
+acts at the same wall time; see [Swarm elapsed thresholds](../reference/swarm-thresholds.md).
 
 The health pass reports `merge stall` when the dev merge queue holds entries and no pull request has merged
 into dev for sixty minutes. Its evidence names the queue length, minutes since the latest dev merge and the
@@ -5075,7 +5118,7 @@ in [One lease heartbeat per tick pass](../reference/tick-adapters.md#one-lease-h
 The refresh job, which runs the GitHub, Langfuse and Grafana refreshes and, for a `doctor` swarm, the Doctor timer,
 keeps its own heartbeat for the length of its run.
 
-The automatic snapshot never runs inside the pass. Step 12 of the list above only starts the detached snapshot job
+The automatic snapshot never runs inside the pass. The pass only starts the detached snapshot job
 and returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
 most 30 minutes once it starts; a tick that finds the lock held starts no second job. Two jobs started before
 either holds the lock race for it: the first to take it writes the snapshot, the other exits without one.
