@@ -58,7 +58,7 @@ def test_a_held_tick_call_still_stamps_the_pass_and_names_the_missing_value(
 @pytest.mark.feature("swarm-tick-early-end-stamp")
 def test_a_pass_box_shares_the_names_of_the_steps_its_pass_left() -> None:
     box = PassBox()
-    judging = PassBox(box.left)
+    judging = PassBox(left=box.left)
     judging.left.append("intent judge")
     assert box.left == ["intent judge"]
     with pytest.raises(Left):

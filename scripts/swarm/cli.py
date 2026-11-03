@@ -419,7 +419,7 @@ def run_tick(
             run_group("wrapper refresh", **passing, scheduled=scheduled)
             host_steps.raise_held(box)
             doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
-            judging: dict[str, Any] = PassBox(box.left)
+            judging: dict[str, Any] = PassBox(left=box.left)
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
                 judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)

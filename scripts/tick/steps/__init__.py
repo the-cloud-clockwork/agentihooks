@@ -1,6 +1,6 @@
 """Registered tick steps that run a hand written call of the tick pass against the pass state."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from functools import partial
 from importlib import import_module
 from typing import Any, cast
@@ -87,9 +87,10 @@ class PassBox(dict[str, Any]):
     ``left`` names each step the pass left running, dropped or held, shared by every box handed the same list.
     """
 
-    def __init__(self, left: list[str] | None = None) -> None:
-        """Start an empty box keeping the names of the steps its pass left in ``left``, a new list when not given."""
-        super().__init__()
+    def __init__(self, values: Mapping[str, Any] | None = None, *, left: list[str] | None = None) -> None:
+        """Start a box holding ``values`` and keeping the names of the steps its pass left in ``left``, a new list when
+        not given."""
+        super().__init__(values or {})
         self.left: list[str] = [] if left is None else left
 
     def __missing__(self, key: str) -> Any:
