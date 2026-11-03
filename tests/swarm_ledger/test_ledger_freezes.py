@@ -459,12 +459,23 @@ def test_the_api_takes_freeze_ops_against_the_freezes_collection():
     assert [schemas.target(op) for op in ops] == ["freezes", "freezes"]
 
 
-def test_the_api_accepts_a_boolean_only_flag_on_focus():
-    ops = [{"op": "freeze_set", "id": "f3", "verb": "focus", "target": "plans/a", "only": True}]
+def test_the_api_stores_a_focus_posted_with_only_true() -> None:
+    freeze("plans/b", verb="focus")
+    ops = [{"op": "freeze_set", "id": "f3", "verb": "focus", "target": "plans/a", "only": True, "position": "top"}]
     assert schemas.check_operations({"operation_id": "o2", "ops": ops, "guards": {}}, core, ()) == ops
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == []
+    assert targets(state) == [("focus", "plans/a")]
 
 
-def test_the_api_refuses_a_non_boolean_only_flag():
+def test_the_api_refuses_a_focus_position_outside_top_and_bottom() -> None:
+    ops = [{"op": "freeze_set", "id": "f5", "verb": "focus", "target": "plans/a", "position": "middle"}]
+    with pytest.raises(schemas.APIError) as raised:
+        schemas.check_operations({"operation_id": "o4", "ops": ops, "guards": {}}, core, ())
+    assert raised.value.code == "schema_invalid"
+
+
+def test_the_api_refuses_a_non_boolean_only_flag() -> None:
     ops = [{"op": "freeze_set", "id": "f4", "verb": "focus", "target": "plans/a", "only": "yes"}]
     with pytest.raises(schemas.APIError) as raised:
         schemas.check_operations({"operation_id": "o3", "ops": ops, "guards": {}}, core, ())

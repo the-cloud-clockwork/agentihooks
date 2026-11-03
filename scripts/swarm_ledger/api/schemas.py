@@ -132,7 +132,6 @@ TYPES = {
     "follow_up": {"type": "boolean"},
     "workstation": {"type": "boolean"},
     "release": {"type": "boolean"},
-    "only": {"type": "boolean"},
     "if_plan_lines_missing": {"type": "boolean"},
     "rounds": {"type": "integer", "minimum": 0},
     "escalated": {"type": "boolean"},
@@ -156,6 +155,7 @@ TYPES = {
 }
 KIND_TYPES = {
     "artifact_add": {"plan": {"type": "boolean"}},
+    "freeze_set": {"only": {"type": "boolean"}, "position": {"enum": ["top", "bottom"]}},
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
     "task_rank": {"if_owned": {"type": "boolean"}},
 }
