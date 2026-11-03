@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -704,7 +705,7 @@ def test_the_sweep_moves_controller_dispatcher_seat_mail_to_its_hive_occupant(st
     assert controller.inbox(seat) == []
 
 
-def test_mail_redirected_to_a_settled_agent_on_its_hive_clears_its_mark_there(redis, agent):
+def test_mail_redirected_to_a_settled_agent_on_its_hive_clears_its_mark_there(redis: Any, agent: Any) -> None:
     member = InboxStore(redis, world="m1")
     member.quiet_exits([agent.name, "sw-eng-9"])
     controller = InboxStore(redis, world="")
@@ -714,7 +715,9 @@ def test_mail_redirected_to_a_settled_agent_on_its_hive_clears_its_mark_there(re
     assert member.settled_exits() == {"sw-eng-9"}
 
 
-def test_mail_moved_to_a_settled_agent_in_another_world_clears_its_mark_there(store, agent, mail):
+def test_mail_moved_to_a_settled_agent_in_another_world_clears_its_mark_there(
+    store: Any, agent: Any, mail: Any
+) -> None:
     member, item = mail
     target = InboxStore(store.redis, world="m2")
     target.quiet_exits([agent.name, "sw-eng-9"])

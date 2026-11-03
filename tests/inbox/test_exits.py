@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.inbox import exits, wake
@@ -1049,7 +1051,9 @@ def test_the_sweep_settles_seat_mail_of_an_unknown_swarm_as_before(redis):
     assert inbox.get(item.id).state == "pending"
 
 
-def test_a_later_sweep_reads_no_agent_an_earlier_sweep_found_settled(redis, monkeypatch):
+def test_a_later_sweep_reads_no_agent_an_earlier_sweep_found_settled(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, inbox = RedisStore(redis), InboxStore(redis)
     store.create(SwarmConfig("sw", "/repo", 0, 0))
     for n in (1, 2, 3):
@@ -1066,7 +1070,7 @@ def test_a_later_sweep_reads_no_agent_an_earlier_sweep_found_settled(redis, monk
     assert reads == [["eng-1@sw", "eng-2@sw", "eng-3@sw"], ["eng-1@sw", "eng-2@sw", "eng-3@sw"]]
 
 
-def test_an_agent_the_sweep_had_to_settle_stays_unmarked_until_a_sweep_finds_it_quiet(redis):
+def test_an_agent_the_sweep_had_to_settle_stays_unmarked_until_a_sweep_finds_it_quiet(redis: Any) -> None:
     store, inbox = RedisStore(redis), InboxStore(redis)
     store.create(SwarmConfig("sw", "/repo", 1, 0))
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
@@ -1076,7 +1080,7 @@ def test_an_agent_the_sweep_had_to_settle_stays_unmarked_until_a_sweep_finds_it_
     assert inbox.settled_exits() == {"sw-eng-1"}
 
 
-def test_quiet_exits_marks_every_name_and_returns_the_quiet_ones(redis):
+def test_quiet_exits_marks_every_name_and_returns_the_quiet_ones(redis: Any) -> None:
     inbox = InboxStore(redis)
     inbox.send("sender", "sw-eng-2", "open")
     assert inbox.quiet_exits(["sw-eng-1", "sw-eng-2"]) == {"sw-eng-1"}
@@ -1085,14 +1089,14 @@ def test_quiet_exits_marks_every_name_and_returns_the_quiet_ones(redis):
     assert inbox.settled_exits() == {"sw-eng-1"}
 
 
-def test_mail_sent_to_a_settled_agent_clears_its_mark(redis):
+def test_mail_sent_to_a_settled_agent_clears_its_mark(redis: Any) -> None:
     inbox = InboxStore(redis)
     inbox.quiet_exits(["sw-eng-1", "sw-eng-2"])
     inbox.send("sender", "sw-eng-1", "late")
     assert inbox.settled_exits() == {"sw-eng-2"}
 
 
-def test_mail_redirected_to_a_settled_agent_clears_its_mark(redis):
+def test_mail_redirected_to_a_settled_agent_clears_its_mark(redis: Any) -> None:
     inbox = InboxStore(redis)
     item = inbox.send("sender", "sw-eng-2", "contract")
     inbox.quiet_exits(["sw-eng-1", "sw-eng-3"])
@@ -1100,7 +1104,7 @@ def test_mail_redirected_to_a_settled_agent_clears_its_mark(redis):
     assert inbox.settled_exits() == {"sw-eng-3"}
 
 
-def test_mail_reopened_at_a_settled_agent_clears_its_mark(redis):
+def test_mail_reopened_at_a_settled_agent_clears_its_mark(redis: Any) -> None:
     inbox = InboxStore(redis)
     item = inbox.send("sender", "sw-eng-1", "question")
     answer = inbox.reply(item.id, "sw-eng-1", "answer")
