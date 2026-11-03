@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 import scripts.swarm.cli  # noqa: F401
-from scripts.swarm import difficulty, grouping
+from scripts.swarm import difficulty, fleet_red, grouping
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import engine, pool, view
 from scripts.tick.deadline import Deadline
@@ -162,6 +162,20 @@ def test_appliers_need_a_ledger_and_a_swarm() -> None:
     assert tasks.appliers({"slug": "sw"}) == {}
     assert tasks.appliers({"ledger": Ledger()}) == {}
     assert list(tasks.appliers({"slug": "sw", "ledger": Ledger()})) == [tasks.SIZES, tasks.GROUPS]
+
+
+def test_appliers_save_fleet_red_listings_wherever_the_site_holds_a_store() -> None:
+    saved: list[tuple[str, str, int, bool]] = []
+    redis = SimpleNamespace(set=lambda name, value, *, ex, nx: saved.append((name, value, ex, nx)) or True)
+    store = SimpleNamespace(redis=redis)
+
+    assert list(tasks.appliers({"store": store})) == [fleet_red.LISTINGS]
+    found = tasks.appliers({"slug": "sw", "ledger": Ledger(), "store": store})
+    assert list(found) == [tasks.SIZES, tasks.GROUPS, fleet_red.LISTINGS]
+
+    found[fleet_red.LISTINGS](Write(fleet_red.LISTINGS, "key", "[]"))
+
+    assert saved == [("key", "[]", fleet_red.TTL, True)]
 
 
 def test_the_size_pass_returns_its_sizes_as_guarded_task_writes() -> None:

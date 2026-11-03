@@ -1,6 +1,9 @@
 import inspect
+import json
 import subprocess
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -8,7 +11,10 @@ from scripts.swarm import fleet_red, panic
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable
 from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.ports.source_control import OpenChange, RollupCheck
+from scripts.tick.step import Context, View, Write
 
 pytestmark = pytest.mark.unit
 
@@ -384,6 +390,14 @@ def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, m
 SAVED = [pull(1, run("Tests", "FAILURE")), pull(2, run("Lint", None, None), status("Gate", "SUCCESS"))]
 
 
+def listed(store: RedisStore, slug: str, repo: str, reader: fleet_red.Reader | None = None) -> fleet_red.Pulls | None:
+    """List through the cache and apply its save as the engine would, returning the listing."""
+    pulls, saves = fleet_red.cached(store, slug, repo, reader)
+    for save in saves:
+        fleet_red.saver(store)(save)
+    return pulls
+
+
 def test_the_cache_lists_once_and_keeps_the_listing_ten_minutes(store: RedisStore) -> None:
     reads: list[str] = []
 
@@ -391,11 +405,71 @@ def test_the_cache_lists_once_and_keeps_the_listing_ten_minutes(store: RedisStor
         reads.append(repo)
         return SAVED
 
-    assert fleet_red.cached(store, "sw", "o/r", reader) == tuple(SAVED)
-    assert fleet_red.cached(store, "sw", "o/r", reader) == tuple(SAVED)
+    assert listed(store, "sw", "o/r", reader) == tuple(SAVED)
+    assert listed(store, "sw", "o/r", reader) == tuple(SAVED)
     assert reads == ["o/r"]
     assert store.redis.ttl(store.key("sw", "fleet-red-pulls:o/r")) == 600
     assert fleet_red.TTL == 600
+
+
+def test_the_cache_returns_a_fresh_listing_with_its_save_and_writes_nothing(store: RedisStore) -> None:
+    key = store.key("sw", "fleet-red-pulls:o/r")
+
+    pulls, saves = fleet_red.cached(store, "sw", "o/r", lambda repo: SAVED)
+
+    assert pulls == tuple(SAVED)
+    listing = [[p.url, [[c.name, c.result, c.at] for c in p.checks]] for p in SAVED]
+    assert saves == (Write(fleet_red.LISTINGS, key, json.dumps(listing)),)
+    assert store.redis.get(key) is None
+
+
+def test_a_saved_listing_returns_no_save(store: RedisStore) -> None:
+    listed(store, "sw", "o/r", lambda repo: SAVED)
+
+    assert fleet_red.cached(store, "sw", "o/r", lambda repo: []) == (tuple(SAVED), ())
+
+
+def test_the_saver_keeps_a_listing_saved_since_the_step_read_none(store: RedisStore) -> None:
+    key = store.key("sw", "fleet-red-pulls:o/r")
+    store.redis.set(key, "[]", ex=60)
+
+    with pytest.raises(
+        RevisionConflict, match=f"^another pass saved the listing under {key} since the step read none$"
+    ):
+        fleet_red.saver(store)(Write(fleet_red.LISTINGS, key, "null"))
+
+    assert store.redis.get(key) == "[]"
+    assert store.redis.ttl(key) == 60
+
+
+def test_the_engine_applies_the_listing_the_notice_step_returns(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.tick import engine
+    from scripts.tick.steps import tasks
+
+    both = [run("Tests", "FAILURE"), run("Semgrep", "FAILURE")]
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or fleet(both, *[both] * 3))
+    (step,) = [step for step in tasks.STEPS if step.name == "fleet red notice"]
+    state = {"slug": "sw", "store": store, "ledger": Ledger(), "rows": {"red": task("red", pr_url=MINE)}}
+    state |= {"now_ms": NOW_MS, "box": {}}
+    view = cast(View, SimpleNamespace(read=lambda domain, key: state.get(key)))
+    key = store.key("sw", "fleet-red-pulls:o/r")
+
+    found = step.run(Context(view, Deadline.after(60.0)))
+    assert [write.domain for write in found.writes][1:] == [fleet_red.LISTINGS]
+    assert store.redis.get(key) is None
+    assert fleet_red.LISTINGS in step.writes
+
+    (record,) = engine.run_group("x", Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state))
+
+    assert record.dropped == ()
+    assert json.loads(store.redis.get(key))[0][0] == MINE
+    assert store.redis.ttl(key) == 600
+    store.redis.delete(store.key("sw", "fleet-red:red"))
+    engine.run_group("x", Context(view, Deadline.after(60.0)), [step], apply=tasks.appliers(state))
+    assert reads == ["o/r"]
 
 
 def test_the_cache_keeps_each_swarm_and_repository_apart(store: RedisStore) -> None:
@@ -405,9 +479,9 @@ def test_the_cache_keeps_each_swarm_and_repository_apart(store: RedisStore) -> N
         reads.append(repo)
         return SAVED
 
-    fleet_red.cached(store, "sw", "o/r", reader)
-    fleet_red.cached(store, "sw", "o/s", reader)
-    fleet_red.cached(store, "other", "o/r", reader)
+    listed(store, "sw", "o/r", reader)
+    listed(store, "sw", "o/s", reader)
+    listed(store, "other", "o/r", reader)
     assert reads == ["o/r", "o/s", "o/r"]
 
 
@@ -421,8 +495,8 @@ def test_the_cache_keeps_a_failed_listing_as_none_for_ten_minutes(store: RedisSt
         reads.append(repo)
         raise error
 
-    assert fleet_red.cached(store, "sw", "o/r", reader) is None
-    assert fleet_red.cached(store, "sw", "o/r", reader) is None
+    assert listed(store, "sw", "o/r", reader) is None
+    assert listed(store, "sw", "o/r", reader) is None
     assert reads == ["o/r"]
     assert store.redis.ttl(store.key("sw", "fleet-red-pulls:o/r")) == 600
 
@@ -434,14 +508,14 @@ def test_the_cache_keeps_an_empty_listing(store: RedisStore) -> None:
         reads.append(repo)
         return []
 
-    assert fleet_red.cached(store, "sw", "o/r", reader) == ()
-    assert fleet_red.cached(store, "sw", "o/r", reader) == ()
+    assert listed(store, "sw", "o/r", reader) == ()
+    assert listed(store, "sw", "o/r", reader) == ()
     assert reads == ["o/r"]
 
 
 def test_the_cache_lists_through_read_without_a_reader(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fleet_red, "read", lambda repo: SAVED if repo == "o/r" else [])
-    assert fleet_red.cached(store, "sw", "o/r") == tuple(SAVED)
+    assert listed(store, "sw", "o/r") == tuple(SAVED)
 
 
 def test_the_notice_pass_reads_through_the_cache_without_a_reader(
@@ -457,11 +531,19 @@ def test_the_notice_pass_reads_through_the_cache_without_a_reader(
 
     monkeypatch.setattr(fleet_red, "read", reader)
     ledger = Ledger()
-    held = fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS)
+    held = noticed(store, ledger, rows)
     assert held == [f"task red held unclaimed, {MINE} is red only from Semgrep, Tests"]
     store.redis.delete(store.key("sw", "fleet-red:red"))
-    assert fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS) == held
+    assert noticed(store, ledger, rows) == held
     assert reads == ["o/r"]
+
+
+def noticed(store: RedisStore, ledger: Ledger, rows: dict[str, dict[str, Any]]) -> list[str | Write]:
+    """Run the notice pass through the cache, apply its listing saves as the engine would and return its actions."""
+    found = fleet_red.notice_pass("sw", store, ledger, rows, NOW_MS)
+    for save in [item for item in found if isinstance(item, Write)]:
+        fleet_red.saver(store)(save)
+    return [item for item in found if not isinstance(item, Write)]
 
 
 def test_the_notice_pass_declares_nothing_while_the_cache_holds_a_failed_listing(
@@ -472,5 +554,7 @@ def test_the_notice_pass_declares_nothing_while_the_cache_holds_a_failed_listing
 
     monkeypatch.setattr(fleet_red, "read", reader)
     ledger = Ledger()
-    assert fleet_red.notice_pass("sw", store, ledger, {"red": task("red", pr_url=MINE)}, NOW_MS) == []
+    assert noticed(store, ledger, {"red": task("red", pr_url=MINE)}) == []
+    assert noticed(store, ledger, {"red": task("red", pr_url=MINE)}) == []
     assert ledger.notices == []
+    assert store.redis.get(store.key("sw", "fleet-red-pulls:o/r")) == "null"
