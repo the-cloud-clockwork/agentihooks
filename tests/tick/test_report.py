@@ -148,7 +148,6 @@ def test_the_ledger_github_findings_and_metrics_steps_run_in_the_slow_lane() -> 
         "findings pass",
         "metrics record",
         "bottleneck status",
-        "snapshot job",
     }
     assert {lane for lane in lanes.values() if lane != engine.SLOW} == {CallStep.lane}
 
