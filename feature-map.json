@@ -939,7 +939,8 @@
         "tests/swarm_ledger/test_outbox_relay.py::test_a_sent_row_is_never_published_again",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it",
-        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields"
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data"
       ]
     },
     {

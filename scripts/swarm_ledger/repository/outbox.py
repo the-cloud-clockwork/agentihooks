@@ -81,7 +81,8 @@ def relay(repository: Any, events: EventLog, batch: int = BATCH, clock: Callable
 
 def slim(event: envelope.Envelope) -> envelope.Envelope:
     """The event with a changed entity's data cut to its catalogued fields, for rows written before the cut."""
-    if not event.type.endswith(".changed") or event.type not in catalogue.LEDGER:
+    kind = catalogue.LEDGER.get(event.type)
+    if kind is None or not kind.fields:
         return event
     return dataclasses.replace(event, data=catalogue.filled(event.entity, event.data))
 

@@ -156,3 +156,16 @@ def test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_
     [published] = [event for _, event in bus.events.entries if event.id == fat.id]
     assert published.data == {"id": "p9", "title": "Nine", "description": "", "done": False}
     assert (published.type, published.key, published.version) == ("phase.changed", "p9", 9)
+
+
+@pytest.mark.feature("ledger-event-relay")
+def test_a_removal_row_is_published_unchanged_with_empty_data(repo, bus):
+    outbox.relay(repo, bus.events)
+    with repo.transaction() as transaction:
+        transaction.purge("ledger")
+    assert outbox.relay(repo, bus.events) == 2
+    removed = [event for _, event in bus.events.entries[2:]]
+    assert sorted((event.type, event.key, event.data) for event in removed) == [
+        ("phase.removed", "p1", {}),
+        ("task.removed", "t1", {}),
+    ]
