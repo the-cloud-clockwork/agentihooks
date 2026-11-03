@@ -85,7 +85,7 @@ def test_required_hive_failure_retires_without_relaunch_entitlement(monkeypatch,
         live_names=lambda: {agent.name}, retire=lambda agent, **kwargs: retired.append(agent.name) or True
     )
     ledger = SimpleNamespace(notify=lambda *args: notices.append(args))
-    monkeypatch.setattr(controller, "_drop", lambda *args: " dropped")
+    monkeypatch.setattr(importlib.import_module("scripts.tick.steps.agents"), "_drop", lambda *args: " dropped")
     found = {"hive_settings": {"expected": "available", "actual": "missing"}}
     action = controller._failed_launch(
         "sw", store, ledger, runtime, {}, launch_check.Miss(agent, found, relaunch), 10000
@@ -221,7 +221,9 @@ def test_failed_hive_launch_retires_records_and_drops_that_agent(monkeypatch):
     runtime, ledger, rows = SimpleNamespace(), SimpleNamespace(), {"task": {"state": "claimed"}}
     retired, dropped = [], []
     monkeypatch.setattr(controller, "_retire_launch", lambda *args: retired.append(args) or True)
-    monkeypatch.setattr(controller, "_drop", lambda *args: dropped.append(args) or " dropped")
+    monkeypatch.setattr(
+        importlib.import_module("scripts.tick.steps.agents"), "_drop", lambda *args: dropped.append(args) or " dropped"
+    )
     found = {"hive_pane": {"expected": "available", "actual": "missing"}}
     controller._failed_launch("sw", store, ledger, runtime, rows, launch_check.Miss(agent, found, False), 10000)
     assert retired == [("sw", store, runtime, agent, 10000)]

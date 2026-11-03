@@ -1,5 +1,6 @@
 """The start and observation steps of the tick pass: config load, the stopped branch and the observation sweeps."""
 
+import sys
 from collections.abc import Callable
 from functools import partial
 from importlib import import_module
@@ -37,6 +38,20 @@ def raise_held(box: dict[str, Any]) -> None:
     """Raise the exception a step held, as the hand written pass let it escape."""
     if RAISED in box:
         raise box[RAISED]
+
+
+def skip_dropped(function: Callable[..., Any], *args: Any) -> list[str]:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    for _ in range(2):
+        try:
+            return tick.timing.call(function, *args) or []
+        except (RedisConnectionError, RedisTimeoutError) as exc:
+            dropped = exc
+    name = f"{function.__module__}.{function.__qualname__}"
+    print(f"{name} skipped, its Redis connection dropped or timed out twice: {dropped}", file=sys.stderr)
+    return [f"skipped {name}: its Redis connection dropped or timed out twice"]
 
 
 def step_config_load(slug: str, store: Any, box: dict[str, Any]) -> list[str]:
@@ -137,7 +152,7 @@ def step_spawn_due(
 
 
 def step_exits_sweep(slug: str, store: Any, ledger: Any) -> list[str]:
-    return tick.skip_dropped(
+    return skip_dropped(
         tick.exits.sweep,
         tick.InboxStore(store.redis),
         slug,

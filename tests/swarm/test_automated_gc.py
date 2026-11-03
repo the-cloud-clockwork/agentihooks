@@ -1,4 +1,5 @@
 from dataclasses import replace
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -344,7 +345,7 @@ def test_tick_collects_with_the_current_ledger_rows(world, monkeypatch, swarm_st
     monkeypatch.setattr(tick, "_woken", lambda *_: False)
     monkeypatch.setattr(tick, "_bin_closed", lambda *_: [])
     monkeypatch.setattr(tick, "skip_refused", lambda *_: [])
-    monkeypatch.setattr(tick, "skip_dropped", lambda *_: [])
+    monkeypatch.setattr(import_module("scripts.tick.steps.observe"), "skip_dropped", lambda *_: [])
     monkeypatch.setattr(tick.freeze, "watched", lambda slug, actual_store, actual_ledger, doc: doc)
     monkeypatch.setattr(tick.lifetime, "sleeping", lambda *_: True)
     monkeypatch.setattr(tick.timing, "call", lambda fn, *args: fn(*args) if fn is tick.pass_state else [])
@@ -471,7 +472,7 @@ def test_collected_worker_forwards_its_ledger_to_claim_cleanup(world, monkeypatc
     worker = replace(agent, lane="eng", task="work")
     rows = {"work": {"id": "work"}}
     drop = Mock(return_value="task reopened")
-    monkeypatch.setattr(tick, "_drop", drop)
+    monkeypatch.setattr(import_module("scripts.tick.steps.agents"), "_drop", drop)
     assert tick._collected(SLUG, store, ledger, rows, worker) == "task reopened"
     drop.assert_called_once_with(SLUG, store, ledger, rows, worker)
 

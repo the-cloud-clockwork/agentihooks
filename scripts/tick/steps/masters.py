@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from scripts.swarm import (
+    control_notifications,
     dispatch_seat,
     lifetime,
     master_alarm,
@@ -41,6 +42,10 @@ Get = Callable[[str], Any]
 tick: Any = import_module("scripts.swarm.tick")
 
 
+def _operator_line(item: Any) -> bool:
+    return item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
+
+
 def _master_down(slug: Any, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: Any) -> Any:
     """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
     master took but never closed to pending so the next master receives it."""
@@ -51,7 +56,7 @@ def _master_down(slug: Any, config: Any, store: Any, ledger: Any, runtime: Any, 
     ):
         return []
     inbox, seat = tick.InboxStore(store.redis), tick.seat_address(slug, tick.MASTER)
-    waiting = [item for item in inbox.inbox(seat) if item.state not in tick.CLOSED and tick._operator_line(item)]
+    waiting = [item for item in inbox.inbox(seat) if item.state not in tick.CLOSED and _operator_line(item)]
     for item in waiting:
         if item.state != "pending":
             inbox.redirect(item.id, "swarm", seat, tick.REDELIVERED)

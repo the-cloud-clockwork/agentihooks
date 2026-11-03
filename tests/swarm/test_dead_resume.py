@@ -7,6 +7,7 @@ from hooks.context import context_recycle
 from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
+from scripts.tick.steps import agents as agent_steps
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _resuming
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -514,7 +515,7 @@ def test_a_legacy_lost_claim_without_a_generation_reopens(store):
     ledger.rows["t1"].pop("claim_generation")
     rows = {"t1": dict(ledger.rows["t1"])}
 
-    assert tick_module._drop("sw", store, ledger, rows, agent) == ", task t1 reopened"
+    assert agent_steps._drop("sw", store, ledger, rows, agent) == ", task t1 reopened"
     assert ledger.rows["t1"]["state"] == "open"
     assert ledger.rows["t1"]["claimed_by"] == ""
 
@@ -524,7 +525,7 @@ def test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds(store):
     rows = {"t1": dict(ledger.rows["t1"])}
     lives = store.claims("sw", "t1")
 
-    assert tick_module._drop("sw", store, ledger, rows, agent, refund=True) == ", task t1 reopened"
+    assert agent_steps._drop("sw", store, ledger, rows, agent, refund=True) == ", task t1 reopened"
     assert store.claims("sw", "t1") == lives - 1
 
 
@@ -536,7 +537,7 @@ def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone
     ledger.update_task("sw", "t1", {"state": "open", "claimed_by": ""})
     store.redis.hincrby(store.key("sw", "started-lives"), "t1", -1)
 
-    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+    agent_steps._drop("sw", store, ledger, rows, agent, refund=True)
 
     assert store.claims("sw", "t1") == lives - 1
     assert ledger.rows["t1"]["claimed_by"] == ""
@@ -550,7 +551,7 @@ def test_a_tick_drop_refunds_nothing_when_one_claim_field_moved(store, live):
     lives = store.claims("sw", "t1")
     ledger.rows["t1"].update(live)
 
-    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+    agent_steps._drop("sw", store, ledger, rows, agent, refund=True)
 
     assert store.claims("sw", "t1") == lives
 
@@ -561,7 +562,7 @@ def test_a_tick_drop_refunds_a_legacy_claim_without_a_generation(store):
     rows = {"t1": dict(ledger.rows["t1"])}
     lives = store.claims("sw", "t1")
 
-    assert tick_module._drop("sw", store, ledger, rows, agent, refund=True) == ", task t1 reopened"
+    assert agent_steps._drop("sw", store, ledger, rows, agent, refund=True) == ", task t1 reopened"
     assert store.claims("sw", "t1") == lives - 1
 
 
@@ -572,7 +573,7 @@ def test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone(store):
     read = []
     ledger.task = lambda slug, task_id: read.append((slug, task_id))
 
-    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+    agent_steps._drop("sw", store, ledger, rows, agent, refund=True)
 
     assert store.claims("sw", "t1") == lives
     assert read == [("sw", "t1")]
@@ -593,7 +594,7 @@ def test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_re
 
     ledger.task = settled_after_read
 
-    tick_module._drop("sw", store, ledger, rows, agent, refund=True)
+    agent_steps._drop("sw", store, ledger, rows, agent, refund=True)
 
     assert store.claims("sw", "t1") == lives
 

@@ -67,6 +67,31 @@ def _orphans(slug: Any, store: Any, ledger: Any, rows: Any) -> Any:
     return actions
 
 
+def _drop(
+    slug: str, store: Any, ledger: Any, rows: dict[str, dict[str, Any]], agent: AgentRecord, refund: bool = False
+) -> str:
+    held = rows.get(agent.task, {}).get("state") in tick.ACTIVE and rows[agent.task].get("claimed_by") == agent.name
+    held = held and not tick.awaiting_merge(rows[agent.task])
+    expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
+    refund = refund and held and store.claims(slug, agent.task) > 0
+    generation = store.claim_generation(slug, agent.task)
+    if refund and tick._still_held(ledger.task(slug, agent.task), expected):
+        store.refund_held_claim(slug, agent.task, agent.name, generation)
+    store.release(slug, agent.task, agent.name)
+    store.drop_agent(slug, agent.name)
+    reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
+    tick.exits.settle(tick.InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
+    return f", task {agent.task} reopened" if reopen else ""
+
+
+def _follow(slug: str, store: Any, runtime: Any, agent: AgentRecord, pid: Any) -> tuple[AgentRecord | None, list[str]]:
+    if pid is None:
+        return agent, []
+    if (rebound := tick._rebind(slug, store, runtime, agent, pid)) is None:
+        return None, [f"held {agent.name} until one pane holds its resumed process {pid}"]
+    return rebound, [f"rebound {agent.name} to its resumed process {pid} in pane {rebound.pane_id}"]
+
+
 def _conversations(slug: str, store: Any, runtime: Any) -> None:
     """Record each paned agent's current conversation, fanned out over the pass workers."""
     local = runtime.conversations()

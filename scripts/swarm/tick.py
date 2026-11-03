@@ -39,7 +39,6 @@ from scripts.swarm import (
     claim_order,
     content_refusal,
     continuation,
-    control_notifications,
     dead_resume,
     deliberate_exit,
     difficulty,  # noqa: F401
@@ -297,20 +296,6 @@ def skip_refused(function, *args):
         return [f"skipped {name}: its Redis read timed out"]
 
 
-def skip_dropped(function, *args):
-    from redis.exceptions import ConnectionError as RedisConnectionError
-    from redis.exceptions import TimeoutError as RedisTimeoutError
-
-    for _ in range(2):
-        try:
-            return timing.call(function, *args) or []
-        except (RedisConnectionError, RedisTimeoutError) as exc:
-            dropped = exc
-    name = f"{function.__module__}.{function.__qualname__}"
-    print(f"{name} skipped, its Redis connection dropped or timed out twice: {dropped}", file=sys.stderr)
-    return [f"skipped {name}: its Redis connection dropped or timed out twice"]
-
-
 def _codex_hook_order():
     from scripts.targets.codex_target import codex_home, restore_hook_order
 
@@ -334,32 +319,13 @@ def _woken(slug, config, store, ledger):
     if waiting and config.template == priming.TEMPLATE and ledger.closed(slug):
         priming.cancel_master_items(inbox, slug)
         return False
-    return any(_operator_line(item) for item in waiting)
-
-
-def _operator_line(item):
-    return item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
+    return any(master_steps._operator_line(item) for item in waiting)
 
 
 def _collected(slug, store, ledger, rows, agent):
     if agent.lane == MASTER:
         store.redis.set(store.key(slug, "master-retired-tasks"), json.dumps(list(rows)))
-    return _drop(slug, store, ledger, rows, agent)
-
-
-def _drop(slug, store, ledger, rows, agent, refund=False):
-    held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
-    held = held and not awaiting_merge(rows[agent.task])
-    expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
-    refund = refund and held and store.claims(slug, agent.task) > 0
-    generation = store.claim_generation(slug, agent.task)
-    if refund and _still_held(ledger.task(slug, agent.task), expected):
-        store.refund_held_claim(slug, agent.task, agent.name, generation)
-    store.release(slug, agent.task, agent.name)
-    store.drop_agent(slug, agent.name)
-    reopen = held and _reopen(slug, ledger, rows, agent.task, expected)
-    exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
-    return f", task {agent.task} reopened" if reopen else ""
+    return agent_steps._drop(slug, store, ledger, rows, agent)
 
 
 def _still_held(row, expected):
@@ -389,7 +355,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             continue
         if dead_resume.skip_binding(agent, facts, live_names):
             continue
-        agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
+        agent, followed = agent_steps._follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
         actions.extend(followed)
         if agent is None:
             continue
@@ -418,17 +384,10 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             continue
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
         actions.append(
-            f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent, refund=True)
+            f"retired {agent.name} after mismatched {fields}"
+            + agent_steps._drop(slug, store, ledger, rows, agent, refund=True)
         )
     return actions
-
-
-def _follow(slug, store, runtime, agent, pid):
-    if pid is None:
-        return agent, []
-    if (rebound := _rebind(slug, store, runtime, agent, pid)) is None:
-        return None, [f"held {agent.name} until one pane holds its resumed process {pid}"]
-    return rebound, [f"rebound {agent.name} to its resumed process {pid} in pane {rebound.pane_id}"]
 
 
 def _rebind(slug, store, runtime, agent, pid):
@@ -500,7 +459,7 @@ def _failed_hive_launch(slug, store, ledger, runtime, rows, miss, now_ms):
     launch_check.forget(store, slug, agent.name)
     if agent.lane == MASTER:
         ledger.notify(slug, launch_check.told(found, "retired"))
-    return f"retired {agent.name} after its hive join failed" + _drop(slug, store, ledger, rows, agent)
+    return f"retired {agent.name} after its hive join failed" + agent_steps._drop(slug, store, ledger, rows, agent)
 
 
 def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
@@ -547,7 +506,9 @@ def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
     pending = master_start.read(store, slug)
     if agent.lane == MASTER and pending.get("name") == agent.name:
         master_start.save(store, slug, {**pending, "name": "", "retry": True, "at": now_ms})
-    return f"retired {agent.name} after its launch check failed on {fields}" + _drop(slug, store, ledger, rows, agent)
+    return f"retired {agent.name} after its launch check failed on {fields}" + agent_steps._drop(
+        slug, store, ledger, rows, agent
+    )
 
 
 def _retire_launch(slug, store, runtime, agent, now_ms):
@@ -588,7 +549,7 @@ def _restore_owner(slug, store, ledger, rows, agent):
 def _drop_remote(slug, store, ledger, rows, agent, reason):
     master_retire.forget(store, slug, agent.name)
     _refund_parked(slug, store, rows, agent)
-    return f"retired {agent.name}: {reason}" + _drop(slug, store, ledger, rows, agent)
+    return f"retired {agent.name}: {reason}" + agent_steps._drop(slug, store, ledger, rows, agent)
 
 
 def _remote_gone_reason(slug: str, store: RedisStore, runtime: Any, agent: AgentRecord, now_ms: int) -> str:
@@ -694,14 +655,15 @@ def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
     if deliberate_exit.take(store, slug, agent.name):
         runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
         return [
-            f"retired {agent.name} after a deliberate terminate" + _drop(slug, store, ledger, rows, agent, refund=True)
+            f"retired {agent.name} after a deliberate terminate"
+            + agent_steps._drop(slug, store, ledger, rows, agent, refund=True)
         ]
     if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
         return [f"resumed {agent.name}"]
     if agent not in store.agents(slug):
         return []
     runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
-    return [f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent)]
+    return [f"lost {agent.name}" + agent_steps._drop(slug, store, ledger, rows, agent)]
 
 
 def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
@@ -743,7 +705,8 @@ def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
         return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
     content_refusal.handoff(store, slug, agent, now_ms)
     return [
-        f"freed {agent.name} after repeated content refusals" + _drop(slug, store, ledger, rows, agent, refund=True)
+        f"freed {agent.name} after repeated content refusals"
+        + agent_steps._drop(slug, store, ledger, rows, agent, refund=True)
     ]
 
 
@@ -756,7 +719,8 @@ def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
         return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
     revoked_seats.worker_handoff(store, slug, agent, now_ms)
     return [
-        f"freed the seat of {agent.name}: {account} was revoked" + _drop(slug, store, ledger, rows, agent, refund=True)
+        f"freed the seat of {agent.name}: {account} was revoked"
+        + agent_steps._drop(slug, store, ledger, rows, agent, refund=True)
     ]
 
 
@@ -842,7 +806,9 @@ def _watch_idle(
         return nudged
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
         why = f"; outage recovery could not proceed: {resume.recovery_blocker(store, slug, agent)}" if pending else ""
-        return nudged + [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True) + why]
+        return nudged + [
+            f"stalled {agent.name}" + agent_steps._drop(slug, store, ledger, rows, idle, refund=True) + why
+        ]
     return nudged
 
 
@@ -881,7 +847,7 @@ def _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms):
     outage.clear_pane(store, slug, agent.name)
     return [
         f"freed the seat of {agent.name}, stuck on a provider error"
-        + _drop(slug, store, ledger, rows, agent, refund=True)
+        + agent_steps._drop(slug, store, ledger, rows, agent, refund=True)
     ]
 
 
@@ -1409,7 +1375,7 @@ def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
             "accounts": [row for row in readings if not quota_handoff.trigger(capacity.Account(**row), thresholds)],
         }
         actions.append(f"spawn capacity for {task['id']}: {json.dumps(snapshot)}")
-    actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
+    actions.append(f"spawn failed for {task['id']}{agent_steps._drop(slug, store, ledger, rows, record)}: {exc}")
     if isinstance(exc, ProfileUnresolved):
         actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
     return actions
@@ -1442,7 +1408,7 @@ def _room_refused(slug, store, ledger, runtime, rows, failed, refused):
     _release_hive_launch(slug, store, record)
     transfers.detach(store, slug, record)
     store.record_launch(slug, record, "waiting", str(failed.error))
-    _drop(slug, store, ledger, rows, record)
+    agent_steps._drop(slug, store, ledger, rows, record)
     return refused
 
 
