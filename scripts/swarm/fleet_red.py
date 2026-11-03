@@ -73,7 +73,7 @@ class Saved(Protocol):
         """Return the value saved under the name, none when nothing is saved."""
         ...
 
-    def set(self, name: str, value: str, *, ex: int | None = None, nx: bool = False) -> object:
+    def set(self, name: str, value: str, **kwargs: int | bool) -> object:
         """Save the value under the name, for ex seconds when ex is given, and only while nothing is saved there when nx
         holds."""
         ...
