@@ -164,7 +164,9 @@ def test_critical_heartbeat_does_not_wait_for_slow_lane() -> None:
 
     later: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(critical_s=0.03, slow_s=0.5, heartbeat=beat.set):
-        assert engine.run_group("load", context(), (Step("slow", slow, lane=Lane("slow")),), later.append) == ()
+        assert (
+            engine.run_group("load", context(), (Step("slow", slow, lane=Lane("slow")),), finished=later.append) == ()
+        )
     assert beat.is_set()
     assert [[row.outcome for row in records] for records in later] == [[engine.OK]]
 
@@ -209,7 +211,7 @@ def test_an_expired_lane_drops_its_ready_step_and_every_dependent_in_another_lan
     steps = (Step("slow", action, lane=Lane("slow")), Step("after", action, frozenset({"slow"})))
     later: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(slow_s=0.0):
-        assert engine.run_group("load", context(), steps, later.append) == ()
+        assert engine.run_group("load", context(), steps, finished=later.append) == ()
     assert ran == []
     assert [(row.name, row.outcome, row.wall_s, row.budget_s) for row in later[0]] == [
         ("slow", engine.LATE, 0.0, 2.0),
@@ -565,7 +567,7 @@ def test_a_group_returns_its_critical_steps_while_its_slow_step_still_runs() -> 
     )
     later: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(workers=3):
-        rows = engine.run_group("load", context(), steps, later.append)
+        rows = engine.run_group("load", context(), steps, finished=later.append)
         assert [(row.name, row.outcome) for row in rows] == [("quick", engine.OK)]
         assert engine.run_group("next", context(), (Step("next", quick, group="next"),)) != ()
         assert later == []
@@ -587,7 +589,10 @@ def test_the_pass_waits_for_a_hung_slow_step_only_until_the_slow_deadline() -> N
     later: list[tuple[engine.StepRecord, ...]] = []
     try:
         with pool.running(slow_s=0.05):
-            assert engine.run_group("load", context(), (Step("hung", hung, lane=Lane("slow")),), later.append) == ()
+            assert (
+                engine.run_group("load", context(), (Step("hung", hung, lane=Lane("slow")),), finished=later.append)
+                == ()
+            )
         assert [[row.outcome for row in records] for records in later] == [[engine.LATE]]
     finally:
         release.set()
