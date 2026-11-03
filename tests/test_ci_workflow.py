@@ -2119,7 +2119,7 @@ def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memo
         "BRANCH": "${{ github.head_ref }}",
     }
     assert keep["uses"] == "actions/cache/save@v4"
-    assert keep["if"] == "steps.preflight.outputs.id != ''"
+    assert keep["if"] == "steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''"
     assert keep["continue-on-error"] is True
     assert find["timeout-minutes"] == 3
     prefix = "mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-"

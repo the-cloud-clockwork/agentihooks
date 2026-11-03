@@ -4320,7 +4320,7 @@ jobs:
           echo "No Mutation preflight run of $BRANCH kept kill memory, so the first plan prices units without it."
 
       - name: Keep the branch preflight kill memory for this run's shards
-        if: steps.preflight.outputs.id != ''
+        if: steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
