@@ -38,6 +38,7 @@ def node(address: str, depth: int, state: str = "open") -> dict[str, Any]:
     return {"node": address, "kind": address.split("/")[0][:-1], "depth": depth, "state": state}
 
 
+@pytest.fixture
 def held_phases() -> Iterator[Callable[..., None]]:
     token = view.CURRENT.set(view.LedgerView(1, {"phases": []}))
     kept = view.HELD.set(None)
