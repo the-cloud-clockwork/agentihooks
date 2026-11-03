@@ -9,7 +9,6 @@ further master seats its count holds.
 import json
 import os
 import sys
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -92,7 +91,7 @@ from scripts.swarm.store import EVENTS_ENGINE, MASTER, PREFIX, AgentRecord, Redi
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import masters as master_seats
-from scripts.tick import engine, steps
+from scripts.tick import engine, pool, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import masters as master_steps
@@ -117,8 +116,7 @@ SPAWN_DUE = "spawn-due"
 HOST_SPENDS = f"{PREFIX}:host-spends"
 HOST_SPENDS_KEPT = 1000
 HOST_START_LAG_MS = 30 * 1000
-# Swarms tick in threads; two placing from one live session count overfill an account.
-PLACING = threading.Lock()
+PLACING = pool.HostLock(lambda: lost_runner.home() / "swarm" / "placing.lock")
 DOWN_TOLD = "master down told"
 REDELIVERED = "the master went down before closing it; kept for the next master"
 MASTER_DOWN = (
@@ -268,6 +266,7 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
             task_steps.raise_held(box)
         actions.extend(master_steps.run_dispatch(locals()))
     actions.extend(master_steps.run_watch(locals()))
+    passing["rows"] = box["rows"]
     actions += run_group(task_steps.CLOSE, **passing, config=config)
     task_steps.raise_held(box)
     return actions
@@ -660,42 +659,78 @@ def _elsewhere(agent: AgentRecord) -> bool:
     return not agent.runtime_target and bool(agent.hive) and agent.hive != hive_id()
 
 
-def _reap(slug, store, ledger, runtime, rows, now_ms):
+def _reap(
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
+) -> list[str]:
+    """Judge every legacy agent of the swarm, one task per pass worker, returning actions in agent order."""
     from scripts.hub.reconciler import legacy_agents
 
-    live, actions = timing.timed(_live_names, runtime), []
-    for agent in timing.timed(legacy_agents, store, slug):
-        with timing.acting(agent.name):
-            if (
-                agent.state == "awaiting-decision"
-                or (agent.lane == MASTER and agent.state == "starting")
-                or timing.timed(_acknowledging, slug, store, agent)
-            ):
-                continue
-            if reason := timing.timed(_remote_gone_reason, slug, store, runtime, agent, now_ms):
-                actions.append(timing.timed(_drop_remote, slug, store, ledger, rows, agent, reason))
-                continue
-            ended = _ended(agent, rows)
-            if agent.state == "retiring" and not ended:
-                continue
-            if ended:
-                actions += timing.timed(_retire_ended, slug, store, ledger, runtime, rows, agent, now_ms)
-            elif agent.runtime_backend != "local" or reports.host(agent) or _elsewhere(agent):
-                actions += timing.timed(_watch_remote, slug, store, ledger, runtime, rows, agent, now_ms)
-            elif agent.name in live and agent.lane == MASTER:
-                runtime.name_pane(agent)
-                actions += timing.timed(_watch_agent, slug, store, ledger, runtime, rows, agent, now_ms)
-            elif agent.name in live:
-                timing.timed(_restore_owner, slug, store, ledger, rows, agent)
-                if _ended(agent, rows):
-                    actions += timing.timed(_retire_ended, slug, store, ledger, runtime, rows, agent, now_ms)
-                else:
-                    actions += timing.timed(_watch_agent, slug, store, ledger, runtime, rows, agent, now_ms)
-            elif resume.recovery_pending(store, slug, agent):
-                store.refresh(slug, agent.task, agent.name, LEASE_MS)
-            elif now_ms - agent.started_at > STARTUP_GRACE_MS:
-                actions += timing.timed(_lost, slug, store, ledger, runtime, rows, agent, now_ms)
-    return actions
+    live, rows = timing.timed(_live_names, runtime), dict(rows)
+
+    judging = _Reaping(slug, store, ledger, runtime, rows, live, now_ms)
+    agents = list(timing.timed(legacy_agents, store, slug))
+    by_task: dict[str, list[int]] = {}
+    for index, agent in enumerate(agents):
+        by_task.setdefault(agent.task or agent.name, []).append(index)
+
+    def one(indexes: list[int]) -> list[tuple[int, list[str]]]:
+        """Return the actions judging each agent of one task took, in agent order."""
+        judged: list[tuple[int, list[str]]] = []
+        for index in indexes:
+            with timing.acting(agents[index].name):
+                judged.append((index, _reap_agent(judging, agents[index])))
+        return judged
+
+    found = dict(pair for pairs in pool.fan_out(one, by_task.values()) for pair in pairs)
+    return [action for index in range(len(agents)) for action in found[index]]
+
+
+@dataclass(frozen=True)
+class _Reaping:
+    """What one reap pass judges every agent against."""
+
+    slug: str
+    store: RedisStore
+    ledger: Any
+    runtime: Any
+    rows: dict[str, dict[str, Any]]
+    live: Any
+    now_ms: int
+
+
+def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
+    """Return the actions judging one agent: drop, retire, watch, refresh its lease or count it lost."""
+    slug, store, ledger, runtime = judging.slug, judging.store, judging.ledger, judging.runtime
+    rows, live, now_ms = judging.rows, judging.live, judging.now_ms
+    if (
+        agent.state == "awaiting-decision"
+        or (agent.lane == MASTER and agent.state == "starting")
+        or timing.timed(_acknowledging, slug, store, agent)
+    ):
+        return []
+    if reason := timing.timed(_remote_gone_reason, slug, store, runtime, agent, now_ms):
+        return [timing.timed(_drop_remote, slug, store, ledger, rows, agent, reason)]
+    ended = _ended(agent, rows)
+    if agent.state == "retiring" and not ended:
+        return []
+    if ended:
+        return timing.timed(_retire_ended, slug, store, ledger, runtime, rows, agent, now_ms)
+    if agent.runtime_backend != "local" or reports.host(agent) or _elsewhere(agent):
+        return timing.timed(_watch_remote, slug, store, ledger, runtime, rows, agent, now_ms)
+    if agent.name in live and agent.lane == MASTER:
+        runtime.name_pane(agent)
+        return timing.timed(_watch_agent, slug, store, ledger, runtime, rows, agent, now_ms)
+    if agent.name in live:
+        timing.timed(_restore_owner, slug, store, ledger, rows, agent)
+        if _ended(agent, rows):
+            return timing.timed(_retire_ended, slug, store, ledger, runtime, rows, agent, now_ms)
+        return timing.timed(_watch_agent, slug, store, ledger, runtime, rows, agent, now_ms)
+    if resume.recovery_pending(store, slug, agent):
+        store.refresh(slug, agent.task, agent.name, LEASE_MS)
+        return []
+    if now_ms - agent.started_at > STARTUP_GRACE_MS:
+        return timing.timed(_lost, slug, store, ledger, runtime, rows, agent, now_ms)
+    return []
 
 
 def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
@@ -928,21 +963,26 @@ def _orphans(slug, store, ledger, rows):
     return actions
 
 
-def _conversations(slug, store, runtime):
+def _conversations(slug: str, store: RedisStore, runtime: Any) -> None:
+    """Record each paned agent's current conversation, fanned out over the pass workers."""
     local = runtime.conversations()
     found = {**(local or {}), **reports.Reports(store.redis).conversations()}
-    for agent in store.agents(slug):
+
+    def one(agent: AgentRecord) -> None:
+        """Pin and record the conversation the pane of ``agent`` reports."""
         if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
-            continue
+            return
         pane = reports.pane_key(agent)
         if pane not in found and (local is None or reports.host(agent) or resume.recovery_pending(store, slug, agent)):
-            continue
+            return
         current = found.get(pane, "")
         if current:
             context_recycle.pin_swarm(current, slug, store.config(slug).compact_limit or None)
         if current and current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
             store.names.note(agent.name, session_id=current)
+
+    pool.fan_out(one, store.agents(slug))
 
 
 def _session_models(slug, store):
@@ -1286,6 +1326,7 @@ class Launch:
 def _prepare(run, lane, task, taken, failing, peers):
     slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
     rows, doc, now_ms = run.rows, run.doc, run.now_ms
+    task = rows[task["id"]] = dict(task)
     expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
     blocked = (
         timing.timed(_lives_spent, slug, store, ledger, rows, task)

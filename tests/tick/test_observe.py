@@ -1,7 +1,7 @@
 """The start and observation steps run the tick's hand written start and observe calls from the registry."""
 
 from contextlib import contextmanager
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -278,6 +278,25 @@ def test_the_spawn_due_step_spawns_only_when_due_on_a_running_tick_swarm(
     assert step.run(_ctx(pass_state)).writes[0].value == []
     assert ("spawn" in [name for name, _ in seen]) is spawned
     assert store.redis.keys.get("sw:spawn-due") == due
+
+
+def test_the_spawn_due_step_passes_a_row_copy_and_refreshes_box_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _Store("running", {"sw:spawn-due": 1})
+    seen = _observe_fakes(monkeypatch, store)
+    rows: Any = MappingProxyType({"t1": {"id": "t1"}})
+    box: dict[str, Any] = {"rows": rows, "doc": {"tasks": []}}
+    config = SimpleNamespace(state="running", engine="tick")
+    step: Any = observe.step_spawn_due
+    actions = step("sw", config, store, _Ledger(), "runtime", 7, box)
+    assert actions == ["spawned"]
+    spawn_calls = [args for name, args in seen if name == "spawn"]
+    assert len(spawn_calls) == 1
+    claimed = spawn_calls[0][5]
+    assert claimed == dict(rows)
+    assert claimed is not None
+    assert claimed is not rows
+    assert box["rows"] == dict(rows)
+    assert box["rows"] is not rows
 
 
 def test_a_step_that_raises_holds_its_exception_and_stops_the_later_steps(monkeypatch: pytest.MonkeyPatch) -> None:

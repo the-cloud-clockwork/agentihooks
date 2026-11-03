@@ -1,9 +1,10 @@
+from collections.abc import Iterable
 from itertools import combinations
 from math import isfinite
 
 from scripts.tick.step import Step
 
-__all__ = ["Registry", "latest_start", "register", "registry", "validate", "waves"]
+__all__ = ["Registry", "latest_start", "ordered", "register", "registry", "steps", "validate", "waves"]
 
 
 def _validate_timing(steps: list[Step]) -> None:
@@ -25,7 +26,7 @@ def _dependency_waves(steps: list[Step]) -> tuple[tuple[Step, ...], ...]:
         missing = step.needs - names
         if missing:
             raise ValueError(f"Unknown dependency for {step.name}: {', '.join(sorted(missing))}")
-    pending = sorted(steps, key=lambda step: step.order)
+    pending = list(steps)
     completed: set[str] = set()
     result: list[tuple[Step, ...]] = []
     for _ in steps:
@@ -48,12 +49,18 @@ def _validate_writers(ordered: tuple[tuple[Step, ...], ...]) -> None:
         for dependency in step.needs:
             ancestors[step.name].update(ancestors[dependency])
     for first, second in combinations(steps, 2):
-        if first.lane != second.lane:
+        if first.lane != second.lane or first.name in ancestors[second.name] or second.name in ancestors[first.name]:
             continue
         shared = first.writes & second.writes
-        if shared and first.name not in ancestors[second.name] and second.name not in ancestors[first.name]:
+        if shared:
             domains = ", ".join(sorted(shared))
             raise ValueError(f"Unordered writers in lane {first.lane} for {domains}: {first.name}, {second.name}")
+        crossed = (first.writes & second.reads) | (first.reads & second.writes)
+        if crossed:
+            domains = ", ".join(sorted(crossed))
+            raise ValueError(
+                f"Unordered reader and writer in lane {first.lane} for {domains}: {first.name}, {second.name}"
+            )
 
 
 class Registry:
@@ -71,6 +78,11 @@ class Registry:
         _validate_writers(ordered)
         return ordered
 
+    def steps(self) -> tuple[Step, ...]:
+        """Return the registered steps in registration order once their needs, reads and writes validate."""
+        self.validate()
+        return tuple(self._steps)
+
 
 registry = Registry()
 
@@ -85,6 +97,27 @@ def validate() -> None:
 
 def waves() -> tuple[tuple[Step, ...], ...]:
     return registry.waves()
+
+
+def steps() -> tuple[Step, ...]:
+    """Return the registered steps in registration order once they validate."""
+    return registry.steps()
+
+
+def ordered(steps: Iterable[Step]) -> tuple[Step, ...]:
+    """Return ``steps`` with each after the steps among them it needs, otherwise in the order given."""
+    pending = list(steps)
+    names = {step.name for step in pending}
+    placed: list[Step] = []
+    done: set[str] = set()
+    for _ in range(len(pending)):
+        ready = next((step for step in pending if step.needs & names <= done), None)
+        if ready is None:
+            raise ValueError(f"Dependency cycle: {', '.join(sorted(step.name for step in pending))}")
+        placed.append(ready)
+        done.add(ready.name)
+        pending.remove(ready)
+    return tuple(placed)
 
 
 def latest_start(name: str, steps: list[Step]) -> float:
