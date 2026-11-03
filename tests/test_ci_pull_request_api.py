@@ -186,6 +186,8 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_mutation/measured.py",
         "scripts/ci_mutation/merge.py",
         "scripts/ci_mutation/plan.py",
+        "scripts/ci_mutation/probe.py",
+        "scripts/ci_mutation/probed.py",
         "scripts/ci_mutation/regrade.py",
         "scripts/ci_mutation/reuse.py",
         "scripts/ci_release.sh",
