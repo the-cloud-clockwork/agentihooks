@@ -2,8 +2,8 @@ from collections.abc import Callable
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Barrier, BrokenBarrierError, Event, Lock, Thread, current_thread, get_ident
-from time import monotonic
+from threading import Barrier, BrokenBarrierError, Event, Lock, Thread, Timer, current_thread, get_ident
+from time import monotonic, sleep
 
 import pytest
 
@@ -423,7 +423,7 @@ def test_running_rejects_zero_workers() -> None:
 def test_host_lock_nested_with_a_callable_path_creates_the_missing_parent_and_releases(tmp_path: Path) -> None:
     from scripts.tick import pool
 
-    parent = tmp_path / "missing"
+    parent = tmp_path / "missing" / "deeper"
     paths = iter([parent / "a.lock", parent / "b.lock", parent / "c.lock"])
     lock = pool.HostLock(lambda: next(paths))
     assert not parent.exists()
@@ -463,6 +463,36 @@ def test_fan_out_thread_names_and_worker_count_for_four_values() -> None:
     assert found == list(range(4))
     assert len(names) == 2
     assert all(name.startswith("tick-fan-out") for name in names)
+
+
+def test_fan_out_returns_at_once_and_cancels_queued_items_when_waiting_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.tick import pool
+
+    gate, lock = Event(), Lock()
+    ran: list[int] = []
+
+    def action(value: int) -> int:
+        with lock:
+            ran.append(value)
+        gate.wait(timeout=5)
+        return value
+
+    def failing_wait(futures: object) -> None:
+        raise RuntimeError("wait failed")
+
+    monkeypatch.setattr(pool, "wait", failing_wait)
+    release = Timer(0.5, gate.set)
+    release.start()
+    started = monotonic()
+    with pytest.raises(RuntimeError, match="wait failed"), pool.running(workers=2):
+        pool.fan_out(action, range(4))
+    elapsed = monotonic() - started
+    release.join()
+    settle = monotonic() + 0.5
+    while len(ran) < 4 and monotonic() < settle:
+        sleep(0.05)
+    assert elapsed < 0.4
+    assert set(ran) <= {0, 1}
 
 
 def test_fan_out_runs_in_the_caller_thread_outside_a_pass() -> None:
