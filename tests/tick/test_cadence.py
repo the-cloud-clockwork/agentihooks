@@ -4,13 +4,22 @@ import pytest
 
 from scripts.swarm import scheduled_tick
 from scripts.tick import engine
-from scripts.tick.step import Lane
+from scripts.tick.step import Context, Domain, Lane, Result
 
 
 @dataclass(frozen=True)
 class TimedStep:
     lane: Lane
     interval_s: float
+    name: str = "timed"
+    group: str = "load"
+    budget_s: float = 1.0
+    needs: frozenset[str] = frozenset()
+    reads: frozenset[Domain] = frozenset()
+    writes: frozenset[Domain] = frozenset()
+
+    def run(self, ctx: Context) -> Result:
+        return Result()
 
 
 @pytest.mark.parametrize("minutes", [1, 2, 3, 4, 5])
