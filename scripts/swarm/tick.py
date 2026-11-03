@@ -10,7 +10,7 @@ import json
 import os
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -1041,14 +1041,20 @@ class Claims:
     ordered: list
 
 
-def claim_view(slug, store, rows, doc, dispatched=None):
+def claim_view(
+    slug: str,
+    store: RedisStore,
+    rows: dict[str, dict[str, Any]],
+    doc: dict[str, Any],
+    dispatched: Callable[[dict[str, Any]], Any] | None = None,
+) -> Claims:
     awaiting = _owned_tasks(slug, store)
     claimed = store.claimed(slug, [task_id for task_id, t in rows.items() if t.get("state") == "open"])
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
     released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
-    unshared = fleet_red.checker()
+    unshared = fleet_red.checker(fleet_red.saved_reader(store, slug))
     view = readiness.Snapshot(
         slug,
         rows,
