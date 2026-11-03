@@ -330,6 +330,26 @@ def test_the_wait_command_checks_other_swarms_despite_a_failure_or_slow_pass(mon
     ]
 
 
+def test_the_wait_command_runs_every_pass_of_every_swarm_at_once(monkeypatch, capsys):
+    from argparse import Namespace
+    from threading import Barrier
+    from types import SimpleNamespace
+
+    slugs = [f"sw{index}" for index in range(30)]
+    together = Barrier(len(slugs) * 2, timeout=5)
+
+    def meet(store: object, slug: str) -> list[str]:
+        together.wait()
+        return []
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: True)
+    monkeypatch.setattr(cli, "run_waits", meet)
+    monkeypatch.setattr(cli.ack_pass, "run", meet)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: slugs), Namespace())
+    assert capsys.readouterr() == ("", "")
+
+
 def test_the_wait_command_accepts_an_empty_swarm_list(monkeypatch, capsys):
     from argparse import Namespace
     from types import SimpleNamespace

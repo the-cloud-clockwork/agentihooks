@@ -47,10 +47,20 @@ def _launch(store: RedisStore, state: str) -> AgentRecord:
 
 @pytest.mark.parametrize("state", ["acknowledging", "launching"])
 def test_a_waiting_launch_is_collected_by_the_wait_pass_under_the_acks_lock(
-    store: RedisStore, collected: list[Any], state: str
+    store: RedisStore, collected: list[Any], state: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    import json
+    import time
+
     _launch(store, state)
+    before = int(time.time() * 1000)
     assert ack_pass.run(store, "sw", ledger="ledger", runtime="runtime") == ["spawned engineer@a1b2c3-0001 for t1"]
+    after = int(time.time() * 1000)
+    events = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith("{")]
+    assert [(e["slug"], e["phase"]) for e in events if e["step"].endswith(".collect")] == [
+        ("sw", "started"),
+        ("sw", "finished"),
+    ]
     held = lease.current(store, "sw")
     assert held is not None and held.owner == commands.hive_id()
     read, call = collected
@@ -58,7 +68,7 @@ def test_a_waiting_launch_is_collected_by_the_wait_pass_under_the_acks_lock(
     slug, config, passed, ledger, fenced, doc, now_ms = call
     assert (slug, config, passed, ledger, doc) == ("sw", store.config("sw"), store, "ledger", DOC)
     assert fenced == ("fenced", store, "sw", held, "runtime", controller.deployment_for(config, os.environ))
-    assert now_ms > 1_700_000_000_000
+    assert before <= now_ms <= after
     assert store.redis.get(store.key("sw", ack_pass.LOCK)) is None
 
 
@@ -104,10 +114,30 @@ def test_a_remote_ledger_swarm_is_collected_only_with_tick_authority(
     held = lease.Lease(commands.hive_id(), 1, 10**15)
     monkeypatch.setattr(lease, "acquire", lambda own, slug, owner: acquired.append(slug) or held)
     monkeypatch.setattr(lease, "require", lambda own, slug, current: None)
+    from scripts.swarm_ledger import ledger_link
+
+    asked: list[Any] = []
+    remote, headers = ledger_link.remote, authority_context.tick_headers
+    monkeypatch.setattr(ledger_link, "remote", lambda slug: asked.append(("remote", slug)) or remote(slug=slug))
+    monkeypatch.setattr(
+        authority_context, "tick_headers", lambda slug: asked.append(("headers", slug)) or headers(slug)
+    )
     with authority_context.bound(authority):
         found = ack_pass.run(store, "sw", ledger="ledger", runtime="runtime")
+    assert {kind for kind, _ in asked} == {"remote", "headers"}
+    assert {slug for _, slug in asked} == {"sw"}
     assert acquired == (["sw"] if authority else [])
     assert found == (["spawned engineer@a1b2c3-0001 for t1"] if authority else [])
+
+
+def test_the_default_runtime_routes_a_deferring_herdr_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import runtime
+    from scripts.swarm_v2.runtime import routed
+
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: "herdr")
+    monkeypatch.setattr(runtime, "deferring", lambda inner: ("deferring", inner))
+    monkeypatch.setattr(routed, "routed", lambda herdr: ("routed", herdr))
+    assert ack_pass._runtime() == ("routed", ("deferring", "herdr"))
 
 
 def test_a_stopped_swarm_collects_nothing(store: RedisStore, collected: list[Any]) -> None:
