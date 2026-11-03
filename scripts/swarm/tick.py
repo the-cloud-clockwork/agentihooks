@@ -1639,7 +1639,7 @@ def _spawn_order(
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
-        ready, refused = focus_budget.place(doc, ready, lane, cap, config.focus_weight, running, locate)
+        ready, refused = focus_budget.place(doc, ready, lane, cap, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
     ranked = timing.timed(_ranked, slug, store, queue, dispatched)

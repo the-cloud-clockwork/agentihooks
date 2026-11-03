@@ -161,7 +161,9 @@
         "tests/swarm/test_tick_records.py::test_step_history_is_bounded_and_keeps_the_journal",
         "tests/swarm/test_tick_records.py::test_tick_pass_is_recorded_even_when_a_step_raises",
         "tests/swarm/test_tick_records.py::test_budgeted_step_record_reads_late_past_its_budget_and_not_failed",
-        "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps"
+        "tests/swarm/test_tick_records.py::test_budgeted_step_record_carries_its_lane_only_when_given",
+        "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps",
+        "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu"
       ]
     },
     {
@@ -593,12 +595,12 @@
     {
       "id": "swarm-focus",
       "origin": "inventory",
-      "behaviour": "A focus holds normal work outside it, urgent tasks and Doctor fixes pass, and focused work takes at most half the lane slots.",
+      "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
       "seam": "scripts.swarm.freeze focus and scripts.swarm.focus_budget",
       "tests": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
-        "tests/swarm/test_freeze.py::test_an_urgent_task_and_a_doctor_fix_pass_a_focus",
-        "tests/swarm/test_focus_budget.py::test_ten_lane_slots_allocate_five_focused_and_five_normal_tasks"
+        "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks"
       ]
     },
     {

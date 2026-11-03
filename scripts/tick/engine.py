@@ -2,7 +2,7 @@
 
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextvars import Context as ContextCopy
 from contextvars import copy_context
@@ -15,9 +15,21 @@ from scripts.swarm import tick_report, timing
 from scripts.tick import pool, registry
 from scripts.tick.adapters.inbox import notify_pass_budget
 from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Result, Step
+from scripts.tick.step import Context, Lane, Result, Step
 
-__all__ = ["FAILED", "HELD", "LATE", "OK", "StepRecord", "group_steps", "run_group", "run_step"]
+__all__ = [
+    "FAILED",
+    "HELD",
+    "LATE",
+    "OK",
+    "StepRecord",
+    "cadence_breaches",
+    "cadence_s",
+    "group_steps",
+    "interval_s",
+    "run_group",
+    "run_step",
+]
 
 OK = "ok"
 LATE = "late"
@@ -97,7 +109,7 @@ def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) 
 def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context) -> None:
     """Run ``step`` in the caller's copied context and append its result or the error it raised."""
     try:
-        outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx))
+        outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane))
     except BaseException as exc:
         outcome.append(exc)
 
@@ -197,3 +209,42 @@ def update_pass_budget(store: Any, slug: str) -> str:
         return held["text"]
     store.redis.delete(key)
     return ""
+
+
+CADENCE_ENV = "AGENTIHOOKS_TICK_CADENCE"
+CRON_S = 60.0
+SLOW = Lane("slow")
+
+
+def cadence_breaches(cadence: float) -> list[str]:
+    """Return each guard a slow lane pass every ``cadence`` seconds breaks; every guard outlasts one missed pass."""
+    from scripts.swarm import lease, scheduled_tick, tick_heartbeat, tick_watch
+
+    missed_s = 2 * cadence
+    checks = {
+        "delivery guard": scheduled_tick.FRESH_S >= missed_s,
+        "heartbeat limit": tick_heartbeat.LIMIT_MS / 1000 >= missed_s,
+        "lease TTL": lease.ttl_ms() / 1000 >= 2 * CRON_S,
+        "stale watcher": tick_watch.PASS_S + tick_watch.SLUG_PASS_S <= tick_heartbeat.LIMIT_MS / 1000 - cadence,
+    }
+    return [name for name, held in checks.items() if not held]
+
+
+def cadence_s(environ: Mapping[str, str] = os.environ) -> float:
+    """Return the slow lane cadence in seconds from whole minutes in the setting, one minute when it is unset."""
+    raw = environ.get(CADENCE_ENV, "").strip() or "1"
+    try:
+        minutes = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{CADENCE_ENV} must be whole minutes, got {raw!r}") from exc
+    if minutes < 1:
+        raise ValueError(f"{CADENCE_ENV} must be at least 1 minute, got {minutes}")
+    breached = cadence_breaches(minutes * CRON_S)
+    if breached:
+        raise ValueError(f"{CADENCE_ENV} of {minutes} minutes breaks the {', '.join(breached)}")
+    return minutes * CRON_S
+
+
+def interval_s(step: Step, cadence: float) -> float:
+    """Return the interval ``step`` runs at: a slow lane step at least every ``cadence`` seconds, others unchanged."""
+    return max(step.interval_s, cadence) if step.lane == SLOW else step.interval_s
