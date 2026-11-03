@@ -46,12 +46,15 @@ def remote(monkeypatch, request):
             started_at=params.get("started_at", 0),
             launched_at=params.get("launched_at", 0),
             hive=HIVE,
-            runtime_target={
-                "host_id": HIVE,
-                "process_namespace": params.get("namespace", "theirs"),
-                "pid": 12,
-                "pid_start": 34,
-            },
+            runtime_target=params.get(
+                "target",
+                {
+                    "host_id": HIVE,
+                    "process_namespace": params.get("namespace", "theirs"),
+                    "pid": 12,
+                    "pid_start": 34,
+                },
+            ),
             profile_decision={"validation": {"pid": 12}},
         ),
     )
@@ -1236,3 +1239,86 @@ def test_the_pod_start_time_is_process_one_start_after_boot(tmp_path, monkeypatc
     assert started == 1700000000 * 1000 + 83333
     assert type(started) is int
     assert process.started_ms(tmp_path / "missing") == 0
+
+
+@pytest.mark.parametrize(("listed", "reopened"), [(["someone-else"], True), (None, False)])
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
+def test_a_claim_whose_agent_left_its_hive_member_list_is_reopened_once(
+    remote: SimpleNamespace, listed: list[str] | None, reopened: bool
+) -> None:
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import tick
+    from scripts.swarm.pane import PaneObservation
+
+    agent = replace(remote.agent, pane_id="")
+    remote.store.put_agent("fixture", agent)
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report["names"] = listed or [agent.name]
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+    remote.store.claim("fixture", "task", agent.name, 60000)
+    rows = {"task": {"state": "claimed", "claimed_by": agent.name, "branch": "kept"}}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+    remote.runtime.observe = Mock(return_value=PaneObservation("unknown"))
+    remote.runtime.retire = Mock(side_effect=AssertionError("a vanished hive member needs no remote command"))
+    now = LAUNCHED + remote.reports.STARTUP_MS
+
+    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, now)
+    again = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, now + 1)
+
+    if reopened:
+        assert actions == [f"retired {agent.name}: its hive no longer lists it, task task reopened"]
+        assert again == []
+        ledger.update_task.assert_called_once()
+        assert ledger.update_task.call_args.args[2] == {"state": "open", "claimed_by": ""}
+        assert rows["task"]["branch"] == "kept"
+        assert remote.store.agents("fixture") == []
+        assert remote.store.claimant("fixture", "task") is None
+        assert remote.store.execution_registry.occupants("fixture")[agent.seat].state == "ended"
+        exit_record = InboxStore(remote.redis).seats.exit_of(agent.name)
+        assert (exit_record["reason"], exit_record["seat"]) == ("stopped", agent.seat)
+    else:
+        assert actions == [f"suspect {agent.name}: its runtime did not answer"]
+        ledger.update_task.assert_not_called()
+        assert [found.name for found in remote.store.agents("fixture")] == [agent.name]
+        assert remote.store.claimant("fixture", "task") == agent.name
+
+
+@pytest.mark.parametrize(
+    ("hive", "names", "since", "vanished"),
+    [
+        (HIVE, ["someone-else"], 0, True),
+        (HIVE, ["someone-else"], -1, False),
+        (HIVE, [], 0, False),
+        (HIVE, "", 0, False),
+        ("", ["someone-else"], 0, False),
+        ("silent", ["someone-else"], 0, False),
+    ],
+)
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED}], indirect=True)
+def test_a_hive_member_vanishes_only_from_a_beating_hive_that_lists_others(
+    remote: SimpleNamespace, hive: str, names: object, since: int, vanished: bool
+) -> None:
+    agent = replace(remote.agent, hive=hive, runtime_target={})
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report["names"] = names
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    found = remote.runtime.hive.vanished(agent, LAUNCHED + remote.reports.STARTUP_MS + since)
+
+    assert found is vanished
+
+
+@pytest.mark.parametrize("remote", [{"started_at": LAUNCHED}], indirect=True)
+def test_a_hive_member_without_a_launch_time_counts_from_its_start(remote: SimpleNamespace) -> None:
+    agent = replace(remote.agent, runtime_target={})
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report["names"] = ["someone-else"]
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert not remote.runtime.hive.vanished(agent, LAUNCHED + remote.reports.STARTUP_MS - 1)
+    assert remote.runtime.hive.vanished(agent, LAUNCHED + remote.reports.STARTUP_MS)
+    assert not remote.runtime.hive.vanished(replace(agent, started_at=0), LAUNCHED + remote.reports.STARTUP_MS)
