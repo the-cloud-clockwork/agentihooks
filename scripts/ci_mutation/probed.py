@@ -31,9 +31,7 @@ def probed_plan(plan: dict[str, Any], budget: float, memory: KillMemory | None =
     costs.update({name: sum(units) for name, units in unit_costs.items()})
     splits = {function_name(name): plan["splits"][function_name(name)] for name in survivors}
     remaining = budget - plan["probe"]["seconds"]
-    shards = plan_shards(
-        costs, limit=min(10, len(plan["costs"])), splits=splits, unit_costs=unit_costs, budget=remaining
-    )
+    shards = plan_shards(costs, splits=splits, unit_costs=unit_costs, budget=remaining)
     replanned = {
         **plan,
         **shards,
