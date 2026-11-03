@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.610 · 2026-11-03
+
+### 2026-11-03 · 0b3ad4ae3ff7 · #9528 · @nestorcolt
+
+**Fleet red listing cache write moves behind an engine applier**
+
+The fleet red notice step no longer writes its open pull request listing directly to the store; instead, `fleet_red.cached` returns the listing alongside any needed cache save, which flows through holds and task writes to a new `fleet_red.saver` applier that saves it under an NX guard with a ten minute expiry, raising a conflict if another pass already saved it. This completes the tick core plan's move toward engine-run steps that share no state, removing the last direct write from this step so parallel passes can never race on the listing cache.
+
+### 2026-11-03 · 3790670b1530 · #9539 · @nestorcolt
+
+**Let the protected grader accept the early mutation probe and replan stages as non gates (Refs #9536)**
+
+This change extends `gate_protected.py`'s `MUTATION_STAGES` list to recognize `mutation-probe` and `mutation-replan` as valid non-gate stages, matching existing handling for `mutation-refine` and `mutation-shard`. It allows a branch head to declare these stages under `not_gates` while still requiring them in the `mutation` job's needs, with corresponding test coverage added for both new stages. This unblocks the upcoming Tests workflow update that introduces the probe and replan jobs themselves, which will land in a separate pull request.
+
 ## v2.17.608 · 2026-11-03
 
 ### 2026-11-03 · 861f05a17069 · #9537 · @nestorcolt
