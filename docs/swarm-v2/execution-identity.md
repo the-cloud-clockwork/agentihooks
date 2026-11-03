@@ -234,31 +234,59 @@ Every agent projection write also writes the agent's hive into a separate hash, 
 - The hive member Redis user may write the key: `swarm:*:hosts` is in `scripts.hive.auth.WORKER_KEYS`.
 - Swarm snapshots export and restore the key with the other per swarm hashes.
 
-### Turning the one field read on
+#### A projection write that fails
 
-`SWARM_HOST_PROJECTION_ENABLED` chooses the read:
+`ExecutionRegistry` commits the fenced execution record first and projects it second. When the projection write
+raises after the commit, for example a lost Redis connection or a writer killed between the two steps, the registry
+deletes the `hosts` fields of the names that write touched with `RedisStore.forget_hosts`, then raises the original
+error:
+
+| Write | Fields deleted on a failed projection |
+|---|---|
+| `ExecutionRegistry.update`, such as a move to another hive | The agent's own name |
+| `ExecutionRegistry.start` that replaces an earlier execution | The new name and the replaced name |
+| `ExecutionRegistry.start` with no earlier execution | The new name |
+
+A missing field sends `scope.host` to `ExecutionRegistry.hive`, which reads the committed record, so a failed
+projection never leaves a field naming the hive the agent left. The `agents` hash is not rolled back; the agent's next
+projection write sets both again. The caller still sees the error.
+
+### The one field read
+
+`SWARM_HOST_PROJECTION_ENABLED` chooses the read. The value is trimmed and compared without case:
 
 | Value | `scope.host` reads |
 |---|---|
-| unset, or anything other than `true` (default) | `ExecutionRegistry.hive`, as in [the table above](#execution-reads-through-the-records-port) |
-| `true` | One `HGET` of the agent's `hosts` field; `ExecutionRegistry.hive` only when the field is absent |
+| unset, `true` or any value not listed below (default) | One `HGET` of the agent's `hosts` field; `ExecutionRegistry.hive` only when the field is absent |
+| `false`, `0`, `no` or `off` | `ExecutionRegistry.hive`, as in [the table above](#execution-reads-through-the-records-port), whatever `hosts` holds |
 
 The joined member list comes from the hive index and member records. Inside `scope.one_pass()`, as in the
-controller's pass, they are read once per pass, so each `scope.host` call with the flag on costs one `HGET`. Outside a
-pass every call reads them again.
+controller's pass, they are read once per pass, so each `scope.host` call with the projection read costs one `HGET`.
+Outside a pass every call reads them again.
 
 In both cases a member that is not among the joined members answers `""`, and a hive member process recognises only
 itself.
 
-The flag is off by default because a writer on older code updates execution records and the `agents` hash without
-touching `hosts`, which leaves a field naming a hive the agent has left. Enable it only after:
+Pull request 9279 shipped the read behind the flag, off by default. Pull request 9474 made it the default. The read
+is trusted only when every writer maintains `hosts`, because a writer on older code updates execution records and the
+`agents` hash without touching it and leaves a field naming a hive the agent has left. The rollout runs in this order:
 
-1. Every controller, tick and hive member process runs a release that carries pull request 9279.
-2. Every existing hive member Redis user is granted again, so its access list carries `swarm:*:hosts`. A user granted
-   before the change cannot write the key, and its projection writes fail.
+1. Grant every existing hive member Redis user again, so its access list carries `swarm:*:hosts`. A user granted
+   before pull request 9279 cannot write the key, and its projection writes fail.
+2. Roll every controller, tick and hive member process onto a release that carries pull request 9474, which also
+   carries pull request 9279.
+3. The projection read is then on with no setting. A deployment that still sets `SWARM_HOST_PROJECTION_ENABLED` to an
+   off value in its git configuration removes it there.
 
-Set the flag through the deployment's git configuration, never by hand on a running pod or service. To go back, unset
-it; the execution registry read needs no state from the projection.
+To turn the read off, set `SWARM_HOST_PROJECTION_ENABLED=false` through the deployment's git configuration, never by
+hand on a running pod or service. The execution registry read needs no state from the projection, so turning it off
+takes effect on the next call. In a container specification the entry is:
+
+```yaml
+env:
+  - name: SWARM_HOST_PROJECTION_ENABLED
+    value: "false"
+```
 
 ### Checking a host field
 
@@ -274,15 +302,17 @@ redis-cli -u "$URL" HGET "$P:$SLUG:hosts" "<agent name>"
 ```
 
 The two lengths match when every projected agent has a host field. A field missing for a live agent is filled by that
-agent's next projection write; with the flag on, the lookup falls back to the execution registry until then. Never
-write the key by hand.
+agent's next projection write; until then the lookup falls back to the execution registry. A field also goes missing
+after a failed projection write, as in [A projection write that fails](#a-projection-write-that-fails). Never write the
+key by hand.
 
 ### Measuring the placement reads
 
 The routing read is the `scripts.hive.scope.readings` step of the tick report; the journal command in
 [Measuring tick passes](#measuring-tick-passes) prints its call count, total and median wall time. The source task's
 target is a median under five milliseconds on the workstation, against twenty milliseconds over 29,508 calls before
-the change. Pull request 9279 does not record that observation; it needs the deployed workstation with the flag on.
+the change. Neither pull request 9279 nor 9474 records that observation; it needs sixty tick passes on the
+workstation after every writer runs a release carrying pull request 9474.
 
 ## Retries after a fencing conflict
 
@@ -302,10 +332,12 @@ every attempt. Nothing is configured.
 
 | Test | Checks |
 |---|---|
-| `tests/hive/test_member_scope.py::test_host_hash_hit_uses_one_field_read` | With the flag on, `scope.host` makes one `HGET` of the `hosts` field and never calls `ExecutionRegistry.hive` |
+| `tests/hive/test_member_scope.py::test_host_hash_hit_uses_one_field_read` | With the flag unset, `scope.host` makes one `HGET` of the `hosts` field and never calls `ExecutionRegistry.hive` |
 | `tests/hive/test_member_scope.py::test_host_hash_miss_keeps_legacy_lookup` | A missing `hosts` hash falls back to the execution registry |
 | `tests/hive/test_member_scope.py::test_removing_an_agent_removes_its_host` | `drop_agent` deletes the field and the lookup answers `""` |
-| `tests/hive/test_member_scope.py::test_host_projection_stays_untrusted_until_every_writer_upgrades` | With the flag off, a stale field left by an older writer does not decide the answer |
+| `tests/hive/test_member_scope.py::test_a_hive_move_that_loses_its_projection_reads_the_registry_host` | A hive move whose projection raises deletes the agent's field and the lookup answers the new hive from the registry |
+| `tests/hive/test_member_scope.py::test_a_replacement_that_loses_its_projection_leaves_no_host_for_either_name` | A replacing start whose projection raises deletes the fields of both the old and the new name |
+| `tests/hive/test_member_scope.py::test_host_projection_off_switch_keeps_the_legacy_registry_lookup` | With `false`, `0`, `no` or ` OFF `, a stale field left by an older writer does not decide the answer |
 | `tests/hive/test_member_scope.py::test_renaming_an_agent_removes_only_its_old_host_projection` | A rename removes the old field and leaves other agents' fields |
 | `tests/swarm/test_execution_concurrency.py::test_fencing_retries_sleep_only_before_remaining_attempts` | A conflict sleeps only while attempts remain, within the 1 to 32 millisecond bounds |
 | `tests/swarm/test_fencing_reads.py::test_execution_and_name_sections_share_the_lightweight_projection` | Reads of `executions` and `by-name` take the published copy, not the whole document |
@@ -317,6 +349,7 @@ every attempt. Nothing is configured.
 | Symptom | Cause | Action |
 |---|---|---|
 | A hive member's projection writes fail with a Redis permission error naming `…:hosts` | Its Redis user was granted before pull request 9279 | Grant the member again so its access list carries `swarm:*:hosts` |
-| With the flag on, a controller reads an agent's session readings below the wrong member | A process on older code moved the agent without updating `hosts` | Unset `SWARM_HOST_PROJECTION_ENABLED` through git configuration, upgrade that process, then enable it again |
+| A controller reads an agent's session readings below the wrong member | A process on a release without pull request 9474 moved the agent without updating `hosts` | Set `SWARM_HOST_PROJECTION_ENABLED=false` through git configuration, upgrade that process, then remove the setting |
+| A swarm write raises after its execution record committed, and the agent's `hosts` field is gone | The projection write failed and `forget_hosts` dropped the field | No action; host lookups read the registry until the agent's next projection write |
 | `scope.readings` median stays near its old value with the flag on | The `hosts` field is missing for most agents, so lookups fall back | Compare `HLEN` of `hosts` and `agents` as above |
 | `the swarm fencing state kept changing; nothing was committed` | Sixteen conflicting attempts, as in [Fencing records](../reference/fencing-records.md#troubleshooting) | The next pass retries; find the scanning change in the tick journal |
