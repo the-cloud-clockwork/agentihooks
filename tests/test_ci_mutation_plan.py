@@ -934,7 +934,7 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
         (4800, 3, 3),
         (36000, 10**4, 10),
         (36001, 10**4, 11),
-        (10**6, 10**4, 40),
+        (10**6, 10**4, 80),
     ],
 )
 def test_shard_count_fills_each_shard_to_its_target_within_the_limit_unless_the_budget_needs_more(
