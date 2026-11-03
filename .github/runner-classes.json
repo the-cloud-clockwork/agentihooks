@@ -37,6 +37,7 @@
   "mutation-preflight.yml/plan": "standard",
   "mutation-preflight.yml/probe": "batch",
   "mutation-preflight.yml/refine": "light",
+  "mutation-preflight.yml/replan": "light",
   "mutation-preflight.yml/stats": "batch",
   "mutation-preflight.yml/touched-tests": "standard",
   "mutation-refinement-proof.yml/planning": "light",
