@@ -1532,6 +1532,20 @@ There is no setting for the ratio, and no log line prints it. Compare `Measured 
 
 [Pull request 4786](https://github.com/the-cloud-clockwork/agentihooks/pull/4786) delivered the adjustment. Replaying the planner on the same statistics artifacts, the account scan head of [run 39207424222](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39207424222) fell from 48.2 to 16.2 estimated minutes per mutant and from 100 to 60 units on ten shards; five other recent pull request runs fell between two and four times, and two of them needed fewer shards (10 to 6, and 5 to 3). Predicted over actual shard wall stayed between 1.6 and 4.9 across all six runs, so the estimate still exceeds observed work. On the account scan head every one of the 1881 traced tests executes the changed one statement function, so line level narrowing could not have cut its test set.
 
+### Early stage and shards sized after it
+
+A preflight plan with split mutants runs two stages. In the early stage (`probe`), each split mutant runs only its head tests once. The shards then skip the head and run only what the early stage left. Each stage is sized for its own work, so neither stage is sized for the worst case of the other.
+
+| Stage | Job count | Work priced |
+|---|---|---|
+| `probe` | `probe_shards` in `plan.json`: the split mutants' head cost, `5.6 + 1.25 * head_seconds` each, divided by the planned workers times 120 seconds, rounded up. It is at least 1 and at most 40 (the batch runner pool) or the number of split mutants | One head run per split mutant |
+| `replan` | One job on the light pool, after every `probe` job succeeds | Merges the early results into the plan, replans the shards and uploads `mutation-plan-probed` |
+| `mutation-shard` | `shards` in the probed plan, sized against the shard budget less the longest early job | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
+
+On the e2 proof, [run 41605474823](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41605474823) sized both stages at 49 jobs from 130220 estimated worker seconds. Its early stage killed 451 of 493 split mutants. The 356 surviving units then took 16849 observed worker seconds; their head plus slice estimate was 69876.
+
+The `replan` log prints `Early mutation kills: K of N split mutants` and `Probed mutation worker seconds: S; probed shards: C`. When the remaining budget cannot hold the slowest shard, `replan` fails with **Mutation plan over budget** and the shards do not start. A plan without split mutants skips `probe` and `replan`, and the shards use the `refine` plan as before. The pull request Tests workflow runs no early stage, so its split mutants keep the head in every unit.
+
 ### Combined grading
 
 A shard grades its unsplit mutants normally and records split results under `units` for the final `mutation` merge job. A successful unit or shard alone does not establish a successful gate.
