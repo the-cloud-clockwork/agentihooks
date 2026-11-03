@@ -2158,8 +2158,16 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
     tmp_path: Path, same: list[str], kept: dict[str, int], chosen: str
 ) -> None:
     find = _preflight_seed_steps()["Find the branch preflight that kept kill memory"]
-    branch = [{"id": int(run), "head_branch": "topic"} for run in ("42", "41", "40")]
-    head = [{"id": int(run), "head_branch": "topic"} for run in same] + [{"id": 7, "head_branch": "other"}]
+    done = "completed"
+    branch = [{"id": 43, "head_branch": "topic", "status": "in_progress"}] + [
+        {"id": int(run), "head_branch": "topic", "status": done} for run in ("42", "41", "40")
+    ]
+    head = [
+        {"id": 44, "head_branch": "topic", "status": "in_progress"},
+        *({"id": int(run), "head_branch": "topic", "status": done} for run in same),
+        {"id": 7, "head_branch": "other", "status": done},
+    ]
+    kept = {"43": 5, "44": 5, **kept}
     responses = {
         "head_sha=abc": {"workflow_runs": head},
         "branch=topic": {"workflow_runs": branch},
@@ -2211,7 +2219,9 @@ def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
         "repos/o/r/actions/workflows/mutation-preflight.yml/runs?head_sha=abc&event=push&per_page=20",
         "repos/o/r/actions/workflows/mutation-preflight.yml/runs?branch=topic&event=push&per_page=20",
     ]
-    assert "runs/7/artifacts" not in "".join(calls)
+    assert not {"runs/7/artifacts", "runs/43/artifacts", "runs/44/artifacts"} & {
+        call.removeprefix("repos/o/r/actions/").partition("?")[0] for call in calls
+    }
     if chosen:
         assert f"kill memory of Mutation preflight run {chosen}" in result.stdout
     else:

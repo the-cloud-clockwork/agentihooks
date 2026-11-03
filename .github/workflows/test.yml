@@ -4295,8 +4295,8 @@ jobs:
           BRANCH: ${{ github.head_ref }}
         run: |
           runs="repos/$GITHUB_REPOSITORY/actions/workflows/mutation-preflight.yml/runs"
-          same=$(gh api "$runs?head_sha=$HEAD&event=push&per_page=20" --jq '.workflow_runs[] | select(.head_branch == env.BRANCH) | .id') || same=""
-          newest=$(gh api "$runs?branch=$BRANCH&event=push&per_page=20" --jq '.workflow_runs[].id') || newest=""
+          same=$(gh api "$runs?head_sha=$HEAD&event=push&per_page=20" --jq '.workflow_runs[] | select(.head_branch == env.BRANCH and .status == "completed") | .id') || same=""
+          newest=$(gh api "$runs?branch=$BRANCH&event=push&per_page=20" --jq '.workflow_runs[] | select(.status == "completed") | .id') || newest=""
           while read -r run; do
             [[ -n "$run" ]] || continue
             kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select((.expired | not) and (.name | startswith("mutation-killers-")))] | length') || continue
