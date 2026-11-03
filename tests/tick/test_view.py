@@ -293,3 +293,19 @@ def test_holding_drops_the_view_the_block_started() -> None:
     assert (view.CURRENT.get(), view.REFRESH.get()) == (outer, outer_refresh)
     view.CURRENT.set(None)
     view.REFRESH.set(None)
+
+
+def test_document_refreshes_a_stale_held_record_and_clears_its_stale_flag() -> None:
+    fresh = view.LedgerView(9, {**STATE, "overview": "fresh"})
+
+    def refresh() -> view.LedgerView:
+        return fresh
+
+    with view.holding():
+        view.REFRESH.set(("sw", refresh))
+        kept = view.Held(view.LedgerView(7, STATE), lambda: pytest.fail("renew should not run"), stale=True)
+        view.HELD.set(kept)
+        doc = view.document("sw")
+    assert doc == fresh.document
+    assert kept.view is fresh
+    assert kept.stale is False
