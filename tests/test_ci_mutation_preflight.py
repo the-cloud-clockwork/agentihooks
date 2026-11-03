@@ -581,7 +581,7 @@ def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
     merge["env"]["UNRELATED_SETTING"] = "ignored"
     assert merge["env"]["SHARDS"] == (
         "${{ needs.plan.outputs.changed != '0'"
-        " && (needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}"
+        " && (needs.replan.outputs.shards || needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}"
     )
     assert merge["run"] == (
         "python -m scripts.ci_mutation."
