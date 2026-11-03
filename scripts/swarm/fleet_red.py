@@ -123,7 +123,7 @@ def saver(store: Listings) -> Callable[[Write], None]:
 
 
 def _settled(apply: Callable[[Write], None], write: Write) -> None:
-    """Apply ``write``, turning a Redis timeout into a dropped write the next pass recomputes, as the step skipped it."""
+    """Apply ``write``; a Redis timeout becomes a dropped write the next pass recomputes, as the step skipped it."""
     from redis.exceptions import TimeoutError as RedisTimeoutError
 
     try:
