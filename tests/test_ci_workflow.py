@@ -2049,16 +2049,25 @@ def test_tests_mutation_carries_kill_memory_to_the_next_plan() -> None:
         assert step["with"] == {"path": ".mutation-stats/killers", "key": key, "restore-keys": prefix}
         assert names.index(restore) < names.index(before)
     shard = {step.get("name"): step for step in jobs["mutation-shard"]["steps"]}
+    forwarded = "needs.mutation-plan.outputs.forwarded != 'true'"
+    assert shard[restore]["if"] == forwarded
+    assert "if" not in {step.get("name"): step for step in jobs["mutation-refine"]["steps"]}[restore]
     collect = shard["Collect the tests that killed mutants"]
-    assert collect["if"].startswith("always()")
+    assert collect["if"] == f"always() && {forwarded}"
     assert "find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +" in collect["run"]
     upload = shard["Upload the tests that killed mutants"]
-    assert upload["if"].startswith("always()")
+    assert upload["if"] == f"always() && {forwarded}"
     assert upload["with"]["name"] == "mutation-killers-${{ matrix.shard }}"
     assert upload["with"]["path"] == ".mutation-killers/"
     merged = [step.get("name") for step in jobs["mutation"]["steps"]]
     steps = {step.get("name"): step for step in jobs["mutation"]["steps"]}
+    assert steps[restore]["if"] == forwarded
     download = steps["Download the tests that killed mutants"]
+    assert download["if"] == forwarded
+    assert download["continue-on-error"] is True
+    retry = steps["Download the tests that killed mutants, attempt 2"]
+    assert retry["if"] == "steps.download-the-tests-that-killed-mutants.outcome == 'failure'"
+    assert retry["with"] == download["with"]
     assert download["with"] == {
         "pattern": "mutation-killers-*",
         "path": ".mutation-stats/killers",
@@ -2067,7 +2076,7 @@ def test_tests_mutation_carries_kill_memory_to_the_next_plan() -> None:
     keep = steps["Keep the tests that killed mutants for this branch's next plan"]
     assert keep["uses"] == "actions/cache/save@v4"
     assert keep["with"] == {"path": ".mutation-stats/killers", "key": key}
-    assert "hashFiles('.mutation-stats/killers/*') != ''" in keep["if"]
+    assert keep["if"] == f"{forwarded} && hashFiles('.mutation-stats/killers/*') != ''"
     assert merged.index(download["name"]) < merged.index(keep["name"]) < merged.index("Merge the shard reports")
 
 
