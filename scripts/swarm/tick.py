@@ -51,7 +51,7 @@ from scripts.swarm import (
     launch_check,
     ledger_events,
     ledger_probe,
-    lifetime,
+    lifetime,  # noqa: F401
     live_binding,
     lost_runner,
     master_move,
@@ -227,18 +227,15 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     observe_steps.raise_held(box)
     if "finished" in box:
         return actions
-    store.redis.delete(store.key(slug, SPAWN_HOLD))
-    engine.update_pass_budget(store, slug)
     actions += run_group("observe", **passing)
     observe_steps.raise_held(box)
     config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
     passing |= {"rows": rows, "doc": doc, "due": due}
     actions += run_group("agents", **passing, config=config)
     actions.extend(master_steps.run_masters(locals()))
-    sleeping = lifetime.sleeping(slug, store, rows)
-    actions += run_group(task_steps.DRAINED, **passing, config=config, sleeping=sleeping)
+    actions += run_group(task_steps.DRAINED, **passing, config=config)
     task_steps.raise_held(box)
-    config = box["config"]
+    config, sleeping = box["config"], box["sleeping"]
     actions += run_group("tasks", **passing, config=config)
     actions += run_group(task_steps.REOPENS, **passing, config=config)
     actions += run_group(task_steps.TASK_PASSES, **passing, config=config)

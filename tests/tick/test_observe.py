@@ -115,9 +115,24 @@ def _observe_fakes(monkeypatch: pytest.MonkeyPatch, store: _Store) -> list[tuple
     return seen
 
 
+def test_the_pass_setup_steps_clear_the_spawn_hold_and_update_the_pass_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deleted: list[str] = []
+    budgeted: list[tuple[object, str]] = []
+    store = SimpleNamespace(redis=SimpleNamespace(delete=deleted.append), key=lambda slug, name: f"{slug}:{name}")
+    monkeypatch.setattr(tick_module.engine, "update_pass_budget", lambda store, slug: budgeted.append((store, slug)))
+    assert observe.step_spawn_hold_clear("sw", store) == []
+    assert deleted == [f"sw:{tick_module.SPAWN_HOLD}"]
+    assert observe.step_pass_budget("sw", store) == []
+    assert budgeted == [(store, "sw")]
+
+
 def test_the_start_and_observe_steps_sit_in_their_groups_in_legacy_order() -> None:
     assert [step.name for step in engine.group_steps("start")] == ["config load", "stopped branch"]
     assert [step.name for step in engine.group_steps("observe")] == [
+        "spawn hold clear",
+        "pass budget",
         "pane evidence",
         "execution reconcile",
         "master move fail over",
@@ -131,7 +146,7 @@ def test_the_start_and_observe_steps_sit_in_their_groups_in_legacy_order() -> No
         "track outages",
         "verify",
     ]
-    assert len(observe.STEPS) == 14
+    assert len(observe.STEPS) == 16
 
 
 def test_a_running_swarm_loads_its_config_and_skips_the_stopped_branch() -> None:

@@ -86,7 +86,7 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
     ]
     assert [step.name for step in engine.group_steps(tasks.CLOSE)][-2:] == ["settle", "close space"]
     assert [step.group for step in tasks.STEPS] == (
-        [tasks.DRAINED] + [tasks.REOPENS] * 5 + [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
+        [tasks.DRAINED] * 2 + [tasks.REOPENS] * 5 + [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
     )
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
@@ -146,10 +146,17 @@ def test_a_drained_swarm_with_claimable_work_runs_again(
         seen.append((slug, store_seen, rows, doc, lane))
         return lane in claimable
 
-    tick = SimpleNamespace(LANES=("eng", "ci"), _claimable=claimable_in)
+    def sleeping_of(slug: str, store_seen: Any, rows: Any) -> bool:
+        seen.append((slug, store_seen, rows))
+        return sleeping
+
+    lifetime = SimpleNamespace(sleeping=sleeping_of)
+    tick = SimpleNamespace(LANES=("eng", "ci"), _claimable=claimable_in, lifetime=lifetime)
     box: dict[str, Any] = {"config": "old"}
-    state_of = {**_pass(box), "store": store, "config": SimpleNamespace(state=state), "sleeping": sleeping}
+    state_of = {**_pass(box), "store": store, "config": SimpleNamespace(state=state)}
     assert _run(tasks.DRAINED, tick, state_of, monkeypatch) == expected
+    assert box["sleeping"] is sleeping
+    assert seen.pop(0) == ("sw", store, "rows")
     assert box["config"] == ("resumed" if expected else "old")
     assert updates == ([("sw", "running")] if expected else [])
     assert seen == [("sw", store, "rows", "doc", lane) for lane in asked]

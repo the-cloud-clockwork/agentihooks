@@ -40,9 +40,14 @@ def raise_held(box: dict[str, Any]) -> None:
         raise box[RAISED]
 
 
+def _sleeping(tick: Any, get: Get) -> Any:
+    get("box")["sleeping"] = tick.lifetime.sleeping(get("slug"), get("store"), get("rows"))
+    return []
+
+
 def _drained_resume(tick: Any, get: Get) -> Any:
     slug, store, rows, doc, config = get("slug"), get("store"), get("rows"), get("doc"), get("config")
-    if get("sleeping") or config.state != "drained":
+    if get("box")["sleeping"] or config.state != "drained":
         return []
     if not any(tick._claimable(slug, store, rows, doc, lane) for lane in tick.LANES):
         return []
@@ -120,7 +125,8 @@ def _close_space(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
-    CallStep("drained resume", DRAINED, held(_drained_resume)),
+    CallStep("sleeping", DRAINED, held(_sleeping)),
+    CallStep("drained resume", DRAINED, held(_drained_resume), frozenset({"sleeping"})),
     CallStep("dev red reopen", REOPENS, held(_dev_red_reopen)),
     CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen)),
     CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),

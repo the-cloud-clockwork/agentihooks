@@ -12,6 +12,8 @@ from tests.swarm.tick_scenarios.test_characterisation import replay
 TODAY = {
     "start": ["config load", "stopped branch"],
     "observe": [
+        "spawn hold clear",
+        "pass budget",
         "pane evidence",
         "execution reconcile",
         "master move fail over",
@@ -26,7 +28,7 @@ TODAY = {
         "verify",
     ],
     "agents": ["reap", "recover outages", "strays", "failed panes"],
-    "drained resume": ["drained resume"],
+    "drained resume": ["sleeping", "drained resume"],
     "tasks": ["orphans"],
     "reopen passes": [
         "dev red reopen",
