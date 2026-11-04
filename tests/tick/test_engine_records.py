@@ -187,16 +187,16 @@ def test_recording_pass_without_a_store_journals_nothing() -> None:
 @pytest.mark.feature("swarm-tick-cost-report")
 def test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain() -> None:
     store = Store()
-    slow = WriteStep("slow probe", "planted", lambda tick, get: time.sleep(0.2) or [])
+    slow = WriteStep("metrics record", "planted", lambda tick, get: time.sleep(0.2) or [])
     slow.lane = engine.SLOW
     follow = ok_step()
-    follow.name, follow.needs = "critical follow", frozenset({"slow probe"})
+    follow.name, follow.needs = "critical follow", frozenset({"metrics record"})
     later: list[tuple[engine.StepRecord, ...]] = []
     with recording(store) as current, pool.running(critical_s=5.0, slow_s=5.0):
         engine.run_group(
             "planted", Context(View(), Deadline.after(60.0)), [ok_step(), slow, follow], finished=later.append
         )
-    assert [[row.name for row in records] for records in later] == [["slow probe", "critical follow"]]
+    assert [[row.name for row in records] for records in later] == [["metrics record", "critical follow"]]
     rows = {row["step"]: row for row in store.records()}
     assert rows["critical follow"]["lane"] == "tick" and rows["critical follow"]["outcome"] == engine.OK
     assert current["critical_end_s"] == rows["size pass"]["start_s"] + rows["size pass"]["wall_s"]
