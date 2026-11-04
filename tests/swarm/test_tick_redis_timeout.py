@@ -36,10 +36,8 @@ def test_a_redis_timeout_in_the_conversations_step_lets_the_pass_finish(store, m
     monkeypatch.setattr(
         tick_module.agent_steps, "_session_models", lambda *args: models.append(args) or real_models(*args)
     )
-    real_close = tick_module.task_steps._close_space
-    monkeypatch.setattr(
-        tick_module.task_steps, "_close_space", lambda *args: closed.append(args[0]) or real_close(*args)
-    )
+    real_close = tick_module._close_space
+    monkeypatch.setattr(tick_module, "_close_space", lambda *args: closed.append(args[0]) or real_close(*args))
     runtime = TimingOutRuntime()
     token = timing.ON_FAILURE.set(lambda name, exc: failures.append((name, type(exc).__name__)))
     try:

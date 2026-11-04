@@ -172,7 +172,7 @@ def test_a_stopped_swarm_that_sleeps_finishes_the_pass(monkeypatch: pytest.Monke
     state, box = _state(store)
     monkeypatch.setattr(automated_gc, "run", _fake(seen, "cleanup", ["cleaned"]))
     monkeypatch.setattr(tick_module, "_woken", lambda slug, config, store, ledger: False)
-    monkeypatch.setattr(tick_module.task_steps, "_close_space", _fake(seen, "close", ["closed"]))
+    monkeypatch.setattr(tick_module, "_close_space", _fake(seen, "close", ["closed"]))
     monkeypatch.setattr(tick_module, "_bin_closed", _fake(seen, "bin", ["binned"]))
     assert actions(engine.run_group("start", _ctx(state))) == ["cleaned", "closed", "binned"]
     assert box["finished"] is True
@@ -189,7 +189,7 @@ def test_a_stopped_swarm_with_retired_tasks_awake_keeps_finishing(monkeypatch: p
     monkeypatch.setattr(automated_gc, "run", lambda *args: [])
     monkeypatch.setattr(tick_module, "_woken", lambda slug, config, store, ledger: False)
     monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: True)
-    monkeypatch.setattr(tick_module.task_steps, "_close_space", lambda *args: [])
+    monkeypatch.setattr(tick_module, "_close_space", lambda *args: [])
     monkeypatch.setattr(tick_module, "_bin_closed", lambda *args: ["binned"])
     assert actions(engine.run_group("start", _ctx(state))) == ["binned"]
     assert box["finished"] is True

@@ -55,6 +55,8 @@ def _tick(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
 
     return SimpleNamespace(
         skip_refused=skip_refused,
+        _master_down="master down",
+        _night_watch="night watch",
         _master=_master,
     )
 
@@ -99,11 +101,11 @@ def test_the_steps_sit_at_their_sites_in_todays_order() -> None:
         ("retire idle master", (lifetime.retire_idle_master, "sw", "store", "ledger", "runtime", "rows", 7)),
         ("master stall", (master_stall.run, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
         ("prompt stall", (master_prompt_stall.run, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
-        ("master down", (masters._master_down, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
+        ("master down", ("master down", "sw", "CONFIG", "store", "ledger", "runtime", 7)),
         ("master scale", (master_scale.run, "sw", "CONFIG", "store", "runtime", "doc", 7)),
         ("seat alarm", (master_seat_alarm.run, "sw", "store", "ledger", "runtime", "doc")),
         ("dispatch seat", (dispatch_seat.run, "sw", "CONFIG", "store", "runtime", "doc", 7, False)),
-        ("night watch", (masters._night_watch, "sw", "store", "ledger", "runtime", "doc", 7, False)),
+        ("night watch", ("night watch", "sw", "store", "ledger", "runtime", "doc", 7, False)),
     ],
 )
 def test_each_step_runs_its_call_with_the_pass_state(name: str, expected: tuple[Any, ...]) -> None:

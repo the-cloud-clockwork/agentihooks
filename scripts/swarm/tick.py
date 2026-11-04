@@ -30,7 +30,7 @@ from scripts.handoff.envelope import reclaim, remote_heads
 from scripts.hive import registry, reports
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import CLOSED, InboxStore  # noqa: F401
+from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     apply_wait,
@@ -320,6 +320,12 @@ def _codex_hook_order():
     return [f"restored the approved Codex hook order in {path}: {', '.join(moved)}"] if moved else []
 
 
+def _close_space(slug, config, store, runtime):
+    if not store.agents(slug):
+        runtime.close_space(config)
+    return []
+
+
 def _bin_closed(slug, store, ledger, doc):
     if doc.get("closed_at") and not store.agents(slug):
         exits.close_swarm(InboxStore(store.redis), slug)
@@ -339,6 +345,27 @@ def _woken(slug, config, store, ledger):
 
 def _operator_line(item):
     return item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
+
+
+def _master_down(slug, config, store, ledger, runtime, now_ms):
+    """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
+    master took but never closed to pending so the next master receives it."""
+    live = runtime.live_names()
+    masters = [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
+    if config.state == "stopping" or any(m.name in live or now_ms - m.started_at <= STARTUP_GRACE_MS for m in masters):
+        return []
+    inbox, seat = InboxStore(store.redis), seat_address(slug, MASTER)
+    waiting = [item for item in inbox.inbox(seat) if item.state not in CLOSED and _operator_line(item)]
+    for item in waiting:
+        if item.state != "pending":
+            inbox.redirect(item.id, "swarm", seat, REDELIVERED)
+    told = [item for item in waiting if DOWN_TOLD not in (e.get("event") for e in inbox.history(item.id))]
+    for item in told:
+        inbox.note(item.id, DOWN_TOLD, "swarm", MASTER_DOWN, now_ms)
+    if not told:
+        return []
+    ledger.notify(slug, MASTER_DOWN)
+    return [f"master down, told the operator about {len(told)} waiting lines"]
 
 
 def _collected(slug, store, ledger, rows, agent):
@@ -1753,6 +1780,18 @@ def _recover_master(slug, config, store, runtime, now_ms):
     return [f"adopted live master {name}"]
 
 
+def _night_watch(slug, store, ledger, runtime, doc, now_ms, sleeping):
+    from scripts.swarm.health import night_watch
+
+    def respawn():
+        if master_start.read(store, slug).get("alerted"):
+            store.redis.delete(store.key(slug, "master-start"))
+        with PLACING:
+            return _master(slug, store.config(slug), store, runtime, now_ms, past_host=True)
+
+    return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
+
+
 def _master(slug, config, store, runtime, now_ms, past_host=False):
     store.redis.hdel(MASTER_WAITING, slug)
     agents = store.agents(slug)
@@ -1880,3 +1919,21 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
             return act(config, held)
     finally:
         controller.release_tick_lock(store, slug, token)
+
+
+def _settle(slug, config, store, ledger, rows, doc):
+    agents = store.agents(slug)
+    if config.state == "stopping":
+        if agents:
+            return []
+        store.update(slug, state="stopped")
+        return ["stopped"]
+    if any(a.lane != MASTER for a in agents):
+        return []
+    if config.state != "running" or any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
+        return []
+    store.update(slug, state="drained")
+    blocked = sum(1 for t in rows.values() if t.get("state") == "blocked" and not t.get("out_of_scope"))
+    waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
+    ledger.notify(slug, freeze.notice(doc, rows.values(), freeze.fix_phase(config)) + waiting)
+    return ["drained"]

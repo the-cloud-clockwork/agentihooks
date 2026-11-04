@@ -67,7 +67,7 @@ def step_stopped_branch(
             box["finished"] = True
             return (
                 actions
-                + tick.skip_refused(tick.task_steps._close_space, slug, config, store, runtime)
+                + tick.skip_refused(tick._close_space, slug, config, store, runtime)
                 + tick._bin_closed(slug, store, ledger, doc)
             )
         box["config"] = store.update(slug, state="paused")

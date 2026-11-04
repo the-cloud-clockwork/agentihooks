@@ -203,7 +203,7 @@ def test_stopped_proof_swarm_still_collects_its_automated_master(world, monkeypa
     config = SimpleNamespace(state="stopped")
     monkeypatch.setattr(store, "ensure_code", lambda _: config)
     monkeypatch.setattr(tick, "_woken", lambda *_: False)
-    monkeypatch.setattr(tick.task_steps, "_close_space", lambda *_: [])
+    monkeypatch.setattr(tick, "_close_space", lambda *_: [])
     monkeypatch.setattr(tick, "_bin_closed", lambda *_: [])
     ledger.state = lambda _: {"tasks": []}
 

@@ -283,7 +283,7 @@ def test_the_tick_does_not_wake_a_master_while_shutting_down(setup, state, monke
     store.update("sw", state=state)
     monkeypatch.setattr(tick_module.agent_steps, "_reap", lambda *args: [])
     monkeypatch.setattr(tick_module.lifetime, "retire_idle_master", lambda *args: [])
-    monkeypatch.setattr(tick_module.task_steps, "_close_space", lambda *args: [])
+    monkeypatch.setattr(tick_module, "_close_space", lambda *args: [])
     runtime.retire = lambda *args, **kwargs: False
     master_wake.run("sw", store, runtime, ledger.state("sw"), START)
     tick("sw", store, ledger, runtime, START + WINDOW)

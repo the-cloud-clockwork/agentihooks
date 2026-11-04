@@ -638,7 +638,7 @@ def test_the_tick_respawns_the_front_door_past_the_host_hold_and_spent_retries(s
         return []
 
     monkeypatch.setattr(night_watch, "run", run_watch)
-    tick.master_steps._night_watch(SLUG, store, Ledger(), Runtime(), {"tasks": []}, NOW, False)
+    tick._night_watch(SLUG, store, Ledger(), Runtime(), {"tasks": []}, NOW, False)
     assert seen["respawn"] == ["launched"]
     assert called == [{"past_host": True}]
     assert not store.redis.exists(store.key(SLUG, "master-start"))
@@ -654,7 +654,7 @@ def test_the_respawn_runs_the_tick_master_launch_and_the_watch_gets_the_tick_inp
 
     monkeypatch.setattr(night_watch, "run", run_watch)
     ledger, runtime, doc = Ledger(), Runtime(), {"tasks": [{"id": "t1"}]}
-    assert tick.master_steps._night_watch(SLUG, store, ledger, runtime, doc, NOW, True) == ["launched"]
+    assert tick._night_watch(SLUG, store, ledger, runtime, doc, NOW, True) == ["launched"]
     assert called == [(SLUG, store.config(SLUG), store, runtime, NOW)]
     found = seen["watch"]
     assert (found.store, found.slug, found.ledger, found.runtime, found.doc) == (store, SLUG, ledger, runtime, doc)
@@ -669,7 +669,7 @@ def test_every_tick_runs_the_night_watch_with_its_ledger_and_sleep(monkeypatch):
     swarm = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     swarm.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1))
     seen = []
-    monkeypatch.setattr(tick.master_steps, "_night_watch", lambda *args: seen.append(args) or [])
+    monkeypatch.setattr(tick, "_night_watch", lambda *args: seen.append(args) or [])
     ledger, runtime = FakeLedger([{"id": "t1", "lane": "eng"}]), FakeRuntime()
     tick.tick(SLUG, swarm, ledger, runtime, now_ms=1_000)
     ((slug, store_, ledger_, runtime_, _, now, sleeping),) = seen

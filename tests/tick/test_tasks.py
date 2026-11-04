@@ -69,7 +69,6 @@ def _tick(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespac
 
 
 MOVED = (
-    (tasks, ("_settle", "_close_space")),
     (agents, ("_reap", "_strays", "_orphans", "_conversations", "_session_models")),
 )
 
