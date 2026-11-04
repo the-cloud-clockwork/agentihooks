@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.642 · 2026-11-04
+
+### 2026-11-04 · 73dddfcc294b · #9742 · @nestorcolt
+
+**Document the tick pattern gate without its bootstrap path**
+
+This change updates the Tick pattern gate reference to document that the gate no longer has a bootstrap fallback: the Hold the tick step pattern step script now fails outright if the protected grader copy is missing `scripts/tick_pattern.py`, and a base missing `tests/TICK_PATTERN_ALLOWLIST.json` fails grading with a specific error and summary line, both now captured with exact output. It also records the removed bootstrap rule as history, ties it to the same pattern used when the whole ledger state gate dropped its bootstrap, and adds two new Troubleshooting rows so operators can recognize and resolve these failures quickly.
+
 ## v2.17.641 · 2026-11-04
 
 ### 2026-11-04 · 07eda110e3b5 · #9734 · @nestorcolt
