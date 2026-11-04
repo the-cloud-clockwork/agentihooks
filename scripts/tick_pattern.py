@@ -99,7 +99,7 @@ def steps(tree: ast.Module, rows: dict[str, str]) -> list[str]:
 
 def banned(tree: ast.Module, name: str) -> list[str]:
     """Imports in the module named by its path name that reach an adapted implementation, relative ones resolved."""
-    package = name.removesuffix(".py").split("/")[:-1]
+    package = name.split("/")[:-1]
     found: list[str] = []
     for node in ast.walk(tree):
         names: list[str] = []
