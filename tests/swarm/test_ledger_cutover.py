@@ -123,10 +123,11 @@ def _acknowledge_as(
     assert cli.main([SLUG, "ledger-ready"]) == 0
 
 
-def _seat_legacy_master(store: RedisStore) -> AgentRecord:
+def _seat_legacy_master(store: RedisStore, launched_at: int = 10001) -> AgentRecord:
     """Put a master with no execution identity in seat three, launched after staging."""
     seat = f"{masters.seat(3)}@{SLUG}"
-    store.put_agent(SLUG, AgentRecord(store.next_name(SLUG, "master"), "master", "proof", seat=seat, launched_at=10001))
+    master = AgentRecord(store.next_name(SLUG, "master"), "master", "proof", seat=seat, launched_at=launched_at)
+    store.put_agent(SLUG, master)
     return next(agent for agent in store.agents(SLUG) if agent.seat == seat)
 
 
@@ -164,6 +165,41 @@ def test_a_master_without_an_execution_that_finishes_while_authenticating_record
     monkeypatch.setattr(ledger_cutover.client.ResourceClient, "request", finishing)
     _acknowledge_as(pending, monkeypatch, legacy.name)
     assert store.redis.hget(store.key(SLUG, "ledger-ready"), legacy.name) is None
+
+
+def test_a_master_without_an_execution_removed_while_authenticating_records_no_receipt(
+    pending: tuple[RedisStore, list[AgentRecord], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import ledger_cutover
+
+    store = pending[0]
+    legacy = _seat_legacy_master(store)
+    real = ledger_cutover.client.ResourceClient.request
+
+    def removing(self: ledger_cutover.client.ResourceClient, slug: str, path: str, payload: dict | None = None) -> dict:
+        answer = real(self, slug, path, payload)
+        store.redis.hdel(store.key(SLUG, "agents"), legacy.name)
+        return answer
+
+    monkeypatch.setattr(ledger_cutover.client.ResourceClient, "request", removing)
+    _acknowledge_as(pending, monkeypatch, legacy.name)
+    assert store.redis.hget(store.key(SLUG, "ledger-ready"), legacy.name) is None
+
+
+def test_a_master_without_an_execution_launched_at_the_first_millisecond_acknowledges(
+    pending: tuple[RedisStore, list[AgentRecord], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = pending[0]
+    store.redis.hset(store.key(SLUG, "config"), "ledger_staged_at", 1)
+    legacy = _seat_legacy_master(store, launched_at=1)
+    _acknowledge_as(pending, monkeypatch, legacy.name)
+    receipt = json.loads(store.redis.hget(store.key(SLUG, "ledger-ready"), legacy.name))
+    assert receipt == {
+        "url": store.config(SLUG).pending_api_url,
+        "staged_at": 1,
+        "execution_id": "",
+        "launched_at": 1,
+    }
 
 
 @pytest.mark.parametrize("command", ["ledger", "swarm"])
