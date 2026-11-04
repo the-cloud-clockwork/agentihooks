@@ -36,6 +36,8 @@ def test_report_aggregates_step_costs_and_pass_gaps() -> None:
             {"step": "launch", "count": 2, "median_s": 4.0, "p95_s": 6.0, "cpu_share": 80.0},
         ],
         "lanes": [],
+        "critical_end_p95_s": None,
+        "records": [],
     }
 
 
@@ -64,10 +66,17 @@ def test_tick_report_prints_each_lane_share(capsys: pytest.CaptureFixture[str]) 
         "passes_without_steps": 0,
         "steps": [],
         "lanes": [{"lane": "critical", "count": 2, "cpu_share": 41.5}],
+        "critical_end_p95_s": 12.5,
+        "records": [
+            {"step": "spawn", "records": 4, "late_share": 25.0, "abandoned": 1, "held": 2, "skipped": 3, "dropped": 5}
+        ],
     }
     with mock.patch.object(tick_report, "read", return_value=report):
         tick_report.command(object(), argparse.Namespace(slug="sw", passes=1))
-    assert "Lane critical  2 steps  41.50% CPU share" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Lane critical  2 steps  41.50% CPU share" in out
+    assert "Critical lane end p95: 12.500s" in out
+    assert "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\nspawn  4  25.00%  1  2  3  5\n" in out
 
 
 def test_lane_share_is_zero_when_no_step_cpu_was_spent() -> None:
@@ -105,6 +114,8 @@ def test_empty_report_and_missing_step_history_are_explicit() -> None:
         "orphan_steps": 0,
         "steps": [],
         "lanes": [],
+        "critical_end_p95_s": None,
+        "records": [],
     }
     passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}]
     assert tick_report.summarize(passes, [])["passes_without_steps"] == 1
@@ -157,9 +168,24 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    row = {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}
+    row = {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0, "critical_end_s": 1.25}
     store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps(row)})
     store.redis.xadd(store.key("sw", "tick:steps"), {"record": json.dumps(step("a", "launch", 1, 1, 0))})
+    outcome = {
+        "pass_id": "a",
+        "step": "launch",
+        "lane": "tick",
+        "outcome": "late",
+        "wall_s": 1.0,
+        "budget_s": 0.5,
+        "start_s": 0.25,
+        "abandoned": True,
+        "held": False,
+        "skipped": False,
+        "dropped": 2,
+        "conflicts": 0,
+    }
+    store.redis.xadd(store.key("sw", "tick:records"), {"record": json.dumps(outcome)})
     tick_report.command(store, argparse.Namespace(slug="sw", passes=1))
     assert capsys.readouterr().out == (
         "Tick report: 1 recorded passes\n"
@@ -168,6 +194,9 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
         "Passes without retained steps: 0\n"
         "Step  Count  Median  P95  CPU share\n"
         "launch  1  1.000s  1.000s  100.00%\n"
+        "Critical lane end p95: 1.250s\n"
+        "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\n"
+        "launch  1  100.00%  1  0  0  2\n"
         "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"
     )
 

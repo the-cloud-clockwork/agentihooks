@@ -1562,6 +1562,15 @@ def _collect_acks(
     return actions
 
 
+def _running(agents: list[AgentRecord], rows: dict[str, Any], lane: str) -> list[dict[str, Any]]:
+    """The task rows of the lane's agents that have not ended and still own their task."""
+    return [
+        rows.get(a.task, {"id": a.task, "lane": a.lane})
+        for a in agents
+        if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
+    ]
+
+
 def _spawn_order(
     slug: str,
     config: SwarmConfig,
@@ -1582,18 +1591,14 @@ def _spawn_order(
     claims = timing.timed(claim_view, slug, store, rows, doc, dispatched)
     queue, waits = [], []
     for lane, cap in caps.items():
-        running = [
-            rows.get(a.task, {"id": a.task, "lane": a.lane})
-            for a in agents
-            if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
-        ]
+        running = timing.timed(_running, agents, rows, lane)
         busy = len(running)
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
         ready = [task for task in ready if readiness.tick_launches(config.engine, task)]
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
-        ready, refused = focus_budget.place(doc, ready, lane, cap, running, locate)
+        ready, refused = timing.timed(focus_budget.place, doc, ready, lane, cap, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
     ranked = timing.timed(_ranked, slug, store, queue, dispatched)
@@ -1900,7 +1905,7 @@ def respawn_master(slug, store, runtime, now_ms):
             _recover_master(slug, config, store, fenced, now_ms) or _master(slug, config, store, fenced, now_ms)
         )
 
-    return _under_tick_lock(slug, store, respawn)
+    return _under_tick_lock(slug, store, respawn, "respawn master")
 
 
 def place_master(slug, store, runtime, now_ms):
@@ -1910,10 +1915,10 @@ def place_master(slug, store, runtime, now_ms):
         fenced = controller.FencedRuntime(store, slug, held, runtime, controller.deployment_for(config, os.environ))
         return _master(slug, config, store, fenced, now_ms)
 
-    return _under_tick_lock(slug, store, place)
+    return _under_tick_lock(slug, store, place, "place master")
 
 
-def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
+def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str) -> Any:
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 
@@ -1922,7 +1927,7 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
     held = lease.acquire(store, slug, hive_id())
     if held is None:
         return []
-    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms())
+    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms(), caller)
     if token is None:
         return []
     try:
@@ -1932,7 +1937,7 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
         with lease.held_pass(store, slug, held):
             return act(config, held)
     finally:
-        controller.release_tick_lock(store, slug, token)
+        controller.release_tick_lock(store, slug, token, caller)
 
 
 def _settle(
