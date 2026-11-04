@@ -184,6 +184,22 @@
       ]
     },
     {
+      "id": "swarm-tick-early-end-streak",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2369",
+      "behaviour": "Consecutive tick passes that end early on the same missing pass value raise one information only health finding naming the value and the count once the count reaches AGENTIHOOKS_HEALTH_EARLY_ENDS, and a full pass clears it.",
+      "seam": "scripts.swarm.status.findings after scripts.swarm.cli.run_tick passes that end on scripts.tick.steps.Left",
+      "tests": [
+        "tests/tick/test_early_end_streak.py::test_passes_ending_early_on_one_value_raise_one_finding_at_the_threshold",
+        "tests/tick/test_early_end_streak.py::test_a_full_pass_clears_the_finding",
+        "tests/tick/test_early_end_streak.py::test_an_early_end_on_another_value_restarts_the_count",
+        "tests/tick/test_early_end_streak.py::test_the_health_setting_sets_the_threshold",
+        "tests/tick/test_early_end_streak.py::test_the_threshold_takes_only_a_positive_whole_number",
+        "tests/tick/test_early_end_streak.py::test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_of_one",
+        "tests/tick/test_early_end_streak.py::test_each_early_end_of_the_report_step_counts_the_missing_value"
+      ]
+    },
+    {
       "id": "swarm-tick-late-view",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2334",
@@ -207,7 +223,10 @@
         "tests/swarm/test_tick_records.py::test_budgeted_step_record_carries_its_lane_only_when_given",
         "tests/swarm/test_tick_records.py::test_budgeted_step_records_and_fails_under_the_name_it_is_given",
         "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps",
-        "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu"
+        "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_its_budget_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_step_left_with_only_its_actions_domain_journals_nothing"
       ]
     },
     {

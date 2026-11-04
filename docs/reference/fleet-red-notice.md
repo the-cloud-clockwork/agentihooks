@@ -11,8 +11,9 @@ checks say nothing about any one change. The swarm then holds an open task
 whose pull request is red only from those shared checks: no engineer claims
 it, and the ledger shows a notice on the task saying why. This page covers the
 hold, the notice the tick posts each pass, the open pull request listing both
-read, and the ten minute listing cache that keeps the notice step off the
-tick's critical path.
+read, the ten minute listing cache that keeps the notice step off the tick's
+critical path and that the tick's claim filter reads, and the notice step's
+measured budget that lets the cache be saved.
 
 Module: `scripts.swarm.fleet_red`.
 
@@ -34,7 +35,8 @@ not held: that check points at the change itself.
 
 | Site | Function | Listing |
 | --- | --- | --- |
-| Claim filter | `fleet_red.checker()`, used by the tick's claim view and by swarm readiness | Read live through the source control port once per repository per call; a failed listing admits every task and logs `fleet red hold skipped` |
+| Tick claim filter | `fleet_red.checker(fleet_red.saved_reader(store, slug))`, built by `tick.claim_view`. Every ready task listing goes through it, `tick.ready_in_order` and `tick._claimable`, including `capacity.ready_work`, which the quota notice step reads | The saved listing below when one is saved; otherwise a live listing once per repository per call, not saved. A saved failed listing admits every task. A failed live listing admits every task and logs `fleet red hold skipped` |
+| Swarm readiness | `fleet_red.checker()`, used by `scripts.swarm.readiness` for the hub readiness snapshot | Read live through the source control port once per repository per call; a failed listing admits every task and logs `fleet red hold skipped` |
 | Notice step | The `fleet red notice` tick step: `fleet_red.holds` computes the new holds and the lifted ones, and the step returns them as writes. The engine applies each hold through the fleet red applier, which posts it with `fleet_red.post` only while the task is still open, unclaimed and on the same pull request, and drops it for the next pass otherwise | Read through the listing cache below |
 
 The notice pass looks only at open, unclaimed tasks with a pull request. For
@@ -53,9 +55,13 @@ held again later. The tick action line reads
 ## The open pull request listing
 
 Both sites list open pull requests through the repository's source control
-port, `SourceControl.open_changes`, with a 60 second deadline (`SECONDS`). The
-GitHub adapter asks GraphQL for open pull requests with each head commit's
-check rollup:
+port, `SourceControl.open_changes`, with a 60 second deadline (`SECONDS`).
+`fleet_red.read(repo, ports, deadline=...)` takes an optional caller deadline
+and passes `deadline.child(SECONDS)`, so the listing ends at the caller's
+expiry or after 60 seconds, whichever comes first. Without a caller deadline
+it passes a fresh `Deadline.after(SECONDS)`. The GitHub adapter checks the
+deadline before its first GraphQL call and asks for open pull requests with
+each head commit's check rollup:
 
 | Setting | Value |
 | --- | --- |
@@ -90,7 +96,56 @@ The key prefix is `agentihooks` unless `AGENTIHOOKS_SWARM_KEY_PREFIX` sets
 another. One tick pass therefore calls GitHub at most once per repository
 every ten minutes, and a failing GitHub costs one failed call per ten minutes
 instead of one per pass. A hold can start or lift up to ten minutes after the
-checks change on GitHub. The claim filter does not read the cache.
+checks change on GitHub.
+
+The tick claim filter reads the same key through `fleet_red.saved_reader`:
+
+| Saved under the key | The claim filter |
+| --- | --- |
+| A listing | Judges each task against it and does not call GitHub |
+| JSON `null`, a failed listing | Gets no pull requests and admits every task, without calling GitHub |
+| Nothing | Lists live once per repository per claim view and does not save the result; only the notice step saves |
+
+Before this, the claim filter listed live on every claim view. A capacity
+read spent 17.0 of its 22.0 seconds there, in four GitHub GraphQL calls,
+which made the quota notice step the slowest step of the pass.
+
+## The notice step budget
+
+The engine waits on a step for its budget. A step still running when its
+budget runs out is abandoned, and its result, the writes it returns included,
+is dropped (see
+[When a step exceeds its budget](tick-engine-steps.md#when-a-step-exceeds-its-budget)).
+A step that finishes just past its budget is recorded late but keeps its
+writes. The listing save is one of those writes. With no measured timing the
+`fleet red notice` step had the fifteen second unmeasured budget, while one
+live listing took about 16.6 seconds, so the step was abandoned on every pass
+that listed, the save never landed and every pass listed again.
+
+`budgets.MEASURED["fleet red notice"]` now carries the step's measured p95 of
+19.981 seconds, from `tick-report --passes 10` on 3 November 2026 at 18:30
+UTC. Its budget is `ceil(19.981 * 1.5)`, 30 seconds, above the live listing,
+so the pass that lists keeps its save and the passes of the next ten minutes
+read it.
+
+| Measure, ten passes | Before | After |
+| --- | --- | --- |
+| Fleet red notice median | 17.410 s | 0.991 s |
+| Fleet red notice p95 | 20.265 s | 18.811 s, the pass that lists again |
+| Quota notice median | 26.605 s | 8.236 s |
+| Quota notice p95 | 32.908 s | 26.757 s |
+
+The after sample is ten passes that all started after the change reached
+the workstation's dev checkout at 20:14 UTC that day. The first of them ran
+the notice step in 18.81 seconds and was not late, so its save was kept.
+
+Read the declared budget:
+
+```bash
+python -c 'from scripts.tick.steps.budgets import timing_of; print(timing_of("fleet red notice"))'
+```
+
+It prints `(30.0, 60.0)`: a 30 second budget and a 60 second interval.
 
 ## Usage
 
@@ -123,6 +178,18 @@ listing = fleet_red.cached(store, slug, "owner/repo", reader=lambda repo: pulls)
 A `reader` passed to `holds` replaces the cache, so it lists on
 every call.
 
+Build the tick's claim filter over the saved listing, as `tick.claim_view`
+does, and judge one task row:
+
+```python
+admit = fleet_red.checker(fleet_red.saved_reader(store, slug))
+claimable = admit(task_row)
+```
+
+`admit` returns false for a task it holds. It keeps each repository's
+listing for the life of the checker, so one claim view reads Redis, or
+GitHub on a miss, once per repository.
+
 ## Configuration
 
 | Name | Where | Default | Effect |
@@ -142,7 +209,14 @@ The constants are code: change them through a pull request.
   first two hundred GitHub returns.
 - A hold, a lifted hold and its notice lag GitHub by up to ten minutes.
 - A failed listing stays cached for ten minutes, so a short GitHub outage
-  suppresses new notices for that long.
+  suppresses new notices for that long, and the tick claim filter admits
+  every task for that long.
+- Swarm readiness, the hub readiness snapshot, still lists live on every
+  call.
+- A claim view on a cache miss lists live without saving, so until the notice
+  step saves, each claim view pays one listing per repository.
+- The notice step budget is a checked in measurement. A live listing that
+  grows past 30 seconds makes the step late again and drops its save.
 
 ## Troubleshooting
 
@@ -151,13 +225,15 @@ The constants are code: change them through a pull request.
 | The notice step still costs seconds every pass | `tick-report --passes 60`; then `TTL` on the cache key. A missing key on every pass means the save fails; read the tick log for Redis errors |
 | No notice although most pull requests share a red check | `GET` the cache key. `null` means the last listing failed: delete the key to list again, or wait out the ten minutes. Otherwise confirm at least three other pull requests have a check that finished in the last six hours |
 | A task stays held after the shared checks went green | The cached listing is up to ten minutes old; delete the key to read GitHub now |
-| A task is claimed although the notice pass holds it | The claim filter lists live and admits every task when its listing fails; read the tick log for `fleet red hold skipped` |
+| A task is claimed although the notice pass holds it | `GET` the cache key: `null` makes the claim filter admit every task. With no key the claim filter lists live and admits every task when that listing fails; read the tick log for `fleet red hold skipped` |
+| The cache key never appears and the notice step runs over 15 seconds | `tick-report --passes 10` shows the step's wall time; a step still running at its budget is abandoned and its save dropped. Compare that wall time with `timing_of("fleet red notice")` and raise the measured p95 in `budgets.MEASURED` through a pull request |
+| The quota notice step costs tens of seconds | Its capacity read builds the claim view; with no cache key every read lists GitHub. Check the cache key's `TTL` and the notice step as above |
 
 ## Tests
 
 | Test file | Covers |
 | --- | --- |
-| `tests/swarm/test_fleet_red.py` | Hold rules, the notice pass, the cache listing once per ten minutes, one cache entry per swarm and repository, a failed listing cached as none for each port error, an empty listing cached, the default reader, the notice pass reading through the cache, and no notice while a failed listing is cached |
+| `tests/swarm/test_fleet_red.py` | Hold rules, the notice pass, the cache listing once per ten minutes, one cache entry per swarm and repository, a failed listing cached as none for each port error, an empty listing cached, the default reader, the notice pass reading through the cache, no notice while a failed listing is cached, the claim view judging a saved listing without listing again, the claim view admitting every task under a saved failed listing, and the notice step budget above the 16.6 second live listing |
 | `tests/tick/test_apply_fleet_red.py` | The notice step's guarded hold writes and lifted write, the applier posting while the task stays open and unclaimed, dropping a hold whose task moved or a seat claimed, forgetting a failed notice, and a claimed hold dropped then posted on the next pass |
 | `tests/tick/test_source_control.py` | The GitHub open listing: one page when there is no next page, and the stop after eight pages of twenty five |
 

@@ -543,7 +543,7 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
-    monkeypatch.setattr(timer, "schedule", lambda: True)
+    monkeypatch.setattr(timer, "schedule", lambda caller: True)
     monkeypatch.setattr(timer, "undelivered", lambda: "")
     monkeypatch.setattr(timer, "guard", lambda binary: True)
 
@@ -742,3 +742,13 @@ def _package_conditions_offline(tmp_path, monkeypatch):
         ], probed
 
     monkeypatch.setattr(conditions, "layer_dirs", isolated_layers)
+
+
+@pytest.fixture(autouse=True)
+def _real_daemon_hive_id() -> None:
+    """Rebind the hive daemon's hive_id to the real one, which a first import under a stub may have captured."""
+    if "scripts.hive.daemon" in sys.modules:
+        from scripts.hive import daemon
+        from scripts.swarm import commands
+
+        daemon.hive_id = commands.hive_id

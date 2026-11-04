@@ -207,6 +207,7 @@ from scripts.tick.ports.tools import PASS_TOOLS, Tools
 from scripts.tick.steps import Left, PassBox
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
+from scripts.tick.steps import tasks as task_steps
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -287,23 +288,19 @@ def _publish_tick_status(
             raise
 
 
-def _phase_steps(inbox, store, slug, doc, ledger):
+def _phase_steps(inbox: Any, store: Any, slug: str, doc: dict[str, Any], ledger: Any) -> list[Any]:
     actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
     if actions:
         doc = timing.call(ledger_client.pass_state, ledger, slug)
-    ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
-    actions += ticked
-    if ticked:
-        actions += skip_refused(
-            phase_planning.planning_pass,
-            inbox,
-            store,
-            slug,
-            timing.call(ledger_client.pass_state, ledger, slug),
-            ledger,
-            store.config(slug),
-        )
-    return actions
+    return actions + task_steps.phase_writes(skip_refused(phases.phase_changes, slug, doc, ledger))
+
+
+def _planning_after_phase(inbox: Any, store: Any, slug: str, ledger: Any, box: dict[str, Any]) -> list[str]:
+    if task_steps.PHASE_CHANGED not in box:
+        return []
+    del box[task_steps.PHASE_CHANGED]
+    doc = timing.call(ledger_client.pass_state, ledger, slug)
+    return skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
 
 
 def _bin_stop(store, slug, ledger, runtime):
