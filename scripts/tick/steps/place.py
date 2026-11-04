@@ -118,3 +118,4 @@ STEPS = (
 
 for _step in STEPS:
     registry.register(_step)
+registry.require("scripts.tick.steps.report")
