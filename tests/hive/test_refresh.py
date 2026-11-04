@@ -630,8 +630,10 @@ def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
 ):
     from scripts.hive import daemon
     from scripts.scheduler.core import Scheduler, bucket
+    from scripts.swarm import commands
     from scripts.swarm.keyspace import ROOT
 
+    monkeypatch.setattr(daemon, "hive_id", commands.hive_id)
     left = auth.mint(admin, "pod-before-recreate", PUBLIC)
     grant = _joined(admin, hive, tmp_path, monkeypatch)
     admin.acl_deluser(f"hive-{grant['id']}")

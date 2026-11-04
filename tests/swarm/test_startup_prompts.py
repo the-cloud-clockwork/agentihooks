@@ -208,7 +208,7 @@ def test_master_prompt_observation_preserves_previous_retirement_actions():
 
     from scripts.swarm.pane import PaneObservation
     from scripts.swarm.store import RedisStore
-    from scripts.swarm.tick import _reap
+    from scripts.tick.steps.agents import _reap
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
