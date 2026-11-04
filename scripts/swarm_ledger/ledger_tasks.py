@@ -2,6 +2,7 @@
 
 import re
 from pathlib import Path
+from typing import Any
 
 import ledger_comments
 import ledger_kinds
@@ -61,7 +62,14 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-MATCHED = {"claimed_by": "", "claim_generation": 0, "pr_url": "", "awaiting": "", "difficulty": "", "group_members": []}
+MATCHED: dict[str, Any] = {
+    "claimed_by": "",
+    "claim_generation": 0,
+    "pr_url": "",
+    "awaiting": "",
+    "difficulty": "",
+    "group_members": [],
+}
 LIST_FIELDS = (
     "depends_on",
     "territory",
@@ -189,7 +197,7 @@ def check_guards(op: dict) -> None:
         raise ValueError("if_match group_members must list task ids")
 
 
-def _guarded(task: dict, op: dict) -> bool:
+def _guarded(task: dict[str, Any], op: dict[str, Any]) -> bool:
     expected = op.get("if_match", {})
     return (bool(op.get("if_state")) and task.get("state", "open") not in op["if_state"]) or any(
         task.get(key, MATCHED[key]) != value for key, value in expected.items()
