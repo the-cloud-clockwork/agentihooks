@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.619 · 2026-11-04
+
+### 2026-11-04 · c74d183069f4 · #9590 · @nestorcolt
+
+**Reuse the pass's health findings in the tick status publish**
+
+This change stops the tick status publish from recomputing health findings that the pass already gathered a moment earlier: the report step now passes along the stored findings, and status_report only calls findings() itself when none are supplied, with the same fallback preserved for callers that didn't capture them. It shaves roughly nine seconds off each pass by removing a duplicate computation of status.findings, directly advancing the goal of getting a full tick pass under one minute at scale.
+
 ## v2.17.617 · 2026-11-03
 
 ### 2026-11-03 · 1977278c62f6 · #9557 · @nestorcolt
