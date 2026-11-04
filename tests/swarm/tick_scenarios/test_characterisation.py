@@ -223,3 +223,21 @@ def test_dropped_reap_action_breaks_golden(entry: str, monkeypatch: pytest.Monke
     else:
         with pytest.raises(AssertionError, match="GOLDEN_RECORD"):
             compare(record, "finished", entry)
+
+
+@pytest.mark.feature("fenced-live-names-listing")
+def test_running_pass_lists_live_names_once_plus_once_per_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    listings: list[int] = []
+    original = FakeRuntime.live_names
+
+    def counted(self: FakeRuntime) -> set[str]:
+        listings.append(1)
+        return original(self)
+
+    monkeypatch.setattr(FakeRuntime, "live_names", counted)
+    record = replay("running", "run_tick", monkeypatch, tmp_path)
+    launches = sum(1 for call in record["runtime_writes"] if call[0] == "spawn")
+    print(f"LIVE_NAMES_LISTINGS={len(listings)} LAUNCHES={launches}")
+    assert 1 <= len(listings) <= 1 + launches
