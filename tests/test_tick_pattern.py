@@ -293,6 +293,11 @@ def test_a_head_without_an_allowlist_is_red() -> None:
     ]
 
 
+def test_an_offence_only_the_base_allowlist_holds_is_allowed() -> None:
+    held = {tick_pattern.TICK: ["def more"]}
+    assert tick_pattern.grade(held, held, held, {tick_pattern.TICK}, {}) == []
+
+
 def test_the_allowlist_is_sorted_json() -> None:
     text = (_ROOT / tick_pattern.ALLOWLIST).read_text()
     assert text == json.dumps(json.loads(text), indent=1, sort_keys=True) + "\n"
