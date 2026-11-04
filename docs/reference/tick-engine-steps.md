@@ -667,7 +667,7 @@ as described above.
   `skipped ...: the ledger refused its write` line through `skip_refused`.
 - `LedgerRefused` in the rank or stall applier is not caught by the engine and
   leaves the group run, like any other applier exception.
-- An exception from posting the hold notice, `LedgerRefused` included, is a
+- An `Exception` from posting the hold notice, `LedgerRefused` included, is a
   dropped write whose line names the failed hold notice. A Redis error before
   the post, and any error from the lifted marks or listing applier other than
   a Redis timeout, is not caught and leaves the group run.
