@@ -313,7 +313,7 @@ def _inspect(browser, swarm: Swarm, viewport: dict, now_ms: int, counts: Counter
     return shown
 
 
-def _launch_and_attach(browser, swarm: Swarm, counts: Counter) -> dict:
+def _launch_and_attach(browser: "Browser", swarm: Swarm, counts: Counter) -> dict:
     data, opened = swarm.data, swarm.data["opened_ms"]
     launcher = Viewer(browser, swarm, data["viewports"]["desktop"], opened)
     counts["viewers_opened"] += 1
@@ -483,7 +483,7 @@ def _case_b(browser, data: dict) -> tuple[dict, dict, Counter]:
     return checks, observed, counts
 
 
-def _case_c(browser, data: dict) -> tuple[dict, dict, Counter]:
+def _case_c(browser: "Browser", data: dict) -> tuple[dict, dict, Counter]:
     counts, swarm = Counter(), Swarm(data)
     opened, reopened, desktop = data["opened_ms"], data["reopened_ms"], data["viewports"]["desktop"]
     swarm.control({"action": "start"})
