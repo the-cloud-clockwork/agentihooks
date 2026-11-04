@@ -39,7 +39,7 @@ from scripts.swarm import (
     claim_order,
     content_refusal,
     continuation,
-    control_notifications,
+    control_notifications,  # noqa: F401
     dead_resume,
     deliberate_exit,
     difficulty,  # noqa: F401
@@ -80,7 +80,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm import idle as idle_state
-from scripts.swarm.ledger_client import LedgerRefused, pass_state
+from scripts.swarm.ledger_client import LedgerRefused, pass_state  # noqa: F401
 from scripts.swarm.naming import lane_of, parse, seat_label
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
@@ -96,6 +96,19 @@ from scripts.tick.steps import masters as master_steps
 from scripts.tick.steps import observe as observe_steps
 from scripts.tick.steps import place
 from scripts.tick.steps import tasks as task_steps
+from scripts.tick.steps.common import (
+    _collected,  # noqa: F401
+    _current_owner,
+    _drop,
+    _ended,
+    _follow,
+    _operator_line,
+    _rebind,  # noqa: F401
+    _reopen,
+    _still_held,  # noqa: F401
+    skip_dropped,  # noqa: F401
+    skip_refused,  # noqa: F401
+)
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 60
@@ -287,35 +300,6 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     return actions
 
 
-def skip_refused(function, *args):
-    from redis.exceptions import TimeoutError as RedisTimeoutError
-
-    try:
-        return timing.call(function, *args)
-    except LedgerRefused as exc:
-        name = f"{function.__module__}.{function.__qualname__}"
-        print(f"{name} skipped, the ledger refused its write: {exc}", file=sys.stderr)
-        return [f"skipped {name}: the ledger refused its write"]
-    except RedisTimeoutError as exc:
-        name = f"{function.__module__}.{function.__qualname__}"
-        print(f"{name} skipped, its Redis read timed out: {exc}", file=sys.stderr)
-        return [f"skipped {name}: its Redis read timed out"]
-
-
-def skip_dropped(function, *args):
-    from redis.exceptions import ConnectionError as RedisConnectionError
-    from redis.exceptions import TimeoutError as RedisTimeoutError
-
-    for _ in range(2):
-        try:
-            return timing.call(function, *args) or []
-        except (RedisConnectionError, RedisTimeoutError) as exc:
-            dropped = exc
-    name = f"{function.__module__}.{function.__qualname__}"
-    print(f"{name} skipped, its Redis connection dropped or timed out twice: {dropped}", file=sys.stderr)
-    return [f"skipped {name}: its Redis connection dropped or timed out twice"]
-
-
 def _codex_hook_order():
     from scripts.targets.codex_target import codex_home, restore_hook_order
 
@@ -348,10 +332,6 @@ def _woken(slug, config, store, ledger):
     return any(_operator_line(item) for item in waiting)
 
 
-def _operator_line(item):
-    return item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
-
-
 def _master_down(slug, config, store, ledger, runtime, now_ms):
     """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
     master took but never closed to pending so the next master receives it."""
@@ -371,36 +351,6 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
         return []
     ledger.notify(slug, MASTER_DOWN)
     return [f"master down, told the operator about {len(told)} waiting lines"]
-
-
-def _collected(slug, store, ledger, rows, agent):
-    if agent.lane == MASTER:
-        store.redis.set(store.key(slug, "master-retired-tasks"), json.dumps(list(rows)))
-    return _drop(slug, store, ledger, rows, agent)
-
-
-def _drop(slug, store, ledger, rows, agent, refund=False):
-    held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
-    held = held and not awaiting_merge(rows[agent.task])
-    expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
-    refund = refund and held and store.claims(slug, agent.task) > 0
-    generation = store.claim_generation(slug, agent.task)
-    if refund and _still_held(ledger.task(slug, agent.task), expected):
-        store.refund_held_claim(slug, agent.task, agent.name, generation)
-    store.release(slug, agent.task, agent.name)
-    store.drop_agent(slug, agent.name)
-    reopen = held and _reopen(slug, ledger, rows, agent.task, expected)
-    exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
-    return f", task {agent.task} reopened" if reopen else ""
-
-
-def _still_held(row, expected):
-    row = row or {}
-    return (
-        row.get("state") in ACTIVE
-        and row.get("claimed_by") == expected["claimed_by"]
-        and row.get("claim_generation", 0) == expected["claim_generation"]
-    )
 
 
 def _verify(slug, store, ledger, runtime, rows, now_ms):
@@ -453,35 +403,6 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent, refund=True)
         )
     return actions
-
-
-def _follow(slug, store, runtime, agent, pid):
-    if pid is None:
-        return agent, []
-    if (rebound := _rebind(slug, store, runtime, agent, pid)) is None:
-        return None, [f"held {agent.name} until one pane holds its resumed process {pid}"]
-    return rebound, [f"rebound {agent.name} to its resumed process {pid} in pane {rebound.pane_id}"]
-
-
-def _rebind(slug, store, runtime, agent, pid):
-    found = (runtime.conversations() or {}).items()
-    panes = [p for p, c in found if c and c == agent.conversation_id and "/" not in p]
-    if len(panes) != 1:
-        return None
-    validation = {**agent.profile_decision.get("validation", {}), "pid": pid}
-    rebound = replace(agent, pane_id=panes[0], profile_decision={**agent.profile_decision, "validation": validation})
-    store.put_agent(slug, rebound)
-    return rebound
-
-
-def _ended(agent, rows):
-    task = rows.get(agent.task, {})
-    ended = agent.lane != MASTER and (
-        task.get("done")
-        or task.get("state") in {"done", "blocked", "handoff"}
-        or (task.get("awaiting") == "verify" and not task.get("claimed_by"))
-    )
-    return agent.state == "finished" or bool(ended)
 
 
 def _launch_checks(
@@ -591,10 +512,6 @@ def _retire_launch(slug, store, runtime, agent, now_ms):
     if exited:
         failed_panes.hold(store, slug, agent, now_ms, EXITED_BEFORE_LIFE)
     return True
-
-
-def _current_owner(agent, row):
-    return row.get("claimed_by", "") in ("", agent.name)
 
 
 def _restore_owner(slug, store, ledger, rows, agent):
@@ -924,13 +841,6 @@ def _operator_at_pane(slug, store, agent, observed, now_ms):
     """The idle count holds while the pane's input line holds text or the operator prompted it inside the quiet window."""
     last = idle_state.last_prompt(store.redis, slug, agent.name)
     return bool(observed.typed) or (last is not None and now_ms - last < wake.quiet_ms(os.environ))
-
-
-def _reopen(slug, ledger, rows, task_id, expected=None):
-    guard = {"if_match": expected} if expected is not None else {}
-    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE, **guard)
-    rows[task_id].update(live)
-    return live["state"] == "open"
 
 
 def ready_in_order(slug, store, rows, doc, lane, dispatched=None, claims=None):
