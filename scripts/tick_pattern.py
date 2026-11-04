@@ -145,14 +145,15 @@ def write(tree: Path) -> None:
 def grade(
     base: dict[str, list[str]] | None, head: dict[str, list[str]], recorded: dict[str, list[str]] | None
 ) -> list[str]:
-    """Reject offences the base allowlist does not hold and a head record that differs from its measurement;
-    a base without an allowlist allows what the head records."""
-    allowed = (recorded or {}) if base is None else base
+    """Reject a missing base allowlist, offences the base allowlist does not hold and a head record that differs
+    from its measurement."""
+    if base is None:
+        return [f"{ALLOWLIST} is missing from the base"]
     errors = [
         f"{name} adds {offence}; the base allowlist does not hold it"
         for name, offences in sorted(head.items())
         for offence in offences
-        if offence not in allowed.get(name, [])
+        if offence not in base.get(name, [])
     ]
     if recorded != head:
         errors.append(f"{ALLOWLIST} differs from the head's measurement; run python -m scripts.tick_pattern --write")

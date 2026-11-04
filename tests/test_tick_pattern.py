@@ -145,12 +145,14 @@ def test_an_allowlisted_offence_kept_or_removed_is_green(tmp_path: Path, capsys:
     assert _grade(base, gone, capsys) == (0, "0 tick pattern offences in 0 files, 2 on the base allowlist, 0 errors\n")
 
 
-def test_a_base_without_an_allowlist_allows_what_the_head_records(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_base_without_an_allowlist_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {tick_pattern.TICK: TICK})
     head = _recorded(tmp_path / "head", {tick_pattern.TICK: TICK})
-    assert _grade(base, head, capsys) == (0, "1 tick pattern offences in 1 files, 0 on the base allowlist, 0 errors\n")
+    assert _grade(base, head, capsys) == (
+        1,
+        "1 tick pattern offences in 1 files, 0 on the base allowlist, 1 errors\n"
+        f"::error::{tick_pattern.ALLOWLIST} is missing from the base\n",
+    )
 
 
 def test_files_outside_the_scope_are_not_graded(tmp_path: Path) -> None:
