@@ -684,8 +684,10 @@ def cmd_tick_watch(store, args):
         repair = tick_watch.Repair(scheduled_tick.restart, respawn)
     else:
 
-        def repair(slug, now):
-            return place_master(slug, store, runtime, now)
+        def repair(slug: str, now: int) -> list[str]:
+            return tick_watch.bounded(
+                lambda: place_master(slug, store, runtime, now), tick_watch.REPAIR_S, "the master placement"
+            )
 
     tick_watch.run(store, now_ms, repair)
 
