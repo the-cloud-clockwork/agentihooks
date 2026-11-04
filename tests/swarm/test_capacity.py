@@ -1149,7 +1149,8 @@ def test_capacity_scales_from_the_pass_document_without_a_ledger_read():
     store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
     store.create(config)
-    ledger = FakeLedger([])
+    ledger = FakeLedger([{"id": "e"}])
+    doc = ledger.state("sw")
     ledger.state = lambda slug: pytest.fail("capacity read the ledger again")
     ledger.comment = lambda *args, **kwargs: None
     runtime = FakeRuntime()
@@ -1160,7 +1161,7 @@ def test_capacity_scales_from_the_pass_document_without_a_ledger_read():
         return capacity.calculate(cfg, [account()], agents, demand)
 
     runtime.quota_capacity = quota
-    capacity.apply("sw", config, store, ledger, runtime, 1000, {"tasks": [{"id": "e", "state": "open"}]})
+    capacity.apply("sw", config, store, ledger, runtime, 1000, doc)
     assert demands == [{"eng": 1, "ci": 0, "plan": 0}]
 
 

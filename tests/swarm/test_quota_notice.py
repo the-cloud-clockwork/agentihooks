@@ -178,8 +178,9 @@ def test_tick_sends_notices_from_the_just_refreshed_accounts(store, monkeypatch)
     ledger = FakeLedger([{"id": "t1", "state": "claimed", "claimed_by": row.name, "difficulty": "M"}])
     readings = iter([decision(15, 90), decision(90, 2), decision(90, 2)])
 
-    def refresh(slug, config, target, source, host, now_ms):
+    def refresh(slug, config, target, source, host, now_ms, doc):
         assert (slug, target, source, host) == ("sw", store, ledger, runtime)
+        assert [task["id"] for task in doc["tasks"]] == ["t1"]
         assert now_ms in (1000, 2000, 3000)
         target.redis.set(target.key(slug, "quota-capacity"), json.dumps(next(readings)))
         return ["quota refreshed"]

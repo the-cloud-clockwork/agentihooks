@@ -258,7 +258,7 @@ def test_the_watch_of_a_registered_swarm_uses_the_pass_document_without_a_ledger
         def state(self, slug):
             pytest.fail("the promotion refresh read the ledger again")
 
-    store.create(SwarmConfig(SLUG, "/repo"))
+    store.create(SwarmConfig(SLUG, "/repo", max_eng=0, max_ci=0))
     ledger = Unread()
     refresh(store, ledger, gh([RED], JOBS))
     assert [fields["task"] for _, fields, _ in ledger.added]

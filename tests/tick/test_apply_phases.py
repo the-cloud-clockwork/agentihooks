@@ -71,7 +71,7 @@ def test_the_phase_step_returns_no_write_for_a_ledger_without_phases() -> None:
 
 def test_the_phase_step_finds_a_task_under_its_slice_and_skips_out_of_scope_tasks() -> None:
     doc = {
-        "phases": [{"id": "p1", "title": "Build"}],
+        "phases": [{"id": "p1", "title": "Build", "done": True}],
         "slices": [{"id": "s1", "phase": "phases/p1"}],
         "tasks": [
             {"id": "t1", "slice": "slices/s1", "state": "open"},
