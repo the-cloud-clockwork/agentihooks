@@ -1604,7 +1604,12 @@ def _spawn_order(
     return timing.timed(focus_budget.ordered, ranked, focus), waits
 
 
-def _ranked(slug, store, queue, dispatched):
+def _ranked(
+    slug: str,
+    store: RedisStore,
+    queue: list[tuple[int, str, dict[str, Any]]],
+    dispatched: Callable[[dict[str, Any]], tuple[Any, ...]] | None,
+) -> list[tuple[str, dict[str, Any]]]:
     demoted = _demoted(slug, store, [entry[2]["id"] for entry in queue])
     queue.sort(
         key=lambda entry: (
