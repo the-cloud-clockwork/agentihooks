@@ -112,7 +112,7 @@ def _abandoned(step: Step) -> None:
     writes = sorted(step.writes - {Domain(f"actions:{step.name}")})
     if writes:
         line = {"event": "swarm_tick_step_abandoned", "slug": timing.SWARM.get(), "step": step.name}
-        timing.emit(sys.stderr, json.dumps({**line, "budget_s": step.budget_s, "writes": writes}))
+        print(json.dumps({**line, "budget_s": step.budget_s, "writes": writes}), file=sys.stderr, flush=True)
 
 
 def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:

@@ -94,6 +94,14 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
         assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
 
 
+def test_a_write_step_runs_in_the_lane_it_is_given() -> None:
+    step = tasks.WriteStep("fleet red notice", tasks.REOPENS, lambda tick, get: [], lane=engine.SLOW)
+    assert (step.lane, tasks.WriteStep("rank pass", tasks.REOPENS, lambda tick, get: []).lane) == (
+        engine.SLOW,
+        CallStep.lane,
+    )
+
+
 def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     tick = _tick(calls)
