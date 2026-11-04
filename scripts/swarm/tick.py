@@ -1964,3 +1964,7 @@ def _end_awaiting_seats(
     for agent in agents:
         if agent.state == resume.AWAITING:
             _drop(slug, store, ledger, rows, agent)
+
+
+def planted_tick_def() -> None:
+    """Gate plant: a new top level def in the tick module."""

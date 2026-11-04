@@ -121,6 +121,7 @@
   "def host_spent",
   "def place_master",
   "def placed_record",
+  "def planted_tick_def",
   "def primed",
   "def ready_in_order",
   "def respawn_master",
@@ -435,6 +436,10 @@
   "step time left: no effects",
   "step time left: no feature",
   "step time left: no writes"
+ ],
+ "scripts/tick/steps/planted.py": [
+  "import scripts.inbox",
+  "step planted_step: no budget row"
  ],
  "scripts/tick/steps/report.py": [
   "step bottleneck status: no effects",
