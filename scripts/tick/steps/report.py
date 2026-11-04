@@ -111,17 +111,9 @@ def _stall_watch(cli: Any, get: Get) -> Any:
 
 
 def _overrun(cli: Any, get: Get) -> Any:
-    slug, runtime = get("slug"), get("runtime")
     return cli.skip_refused(
         overrun.overrun_pass,  # pyright: ignore[reportUnknownMemberType]
-        overrun.Watch(
-            get("store"),
-            slug,
-            get("ledger"),
-            frozenset(get("box")["live"]),
-            lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
-            cli.now_ms(),
-        ),
+        overrun.Watch(get("store"), get("slug"), frozenset(get("box")["live"]), cli.now_ms()),
         get("doc"),
     )
 

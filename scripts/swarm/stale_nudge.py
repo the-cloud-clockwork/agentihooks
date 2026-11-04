@@ -1,4 +1,5 @@
-"""Tick stale check: one inbox item per stale swarm agent per ten minutes of silence, never a typed prompt."""
+"""Tick stale check: one inbox item per stale swarm agent per ten minutes of silence, and one cache warm check per
+forty minutes of silence inside a declared named wait, never a typed prompt."""
 
 import hashlib
 
@@ -7,9 +8,11 @@ from scripts.swarm import idle
 from scripts.swarm.store import AgentRecord
 
 LIMIT_MS = 10 * 60_000
+CACHE_LIMIT_MS = 40 * 60_000
 FRESH_MS = 2 * 60_000
 SENDER = "swarm"
 REF = "stale-nudge"
+CACHE_REF = "cache-warm"
 LAST = "stale-nudged"
 IDLE_REASON = "no activity from you for over ten minutes"
 ERROR_REASON = "your pane shows a provider error"
@@ -19,6 +22,7 @@ TEXT = (
     "with agentihooks swarm {slug} wait --on and the thing that ends it. Close this message with agentihooks msg close "
     "and its id, done."
 )
+CACHE_TEXT = "Cache warm check on swarm {slug}: reply in one line and keep your wait on {task}; no other action."
 
 
 def last_activity(beat: dict | None, agent: AgentRecord) -> int:
@@ -36,12 +40,30 @@ def stale(beat: dict | None, last_ms: int, wait: dict | None, provider_error: st
     return silent
 
 
+def cache_due(wait: dict[str, object] | None, last_ms: int, now_ms: int) -> bool:
+    if not wait:
+        return False
+    until = wait.get("until", 0)
+    reason = wait.get("reason", "")
+    named = bool(wait.get("on")) or bool(str(reason).strip())
+    return isinstance(until, int) and until > now_ms and named and now_ms - last_ms > CACHE_LIMIT_MS
+
+
+def _window(limit_ms: int, last_ms: int, now_ms: int) -> int:
+    return (now_ms - last_ms) // limit_ms
+
+
 def window(last_ms: int, now_ms: int) -> int:
-    return (now_ms - last_ms) // LIMIT_MS
+    return _window(LIMIT_MS, last_ms, now_ms)
 
 
 def item_id(slug: str, name: str, last_ms: int, now_ms: int) -> str:
     key = f"{REF}:{slug}:{name}:{last_ms}:{window(last_ms, now_ms)}"
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
+def cache_item_id(slug: str, name: str, last_ms: int, now_ms: int) -> str:
+    key = f"{CACHE_REF}:{slug}:{name}:{last_ms}:{_window(CACHE_LIMIT_MS, last_ms, now_ms)}"
     return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
@@ -54,11 +76,24 @@ def interrupts(item: Item, now_ms: int) -> bool:
     return is_nudge(item) and now_ms - item.created_at <= FRESH_MS
 
 
+def _send_cache_warm(inbox: InboxStore, slug: str, agent: AgentRecord, last_ms: int, now_ms: int) -> list[str]:
+    nudge_id = cache_item_id(slug, agent.name, last_ms, now_ms)
+    text = CACHE_TEXT.format(slug=slug, task=agent.task)
+    try:
+        item = inbox.send(SENDER, agent.name, text, ref=f"{CACHE_REF}:{nudge_id}", task=agent.task, item_id=nudge_id)
+    except DuplicateItem:
+        return []
+    return [f"sent {agent.name} a cache warm check through its inbox as message {item.id}"]
+
+
 def nudge(inbox: InboxStore, slug: str, agent: AgentRecord, provider_error: str, now_ms: int) -> list[str]:
     redis = inbox.redis
     beat = idle.heartbeat(redis, slug, agent.name)
     last_ms = last_activity(beat, agent)
-    if not stale(beat, last_ms, idle.wait(redis, slug, agent.name), provider_error, now_ms):
+    wait = idle.wait(redis, slug, agent.name)
+    if not stale(beat, last_ms, wait, provider_error, now_ms):
+        if cache_due(wait, last_ms, now_ms):
+            return _send_cache_warm(inbox, slug, agent, last_ms, now_ms)
         return []
     reason = ERROR_REASON if provider_error else IDLE_REASON
     nudge_id = item_id(slug, agent.name, last_ms, now_ms)
