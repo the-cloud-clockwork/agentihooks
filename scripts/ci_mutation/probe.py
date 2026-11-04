@@ -88,7 +88,9 @@ def worker_failure(work: Path, reason: str) -> RuntimeError:
 
 def refusals(owned: set[str], rows: dict[str, str], seconds: float, budget: float) -> str:
     """Name every reason an early shard's grading is refused, or return an empty string when it is complete."""
-    statuses = Counter(status for name, status in rows.items() if name in owned and status not in {"killed", "survived"})
+    statuses = Counter(
+        status for name, status in rows.items() if name in owned and status not in {"killed", "survived"}
+    )
     parts = [", ".join(f"{count} {status}" for status, count in sorted(statuses.items()))]
     parts.append(f"{len(owned - set(rows))} without a result" if owned - set(rows) else "")
     parts.append(f"{len(set(rows) - owned)} not assigned to this shard" if set(rows) - owned else "")
