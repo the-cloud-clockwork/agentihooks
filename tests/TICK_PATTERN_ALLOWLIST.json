@@ -91,6 +91,7 @@
   "def _retry_successor",
   "def _room_refused",
   "def _room_wait",
+  "def _running",
   "def _settle",
   "def _settle_admission",
   "def _shared",
