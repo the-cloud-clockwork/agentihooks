@@ -118,18 +118,19 @@ def test_an_outage_holds_every_step(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "swarm",
+    "setup",
     [
-        Swarm(agent=AgentRecord(OWNER, MASTER, "t1", started_at=START)),
-        Swarm(task={"claimed_by": "engineer@abc-0002"}),
-        Swarm(task={"state": "open"}),
-        Swarm(live=False),
-        Swarm(agent=AgentRecord(OWNER, "eng", "t1", seat=SEAT)),
-        Swarm(agent=AgentRecord(OWNER, "eng", "", seat=SEAT, started_at=START)),
+        {"agent": AgentRecord(OWNER, MASTER, "t1", started_at=START)},
+        {"task": {"claimed_by": "engineer@abc-0002"}},
+        {"task": {"state": "open"}},
+        {"live": False},
+        {"agent": AgentRecord(OWNER, "eng", "t1", seat=SEAT)},
+        {"agent": AgentRecord(OWNER, "eng", "", seat=SEAT, started_at=START)},
     ],
     ids=["a-master", "off-its-claim", "task-open", "dead-pane", "no-seat", "no-task"],
 )
-def test_a_master_an_agent_off_its_claim_or_a_dead_pane_is_skipped(swarm):
+def test_a_master_an_agent_off_its_claim_or_a_dead_pane_is_skipped(setup):
+    swarm = Swarm(**setup)
     assert swarm.tick(FAR_PAST) == []
     assert swarm.master() == []
 

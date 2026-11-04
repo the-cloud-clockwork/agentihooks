@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -9,6 +8,8 @@ from tests.swarm.test_tick import IDLER, STALE_MS, spawned, stale_nudges, tick
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     s = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     return s
