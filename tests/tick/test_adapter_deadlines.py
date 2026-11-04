@@ -170,20 +170,23 @@ def test_github_refuses_an_expired_deadline_before_its_call(name: str, monkeypat
     assert str(raised.value) == "tool deadline expired"
 
 
+BOOM: Any = _Boom()
+
+
 OTHER_CALLS: dict[str, Callable[[], object]] = {
-    "runtime.inspect": lambda: RouterRuntime(_Boom(), _Boom(), _Boom(), _Boom()).inspect("a", deadline=EXPIRED),
-    "runtime.launch": lambda: RouterRuntime(_Boom(), _Boom(), _Boom(), _Boom()).launch({}, deadline=EXPIRED),
-    "runtime.stop": lambda: RouterRuntime(_Boom(), _Boom(), _Boom(), _Boom()).stop("a", deadline=EXPIRED),
-    "runtime.panes": lambda: RouterRuntime(_Boom(), _Boom(), _Boom(), _Boom()).panes(deadline=EXPIRED),
-    "inbox.read": lambda: StoreInbox(_Boom(), "swarm").read("a", deadline=EXPIRED),
-    "inbox.send": lambda: StoreInbox(_Boom(), "swarm").send("a", "b", deadline=EXPIRED),
-    "inbox.close": lambda: StoreInbox(_Boom(), "swarm").close("i", "done", deadline=EXPIRED),
-    "host.read": lambda: JobHost({"x": _Boom()}, {}).read("x", deadline=EXPIRED),
-    "host.run": lambda: JobHost({}, {"x": _Boom()}).run({"job": "x"}, deadline=EXPIRED),
-    "metrics.emit": lambda: SpoolMetrics(_Boom(), {}).emit({}, deadline=EXPIRED),
-    "llm.classify": lambda: ApiLlm("m", "u", _Boom()).classify({}, deadline=EXPIRED),
-    "processes.scan": lambda: PassProcesses(_Boom()).scan(deadline=EXPIRED),
-    "processes.rescan": lambda: PassProcesses(_Boom()).rescan(deadline=EXPIRED),
+    "runtime.inspect": lambda: RouterRuntime(BOOM, BOOM, BOOM, BOOM).inspect("a", deadline=EXPIRED),
+    "runtime.launch": lambda: RouterRuntime(BOOM, BOOM, BOOM, BOOM).launch({}, deadline=EXPIRED),
+    "runtime.stop": lambda: RouterRuntime(BOOM, BOOM, BOOM, BOOM).stop("a", deadline=EXPIRED),
+    "runtime.panes": lambda: RouterRuntime(BOOM, BOOM, BOOM, BOOM).panes(deadline=EXPIRED),
+    "inbox.read": lambda: StoreInbox(BOOM, "swarm").read("a", deadline=EXPIRED),
+    "inbox.send": lambda: StoreInbox(BOOM, "swarm").send("a", "b", deadline=EXPIRED),
+    "inbox.close": lambda: StoreInbox(BOOM, "swarm").close("i", "done", deadline=EXPIRED),
+    "host.read": lambda: JobHost({"x": BOOM}, {}).read("x", deadline=EXPIRED),
+    "host.run": lambda: JobHost({}, {"x": BOOM}).run({"job": "x"}, deadline=EXPIRED),
+    "metrics.emit": lambda: SpoolMetrics(BOOM, {}).emit({}, deadline=EXPIRED),
+    "llm.classify": lambda: ApiLlm("m", "u", BOOM).classify({}, deadline=EXPIRED),
+    "processes.scan": lambda: PassProcesses(BOOM).scan(deadline=EXPIRED),
+    "processes.rescan": lambda: PassProcesses(BOOM).rescan(deadline=EXPIRED),
 }
 
 
