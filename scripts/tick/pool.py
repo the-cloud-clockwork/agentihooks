@@ -119,7 +119,7 @@ class Pass:
     def lane(self, name: str) -> Deadline:
         """Return the deadline of lane ``name``: the slow lane's, the closing lane's, else the critical lane's."""
         if name == CLOSING_LANE:
-            return self.close()
+            return self.critical
         return self.slow if name == SLOW_LANE else self.critical
 
 
