@@ -47,12 +47,15 @@ def floors(source: str) -> dict[str, str]:
     """The interval name each step row of the budgets source declares, keyed by step name."""
     rows: dict[str, str] = {}
     for node in ast.walk(ast.parse(source)):
-        target = node.target if isinstance(node, ast.AnnAssign) else None
-        if isinstance(node, ast.Assign) and len(node.targets) == 1:
-            target = node.targets[0]
-        if not (isinstance(target, ast.Name) and target.id == "MEASURED" and isinstance(node.value, ast.Dict)):
+        if isinstance(node, ast.AnnAssign):
+            target, table = node.target, node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, table = node.targets[0], node.value
+        else:
             continue
-        for key, value in zip(node.value.keys, node.value.values, strict=True):
+        if not (isinstance(target, ast.Name) and target.id == "MEASURED" and isinstance(table, ast.Dict)):
+            continue
+        for key, value in zip(table.keys, table.values, strict=True):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
             args = value.args if isinstance(value, ast.Call) else []
@@ -71,7 +74,9 @@ def steps(tree: ast.Module, rows: dict[str, str]) -> list[str]:
     """Offences of every step registered with a literal name in tree against the budget rows."""
     found: list[str] = []
     for node in ast.walk(tree):
-        callee = _callee(node) if isinstance(node, ast.Call) else ""
+        if not isinstance(node, ast.Call):
+            continue
+        callee = _callee(node)
         if not callee or not node.args:
             continue
         first = node.args[0]
