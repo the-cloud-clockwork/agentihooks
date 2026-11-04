@@ -229,7 +229,9 @@ def run_group(name: str, **state: Any) -> list[str]:
     ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
     box: Mapping[str, object] = state.get("box", {})
     printing = partial(_print_actions, box)
-    return steps.actions(engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=printing))
+    records = engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=printing)
+    steps.note_left(box, records)
+    return steps.actions(records)
 
 
 def _print_actions(box: Mapping[str, object], records: tuple[engine.StepRecord, ...]) -> None:
@@ -2017,9 +2019,14 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
         controller.release_tick_lock(store, slug, token)
 
 
-def _settle(slug, config, store, ledger, rows, doc):
+def _settle(
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], doc: Any
+) -> list[str]:
     agents = store.agents(slug)
     if config.state == "stopping":
+        if not any(a.lane == MASTER and a.state != "finished" for a in agents):
+            _end_awaiting_seats(slug, store, ledger, rows, agents)
+            agents = [a for a in agents if a.state != resume.AWAITING]
         if agents:
             return []
         store.update(slug, state="stopped")
@@ -2033,3 +2040,11 @@ def _settle(slug, config, store, ledger, rows, doc):
     waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
     ledger.notify(slug, freeze.notice(doc, rows.values(), freeze.fix_phase(config)) + waiting)
     return ["drained"]
+
+
+def _end_awaiting_seats(
+    slug: str, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], agents: list[AgentRecord]
+) -> None:
+    for agent in agents:
+        if agent.state == resume.AWAITING:
+            _drop(slug, store, ledger, rows, agent)

@@ -210,6 +210,15 @@ def _heartbeat(cli: Any, get: Get) -> None:
     tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))  # pyright: ignore[reportUnknownMemberType]
 
 
+def early_end(store: Any, slug: str, at: int, doc: Any, missing: KeyError, left: list[str]) -> list[str]:
+    """Write last tick and the heartbeat of a pass that ended early because no step stored ``missing``, returning the
+    line naming that value and the ``left`` steps of the pass."""
+    store.redis.set(store.key(slug, "last-tick"), at)
+    tick_heartbeat.write(store, slug, at, doc)  # pyright: ignore[reportUnknownMemberType]
+    steps = ", ".join(dict.fromkeys(left)) or "no recorded step"
+    return [f"pass ended early: no step stored {missing.args[0]}, the pass left {steps}"]
+
+
 def _status_publish(cli: Any, get: Get) -> None:
     """Publish the tick status with the health findings this pass already found, when the health step found them."""
     found = get("box").get("found")

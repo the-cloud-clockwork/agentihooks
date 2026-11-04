@@ -142,6 +142,18 @@
       ]
     },
     {
+      "id": "swarm-tick-early-end-stamp",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-early-end-stamp",
+      "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick.",
+      "seam": "scripts.swarm.cli.run_tick ending on scripts.tick.steps.Left, with the left step names kept on scripts.tick.steps.PassBox",
+      "tests": [
+        "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
+        "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
+        "tests/tick/test_early_end.py::test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once"
+      ]
+    },
+    {
       "id": "swarm-tick-late-view",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2334",
@@ -933,12 +945,15 @@
     {
       "id": "ledger-event-relay",
       "origin": "inventory",
-      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order, and a crash between publish and mark never duplicates an event.",
+      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
       "seam": "The ledger outbox relay",
       "tests": [
         "tests/swarm_ledger/test_outbox_relay.py::test_the_relay_publishes_each_unsent_row_on_its_subject_with_the_row_id_and_marks_it_sent",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_sent_row_is_never_published_again",
-        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event"
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data"
       ]
     },
     {
