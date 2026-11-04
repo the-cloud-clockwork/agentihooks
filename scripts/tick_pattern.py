@@ -5,7 +5,8 @@ missing a budget row, an interval from the set, a lane or a needs, reads, writes
 declaration, and each import of an adapted implementation from a module outside the adapters. Only files
 whose text the head changes against the base grade, every file when the budgets table changes, so a stale
 entry for an untouched file never fails. A changed file may hold only offences its base allowlist or its base
-measurement holds for it, and its head record must match its measurement.
+measurement holds for it, and its head record must match its measurement; an unchanged file's head record
+may hold only what those hold.
 """
 
 import argparse
@@ -125,7 +126,6 @@ def names(tree: ast.Module) -> list[str]:
 
 def scoped(tree: Path) -> dict[str, str]:
     """Text of each tracked graded file of tree, keyed by its path name."""
-    tree = tree.resolve()
     named = ((path.relative_to(tree).as_posix(), path) for path in files(tree))
     return {name: path.read_text() for name, path in named if name.startswith(SCOPE)}
 
@@ -177,14 +177,16 @@ def grade(
     changed: set[str],
     held: dict[str, list[str]],
 ) -> list[str]:
-    """Reject offences in a changed file that neither the base allowlist nor the base measurement held holds, and a
-    changed file whose head record differs from its measurement; a base without an allowlist allows what the head
-    records."""
+    """Reject offences in a changed file and records of an unchanged one that neither the base allowlist nor the
+    base measurement held holds, and a changed file whose head record differs from its measurement; a base without
+    an allowlist allows what the head records."""
     allowed = (recorded or {}) if base is None else base
+    graded = {name: head.get(name, []) for name in changed}
+    graded |= {name: offences for name, offences in (recorded or {}).items() if name not in changed}
     errors = [
         f"{name} adds {offence}; the base allowlist does not hold it"
-        for name in sorted(changed)
-        for offence in head.get(name, [])
+        for name, offences in sorted(graded.items())
+        for offence in offences
         if offence not in allowed.get(name, []) and offence not in held.get(name, [])
     ]
     if recorded is None or any(recorded.get(name) != head.get(name) for name in changed):

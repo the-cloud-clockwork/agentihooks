@@ -49,6 +49,7 @@ def test_a_fully_declared_step_is_clean(tmp_path: Path) -> None:
     ("source", "offences"),
     [
         (FULL.replace('"beat"', '"lost"'), ["step lost: no budget row"]),
+        (FULL.replace('"beat"', '"lost"') * 2, ["step lost: no budget row"]),
         (FULL.replace('"beat"', '"odd"'), ["step odd: interval outside CRITICAL_S, WIDE_S, SLOW_S"]),
         ('CallStep("beat", "g", call, n, r, w, l, effects=e, feature="f")\n', []),
         ('WriteStep("beat", "g", call, w, n, r, lane=l, effects=e, feature="f")\n', []),
@@ -218,12 +219,27 @@ def test_floors_reads_only_the_measured_table() -> None:
     assert tick_pattern.floors(source) == {"a": "SLOW_S", "b": ""}
 
 
-def test_a_stale_entry_for_an_untouched_file_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_an_untouched_file_whose_record_is_stale_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     lost = FULL.replace('"beat"', '"lost"')
     base = _recorded(tmp_path / "base", {tick_pattern.TICK: TICK, STEP: lost})
     head = _tree(tmp_path / "head", {tick_pattern.TICK: TICK, STEP: lost, "scripts/tick/steps/two.py": FULL})
     (head / tick_pattern.ALLOWLIST).write_text(json.dumps({tick_pattern.TICK: ["def run_tick"]}))
     assert _grade(base, head, capsys) == (0, "2 tick pattern offences in 2 files, 2 on the base allowlist, 0 errors\n")
+
+
+def test_a_padded_record_for_an_untouched_file_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {STEP: FULL})
+    head = _tree(tmp_path / "head", {STEP: FULL, tick_pattern.TICK: "X = 1\n"})
+    (head / tick_pattern.ALLOWLIST).write_text(json.dumps({STEP: ["step fake: no budget row"]}))
+    assert _grade(base, head, capsys) == (
+        1,
+        "0 tick pattern offences in 0 files, 0 on the base allowlist, 1 errors\n"
+        f"::error::{STEP} adds step fake: no budget row; the base allowlist does not hold it\n",
+    )
+
+
+def test_a_tree_without_a_budgets_table_has_no_budget_rows() -> None:
+    assert tick_pattern.measured({STEP: FULL}) == {STEP: ["step beat: no budget row"]}
 
 
 def test_a_changed_file_may_keep_an_offence_its_base_already_held(
