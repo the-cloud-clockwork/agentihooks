@@ -13,7 +13,10 @@ request may remove offences, never add one its base does not already hold.
 The gate shipped in
 [pull request 9658](https://github.com/the-cloud-clockwork/agentihooks/pull/9658);
 [pull request 9705](https://github.com/the-cloud-clockwork/agentihooks/pull/9705)
-narrowed grading to the files a pull request touches.
+narrowed grading to the files a pull request touches;
+[pull request 9726](https://github.com/the-cloud-clockwork/agentihooks/pull/9726)
+removed the bootstrap path, so a base without the allowlist and a dev without
+the grader both fail.
 
 ## What it measures
 
@@ -139,15 +142,21 @@ The lint job of the Tests workflow runs the gate in the step
 ```bash
 if [[ -f "$RUNNER_TEMP/grader/scripts/tick_pattern.py" ]]; then
   cd "$RUNNER_TEMP/grader"
+  python -m scripts.tick_pattern --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+else
+  echo "::error::dev carries no scripts/tick_pattern.py, so nothing trusted can grade."
+  exit 1
 fi
-python -m scripts.tick_pattern --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 ```
 
 `$RUNNER_TEMP/base` is the merge base of the head with the event base
 (`origin/dev` for a pull request into `dev`).
 `$RUNNER_TEMP/grader` is the protected copy checked out at the pull request
-base, so a pull request cannot loosen the grader that grades it; before the
-base carried `scripts/tick_pattern.py`, the head's copy graded.
+base, so a pull request cannot loosen the grader that grades it. Only that
+copy grades. When the protected copy has no `scripts/tick_pattern.py`, the
+step prints the error above and fails; the head's own copy never grades
+itself, so deleting or renaming the grader on `dev` turns every pull request
+red until it is restored.
 
 ### Which files grade
 
@@ -160,6 +169,10 @@ its text did not change.
 
 ### What fails
 
+- The base has no `tests/TICK_PATTERN_ALLOWLIST.json`. Grading stops at this
+  error: no file is graded and no other error is reported, because without a
+  base list there is nothing to hold the head against. A head allowlist does
+  not stand in for the missing base one.
 - A touched file holds an offence that neither the base allowlist nor the
   base measurement holds for it. The base measurement counts so that a file
   may keep an offence it already had when the base allowlist missed it.
@@ -172,8 +185,12 @@ its text did not change.
   requires removing its line in the same change, which is how the list
   shrinks.
 
-A base without an allowlist allows what the head records. That rule let the
-gate land with its first allowlist.
+Before pull request 9726 a base without an allowlist allowed whatever the
+head recorded, and a `dev` without the grader let the head's copy grade. Both
+rules existed only so the gate could land with its first allowlist, and both
+are gone, in the same way the
+[whole ledger state gate](tick-ledger-view.md#the-whole-ledger-state-gate)
+dropped its bootstrap.
 
 ### Output
 
@@ -188,6 +205,14 @@ One summary line, then one `::error::` line per error, exit 1 on any error:
 1 tick pattern offences in 1 files, 0 on the base allowlist, 2 errors
 ::error::scripts/tick/steps/one.py adds step beat: no budget row; the base allowlist does not hold it
 ::error::tests/TICK_PATTERN_ALLOWLIST.json differs from the head's measurement; run python -m scripts.tick_pattern --write
+```
+
+A base without the allowlist still prints the summary, with `0 on the base
+allowlist` and exactly one error:
+
+```
+1 tick pattern offences in 1 files, 0 on the base allowlist, 1 errors
+::error::tests/TICK_PATTERN_ALLOWLIST.json is missing from the base
 ```
 
 A graded file or budgets file that does not parse, a failed `git ls-files`,
@@ -280,7 +305,7 @@ each offence kind for `CallStep`, `WriteStep` and `register`, positional and
 keyword; a new tick module `def`, a planted banned import and relative import
 resolution are red; adapters and the tick module may import adapted modules;
 a pull request cannot allowlist its own offence; kept and removed offences
-are green; a base without an allowlist; files outside the scope; the written
+are green; a base without an allowlist is red; files outside the scope; the written
 JSON format; parse failures; a stale record for an untouched file is green
 and a padded one red; a changed file keeping an offence its base held; and a
 budgets change grading the step files whose measurement it moves.
@@ -297,3 +322,5 @@ budgets change grading the step files whose measurement it moves.
 | `TICK_PATTERN_ALLOWLIST.json differs from the head's measurement` | Run `python -m scripts.tick_pattern --write` and commit the allowlist with the code |
 | A file you did not touch is listed red | Its measurement moved, usually through a budgets row change, or the head allowlist adds an offence to its record |
 | `::error::cannot parse <file>` with no summary | Fix the syntax error in that graded file |
+| `TICK_PATTERN_ALLOWLIST.json is missing from the base` | The merge base lacks the allowlist: merge current `dev` into the branch, or restore the allowlist on `dev` through its own pull request first; adding it only on the head does not help |
+| `dev carries no scripts/tick_pattern.py, so nothing trusted can grade.` | The protected copy at the pull request base lacks the grader; restore `scripts/tick_pattern.py` on `dev`, then close and reopen the pull request so its base names that `dev` |
