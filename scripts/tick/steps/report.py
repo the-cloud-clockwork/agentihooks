@@ -220,7 +220,9 @@ def early_end(store: Any, slug: str, at: int, doc: Any, missing: KeyError, left:
 
 
 def _status_publish(cli: Any, get: Get) -> None:
-    cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"))
+    """Publish the tick status with the health findings this pass already found, when the health step found them."""
+    found = get("box").get("found")
+    cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"), found)
 
 
 STEPS = (
