@@ -109,7 +109,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
         {"pattern": '["gh", ...]'},
         {"pattern": "scripts.tick.adapters.github.command(...)"},
     ]
-    assert rule["paths"]["include"] == ["/scripts/swarm/**", "*.test.py"]
+    assert rule["paths"]["include"] == ["/scripts/swarm/**", "/scripts/tick/**", "*.test.py"]
     allowed = json.loads((_ROOT / ".semgrep/source-control-allowlist.json").read_text())
     assert rule["paths"]["exclude"] == allowed
     assert "/scripts/tick/adapters/github.py" in allowed
