@@ -15,12 +15,13 @@ def _task_state(task: dict[str, Any]) -> str:
 
 
 def _phase_of(node: str | None, nodes: Nodes) -> str | None:
-    """The phase node above ``node`` in the projected hierarchy, or nothing when no phase holds it."""
-    seen: set[str] = set()
-    while node is not None and node in nodes and node not in seen:
+    """The phase node above ``node`` in the projected hierarchy, or nothing when no phase holds it within as many
+    steps as the hierarchy has nodes."""
+    for _ in nodes:
+        if node not in nodes:
+            return None
         if nodes[node][0] == "phase":
             return node
-        seen.add(node)
         node = nodes[node][1]
     return None
 
