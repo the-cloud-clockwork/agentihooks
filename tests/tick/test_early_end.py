@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, reboot, tick_heartbeat
+from scripts.swarm.health import early_ends
 from scripts.swarm.store import RedisStore
 from scripts.tick import engine
 from scripts.tick.step import Context
@@ -73,8 +74,6 @@ def test_a_pass_box_shares_the_names_of_the_steps_its_pass_left() -> None:
 )
 def test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once(left: list[str], named: str) -> None:
     import fakeredis
-
-    from scripts.swarm.health import early_ends
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     found = report.early_end(store, "sw", Left("agents"), left)
