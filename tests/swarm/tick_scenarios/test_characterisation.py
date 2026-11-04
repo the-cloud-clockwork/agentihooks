@@ -134,7 +134,6 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     monkeypatch.setattr(merge_stall, "request", github_reply)
 
-    importlib.import_module("scripts.hive.daemon")
     monkeypatch.setattr(commands, "hive_id", lambda: "fixture-hive")
     monkeypatch.setattr(incidents.socket, "gethostname", lambda: "fixture-host")
     monkeypatch.setattr(reboot, "boot_id", lambda: "00000000-0000-0000-0000-000000000001")

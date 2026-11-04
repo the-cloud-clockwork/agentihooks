@@ -138,7 +138,6 @@ def load(monkeypatch: pytest.MonkeyPatch, slowdown_s: float = 0.0) -> dict[str, 
     clock = VirtualClock()
     virtual = VirtualTime(clock)
     monkeypatch.setattr(merge_stall, "request", github_reply)
-    importlib.import_module("scripts.hive.daemon")
     monkeypatch.setattr(commands, "hive_id", lambda: "fixture-hive")
     monkeypatch.setattr(incidents.socket, "gethostname", lambda: "fixture-host")
     monkeypatch.setattr(reboot, "boot_id", lambda: "00000000-0000-0000-0000-000000000001")
