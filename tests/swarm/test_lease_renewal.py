@@ -272,7 +272,10 @@ def test_keep_tick_refuses_a_tick_lock_it_no_longer_holds(store, clock):
     store.redis.set(store.key("sw", "tick-lock"), "another tick", px=1000)
     with pytest.raises(SwarmError) as error:
         controller.keep_tick(store, "sw", held, "this tick", 600000)
-    assert str(error.value) == "the tick lock is stale"
+    assert str(error.value) == (
+        "the tick lock is stale: unnamed expected token this tic, held by epoch unknown host unknown"
+        " pid unknown start unknown token another "
+    )
     assert store.redis.pttl(store.key("sw", "tick-lock")) <= 1000
 
 

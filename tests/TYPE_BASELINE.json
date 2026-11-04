@@ -572,7 +572,7 @@
   "scripts/swarm/context_view.py": 112,
   "scripts/swarm/continuation.py": 42,
   "scripts/swarm/control_notifications.py": 8,
-  "scripts/swarm/controller.py": 283,
+  "scripts/swarm/controller.py": 278,
   "scripts/swarm/controller_probes.py": 11,
   "scripts/swarm/dead_resume.py": 51,
   "scripts/swarm/default_models.py": 9,
