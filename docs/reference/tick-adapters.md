@@ -893,31 +893,34 @@ look at the placement reads in the table above.
 ### Timed rows inside spawn order
 
 `_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
-`scripts.swarm.tick._spawn_order`. Every part it runs is timed through `timing.timed`, so each part has a row of its
-own nested inside that one. Once per pass it reads the capacity decision and the lane caps, the dispatched claim key
-and the claim view; then, for each lane in the caps, it runs four parts in this order:
+`scripts.swarm.tick._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
+while `_spawn_order` runs. Once per spawn order it times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`,
+`scripts.swarm.dispatcher.claim_key`, `scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for
+each lane in the caps, it times three parts in this order:
 
 | Step row | Runs | Times |
 |---|---|---|
 | `scripts.swarm.tick._running` | Once per lane | The running agent filter: the task rows of the lane's agents that have not ended and still own their task. Its length is the lane's busy count, which offsets the rank of every task queued for the lane |
 | `scripts.swarm.tick.ready_in_order` | Once per lane | The lane's ready tasks in ledger or dispatched order |
-| `scripts.swarm.focus_budget.place` | Once per lane | Focus budget placement: which ready tasks fit the lane cap after the running ones, and which wait. Every `profile_first.placeable` call it makes runs inside this row |
-| `scripts.swarm.profile_first.placeable` | Twice per lane, from inside focus placement: once for the ready tasks outside the focus queue, once for the focused ones | Which of those tasks the runtime can place in the lane, up to the free room, and which are refused |
+| `scripts.swarm.focus_budget.place` | Once per lane | Focus budget placement: which ready tasks fit the lane cap after the running ones, and which wait. It includes its two `profile_first.placeable` rows |
 
-After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue once. A pass over a swarm with two lanes
-therefore adds two `_running` rows and two `focus_budget.place` rows, so each of their counts in the report is the
-number of spawn order rows times the number of lanes.
+`focus_budget.place` locates tasks through `scripts.swarm.profile_first.placeable` twice per lane: once for the ready
+tasks outside the focus queue, once for the focused ones. Each `placeable` row in turn holds one
+`scripts.swarm.profile_first.decided` row and one `scripts.swarm.seat_spawn.placed_elsewhere` row for every task it
+checks, until the lane's free room is filled. After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue once.
 
-Before these rows, a pass could spend twenty one seconds in spawn order while no timed row inside it went over two
-seconds, which left the spawn p95 near thirty one seconds with no row naming where the time went. Read the rows with:
+Over a window recorded entirely after pull request 9673 merged, `_running`, `ready_in_order` and `focus_budget.place`
+have equal counts, one per lane per spawn order, and `placeable` has twice that count.
+
+Read the rows with:
 
 ```bash
 agentihooks swarm <swarm slug> tick-report --passes 60 \
-  | grep -E '_spawn_order|_running|focus_budget|placeable|ready_in_order|_ranked|claim_view'
+  | grep -E 'capacity|claim_key|yielding|claim_view|_spawn_order|_running|ready_in_order|focus_budget|profile_first|placed_elsewhere|_ranked'
 ```
 
-On the workstation tick of `rig-grade-swarm`, at 15:04 UTC on 4 November 2026, after pull request 9673 merged, the
-command printed:
+A snapshot of the spawn order rows from the workstation tick of `rig-grade-swarm`, at 15:04 UTC on 4 November 2026,
+after pull request 9673 merged, with three lanes:
 
 ```text
 scripts.swarm.focus_budget.place  138  0.054s  1.585s  0.18%
@@ -929,20 +932,24 @@ scripts.swarm.tick.claim_view  71  0.050s  0.196s  0.02%
 scripts.swarm.tick.ready_in_order  213  0.111s  2.357s  0.80%
 ```
 
-The columns are count, median, p95 and CPU share; see [Tick report](tick-report.md#output). Rows nest, so a part's
-time also counts in `_spawn_order`, and `placeable` time also counts in `focus_budget.place`.
+The columns are count, median, p95 and CPU share; see [Tick report](tick-report.md#output). The window began before
+the merge: its 71 spawn orders over three lanes gave 213 `ready_in_order` and 426 `placeable` rows, while `_running`
+and `focus_budget.place`, which the merge added, have rows only from the passes after it. Rows nest, so a part's time
+also counts in `_spawn_order`, and `placeable` time also counts in `focus_budget.place`.
+
+Compare totals, count times median, of the same window; percentiles do not add.
 
 | What the report shows | Where the time goes |
 |---|---|
-| `_spawn_order` p95 well above the sum of its parts' p95 | Time outside the timed parts: the runtime's `begin_placement_pass`, the readiness and decision filters on the ready list, or the final focus sort. None of these has a row |
-| `focus_budget.place` close to `_spawn_order` | Placement is the slow part; compare it with `placeable`. When `placeable` is small, the time is in focus placement itself |
-| `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter reads no store, so it grows only with those |
-| `ready_in_order` or `claim_view` close to `_spawn_order` | The ledger reads behind the ready list and the claim view are the slow part |
+| The `_spawn_order` total well above the summed totals of its directly timed parts | Time in untimed code: the runtime's `begin_placement_pass`, the `readiness.tick_launches` and capacity decision task filters on each ready list, `focus_budget.ranks` and the final focus sort |
+| The `focus_budget.place` total close to the `_spawn_order` total | Placement is the slow part; compare it with the `placeable` total. When `placeable` is small, the time is in focus placement itself |
+| `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter makes no store or network call, so it grows only with those |
+| The `ready_in_order` or `claim_view` total close to the `_spawn_order` total | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
 
-`tests/swarm/test_spawn_timing.py` holds the contract: a spawn pass times each part inside the spawn step, spawn order
-times the running filter and focus placement once per lane inside its own row, and the running filter keeps only the
-lane's agents that have not ended and still own their task, with a placeholder row for an agent whose task row is
-missing.
+`tests/swarm/test_spawn_timing.py` holds the contract. A spawn pass records a row for each part before the spawn step
+row ends. Spawn order records one `_running` and one `focus_budget.place` row per lane, each starting and ending
+inside the `_spawn_order` row. The running filter keeps only the lane's agents that have not ended and still own their
+task, with a placeholder row for an agent whose task row is missing.
 
 ## One lease heartbeat per tick pass
 
