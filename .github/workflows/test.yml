@@ -4138,6 +4138,28 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
+      - name: Download the branch preflight kill memory
+        if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        id: download-the-branch-preflight-kill-memory
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &mutation-download-the-branch-preflight-kill-memory
+          pattern: mutation-stats-killers
+          path: .mutation-stats
+          merge-multiple: true
+
+      - name: Download the branch preflight kill memory, wait before attempt 2
+        if: steps.download-the-branch-preflight-kill-memory.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the branch preflight kill memory failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the branch preflight kill memory, attempt 2
+        if: steps.download-the-branch-preflight-kill-memory.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-download-the-branch-preflight-kill-memory
+
       - name: Mutate the only shard in the statistics job
         id: mutate
         if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'

@@ -1,4 +1,5 @@
 import ast
+import fnmatch
 import hashlib
 import json
 import os
@@ -2264,6 +2265,23 @@ def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
         report["with"]["path"] == "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
     )
     assert names.index(mutate["name"]) < names.index(report["name"])
+
+
+def test_the_inline_statistics_shard_downloads_the_branch_preflight_kill_memory_before_it_mutates() -> None:
+    jobs = _mutation_workflow()["jobs"]
+    plan = jobs["mutation-plan"]["steps"]
+    upload = next(step for step in plan if step.get("with", {}).get("name") == "mutation-stats-killers")
+    assert upload["with"]["path"] == ".mutation-killers-restored/"
+    stats = jobs["mutation-stats"]["steps"]
+    names = [step.get("name") for step in stats]
+    download = stats[names.index("Download the branch preflight kill memory")]
+    assert download["with"] == {"pattern": "mutation-stats-killers", "path": ".mutation-stats", "merge-multiple": True}
+    assert download["if"] == stats[names.index("Mutate the only shard in the statistics job")]["if"]
+    assert names.index(download["name"]) < names.index("Mutate the only shard in the statistics job")
+    shard = jobs["mutation"]["steps"]
+    shared = next(step for step in shard if step.get("name") == "Download the shared mutation stats")
+    assert fnmatch.fnmatch("mutation-stats-killers", shared["with"]["pattern"])
+    assert shared["with"]["path"] == ".mutation-stats"
 
 
 def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
