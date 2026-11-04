@@ -1332,6 +1332,20 @@
         "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
         "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
       ]
+    },
+    {
+      "id": "claude-settings-additive-merge",
+      "origin": "inventory",
+      "behaviour": "agentihooks init merges its rendered settings into the existing ~/.claude/settings.json additively instead of replacing it: every operator key, including one added between runs, survives; a dict merges recursively; a list unions existing order first then the rendered entries with no duplicates; a key agentihooks stops rendering is removed on the next run. agentihooks uninstall removes only the leaf paths, list entries, hook groups, enabledPlugins entries and managed-by marker it recorded writing, leaving every operator key untouched.",
+      "seam": "scripts.targets.claude_target.ClaudeAdapter.write_settings and scripts.targets.claude_target.remove_managed_keys through scripts.install.uninstall_global",
+      "tests": [
+        "tests/test_claude_target.py::test_write_settings_keeps_unmanaged_user_keys_on_first_init",
+        "tests/test_claude_target.py::test_write_settings_second_run_keeps_a_key_added_between_runs",
+        "tests/test_claude_target.py::test_write_settings_merges_siblings_without_dropping_either_side",
+        "tests/test_claude_target.py::test_write_settings_removes_a_key_no_longer_rendered",
+        "tests/test_ownership_scope.py::TestSettingsRestore::test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins",
+        "tests/test_ownership_scope.py::TestSettingsRestore::test_install_then_uninstall_returns_user_settings_unchanged"
+      ]
     }
   ],
   "unmapped_rules": [

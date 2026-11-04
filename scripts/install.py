@@ -4729,11 +4729,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     print("======================")
     print("Will remove:")
     if remove_settings:
-        _sb = _load_state().get("settings_original_backup")
-        if _sb and Path(_sb).exists():
-            print(f"  {settings_path}  (restore pre-agentihooks original ← {Path(_sb).name})")
-        else:
-            print(f"  {settings_path}  (managed by agentihooks)")
+        print(f"  {settings_path}  (remove agentihooks-added keys; operator keys kept)")
     else:
         print(f"  {settings_path}  [SKIP — not managed or not found]")
     print(f"  {skills_dir}/  → {n_skills} symlink(s)")
@@ -4767,19 +4763,17 @@ def uninstall_global(args: argparse.Namespace) -> None:
             print("Aborted.")
             sys.exit(0)
 
-    # --- 3. Remove settings.json; restore the pre-agentihooks original ---
+    # --- 3. Remove settings.json keys agentihooks added; keep every operator key ---
     if remove_settings:
-        settings_path.unlink()
-        original = _load_state().get("settings_original_backup")
-        original_path = Path(original) if original else None
-        if original_path and original_path.exists():
-            shutil.copy2(original_path, settings_path)
-            _cprint(f"[OK] Restored pre-agentihooks {settings_path} from {original_path.name}")
-            st = _load_state()
-            st.pop("settings_original_backup", None)
-            _save_state(st)
+        from scripts.targets.claude_target import remove_managed_keys
+
+        if remove_managed_keys(settings_path):
+            _cprint(f"[OK] Removed agentihooks keys from {settings_path}; operator keys kept")
         else:
             _cprint(f"[OK] Removed {settings_path}")
+        st = _load_state()
+        st.pop("settings_original_backup", None)
+        _save_state(st)
     else:
         print(f"[--] Skipped {settings_path} (not managed)")
 

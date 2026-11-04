@@ -287,22 +287,78 @@ class TestSeparatorGuard:
 
 
 class TestSettingsRestore:
-    def test_uninstall_restores_the_pre_agentihooks_settings(self, home, monkeypatch):
+    @pytest.mark.feature("claude-settings-additive-merge")
+    def test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins(self, home, monkeypatch):
         import argparse
 
-        original = '{"permissions": {"allow": ["Bash(ls:*)"]}}'
-        backup = install.CLAUDE_HOME / "settings.json.bak.20260101_000000"
-        backup.write_text(original)
+        from scripts.targets import claude_target
+
         settings = install.CLAUDE_HOME / "settings.json"
-        settings.write_text(json.dumps({install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE, "model": "opus"}))
-        install._save_state({"settings_original_backup": str(backup)})
+        settings.write_text(
+            json.dumps(
+                {
+                    install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE,
+                    "operatorKey": "kept",
+                    "env": {"AGENTIHOOKS_VAR": "1", "OPERATOR_VAR": "kept"},
+                    "permissions": {"allow": ["Bash(ls:*)", "Bash(git:*)"]},
+                    "enabledPlugins": {"ours@m": True, "mine@m": True},
+                    "hooks": {
+                        "PreToolUse": [
+                            {"hooks": [{"command": "python -m hooks"}]},
+                            {"hooks": [{"command": "my-own-hook"}]},
+                        ]
+                    },
+                }
+            )
+        )
+        install._save_state(
+            {
+                claude_target.SETTINGS_RECORD_KEY: {
+                    "leaves": ["env.AGENTIHOOKS_VAR"],
+                    "lists": {"permissions.allow": ["Bash(git:*)"]},
+                },
+                claude_target.HOOK_RECORD_KEY: ["python -m hooks"],
+                claude_target.PLUGIN_RECORD_KEY: ["ours@m"],
+            }
+        )
         monkeypatch.setattr(install, "_cli_tool_is_installed", lambda: False)
         monkeypatch.setattr(install, "_uninstall_cli_tool", lambda: None)
 
         install.uninstall_global(argparse.Namespace(yes=True))
 
-        assert settings.read_text() == original, "uninstall did not restore the operator's settings.json"
-        assert "settings_original_backup" not in install._load_state()
+        remaining = json.loads(settings.read_text())
+        assert remaining == {
+            "operatorKey": "kept",
+            "env": {"OPERATOR_VAR": "kept"},
+            "permissions": {"allow": ["Bash(ls:*)"]},
+            "enabledPlugins": {"mine@m": True},
+            "hooks": {"PreToolUse": [{"hooks": [{"command": "my-own-hook"}]}]},
+        }
+        state = install._load_state()
+        assert claude_target.SETTINGS_RECORD_KEY not in state
+        assert claude_target.HOOK_RECORD_KEY not in state
+        assert claude_target.PLUGIN_RECORD_KEY not in state
+        assert "settings_original_backup" not in state
+
+    @pytest.mark.feature("claude-settings-additive-merge")
+    def test_install_then_uninstall_returns_user_settings_unchanged(self, home, monkeypatch):
+        import argparse
+
+        from scripts.targets.claude_target import ClaudeAdapter
+
+        install.CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+        settings = install.CLAUDE_HOME / "settings.json"
+        original = {"model": "opus", "env": {"OPERATOR_VAR": "kept"}, "operatorKey": "kept"}
+        settings.write_text(json.dumps(original))
+        monkeypatch.setattr(install, "_cli_tool_is_installed", lambda: False)
+        monkeypatch.setattr(install, "_uninstall_cli_tool", lambda: None)
+
+        ClaudeAdapter().write_settings({"env": {"AGENTIHOOKS_VAR": "1"}})
+        assert json.loads(settings.read_text())["env"] == {"OPERATOR_VAR": "kept", "AGENTIHOOKS_VAR": "1"}
+
+        install.uninstall_global(argparse.Namespace(yes=True))
+
+        assert json.loads(settings.read_text()) == original
 
     def test_backup_records_only_the_first_unmanaged_file(self, home, monkeypatch):
         """Later unmanaged files are not the pre-agentihooks original."""

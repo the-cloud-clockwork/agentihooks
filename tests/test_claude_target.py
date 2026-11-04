@@ -99,6 +99,86 @@ def test_write_settings_keeps_operator_plugins_and_enables_fleet_plugins(tmp_pat
     }
 
 
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_keeps_unmanaged_user_keys_on_first_init():
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    install.CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+    settings_path = install.CLAUDE_HOME / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "customTopLevelKey": "operator value",
+                "env": {"OPERATOR_VAR": "kept"},
+                "permissions": {"allow": ["Bash(ls:*)"]},
+                "statusLine": {"type": "command", "command": "operator-status"},
+            }
+        )
+    )
+
+    path = ClaudeAdapter().write_settings({"env": {"NEW_VAR": "1"}, "permissions": {"allow": ["Bash(git:*)"]}})
+
+    written = json.loads(path.read_text())
+    assert written["customTopLevelKey"] == "operator value"
+    assert written["statusLine"] == {"type": "command", "command": "operator-status"}
+    assert written["env"] == {"OPERATOR_VAR": "kept", "NEW_VAR": "1"}
+    assert written["permissions"]["allow"] == ["Bash(ls:*)", "Bash(git:*)"]
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_second_run_keeps_a_key_added_between_runs():
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    adapter = ClaudeAdapter()
+    path = adapter.write_settings({"env": {"A": "1"}})
+
+    doc = json.loads(path.read_text())
+    doc["operatorAddedLater"] = "mine"
+    path.write_text(json.dumps(doc))
+
+    adapter.write_settings({"env": {"A": "1"}})
+
+    assert json.loads(path.read_text())["operatorAddedLater"] == "mine"
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_merges_siblings_without_dropping_either_side():
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    install.CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+    settings_path = install.CLAUDE_HOME / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE,
+                "env": {"OPERATOR_VAR": "kept"},
+                "permissions": {"allow": ["Bash(ls:*)"]},
+            }
+        )
+    )
+
+    path = ClaudeAdapter().write_settings(
+        {"env": {"BUNDLE_VAR": "2"}, "permissions": {"allow": ["Bash(git:*)", "Bash(ls:*)"]}}
+    )
+
+    written = json.loads(path.read_text())
+    assert written["env"] == {"OPERATOR_VAR": "kept", "BUNDLE_VAR": "2"}
+    assert written["permissions"]["allow"] == ["Bash(ls:*)", "Bash(git:*)"]
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_removes_a_key_no_longer_rendered():
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    adapter = ClaudeAdapter()
+    path = adapter.write_settings({"env": {"FEATURE_FLAG": "on", "KEPT": "1"}})
+    assert json.loads(path.read_text())["env"] == {"FEATURE_FLAG": "on", "KEPT": "1"}
+
+    adapter.write_settings({"env": {"KEPT": "1"}})
+
+    assert json.loads(path.read_text())["env"] == {"KEPT": "1"}
+
+
 def test_installed_claude_rules_stay_inside_global_home(tmp_path):
     from scripts.targets.claude_target import ClaudeAdapter
 
