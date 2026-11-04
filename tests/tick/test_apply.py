@@ -334,8 +334,9 @@ def test_the_tasks_applier_drops_a_size_a_concurrent_write_set_after_the_step_re
     ledger = Ledger(held={"t1": {"id": "t1", "difficulty": "L"}})
     apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
 
-    with pytest.raises(RevisionConflict, match="^task t1 changed difficulty on the ledger before the write$"):
+    with pytest.raises(RevisionConflict) as refused:
         apply(Write(TASKS, "t1", {"difficulty": "M", "difficulty_source": "rule"}, expected={"difficulty": ""}))
+    assert str(refused.value) == "task t1 changed difficulty on the ledger before the write"
     assert ledger.held["t1"] == {"id": "t1", "difficulty": "L"}
     assert ledger.updates == []
 
@@ -361,8 +362,9 @@ def test_the_groups_applier_drops_a_release_a_concurrent_regroup_beat_on_the_ser
     ledger = GroupLedger(members={"l1": ["m1", "m3"]})
     apply = tasks.group_writer("sw", ledger, {"l1": {"id": "l1", "group_members": ["m1", "m2"]}}.get)
 
-    with pytest.raises(RevisionConflict, match="^the ledger refused the release of the group under task l1$"):
+    with pytest.raises(RevisionConflict) as refused:
         apply(Write(tasks.GROUPS, "l1", ["m1"], expected={"group_members": ["m1", "m2"]}))
+    assert str(refused.value) == "the ledger refused the release of the group under task l1"
     assert ledger.ungrouped == []
 
 
@@ -370,8 +372,9 @@ def test_the_groups_applier_guards_a_release_without_expected_members_on_no_memb
     ledger = GroupLedger(members={"l1": ["m1"]})
     apply = tasks.group_writer("sw", ledger, {}.get)
 
-    with pytest.raises(RevisionConflict, match="^the ledger refused the release of the group under task l1$"):
+    with pytest.raises(RevisionConflict) as refused:
         apply(Write(tasks.GROUPS, "l1", []))
+    assert str(refused.value) == "the ledger refused the release of the group under task l1"
 
     assert ledger.guards == [{"group_members": []}]
     assert ledger.ungrouped == []

@@ -328,8 +328,9 @@ def test_ungroup_refuses_after_a_concurrent_regroup_moved_the_members(with_ungro
 )
 def test_a_malformed_ungroup_guard_is_refused(if_match: object) -> None:
     op = {"op": "task_ungroup", "id": "u", "by": "swarm", "item": "tasks/t1", "if_match": if_match}
-    with pytest.raises(ValueError, match="^task_ungroup if_match holds only group_members, a list of task ids$"):
+    with pytest.raises(ValueError) as refused:
         core.check_op(op)
+    assert str(refused.value) == "task_ungroup if_match holds only group_members, a list of task ids"
 
 
 @pytest.mark.parametrize(("by", "lane"), [(ENGINEER, "eng"), (PLANNER, "plan")])
