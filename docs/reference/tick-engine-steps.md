@@ -182,9 +182,11 @@ The tick report counts these runs per step in its Late share, Abandoned, Held an
 ### Lanes
 
 A parallel pass gives each lane its own deadline: 110 seconds for the critical
-lane, which holds every step whose lane is not `slow`, and 400 seconds for the
-slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`). These steps declare
-the slow lane:
+lane, which holds every step whose lane is neither `slow` nor `closing`, and
+400 seconds for the slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`),
+both counted from the start of the pass. The closing lane's 30 seconds count
+from the start of the pass `finally`; see [The closing lane](#the-closing-lane).
+These steps declare the slow lane:
 
 | Module | Group | Slow lane steps |
 | --- | --- | --- |
@@ -193,9 +195,9 @@ the slow lane:
 | `scripts.tick.steps.tasks` | `reopen passes` | [fleet red notice](fleet-red-notice.md#the-slow-lane) |
 | `scripts.tick.steps.place` | `placement notices` | lost runner, time left |
 
-The other report steps (stall watch, overrun pass, quiet pass, inbox wake,
-snapshot job, last tick, heartbeat, status publish) and every other step stay
-critical. The command runner and the quota notice run before spawn and stay
+Last tick, heartbeat and status publish declare the closing lane. The other
+report steps (stall watch, overrun pass, quiet pass, inbox wake, snapshot job)
+and every other step stay critical. The command runner and the quota notice run before spawn and stay
 critical. The quota notice step reads cached quota and runs no Claude or Codex
 quota probe; the quota prober service writes those caches once a minute
 ([Quota prober](quota-prober.md)).
@@ -220,7 +222,7 @@ on the pass is not recorded in this document; read it with
 `agentihooks swarm <slug> tick-report --passes 10`.
 
 The `health findings` step stores the findings it computes in the pass box
-under `found`. The `status publish` step, in the `wrapper status` group, passes
+under `found`. The `status publish` step, in the `closing` group, passes
 `box.get("found")` to `cli._publish_tick_status`, and `status.status_report`
 publishes those findings instead of calling `findings` again with the same
 inputs. When the box holds no `found`, for example because the handed off
@@ -303,6 +305,65 @@ different lanes, and one lane when they share it, as in
 
 `agentihooks swarm <slug> tick-report` prints each lane's share of step CPU
 (see [Lane lines](tick-report.md#lane-lines)).
+
+### The closing lane
+
+`last tick`, `heartbeat` and `status publish` run in the `closing` group,
+which `run_tick` calls from the `finally` of the pass, after every other group
+and whether the pass completed, ended early or raised. The three steps declare
+lane `closing` (`scripts.tick.steps.report.CLOSING`), so in a parallel pass
+they run against a deadline of their own instead of the critical deadline that
+may already have expired:
+
+| Value | Meaning |
+| --- | --- |
+| `scripts.tick.pool.CLOSING_LANE` | The lane name, `closing`. |
+| `scripts.tick.pool.CLOSING_S` | 30 seconds, the closing lane deadline. `pool.running(closing_s=...)` sets it for one pass; no setting or environment variable changes it. |
+| `Pass.close()` | Starts the closing deadline on its first call and returns that same deadline on every later call. `Pass.lane("closing")` calls it, so the deadline starts when the first closing step looks up its lane, at the start of the `finally`. |
+
+A closing step is not a slow step: the group runs it eagerly and returns its
+record before the pass ends. Its context deadline is the smaller of the group
+budget and the closing deadline, and its own step budget still applies. When
+the pass ends, `pool.running` joins each handed off slow lane thread for the
+larger of the slow lane time left and the closing lane time left, plus
+`LATER_GRACE_S`. A sequential pass looks up no lane deadline, so the closing
+lane changes nothing there; the three steps run in group order with their
+budgets.
+
+`run_tick` hands the group an `ended` value that says how the pass ended:
+
+| How the pass ended | `ended` | `last tick` | `heartbeat` | `status publish` |
+| --- | --- | --- | --- | --- |
+| Completed its groups | `full` (`report.FULL`) | Writes the current time to `<slug>/last-tick` | Writes the [tick heartbeat](../pillars/swarm.md#tick-heartbeat-and-stale-watcher) and clears the early end streak | Publishes the tick status |
+| No step stored a value a later step needed (`Left`) | `early` (`report.EARLY`) | Writes the current time | Writes the tick heartbeat; the streak keeps the count `early_end` added | Publishes the tick status |
+| Returned before the end (stopped, binned, refused) or raised | none | Writes nothing | Writes nothing | Publishes the tick status, with the exception as `failure` when one was raised |
+
+`report_steps.early_end` no longer stamps the pass itself. It counts the
+missing value in the early end streak and returns the
+`pass ended early: no step stored <value>, the pass left <steps>` line; the
+closing group stamps last tick and the heartbeat afterwards.
+
+The closing lane exists for a pass whose critical lane ran out. Before it, the
+three steps sat in the `wrapper metrics`, `after` and `wrapper status` groups
+on the critical lane, so a pass that spent its 110 critical seconds dropped
+them and wrote no heartbeat, and the stale watcher then judged a live tick
+stale. Now a pass with a hung step still stamps and publishes: in
+`tests/tick/test_closing_lane.py` a reboot pass planted to hang for 300
+seconds under a 1 second critical lane ends early, and the closing group
+records `heartbeat`, `last tick` and `status publish` as `ok` with last tick
+and the heartbeat written.
+
+A new step joins the closing lane only when it must run on every pass ending,
+after the other groups:
+
+```python
+from scripts.tick.steps.report import CLOSING, CLOSING_GROUP
+
+CallStep("example", CLOSING_GROUP, held(_example), lane=CLOSING)
+```
+
+Read `get("ended")` in its action to tell the endings apart; it is `None` when
+the pass raised or returned before its end.
 
 ### Spawn prerequisites and the forty second bound
 
@@ -769,6 +830,8 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_pass_edges.py` | Every pass box read over the twelve tick scenarios is declared with a need on its writer and every pass box write is declared; a planted undeclared read and a planted missing need are named |
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
 | `tests/tick/test_report.py` | The slow lane report steps and a `CallStep` keeping the lane it is given |
+| `tests/tick/test_closing_lane.py` | The closing deadline starting once at `Pass.close` and outliving an expired critical lane, a closing step running while a critical step in the same group is dropped, the three closing steps in the `closing` group and lane, and a 300 second hung step under a 1 second critical lane still stamping last tick, the heartbeat and the status |
+| `tests/tick/test_early_end.py` | An early end names each left step once and counts the missing value without writing last tick or the heartbeat itself |
 | `tests/tick/test_pool.py` | A parallel group returning its critical records while its slow step runs, a handed off step starting after the critical step it needs and dropped when that step was dropped, a handed off step applying its writes through the group appliers on a daemon thread named `tick-slow-lane`, the pass waiting for a hung slow step only until the slow deadline plus the grace second, and a sequential pass running slow steps in the group |
 
 ## Troubleshooting
@@ -786,6 +849,8 @@ The delivered proof and limitations are recorded in
 | `swarm_tick_step_abandoned` in the tick journal | That step was still running at its budget or its lane deadline and the writes it names were dropped. Its worker may still finish its external calls. One line now and then is a slow call; the same step on most passes means its budget is below its real wall time, see [The abandoned write journal line](#the-abandoned-write-journal-line) |
 | A step is late in `tick-report` but no `swarm_tick_step_abandoned` line exists | The step declares no write beyond its own `actions:<name>` domain, or it was dropped before it started because a step it needs was dropped or its lane had expired. Neither loses writes |
 | Preempt and spawn are late in a pass with no critical lane overrun | `fleet red notice` ran past its 30 second budget; both wait for it and are dropped when it is abandoned. Look for its `swarm_tick_step_abandoned` line in the same pass |
+| No heartbeat or last tick after a pass that printed actions | The pass raised or returned before its end, so `ended` was none and the closing group stamped nothing; read the tick log for the exception or the early return line. A pass that ended with `pass ended early` does stamp both |
+| `closing` steps recorded late | The step's own budget or the 30 second closing deadline ran out. The deadline starts at the pass `finally`, not at the start of the pass, so a long critical lane does not shorten it |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
