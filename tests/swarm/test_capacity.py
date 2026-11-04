@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -2661,7 +2662,7 @@ def test_the_quota_notice_step_runs_no_claude_or_codex_quota_probe(monkeypatch, 
     monkeypatch.setenv("AH_CC_TOKEN_a", "fake-a")
     store = _store()
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
-    ledger = FakeLedger([{"id": "e0"}])
+    ledger: Any = FakeLedger([{"id": "e0"}])
     ledger.comment = lambda slug, item, text, by: None
     rt = module.HerdrRuntime(home=tmp_path)
     rt.host = _roomy_host

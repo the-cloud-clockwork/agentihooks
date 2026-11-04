@@ -85,5 +85,7 @@ def stale(decision: dict[str, Any], now_ms: int) -> list[str]:
     """Name the newest quota reading's age once it passes ``STALE_S``, which means the quota prober stopped."""
     rows: list[dict[str, Any]] = decision.get("accounts", [])
     seen = [float(row["observed_at"]) for row in rows if row.get("observed_at") is not None]
-    age = int(now_ms / 1000 - max(seen)) if seen else 0
+    if not seen:
+        return []
+    age = int(now_ms / 1000 - max(seen))
     return [f"quota readings are {age} seconds old; the quota prober has not refreshed them"] if age > STALE_S else []
