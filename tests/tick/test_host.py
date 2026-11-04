@@ -226,7 +226,7 @@ def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase
 def test_no_host_step_wraps_the_tick_and_the_reboot_site_holds_only_the_reboot_pass() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     assert "tick call" not in {step.name for step in registered}
-    assert "tick call" not in budgets.MEASURED
+    assert "tick call" not in budgets.FLOORS
     assert [step.name for step in engine.group_steps("wrapper reboot")] == ["reboot pass"]
 
 

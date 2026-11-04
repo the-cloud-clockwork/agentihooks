@@ -20,7 +20,7 @@ SLOWEST_OBSERVED_VIEW_S = 2.88
 
 @pytest.mark.feature("swarm-tick-late-view")
 def test_the_view_budget_covers_the_measured_ledger_read() -> None:
-    assert budgets.MEASURED["tick view"] == budgets.MEASURED["ledger state"]
+    assert budgets.FLOORS["tick view"] == budgets.FLOORS["ledger state"]
     step = next(step for step in host.STEPS if step.name == "tick view")
     assert step.budget_s == budgets.timing_of("ledger state")[0]
     assert step.budget_s >= SLOWEST_OBSERVED_VIEW_S

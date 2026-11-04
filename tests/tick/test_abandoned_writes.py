@@ -27,6 +27,18 @@ class Redis:
     def xadd(self, key: str, fields: dict[str, str], **kwargs: Any) -> None:
         self.rows.append((key, json.loads(fields["record"])))
 
+    def pipeline(self, transaction: bool = True) -> "Redis":
+        return self
+
+    def lpush(self, key: str, *values: str) -> None:
+        return None
+
+    def ltrim(self, key: str, start: int, end: int) -> None:
+        return None
+
+    def execute(self) -> list[Any]:
+        return []
+
 
 class Store:
     def __init__(self) -> None:

@@ -4418,14 +4418,14 @@ fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed num
 
 ### Budgets and intervals
 
-Each step's budget is its measured p95 from a tick report over 60 passes with fifty percent headroom, rounded up to
-a whole second, and at least one second. Its declared interval is 60 seconds for a step that belongs in every pass,
-120 seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
-`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built.
+Each step's budget is the p95 of its last 60 recorded walls with fifty percent headroom, rounded up to a whole
+second, and never under the step's declared floor; with fewer than 60 walls it is the floor. Its declared interval is 60 seconds for a step that belongs in every pass,
+120 seconds for a wide sweep and 600 seconds for a slow job. Floors and intervals live in the checked in timing table
+`scripts.tick.steps.budgets.FLOORS`; a step the table does not name is refused when the step is built.
 Intervals are declared and validated; no step is skipped because its interval has not elapsed, and the engine runs
 every registered step on every pass. Timing changes, overlap limits and the
 forty second spawn bound are covered in
-[Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals).
+[Tick engine steps](../reference/tick-engine-steps.md#live-budgets-floors-and-declared-intervals).
 
 ### Records
 

@@ -204,7 +204,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
-from scripts.tick.steps import Left, PassBox
+from scripts.tick.steps import Left, PassBox, budgets
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
 from scripts.tick.steps import tasks as task_steps
@@ -442,6 +442,7 @@ def run_tick(
             )
         )
         timing.keep()
+        budgets.resolve(store, slug)
         run_group("before")
         if store.config(slug).state == "stopped":
             _hold_view(beating, slug, ledger)

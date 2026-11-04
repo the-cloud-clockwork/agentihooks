@@ -36,22 +36,32 @@ in the step module that owns its step (`agents`, `masters`, `tasks`), and a test
 patches it there; the moved body still reaches tick seams through the imported
 tick module.
 
-## Measured budgets and declared intervals
+## Live budgets, floors and declared intervals
 
-The timing table `scripts.tick.steps.budgets.MEASURED` records each step's
-p95 from a tick report over sixty passes and its interval from the plan table.
-The budget is `max(1, ceil(p95_s * 1.5))` seconds: fifty percent headroom,
-rounded up to a whole second. These are checked in declarations, not settings
-that update automatically when new reports arrive.
+The table `scripts.tick.steps.budgets.FLOORS` declares each step's floor and its
+interval. Each pass, `run_tick` calls `budgets.resolve(store, slug)` before the
+first group. It reads every step's window of its last sixty walls, the Redis list
+`tick:walls:<step>`, and stores the live budgets for the pass. `budget_of(name)`,
+read through `CallStep.budget_s`, returns `max(floor, ceil(p95 * 1.5))` once a
+step has sixty walls, and the floor until then. `scripts.swarm.timing.append_step`
+pushes each budgeted step's wall to its window in the same pipeline as its
+`tick:steps` record and trims the window to sixty. When a window is missing,
+`resolve` rebuilds it from the `tick:steps` stream, at most once every ten
+minutes. The stream stays the record.
 
-| Step example | Measured p95 | Budget | Declared interval |
-| --- | --- | --- | --- |
-| `reap` | 14.511 s | 22 s | 60 s |
-| `preempt` | 11.749 s | 18 s | 60 s |
-| `spawn` | 21.812 s | 33 s | 60 s |
-| `pane evidence` | 1.047 s | 2 s | 120 s |
-| `metrics record` | 18.905 s | 29 s | 600 s |
-| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 19.981 s | 30 s | 60 s |
+| Step example | Floor | Declared interval |
+| --- | --- | --- |
+| `reap` | 22 s | 60 s |
+| `preempt` | 18 s | 60 s |
+| `spawn` | 33 s | 60 s |
+| `night watch` | 22 s | 120 s |
+| `metrics record` | 29 s | 600 s |
+| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 30 s | 60 s |
+
+The six heavy rows keep their earlier measured budgets as floors. Every row that
+measured under one second, and every row that was never measured, has a two
+second floor. `scripts.tick.registry.latest_start` adds floors, so the spawn
+start bound does not move with live budgets.
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
 seconds. The group runner runs each group at its site on every pass and does
@@ -62,10 +72,9 @@ the larger of its declared interval and the slow lane cadence from
 no pass reads it yet. See
 [Cadence](../pillars/swarm.md#cadence).
 
-A step with no report row uses `UNMEASURED_S`, a ten second p95, giving a
-fifteen second budget. It still needs an explicit timing table entry. An
-unknown name raises `ValueError: Undeclared step timing: <name>` when
-`CallStep` is constructed, before registration.
+Every step needs an explicit `FLOORS` entry. An unknown name raises
+`ValueError: Undeclared step timing: <name>` when `CallStep` is constructed,
+before registration.
 
 ### Inspect and change timing
 
@@ -87,19 +96,16 @@ Inspect the checked in declaration from the repository root:
 python -c 'from scripts.tick.steps.budgets import timing_of; print(timing_of("reap"))'
 ```
 
-The result is `(22.0, 60.0)`: budget first, interval second. To change a step's
-timing, update its `Timing(p95_s, interval_s)` entry in `MEASURED` through the
-normal code review and CI workflow. For a newly registered `example` step
-without a report row, declare it in that table before constructing it:
+Outside a pass the result is the floor, `(22.0, 60.0)`: budget first,
+interval second. To change a floor or interval, update the step's
+`Timing(floor_s, interval_s)` entry in `FLOORS` through the normal code review
+and CI workflow. Declare a newly registered `example` step before constructing it:
 
 ```python
-"example": Timing(UNMEASURED_S, CRITICAL_S),
+"example": Timing(2.0, CRITICAL_S),
 ```
 
-That is a dictionary entry using the table's existing imports and constants.
-Once measured, replace `UNMEASURED_S` with its observed p95, keeping the
-interval required by the plan. There is no CLI or environment override for
-this table in this delivery.
+Its live budget then follows its walls once sixty runs are recorded.
 
 ### When a step exceeds its budget
 
@@ -172,7 +178,7 @@ for (slug, step, writes), n in c.most_common(): print(n, slug, step, ", ".join(w
 A step that appears on most passes loses its writes every time, as the fleet
 red notice did before its budget was measured. Compare its wall time in
 `agentihooks swarm <slug> tick-report --passes 10` with its budget and raise
-its measured p95 in `budgets.MEASURED` through a pull request. Nothing reads
+its floor in `budgets.FLOORS` through a pull request. Nothing reads
 the line back; it is evidence for an operator or an agent, not an input to
 the next pass.
 
@@ -702,8 +708,8 @@ by the engine and does not leave the pass.
 
 1. Write the call as a function `(tick, get) -> actions` in a module under
    `scripts/tick/steps/`, reading its arguments with `get`.
-2. Add the step name to `budgets.MEASURED` with its measured p95 (or
-   `UNMEASURED_S`) and plan interval, then register `CallStep("<name>", <group>, <order>, held(<call>))`, choosing an
+2. Add the step name to `budgets.FLOORS` with its floor (two seconds unless
+   measured heavier) and plan interval, then register `CallStep("<name>", <group>, <order>, held(<call>))`, choosing an
    order that puts it where its hand written line stood. Use `held` when an
    exception from the call must still leave the pass.
 3. Import the module in `scripts.swarm.tick` so it registers before the first
@@ -756,7 +762,7 @@ The delivered proof and limitations are recorded in
 
 | Symptom | Check |
 | --- | --- |
-| `Undeclared step timing` at import | Declare that exact step name in `MEASURED` before constructing its `CallStep` |
+| `Undeclared step timing` at import | Declare that exact step name in `FLOORS` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
 | Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |

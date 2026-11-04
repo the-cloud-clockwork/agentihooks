@@ -152,8 +152,8 @@ orphan and left out of every row.
 
 ## What reads the same records
 
-- **Step budgets.** Each budget in `scripts.tick.steps.budgets.MEASURED` is a step's p95 from a 60 pass report with
-  fifty percent headroom; see [Tick engine steps](tick-engine-steps.md#measured-budgets-and-declared-intervals).
+- **Step budgets.** Each pass raises a step's floor in `scripts.tick.steps.budgets.FLOORS` to the p95 of its last 60
+  walls with fifty percent headroom; see [Tick engine steps](tick-engine-steps.md#live-budgets-floors-and-declared-intervals).
 - **Pass budget hold.** Every pass computes the p95 of its last 10 pass records. Above the target of the stage
   `AGENTIHOOKS_TICK_STAGE` names (`S1` 384, `S2` 240, `S3` 120, `S4` 60 seconds, default `S1`), the tick holds new
   spawns and sends the master one notice; the hold clears when the p95 is back under the target. With fewer than
