@@ -46,8 +46,8 @@ def cache_due(wait: dict[str, object] | None, last_ms: int, now_ms: int) -> bool
     until = wait.get("until", 0)
     reason = wait.get("reason", "")
     named = bool(wait.get("on")) or bool(str(reason).strip())
-    fresh = isinstance(until, int) and until > now_ms
-    return bool(last_ms) and fresh and named and now_ms - last_ms > CACHE_LIMIT_MS
+    open_wait = isinstance(until, int) and until > now_ms
+    return bool(last_ms) and open_wait and named and now_ms - last_ms > CACHE_LIMIT_MS
 
 
 def window(last_ms: int, now_ms: int) -> int:

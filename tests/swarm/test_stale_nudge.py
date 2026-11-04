@@ -229,7 +229,7 @@ def test_cache_due_is_false_once_the_wait_itself_ends(inbox):
     assert cache_items(inbox) == []
 
 
-def test_cache_due_is_false_without_a_known_activity_time():
+def test_cache_due_needs_a_known_activity_time():
     wait = {"until": BASE + 3 * CACHE_LIMIT, "reason": "checks on the pull request"}
     assert not stale_nudge.cache_due(wait, 0, BASE)
     assert stale_nudge.cache_due(wait, BASE - CACHE_LIMIT - 1, BASE)
