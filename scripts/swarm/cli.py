@@ -104,6 +104,7 @@ from scripts.swarm import (
     doc_report,
     done_gate,
     failed_panes,
+    git_https,
     idle,
     launch_check,
     ledger_events,
@@ -292,7 +293,7 @@ def _phase_steps(inbox: Any, store: Any, slug: str, doc: dict[str, Any], ledger:
     actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
     if actions:
         doc = timing.call(ledger_client.pass_state, ledger, slug)
-    return actions + task_steps.phase_writes(skip_refused(phases.phase_changes, slug, doc, ledger))
+    return actions + task_steps.phase_writes(skip_refused(phases.phase_changes, doc))
 
 
 def _planning_after_phase(inbox: Any, store: Any, slug: str, ledger: Any, box: dict[str, Any]) -> list[str]:
@@ -1710,7 +1711,7 @@ def cmd_review(store, args):
 
 def _git(run, *args):
     try:
-        return run(["git", *args], capture_output=True, text=True, timeout=20)
+        return git_https.run(["git", *args], runner=run, timeout=20)
     except (OSError, subprocess.SubprocessError) as exc:
         raise SwarmError(f"git {args[0]} could not run: {exc}") from exc
 

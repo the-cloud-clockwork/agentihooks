@@ -358,6 +358,18 @@
       ]
     },
     {
+      "id": "swarm-ordering-dependency-audit",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2382",
+      "behaviour": "Each tick pass records every open task dependency whose tasks share no territory and whose dependent never names the other task's code, and swarm status lists them with one health finding each.",
+      "seam": "the tick dependency audit step and agentihooks swarm status ordering_dependencies",
+      "tests": [
+        "tests/swarm_ledger/test_dependency_audit.py::test_a_dependency_with_disjoint_territories_and_no_named_code_is_reported",
+        "tests/swarm/test_ordering_dependencies.py::test_the_tick_records_each_ordering_only_dependency",
+        "tests/swarm/test_ordering_dependencies.py::test_status_prints_the_list"
+      ]
+    },
+    {
       "id": "swarm-claim-dependencies",
       "origin": "inventory",
       "behaviour": "A task stacked on a live dependency is claimable while work parked on it waits.",
@@ -1394,7 +1406,47 @@
         "tests/tick/test_view.py::test_the_view_holds_every_top_level_part_the_pass_reads",
         "tests/tick/test_view.py::test_a_pass_holding_a_view_reads_each_document_through_one_delta_read",
         "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
-        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
+        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view",
+        "tests/tick/test_view.py::test_document_serves_the_held_view_and_reads_again_only_after_a_write",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_running_pass_reads_the_ledger_once_plus_once_per_write",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_planted_second_read_without_a_write_is_counted"
+      ]
+    },
+    {
+      "id": "claude-settings-additive-merge",
+      "origin": "inventory",
+      "behaviour": "agentihooks init merges its rendered settings into the existing ~/.claude/settings.json additively instead of replacing it: every operator key, including one added between runs, survives; a dict merges recursively; a list unions existing order first then the rendered entries with no duplicates; a key agentihooks stops rendering is removed on the next run. agentihooks uninstall removes only the leaf paths, list entries, hook groups, enabledPlugins entries and managed-by marker it recorded writing, leaving every operator key untouched.",
+      "seam": "scripts.targets.claude_target.ClaudeAdapter.write_settings and scripts.targets.claude_target.remove_managed_keys through scripts.install.uninstall_global",
+      "tests": [
+        "tests/test_claude_target.py::test_write_settings_keeps_unmanaged_user_keys_on_first_init",
+        "tests/test_claude_target.py::test_write_settings_second_run_keeps_a_key_added_between_runs",
+        "tests/test_claude_target.py::test_write_settings_merges_siblings_without_dropping_either_side",
+        "tests/test_claude_target.py::test_write_settings_removes_a_key_no_longer_rendered",
+        "tests/test_claude_target.py::test_additive_merge_removes_a_three_level_leaf_no_longer_rendered",
+        "tests/test_claude_target.py::test_additive_merge_removal_of_an_already_absent_leaf_is_a_no_op",
+        "tests/test_claude_target.py::test_additive_merge_prunes_a_container_left_empty_by_a_removed_leaf",
+        "tests/test_claude_target.py::test_additive_merge_keeps_a_container_that_still_holds_an_operator_key",
+        "tests/test_claude_target.py::test_additive_merge_prunes_every_ancestor_left_empty_by_a_four_level_leaf",
+        "tests/test_claude_target.py::test_additive_merge_processes_every_rendered_key_after_a_list_value",
+        "tests/test_claude_target.py::test_additive_merge_drops_a_stale_rendered_list_item_using_the_prior_record",
+        "tests/test_claude_target.py::test_additive_merge_discards_a_stale_list_entry_when_the_list_stops_rendering",
+        "tests/test_claude_target.py::test_remove_recorded_settings_tolerates_a_record_without_leaves_or_lists",
+        "tests/test_claude_target.py::test_remove_recorded_settings_skips_a_list_entry_whose_doc_value_is_not_a_list",
+        "tests/test_claude_target.py::test_remove_recorded_settings_removes_listed_entries_from_a_three_level_list",
+        "tests/test_claude_target.py::test_remove_owned_hooks_tolerates_a_group_without_a_hooks_list",
+        "tests/test_claude_target.py::test_remove_owned_hooks_drops_the_hooks_key_when_every_group_was_ours",
+        "tests/test_claude_target.py::test_remove_owned_hooks_keeps_checking_events_after_a_malformed_one",
+        "tests/test_claude_target.py::test_remove_owned_plugins_tolerates_a_name_the_operator_already_removed",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_false_for_a_missing_or_unmanaged_or_invalid_file",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_true_when_operator_content_remains",
+        "tests/test_claude_target.py::test_remove_managed_keys_tolerates_state_with_no_recorded_keys_at_all",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_false_and_deletes_the_file_when_nothing_operator_owned_remains",
+        "tests/test_claude_target.py::test_remove_managed_keys_tolerates_a_marker_the_recorded_leaves_already_removed",
+        "tests/test_claude_target.py::test_enabled_plugins_reads_bundle_user_and_shared_separately",
+        "tests/test_claude_target.py::test_enabled_plugins_records_the_union_of_owned_and_layered_names",
+        "tests/test_claude_target.py::test_write_settings_keeps_hooks_and_enabled_plugins_out_of_the_generic_merge",
+        "tests/test_ownership_scope.py::TestSettingsRestore::test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins",
+        "tests/test_ownership_scope.py::TestSettingsRestore::test_install_then_uninstall_returns_user_settings_unchanged"
       ]
     }
   ],

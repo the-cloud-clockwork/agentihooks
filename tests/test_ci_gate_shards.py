@@ -184,17 +184,17 @@ def test_wait_polls_only_the_jobs_page_until_every_shard_passes():
 
 
 @pytest.mark.parametrize("name", ["unit (3.12, 1)", "unit rerun (3.12, 1)"])
-def test_runner_queue_wait_never_counts_against_the_watch_deadline(name):
+def test_a_queued_planned_job_never_extends_the_watch_deadline(name):
     queued = {"name": name, "status": "queued", "conclusion": None}
-    passed = {**queued, "status": "completed", "conclusion": "success"}
     with (
-        patch.object(ci_gate_shards, "api", side_effect=[[{"jobs": [queued]}], [{"jobs": [passed]}]]),
-        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1300, 1300]),
+        patch.object(ci_gate_shards, "api", return_value=[{"jobs": [queued]}]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 200, 300]),
         patch.object(ci_gate_shards.time, "sleep") as sleep,
+        pytest.raises(RuntimeError, match="timed out after 300 s and 2 polls"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1])
-    sleep.assert_called_once_with(15)
-    assert ci_gate_shards.rate_limit.deadline == 2500
+    assert [call.args for call in sleep.call_args_list] == [(15,), (15,)]
+    assert ci_gate_shards.rate_limit.deadline == 300
 
 
 @pytest.mark.parametrize("name", ["lint", "unit (3.12, 2)", "unit rerun (3.12, 2)", "unit (3.11, 1)"])
@@ -202,9 +202,89 @@ def test_a_queued_job_outside_the_plan_never_extends_the_watch_deadline(name):
     queued = {"name": name, "status": "queued", "conclusion": None}
     with (
         patch.object(ci_gate_shards, "api", return_value=[{"jobs": [queued]}]),
-        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 200, 300]),
         patch.object(ci_gate_shards.time, "sleep"),
-        pytest.raises(RuntimeError, match="timed out"),
+        pytest.raises(RuntimeError, match="timed out after 300 s and 2 polls"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1])
-    assert ci_gate_shards.rate_limit.deadline == 1200
+    assert ci_gate_shards.rate_limit.deadline == 300
+
+
+def test_a_wait_that_never_polls_names_every_planned_shard():
+    with (
+        patch.object(ci_gate_shards, "api", side_effect=AssertionError("must not poll")),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 300]),
+        pytest.raises(RuntimeError) as raised,
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1])
+    assert str(raised.value) == (
+        "Shard verification timed out after 300 s and 0 polls before every expected shard succeeded;"
+        " still waiting on every planned shard"
+    )
+
+
+def test_waiting_names_each_missing_shard_by_its_unit_and_rerun_state():
+    jobs = [
+        {"name": "unit (3.12, 1)", "status": "completed", "conclusion": "success"},
+        {"name": "unit (3.12, 2)", "status": "in_progress", "conclusion": None},
+        {"name": "unit (3.12, 3)", "status": "completed", "conclusion": "failure"},
+        {"name": "unit rerun (3.12, 3)", "status": "queued", "conclusion": None},
+        {"name": "unit (3.12, 5)", "status": "completed", "conclusion": "failure"},
+        {"name": "unit rerun (3.12, 5)", "status": "completed", "conclusion": "success"},
+        {"name": "unit (3.12, 6)"},
+        {"name": "unit (3.12, 7)", "status": "queued", "conclusion": None},
+        {"name": "unit (3.12, 7)", "status": "completed", "conclusion": "success"},
+        {"name": "unit (3.12, 8)", "status": "completed", "conclusion": "cancelled"},
+        {"name": "unit (3.12, 8)", "status": "queued"},
+        {"name": "unit (3.11, 4)", "status": "completed", "conclusion": "success"},
+        {"name": "unit (3.12, 9)", "status": "completed", "conclusion": "failure"},
+        {"name": "unit rerun (3.12, 9)", "status": "completed", "conclusion": "failure"},
+        {"name": "unit rerun (3.12, 9)", "status": "queued", "conclusion": None},
+    ]
+    assert ci_gate_shards.waiting(jobs, [1, 2, 3, 4, 5, 6, 7, 8, 9]) == [
+        "shard 2 unit in_progress",
+        "shard 3 unit failure, rerun queued",
+        "shard 4 unit not listed",
+        "shard 6 unit unknown",
+        "shard 8 unit cancelled, queued",
+        "shard 9 unit failure, rerun failure, queued",
+    ]
+    assert ci_gate_shards.waiting([], []) == []
+
+
+def test_watch_logs_one_line_per_poll_with_what_it_still_waits_for(capsys):
+    pending = {"name": "unit (3.12, 2)", "status": "in_progress", "conclusion": None}
+    first = [{"name": "unit (3.12, 1)", "status": "completed", "conclusion": "success"}, pending]
+    second = [
+        first[0],
+        {**pending, "status": "completed", "conclusion": "success"},
+        {"name": "unit (3.12, 3)", "status": "completed", "conclusion": "success"},
+    ]
+    with (
+        patch.object(ci_gate_shards, "api", side_effect=[[{"jobs": first}], [{"jobs": second}]]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[100, 100, 115]),
+        patch.object(ci_gate_shards.time, "sleep"),
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1, 2, 3])
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.splitlines() == [
+        "Poll 1 at 0 s: 1 of 3 planned shards passed; waiting on shard 2 unit in_progress; shard 3 unit not listed",
+        "Poll 2 at 15 s: 3 of 3 planned shards passed; waiting on nothing",
+    ]
+
+
+def test_timeout_names_every_shard_still_missing_at_the_last_poll():
+    jobs = [{"name": "unit (3.12, 1)", "status": "in_progress", "conclusion": None}]
+    with (
+        patch.object(ci_gate_shards, "api", return_value=[{"jobs": jobs}]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 299, 300]),
+        patch.object(ci_gate_shards.time, "sleep"),
+        pytest.raises(RuntimeError) as raised,
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1, 2])
+    assert str(raised.value) == (
+        "Shard verification timed out after 300 s and 2 polls before every expected shard succeeded;"
+        " still waiting on shard 1 unit in_progress; shard 2 unit not listed"
+    )
+    assert ci_gate_shards.rate_limit.deadline == 300
