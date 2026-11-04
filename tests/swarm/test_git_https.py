@@ -60,11 +60,10 @@ def test_only_a_failed_publickey_refusal_is_retried(answer: tuple[int, str, str]
     assert len(calls) == 1
 
 
-def test_a_script_that_prints_a_publickey_refusal_is_never_rerun() -> None:
-    calls, fake = answers((1, "", REFUSAL))
-    done = git_https.run(["bash", "wt.sh", "done", "w"], runner=fake)
-    assert (done.returncode, done.stderr) == (1, REFUSAL)
-    assert len(calls) == 1
+def test_a_worktree_script_whose_fetch_is_refused_reruns_with_the_settings() -> None:
+    calls, fake = answers((1, "", REFUSAL + "wt: cannot read origin branches\n"), (0, "", ""))
+    assert git_https.run(["bash", "wt.sh", "done", "w", "--pushed"], runner=fake, env={}).returncode == 0
+    assert [kwargs["env"] for _, kwargs in calls] == [{}, HTTPS_ENTRIES]
 
 
 def test_a_publickey_refusal_is_retried_once_over_https_for_that_call_only() -> None:
