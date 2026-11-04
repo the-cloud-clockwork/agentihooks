@@ -293,7 +293,7 @@ def _phase_steps(inbox: Any, store: Any, slug: str, doc: dict[str, Any], ledger:
     actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
     if actions:
         doc = timing.call(ledger_client.pass_state, ledger, slug)
-    return actions + task_steps.phase_writes(skip_refused(phases.phase_changes, slug, doc, ledger))
+    return actions + task_steps.phase_writes(skip_refused(phases.phase_changes, doc))
 
 
 def _planning_after_phase(inbox: Any, store: Any, slug: str, ledger: Any, box: dict[str, Any]) -> list[str]:
@@ -432,7 +432,7 @@ def run_tick(
         )
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc, view, beating, box = {}, None, ExitStack(), PassBox()
+    doc, view, beating, box, ended = {}, None, ExitStack(), PassBox(), None
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner)))
@@ -512,18 +512,24 @@ def run_tick(
             actions += run_group("wrapper metrics", **passing, count=len(actions))
             host_steps.raise_held(box)
             doc = timing.call(ledger_client.pass_state, ledger, slug)
-            run_group("after", **(passing | {"doc": doc}))
-            host_steps.raise_held(box)
             started = box["started"]
+            ended = report_steps.FULL
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     except Left as missing:
-        return report_steps.early_end(store, slug, now_ms(), doc, missing, box.left)
+        ended = report_steps.EARLY
+        return report_steps.early_end(store, slug, missing, box.left)
     finally:
         try:
             published: dict[str, Any] = PassBox()
-            run_group(
-                "wrapper status", store=store, slug=slug, doc=doc, view=view, box=published, failure=sys.exception()
-            )
+            closing: dict[str, Any] = {
+                "store": store,
+                "slug": slug,
+                "doc": doc,
+                "view": view,
+                "box": published,
+                "ended": ended,
+            }
+            run_group(report_steps.CLOSING_GROUP, **closing, failure=sys.exception())
             host_steps.raise_held(published)
         finally:
             beating.close()
