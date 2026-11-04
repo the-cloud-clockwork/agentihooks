@@ -96,7 +96,7 @@ def test_the_spawn_order_follows_the_dispatched_key_over_the_ledger_rank(store, 
     assert [task["id"] for _, task in order] == ["t2", "t1"]
 
 
-def test_the_running_filter_keeps_the_lane_agents_that_still_own_their_task():
+def test_the_running_filter_keeps_the_lane_agents_that_still_own_their_task() -> None:
     agents = [
         AgentRecord("engineer@a1b2c3-0001", "eng", "t1"),
         AgentRecord("engineer@a1b2c3-0002", "eng", "t2", state="finished"),
