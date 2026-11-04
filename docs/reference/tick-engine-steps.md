@@ -111,8 +111,8 @@ its eventual result is dropped. External writes already performed are not
 rolled back. Writes the step returns for the engine to apply, cache saves
 included, are dropped with the result. A step that finishes past its budget
 before the engine abandons it is recorded late and keeps its writes. A step
-abandoned on every pass never saves its cache, so every pass repeats the work the cache was meant to
-skip. The [fleet red notice](fleet-red-notice.md#the-notice-step-budget) step
+abandoned on every pass never saves its cache, so every pass repeats the work
+the cache was meant to skip. The [fleet red notice](fleet-red-notice.md#the-notice-step-budget) step
 did this with its fifteen second unmeasured budget until it was measured.
 This delivery allows the next pass to start the same step while
 the earlier worker remains active. Do not interpret `late` as proof that the
