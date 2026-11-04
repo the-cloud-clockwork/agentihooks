@@ -63,8 +63,8 @@ class Recorder:
 
     def viewed(self, box: object, key: str, value: object) -> None:
         step = STEP.get()
-        if step is not None and key in KEYS:
-            self.reads.add(Seen(step, key, self.writer(key, value, box)))
+        if step is not None and key in KEYS and (writer := self.writer(key, value, box)) is not None:
+            self.reads.add(Seen(step, key, writer))
 
 
 def named(run: Callable[[Context], Result], name: str, rec: Recorder) -> Callable[[Context], Result]:
