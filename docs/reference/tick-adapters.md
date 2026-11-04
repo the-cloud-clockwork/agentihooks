@@ -457,8 +457,8 @@ def state_by_port(port: SourceControl, number: int, deadline: Deadline) -> Chang
     return port.change(ChangeRef("the-cloud-clockwork/agentihooks", number), deadline=deadline)
 ```
 
-In a module under `scripts/tick`, the first function fails the scan and the second passes. A finding names the file
-and the rule:
+In a module under `scripts/tick`, the first function fails the scan and the second passes. A finding opens with the
+file and the rule; the scan then prints the rule message and the matching line:
 
 ```text
 scripts/tick/<module>.py
@@ -466,9 +466,9 @@ scripts/tick/<module>.py
 ```
 
 `git` commands are not matched. `.semgrep/source-control.test.py` holds the failing and passing fixtures, a tick step
-that builds a `gh` list and one that calls the port included, graded with `semgrep --test` in the same workflow step that scans the code; the rule also
-includes `*.test.py` so that fixture file is scanned. The fixture grades the pattern shapes; the repository scan in the
-same step grades the path include.
+that builds a `gh` list and one that reads through the port included, graded with `semgrep --test` in the same
+workflow step that scans the code; the rule also includes `*.test.py` so that fixture file is scanned. The fixture
+grades the pattern shapes; the repository scan in the same step grades the path include.
 
 Files that still build `gh` commands are listed twice and must match: in the rule's `paths.exclude` and in
 `.semgrep/source-control-allowlist.json`. The list only shrinks. The Semgrep workflow step
