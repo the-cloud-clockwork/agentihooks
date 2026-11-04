@@ -35,5 +35,5 @@ def run(argv: list[str], runner: Runner | None = None, **options: Any) -> subpro
     done = call(argv, capture_output=True, text=True, **options)
     if done.returncode == 0 or REFUSED not in done.stderr:
         return done
-    base = options.pop("env", None) or os.environ
-    return call(argv, capture_output=True, text=True, env=environment(base), **options)
+    base = options.pop("env", None)
+    return call(argv, capture_output=True, text=True, env=environment(os.environ if base is None else base), **options)

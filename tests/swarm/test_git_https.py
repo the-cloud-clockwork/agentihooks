@@ -45,10 +45,18 @@ def test_a_success_runs_once() -> None:
     assert calls == [(["git", "push"], {"capture_output": True, "text": True, "cwd": "/w"})]
 
 
-def test_a_failure_that_is_not_a_publickey_refusal_runs_once() -> None:
-    calls, fake = answers((1, "", "fatal: couldn't find remote ref nope\n"))
+@pytest.mark.parametrize(
+    "answer",
+    [
+        (1, "", "fatal: couldn't find remote ref nope\n"),
+        (128, "", "git@github.com: Permission denied (password).\n"),
+        (0, "ok\n", REFUSAL),
+    ],
+)
+def test_only_a_failed_publickey_refusal_is_retried(answer: tuple[int, str, str]) -> None:
+    calls, fake = answers(answer)
     done = git_https.run(["git", "fetch", "origin", "nope"], runner=fake)
-    assert (done.returncode, done.stderr) == (1, "fatal: couldn't find remote ref nope\n")
+    assert (done.returncode, done.stdout, done.stderr) == answer
     assert len(calls) == 1
 
 
@@ -72,6 +80,7 @@ def test_a_refused_retry_is_returned_without_a_third_attempt() -> None:
     done = git_https.run(["git", "fetch", "origin"], runner=fake, env={})
     assert (done.returncode, done.stderr) == (128, "remote: Invalid username or token.\n")
     assert len(calls) == 2
+    assert calls[1][1]["env"] == HTTPS_ENTRIES
 
 
 def test_the_retry_builds_on_the_process_environment_when_the_caller_passes_none(
@@ -113,6 +122,7 @@ def test_the_settings_carry_no_token_from_the_environment() -> None:
 
 
 def test_publish_retries_a_refused_push_over_https(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
     calls, fake = answers((128, "", REFUSAL), (0, "", "To https://github.com/o/r.git\n"))
     monkeypatch.setattr(git_https.subprocess, "run", fake)
     assert publish.git(tmp_path, "push", "-u", "origin", "HEAD:b") == ""
