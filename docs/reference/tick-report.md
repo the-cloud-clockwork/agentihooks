@@ -99,6 +99,43 @@ the `tick:records` stream of the same passes:
 Only steps the tick engine runs write these records; a window without them prints the header alone and
 `Critical lane end p95: n/a`.
 
+### Outcome values
+
+Each `tick:records` row carries one `outcome`, checked in this order:
+
+| Outcome | When | Counts as |
+|---|---|---|
+| `skipped` | The step never started: its lane deadline had passed, a step it needs was dropped, or a handed off step was dropped before the pass workers ran it. | Skipped |
+| `failed` | The step raised. | Neither late nor dropped |
+| `held` | The step's earlier run for the same swarm was still alive, so no thread started. | Held |
+| `late` | The step was still running at its budget, or it finished with a wall time above its budget. | Late share; Abandoned too when it was left running |
+| `ok` | The step finished within its budget. | None of the columns |
+
+A late run that finished keeps its result: its writes apply, and only the ones refused by compare and set count as
+dropped. An abandoned run never applies its writes, so all of its declared write domains count as dropped. A held,
+failed or skipped record drops nothing. A skipped row stores `abandoned` false, so Abandoned and Skipped never count
+the same row.
+
+### Reading the outcome rows
+
+```bash
+agentihooks swarm <id> tick-report --passes 60 | sed -n '/^Critical lane end/,/^CPU share/p'
+```
+
+```text
+Critical lane end p95: 38.402s
+Step  Records  Late share  Abandoned  Held  Skipped  Dropped
+fleet red notice  60  8.33%  5  0  0  15
+spawn  60  0.00%  0  0  0  0
+CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.
+```
+
+The figures are illustrative. Here the fleet red notice step was left running at its budget in 5 of 60 passes, and
+those runs lost 15 declared write domains between them. `spawn` finished in budget on every pass. A step with Held
+above zero overlapped its own earlier run; with Skipped above zero, its lane ran out or a step it needs was dropped.
+Critical lane end p95 shows how late in a pass the critical lane steps finish, apart from the slow lane steps that
+the pass wall time includes.
+
 ## Where the numbers come from
 
 | Stream | One record per | Fields the report reads | Kept |
@@ -136,6 +173,11 @@ pass reads yet, the scheduler cron stays every minute, and every pass still runs
 | Many passes without retained steps | Steps outnumber passes, so `tick:steps` trims first. Read a shorter window. |
 | No `Lane` lines | The window holds no step record with a lane. Check that the swarm runs the current tick code. |
 | `Lane tick` above 40 percent | The critical lane takes more step CPU than the 40 percent threshold. Find its heaviest rows and check whether each needs to finish before spawn; one that does not can move to the slow lane, see [Lanes](tick-engine-steps.md#lanes). |
+| No outcome rows and `Critical lane end p95: n/a` | The window holds no `tick:records` row: the swarm runs tick code from before the outcome columns, or no engine step ran. Check the journal for `swarm_tick_record_failed` with stream `tick:records`. |
+| A step's Late share climbs | Its wall time is past its budget on those passes. Compare the step row's p95 with its budget in the timing table; a run still going at its budget is abandoned and its result dropped. |
+| Abandoned and Dropped rise together | Runs are left going at their budget and their writes never apply. Raise the step's measured budget or make the step faster; until then its effects land only on passes where it finishes in time. |
+| Held above zero | An earlier run of the same step is still alive in its daemon thread. Check Abandoned on the same row: each abandoned run can hold the next pass's run. |
+| Skipped above zero | The lane deadline passed before the step started, or a step it needs was dropped. Read the rows of the steps it needs and the lane's heaviest rows. |
 | One step dominates p95 | Compare it with its budget in the timing table; a step past its budget is recorded late and the pass continues. See [Tick engine steps](tick-engine-steps.md#when-a-step-exceeds-its-budget). |
 | Spawns stop and the master got a pass budget notice | The pass p95 is above the stage target. Read the report over 10 passes to find the slow steps; the hold clears by itself once the passes recover. |
 

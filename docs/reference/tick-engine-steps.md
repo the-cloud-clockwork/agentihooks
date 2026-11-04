@@ -111,6 +111,9 @@ rolled back. This delivery allows the next pass to start the same step while
 the earlier worker remains active. Do not interpret `late` as proof that the
 underlying call stopped or that retrying it cannot overlap.
 
+The tick report counts these runs per step in its Late share, Abandoned, Held and Dropped columns; see
+[Outcome columns](tick-report.md#outcome-columns).
+
 ### Lanes
 
 A parallel pass gives each lane its own deadline: 110 seconds for the critical
