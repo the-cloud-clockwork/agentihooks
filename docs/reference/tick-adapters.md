@@ -938,14 +938,15 @@ the merge: its 71 spawn orders over three lanes gave 213 `ready_in_order` and 42
 and `focus_budget.place`, which the merge added, have rows only from the passes after it. Rows nest, so a part's time
 also counts in `_spawn_order`, and `placeable` time also counts in `focus_budget.place`.
 
-Compare totals, count times median, of the same window; percentiles do not add.
+The report prints no sum per row, so estimate each row's total as count times median, all from the same window;
+percentiles do not add, and the estimate runs low for a row with a long tail, so check its p95 too.
 
 | What the report shows | Where the time goes |
 |---|---|
-| The `_spawn_order` total well above the summed totals of its directly timed parts | Time in untimed code: the runtime's `begin_placement_pass`, the `readiness.tick_launches` and capacity decision task filters on each ready list, `focus_budget.ranks` and the final focus sort |
-| The `focus_budget.place` total close to the `_spawn_order` total | Placement is the slow part; compare it with the `placeable` total. When `placeable` is small, the time is in focus placement itself |
+| The `_spawn_order` estimate well above the summed estimates of its directly timed parts | Time in untimed code: the runtime's `begin_placement_pass`, the `readiness.tick_launches` and capacity decision task filters on each ready list, `focus_budget.ranks` and the final focus sort |
+| The `focus_budget.place` estimate close to the `_spawn_order` estimate | Placement is the slow part; compare it with the `placeable` estimate. When `placeable` is small, the time is in focus placement itself |
 | `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter makes no store or network call, so it grows only with those |
-| The `ready_in_order` or `claim_view` total close to the `_spawn_order` total | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
+| The `ready_in_order` or `claim_view` estimate close to the `_spawn_order` estimate | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
 
 `tests/swarm/test_spawn_timing.py` holds the contract. A spawn pass records a row for each part before the spawn step
 row ends. Spawn order records one `_running` and one `focus_budget.place` row per lane, each starting and ending
