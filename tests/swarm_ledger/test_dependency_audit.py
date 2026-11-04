@@ -61,6 +61,10 @@ def test_a_dependent_whose_plan_names_the_other_tasks_code_is_not_reported(text)
     assert dependency_audit.audit(tasks, spec()) == []
 
 
+def test_a_territory_entry_keeps_every_character_but_its_edge_slashes():
+    assert dependency_audit.code_paths({"territory": ["/X.py/", "XlibX/"]}) == ["X.py", "XlibX"]
+
+
 def test_the_spec_is_read_only_for_the_dependent_and_only_when_territories_are_disjoint():
     read = []
     tasks = [
