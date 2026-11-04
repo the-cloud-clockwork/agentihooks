@@ -20,9 +20,12 @@ import re
 import sys
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
+
+_JSONDict = dict[str, Any]
 
 
-def _install_module():
+def _install_module() -> Any:
     mod = sys.modules.get("install") or sys.modules.get("scripts.install")
     if mod is None:
         from scripts import install as mod  # production cold path
@@ -82,29 +85,30 @@ def _keep_foreign_hooks(settings_path: Path, rendered: dict) -> dict:
     return merged
 
 
-def _parent_dict(doc: dict, path: list[str]) -> dict | None:
+def _parent_dict(doc: _JSONDict, path: list[str]) -> _JSONDict | None:
+    current: Any = doc
     for key in path:
-        doc = doc.get(key) if isinstance(doc, dict) else None
-        if not isinstance(doc, dict):
+        current = current.get(key) if isinstance(current, dict) else None
+        if not isinstance(current, dict):
             return None
-    return doc
+    return current
 
 
-def _pop_path(doc: dict, path: list[str]) -> None:
+def _pop_path(doc: _JSONDict, path: list[str]) -> None:
     parent = _parent_dict(doc, path[:-1])
     if parent is not None:
         parent.pop(path[-1], None)
 
 
 def _merge_tree(
-    existing: dict,
-    rendered: dict,
-    prior_record: dict,
+    existing: _JSONDict,
+    rendered: _JSONDict,
+    prior_record: _JSONDict,
     path: tuple[str, ...],
     new_leaves: set[str],
-    new_lists: dict[str, list],
-) -> dict:
-    merged = dict(existing) if isinstance(existing, dict) else {}
+    new_lists: dict[str, list[Any]],
+) -> _JSONDict:
+    merged: _JSONDict = dict(existing) if isinstance(existing, dict) else {}
     for key, value in rendered.items():
         new_path = path + (key,)
         dotted = ".".join(new_path)
@@ -115,9 +119,9 @@ def _merge_tree(
             )
             continue
         if isinstance(value, list):
-            prior_list = prior_record.get("lists", {}).get(dotted, [])
+            prior_list: list[Any] = prior_record.get("lists", {}).get(dotted, [])
             stale = [item for item in prior_list if item not in value]
-            base = [item for item in current if item not in stale] if isinstance(current, list) else []
+            base: list[Any] = [item for item in current if item not in stale] if isinstance(current, list) else []
             for item in value:
                 if item not in base:
                     base.append(item)
@@ -129,7 +133,7 @@ def _merge_tree(
     return merged
 
 
-def _additive_merge(existing: dict, rendered: dict, prior_record: dict) -> tuple[dict, dict]:
+def _additive_merge(existing: _JSONDict, rendered: _JSONDict, prior_record: _JSONDict) -> tuple[_JSONDict, _JSONDict]:
     """Merge rendered into existing, keeping every key agentihooks does not render.
 
     A dict value recurses, a list value unions with existing order first and
@@ -138,7 +142,7 @@ def _additive_merge(existing: dict, rendered: dict, prior_record: dict) -> tuple
     removed; a path never recorded here is never touched.
     """
     new_leaves: set[str] = set()
-    new_lists: dict[str, list] = {}
+    new_lists: dict[str, list[Any]] = {}
     merged = _merge_tree(existing, rendered, prior_record, (), new_leaves, new_lists)
 
     for dotted in set(prior_record.get("leaves", [])) - new_leaves:
@@ -149,7 +153,7 @@ def _additive_merge(existing: dict, rendered: dict, prior_record: dict) -> tuple
     return merged, {"leaves": sorted(new_leaves), "lists": new_lists}
 
 
-def _remove_recorded_settings(doc: dict, record: dict) -> None:
+def _remove_recorded_settings(doc: _JSONDict, record: _JSONDict) -> None:
     for dotted in record.get("leaves", []):
         _pop_path(doc, dotted.split("."))
     for dotted, written in record.get("lists", {}).items():
@@ -159,7 +163,7 @@ def _remove_recorded_settings(doc: dict, record: dict) -> None:
             parent[path[-1]] = [item for item in parent[path[-1]] if item not in written]
 
 
-def _remove_owned_hooks(doc: dict, owned: set[str]) -> None:
+def _remove_owned_hooks(doc: _JSONDict, owned: set[str]) -> None:
     hooks = doc.get("hooks")
     if not isinstance(hooks, dict):
         return
@@ -181,7 +185,7 @@ def _remove_owned_hooks(doc: dict, owned: set[str]) -> None:
         doc.pop("hooks", None)
 
 
-def _remove_owned_plugins(doc: dict, owned: set[str]) -> None:
+def _remove_owned_plugins(doc: _JSONDict, owned: set[str]) -> None:
     plugins = doc.get("enabledPlugins")
     if not isinstance(plugins, dict):
         return
@@ -258,8 +262,8 @@ def settings_document(rendered: dict) -> dict:
 
 
 def enabled_plugins(
-    operator: dict, layered: dict, bundle: Path | None, user: Path | None = None, shared: Path | None = None
-) -> dict:
+    operator: _JSONDict, layered: _JSONDict, bundle: Path | None, user: Path | None = None, shared: Path | None = None
+) -> _JSONDict:
     from scripts.deps_preflight import fleet_plugins
 
     _i = _install_module()
@@ -373,7 +377,7 @@ class ClaudeAdapter:
         mcp = installer.load_json(installer._CLAUDE_JSON) if installer._CLAUDE_JSON.exists() else {}
         return installed_counts(mcp.get("mcpServers", {}), self.home() / "skills", settings.get("enabledPlugins", {}))
 
-    def write_settings(self, rendered: dict) -> Path:
+    def write_settings(self, rendered: _JSONDict) -> Path:
         _i = _install_module()
         rendered = settings_document(rendered)
 

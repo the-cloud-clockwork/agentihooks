@@ -2652,25 +2652,6 @@ def list_profiles() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _preserve_personal_keys(existing_path: Path) -> dict:
-    """Return personal keys from an existing unmanaged settings file."""
-    personal: dict = {}
-    if not existing_path.exists():
-        return personal
-    try:
-        existing = load_json(existing_path)
-        if existing.get(MANAGED_BY_KEY) == MANAGED_BY_VALUE:
-            return personal  # Already managed — don't re-import
-        for key in PERSONAL_KEYS:
-            if key in existing:
-                personal[key] = existing[key]
-        if personal:
-            print(f"Preserving personal keys from existing settings: {sorted(personal)}")
-    except json.JSONDecodeError:
-        print("WARNING: existing settings.json is invalid JSON – skipping preservation.")
-    return personal
-
-
 def _backup_settings(existing_path: Path) -> None:
     """Back up an existing unmanaged settings file (skips if already managed)."""
     if not existing_path.exists():
