@@ -82,12 +82,25 @@ def _number(slug: str, address: str) -> int:
 
 
 def held(redis, slug: str, agents: list) -> dict[str, str]:
-    """Each live master seat, lead first then by number, with the name holding it. The seat registry decides every
-    seat it has an occupant for: live while that occupant has neither left nor finished nor retired nor been asked to
-    retire. A master record whose seat the registry does not hold yet counts by its record."""
+    """Each live master seat, lead first then by number, with the name holding it: an occupied seat whose master has
+    not been asked to retire."""
     from scripts.swarm import master_retire
 
-    registry, table, store = SeatRegistry(redis), MasterSeats(redis), RedisStore(redis)
+    store = RedisStore(redis)
+    found = {
+        address: name
+        for address, name in occupied(redis, slug, agents).items()
+        if not master_retire.reason(store, slug, name)
+    }
+    lead = seat_address(slug, MASTER)
+    return dict(sorted(found.items(), key=lambda pair: (pair[0] != lead, _number(slug, pair[0]))))
+
+
+def occupied(redis, slug: str, agents: list) -> dict[str, str]:
+    """Each master seat with the name in it. The seat registry decides every seat it has an occupant for: occupied
+    while that occupant has neither left nor finished nor retired. A master record whose seat the registry does not
+    hold yet counts by its record."""
+    registry, table = SeatRegistry(redis), MasterSeats(redis)
     gone = {a.name for a in agents if a.state in GONE}
     retired = set(table.retired(slug))
     records = {a.seat or a.name: a.name for a in agents if a.lane == MASTER and a.name not in gone}
@@ -97,10 +110,9 @@ def held(redis, slug: str, agents: list) -> dict[str, str]:
         name = occupant or records.get(address)
         if occupant and (occupant in gone or registry.left(occupant, address)):
             continue
-        if name and not master_retire.reason(store, slug, name):
+        if name:
             found[address] = name
-    lead = seat_address(slug, MASTER)
-    return dict(sorted(found.items(), key=lambda pair: (pair[0] != lead, _number(slug, pair[0]))))
+    return found
 
 
 def assign(

@@ -196,7 +196,8 @@ class InboxStore:
         from scripts.hive import scope
 
         requested = self.names.resolve(address)
-        sender, address = self.names.resolve(sender), self.seats.recipient(requested)
+        sender = self.names.resolve(sender)
+        requested, address = self.pool.rerouted(requested, self.seats.recipient(requested))
         home = self.home(address)
         if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
