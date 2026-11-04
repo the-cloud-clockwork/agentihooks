@@ -81,6 +81,7 @@ def test_a_report_without_progress_lines_says_none_were_recorded():
     assert overrun.NO_STEPS in item.text
 
 
+@pytest.mark.feature("overrun-no-wall-time-handoff")
 def test_an_agent_far_past_the_report_limit_is_only_ever_reported_never_asked_or_retired():
     swarm = Swarm()
     actions = swarm.tick(FAR_PAST)

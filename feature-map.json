@@ -1413,13 +1413,24 @@
         "tests/test_ownership_scope.py::TestSettingsRestore::test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins",
         "tests/test_ownership_scope.py::TestSettingsRestore::test_install_then_uninstall_returns_user_settings_unchanged"
       ]
+    },
+    {
+      "id": "overrun-no-wall-time-handoff",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "Wall time on a claimed task only reports the agent to the master once; it never asks the agent to hand off, never retires it and never reopens its task. Only the context limit triggers a handoff.",
+      "seam": "The overrun step of the swarm tick",
+      "semgrep_rule": "feature-overrun-no-wall-time-handoff",
+      "tests": [
+        "tests/swarm/test_overrun.py::test_an_agent_far_past_the_report_limit_is_only_ever_reported_never_asked_or_retired"
+      ]
     }
   ],
   "unmapped_rules": [
     "feature-front-door-no-token",
     "feature-front-door-route-check",
     "feature-front-door-runtime-check",
-    "feature-overrun-no-wall-time-handoff",
     "feature-stale-nudge-in-tick",
     "feature-stale-nudge-recorded"
   ]
