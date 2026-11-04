@@ -178,17 +178,18 @@ def grade(
     changed: set[str],
     held: dict[str, list[str]],
 ) -> list[str]:
-    """Reject offences in a changed file and records of an unchanged one that neither the base allowlist nor the
-    base measurement held holds, and a changed file whose head record differs from its measurement; a base without
-    an allowlist allows what the head records."""
-    allowed = (recorded or {}) if base is None else base
+    """Reject a missing base allowlist, offences in a changed file and records of an unchanged one that neither
+    the base allowlist nor the base measurement held holds, and a changed file whose head record differs from its
+    measurement."""
+    if base is None:
+        return [f"{ALLOWLIST} is missing from the base"]
     graded = {name: head.get(name, []) for name in changed}
     graded |= {name: offences for name, offences in (recorded or {}).items() if name not in changed}
     errors = [
         f"{name} adds {offence}; the base allowlist does not hold it"
         for name, offences in sorted(graded.items())
         for offence in offences
-        if offence not in allowed.get(name, []) and offence not in held.get(name, [])
+        if offence not in base.get(name, []) and offence not in held.get(name, [])
     ]
     if recorded is None or any(recorded.get(name) != head.get(name) for name in changed):
         errors.append(f"{ALLOWLIST} differs from the head's measurement; run python -m scripts.tick_pattern --write")
