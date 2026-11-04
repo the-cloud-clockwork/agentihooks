@@ -108,12 +108,12 @@ class ExecutionRegistry:
         rows = fencing.records(self.store, slug).sections(slug, ("executions",))["executions"]
         return occupants_of({"executions": {key: row.value for key, row in rows.items()}})
 
+    def named(self, slug: str, name: str) -> bool:
+        """Whether a current execution carries the name: the one read a legacy write repeats inside its watch."""
+        return fencing.records(self.store, slug).record(slug, fencing.BY_NAME, name) is not None
+
     def managed(self, slug: str, name: str) -> bool:
-        port = fencing.records(self.store, slug)
-        if port.record(slug, "by-name", name) is not None:
-            return True
-        rows = port.sections(slug, ("archive",))["archive"]
-        return any(cast(dict[str, Any], row.value)["name"] == name for row in rows.values())
+        return self.named(slug, name) or fencing.archived_name(self.store, slug, name)
 
     def archive(self, slug: str) -> int:
         listed = self.store.listed(slug)
@@ -167,11 +167,12 @@ class ExecutionRegistry:
         return result
 
     def put(self, slug: str, agent: AgentRecord) -> None:
+        managed = _has_identity(agent) or self.managed(slug, agent.name)
         with _writes(slug):
-            timing.timed(self._put, slug, agent)
+            timing.timed(self._put, slug, agent, managed)
 
-    def _put(self, slug: str, agent: AgentRecord) -> None:
-        if _has_identity(agent) or not self.store.project_legacy(slug, agent, lambda: self.managed(slug, agent.name)):
+    def _put(self, slug: str, agent: AgentRecord, managed: bool) -> None:
+        if managed or not self.store.project_legacy(slug, agent, lambda: self.named(slug, agent.name)):
             self.update(slug, agent)
 
     def get(self, slug: str, execution_id: str) -> AgentRecord:

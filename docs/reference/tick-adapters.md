@@ -822,6 +822,137 @@ def retire_all(names_and_pids):
     return [reaper.retire(name, pid, []) for name, pid in names_and_pids]
 ```
 
+## One placement scan per placement pass
+
+The spawn step places a lane's ready tasks in one placement pass: `_spawn_order` in `scripts.swarm.tick` calls the
+runtime's `begin_placement_pass` before it reads capacity, and the place and observe steps wrap their launches in
+`tick._placement_pass`, which calls `end_placement_pass` when the pass ends, even when it raises. On `controller.FencedRuntime` the pass holds one `local_slots.PassCache` in
+`_local_slots_cache`; `end_placement_pass` drops it, so the next pass starts empty.
+
+`PassCache.once(read, *args)` returns the pass's result of `read(*args)`. The first call with a given function and
+arguments runs the read under the cache's lock and keeps the value; every later call in that pass, from any launch
+thread, gets the same value without reading again. A different function or different arguments is a separate entry.
+
+| Read | Inside a placement pass | Outside a placement pass |
+|---|---|---|
+| Live session scan, `local_slots.live`, which walks `/proc` through `terminate_agent.sessions` | Once per pass, `cache.once(live)` | On every `running`, `held` and `claim` call |
+| Swarm agent records of every swarm, `local_slots._scanned` | Once per pass, keyed by the store | On every call |
+| The workstation host reading, `controller._host_reading(store, machine)`, which runs `headroom.measure` against the machine's last saved reading | Once per pass and machine | On every `_workstation_room` call |
+| The local slot claims hash, `local_slots.key(machine)` | Read and written on every claim under `WATCH` | The same |
+
+`FencedRuntime._local_refusal` passes the pass cache to `local_slots.claim`, so each claim counts the live workers
+from the pass scan. The claim hash is never cached: every claim still reads it under `WATCH` and retries on a
+`WatchError`, so concurrent launches in one pass cannot take more than `local-max-agents` slots between them.
+`local_slots.occupancy`, read by the hive launch, the swarm probe and the spawn stall health check, takes no cache and scans each time.
+
+Before this cache, each launch walked `/proc` three times, once each through `running`, `held` and `claim`, so five
+concurrent launches in one pass ran fifteen walks at once. `agentihooks swarm rig-grade-swarm tick-report --passes 60`, run on
+the workstation tick before pull request 9630 merged on 4 November 2026, put the fenced runtime spawn at a median of
+10.9 seconds and a p95 of 15.4 seconds per launch. Run the same command after a change to compare.
+
+A value read once holds for the whole pass. A session that starts or ends during the pass, or a host reading that
+changes, is seen by the next placement pass. The claim hash still bounds the slots taken.
+
+Use the cache for another read that every launch of a pass repeats:
+
+```python
+from scripts.swarm import local_slots
+
+
+def placed(store, slug, tasks):
+    cache = local_slots.PassCache()
+    return [local_slots.running(store, slug, task, cache) for task in tasks]
+```
+
+`tests.hive.test_fenced_spawn_pass` holds the contract: five launches started together in one pass make one session
+scan and one host reading and claim five slots; with a local cap of three they admit three and refuse two; the next
+pass scans again; a refusal outside a pass scans on every call.
+
+### Timed rows inside a fenced spawn
+
+`FencedRuntime._spawn` records two timed rows through `timing.step` for every launch, inside the spawn step's own
+row:
+
+| Step row | Times |
+|---|---|
+| `scripts.swarm.controller.FencedRuntime._refusal` | The placement refusal: the deployment mode refusal, then either the local refusal (workstation room and the local slot claim) or the hive and backend refusal, which on a hive placement can reach the workstation claim |
+| `scripts.swarm.controller.FencedRuntime.runtime_spawn` | The wrapped runtime's `spawn`: the herdr pane, the Kubernetes worker or the hive launch |
+
+Both rows pass `report=False`: a raised error still ends the row with outcome `error` and propagates, but it does not
+reach the spawn stall failure hook, `timing.ON_FAILURE`, so one failed launch is recorded once, under the step that
+called the spawn. The rows show in `swarm <id> tick-report` as their own step rows; see
+[Tick report](tick-report.md#output).
+
+```bash
+agentihooks swarm <swarm slug> tick-report --passes 60 | grep -E 'spawn|FencedRuntime'
+```
+
+When `runtime_spawn` takes most of a slow `spawn` row, the wrapped runtime is the slow part; when `_refusal` does,
+look at the placement reads in the table above.
+
+### Timed rows inside spawn order
+
+`_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
+`scripts.swarm.tick._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
+while `_spawn_order` runs. Once per spawn order it times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`,
+`scripts.swarm.dispatcher.claim_key`, `scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for
+each lane in the caps, it times three parts in this order:
+
+| Step row | Runs | Times |
+|---|---|---|
+| `scripts.swarm.tick._running` | Once per lane | The running agent filter: the task rows of the lane's agents that have not ended and still own their task. Its length is the lane's busy count, which offsets the rank of every task queued for the lane |
+| `scripts.swarm.tick.ready_in_order` | Once per lane | The lane's ready tasks in ledger or dispatched order |
+| `scripts.swarm.focus_budget.place` | Once per lane | Focus budget placement: which ready tasks fit the lane cap after the running ones, and which wait. It includes its two `profile_first.placeable` rows |
+
+`focus_budget.place` locates tasks through `scripts.swarm.profile_first.placeable` twice per lane: once for the ready
+tasks outside the focus queue, once for the focused ones. Each `placeable` row in turn holds one
+`scripts.swarm.profile_first.decided` row and one `scripts.swarm.seat_spawn.placed_elsewhere` row for every task it
+checks, until the lane's free room is filled. After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue once.
+
+The code fixes the counts: `_running`, `ready_in_order` and `focus_budget.place` each run once per lane per spawn
+order, and `placeable` twice, so over a window recorded entirely after pull request 9673 merged the first three have
+equal counts and `placeable` has twice that.
+
+Read the rows with:
+
+```bash
+agentihooks swarm <swarm slug> tick-report --passes 60 \
+  | grep -E 'capacity|claim_key|yielding|claim_view|_spawn_order|_running|ready_in_order|focus_budget|profile_first|placed_elsewhere|_ranked'
+```
+
+A snapshot of the spawn order rows from the workstation tick of `rig-grade-swarm`, read at 15:04 UTC on 4 November
+2026 over a window that began before pull request 9673 merged, with three lanes:
+
+```text
+scripts.swarm.focus_budget.place  138  0.054s  1.585s  0.18%
+scripts.swarm.profile_first.placeable  426  0.000s  0.311s  0.29%
+scripts.swarm.tick._ranked  71  0.002s  0.009s  0.00%
+scripts.swarm.tick._running  138  0.000s  0.001s  0.00%
+scripts.swarm.tick._spawn_order  71  3.336s  17.861s  2.26%
+scripts.swarm.tick.claim_view  71  0.050s  0.196s  0.02%
+scripts.swarm.tick.ready_in_order  213  0.111s  2.357s  0.80%
+```
+
+The columns are count, median, p95 and CPU share; see [Tick report](tick-report.md#output). The window began before
+the merge: its 71 spawn orders over three lanes gave 213 `ready_in_order` and 426 `placeable` rows, while `_running`
+and `focus_budget.place`, which the merge added, have rows only from the passes after it. Rows nest, so a part's time
+also counts in `_spawn_order`, and `placeable` time also counts in `focus_budget.place`.
+
+The report prints no sum per row, so estimate each row's total as count times median, all from the same window;
+percentiles do not add, and the estimate runs low for a row with a long tail, so check its p95 too.
+
+| What the report shows | Where the time goes |
+|---|---|
+| The `_spawn_order` estimate well above the summed estimates of its directly timed parts | Time in untimed code: the runtime's `begin_placement_pass`, the `readiness.tick_launches` and capacity decision task filters on each ready list, `focus_budget.ranks` and the final focus sort |
+| The `focus_budget.place` estimate close to the `_spawn_order` estimate | Placement is the slow part; compare it with the `placeable` estimate. When `placeable` is small, the time is in focus placement itself |
+| `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter makes no store or network call, so it grows only with those |
+| The `ready_in_order` or `claim_view` estimate close to the `_spawn_order` estimate | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
+
+`tests/swarm/test_spawn_timing.py` holds the contract. A spawn pass records a row for each part before the spawn step
+row ends. Spawn order records one `_running` and one `focus_budget.place` row per lane, each starting and ending
+inside the `_spawn_order` row. The running filter keeps only the lane's agents that have not ended and still own their
+task, with a placeholder row for an agent whose task row is missing.
+
 ## One lease heartbeat per tick pass
 
 `scripts.swarm.lease.held_pass(store, slug, held)` holds the controller lease for one tick pass. `run_tick` enters it
@@ -916,6 +1047,25 @@ The last line raises `UndeclaredEffect("host is not a declared effect")`.
 A restricted port raises `TypeError("tools require a Deadline keyword argument")` when `deadline=` is missing or not a
 `Deadline`, `TimeoutError("tool deadline expired")` when it has passed, and `AttributeError` for an operation outside
 its port.
+
+### Effects in a tick pass
+
+`scripts.swarm.cli.run_tick` builds the real `Tools` once per pass and holds it in
+`scripts.tick.ports.tools.PASS_TOOLS` until the pass ends. A `Context` built without `tools` inside the pass takes
+that value; outside a pass it is `None`. The adapters are `ClientLedger` with service credentials, `StoreCoordination`
+acting as the lease owner, `GitHubSourceControl` on the working directory, `RouterRuntime` over `routed(os.environ)`,
+a fresh `PassProcesses`, `StoreInbox` sending as `tick@<slug>`, `ApiLlm` on the first classifier model, `SpoolMetrics`
+over the local spool opened on its first append, and `local_host`.
+
+`scripts.tick.engine.run_step` hands each step `Context(view, deadline, tools.for_effects(step.effects))`. A step
+declares its effects and its feature map id on the `Step` protocol (`effects`, `feature`); `CallStep` and `WriteStep`
+take them as keywords and default to `frozenset()` and `""`. A step that calls a write operation on a port it did not
+declare raises `UndeclaredEffect`, and the engine records the step failed with
+`scripts.tick.ports.contracts.UndeclaredEffect` as its error. The writes the step would have returned in its `Result`
+are not applied; calls it already made through declared ports stay made.
+
+Every registered step declares `effects=frozenset()` today and still reaches outside systems through the tick module.
+A step moves onto ports in its own sweep, naming the ports it writes in `effects` in the same pull request.
 
 ## Fakes for tests
 
@@ -1035,6 +1185,9 @@ and call the port from the step.
 | `Outcome(..., Status.UNAVAILABLE, "", detail="no agent named <handle>")` from `runtime.inspect` or `runtime.stop` | The `agents` lookup found no record for that name. | Check the name against the swarm's agent records; the router was not called. |
 | `TypeError` from `runtime.launch` | The request mapping lacks one of `config`, `lane`, `name`, `task`, or carries another key. | Pass exactly those four keys. |
 | `runtime.panes` returns `[]` | herdr answered without a `panes` list. | Run `herdr pane list` on the host and check the herdr server is up. |
+| The `spawn` step row is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Check the caller runs inside `begin_placement_pass` and `end_placement_pass`, and route a repeated read through the pass cache, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
+| The `spawn` step row is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
+| Two launches in one pass are refused as local full although a session ended during the pass | The pass reads the live session scan once, so the ended session still counts until the pass ends. | No action; the next pass scans again. |
 | A reaped or retired process was not found in a tick pass | The process exited before selection, so its `/proc` entry was gone and the snapshot was kept. | No action; the process is already gone. |
 | HTTP 409 `stale_controller`, `the controller lease is stale`, on `ledger.mutate` or a `LedgerClient` write | The operation carried a `controller_epoch` that is no longer the live lease of that ledger: another controller took over. | No action in the step. The pass stops at its next step boundary, where `keep_tick` raises, and a later pass acquires the lease again once no other controller holds it. |
 | `SwarmError: the controller lease is stale` at the start of a pass or before a launch | `held_pass` renewal or `require_epoch` found another controller's lease. | Check which hive holds the swarm's lease; a pass on this controller resumes only once it acquires the lease. |

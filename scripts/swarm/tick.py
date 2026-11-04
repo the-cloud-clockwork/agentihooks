@@ -20,7 +20,7 @@ from importlib import import_module
 from typing import Any, Protocol
 
 import scripts.tick.steps.agents  # noqa: F401
-from hooks.context import context_recycle
+from hooks.context import context_recycle  # noqa: F401
 from scripts.doctor import priming
 from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
@@ -73,7 +73,7 @@ from scripts.swarm import (
     revoked_seats,
     run_window,
     seat_spawn,
-    session_model,
+    session_model,  # noqa: F401
     stack,
     stale_nudge,
     successor_retry,
@@ -677,32 +677,6 @@ def _elsewhere(agent: AgentRecord) -> bool:
     return not agent.runtime_target and bool(agent.hive) and agent.hive != hive_id()
 
 
-def _reap(
-    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
-) -> list[str]:
-    """Judge every legacy agent of the swarm, one task per pass worker, returning actions in agent order."""
-    from scripts.hub.reconciler import legacy_agents
-
-    live, rows = timing.timed(_live_names, runtime), dict(rows)
-
-    judging = _Reaping(slug, store, ledger, runtime, rows, live, now_ms)
-    agents = list(timing.timed(legacy_agents, store, slug))
-    by_task: dict[str, list[int]] = {}
-    for index, agent in enumerate(agents):
-        by_task.setdefault(agent.task or agent.name, []).append(index)
-
-    def one(indexes: list[int]) -> list[tuple[int, list[str]]]:
-        """Return the actions judging each agent of one task took, in agent order."""
-        judged: list[tuple[int, list[str]]] = []
-        for index in indexes:
-            with timing.acting(agents[index].name):
-                judged.append((index, _reap_agent(judging, agents[index])))
-        return judged
-
-    found = dict(pair for pairs in pool.fan_out(one, by_task.values()) for pair in pairs)
-    return [action for index in range(len(agents)) for action in found[index]]
-
-
 @dataclass(frozen=True)
 class _Reaping:
     """What one reap pass judges every agent against."""
@@ -778,20 +752,6 @@ def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
         agent = replace(agent, state="working")
         store.put_agent(slug, agent)
     return _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
-
-
-def _strays(slug, config, store, runtime):
-    """Live agent processes still carrying a name this swarm issued and retired: every holder is left over."""
-    recorded, actions = {a.name for a in store.agents(slug)}, []
-    for name in sorted(runtime.live_names() - recorded):
-        found = parse(name)
-        if not found or found.code != config.code or not store.names.entry(name).get("retired_at"):
-            continue
-        if runtime.reap_name(name):
-            actions.append(f"reaped stray {name}")
-        else:
-            actions.append(f"could not reap stray {name}, retrying next tick")
-    return actions
 
 
 def agent_status(agent):
@@ -964,50 +924,6 @@ def _operator_at_pane(slug, store, agent, observed, now_ms):
     """The idle count holds while the pane's input line holds text or the operator prompted it inside the quiet window."""
     last = idle_state.last_prompt(store.redis, slug, agent.name)
     return bool(observed.typed) or (last is not None and now_ms - last < wake.quiet_ms(os.environ))
-
-
-def _orphans(slug, store, ledger, rows):
-    known = {a.name for a in store.agents(slug)}
-    actions = []
-    for task_id, row in rows.items():
-        if (
-            row.get("state") in ACTIVE
-            and row.get("claimed_by") not in known
-            and store.claimant(slug, task_id) is None
-            and not awaiting_merge(row)
-        ):
-            if _reopen(slug, ledger, rows, task_id):
-                actions.append(f"task {task_id} had no agent, reopened")
-    return actions
-
-
-def _conversations(slug: str, store: RedisStore, runtime: Any) -> None:
-    """Record each paned agent's current conversation, fanned out over the pass workers."""
-    local = runtime.conversations()
-    found = {**(local or {}), **reports.Reports(store.redis).conversations()}
-
-    def one(agent: AgentRecord) -> None:
-        """Pin and record the conversation the pane of ``agent`` reports."""
-        if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
-            return
-        pane = reports.pane_key(agent)
-        if pane not in found and (local is None or reports.host(agent) or resume.recovery_pending(store, slug, agent)):
-            return
-        current = found.get(pane, "")
-        if current:
-            context_recycle.pin_swarm(current, slug, store.config(slug).compact_limit or None)
-        if current and current != agent.conversation_id:
-            store.put_agent(slug, replace(agent, conversation_id=current))
-            store.names.note(agent.name, session_id=current)
-
-    pool.fan_out(one, store.agents(slug))
-
-
-def _session_models(slug, store):
-    for agent in store.agents(slug):
-        reported = session_model.apply(agent, session_model.get(store.redis, slug, agent.name))
-        if reported != agent:
-            store.put_agent(slug, reported)
 
 
 def _reopen(slug, ledger, rows, task_id, expected=None):
@@ -1646,6 +1562,15 @@ def _collect_acks(
     return actions
 
 
+def _running(agents: list[AgentRecord], rows: dict[str, Any], lane: str) -> list[dict[str, Any]]:
+    """The task rows of the lane's agents that have not ended and still own their task."""
+    return [
+        rows.get(a.task, {"id": a.task, "lane": a.lane})
+        for a in agents
+        if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
+    ]
+
+
 def _spawn_order(
     slug: str,
     config: SwarmConfig,
@@ -1666,18 +1591,14 @@ def _spawn_order(
     claims = timing.timed(claim_view, slug, store, rows, doc, dispatched)
     queue, waits = [], []
     for lane, cap in caps.items():
-        running = [
-            rows.get(a.task, {"id": a.task, "lane": a.lane})
-            for a in agents
-            if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
-        ]
+        running = timing.timed(_running, agents, rows, lane)
         busy = len(running)
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
         ready = [task for task in ready if readiness.tick_launches(config.engine, task)]
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
-        ready, refused = focus_budget.place(doc, ready, lane, cap, running, locate)
+        ready, refused = timing.timed(focus_budget.place, doc, ready, lane, cap, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
     ranked = timing.timed(_ranked, slug, store, queue, dispatched)
@@ -1984,7 +1905,7 @@ def respawn_master(slug, store, runtime, now_ms):
             _recover_master(slug, config, store, fenced, now_ms) or _master(slug, config, store, fenced, now_ms)
         )
 
-    return _under_tick_lock(slug, store, respawn)
+    return _under_tick_lock(slug, store, respawn, "respawn master")
 
 
 def place_master(slug, store, runtime, now_ms):
@@ -1994,10 +1915,10 @@ def place_master(slug, store, runtime, now_ms):
         fenced = controller.FencedRuntime(store, slug, held, runtime, controller.deployment_for(config, os.environ))
         return _master(slug, config, store, fenced, now_ms)
 
-    return _under_tick_lock(slug, store, place)
+    return _under_tick_lock(slug, store, place, "place master")
 
 
-def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
+def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str) -> Any:
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 
@@ -2006,7 +1927,7 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
     held = lease.acquire(store, slug, hive_id())
     if held is None:
         return []
-    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms())
+    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms(), caller)
     if token is None:
         return []
     try:
@@ -2016,7 +1937,7 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
         with lease.held_pass(store, slug, held):
             return act(config, held)
     finally:
-        controller.release_tick_lock(store, slug, token)
+        controller.release_tick_lock(store, slug, token, caller)
 
 
 def _settle(

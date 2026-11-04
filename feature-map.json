@@ -43,6 +43,24 @@
       ]
     },
     {
+      "id": "fenced-live-names-listing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g6",
+      "behaviour": "The fenced runtime lists live agent names once per tick pass, keeps that listing on the pass's process model shared by every fenced runtime of the pass, lists again after a fenced spawn, collect, expire, retire, reap, close or resume, and lists on every call outside a pass.",
+      "seam": "scripts.swarm.controller.FencedRuntime.live_names and scripts.swarm.cli.run_tick with the running scenario",
+      "tests": [
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_once_per_pass_and_serves_copies",
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_again_in_a_new_pass",
+        "tests/swarm/test_controller_live_names.py::test_live_names_outside_a_pass_lists_every_call",
+        "tests/swarm/test_controller_live_names.py::test_agent_changes_drop_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing_when_it_fails",
+        "tests/swarm/test_controller_live_names.py::test_a_change_through_one_fenced_runtime_drops_the_listing_of_another",
+        "tests/swarm/test_controller_live_names.py::test_collect_and_expire_drop_the_pass_listing",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_running_pass_lists_live_names_once_plus_once_per_launch"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-budget",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a4",
@@ -81,6 +99,25 @@
         "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
         "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
         "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path"
+      ]
+    },
+    {
+      "id": "swarm-tick-declared-effects",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h4",
+      "behaviour": "The tick wrapper builds the real port tools once per pass and the engine hands each step only the ports its declared effects name: a step that calls a write operation on any other port raises UndeclaredEffect and is recorded failed, while every existing step declares no effects.",
+      "seam": "scripts.tick.engine.run_step with Context.tools narrowed by Tools.for_effects(step.effects), fed by scripts.swarm.cli.run_tick through scripts.tick.ports.tools.PASS_TOOLS",
+      "tests": [
+        "tests/tick/test_effects.py::test_a_step_sends_through_its_declared_inbox",
+        "tests/tick/test_effects.py::test_a_ledger_write_outside_the_declared_effects_goes_red",
+        "tests/tick/test_effects.py::test_a_step_without_effects_cannot_write",
+        "tests/tick/test_effects.py::test_a_context_built_inside_a_pass_carries_the_pass_tools",
+        "tests/tick/test_effects.py::test_call_and_write_steps_declare_their_effects_and_feature",
+        "tests/tick/test_effects.py::test_every_registered_step_declares_no_effects_yet",
+        "tests/tick/test_effects.py::test_a_step_of_a_parallel_pass_reaches_its_declared_ports",
+        "tests/tick/test_effects.py::test_the_pass_spool_opens_once_and_appends_every_batch",
+        "tests/tick/test_effects.py::test_the_pass_tools_wire_every_real_adapter_for_the_swarm",
+        "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
       ]
     },
     {
@@ -205,7 +242,14 @@
         "tests/swarm/test_tick_records.py::test_budgeted_step_record_carries_its_lane_only_when_given",
         "tests/swarm/test_tick_records.py::test_budgeted_step_records_and_fails_under_the_name_it_is_given",
         "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps",
-        "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu"
+        "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_its_budget_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_step_left_with_only_its_actions_domain_journals_nothing",
+        "tests/tick/test_engine_records.py::test_abandoned_write_step_reads_abandoned_with_its_writes_dropped",
+        "tests/tick/test_engine_records.py::test_steps_dropped_at_an_expired_lane_read_skipped",
+        "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95",
+        "tests/tick/test_engine_records.py::test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain"
       ]
     },
     {

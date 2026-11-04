@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/pool.py:scripts.inbox.pool.x\u01c1MasterPool\u01c1empty:86ca4b38690b9d38fa69cf6aa426843ec1539d442c4cef626078e558d8c8eaf0": {
+    "reader": "standards_reader",
+    "reason": "Replaces Any with None as the first argument of cast in cast(Any, RedisStore(redis)).agents(slug). typing.cast returns the store unchanged and never reads the first argument at runtime, so the same agent records are listed and the seat check result is identical."
+  }
+}

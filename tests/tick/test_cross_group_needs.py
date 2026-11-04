@@ -32,6 +32,8 @@ class Step:
     interval_s: float = 0.0
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
 
     def run(self, ctx: Context) -> Result:
         return self.action(ctx)
@@ -224,7 +226,7 @@ def test_a_critical_step_is_dropped_in_its_group_when_the_handed_off_step_it_nee
         found.hand((first.name,))
         found.end(first.name, True)
         rows = engine.run_group("cross gone wake", _ctx(), (wake,))
-    assert rows == (engine.StepRecord("cross gone wake", 0.0, 5.0, abandoned=True),)
+    assert rows == (engine.StepRecord("cross gone wake", 0.0, 5.0, abandoned=True, skipped=True),)
     assert ran == []
 
 

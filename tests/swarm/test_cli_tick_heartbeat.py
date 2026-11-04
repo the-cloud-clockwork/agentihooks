@@ -46,4 +46,4 @@ def test_the_tick_heartbeat_keeps_the_tick_lock_with_the_exact_lease_and_token(
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     keep_calls.clear()
     seen["heartbeat"]()
-    assert keep_calls == [(store, "sw", seen["held"], seen["token"], cli.TICK_LOCK_MS)]
+    assert keep_calls == [(store, "sw", seen["held"], seen["token"], cli.TICK_LOCK_MS, "pass heartbeat")]

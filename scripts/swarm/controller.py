@@ -14,16 +14,19 @@ from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
 from scripts.events.factory import open_bus
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import holder_pod, lease, local_slots, tick_stop
+from scripts.swarm import holder_pod, lease, local_slots, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
+from scripts.tick.adapters.processes import PassProcesses
+from scripts.tick.ports.tools import PASS_TOOLS
 
 if TYPE_CHECKING:
     from scripts.hive.admission import Room
     from scripts.hive.placement import Wait
+    from scripts.swarm.tick import Placed
     from scripts.swarm_v2.control_service import ControlService
 
 LOCAL, HYBRID, DISTRIBUTED = "local", "hybrid", "distributed"
@@ -32,6 +35,7 @@ NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes r
 WORKSTATION = "the workstation hive spawns {lane} work"
 DISABLED = "the {backend} runtime is disabled on this controller"
 OVERFLOW = "the local machine takes {lane} work"
+AGENT_CHANGES = frozenset(["retire", "reap_name", "close_space", "close_pane", "resume"])
 
 
 def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
@@ -60,7 +64,20 @@ class FencedRuntime:
         self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self.runtime, name)
+        found = getattr(self.runtime, name)
+        return partial(self._changing, found) if name in AGENT_CHANGES else found
+
+    def live_names(self) -> set[str]:
+        """The live agent names, listed once per tick pass and again after a fenced runtime changes its agents."""
+        shared = _pass_processes()
+        return self.runtime.live_names() if shared is None else shared.live_names(self.runtime.live_names)
+
+    def _changing(self, operation: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            if (shared := _pass_processes()) is not None:
+                shared.forget_names()
 
     def _mode_refusal(self) -> str:
         if self.deployment == LOCAL:
@@ -141,7 +158,8 @@ class FencedRuntime:
         if not equipped(task, local):
             return needs_refusal(task, [local] if local else [])
         found, held, maximum = self._workstation_room(machine, task)
-        taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum) if name else held
+        cache = self._local_slots_cache
+        taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum, cache) if name else held
         if taken >= maximum:
             self._local_full(machine, taken, maximum)
             refused = f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
@@ -152,16 +170,15 @@ class FencedRuntime:
         return ""
 
     def _workstation_room(self, machine: str, task: dict) -> tuple["Room", int, int]:
-        from scripts.hive import admission, headroom, registry
+        from scripts.hive import admission, registry
 
         hive = registry.show(self.store.redis, machine)
         cache = self._local_slots_cache
         running = local_slots.running(self.store, self.slug, task["id"], cache)
         held = local_slots.held(self.store, machine, self.slug, task["id"], cache)
         pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
-        now = lease.now_ms(self.store)
         found = admission.room(
-            headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)),
+            _host_reading(self.store, machine) if cache is None else cache.once(_host_reading, self.store, machine),
             running,
             pending,
             hive["max_agents"] if hive is not None else None,
@@ -217,11 +234,11 @@ class FencedRuntime:
         room = getattr(self.runtime, "launch_room", None)
         return room(config) if room else 1
 
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> "Placed":
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         task = _master_task(lane, task)
         try:
-            return self._spawn(config, lane, name, task)
+            return self._changing(self._spawn, config, lane, name, task)
         except BaseException:
             from scripts.hive import admission
             from scripts.swarm.commands import hive_id
@@ -230,8 +247,9 @@ class FencedRuntime:
             admission.release(self.store.redis, hive_id(), f"{self.slug}/{name}")
             raise
 
-    def _spawn(self, config, lane, name, task):
-        refused = self._refusal(lane, task, name)
+    def _spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> "Placed":
+        with timing.step(f"{__name__}.FencedRuntime._refusal", report=False):
+            refused = self._refusal(lane, task, name)
         workstation = _to_workstation(lane, refused, self._pass_memo())
         from scripts.hive.placement import LOCAL_FULL
 
@@ -251,25 +269,41 @@ class FencedRuntime:
             runtime = runtime.herdr_runtime
         elif not _hive_lane(lane, task, self.kubernetes_proof) and getattr(runtime, "hive_launch", None) is not None:
             runtime = runtime.original_runtime
-        return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+        with timing.step(f"{__name__}.FencedRuntime.runtime_spawn", report=False):
+            return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
-    def collect(self, config, lane, name, task):
+    def collect(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
         from scripts.swarm.tick import SpawnError
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        outcome = self.runtime.hive_launch.collect(request)
+        outcome = self._changing(self.runtime.hive_launch.collect, request)
         if not outcome.ok:
             raise SpawnError(outcome.detail, outcome.status)
         return outcome.value
 
-    def expire(self, config, lane, name, task):
+    def expire(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        return self.runtime.hive_launch.expire(request)
+        return self._changing(self.runtime.hive_launch.expire, request)
+
+
+def _host_reading(store: RedisStore, machine: str) -> dict[str, Any] | None:
+    """The machine's host reading for workstation room, taken against its last saved reading."""
+    from scripts.hive import headroom
+
+    now = lease.now_ms(store)
+    reading: dict[str, Any] | None = headroom.measure(0, now, previous=headroom.read(store.redis, machine, now))
+    return reading
+
+
+def _pass_processes() -> PassProcesses | None:
+    """The running tick pass's process model, which holds its shared live names listing."""
+    processes = getattr(PASS_TOOLS.get(), "processes", None)
+    return processes if isinstance(processes, PassProcesses) else None
 
 
 def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:
@@ -381,43 +415,57 @@ def _ended_boot(held: dict, host: str) -> bool:
     return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 
 
-def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:
+def _lock_raw(pipe: Any, key: str) -> str | None:
+    """Read the tick lock value through a watched pipeline."""
+    return pipe.get(key)
+
+
+def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int, caller: str = "unnamed") -> str | None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
     token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex, **_holder()})
     with store.redis.pipeline() as pipe:
-        try:
-            pipe.watch(key)
-            lease.require(store, slug, held)
-            raw = pipe.get(key)
-            if raw and not _dead(raw):
-                return None
-            pipe.multi()
-            pipe.set(key, token, px=ttl_ms)
-            pipe.execute()
-            return token
-        except WatchError:
+        pipe.watch(key)
+        lease.require(store, slug, held)
+        raw = _lock_raw(pipe, key)
+        if raw and not _dead(raw):
+            _journal_lock(slug, caller, "refused", raw)
             return None
+        pipe.multi()
+        pipe.set(key, token, px=ttl_ms)
+        try:
+            pipe.execute()
+        except WatchError:
+            _journal_lock(slug, caller, "refused", raw)
+            return None
+        _journal_lock(slug, caller, "replaced a dead holder" if raw else "taken", raw)
+        return token
 
 
-def release_tick_lock(store: RedisStore, slug: str, token: str) -> None:
+def release_tick_lock(store: RedisStore, slug: str, token: str, caller: str = "unnamed") -> None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
     with store.redis.pipeline() as pipe:
+        pipe.watch(key)
+        raw = _lock_raw(pipe, key)
+        if raw != token:
+            _journal_lock(slug, caller, "found another holder", raw)
+            return
+        pipe.multi()
+        pipe.delete(key)
         try:
-            pipe.watch(key)
-            if pipe.get(key) != token:
-                return
-            pipe.multi()
-            pipe.delete(key)
             pipe.execute()
         except WatchError:
+            _journal_lock(slug, caller, "found another holder", raw)
             return
+        _journal_lock(slug, caller, "released", raw)
 
 
-def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_ms: int) -> None:
+def keep_tick(
+    store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_ms: int, caller: str = "unnamed"
+) -> None:
     from redis.exceptions import WatchError
 
     lease.renew(store, slug, held)
@@ -426,14 +474,36 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(key)
-                if pipe.get(key) != token:
-                    raise SwarmError("the tick lock is stale")
+                raw = _lock_raw(pipe, key)
+                if raw != token:
+                    raise SwarmError(
+                        f"the tick lock is stale: {caller} expected token {_token_prefix(token)}, {_lock_holder(raw)}"
+                    )
                 pipe.multi()
                 pipe.pexpire(key, ttl_ms)
                 pipe.execute()
                 return
             except WatchError:
                 continue
+
+
+def _token_prefix(value: str) -> str:
+    decoded: dict[str, Any] = json.loads(value) if value.startswith("{") else {}
+    return str(decoded.get("token", value))[:8]
+
+
+def _lock_holder(raw: str | None) -> str:
+    if raw is None:
+        return "the key is absent"
+    held: dict[str, Any] = json.loads(raw) if raw.startswith("{") else {}
+    fields = " ".join(f"{name} {held.get(name, 'unknown')}" for name in ("epoch", "host", "pid", "start"))
+    return f"held by {fields} token {_token_prefix(raw)}"
+
+
+def _journal_lock(slug: str, caller: str, outcome: str, raw: str | None) -> None:
+    line = {"event": "swarm_tick_lock", "slug": slug, "caller": caller, "outcome": outcome, "holder": _lock_holder(raw)}
+    sys.stderr.write(json.dumps(line) + "\n")
+    sys.stderr.flush()
 
 
 def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:

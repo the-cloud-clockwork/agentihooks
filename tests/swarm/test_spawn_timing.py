@@ -3,12 +3,13 @@ import json
 import pytest
 
 from scripts.handoff import transfers
-from scripts.swarm import capacity, dispatcher, input_wait, preempt, profile_first, timing
+from scripts.swarm import capacity, dispatcher, focus_budget, input_wait, preempt, profile_first, timing
 from scripts.swarm import tick as tick_module
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import tick
 from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2.runtime import codex
+from scripts.tick.steps import agents as agent_steps
 from tests.swarm import test_tick
 
 pytestmark = pytest.mark.unit
@@ -34,7 +35,9 @@ def test_a_spawn_pass_times_each_part_inside_the_spawn_step(store, capsys):
         timing.named(capacity.caps),
         timing.named(dispatcher.claim_key),
         timing.named(preempt.yielding),
+        timing.named(tick_module._running),
         timing.named(tick_module.ready_in_order),
+        timing.named(focus_budget.place),
         timing.named(profile_first.placeable),
         timing.named(tick_module._ranked),
         timing.named(tick_module._block_unresolved),
@@ -94,6 +97,56 @@ def test_the_spawn_order_follows_the_dispatched_key_over_the_ledger_rank(store, 
     assert [task["id"] for _, task in order] == ["t2", "t1"]
 
 
+def test_the_running_filter_keeps_the_lane_agents_that_still_own_their_task() -> None:
+    agents = [
+        AgentRecord("engineer@a1b2c3-0001", "eng", "t1"),
+        AgentRecord("engineer@a1b2c3-0002", "eng", "t2", state="finished"),
+        AgentRecord("engineer@a1b2c3-0003", "eng", "t3"),
+        AgentRecord("ci@a1b2c3-0004", "ci", "t4"),
+        AgentRecord("engineer@a1b2c3-0005", "eng", "t5"),
+        AgentRecord("engineer@a1b2c3-0006", "eng", "t6"),
+    ]
+    rows = {
+        "t1": {"id": "t1", "lane": "eng", "claimed_by": "engineer@a1b2c3-0001"},
+        "t2": {"id": "t2", "lane": "eng", "claimed_by": "engineer@a1b2c3-0002"},
+        "t3": {"id": "t3", "lane": "eng", "claimed_by": "engineer@a1b2c3-0009"},
+        "t4": {"id": "t4", "lane": "ci", "claimed_by": "ci@a1b2c3-0004"},
+        "t6": {"id": "t6", "lane": "eng", "state": "done", "claimed_by": "engineer@a1b2c3-0006"},
+    }
+    assert tick_module._running(agents, rows, "eng") == [rows["t1"], {"id": "t5", "lane": "eng"}]
+    assert tick_module._running(agents, rows, "ci") == [rows["t4"]]
+
+
+def test_spawn_order_times_the_running_filter_and_focus_placement_once_per_lane_inside_it(
+    store: RedisStore, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
+    monkeypatch.setattr(capacity, "caps", lambda decision, config: {"eng": 1, "ci": 1})
+    with timing.tick("sw"):
+        timing.timed(
+            tick_module._spawn_order,
+            "sw",
+            store.config("sw"),
+            store,
+            [],
+            ledger.rows,
+            ledger.state("sw"),
+            FakeRuntime(),
+        )
+    rows = finished(capsys)
+    (order,) = [row for row in rows if row["step"] == timing.named(tick_module._spawn_order)]
+    parts = [timing.named(tick_module._running), timing.named(focus_budget.place)]
+    inside = [
+        row["step"]
+        for row in rows
+        if row["step"] in parts
+        and row["started"] >= order["started"]
+        and row["started"] + row["wall_s"] <= order["started"] + order["wall_s"]
+    ]
+    assert sorted(inside) == sorted(parts * 2)
+    assert [row["step"] for row in rows if row["step"] in parts] == inside
+
+
 def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
     from scripts.hub.reconciler import legacy_agents
 
@@ -103,7 +156,7 @@ def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
     with timing.tick("sw"):
         tick("sw", store, ledger, runtime, now_ms=2_000)
     rows = finished(capsys)
-    reap = next(row for row in rows if row["step"] == timing.named(tick_module._reap))
+    reap = next(row for row in rows if row["step"] == timing.named(agent_steps._reap))
     inside = [row for row in rows if reap["started"] <= row["started"] and row is not reap]
     inside = [row for row in inside if row["started"] + row["wall_s"] <= reap["started"] + reap["wall_s"]]
     pass_wide = [timing.named(tick_module._live_names), timing.named(legacy_agents)]
@@ -136,7 +189,7 @@ def test_a_reap_pass_goes_on_to_the_next_agent_after_a_skipped_one(store, capsys
         monkeypatch.setattr(reconciler, "legacy_agents", lambda *_: agents)
         capsys.readouterr()
         with timing.tick("sw"):
-            tick_module._reap("sw", store, ledger, runtime, rows, 2_000)
+            agent_steps._reap("sw", store, ledger, runtime, rows, 2_000)
         return [row.get("agent") for row in finished(capsys) if row["step"] == timing.named(tick_module._watch_agent)]
 
     alone = watched(live)

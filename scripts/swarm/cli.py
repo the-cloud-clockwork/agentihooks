@@ -69,6 +69,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import scripts.tick.steps.report  # noqa: F401
+from hooks.classifier import settings as classifier_settings
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
@@ -190,12 +191,23 @@ from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 from scripts.tick import pool
 from scripts.tick import view as ledger_view
+from scripts.tick.adapters.coordination import StoreCoordination
+from scripts.tick.adapters.github import GitHubSourceControl
+from scripts.tick.adapters.host import local_host
+from scripts.tick.adapters.inbox import StoreInbox
+from scripts.tick.adapters.ledger import ClientLedger, resource_client
+from scripts.tick.adapters.llm import ApiLlm
+from scripts.tick.adapters.metrics import SpoolMetrics
+from scripts.tick.adapters.processes import PassProcesses
+from scripts.tick.adapters.runtime import RouterRuntime
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
+from scripts.tick.ports.tools import PASS_TOOLS, Tools
 from scripts.tick.steps import Left, PassBox
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
+from scripts.tick.steps import tasks as task_steps
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -276,23 +288,19 @@ def _publish_tick_status(
             raise
 
 
-def _phase_steps(inbox, store, slug, doc, ledger):
+def _phase_steps(inbox: Any, store: Any, slug: str, doc: dict[str, Any], ledger: Any) -> list[Any]:
     actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
     if actions:
         doc = timing.call(ledger_client.pass_state, ledger, slug)
-    ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
-    actions += ticked
-    if ticked:
-        actions += skip_refused(
-            phase_planning.planning_pass,
-            inbox,
-            store,
-            slug,
-            timing.call(ledger_client.pass_state, ledger, slug),
-            ledger,
-            store.config(slug),
-        )
-    return actions
+    return actions + task_steps.phase_writes(skip_refused(phases.phase_changes, slug, doc, ledger))
+
+
+def _planning_after_phase(inbox: Any, store: Any, slug: str, ledger: Any, box: dict[str, Any]) -> list[str]:
+    if task_steps.PHASE_CHANGED not in box:
+        return []
+    del box[task_steps.PHASE_CHANGED]
+    doc = timing.call(ledger_client.pass_state, ledger, slug)
+    return skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
 
 
 def _bin_stop(store, slug, ledger, runtime):
@@ -349,6 +357,45 @@ def _tick_groups(store: RedisStore, slug: str, ledger: Any, runtime: Any) -> lis
         return []
 
 
+class _PassSpool:
+    """The local metrics spool of one tick pass, opened on its first append."""
+
+    def __init__(self) -> None:
+        """Start with the spool closed."""
+        self._box: Any = None
+
+    def append_many(self, batches: list[tuple[Any, list[dict[str, object]]]], checkpoint: Callable[..., None]) -> None:
+        """Open the spool on first use and append every batch in one transaction."""
+        from scripts.swarm import metrics_outbox
+
+        spool: Any = metrics_outbox
+        if self._box is None:
+            self._box = spool.Outbox(spool.spool_path(), spool.settings(os.environ))
+        self._box.append_many(batches, checkpoint)
+
+
+def _pass_tools(store: RedisStore, slug: str, owner: str) -> Tools:
+    """Build the port tools of one tick pass of swarm ``slug`` from the real adapters, acting as ``owner``."""
+
+    swarm: Any = store
+    settings: Any = classifier_settings.load()
+
+    def agent(name: str) -> Any:
+        return next((record for record in swarm.agents(slug) if record.name == name), None)
+
+    return Tools(
+        ledger=ClientLedger(slug, resource_client(slug, service=True)),
+        coordination=StoreCoordination(store, slug, owner),
+        source_control=GitHubSourceControl("", Path.cwd(), "dev"),
+        runtime=RouterRuntime(routed(os.environ).router, agent),
+        processes=PassProcesses(),
+        inbox=StoreInbox(InboxStore(swarm.redis), f"tick@{slug}"),
+        llm=ApiLlm(settings.models[0], settings.url),
+        metrics=SpoolMetrics(_PassSpool(), {}),
+        host=local_host(store, slug, os.environ),
+    )
+
+
 @timing.instrument_tick
 @scope.one_pass()
 @outage.guard_tick
@@ -372,23 +419,26 @@ def run_tick(
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return ["the swarm belongs to another hive"]
-    token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
+    token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS, "pass")
     if token is None:
         return ["another tick is running"]
-    tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token))
+    tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token, "pass stop"))
 
     def before_step():
         tick_stop.check()
-        tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
+        tick_activity.keep(
+            store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS, "pass step"), now_ms
+        )
 
     keeping = timing.BEFORE_STEP.set(before_step)
     doc, view, beating, box = {}, None, ExitStack(), PassBox()
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
+        beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner)))
         beating.enter_context(
             pool.running(
                 mode=store.config(slug).tick_mode,
-                heartbeat=lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS),
+                heartbeat=lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS, "pass heartbeat"),
             )
         )
         timing.keep()
@@ -478,7 +528,7 @@ def run_tick(
             beating.close()
             timing.BEFORE_STEP.reset(keeping)
             tick_stop.drop(token)
-            controller.release_tick_lock(store, slug, token)
+            controller.release_tick_lock(store, slug, token, "pass")
 
 
 def cmd_list(store, args):
@@ -650,7 +700,12 @@ def cmd_waker(store, args):
 def cmd_prober(store, args):
     from scripts.swarm import command_runner, quota_refresh
 
-    quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
+    quota_refresh.run(
+        store,
+        lambda slug, row: command_runner.execute(store, slug, row),
+        quota_refresh.WAIT_S,
+        lambda: quota_refresh.probe(dict(os.environ), time.time()),
+    )
 
 
 def cmd_spoke(store, args):
