@@ -149,6 +149,48 @@ def _additive_merge(existing: dict, rendered: dict, prior_record: dict) -> tuple
     return merged, {"leaves": sorted(new_leaves), "lists": new_lists}
 
 
+def _remove_recorded_settings(doc: dict, record: dict) -> None:
+    for dotted in record.get("leaves", []):
+        _pop_path(doc, dotted.split("."))
+    for dotted, written in record.get("lists", {}).items():
+        path = dotted.split(".")
+        parent = _parent_dict(doc, path[:-1])
+        if isinstance(parent, dict) and isinstance(parent.get(path[-1]), list):
+            parent[path[-1]] = [item for item in parent[path[-1]] if item not in written]
+
+
+def _remove_owned_hooks(doc: dict, owned: set[str]) -> None:
+    hooks = doc.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    for event in list(hooks):
+        groups = hooks.get(event)
+        if not isinstance(groups, list):
+            continue
+        kept = [
+            g
+            for g in groups
+            if isinstance(g, dict)
+            and not any(isinstance(h, dict) and h.get("command") in owned for h in g.get("hooks", []))
+        ]
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
+    if not hooks:
+        doc.pop("hooks", None)
+
+
+def _remove_owned_plugins(doc: dict, owned: set[str]) -> None:
+    plugins = doc.get("enabledPlugins")
+    if not isinstance(plugins, dict):
+        return
+    for name in owned:
+        plugins.pop(name, None)
+    if not plugins:
+        doc.pop("enabledPlugins", None)
+
+
 def remove_managed_keys(settings_path: Path) -> bool:
     """Strip only what agentihooks added to a managed settings.json.
 
@@ -169,43 +211,9 @@ def remove_managed_keys(settings_path: Path) -> bool:
         return False
 
     state = _i._load_state()
-    record = state.pop(SETTINGS_RECORD_KEY, {})
-    for dotted in record.get("leaves", []):
-        _pop_path(doc, dotted.split("."))
-    for dotted, written in record.get("lists", {}).items():
-        path = dotted.split(".")
-        parent = _parent_dict(doc, path[:-1])
-        if isinstance(parent, dict) and isinstance(parent.get(path[-1]), list):
-            parent[path[-1]] = [item for item in parent[path[-1]] if item not in written]
-
-    owned_hooks = set(state.pop(HOOK_RECORD_KEY, []))
-    hooks = doc.get("hooks")
-    if isinstance(hooks, dict):
-        for event in list(hooks):
-            groups = hooks.get(event)
-            if not isinstance(groups, list):
-                continue
-            kept = [
-                g
-                for g in groups
-                if isinstance(g, dict)
-                and not any(isinstance(h, dict) and h.get("command") in owned_hooks for h in g.get("hooks", []))
-            ]
-            if kept:
-                hooks[event] = kept
-            else:
-                del hooks[event]
-        if not hooks:
-            doc.pop("hooks", None)
-
-    owned_plugins = set(state.pop(PLUGIN_RECORD_KEY, []))
-    plugins = doc.get("enabledPlugins")
-    if isinstance(plugins, dict):
-        for name in owned_plugins:
-            plugins.pop(name, None)
-        if not plugins:
-            doc.pop("enabledPlugins", None)
-
+    _remove_recorded_settings(doc, state.pop(SETTINGS_RECORD_KEY, {}))
+    _remove_owned_hooks(doc, set(state.pop(HOOK_RECORD_KEY, [])))
+    _remove_owned_plugins(doc, set(state.pop(PLUGIN_RECORD_KEY, [])))
     doc.pop(_i.MANAGED_BY_KEY, None)
     _i._save_state(state)
 

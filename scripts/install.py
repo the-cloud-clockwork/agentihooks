@@ -4763,7 +4763,6 @@ def uninstall_global(args: argparse.Namespace) -> None:
             print("Aborted.")
             sys.exit(0)
 
-    # --- 3. Remove settings.json keys agentihooks added; keep every operator key ---
     if remove_settings:
         from scripts.targets.claude_target import remove_managed_keys
 
