@@ -5,10 +5,30 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from hooks.config import LOG_ENABLED, LOG_FILE, LOG_HOOKS_COMMANDS, LOG_USE_COLORS
 from hooks.logfile import append_text
+
+if TYPE_CHECKING:
+    from hooks.integrations.aws import (
+        AWSAccount,
+        AWSConfigParser,
+        find_aws_account,
+        get_all_aws_accounts,
+        get_aws_account_id,
+        get_aws_profiles,
+    )
+    from hooks.integrations.mailer import (
+        EmailClient,
+        EmailResult,
+        markdown_to_html,
+        parse_recipients,
+        send_email,
+        send_markdown_file,
+        wrap_html_body,
+    )
+    from hooks.observability.metrics import MetricsCollector, ResultAccumulator, Timer, timed
 
 __all__ = [
     "log",
@@ -68,7 +88,7 @@ _METRICS_EXPORTS = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazy load integrations to avoid circular imports."""
     if name in _AWS_EXPORTS:
         from hooks.integrations import aws
@@ -88,7 +108,7 @@ def __getattr__(name: str):
 _BRAIN_LOG_PREFIXES = ("brain_", "broadcast_", "outbox_", "amygdala_")
 
 
-def log(message: str, payload: dict | None = None) -> None:
+def log(message: str, payload: dict[str, Any] | None = None) -> None:
     """Write log entry to file (JSON format), optionally fan out to OTLP logs."""
     if not LOG_ENABLED:
         return
@@ -97,7 +117,7 @@ def log(message: str, payload: dict | None = None) -> None:
         log_path = Path(LOG_FILE)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        entry = {
+        entry: dict[str, Any] = {
             "@timestamp": datetime.now(timezone.utc).isoformat(),
             "message": message,
         }
@@ -176,7 +196,7 @@ def log_transcript(conversation_id: str, entry_type: str, content: str) -> None:
         pass  # Silent failure - never break Claude
 
 
-def output_json(data: dict) -> None:
+def output_json(data: dict[str, Any]) -> None:
     """Output JSON response to stdout (for hook responses)."""
     print(json.dumps(data))
 
@@ -272,7 +292,7 @@ def inject_banner(
     title_line = f"║  {title}"
     title_line = title_line.ljust(width + 1) + "║"
 
-    content_lines = []
+    content_lines: list[str] = []
     for line in content.strip().split("\n"):
         formatted = f"║  {line}"
         formatted = formatted.ljust(width + 1) + "║"
@@ -345,7 +365,7 @@ def get_correlation_id(claude_session_id: Optional[str] = None) -> str:
     )
 
 
-def get_session_context() -> Dict[str, Optional[str]]:
+def get_session_context() -> Dict[str, Optional[str] | bool]:
     """Get full session context from environment.
 
     Returns a dict with both IDs for hooks that need to track both:

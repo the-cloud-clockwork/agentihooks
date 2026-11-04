@@ -16,10 +16,10 @@ from typing import Callable, Iterator, NamedTuple
 
 class _Pattern(NamedTuple):
     name: str
-    regex: re.Pattern
-    accept: Callable[[re.Match], bool] | None = None
+    regex: re.Pattern[str]
+    accept: Callable[[re.Match[str]], bool] | None = None
 
-    def matches(self, text: str) -> list[re.Match]:
+    def matches(self, text: str) -> list[re.Match[str]]:
         return [m for m in self.regex.finditer(text) if self.accept is None or self.accept(m)]
 
 
@@ -28,7 +28,7 @@ _NOSECRET_RE = re.compile(r"#\s*nosecret\b", re.IGNORECASE)
 _CODE_EXPRESSION_RE = re.compile(r"[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$]|\(|\[)")
 
 
-def _is_literal_secret(match: re.Match) -> bool:
+def _is_literal_secret(match: re.Match[str]) -> bool:
     """Whether a matched assignment value is a literal; a bare member access, call or subscript is code
     reading a secret, not a secret.
     """

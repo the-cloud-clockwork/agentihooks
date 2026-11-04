@@ -21,6 +21,9 @@ from hooks.common import log, log_command, log_transcript, output_json, run_scri
 from hooks.config import LOG_ENABLED, LOG_FILE, LOG_HOOKS_COMMANDS, LOG_TRANSCRIPT, LOG_USE_COLORS
 from hooks.observability.transcript import log_new_entries
 
+if TYPE_CHECKING:
+    from hooks.hook_manager import main
+
 __all__ = [
     "main",
     "log",

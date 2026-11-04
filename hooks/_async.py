@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from types import FrameType
 from typing import Any, Callable
 
 from hooks.config import AGENTIHOOKS_HOME
@@ -120,7 +121,7 @@ def _close_inherited_fds(start: int = 3, end: int = 1024) -> None:
 
 
 def _install_alarm(timeout_sec: int, task_name: str) -> None:
-    def _handler(signum, frame):  # noqa: ARG001
+    def _handler(signum: int, frame: FrameType | None) -> None:  # noqa: ARG001
         sys.stderr.write(_stamped(f"[async] {task_name}: TIMEOUT after {timeout_sec}s"))
         os._exit(124)
 
@@ -132,7 +133,7 @@ def _stamped(line: str) -> str:
     return f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n"
 
 
-def _write_job(func: Callable[..., Any], args: tuple, kwargs: dict) -> str:
+def _write_job(func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
     fd, path = tempfile.mkstemp(prefix="async-job-", dir=_LOG_FILE.parent)
     with os.fdopen(fd, "wb") as handle:
         pickle.dump((func, args, kwargs), handle)
