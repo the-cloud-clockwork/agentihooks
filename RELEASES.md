@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.626 · 2026-11-04
+
+### 2026-11-04 · d073f36132e1 · #9628 · @nestorcolt
+
+**Run the Tests mutation plan on the standard runner pool**
+
+The Tests mutation-plan job now runs on the standard runner pool instead of the light pool, keeping its five minute timeout unchanged. Timing data showed the job intermittently timed out on light pods because their 250m CPU request meant it could get throttled to roughly 6.5% of a core under node contention, while the actual CPU work only needs about 14 seconds; standard pods request 2000m, avoiding that starvation. This should eliminate the sporadic timeouts seen on PR 9547 without changing shard or stats sizing behavior.
+
 ## v2.17.625 · 2026-11-04
 
 ### 2026-11-04 · cda4cddf2d55 · #9609 · @nestorcolt
