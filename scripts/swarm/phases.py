@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from scripts.swarm.ledger_events import SENDER, Mail
+from scripts.swarm.phase_projection import projected_phase_tasks
 
 TICKED = "Every task in this phase is done, so the swarm ticked it."
 REOPENED = "A task that is not done landed in this phase, so the swarm reopened it."
@@ -23,12 +24,9 @@ class PhaseChange:
     open_ids: tuple[str, ...]
 
 
-def phase_changes(slug: str, doc: dict[str, Any], ledger: Any) -> list[str | PhaseChange]:
-    """Return each phase whose tasks call for a tick or a reopen, writing nothing; a failed hierarchy read waits a tick."""
-    try:
-        under = phase_tasks(ledger.hierarchy(slug))
-    except OSError as exc:
-        return [f"phase pass skipped, the hierarchy read failed: {exc}"]
+def phase_changes(doc: dict[str, Any]) -> list[str | PhaseChange]:
+    """Return each phase whose tasks call for a tick or a reopen, writing nothing, from the pass document alone."""
+    under = projected_phase_tasks(doc)
     return [change for phase in doc.get("phases", []) if (change := _change(phase, under)) is not None]
 
 
@@ -56,16 +54,3 @@ def apply_change(inbox: Any, store: Any, slug: str, ledger: Any, change: PhaseCh
     mail = Mail(inbox, store, slug)
     mail.inbox.send(SENDER, mail.master, text, fyi=True)
     return f"phase {change.phase_id} {'ticked' if change.done else 'reopened'}"
-
-
-def phase_tasks(rows: list) -> dict:
-    found, phase = {}, None
-    for row in rows:
-        if phase is not None and row["depth"] <= phase[1]:
-            phase = None
-        if row["kind"] == "phase":
-            phase = (row["node"].removeprefix("phases/"), row["depth"])
-            found[phase[0]] = []
-        elif row["kind"] == "task" and phase is not None:
-            found[phase[0]].append((row["node"].removeprefix("tasks/"), row["state"]))
-    return found

@@ -1,5 +1,6 @@
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from importlib import import_module
 from itertools import combinations
 from math import isfinite
 
@@ -12,6 +13,7 @@ __all__ = [
     "ordered",
     "register",
     "registry",
+    "require",
     "steps",
     "validate",
     "waves",
@@ -104,18 +106,29 @@ def _validate_writers(ordered: tuple[tuple[Step, ...], ...]) -> None:
 class Registry:
     def __init__(self) -> None:
         self._steps: list[Step] = []
+        self._providers: list[str] = []
 
     def register(self, step: Step) -> None:
         self._steps.append(step)
 
+    def require(self, module: str) -> None:
+        """Keep ``module``, whose steps a registered step needs, to load before the registry is next read."""
+        self._providers.append(module)
+
+    def _load_providers(self) -> None:
+        for module in self._providers:
+            import_module(module)
+
     def validate(self, catalogue: Catalogue | None = None) -> None:
         """Validate the needs, reads and writes of the steps, and with a ``catalogue`` their feature and scenario."""
+        self._load_providers()
         _validate_writers(_dependency_waves(self._steps))
         errors = [] if catalogue is None else _catalogue_errors(self._steps, catalogue)
         if errors:
             raise ValueError("\n".join(errors))
 
     def waves(self) -> tuple[tuple[Step, ...], ...]:
+        self._load_providers()
         ordered = _dependency_waves(self._steps)
         _validate_writers(ordered)
         return ordered
@@ -131,6 +144,11 @@ registry = Registry()
 
 def register(step: Step) -> None:
     registry.register(step)
+
+
+def require(module: str) -> None:
+    """Load ``module``, whose steps a registered step needs, before the registry is next read."""
+    registry.require(module)
 
 
 def validate(catalogue: Catalogue | None = None) -> None:
