@@ -1,6 +1,11 @@
 """The start and observation steps of the tick pass: config load, the stopped branch and the observation sweeps."""
 
+# pyright: reportUnusedFunction=false
+
+import json
+import sys
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from importlib import import_module
 from inspect import signature
@@ -193,6 +198,252 @@ CONFIGURED = frozenset({"stopped branch"})
 LISTED = frozenset({"spawn due"})
 CONFIG = pass_domains("config")
 ROWS = pass_domains("rows")
+
+
+def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, Any], now_ms: int) -> list[str]:
+    from scripts.hub.reconciler import legacy_agents
+
+    judged = tick.launch_check.judged(store, slug)
+    agents, actions = [a for a in legacy_agents(store, slug) if a.name not in judged], list[str]()
+    facts, live_names = runtime.bindings(agents), runtime.live_names()
+    for agent in agents:
+        if (
+            agent.state == "awaiting-decision"
+            or (agent.lane == tick.MASTER and agent.state == "starting")
+            or tick._acknowledging(slug, store, agent)
+        ):
+            continue
+        task = rows.get(agent.task, {})
+        if tick._ended(agent, rows):
+            continue
+        if tick.dead_resume.skip_binding(agent, facts, live_names):
+            continue
+        agent, followed = tick._follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
+        actions.extend(followed)
+        if agent is None:
+            continue
+        filled = tick.live_binding.hosted_home(store, tick.live_binding.fill(agent, facts.get(agent.name, {})))
+        if filled != agent:
+            store.put_agent(slug, filled)
+            agent = filled
+        differences = tick.live_binding.record(store, slug, agent, facts.get(agent.name, {"process": False}), now_ms)
+        if not differences:
+            if agent.state == "retiring":
+                store.put_agent(slug, replace(agent, state="working"))
+            continue
+        fields = ", ".join(differences)
+        saved = tick.live_binding.relaunch_assignment(agent, task, store.config(slug))
+        if agent.lane == tick.MASTER and "process" not in differences and not tick.live_binding.complete(saved):
+            actions.append(f"kept {agent.name} after mismatched {fields}: its relaunch assignment is incomplete")
+            continue
+        live = agent.name in facts and "process" not in differences
+        if held := tick.master_retire.hold(store, slug, agent, f"mismatched {fields}", live, now_ms):
+            store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+            actions.append(held)
+            continue
+        if not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
+            store.put_agent(slug, replace(agent, state="retiring"))
+            actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
+            continue
+        store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+        actions.append(
+            f"retired {agent.name} after mismatched {fields}"
+            + tick._drop(slug, store, ledger, rows, agent, refund=True)
+        )
+    return actions
+
+
+def _launch_checks(
+    slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, Any], doc: dict[str, Any], now_ms: int
+) -> list[str]:
+    waiting, actions = tick.launch_check.pending(store, slug), list[str]()
+    if not waiting:
+        return actions
+    agents = [a for a in store.agents(slug) if a.name in waiting]
+    for name in set(waiting) - {a.name for a in agents}:
+        tick.launch_check.forget(store, slug, name)
+    confirmed = [tick.launch_check.canary(store, slug, agent) for agent in agents]
+    agents, canaries = [agent for agent, _ in confirmed], {agent.name: miss for agent, miss in confirmed}
+    facts = runtime.bindings(agents)
+    if any(tick.launch_check.joined_at(agent, doc) is None for agent in agents):
+        doc = tick.pass_state(ledger, slug)
+    for agent in agents:
+        found = tick.launch_check.misses(
+            store,
+            slug,
+            agent,
+            facts.get(agent.name, {}),
+            doc,
+            tick.launch_check.bundled(agent.profile),
+            tick.launch_check.expected(agent),
+        )
+        found.update(canaries[agent.name])
+        if found and not tick.launch_check.due(agent, found, now_ms):
+            continue
+        if found:
+            miss = tick.launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
+            actions.append(tick._failed_launch(slug, store, ledger, runtime, rows, miss, now_ms))
+            continue
+        elapsed = (tick.launch_check.joined_at(agent, doc) or now_ms) - tick.launch_check.session_started_at(agent)
+        tick.launch_check.record(store, slug, agent, found, now_ms, elapsed)
+        tick.launch_check.forget(store, slug, agent.name)
+        tick.launch_check.clear_relaunched(store, slug, agent.task)
+        tick._settle_admission(slug, runtime, agent)
+        actions.append(f"{agent.name} passed its launch check in {elapsed // 1000} seconds")
+    return actions
+
+
+def _failed_hive_launch(
+    slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, Any], miss: Any, now_ms: int
+) -> str:
+    agent, found = miss.agent, miss.found
+    if not tick._retire_launch(slug, store, runtime, agent, now_ms):
+        return f"could not retire {agent.name} after its hive join failed, retrying next tick"
+    tick.launch_check.record(store, slug, agent, found, now_ms, now_ms - tick.launch_check.session_started_at(agent))
+    tick.launch_check.forget(store, slug, agent.name)
+    if agent.lane == tick.MASTER:
+        ledger.notify(slug, tick.launch_check.told(found, "retired"))
+    return f"retired {agent.name} after its hive join failed" + tick._drop(slug, store, ledger, rows, agent)
+
+
+def _failed_launch(
+    slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, Any], miss: Any, now_ms: int
+) -> str:
+    agent, found = miss.agent, miss.found
+    fields, elapsed = ", ".join(found), now_ms - tick.launch_check.session_started_at(agent)
+    if (
+        tick.idle_state.verdict(
+            tick.idle_state.IDLE, tick.idle_state.heartbeat(store.redis, slug, agent.name), None, now_ms
+        )
+        == tick.idle_state.WORKING
+    ):
+        tick.launch_check.record(store, slug, agent, found, now_ms, elapsed, held=True)
+        tick.launch_check.forget(store, slug, agent.name)
+        return f"{agent.name} failed its launch check on {fields}; reported only while working"
+    hive = bool(agent.hive or tick.reports.host(agent))
+    if (
+        hive
+        and not set(found) <= tick.launch_check.REPORT_ONLY
+        and (not miss.relaunch or tick.launch_check.relaunched(store, slug, agent.task))
+    ):
+        return tick._failed_hive_launch(slug, store, ledger, runtime, rows, miss, now_ms)
+    if hive and set(found) <= tick.launch_check.REPORT_ONLY:
+        tick._settle_admission(slug, runtime, agent)
+    if not miss.relaunch or set(found) <= tick.launch_check.REPORT_ONLY:
+        outcome, said = "report", f"{agent.name} failed its launch check on {fields}; reported only"
+    elif tick.launch_check.relaunched(store, slug, agent.task):
+        outcome, said = "spent", f"{agent.name} failed its launch check on {fields}; its one relaunch is spent"
+    elif held := tick.master_retire.hold(
+        store, slug, agent, f"its launch check failed on {fields}", agent.name in runtime.live_names(), now_ms
+    ):
+        return held
+    elif not tick._retire_launch(slug, store, runtime, agent, now_ms):
+        return f"could not retire {agent.name} after its launch check failed on {fields}, retrying next tick"
+    else:
+        outcome = "relaunch"
+    tick.launch_check.record(store, slug, agent, found, now_ms, elapsed, held=outcome == "spent")
+    tick.launch_check.forget(store, slug, agent.name)
+    enforced = {field: values for field, values in found.items() if field not in tick.launch_check.REPORT_ONLY}
+    if agent.lane == tick.MASTER and enforced:
+        ledger.notify(slug, tick.launch_check.told(enforced, outcome))
+    if outcome != "relaunch":
+        return said  # pyright: ignore[reportPossiblyUnboundVariable]
+    tick.launch_check.mark_relaunched(store, slug, agent.task)
+    saved = tick.live_binding.relaunch_assignment(agent, rows.get(agent.task, {}), store.config(slug))
+    store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+    pending = tick.master_start.read(store, slug)
+    if agent.lane == tick.MASTER and pending.get("name") == agent.name:
+        tick.master_start.save(store, slug, {**pending, "name": "", "retry": True, "at": now_ms})
+    return f"retired {agent.name} after its launch check failed on {fields}" + tick._drop(
+        slug, store, ledger, rows, agent
+    )
+
+
+def _retire_launch(slug: str, store: Any, runtime: Any, agent: Any, now_ms: int) -> bool:
+    local = agent.runtime_backend == "local"
+    exited = local and agent.lane != tick.MASTER and agent.name not in runtime.live_names()
+    kept = replace(agent, pane_id="") if exited else agent
+    if not runtime.retire(kept, homes=tick.reaper.scratch_homes(slug, agent.task)):
+        return False
+    if exited:
+        tick.failed_panes.hold(store, slug, agent, now_ms, tick.EXITED_BEFORE_LIFE)
+    return True
+
+
+def _acknowledging(slug: str, store: Any, agent: Any) -> bool:
+    if agent.lane == tick.MASTER:
+        return False
+    raw = store.redis.hget(store.key(slug, "launches"), agent.name)
+    return bool(raw) and json.loads(raw).get("state") in (tick.ACKNOWLEDGING, "launching")
+
+
+def _expire_launch(config: Any, runtime: Any, agent: Any, error: Exception) -> Exception:
+    try:
+        kept = runtime.expire(
+            config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, tick.ACK_LATER: True}
+        )
+    except Exception as exc:
+        return RuntimeError(f"expiring the launch raised {exc!r}")
+    return error if kept is False else tick.SpawnError(tick.ACK_EXPIRED)
+
+
+def _finished_launch(slug: str, store: Any, doc: dict[str, Any], agent: Any) -> str:
+    tick._release_hive_launch(slug, store, agent)
+    store.count_claim(slug, agent.task)
+    store.count_spawn(slug, agent.harness)
+    store.record_launch(
+        slug, agent, "started", after=store.take_restart(slug, agent.task) or tick._master_set(doc, agent.task)
+    )
+    store.redis.hdel(store.key(slug, "launch-assignments"), agent.task)
+    return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
+
+
+def _collect_acks(
+    slug: str, config: Any, store: Any, ledger: Any, runtime: Any, doc: dict[str, Any], now_ms: int
+) -> list[str]:
+    from scripts.swarm import launch_job
+    from scripts.swarm_v2.runtime import codex
+
+    rows = {t["id"]: t for t in doc["tasks"]}
+    actions: list[str]
+    pending: set[str]
+    actions, pending = (
+        ([], set())
+        if config.engine == tick.EVENTS_ENGINE
+        else launch_job.collect(tick._Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))  # pyright: ignore[reportUnknownMemberType]
+    )
+    for agent in [
+        a
+        for a in store.agents(slug)
+        if tick.readiness.tick_launches(config.engine, rows.get(a.task, {}))
+        and tick._acknowledging(slug, store, a)
+        and a.name not in pending
+    ]:
+        task = rows.get(agent.task) or {"id": agent.task}
+        try:
+            placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, tick.ACK_LATER: True})
+            if agent.state == "finished":
+                actions.append(tick._finished_launch(slug, store, doc, agent))
+                continue
+            launched = codex.admit_legacy(store, slug, tick.placed_record(agent, placed), runtime)
+        except Exception as exc:
+            error = exc
+            transient = tick._acknowledging_error(exc) or not isinstance(exc, tick.SpawnError | tick.SwarmError)
+            if transient and now_ms - agent.started_at >= tick.LEASE_MS:
+                error = tick._expire_launch(config, runtime, agent, error)
+            if tick._acknowledging_error(error):
+                store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
+            elif isinstance(error, tick.SpawnError | tick.SwarmError):
+                actions += tick._spawn_failed(
+                    slug, store, ledger, runtime, rows, tick.Failed(agent, task, error), now_ms
+                )
+            else:
+                print(f"{agent.name} collect for {task['id']} raised {error!r}, waiting for the hive", file=sys.stderr)
+                store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
+            continue
+        actions += tick._started(slug, config, store, ledger, doc, tick.Started(agent, task, placed, launched), now_ms)
+    return actions
+
 
 STEPS = (
     CallStep("config load", "start", partial(_run, step_config_load), writes=CONFIG),
