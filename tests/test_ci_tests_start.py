@@ -253,7 +253,7 @@ def test_default_wait_for_a_started_run_is_bounded(monkeypatch: pytest.MonkeyPat
 def test_command_passes_the_started_run_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts import ci_tests_start
 
-    calls: list[tuple[tuple[str, str], dict[str, object]]] = []
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
 
     def verify(*args: str, **kwargs: object) -> str:
         calls.append((args, kwargs))
