@@ -315,18 +315,24 @@ def test_whole_tree_drift_in_an_untouched_file_is_red(tmp_path: Path, capsys: py
     assert tick_pattern.main(["--tree", "--head", str(tree)]) == 1
     assert capsys.readouterr().out.splitlines() == [
         "1 tick pattern offences in 1 files, 1 drifts",
-        f"::error::{STEP} measures ['step lost: no budget row'] but {tick_pattern.ALLOWLIST} records []",
+        f"::error::{STEP} measures step lost: no budget row; {tick_pattern.ALLOWLIST} does not record it",
     ]
 
 
 def test_drift_names_stale_records_padded_records_and_a_missing_allowlist() -> None:
-    held = {"a.py": ["def one"], "b.py": ["def two"]}
+    held = {"a.py": ["def one"], "b.py": ["def two", "def zero"]}
+    allowlist = tick_pattern.ALLOWLIST
     assert tick_pattern.drift(held, held) == []
-    assert tick_pattern.drift(held, {"a.py": ["def one"]}) == [
-        f"b.py measures [] but {tick_pattern.ALLOWLIST} records ['def two']"
+    assert tick_pattern.drift(held, {"a.py": ["def one"], "b.py": ["def zero"]}) == [
+        f"b.py no longer measures def two; {allowlist} still records it"
     ]
-    assert tick_pattern.drift({}, {"a.py": ["def one"]}) == [
-        f"a.py measures ['def one'] but {tick_pattern.ALLOWLIST} records []"
+    assert tick_pattern.drift({}, {"a.py": ["def one", "def two"]}) == [
+        f"a.py measures def one; {allowlist} does not record it",
+        f"a.py measures def two; {allowlist} does not record it",
+    ]
+    assert tick_pattern.drift({"a.py": ["def one"]}, {"a.py": ["def two"]}) == [
+        f"a.py measures def two; {allowlist} does not record it",
+        f"a.py no longer measures def one; {allowlist} still records it",
     ]
     assert tick_pattern.drift(None, {}) == [
         f"{tick_pattern.ALLOWLIST} is missing; run python -m scripts.tick_pattern --write"

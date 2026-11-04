@@ -197,14 +197,21 @@ def grade(
 
 
 def drift(recorded: dict[str, list[str]] | None, head: dict[str, list[str]]) -> list[str]:
-    """Each difference between the whole tree measurement head and its recorded allowlist, file by file."""
+    """Each offence the whole tree measurement head and its recorded allowlist disagree on, file by file."""
     if recorded is None:
         return [f"{ALLOWLIST} is missing; run python -m scripts.tick_pattern --write"]
-    return [
-        f"{name} measures {head.get(name, [])} but {ALLOWLIST} records {recorded.get(name, [])}"
-        for name in sorted(set(recorded) | set(head))
-        if recorded.get(name, []) != head.get(name, [])
-    ]
+    errors: list[str] = []
+    for name in sorted(set(recorded) | set(head)):
+        measured_here, recorded_here = set(head.get(name, [])), set(recorded.get(name, []))
+        errors += [
+            f"{name} measures {offence}; {ALLOWLIST} does not record it"
+            for offence in sorted(measured_here - recorded_here)
+        ]
+        errors += [
+            f"{name} no longer measures {offence}; {ALLOWLIST} still records it"
+            for offence in sorted(recorded_here - measured_here)
+        ]
+    return errors
 
 
 def main(argv: list[str] | None = None) -> int:
