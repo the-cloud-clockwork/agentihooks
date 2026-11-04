@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.swarm import ledger_client
 
 
@@ -38,10 +40,10 @@ def test_ungroup_tasks_sends_the_lead_as_the_swarm(monkeypatch):
     assert {k: v for k, v in op.items() if k != "id"} == {"op": "task_ungroup", "by": "swarm", "item": "tasks/t1"}
 
 
-def test_ungroup_tasks_sends_the_expected_members_as_its_guard(monkeypatch):
-    sent = []
+def test_ungroup_tasks_sends_the_expected_members_as_its_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[dict[str, object]] = []
 
-    def call(slug, batch, service):
+    def call(slug: str, batch: list[dict[str, object]], service: bool) -> dict[str, list[str]]:
         sent.extend(batch)
         return {"rejected": []}
 
