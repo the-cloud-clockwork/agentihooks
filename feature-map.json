@@ -98,7 +98,16 @@
         "tests/tick/test_step_isolation.py::test_every_registered_call_step_declares_its_measured_timing",
         "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
         "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
-        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path"
+        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path",
+        "tests/tick/test_intervals.py::test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass",
+        "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_three_runs_once_in_three_passes",
+        "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_one_runs_every_pass",
+        "tests/tick/test_intervals.py::test_a_skipped_step_counts_as_ended_for_its_dependents",
+        "tests/tick/test_intervals.py::test_a_failed_run_records_its_end_and_a_late_run_does_not",
+        "tests/tick/test_intervals.py::test_nothing_rests_without_a_recording_store",
+        "tests/tick/test_intervals.py::test_a_step_never_recorded_is_due",
+        "tests/tick/test_intervals.py::test_a_step_above_sixty_seconds_writing_a_pass_box_is_refused",
+        "tests/tick/test_intervals.py::test_every_registered_step_writing_the_pass_state_runs_every_pass"
       ]
     },
     {

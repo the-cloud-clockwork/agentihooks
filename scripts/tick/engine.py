@@ -32,6 +32,7 @@ __all__ = [
     "cadence_s",
     "group_steps",
     "interval_s",
+    "resting",
     "run_group",
     "run_step",
 ]
@@ -63,10 +64,14 @@ class StepRecord:
     dropped: tuple[Write, ...] = ()
     conflicts: tuple[str, ...] = ()
     applied: tuple[str, ...] = ()
+    rested: bool = False
 
     @property
     def outcome(self) -> str:
-        """Return failed when the step raised, held when its earlier run was alive, late when it ran past its budget or was left running, else ok."""
+        """Return skipped when its interval had not elapsed, failed when the step raised, held when its earlier run was
+        alive, late when it ran past its budget or was left running, else ok."""
+        if self.rested:
+            return SKIPPED
         if self.error:
             return FAILED
         if self.held:
@@ -158,18 +163,19 @@ def run_group(
     its lane.
     """
     ordered = group_steps(name, steps)
+    rest = resting(ordered, cadence_s())
     found = pool.active()
     if found is None or not found.parallel:
-        return tuple(_sequential(step, ctx, apply or {}) for step in ordered)
+        return tuple(_sequential(step, ctx, apply or {}, rest) for step in ordered)
     later = _slow_lane(ordered, found.pending())
     names = {step.name for step in later}
-    records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
+    records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {}, rest)
     if later:
         found.hand(names)
         gone = _gone(later, frozenset(record.name for record in records if record.abandoned))
         for each in gone:
             found.end(each, True)
-        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished))
+        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished, rest))
     return records
 
 
@@ -199,19 +205,45 @@ def _run_later(
     found: pool.Pass,
     apply: Appliers,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
+    rest: frozenset[str] = frozenset(),
 ) -> None:
-    """Run the handed off steps on the pass workers, dropping each in ``gone``, then hand their records in group
-    order to ``finished``."""
-    ran = {record.name: record for record in _eager(tuple(s for s in later if s.name not in gone), ctx, found, apply)}
+    """Run the handed off steps on the pass workers, dropping each in ``gone`` and skipping each in ``rest``, then
+    hand their records in group order to ``finished``."""
+    kept = tuple(s for s in later if s.name not in gone)
+    ran = {record.name: record for record in _eager(kept, ctx, found, apply, rest)}
     records = tuple(ran.get(step.name) or _skipped(step, _offset()) for step in later)
     if finished is not None:
         finished(records)
 
 
-def _sequential(step: Step, ctx: Context, apply: Appliers) -> StepRecord:
-    """Run ``step`` alone, apply its writes and journal its record with its start offset in the pass."""
+def _sequential(step: Step, ctx: Context, apply: Appliers, rest: frozenset[str] = frozenset()) -> StepRecord:
+    """Run ``step`` alone, or skip it when it is in ``rest``, apply its writes and journal its record with its start
+    offset in the pass."""
     offset = _offset()
+    if step.name in rest:
+        return _journal(step, _rested(step), offset)
     return _journal(step, _applied(run_step(step, ctx), apply), offset)
+
+
+def _rested(step: Step) -> StepRecord:
+    """Return the record of ``step`` skipped because its interval had not elapsed: no thread, ended for dependents."""
+    return StepRecord(step.name, 0.0, step.budget_s, rested=True)
+
+
+def resting(ordered: Iterable[Step], cadence: float) -> frozenset[str]:
+    """Return the steps of ``ordered`` whose interval at ``cadence`` has not elapsed since their last ended run.
+
+    Only a step whose interval is above one cron minute can rest. A step rests while the pass start, or the clock
+    outside a recording pass, is within its interval less one cron minute of its last end, so a step ending anywhere
+    inside its pass runs again on the pass its interval falls due. Without a recording store nothing rests.
+    """
+    store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
+    wide = {step.name: interval_s(step, cadence) for step in ordered if interval_s(step, cadence) > CRON_S}
+    if store is None or slug is None or not wide:
+        return frozenset()
+    now = time.time() if current is None else current["start_ms"] / 1000
+    ends = timing.step_ends(store, slug)
+    return frozenset(name for name, every in wide.items() if name in ends and now - ends[name] <= every - CRON_S)
 
 
 def _skipped(step: Step, offset: float | None) -> StepRecord:
@@ -254,10 +286,13 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         "start_s": offset,
         "abandoned": record.abandoned and not record.skipped,
         "held": record.held,
-        "skipped": record.skipped,
+        "skipped": record.skipped or record.rested,
+        "rested": record.rested,
         "dropped": dropped,
         "conflicts": len(record.conflicts),
     }
+    if record.outcome in (OK, FAILED) and (step.interval_s > CRON_S or step.lane == SLOW):
+        timing.step_ended(store, slug, step.name, time.time())
     if offset is not None and _critical(step):
         current["critical_end_s"] = max(current.get("critical_end_s", 0.0), offset + record.wall_s)
     timing.append_record(store, slug, "tick:records", row)
@@ -312,10 +347,13 @@ def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
     return record
 
 
-def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: Appliers) -> tuple[StepRecord, ...]:
+def _eager(
+    ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: Appliers, rest: frozenset[str] = frozenset()
+) -> tuple[StepRecord, ...]:
     """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended.
 
     Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
+    A step in ``rest`` starts no thread and ends at once for its dependents.
     """
     clock = ctx.deadline.clock
     names = {step.name for step in ordered}
@@ -332,7 +370,9 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                 pending.remove(step)
                 lane = found.lane(step.lane)
                 offsets[step.name] = _offset()
-                if step.needs & dropped or lane.expired:
+                if step.name in rest:
+                    records[step.name] = _ended(found, _rested(step))
+                elif step.needs & dropped or lane.expired:
                     dropped.add(step.name)
                     records[step.name] = _ended(
                         found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
