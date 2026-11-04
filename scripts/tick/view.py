@@ -200,14 +200,17 @@ def start(slug: str, service: bool) -> LedgerView | None:
 
 
 def document(slug: str) -> dict[str, Any] | None:
-    """The whole document of ledger ``slug`` from the pass's held view patched with one delta read, or nothing
-    when the pass holds no view of that ledger."""
+    """The whole document of ledger ``slug`` from the pass's held view, patched by one delta read only when a ledger
+    write left it stale or the pass holds no record of it, or nothing when the pass holds no view of that ledger."""
     held = REFRESH.get()
     if held is None or held[0] != slug:
         return None
+    kept = HELD.get()
+    if kept is not None and not kept.stale:
+        return kept.view.document
     view = held[1]()
     CURRENT.set(view)
-    if (kept := HELD.get()) is not None:
+    if kept is not None:
         kept.view, kept.stale = view, False
     return view.document
 

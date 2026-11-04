@@ -132,7 +132,7 @@ class Inbox:
         self.sent.append(text)
 
 
-def test_the_phase_pass_reads_every_page_of_a_ledger_above_the_cap(large, monkeypatch):
+def test_the_phase_pass_of_a_ledger_above_the_cap_reads_no_page(large, monkeypatch):
     served = Served(large)
     flat = ledger_client._ledger()
     monkeypatch.setattr(api_client, "ResourceClient", lambda base, credentials, timeout: served)
@@ -155,7 +155,7 @@ def test_the_phase_pass_reads_every_page_of_a_ledger_above_the_cap(large, monkey
     ]
     assert ticked == [(f"p{n}", n % 2 == 0) for n in range(40)]
     assert actions == [f"phase p{n} {'ticked' if n % 2 == 0 else 'reopened'}" for n in range(40)]
-    assert len(served.paths) > 1
+    assert served.paths == []
 
 
 def test_tree_prints_every_page(large, monkeypatch, capsys):

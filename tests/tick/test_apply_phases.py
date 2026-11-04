@@ -34,8 +34,9 @@ class Ledger:
         self.set.append((slug, phase_id, done, status))
 
 
-def node(address: str, depth: int, state: str = "open") -> dict[str, Any]:
-    return {"node": address, "kind": address.split("/")[0][:-1], "depth": depth, "state": state}
+class Unread(Ledger):
+    def hierarchy(self, slug: str) -> list[dict[str, Any]]:
+        pytest.fail("the phase pass read the hierarchy instead of projecting the pass document")
 
 
 @pytest.fixture
@@ -52,8 +53,11 @@ def held_phases() -> Iterator[Callable[..., None]]:
 
 
 def test_the_phase_step_returns_a_write_per_checkbox_guarded_on_the_done_state_it_read() -> None:
-    ledger = Ledger([node("phases/p1", 0), node("tasks/t1", 1, "done"), node("phases/p2", 0), node("tasks/t2", 1)])
-    doc = {"phases": [{"id": "p1", "title": "Build"}, {"id": "p2", "title": "Ship", "done": True}]}
+    doc = {
+        "phases": [{"id": "p1", "title": "Build"}, {"id": "p2", "title": "Ship", "done": True}],
+        "tasks": [{"id": "t1", "phase": "p1", "state": "done"}, {"id": "t2", "phase": "p2", "state": "open"}],
+    }
+    ledger = Unread([])
     assert tasks.phase_writes(phases.phase_changes("sw", doc, ledger)) == [
         Write(tasks.PHASES, "p1", phases.PhaseChange("p1", "Build", True, 1, ()), expected=False),
         Write(tasks.PHASES, "p2", phases.PhaseChange("p2", "Ship", False, 1, ("t2",)), expected=True),
@@ -62,16 +66,20 @@ def test_the_phase_step_returns_a_write_per_checkbox_guarded_on_the_done_state_i
 
 
 def test_the_phase_step_returns_no_write_for_a_ledger_without_phases() -> None:
-    assert phases.phase_changes("sw", {}, Ledger([node("tasks/t1", 1, "done")])) == []
+    assert phases.phase_changes("sw", {"tasks": [{"id": "t1", "state": "done"}]}, Unread([])) == []
 
 
-def test_the_phase_step_passes_a_skipped_hierarchy_read_through_as_an_action() -> None:
-    class Broken(Ledger):
-        def hierarchy(self, slug: str) -> list[dict[str, Any]]:
-            raise OSError("refused")
-
-    found = tasks.phase_writes(phases.phase_changes("sw", {"phases": [{"id": "p1", "title": "Build"}]}, Broken([])))
-    assert found == ["phase pass skipped, the hierarchy read failed: refused"]
+def test_the_phase_step_finds_a_task_under_its_slice_and_skips_out_of_scope_tasks() -> None:
+    doc = {
+        "phases": [{"id": "p1", "title": "Build"}],
+        "slices": [{"id": "s1", "phase": "phases/p1"}],
+        "tasks": [
+            {"id": "t1", "slice": "slices/s1", "state": "open"},
+            {"id": "t2", "phase": "p1", "state": "out_of_scope"},
+            {"id": "t3", "phase": "elsewhere", "state": "open"},
+        ],
+    }
+    assert phases.phase_changes("sw", doc, Unread([])) == [phases.PhaseChange("p1", "Build", False, 1, ("t1",))]
 
 
 def test_the_phase_applier_sets_the_checkbox_marks_the_box_and_returns_its_action(
@@ -191,16 +199,17 @@ def test_a_conflicting_checkbox_is_dropped_then_recomputed_on_the_next_pass(
         return f"phase {change.phase_id} set"
 
     monkeypatch.setattr(phases, "apply_change", apply_change)
-    ledger = Ledger([node("phases/p1", 0), node("tasks/t1", 1, "done")])
-    stale = {"phases": [{"id": "p1", "title": "Build"}]}
+    ledger = Unread([])
+    done = [{"id": "t1", "phase": "p1", "state": "done"}]
+    stale = {"phases": [{"id": "p1", "title": "Build"}], "tasks": done}
     held_phases({"id": "p1", "done": True})
     box: dict[str, Any] = {}
     first = _phase_pass(ledger, stale, box)
     assert ledger.set == [] and box == {}
     assert any("phase p1 changed its checkbox since the phase pass read it" in line for line in first)
-    fresh = {"phases": [{"id": "p1", "title": "Build", "done": True}]}
+    fresh = {"phases": [{"id": "p1", "title": "Build", "done": True}], "tasks": done}
     assert _phase_pass(ledger, fresh, box) == [] and ledger.set == [] and box == {}
-    ledger.rows.append(node("tasks/t2", 1))
+    fresh["tasks"] = [*done, {"id": "t2", "phase": "p1", "state": "open"}]
     assert _phase_pass(ledger, fresh, box) == ["phase p1 set"]
     assert ledger.set == [("sw", "p1", False, "")] and box == {tasks.PHASE_CHANGED: True}
 

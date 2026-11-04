@@ -177,18 +177,14 @@ def test_phase_pass_never_ticks_a_phase_to_plan_or_planning(store):
             self.ticked.append(phase_id)
 
         def hierarchy(self, slug):
-            return [node("phases/p1", 0), node("phases/p2", 0), node("tasks/plan-p2", 1)]
+            raise AssertionError("the phase pass projects the pass document")
 
     data = doc([{"id": "p1", "planning": "auto"}, {"id": "p2", "planning": "auto"}], [plan("p2")])
     assert [phase_state.lifecycle(p, data) for p in data["phases"]] == ["to_plan", "planning"]
     assert phase_pass(None, store, "sw", data, Ledger()) == [] and Ledger.ticked == []
 
 
-def node(address, depth, state="open"):
-    return {"node": address, "kind": address.split("/")[0][:-1], "depth": depth, "state": state}
-
-
-def test_phase_pass_reads_each_phase_s_tasks_and_states_from_the_ledger_hierarchy(store):
+def test_phase_pass_reads_each_phase_s_tasks_and_states_from_the_pass_document(store):
 
     class Inbox:
         sent = []
@@ -203,30 +199,28 @@ def test_phase_pass_reads_each_phase_s_tasks_and_states_from_the_ledger_hierarch
             self.ticked.append((phase_id, done))
 
         def hierarchy(self, slug):
-            return [
-                node("plans/a", 0),
-                node("phases/p1", 1),
-                node("slices/s1", 2),
-                node("tasks/t1", 3, "done"),
-                node("tasks/t2", 2, "done"),
-                node("tasks/t5", 2, "out_of_scope"),
-                node("phases/p2", 1),
-                node("tasks/t3", 2),
-                node("tasks/t8", 2),
-                node("tasks/t4", 0),
-                node("phases/p3", 0),
-                node("tasks/t6", 1, "done"),
-                node("tasks/t7", 0),
-            ]
+            raise AssertionError("the phase pass projects the pass document")
 
     data = doc(
         [
-            {"id": "p1", "title": "Build"},
-            {"id": "p2", "title": "Ship", "done": True},
+            {"id": "p1", "title": "Build", "plan": "plans/a"},
+            {"id": "p2", "title": "Ship", "done": True, "plan": "plans/a"},
             {"id": "p3", "title": "Lone"},
             {"id": "p9", "title": "Added after the read"},
-        ]
+        ],
+        [
+            {"id": "t1", "slice": "slices/s1", "state": "done"},
+            {"id": "t2", "phase": "p1", "state": "done"},
+            {"id": "t5", "phase": "p1", "state": "open", "out_of_scope": True},
+            {"id": "t3", "phase": "p2", "state": "open"},
+            {"id": "t8", "phase": "p2"},
+            {"id": "t4", "state": "open"},
+            {"id": "t6", "phase": "p3", "done": True},
+            {"id": "t7", "phase": "missing", "state": "open"},
+        ],
     )
+    data["plans"] = [{"id": "a"}]
+    data["slices"] = [{"id": "s1", "phase": "phases/p1"}]
     assert phase_pass(Inbox(), store, "sw", data, Ledger()) == [
         "phase p1 ticked",
         "phase p2 reopened",
@@ -234,22 +228,6 @@ def test_phase_pass_reads_each_phase_s_tasks_and_states_from_the_ledger_hierarch
     ]
     assert Ledger.ticked == [("p1", True), ("p2", False), ("p3", True)]
     assert Inbox.sent[0].endswith("all 2 tasks closed.") and Inbox.sent[1].endswith("reopened for t3, t8.")
-
-
-def test_phase_pass_skips_when_the_hierarchy_read_fails(store):
-    import urllib.error
-
-    class Ledger:
-        def set_phase(self, slug, phase_id, done, status):
-            raise AssertionError("no phase may change without the hierarchy")
-
-        def hierarchy(self, slug):
-            raise urllib.error.HTTPError("http://ledger/hierarchy", 404, "Not Found", {}, None)
-
-    data = doc([{"id": "p1", "title": "Build"}], [{"id": "t1", "phase": "p1", "state": "done"}])
-    assert phase_pass(None, store, "sw", data, Ledger()) == [
-        "phase pass skipped, the hierarchy read failed: HTTP Error 404: Not Found"
-    ]
 
 
 def test_the_ledger_client_reads_the_hierarchy_resource(monkeypatch):

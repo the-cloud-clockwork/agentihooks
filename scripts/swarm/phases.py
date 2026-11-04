@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from scripts.swarm.ledger_events import SENDER, Mail
+from scripts.swarm_ledger.repository import hierarchy
 
 TICKED = "Every task in this phase is done, so the swarm ticked it."
 REOPENED = "A task that is not done landed in this phase, so the swarm reopened it."
@@ -24,11 +25,8 @@ class PhaseChange:
 
 
 def phase_changes(slug: str, doc: dict[str, Any], ledger: Any) -> list[str | PhaseChange]:
-    """Return each phase whose tasks call for a tick or a reopen, writing nothing; a failed hierarchy read waits a tick."""
-    try:
-        under = phase_tasks(ledger.hierarchy(slug))
-    except OSError as exc:
-        return [f"phase pass skipped, the hierarchy read failed: {exc}"]
+    """Return each phase whose tasks call for a tick or a reopen, writing nothing, from the pass document alone."""
+    under = projected_phase_tasks(doc)
     return [change for phase in doc.get("phases", []) if (change := _change(phase, under)) is not None]
 
 
@@ -58,14 +56,32 @@ def apply_change(inbox: Any, store: Any, slug: str, ledger: Any, change: PhaseCh
     return f"phase {change.phase_id} {'ticked' if change.done else 'reopened'}"
 
 
-def phase_tasks(rows: list) -> dict:
-    found, phase = {}, None
-    for row in rows:
-        if phase is not None and row["depth"] <= phase[1]:
-            phase = None
-        if row["kind"] == "phase":
-            phase = (row["node"].removeprefix("phases/"), row["depth"])
-            found[phase[0]] = []
-        elif row["kind"] == "task" and phase is not None:
-            found[phase[0]].append((row["node"].removeprefix("tasks/"), row["state"]))
+def _task_state(task: dict[str, Any]) -> str:
+    """The state the ledger hierarchy reports for ``task``."""
+    if task.get("out_of_scope"):
+        return "out_of_scope"
+    return task.get("state") or ("done" if task.get("done") else "open")
+
+
+def _phase_of(node: str | None, nodes: dict[str, tuple[str, str | None, int]]) -> str | None:
+    """The phase node above ``node`` in the projected hierarchy, or nothing when no phase holds it."""
+    seen: set[str] = set()
+    while node is not None and node in nodes and node not in seen:
+        if nodes[node][0] == "phase":
+            return node
+        seen.add(node)
+        node = nodes[node][1]
+    return None
+
+
+def projected_phase_tasks(doc: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
+    """Each phase's tasks with the states the ledger hierarchy reports, projected from ``doc`` with no ledger read."""
+    nodes, _ = hierarchy.project(doc)
+    found: dict[str, list[tuple[str, str]]] = {
+        node.removeprefix("phases/"): [] for node, row in nodes.items() if row[0] == "phase"
+    }
+    for task in doc.get("tasks") or []:
+        node = f"tasks/{task.get('id')}"
+        if node in nodes and (phase := _phase_of(nodes[node][1], nodes)) is not None:
+            found[phase.removeprefix("phases/")].append((task["id"], _task_state(task)))
     return found

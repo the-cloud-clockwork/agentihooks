@@ -309,3 +309,23 @@ def test_document_refreshes_a_stale_held_record_and_clears_its_stale_flag() -> N
     assert doc == fresh.document
     assert kept.view is fresh
     assert kept.stale is False
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_document_serves_the_held_view_and_reads_again_only_after_a_write() -> None:
+    reads: list[int] = []
+
+    def refresh() -> view.LedgerView:
+        reads.append(len(reads))
+        return view.LedgerView(8 + len(reads), {**STATE, "overview": f"read {len(reads)}"})
+
+    with view.holding():
+        view.REFRESH.set(("sw", refresh))
+        view.HELD.set(view.Held(view.LedgerView(7, STATE), refresh))
+        first, second = view.document("sw"), view.document("sw")
+        view.wrote()
+        third, fourth = view.document("sw"), view.document("sw")
+    assert (first, second) == (STATE, STATE)
+    assert third is not None and fourth is not None
+    assert (third["overview"], fourth["overview"]) == ("read 1", "read 1")
+    assert reads == [0]

@@ -253,6 +253,17 @@ def test_the_watch_reads_the_newest_finished_dev_push_run(store):
     assert calls[0][0] == ["gh", "api", RUNS, "--jq", ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"]
 
 
+def test_the_watch_of_a_registered_swarm_uses_the_pass_document_without_a_ledger_read(store):
+    class Unread(Ledger):
+        def state(self, slug):
+            pytest.fail("the promotion refresh read the ledger again")
+
+    store.create(SwarmConfig(SLUG, "/repo"))
+    ledger = Unread()
+    refresh(store, ledger, gh([RED], JOBS))
+    assert [fields["task"] for _, fields, _ in ledger.added]
+
+
 def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(store):
     calls, ledger = [], Ledger()
     actions = refresh(store, ledger, gh([RED], JOBS, calls))

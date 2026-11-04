@@ -222,3 +222,80 @@ def test_dropped_reap_action_breaks_golden(entry: str, monkeypatch: pytest.Monke
     else:
         with pytest.raises(AssertionError, match="GOLDEN_RECORD"):
             compare(record, "finished", entry)
+
+
+class ReadCount:
+    """Ledger reads of one run_tick pass held through a counted view: whole reads, delta reads and hierarchy reads."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, second_read: bool = False) -> None:
+        """Count the fake ledger's reads and serve the pass a held view whose delta reads are counted."""
+        from scripts.tick import view
+
+        self.counts: dict[str, int] = {"state": 0, "changes": 0, "hierarchy": 0, "writes": 0}
+        self.unwritten: list[int] = []
+        self.written = True
+        whole, tree = FakeLedger.state, FakeLedger.hierarchy
+
+        def state(ledger: FakeLedger, slug: str) -> dict[str, Any]:
+            self.counts["state"] += 1
+            return whole(ledger, slug)
+
+        def hierarchy(ledger: FakeLedger, slug: str) -> list[dict[str, Any]]:
+            self.counts["hierarchy"] += 1
+            return tree(ledger, slug)
+
+        monkeypatch.setattr(FakeLedger, "state", state)
+        monkeypatch.setattr(FakeLedger, "hierarchy", hierarchy)
+        for name in LEDGER_WRITES:
+            monkeypatch.setattr(FakeLedger, name, self.writing(getattr(FakeLedger, name), view.wrote))
+
+        def hold(beating: Any, slug: str, ledger: FakeLedger) -> None:
+            beating.enter_context(view.holding())
+
+            def renew() -> view.LedgerView:
+                if not self.written:
+                    self.unwritten.append(self.counts["changes"])
+                self.counts["changes"] += 1
+                self.written = False
+                return view.LedgerView(self.counts["changes"], copy.deepcopy(whole(ledger, slug)))
+
+            held = renew()
+            view.CURRENT.set(held)
+            view.HELD.set(view.Held(held, renew))
+            view.REFRESH.set((slug, renew))
+            if second_read:
+                view.wrote()
+
+        monkeypatch.setattr(cli, "_hold_view", hold)
+
+    def writing(self, method: Any, wrote: Any) -> Any:
+        """``method`` counted as a ledger write that leaves the held view stale, as the ledger client does."""
+
+        def write(ledger: FakeLedger, *args: Any, **kwargs: Any) -> Any:
+            found = method(ledger, *args, **kwargs)
+            self.counts["writes"] += 1
+            self.written = True
+            wrote()
+            return found
+
+        write.__name__ = write.__qualname__ = method.__name__
+        return write
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_running_pass_reads_the_ledger_once_plus_once_per_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    reads = ReadCount(monkeypatch)
+    replay("running", "run_tick", monkeypatch, tmp_path)
+    assert reads.counts["hierarchy"] == 0, reads.counts
+    assert reads.counts["state"] == 0, reads.counts
+    assert 1 <= reads.counts["changes"] <= 1 + reads.counts["writes"], reads.counts
+    assert reads.unwritten == [], reads.counts
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_planted_second_read_without_a_write_is_counted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    reads = ReadCount(monkeypatch, second_read=True)
+    replay("running", "run_tick", monkeypatch, tmp_path)
+    assert reads.unwritten, reads.counts

@@ -24,7 +24,7 @@ _SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "n
 
 
 def _quota_notice(tick: Any, get: Get) -> Any:
-    keys = ("slug", "config", "store", "ledger", "runtime", "now_ms")
+    keys = ("slug", "config", "store", "ledger", "runtime", "now_ms", "doc")
     return tick.skip_refused(quota_notice.refresh, *map(get, keys))
 
 

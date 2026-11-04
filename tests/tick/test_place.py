@@ -190,7 +190,7 @@ def test_the_placement_notices_run_their_calls_with_the_pass_state(monkeypatch: 
         "ran 3",
     ]
     assert calls == [
-        (quota_notice.refresh, "sw", "config", "store", "ledger", "runtime", 7),
+        (quota_notice.refresh, "sw", "config", "store", "ledger", "runtime", 7, "doc"),
         (lost_runner.sweep, "sw", "config", "store", 7),
         (time_left.refresh, "sw", "store", "ledger", "runtime", "config", "doc"),
     ]

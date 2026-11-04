@@ -651,14 +651,24 @@ def placement_ready(
     return eligible, actions
 
 
-def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
+def apply(
+    slug: str,
+    config: Any,
+    store: Any,
+    ledger: Any,
+    runtime: Any,
+    now_ms: int,
+    doc: dict[str, Any] | None = None,
+) -> list[str]:
+    """Scale the lane caps from quota and ready work in ``doc``, the pass document, read whole when none is given."""
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
         return []
     from scripts.swarm.ledger_client import LedgerRefused
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
+    doc = pass_state(ledger, slug) if doc is None else doc
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, doc))
     ready, skipped = placement_ready(store, slug, ready, now_ms)
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None
