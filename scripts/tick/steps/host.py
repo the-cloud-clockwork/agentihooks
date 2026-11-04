@@ -19,6 +19,7 @@ from scripts.swarm import (
 from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
 from scripts.tick.steps import CallStep, Left, pass_domains
+from scripts.tick.steps.tasks import PHASES, WriteStep
 
 Get = Callable[[str], Any]
 
@@ -118,6 +119,10 @@ def _phase_passes(cli: Any, get: Get) -> Any:
     return cli._phase_steps(get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"))
 
 
+def _planning_after_phase(cli: Any, get: Get) -> Any:
+    return cli._planning_after_phase(get("inbox"), get("store"), get("slug"), get("ledger"), get("box"))
+
+
 def _intent_check(cli: Any, get: Get) -> None:
     get("box")["judged"] = cli._intent_pass(
         get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"), get("config")
@@ -156,7 +161,10 @@ STEPS = (
     CallStep("command runner", "wrapper commands", held(_command_runner)),
     CallStep("urgent hold", "wrapper phases", held(_urgent_hold)),
     CallStep("dependency audit", "wrapper phases", held(_dependency_audit)),
-    CallStep("planning and phase pass", "wrapper phases", held(_phase_passes)),
+    WriteStep("planning and phase pass", "wrapper phases", held(_phase_passes), writes=frozenset({PHASES})),
+    CallStep(
+        "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})
+    ),
     CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
     CallStep("intent check", "wrapper intent", held(_intent_check), writes=pass_domains("judged")),
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
