@@ -336,7 +336,9 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
     submitted: list[Future[StepRecord]] = []
     try:
         while pending or running:
-            ready = [s for s in pending if s.needs & names <= records.keys() and not _waiting(s, names, found)]
+            ready = [
+                step for step in pending if step.needs & names <= records.keys() and not _waiting(step, names, found)
+            ]
             for step in ready:
                 pending.remove(step)
                 lane = found.lane(step.lane)
