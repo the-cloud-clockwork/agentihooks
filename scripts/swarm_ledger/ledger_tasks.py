@@ -61,6 +61,7 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
+MATCHED = {"claimed_by": "", "claim_generation": 0, "pr_url": "", "awaiting": "", "difficulty": "", "group_members": []}
 LIST_FIELDS = (
     "depends_on",
     "territory",
@@ -176,19 +177,22 @@ def check_guards(op: dict) -> None:
     if not isinstance(guard, list) or not all(state in STATES for state in guard):
         raise ValueError(f"if_state must be a list of states from {STATES}")
     expected = op.get("if_match", {})
-    if not isinstance(expected, dict) or set(expected) - {"claimed_by", "claim_generation", "pr_url", "awaiting"}:
+    if not isinstance(expected, dict) or set(expected) - set(MATCHED):
         raise ValueError("if_match must contain task ownership fields")
-    if any(not isinstance(value, str) for key, value in expected.items() if key != "claim_generation"):
+    if any(not isinstance(value, str) for key, value in expected.items() if isinstance(MATCHED[key], str)):
         raise ValueError("if_match ownership fields must be strings")
     generation = expected.get("claim_generation", 0)
     if type(generation) is not int or generation < 0:
         raise ValueError("if_match claim_generation must be a nonnegative integer")
+    members = expected.get("group_members", [])
+    if not isinstance(members, list) or not all(isinstance(m, str) and ID_RE.match(m) for m in members):
+        raise ValueError("if_match group_members must list task ids")
 
 
-def _guarded(task, op):
+def _guarded(task: dict, op: dict) -> bool:
     expected = op.get("if_match", {})
     return (bool(op.get("if_state")) and task.get("state", "open") not in op["if_state"]) or any(
-        task.get(key, 0 if key == "claim_generation" else "") != value for key, value in expected.items()
+        task.get(key, MATCHED[key]) != value for key, value in expected.items()
     )
 
 
