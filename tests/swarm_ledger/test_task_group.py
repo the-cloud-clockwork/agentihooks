@@ -296,6 +296,43 @@ def test_ungroup_of_a_task_without_a_group_changes_nothing(with_ungroup):
     assert rejected == ["ungroup-2"]
 
 
+def guarded_ungroup(lead: str, members: list[str], n: int = 1) -> tuple[dict, list]:
+    op = {
+        "op": "task_ungroup",
+        "id": f"ungroup-{n}",
+        "by": "swarm",
+        "item": f"tasks/{lead}",
+        "if_match": {"group_members": members},
+    }
+    core.check_op(op)
+    return core.sync(SLUG, ops=[op])
+
+
+def test_ungroup_releases_while_the_lead_holds_the_members_it_expects(with_ungroup: None) -> None:
+    group("t1", ["t2", "t3"])
+    state, rejected = guarded_ungroup("t1", ["t2", "t3"])
+    assert rejected == []
+    assert "group_members" not in rows(state)["t1"] and "merged_into" not in rows(state)["t2"]
+
+
+def test_ungroup_refuses_after_a_concurrent_regroup_moved_the_members(with_ungroup: None) -> None:
+    group("t1", ["t2", "t3"])
+    state, rejected = guarded_ungroup("t1", ["t2"])
+    assert rejected == ["ungroup-1"]
+    assert state["_meta"]["warnings"][-1] == "tasks/t1 changed its group members"
+    assert rows(state)["t1"]["group_members"] == ["t2", "t3"] and rows(state)["t3"]["merged_into"] == "t1"
+
+
+@pytest.mark.parametrize(
+    "if_match", [{"group_members": "t2"}, {"group_members": ["bad id"]}, {"claimed_by": "x"}, ["t2"]]
+)
+def test_a_malformed_ungroup_guard_is_refused(if_match: object) -> None:
+    op = {"op": "task_ungroup", "id": "u", "by": "swarm", "item": "tasks/t1", "if_match": if_match}
+    with pytest.raises(ValueError) as refused:
+        core.check_op(op)
+    assert str(refused.value) == "task_ungroup if_match holds only group_members, a list of task ids"
+
+
 @pytest.mark.parametrize(("by", "lane"), [(ENGINEER, "eng"), (PLANNER, "plan")])
 def test_a_lane_agent_cannot_ungroup_tasks(with_ungroup, by, lane):
     group("t1", ["t2"])
@@ -322,7 +359,7 @@ def test_a_malformed_ungroup_op_is_refused(op):
 def test_the_ungroup_refusal_names_its_shape():
     with pytest.raises(ValueError) as refused:
         core.check_op({"op": "task_ungroup", "id": "u", "by": "swarm", "item": "tasks/t1", "members": ["t2"]})
-    assert str(refused.value) == "task_ungroup takes only an id, by and an item tasks/<lead id>"
+    assert str(refused.value) == "task_ungroup takes only an id, by, an item tasks/<lead id> and an if_match"
 
 
 def test_the_core_and_the_server_schema_know_the_ungroup_op():
@@ -331,3 +368,4 @@ def test_the_core_and_the_server_schema_know_the_ungroup_op():
     schema = schemas.operation_schema("task_ungroup")
     op = {"op": "task_ungroup", "id": "u", "by": "swarm", "item": "tasks/t1"}
     assert schemas.mismatched_field(schema, op) is None
+    assert schemas.mismatched_field(schema, {**op, "if_match": {"group_members": ["t2"]}}) is None

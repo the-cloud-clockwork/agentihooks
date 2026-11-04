@@ -1,0 +1,1 @@
+The tick engine now hands every step only the ports its declared effects name. `run_tick` builds the real port tools once per pass, `run_step` narrows them with `Tools.for_effects(step.effects)`, and a step writing through an undeclared port fails with `UndeclaredEffect`. Steps declare `effects` and `feature`; every existing step declares no effects.
