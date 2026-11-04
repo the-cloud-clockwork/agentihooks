@@ -534,7 +534,7 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert mutation_counts("scripts/sample.py", source, {9, 14}) == (0, ["cached"])
 
 
-def test_mutant_counting_resolves_positions_on_its_one_parse(monkeypatch):
+def test_mutant_counting_resolves_positions_on_its_one_parse(monkeypatch: pytest.MonkeyPatch) -> None:
     import libcst
     from libcst import metadata
     from mutmut.configuration import Config

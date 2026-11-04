@@ -972,7 +972,9 @@ def test_module_facts_names_every_import_and_nested_function_from_one_parse(monk
     assert parsed == [source]
 
 
-def test_a_held_tests_folder_is_read_once_and_each_selection_is_made_once(tmp_path, monkeypatch):
+def test_a_held_tests_folder_is_read_once_and_each_selection_is_made_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.ci_mutation import scope
 
     tests = tmp_path / "tests"
@@ -984,9 +986,9 @@ def test_a_held_tests_folder_is_read_once_and_each_selection_is_made_once(tmp_pa
     read_text = Path.read_text
     reaching = scope.reaching_tests
 
-    def read(path, *args, **kwargs):
+    def read(path: Path) -> str:
         reads.append(path)
-        return read_text(path, *args, **kwargs)
+        return read_text(path)
 
     monkeypatch.setattr(Path, "read_text", read)
     monkeypatch.setattr(scope, "reaching_tests", lambda *args: reached.append(args[1:3]) or reaching(*args))
