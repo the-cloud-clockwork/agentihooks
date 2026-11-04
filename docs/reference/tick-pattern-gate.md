@@ -34,7 +34,8 @@ read. The gate records four kinds of offence:
 A step is any call to `CallStep`, `WriteStep` or `register`, bare or as an
 attribute (`steps.CallStep`, `registry.register`), whose first positional
 argument is a string literal. That literal is the step name. A call whose
-first argument is not a literal is skipped, such as `registry.register(_step)`. In
+first argument is not a literal is skipped, such as `registry.register(_step)`, and
+is not checked against any rule. In
 `registry.register(CallStep("name", ...))` the outer call is skipped and the
 inner `CallStep` is graded.
 
@@ -46,6 +47,10 @@ slot:
 | `CallStep` | `name`, `group`, `call`, `needs`, `reads`, `writes`, `lane` |
 | `WriteStep` | `name`, `group`, `call`, `writes`, `needs`, `reads` |
 | `register` | `name` |
+
+`scripts.tick.registry.register` itself takes a `Step`, so the `register`
+rule only catches a call shaped like `register("<name>", ...)`; real steps are
+graded at their `CallStep` or `WriteStep` construction.
 
 `effects` and `feature` have no positional slot and must always be passed by
 keyword. A default value does not count: a step that relies on
@@ -83,7 +88,8 @@ resolved against the file's own package, so `from ...inbox import store` in
 `scripts/tick/steps/one.py` records `import scripts.inbox` and
 `import scripts.inbox.store`. A name that only shares a prefix, such as
 `scripts.inboxes`, is not banned. The adapters folder and the tick module may
-import these modules.
+import these modules. Dynamic imports such as `importlib.import_module` or
+`__import__` are not graded.
 
 ## The allowlist
 
@@ -106,7 +112,8 @@ JSON with a one space indent and a trailing newline:
 }
 ```
 
-At `dev` `b91a0d7c1b` it holds 549 offences in 8 files:
+At `dev` `b91a0d7c1b` it held 549 offences in 8 files; the self grade under
+[Usage](#usage) prints the current totals:
 
 | File | Offences |
 | --- | --- |
@@ -119,8 +126,9 @@ At `dev` `b91a0d7c1b` it holds 549 offences in 8 files:
 | `scripts/tick/steps/agents.py` | 38 |
 | `scripts/tick/steps/place.py` | 31 |
 
-Most step offences are `no effects` and `no feature`: every registered step
-declares no effects today and relies on the defaults (see
+The largest step offence kinds are `no effects` and `no feature`, 96 each: no
+registered step passes either keyword today and each relies on the defaults
+(see
 [Effects in a tick pass](tick-adapters.md#effects-in-a-tick-pass)).
 
 ## Grading
@@ -135,8 +143,8 @@ fi
 python -m scripts.tick_pattern --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 ```
 
-`$RUNNER_TEMP/base` is the merge base of the pull request head with
-`origin/dev` (or the event base outside a pull request into `dev`).
+`$RUNNER_TEMP/base` is the merge base of the head with the event base
+(`origin/dev` for a pull request into `dev`).
 `$RUNNER_TEMP/grader` is the protected copy checked out at the pull request
 base, so a pull request cannot loosen the grader that grades it; before the
 base carried `scripts/tick_pattern.py`, the head's copy graded.
@@ -196,7 +204,7 @@ grade.
 
 ## Usage
 
-Check that a tree's allowlist matches its code by grading it against itself:
+Print the current totals by grading a tree against itself:
 
 ```bash
 python -m scripts.tick_pattern --base . --head .
@@ -204,6 +212,13 @@ python -m scripts.tick_pattern --base . --head .
 
 On `dev` `b91a0d7c1b` it prints
 `549 tick pattern offences in 8 files, 549 on the base allowlist, 0 errors`.
+A self grade touches no file, so it never compares the record with the
+measurement. Confirm the record matches the code with:
+
+```bash
+python -m scripts.tick_pattern --write
+git diff --exit-code tests/TICK_PATTERN_ALLOWLIST.json
+```
 
 Record the head's measurement after removing offences:
 
