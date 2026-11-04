@@ -1,6 +1,8 @@
 """The shared tick helpers live in the common step module and the swarm tick module re-exports each one."""
 
+from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -42,3 +44,170 @@ def test_common_helpers_reach_tick_seams_through_the_tick_module(monkeypatch: py
         ["held engineer@1-1 until one pane holds its resumed process 7"],
     )
     assert seen == [("slug", "store", "runtime", agent, 7)]
+
+
+@dataclass(frozen=True)
+class _Agent:
+    """Agent record with the fields the rebind helper reads and replaces."""
+
+    name: str
+    pane_id: str
+    conversation_id: str
+    profile_decision: dict[str, Any]
+
+
+class _Ledger:
+    """Ledger fake that records task updates and answers with a fixed live row."""
+
+    def __init__(self, live: dict[str, object]) -> None:
+        self.live = live
+        self.calls: list[tuple[object, ...]] = []
+
+    def update_task(self, slug: str, task_id: str, fields: dict[str, object], **guard: object) -> dict[str, object]:
+        self.calls.append((slug, task_id, fields, guard))
+        return self.live
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+def test_still_held_needs_active_state_owner_and_generation() -> None:
+    expected = {"claimed_by": "a", "claim_generation": 2}
+    assert common._still_held({"state": "claimed", "claimed_by": "a", "claim_generation": 2}, expected) is True
+    assert common._still_held({"state": "pr", "claimed_by": "a", "claim_generation": 2}, expected) is True
+    assert common._still_held({"state": "open", "claimed_by": "a", "claim_generation": 2}, expected) is False
+    assert common._still_held({"state": "claimed", "claimed_by": "b", "claim_generation": 2}, expected) is False
+    assert common._still_held({"state": "claimed", "claimed_by": "a", "claim_generation": 3}, expected) is False
+    assert (
+        common._still_held({"state": "claimed", "claimed_by": "a"}, {"claimed_by": "a", "claim_generation": 0}) is True
+    )
+    assert common._still_held(None, expected) is False
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+def test_current_owner_accepts_an_unclaimed_row_or_its_own_claim() -> None:
+    agent = SimpleNamespace(name="a")
+    assert common._current_owner(agent, {}) is True
+    assert common._current_owner(agent, {"claimed_by": ""}) is True
+    assert common._current_owner(agent, {"claimed_by": "a"}) is True
+    assert common._current_owner(agent, {"claimed_by": "b"}) is False
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+@pytest.mark.parametrize(
+    ("lane", "state", "row", "ended"),
+    [
+        ("eng", "working", {}, False),
+        ("eng", "finished", {}, True),
+        ("eng", "working", {"done": True}, True),
+        ("eng", "working", {"state": "done"}, True),
+        ("eng", "working", {"state": "blocked"}, True),
+        ("eng", "working", {"state": "handoff"}, True),
+        ("eng", "working", {"state": "claimed"}, False),
+        ("eng", "working", {"awaiting": "verify"}, True),
+        ("eng", "working", {"awaiting": "verify", "claimed_by": "a"}, False),
+        ("eng", "working", {"awaiting": "review"}, False),
+        ("master", "working", {"state": "done"}, False),
+        ("master", "finished", {"state": "done"}, True),
+    ],
+)
+def test_ended_reads_the_task_row_except_for_masters(
+    lane: str, state: str, row: dict[str, object], ended: bool
+) -> None:
+    agent = SimpleNamespace(lane=lane, state=state, task="t1")
+    assert common._ended(agent, {"t1": row}) is ended
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+def test_operator_line_skips_operator_control_notices() -> None:
+    control = tick.control_notifications.CONTROL_REF
+    line = SimpleNamespace(sender="operator", fyi=False, ref=control)
+    assert common._operator_line(line) is True
+    assert common._operator_line(SimpleNamespace(sender="operator", fyi=True, ref=f"{control}x")) is False
+    assert common._operator_line(SimpleNamespace(sender="operator", fyi=True, ref="other")) is True
+    assert common._operator_line(SimpleNamespace(sender="swarm", fyi=False, ref="other")) is False
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+@pytest.mark.parametrize("expected", [None, {"claimed_by": "a", "claim_generation": 1}])
+def test_reopen_guards_on_active_state_and_reports_the_live_state(expected: dict[str, object] | None) -> None:
+    ledger = _Ledger({"state": "open", "claimed_by": ""})
+    rows: dict[str, dict[str, object]] = {"t1": {"state": "claimed", "claimed_by": "a"}}
+    assert common._reopen("slug", ledger, rows, "t1", expected) is True
+    guard: dict[str, object] = {"if_state": tick.ACTIVE}
+    if expected is not None:
+        guard["if_match"] = expected
+    assert ledger.calls == [("slug", "t1", {"state": "open", "claimed_by": ""}, guard)]
+    assert rows["t1"] == {"state": "open", "claimed_by": ""}
+    claimed: dict[str, object] = {"state": "pr", "claimed_by": "a"}
+    ledger.live = claimed
+    assert common._reopen("slug", ledger, rows, "t1") is False
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+def test_rebind_takes_the_one_pane_holding_the_conversation() -> None:
+    stored: list[tuple[str, object]] = []
+    store = SimpleNamespace(put_agent=lambda slug, agent: stored.append((slug, agent)))
+    agent = _Agent(name="a", pane_id="old", conversation_id="c1", profile_decision={"validation": {"state": "ok"}})
+    runtime = SimpleNamespace(conversations=lambda: {"w1:p1": "c1", "w1:p2": "c2", "remote/p3": "c1"})
+    rebound = common._rebind("slug", store, runtime, agent, 9)
+    assert rebound.pane_id == "w1:p1"
+    assert rebound.profile_decision == {"validation": {"state": "ok", "pid": 9}}
+    assert stored == [("slug", rebound)]
+    two = SimpleNamespace(conversations=lambda: {"w1:p1": "c1", "w1:p2": "c1"})
+    assert common._rebind("slug", store, two, agent, 9) is None
+    assert common._rebind("slug", store, SimpleNamespace(conversations=lambda: None), agent, 9) is None
+    assert len(stored) == 1
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+def test_follow_keeps_an_agent_without_a_pid_and_reports_a_rebind(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = SimpleNamespace(name="a")
+    assert common._follow("slug", "store", "runtime", agent, None) == (agent, [])
+    rebound = SimpleNamespace(pane_id="w1:p1")
+    monkeypatch.setattr(tick, "_rebind", lambda *args: rebound)
+    assert common._follow("slug", "store", "runtime", agent, 7) == (
+        rebound,
+        ["rebound a to its resumed process 7 in pane w1:p1"],
+    )
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+def test_skip_refused_turns_a_refusal_or_redis_timeout_into_a_skip_line(capsys: pytest.CaptureFixture[str]) -> None:
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    def refused() -> None:
+        raise tick.LedgerRefused("no")
+
+    def slow() -> None:
+        raise RedisTimeoutError("slow")
+
+    name = f"{__name__}.{refused.__qualname__}"
+    assert common.skip_refused(lambda value: [value], "x") == ["x"]
+    assert common.skip_refused(refused) == [f"skipped {name}: the ledger refused its write"]
+    slow_name = f"{__name__}.{slow.__qualname__}"
+    assert common.skip_refused(slow) == [f"skipped {slow_name}: its Redis read timed out"]
+    err = capsys.readouterr().err
+    assert f"{name} skipped, the ledger refused its write: " in err
+    assert f"{slow_name} skipped, its Redis read timed out: slow" in err
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+def test_skip_dropped_retries_once_then_skips(capsys: pytest.CaptureFixture[str]) -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    calls: list[int] = []
+
+    def flaky() -> list[str]:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RedisConnectionError("gone")
+        return ["ok"]
+
+    def dead() -> None:
+        raise RedisConnectionError("down")
+
+    assert common.skip_dropped(flaky) == ["ok"]
+    assert len(calls) == 2
+    assert common.skip_dropped(lambda: None) == []
+    name = f"{__name__}.{dead.__qualname__}"
+    assert common.skip_dropped(dead) == [f"skipped {name}: its Redis connection dropped or timed out twice"]
+    assert f"{name} skipped, its Redis connection dropped or timed out twice: down" in capsys.readouterr().err
