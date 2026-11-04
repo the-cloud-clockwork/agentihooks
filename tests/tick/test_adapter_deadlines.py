@@ -1,6 +1,7 @@
 """Deadline coverage of the tick adapters: every method taking a deadline keyword checks it before its I/O."""
 
 import ast
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,7 @@ def _modules() -> list[Path]:
     return sorted(path for path in ADAPTERS.glob("*.py") if path.name not in SKIPPED)
 
 
+@pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy rewrites every method body")
 def test_every_adapter_method_checks_its_deadline() -> None:
     report: list[str] = []
     missing: list[str] = []
