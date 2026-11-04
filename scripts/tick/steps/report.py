@@ -24,7 +24,7 @@ from scripts.swarm import (
 from scripts.swarm.status import findings  # pyright: ignore[reportUnknownVariableType]
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, pass_domains
 from scripts.tick.steps.host import held
 
 Get = Callable[[str], Any]
@@ -225,26 +225,39 @@ def _status_publish(cli: Any, get: Get) -> None:
     cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"), found)
 
 
+VIEWED = frozenset({"tick view"})
+FOUND = frozenset({"health findings"})
+VIEW = pass_domains("view")
+
 STEPS = (
-    CallStep("ledger event pass", "wrapper events", held(_event_pass), lane=SLOW),
-    CallStep("done recheck", "wrapper events", held(_done_recheck), lane=SLOW),
-    CallStep("progress checks", "wrapper events", held(_progress_checks), lane=SLOW),
-    CallStep("waits end", "wrapper events", held(_waits_end), lane=SLOW),
-    CallStep("merge pass", "wrapper events", held(_merge_pass), lane=SLOW),
-    CallStep("stall watch", "wrapper events", held(_stall_watch)),
-    CallStep("overrun pass", "wrapper events", held(_overrun), frozenset({"stall watch"})),
+    CallStep("ledger event pass", "wrapper events", held(_event_pass), VIEWED, VIEW, lane=SLOW),
+    CallStep("done recheck", "wrapper events", held(_done_recheck), VIEWED, VIEW, lane=SLOW),
+    CallStep("progress checks", "wrapper events", held(_progress_checks), VIEWED, VIEW, lane=SLOW),
+    CallStep("waits end", "wrapper events", held(_waits_end), VIEWED, VIEW, lane=SLOW),
+    CallStep("merge pass", "wrapper events", held(_merge_pass), VIEWED, VIEW, lane=SLOW),
+    CallStep(
+        "stall watch",
+        "wrapper events",
+        held(_stall_watch),
+        VIEWED | {"page relay"},
+        pass_domains("agents", "view"),
+        pass_domains("live"),
+    ),
+    CallStep("overrun pass", "wrapper events", held(_overrun), frozenset({"stall watch"}), pass_domains("live")),
     CallStep("quiet pass", "wrapper events", held(_quiet)),
     CallStep("doc report", "wrapper events", held(_doc_report), lane=SLOW),
-    CallStep("priorities sweep", "wrapper events", held(_priorities), lane=SLOW),
-    CallStep("health findings", "wrapper events", held(_health_findings), lane=SLOW),
-    CallStep("findings pass", "wrapper events", held(_findings_pass), frozenset({"health findings"}), lane=SLOW),
-    CallStep("metrics record", "wrapper metrics", held(_metrics), frozenset({"health findings"}), lane=SLOW),
+    CallStep("priorities sweep", "wrapper events", held(_priorities), VIEWED, VIEW, lane=SLOW),
+    CallStep(
+        "health findings", "wrapper events", held(_health_findings), VIEWED, VIEW, pass_domains("found"), lane=SLOW
+    ),
+    CallStep("findings pass", "wrapper events", held(_findings_pass), FOUND, pass_domains("found"), lane=SLOW),
+    CallStep("metrics record", "wrapper metrics", held(_metrics), FOUND, pass_domains("found", "view"), lane=SLOW),
     CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
-    CallStep("inbox wake", "wrapper metrics", held(_inbox_wake)),
-    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job)),
+    CallStep("inbox wake", "wrapper metrics", held(_inbox_wake), frozenset({"page relay"}), pass_domains("agents")),
+    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), writes=pass_domains("started")),
     CallStep("last tick", "wrapper metrics", held(_last_tick)),
     CallStep("heartbeat", "after", held(_heartbeat)),
-    CallStep("status publish", "wrapper status", held(_status_publish)),
+    CallStep("status publish", "wrapper status", held(_status_publish), FOUND, pass_domains("found", "view")),
 )
 
 for _step in STEPS:
