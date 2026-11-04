@@ -98,6 +98,7 @@
         "tests/tick/test_effects.py::test_every_registered_step_declares_no_effects_yet",
         "tests/tick/test_effects.py::test_a_step_of_a_parallel_pass_reaches_its_declared_ports",
         "tests/tick/test_effects.py::test_the_pass_spool_opens_once_and_appends_every_batch",
+        "tests/tick/test_effects.py::test_the_pass_tools_wire_every_real_adapter_for_the_swarm",
         "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
       ]
     },
