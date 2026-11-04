@@ -100,6 +100,44 @@ orphan and left out of every row.
 - **Load budget.** CI runs a simulated pass and grades its `pass_p95_s` against a budget that only shrinks; see
   [Tick load budget](tick-load-budget.md).
 
+## Scale proof at six, ten and fifteen agents
+
+The scale proof runs the swarm at six, then ten, then fifteen agents on the workstation and pastes one report over
+60 passes per stage on the task. The master judges each report against the stage table. The goal is fifteen agents
+with every pass under one minute.
+
+| Rollout stage | `STAGE_TARGETS` pass p95 target | Held when |
+|---|---|---|
+| `S1` (default) | 384 s | the p95 of the last 10 passes is above 384 s |
+| `S2` | 240 s | above 240 s |
+| `S3` | 120 s | above 120 s |
+| `S4` | 60 s | above 60 s; the stage the fifteen agent goal needs |
+
+Run one stage:
+
+```bash
+agentihooks swarm <id> set max-eng-agents=6 max-ci-agents=0   # then 10, then 15 agents in total
+agentihooks swarm <id> tick-report --passes 60                # once 60 passes ran at that agent count
+```
+
+Read the `Pass p95` line against the stage target and the step rows against their budgets. The report prints the
+p95, not the slowest pass, so the slowest pass under one minute at fifteen agents is proven only when the pass p95
+is well under 60 seconds and no step row's p95 approaches it; read single pass wall times from the `tick:passes`
+stream when the p95 is close. Set `AGENTIHOOKS_TICK_STAGE` to the stage the passes meet, so the pass budget hold
+guards it.
+
+What the scale proof task delivered: two cuts that took the slowest repeated work out of each pass.
+
+- The tick claim filter reads the saved fleet red listing, and the `fleet red notice` step has a measured 30 second
+  budget so the save is kept. The quota notice median fell from 26.605 to 8.236 seconds over ten passes. See
+  [Fleet red notice](fleet-red-notice.md#the-notice-step-budget).
+- The status publish reuses the health findings the pass already found. Its median fell from 10.932 to 9.244
+  seconds over ten passes. See [Tick engine steps](tick-engine-steps.md#lanes).
+
+After both cuts, ten passes on 4 November 2026 measured a pass p95 of 104.104 seconds and a gap p95 of 109.479
+seconds: under the `S3` target, above `S4`. The three stage reports over 60 passes moved to a separate scale proof
+task in the tick plan and were not part of this delivery.
+
 `AGENTIHOOKS_TICK_CADENCE` does not change any figure in the report today: it sets the slow lane cadence, which no
 pass reads yet, the scheduler cron stays every minute, and every pass still runs every step. See
 [Cadence](../pillars/swarm.md#cadence) and [Swarm Tick](configuration.md#swarm-tick).
