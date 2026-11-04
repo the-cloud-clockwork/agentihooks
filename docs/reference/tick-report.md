@@ -88,7 +88,7 @@ the `tick:records` stream of the same passes:
 
 | Column | Meaning |
 |---|---|
-| Critical lane end p95 | The 95th percentile over the window of the pass records' `critical_end_s`: the latest end of an engine step outside the slow lane, in seconds from the pass start (start offset plus wall time). Passes that ran no such step carry no value and are left out. |
+| Critical lane end p95 | The 95th percentile over the window of the pass records' `critical_end_s`: the latest end of an engine step on the critical chain (outside the slow lane and not handed off to run after its group), in seconds from the pass start (start offset plus wall time). Passes that ran no such step carry no value and are left out. |
 | Records | Engine step records of that step in the window, one per run, held or skipped run. |
 | Late share | Percent of those records whose outcome is `late`: the step ran past its budget or was left running. Held and skipped records are not late. |
 | Abandoned | Runs still going at their budget or lane deadline; the engine left them running and dropped their result. |
