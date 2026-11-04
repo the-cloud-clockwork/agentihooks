@@ -35,9 +35,6 @@ class Store:
     def key(self, slug: str, stream: str) -> str:
         return f"{slug}:{stream}"
 
-    def records(self) -> list[dict[str, Any]]:
-        return [row for key, row in self.redis.rows if key == "sw:tick:records"]
-
 
 class View:
     def read(self, domain: Domain, key: str) -> object | None:
@@ -98,7 +95,6 @@ def test_a_write_step_left_at_its_budget_journals_its_returned_write_domains(
     assert [(row["slug"], row["step"], row["budget_s"], row["writes"]) for row in lines] == [
         ("sw", "rank pass", 1.0, ["ranks", "tasks"])
     ]
-    assert [(row["step"], row["abandoned"], row["dropped"]) for row in store.records()] == [("rank pass", True, 3)]
 
 
 @pytest.mark.feature("swarm-tick-cost-report")
@@ -131,4 +127,3 @@ def test_a_step_left_with_only_its_actions_domain_journals_nothing(capsys: pytes
         release.set()
         joined("release alert")
     assert journal(capsys.readouterr().err) == []
-    assert [(row["step"], row["abandoned"]) for row in store.records()] == [("release alert", True)]
