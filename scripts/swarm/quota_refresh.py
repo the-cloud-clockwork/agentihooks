@@ -83,5 +83,5 @@ def run(store: RedisStore, execute: Callable[[str, dict], str], wait_s: float, p
     due = 0.0
     while True:
         due = probe_due(prober, due, time.monotonic())
-        pubsub.get_message(timeout=wait_s)
+        pubsub.get_message(timeout=min(wait_s, max(0.0, due - time.monotonic())))
         answer_all(store, execute)

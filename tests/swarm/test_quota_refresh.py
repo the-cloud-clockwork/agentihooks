@@ -218,6 +218,30 @@ def test_run_listens_on_the_wake_channel_and_answers_every_swarm_on_each_wake(st
     assert rounds == [(store, execute), (store, execute)]
 
 
+def test_run_wakes_for_the_next_probe_a_minute_after_the_last_one_started(store, monkeypatch):
+    seen, rounds = [], []
+    clock = iter([0.5, 50.5, 60.5, 190.5])
+
+    class PubSub:
+        def subscribe(self, channel):
+            seen.append(("subscribe", channel))
+
+        def get_message(self, timeout):
+            seen.append(("wait", timeout))
+
+    def answer_all(store_, execute):
+        rounds.append(store_)
+        if len(rounds) == 2:
+            raise Stop
+
+    monkeypatch.setattr(store.redis, "pubsub", PubSub)
+    monkeypatch.setattr(quota_refresh, "answer_all", answer_all)
+    monkeypatch.setattr(quota_refresh, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    with pytest.raises(Stop):
+        quota_refresh.run(store, lambda slug, row: "", 30, lambda: seen.append("probe"))
+    assert seen == [("subscribe", quota_refresh.WAKE), "probe", ("wait", 10.0), "probe", ("wait", 0.0)]
+
+
 def test_timer_ensure_also_runs_the_quota_prober_service(tmp_path):
     calls = []
     timer.ensure(

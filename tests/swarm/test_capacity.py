@@ -2639,7 +2639,7 @@ def _probing(monkeypatch, ran, calls=None):
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
 
 
-def test_a_pass_read_runs_no_claude_or_codex_quota_probe(monkeypatch, tmp_path):
+def test_a_pass_read_runs_only_the_local_codex_login_status_check(monkeypatch, tmp_path):
     ran = []
     _probing(monkeypatch, ran)
     env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
