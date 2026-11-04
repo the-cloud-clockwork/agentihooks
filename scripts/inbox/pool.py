@@ -78,18 +78,23 @@ class MasterPool:
         return door, door
 
     def empty(self, slug: str, address: str) -> bool:
-        """No master is in the seat: the seat was retired, its registry occupant has finished, retired, left it or
-        never launched, or it has none and no live master record names the seat."""
+        """No master is in the seat: the seat was retired, its registry occupant has finished, retired, been asked to
+        retire, left it or never launched, or it has none and no live master record names the seat."""
         redis = cast(Any, self.redis)
         seats = cast(Any, self.inbox).seats
         if address in masters.MasterSeats(redis).retired(slug):
             return True
-        agents: list[AgentRecord] = cast(Any, RedisStore(redis)).agents(slug)
+        from scripts.swarm import master_retire
+
+        store = RedisStore(redis)
+        agents: list[AgentRecord] = cast(Any, store).agents(slug)
         gone = {agent.name for agent in agents if agent.state in masters.GONE or unlaunched(agent)}
         occupant: str = seats.occupant(address).occupant
         if occupant:
-            return occupant in gone or seats.left(occupant, address)
-        return not any(a.lane == MASTER and a.seat == address and a.name not in gone for a in agents)
+            asked = bool(master_retire.reason(store, slug, occupant))
+            return occupant in gone or seats.left(occupant, address) or asked
+        named = [a.name for a in agents if a.lane == MASTER and a.seat == address and a.name not in gone]
+        return all(master_retire.reason(store, slug, name) for name in named)
 
     def stage_add(self, pipe, item) -> None:
         """pipe is in MULTI; the score is the item's place in its front door's arrival order."""
