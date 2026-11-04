@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.631 · 2026-11-04
+
+### 2026-11-04 · 80bb6f4290ea · #9663 · @nestorcolt
+
+**Return the master stall pass as stall writes the engine applies while the master stays live**
+
+The master stall step now returns its decisions as writes for the engine to apply, instead of mutating state directly: `master_stall.stalls` decides forget, stop, or retire for the live master without writing, `apply_stall` applies one decision, and `stall_writes`/`stall_writer` turn decisions into guarded compare-and-set writes keyed on the master name read. If the master changes before the write lands, the engine drops it with a `RevisionConflict` and recomputes it on the next pass, rather than corrupting state. This closes out the pure-steps task for the parallel engine, leaving the stall step safe to run concurrently with other steps.
+
 ## v2.17.629 · 2026-11-04
 
 ### 2026-11-04 · 42c1e6400516 · #9650 · @nestorcolt
