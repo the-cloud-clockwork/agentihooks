@@ -180,7 +180,8 @@
         "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu",
         "tests/tick/test_engine_records.py::test_abandoned_write_step_reads_abandoned_with_its_writes_dropped",
         "tests/tick/test_engine_records.py::test_steps_dropped_at_an_expired_lane_read_skipped",
-        "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95"
+        "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95",
+        "tests/tick/test_engine_records.py::test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain"
       ]
     },
     {

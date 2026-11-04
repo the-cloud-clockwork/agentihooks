@@ -1,6 +1,7 @@
 """Engine step records in the tick:records stream and the report columns built from them."""
 
 import json
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import Event
@@ -156,6 +157,24 @@ def test_handed_off_step_dropped_with_its_need_journals_a_skipped_slow_lane_row(
         ("size pass", "tick", engine.SKIPPED, 0),
         ("slow follow", "slow", engine.SKIPPED, 0),
     ]
+
+
+@pytest.mark.feature("swarm-tick-cost-report")
+def test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain() -> None:
+    store = Store()
+    slow = WriteStep("slow probe", "planted", lambda tick, get: time.sleep(0.2) or [])
+    slow.lane = engine.SLOW
+    follow = ok_step()
+    follow.name, follow.needs = "critical follow", frozenset({"slow probe"})
+    later: list[tuple[engine.StepRecord, ...]] = []
+    with recording(store) as current, pool.running(critical_s=5.0, slow_s=5.0):
+        engine.run_group(
+            "planted", Context(View(), Deadline.after(60.0)), [ok_step(), slow, follow], finished=later.append
+        )
+    assert [[row.name for row in records] for records in later] == [["slow probe", "critical follow"]]
+    rows = {row["step"]: row for row in store.records()}
+    assert rows["critical follow"]["lane"] == "tick" and rows["critical follow"]["outcome"] == engine.OK
+    assert current["critical_end_s"] == rows["size pass"]["start_s"] + rows["size pass"]["wall_s"]
 
 
 def ok_step() -> WriteStep:
