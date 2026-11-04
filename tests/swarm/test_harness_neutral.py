@@ -26,7 +26,7 @@ def codex_only(tmp_path, monkeypatch):
         monkeypatch.delenv(key)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
-    monkeypatch.setattr(capacity, "_claude", lambda environ, now: [])
+    monkeypatch.setattr(capacity, "_claude", lambda environ, now, refresh=True: [])
     monkeypatch.setattr(capacity, "_codex", lambda environ, now, refresh: [codex("cx"), codex("cy", sessions=1)])
     monkeypatch.setattr(plugins, "claude_only", lambda profile: False)
     return tmp_path
@@ -37,7 +37,7 @@ def claude_only(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(
-        capacity, "_claude", lambda environ, now: [capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6)]
+        capacity, "_claude", lambda environ, now, refresh=True: [capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6)]
     )
     monkeypatch.setattr(capacity, "_codex", lambda environ, now, refresh: [])
     monkeypatch.setattr(plugins, "claude_only", lambda profile: False)

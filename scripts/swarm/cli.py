@@ -698,7 +698,12 @@ def cmd_waker(store, args):
 def cmd_prober(store, args):
     from scripts.swarm import command_runner, quota_refresh
 
-    quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
+    quota_refresh.run(
+        store,
+        lambda slug, row: command_runner.execute(store, slug, row),
+        quota_refresh.WAIT_S,
+        lambda: quota_refresh.probe(dict(os.environ), time.time()),
+    )
 
 
 def cmd_spoke(store, args):

@@ -310,6 +310,6 @@ def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(mon
     herdr = HerdrRuntime()
     assert herdr.quota_accounts is None
     decision = _sizing(herdr)
-    assert asked == [(NOW_MS / 1000, True)]
+    assert asked == [(NOW_MS / 1000, False)]
     assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
