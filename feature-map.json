@@ -89,7 +89,10 @@
         "tests/tick/test_intervals.py::test_nothing_rests_without_a_recording_store",
         "tests/tick/test_intervals.py::test_a_step_never_recorded_is_due",
         "tests/tick/test_intervals.py::test_a_step_above_sixty_seconds_writing_a_pass_box_is_refused",
-        "tests/tick/test_intervals.py::test_every_registered_step_writing_the_pass_state_runs_every_pass"
+        "tests/tick/test_intervals.py::test_every_registered_step_writing_the_pass_state_runs_every_pass",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_interval_scenario_runs_each_wide_step_once_and_rests_it_once",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_interval_slow_scenario_runs_a_slow_step_once_in_three_passes",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_engine_ignoring_the_last_run_hash_breaks_the_interval_scenarios"
       ]
     },
     {

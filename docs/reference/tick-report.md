@@ -93,7 +93,7 @@ the `tick:records` stream of the same passes:
 | Late share | Percent of those records whose outcome is `late`: the step ran past its budget or was left running. Held and skipped records are not late. |
 | Abandoned | Runs still going at their budget or lane deadline; the engine left them running and dropped their result. |
 | Held | Runs refused because the step's earlier run for the same swarm was still alive. |
-| Skipped | Steps dropped before they started, because their lane deadline had passed or a step they need was dropped. |
+| Skipped | Steps dropped before they started, because their lane deadline had passed or a step they need was dropped, and steps rested because their interval had not elapsed since their last ended run (the `rested` field). A rested step starts no thread and counts as ended for the steps that need it. |
 | Dropped | Writes that never applied. A finished run counts each write refused by compare and set; an abandoned run, whose result is unknown, counts each write domain it declares, its own actions domain included. |
 
 Only steps the tick engine runs write these records; a window without them prints the header alone and
@@ -105,7 +105,7 @@ Only steps the tick engine runs write these records; a window without them print
 |---|---|---|---|
 | `tick:passes` | Tick pass | `pass_id`, `start_ms`, `end_ms`, `wall_s`, `critical_end_s` | Newest 50,000 |
 | `tick:steps` | Finished step | `pass_id`, `step`, `wall_s`, `own_cpu_s`, `reaped_child_cpu_s` | Newest 50,000 |
-| `tick:records` | Engine step record | `pass_id`, `step`, `lane`, `outcome`, `wall_s`, `start_s`, `abandoned`, `held`, `skipped`, `dropped` | Newest 50,000 |
+| `tick:records` | Engine step record | `pass_id`, `step`, `lane`, `outcome`, `wall_s`, `start_s`, `abandoned`, `held`, `skipped`, `rested`, `dropped` | Newest 50,000 |
 
 An engine step record also stores its `budget_s` and its count of compare and set `conflicts`. All three streams sit
 under the swarm's own Redis key prefix. A pass record also carries its `critical_end_s`, the active agent count, the
