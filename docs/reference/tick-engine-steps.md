@@ -706,9 +706,7 @@ by the engine and does not leave the pass.
    `UNMEASURED_S`) and plan interval, then register `CallStep` with every
    field, even at its default, because the
    [tick pattern gate](tick-pattern-gate.md) refuses a step missing any of
-   them:
-   `CallStep("<name>", <group>, held(<call>), needs=..., reads=..., writes=...,
-   lane=..., effects=..., feature=...)`. Steps run in dependency waves
+   them, as in the example below. Steps run in dependency waves
    (`Registry.waves`); `Registry.steps` keeps registration order, so register
    the step where its hand written line stood. Use `held` when an exception
    from the call must still leave the pass.

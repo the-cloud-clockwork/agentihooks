@@ -213,7 +213,7 @@ python -m scripts.tick_pattern --base . --head .
 On `dev` `b91a0d7c1b` it prints
 `549 tick pattern offences in 8 files, 549 on the base allowlist, 0 errors`.
 A self grade touches no file, so it never compares the record with the
-measurement. Confirm the record matches the code with:
+measurement. On a clean tree, confirm the record matches the code with:
 
 ```bash
 python -m scripts.tick_pattern --write
