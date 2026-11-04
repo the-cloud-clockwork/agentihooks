@@ -2,9 +2,10 @@ import argparse
 import json
 import subprocess
 import time
+from typing import Any
 
 
-def _api(endpoint: str) -> dict:
+def _api(endpoint: str) -> dict[str, Any]:
     return json.loads(
         subprocess.run(["gh", "api", endpoint], check=True, capture_output=True, text=True, timeout=30).stdout
     )
