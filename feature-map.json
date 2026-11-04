@@ -114,6 +114,18 @@
       ]
     },
     {
+      "id": "swarm-tick-agents-reap",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h10",
+      "behaviour": "The reap cluster lives in the agents step module, the swarm tick module re-exports each moved name, a moved helper reaches its siblings through the tick module so a patched tick seam still applies, and the reap step declares the ledger, runtime and inbox ports, its feature and its lane.",
+      "seam": "scripts.tick.steps.agents, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/test_agents.py::test_the_reap_cluster_lives_in_the_agents_step_module_and_tick_reexports_it",
+        "tests/tick/test_agents.py::test_the_reap_step_declares_its_ports_feature_and_lane",
+        "tests/tick/test_agents.py::test_a_moved_reap_helper_reaches_a_patched_tick_seam"
+      ]
+    },
+    {
       "id": "swarm-tick-declared-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",

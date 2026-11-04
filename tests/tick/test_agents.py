@@ -252,3 +252,54 @@ def test_the_tick_prints_handed_off_records_when_no_box_was_handed(
     monkeypatch.setattr(tick_module.engine, "run_group", finish)
     assert tick_module.run_group("agents", slug="sw") == []
     assert capsys.readouterr().out == ""
+
+
+REAP_MOVED = (
+    "_restore_owner",
+    "_drop_remote",
+    "_remote_gone_reason",
+    "_hive_lost",
+    "_retire_ended",
+    "_live_names",
+    "_observe",
+    "_elsewhere",
+    "_Reaping",
+    "_reap_agent",
+    "_lost",
+    "_watch_remote",
+    "_refusal_due",
+    "_free_refused",
+    "_free_revoked",
+    "_watch_agent",
+    "_watch_idle",
+    "_stale_nudge",
+    "_stuck_on_provider",
+    "_free_stuck",
+    "_operator_at_pane",
+)
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+@pytest.mark.parametrize("name", REAP_MOVED)
+def test_the_reap_cluster_lives_in_the_agents_step_module_and_tick_reexports_it(name: str) -> None:
+    moved = getattr(agent_steps, name)
+    assert moved.__module__ == "scripts.tick.steps.agents"
+    assert getattr(tick_module, name) is moved
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_the_reap_step_declares_its_ports_feature_and_lane() -> None:
+    reap = next(step for step in agent_steps.STEPS if step.name == "reap")
+    assert reap.effects == frozenset({"ledger", "runtime", "inbox"})
+    assert reap.feature == "swarm-tick-agents-reap"
+    assert reap.lane == Lane("tick")
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_a_moved_reap_helper_reaches_a_patched_tick_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[object, ...]] = []
+    monkeypatch.setattr(tick_module, "_watch_idle", lambda *args: seen.append(args) or ["watched"])
+    monkeypatch.setattr(tick_module.revoked_seats, "on_revoked", lambda agent: False)
+    agent = SimpleNamespace(name="engineer@1-1")
+    assert agent_steps._watch_agent("sw", "store", "ledger", "runtime", {}, agent, 7) == ["watched"]
+    assert seen == [("sw", "store", "ledger", "runtime", {}, agent, 7)]
