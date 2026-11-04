@@ -40,7 +40,7 @@ def names_code(text: str, dependency: Task) -> bool:
 
 
 def closed(task: Task) -> bool:
-    return task.get("state") == "done" or bool(task.get("out_of_scope") or task.get("merged_into"))
+    return task.get("state") == "done" or bool(task.get("out_of_scope"))
 
 
 def audit(tasks: list[Task], spec: Spec) -> list[dict[str, str]]:

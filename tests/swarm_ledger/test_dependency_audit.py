@@ -84,8 +84,6 @@ def test_the_spec_is_read_only_for_the_dependent_and_only_when_territories_are_d
         (task("b", ["docs/"], ["a"]), task("a", ["scripts/x.py"], state="done")),
         (task("b", ["docs/"], ["a"], out_of_scope=True), task("a", ["scripts/x.py"])),
         (task("b", ["docs/"], ["a"]), task("a", ["scripts/x.py"], out_of_scope=True)),
-        (task("b", ["docs/"], ["a"], merged_into="c"), task("a", ["scripts/x.py"])),
-        (task("b", ["docs/"], ["a"]), task("a", ["scripts/x.py"], merged_into="c")),
         (task("b", ["changelog.d/"], ["a"]), task("a", ["scripts/x.py"])),
         (task("b", ["docs/"], ["a"]), task("a", ["changelog.d/x.md"])),
         (task("b", [], ["a"]), task("a", ["scripts/x.py"])),
@@ -100,8 +98,8 @@ def test_closed_unknown_or_codeless_dependencies_are_not_judged(dependent, depen
 @pytest.mark.parametrize("state", ["open", "claimed", "blocked", "pr"])
 def test_every_open_state_on_both_sides_is_audited(state):
     tasks = [
-        task("a", ["scripts/x.py"], state=state, out_of_scope=False, merged_into=""),
-        task("b", ["docs/"], ["a"], state=state, out_of_scope=False, merged_into=""),
+        task("a", ["scripts/x.py"], state=state, out_of_scope=False),
+        task("b", ["docs/"], ["a"], state=state, out_of_scope=False),
     ]
     assert [row["depends_on"] for row in dependency_audit.audit(tasks, spec())] == ["a"]
 
