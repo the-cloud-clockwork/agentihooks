@@ -793,3 +793,35 @@ def test_operator_ledger_writes_reach_the_front_door_past_the_pool(swarm, inbox)
     assert [(inbox.get(i.id).address, inbox.get(i.id).sender) for i in sent] == [(FRONT, "operator")] * 3
     assert inbox.pending_mail("sw-master-2") == []
     assert swarm.redis.exists(f"{POOL}:last") == 0
+
+
+def test_an_item_for_an_empty_backend_seat_goes_straight_to_the_front_door(swarm, inbox):
+    _masters(swarm, 1)
+    item = inbox.send("ledger", SECOND, "phase p1 has no tasks")
+    assert inbox.get(item.id).address == FRONT
+    assert [i.id for i in inbox.pending_mail("sw-master-1")] == [item.id]
+    assert inbox.open_items(SECOND) == []
+
+
+def test_an_item_for_a_backend_seat_whose_master_finished_goes_to_the_front_door(swarm, inbox):
+    _masters(swarm, 2, {"sw-master-2": "finished"})
+    item = inbox.send("ledger", SECOND, "alert al-1 (sync)")
+    assert inbox.get(item.id).address == FRONT
+    assert inbox.pending_mail("sw-master-2") == []
+    assert [i.id for i in inbox.pending_mail("sw-master-1")] == [item.id]
+
+
+def test_an_item_for_a_live_backend_seat_stays_with_that_seat(swarm, inbox):
+    _masters(swarm, 2)
+    item = inbox.send("ledger", SECOND, "alert al-2 (sync)")
+    assert inbox.get(item.id).address == SECOND
+    assert [i.id for i in inbox.pending_mail("sw-master-2")] == [item.id]
+    assert swarm.redis.exists(POOL) == 0
+
+
+def test_an_item_for_an_empty_backend_seat_joins_the_pool_while_two_masters_are_live(swarm, inbox, held):
+    _masters(swarm, 2)
+    item = inbox.send("ledger", THIRD, "phase p2 has no tasks")
+    assert inbox.get(item.id).address == FRONT
+    assert swarm.redis.zrange(POOL, 0, -1) == [item.id]
+    assert inbox.open_items(THIRD) == []
