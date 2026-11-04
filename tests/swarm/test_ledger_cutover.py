@@ -90,9 +90,12 @@ def test_a_master_without_an_execution_launched_after_staging_reads_ready(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    status, _ = _legacy_master_readiness(pending, monkeypatch, capsys, 10001)
+    status, legacy = _legacy_master_readiness(pending, monkeypatch, capsys, 10001)
     assert status["ready"] is True
     assert status["missing"] == []
+    receipt = json.loads(pending[0].redis.hget(pending[0].key(SLUG, "ledger-ready"), legacy.name))
+    assert receipt["launched_at"] == 10001
+    assert "generation" not in receipt
 
 
 def test_a_master_without_an_execution_launched_before_staging_stays_missing(
@@ -103,6 +106,64 @@ def test_a_master_without_an_execution_launched_before_staging_stays_missing(
     status, legacy = _legacy_master_readiness(pending, monkeypatch, capsys, 9999)
     assert status["ready"] is False
     assert status["missing"] == [legacy.name]
+
+
+def _finish(store: RedisStore, name: str) -> None:
+    """Mark a projected agent row finished, as the tick does when its life ends."""
+    row = json.loads(store.redis.hget(store.key(SLUG, "agents"), name))
+    store.redis.hset(store.key(SLUG, "agents"), name, json.dumps({**row, "state": "finished"}))
+
+
+def _acknowledge_as(
+    pending: tuple[RedisStore, list[AgentRecord], str], monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Run the ready report as one agent holding its ledger token."""
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", ledger_authority.agent_token(pending[2], SLUG, name))
+    assert cli.main([SLUG, "ledger-ready"]) == 0
+
+
+def _seat_legacy_master(store: RedisStore) -> AgentRecord:
+    """Put a master with no execution identity in seat three, launched after staging."""
+    seat = f"{masters.seat(3)}@{SLUG}"
+    store.put_agent(SLUG, AgentRecord(store.next_name(SLUG, "master"), "master", "proof", seat=seat, launched_at=10001))
+    return next(agent for agent in store.agents(SLUG) if agent.seat == seat)
+
+
+def test_a_finished_master_without_an_execution_never_authenticates(
+    pending: tuple[RedisStore, list[AgentRecord], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import ledger_cutover
+
+    store = pending[0]
+    legacy = _seat_legacy_master(store)
+    _finish(store, legacy.name)
+    calls: list[tuple] = []
+    monkeypatch.setattr(ledger_cutover.client.ResourceClient, "request", lambda *args: calls.append(args))
+    _acknowledge_as(pending, monkeypatch, legacy.name)
+    assert calls == []
+    assert store.redis.hget(store.key(SLUG, "ledger-ready"), legacy.name) is None
+
+
+def test_a_master_without_an_execution_that_finishes_while_authenticating_records_no_receipt(
+    pending: tuple[RedisStore, list[AgentRecord], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import ledger_cutover
+
+    store = pending[0]
+    legacy = _seat_legacy_master(store)
+    real = ledger_cutover.client.ResourceClient.request
+
+    def finishing(
+        self: ledger_cutover.client.ResourceClient, slug: str, path: str, payload: dict | None = None
+    ) -> dict:
+        answer = real(self, slug, path, payload)
+        _finish(store, legacy.name)
+        return answer
+
+    monkeypatch.setattr(ledger_cutover.client.ResourceClient, "request", finishing)
+    _acknowledge_as(pending, monkeypatch, legacy.name)
+    assert store.redis.hget(store.key(SLUG, "ledger-ready"), legacy.name) is None
 
 
 @pytest.mark.parametrize("command", ["ledger", "swarm"])
