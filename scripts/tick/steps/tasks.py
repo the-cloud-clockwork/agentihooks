@@ -307,8 +307,8 @@ def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
         held = ledger.update_task(slug, write.key, fields, if_match=expected or None)
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
-    if kept := sorted(key for key in expected if key in fields and held.get(key, "") != fields[key]):
-        raise RevisionConflict(f"task {write.key} changed {', '.join(kept)} on the ledger before the write")
+    if changed := sorted(key for key in expected if key in fields and held.get(key, "") != fields[key]):
+        raise RevisionConflict(f"task {write.key} changed {', '.join(changed)} on the ledger before the write")
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] | None]]:
