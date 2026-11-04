@@ -555,8 +555,10 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
 
 
 def authority_held(store: Any, slug: str, task: str) -> bool:
-    port = _port(store) if RedisRecords(store.redis).layout(slug) == RECORDS else WholeDocumentRecords(store)
-    found = port.sections(slug, ("claims", "journals"))
+    port = RedisRecords(store.redis)
+    found = (port if port.layout(slug) == RECORDS else WholeDocumentRecords(store)).sections(
+        slug, ("claims", "journals")
+    )
     return task in found["claims"] or task in found["journals"]
 
 

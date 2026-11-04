@@ -369,7 +369,7 @@ def test_the_authority_check_reads_the_records_of_a_migrated_swarm_on_any_backen
 
     _migrated(store)
     fencing.write(store, "sw", lambda doc: doc["claims"].update(t1={"a": 1}))
-    monkeypatch.setattr(fencing.state, "backend", lambda: "bus")
+    monkeypatch.setattr(fencing.state, "backend", lambda *_: "bus")
     assert fencing.authority_held(store, "sw", "t1")
     assert not fencing.authority_held(store, "sw", "t3")
 
