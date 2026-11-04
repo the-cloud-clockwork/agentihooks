@@ -1,11 +1,13 @@
 """The master inbox pool of a swarm with two or more live masters: items for the front door seat wait here in arrival
 order, and each is claimed by exactly one live master, in round robin seat order. Operator items never enter it."""
 
+from typing import Any, cast
+
 from scripts.inbox import intent
 from scripts.inbox.seats import is_seat, master_of
 from scripts.inbox.store import POOL_HOLDER, POOL_SKIP
 from scripts.swarm.keyspace import ROOT
-from scripts.swarm.store import MASTER, RedisStore
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
 
 PREFIX = f"{ROOT}:inbox:pool"
@@ -72,13 +74,15 @@ class MasterPool:
     def empty(self, slug: str, address: str) -> bool:
         """No master is in the seat: the seat was retired, its registry occupant has finished, retired or left it, or
         it has none and no live master record names the seat."""
-        if address in masters.MasterSeats(self.redis).retired(slug):
+        redis = cast(Any, self.redis)
+        seats = cast(Any, self.inbox).seats
+        if address in masters.MasterSeats(redis).retired(slug):
             return True
-        agents = RedisStore(self.redis).agents(slug)
+        agents: list[AgentRecord] = cast(Any, RedisStore(redis)).agents(slug)
         gone = {agent.name for agent in agents if agent.state in masters.GONE}
-        occupant = self.inbox.seats.occupant(address).occupant
+        occupant: str = seats.occupant(address).occupant
         if occupant:
-            return occupant in gone or self.inbox.seats.left(occupant, address)
+            return occupant in gone or seats.left(occupant, address)
         return not any(a.lane == MASTER and a.seat == address and a.name not in gone for a in agents)
 
     def stage_add(self, pipe, item) -> None:
