@@ -3,7 +3,6 @@
 import os
 import subprocess
 from collections.abc import Callable, Mapping
-from typing import Any
 
 REFUSED = "Permission denied (publickey"
 SETTINGS = (
@@ -29,11 +28,19 @@ def environment(base: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
-def run(argv: list[str], runner: Runner | None = None, **options: Any) -> subprocess.CompletedProcess[str]:
+def run(
+    argv: list[str],
+    runner: Runner | None = None,
+    *,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Run argv; a call refused over ssh publickey runs once more over https for that call only."""
     call = runner or subprocess.run
-    done = call(argv, capture_output=True, text=True, **options)
+    options = {key: value for key, value in (("cwd", cwd), ("timeout", timeout)) if value is not None}
+    first = options if env is None else {**options, "env": env}
+    done = call(argv, capture_output=True, text=True, **first)
     if done.returncode == 0 or REFUSED not in done.stderr:
         return done
-    base = options.pop("env", None)
-    return call(argv, capture_output=True, text=True, env=environment(os.environ if base is None else base), **options)
+    return call(argv, capture_output=True, text=True, env=environment(os.environ if env is None else env), **options)
