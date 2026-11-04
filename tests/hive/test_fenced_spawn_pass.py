@@ -30,7 +30,6 @@ def counted(monkeypatch: pytest.MonkeyPatch, module: Any, name: str, value: Any)
 
 def local(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> tuple[FencedRuntime, list, list]:
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
-    monkeypatch.setattr(lease, "now_ms", lambda store: NOW)
     setup.store.update(setup.config.slug, local_max_agents=LAUNCHES)
     scans = counted(monkeypatch, terminate_agent, "sessions", [])
     readings = counted(monkeypatch, headroom, "measure", READING)
@@ -57,6 +56,7 @@ def test_concurrent_launches_in_one_pass_scan_processes_and_read_the_host_once(
     setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fenced, scans, readings = local(setup, monkeypatch)
+    monkeypatch.setattr(lease, "now_ms", lambda store: NOW)
     fenced.begin_placement_pass()
     refusals = refuse_together(fenced, 0)
     fenced.end_placement_pass()
