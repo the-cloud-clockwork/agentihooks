@@ -196,11 +196,7 @@ class FencedRuntime:
             self._local_full(machine, held, local_max)
             return chosen.reason + refused
         room = local_max - reserved
-        cache = self._local_slots_cache
-        if (
-            claim
-            and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, room, cache)) >= room
-        ):
+        if claim and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, room)) >= room:
             self._local_full(machine, taken, local_max)
             return local_full(waited, taken, local_max, reserved).reason + refused
         if claim:

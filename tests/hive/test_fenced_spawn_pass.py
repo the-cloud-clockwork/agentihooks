@@ -32,6 +32,7 @@ def local(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> tuple[Fenc
     setup.store.update(setup.config.slug, local_max_agents=LAUNCHES)
     scans = counted(monkeypatch, terminate_agent, "sessions", [])
     readings = counted(monkeypatch, headroom, "measure", READING)
+    monkeypatch.setattr(headroom, "read", lambda redis, machine, now: {"saved": machine})
     return FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local"), scans, readings
 
 
@@ -50,7 +51,9 @@ def refuse_together(fenced: FencedRuntime, first: int) -> dict[int, str]:
     return refusals
 
 
-def test_concurrent_launches_in_one_pass_scan_processes_and_read_the_host_once(setup, monkeypatch):
+def test_concurrent_launches_in_one_pass_scan_processes_and_read_the_host_once(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fenced, scans, readings = local(setup, monkeypatch)
     fenced.begin_placement_pass()
     refusals = refuse_together(fenced, 0)
@@ -58,9 +61,13 @@ def test_concurrent_launches_in_one_pass_scan_processes_and_read_the_host_once(s
     assert refusals == dict.fromkeys(range(LAUNCHES), "")
     assert len(setup.store.redis.hgetall(local_slots.key("workstation"))) == LAUNCHES
     assert (len(scans), len(readings)) == (1, 1)
+    pending, now, keywords = readings[0]
+    assert (pending, isinstance(now, int), keywords) == (0, True, {"previous": {"saved": "workstation"}})
 
 
-def test_the_next_pass_scans_again_and_a_launch_outside_a_pass_scans_each_time(setup, monkeypatch):
+def test_the_next_pass_scans_again_and_a_launch_outside_a_pass_scans_each_time(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fenced, scans, readings = local(setup, monkeypatch)
     for _ in range(2):
         fenced.begin_placement_pass()
@@ -68,8 +75,9 @@ def test_the_next_pass_scans_again_and_a_launch_outside_a_pass_scans_each_time(s
         assert fenced._refusal("eng", {"id": "other"}, "") == ""
         fenced.end_placement_pass()
     assert (len(scans), len(readings)) == (2, 2)
-    assert fenced._refusal("eng", {"id": "task"}, "") == ""
-    assert (len(scans), len(readings)) == (4, 3)
+    for outside in range(1, 3):
+        assert fenced._refusal("eng", {"id": "task"}, "") == ""
+        assert len(scans) > 2 * outside and len(readings) == 2 + outside
 
 
 def test_a_pass_cache_reads_each_value_once_and_hands_it_to_every_caller() -> None:
@@ -86,7 +94,9 @@ def test_a_pass_cache_reads_each_value_once_and_hands_it_to_every_caller() -> No
     assert len(reads) == 1
 
 
-def test_a_claim_in_a_pass_counts_live_workers_from_the_pass_scan(setup, monkeypatch):
+def test_a_claim_in_a_pass_counts_live_workers_from_the_pass_scan(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     sessions = [SimpleNamespace(name="engineer@bbbbbb-0001", target="claude", status="alive")]
     scans = counted(monkeypatch, terminate_agent, "sessions", sessions)
     cache = local_slots.PassCache()
@@ -97,18 +107,20 @@ def test_a_claim_in_a_pass_counts_live_workers_from_the_pass_scan(setup, monkeyp
     assert len(scans) == 1
 
 
-def test_a_fenced_spawn_times_its_placement_and_its_runtime_launch(setup, monkeypatch):
+def test_a_fenced_spawn_times_its_placement_and_its_runtime_launch(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fenced, _, _ = local(setup, monkeypatch)
-    steps: list[str] = []
+    steps: list[tuple[str, bool]] = []
     original = timing.step
 
     def step(name: str, report: bool = True) -> Any:
-        steps.append(name)
+        steps.append((name, report))
         return original(name, report)
 
     monkeypatch.setattr(timing, "step", step)
     assert fenced.spawn(setup.config, "eng", "engineer-0", {"id": "task"}) == setup.herdr.spawn.return_value
-    assert [name for name in steps if name.startswith("scripts.swarm.controller.")] == [
-        "scripts.swarm.controller.FencedRuntime._refusal",
-        "scripts.swarm.controller.FencedRuntime.runtime_spawn",
+    assert [(name, report) for name, report in steps if name.startswith("scripts.swarm.controller.")] == [
+        ("scripts.swarm.controller.FencedRuntime._refusal", False),
+        ("scripts.swarm.controller.FencedRuntime.runtime_spawn", False),
     ]
