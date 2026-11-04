@@ -33,8 +33,8 @@ def clear(store: Any, slug: str) -> None:
 
 def threshold(environ: Mapping[str, str]) -> int:
     """Return the streak length that raises the finding, from the health setting when it is a positive whole number."""
-    raw = environ.get(ENV, "")
-    return int(raw) if raw.isdecimal() and int(raw) > 0 else DEFAULT
+    raw = environ.get(ENV)
+    return int(raw) if raw and raw.isdecimal() and int(raw) > 0 else DEFAULT
 
 
 def findings(store: Any, slug: str, environ: Mapping[str, str] = os.environ) -> list[Finding]:
