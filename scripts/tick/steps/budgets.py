@@ -99,7 +99,7 @@ MEASURED: dict[str, Timing] = {
     "launch slots": Timing(0.116, CRITICAL_S),
     "outage probes": Timing(UNMEASURED_S, CRITICAL_S),
     "hive ledger": Timing(UNMEASURED_S, WIDE_S),
-    "ledger health": Timing(UNMEASURED_S, WIDE_S),
+    "ledger health": Timing(UNMEASURED_S, CRITICAL_S),
     "host pressure": Timing(0.145, WIDE_S),
     "ledger watchdog": Timing(0.041, WIDE_S),
     "ledger probe": Timing(4.476, WIDE_S),
