@@ -214,3 +214,16 @@ def test_a_non_waiting_agent_keeps_the_ten_minute_stale_nudge_unchanged(inbox):
     assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT) != []
     assert cache_items(inbox) == []
     assert len(nudges(inbox)) == 1
+
+
+def test_a_wait_named_only_by_on_still_gets_a_cache_warm_item(inbox):
+    on = {"kind": "checks", "target": "https://github.com/o/r/pull/7"}
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + 3 * CACHE_LIMIT, "", BASE, on=on)
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT + MINUTE) != []
+    assert len(cache_items(inbox)) == 1
+
+
+def test_cache_due_is_false_once_the_wait_itself_ends(inbox):
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + CACHE_LIMIT - MINUTE, "checks on the pull request", BASE)
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT + MINUTE) != []
+    assert cache_items(inbox) == []

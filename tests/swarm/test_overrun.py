@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.inbox.store import InboxStore
 from scripts.swarm import overrun
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
@@ -114,17 +116,53 @@ def test_an_outage_holds_every_step(monkeypatch):
     assert swarm.master() == []
 
 
-def test_a_master_an_agent_off_its_claim_or_a_dead_pane_is_skipped():
-    for swarm in (
+@pytest.mark.parametrize(
+    "swarm",
+    [
         Swarm(agent=AgentRecord(OWNER, MASTER, "t1", started_at=START)),
         Swarm(task={"claimed_by": "engineer@abc-0002"}),
         Swarm(task={"state": "open"}),
         Swarm(live=False),
         Swarm(agent=AgentRecord(OWNER, "eng", "t1", seat=SEAT)),
         Swarm(agent=AgentRecord(OWNER, "eng", "", seat=SEAT, started_at=START)),
-    ):
-        assert swarm.tick(FAR_PAST) == []
-        assert swarm.master() == []
+    ],
+    ids=["a-master", "off-its-claim", "task-open", "dead-pane", "no-seat", "no-task"],
+)
+def test_a_master_an_agent_off_its_claim_or_a_dead_pane_is_skipped(swarm):
+    assert swarm.tick(FAR_PAST) == []
+    assert swarm.master() == []
+
+
+def test_a_report_names_whichever_task_and_agent_is_overrunning():
+    swarm = Swarm(agent=AgentRecord("engineer@abc-0005", "eng", "t5", seat=SEAT, started_at=START))
+    swarm.ledger.rows["t5"] = {"id": "t5", "state": "claimed", "claimed_by": "engineer@abc-0005"}
+    swarm.live = {"engineer@abc-0005"}
+    [action] = swarm.tick(FAR_PAST)
+    assert "t5" in action and "engineer@abc-0005" in action
+
+
+def test_a_claim_closed_between_ticks_stops_further_watching():
+    swarm = Swarm()
+    swarm.tick(REPORT)
+    swarm.ledger.rows["t1"]["state"] = "done"
+    assert swarm.tick(FAR_PAST) == []
+    assert len(swarm.master()) == 1
+
+
+def test_the_report_item_carries_its_task_id():
+    swarm = Swarm()
+    swarm.tick(REPORT)
+    [item] = swarm.master()
+    assert item.task == "t1" and item.ref == "sw:overrun:t1"
+
+
+def test_the_park_and_grace_minutes_constants_are_gone():
+    assert not hasattr(overrun, "PARK_MINUTES")
+    assert not hasattr(overrun, "GRACE_MINUTES")
+    assert not hasattr(overrun, "ASK")
+    assert not hasattr(overrun, "ENDED")
+    assert not hasattr(overrun, "COMMENT")
+    assert not hasattr(overrun, "ASK_CLOSED")
 
 
 def test_a_new_life_on_the_same_task_starts_its_own_clock():
