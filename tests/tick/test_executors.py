@@ -171,3 +171,25 @@ def test_a_slow_step_still_waits_on_a_handed_off_step_after_the_critical_lane_en
         )
     outcomes = {record.name: record.outcome for row in later for record in row}
     assert outcomes == {"lanes held": engine.OK, "lanes needing": engine.OK, "lanes free": engine.OK}
+
+
+def test_a_step_waits_only_on_a_pending_handed_off_need_inside_its_live_lane() -> None:
+    def quick(ctx: Context) -> Result:
+        return Result()
+
+    slow = Lane("slow")
+    group = {"gate step"}
+    with pool.running(workers=1, critical_s=0.01, slow_s=4.0) as found:
+        found.hand(["gate pending", "gate ended"])
+        found.end("gate ended", False)
+        sleep(0.05)
+        assert found.critical.expired
+        pending = Step("gate step", quick, "gate", frozenset({"gate pending"}), slow)
+        ended = Step("gate step", quick, "gate", frozenset({"gate ended"}), slow)
+        expired = Step("gate step", quick, "gate", frozenset({"gate pending"}))
+        plain = Step("gate step", quick, "gate", frozenset({"gate other"}), slow)
+        assert engine._waiting(pending, group, found) is True
+        assert engine._waiting(ended, group, found) is False
+        assert engine._waiting(expired, group, found) is False
+        assert engine._waiting(plain, group, found) is False
+        found.end("gate pending", False)
