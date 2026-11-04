@@ -144,9 +144,26 @@ step_deadline = deadline.child(2.0)
 | `child(seconds)` | A deadline `seconds` from now, capped at the parent's expiry. |
 | `live()` | `remaining`, or `TimeoutError("tool deadline expired")` once `expired` is true. |
 
-The inbox adapter calls `scripts.tick.adapters.inbox.check(deadline)` first. The host, llm and metrics adapters reuse
-the same function, the ledger and coordination adapters call `deadline.live()`, and the source control, runtime and
-processes adapters make the same check themselves, so all nine refuse with the same message.
+Every adapter method that takes a `deadline` keyword calls `deadline.live()` in its own body before it touches
+Redis, the network, SQLite, git, herdr or a job, so all nine adapters refuse an expired deadline with the same
+message. A method that calls another method or helper still makes its own check first, so a read through
+`graph` is refused before it is charged to the caller's budget. Where a call takes a timeout, the adapter
+passes the seconds `live()` returned: `gh api` and `git ls-remote` in the source control adapter, the decisions API
+in the llm adapter, and the ledger client's request timeout, which is the smaller of its own timeout and those seconds.
+
+The fenced records adapter, `records_redis.RedisRecords`, takes no deadline. Its writes rely on the fence's lease and
+revision checks and their retries.
+
+`scripts.swarm.fleet_red.read(repo, ports, deadline=...)` takes the caller's deadline and gives `open_changes` a
+child of it capped at `fleet_red.SECONDS` (60), so the listing ends at whichever comes first. Without a caller
+deadline it gives `open_changes` a fresh 60 second deadline.
+
+The unit test `tests/tick/test_adapter_deadlines.py` walks every module in `scripts/tick/adapters` except `fakes.py`
+by its syntax tree and fails on a method with a keyword-only `deadline` argument whose first statement, after its
+docstring and local imports, does not call `deadline.live()`. It prints the methods and checks it counted per
+module, and a planted method without a check is named in the failure. The same file asserts that the records adapter
+takes no deadline and that every source control, runtime, inbox, host, metrics, llm and processes method refuses an
+expired deadline before touching its outside system. The ledger and coordination adapters keep their own expiry tests.
 
 ## Ledger adapter
 
