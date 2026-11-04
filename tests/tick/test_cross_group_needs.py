@@ -32,6 +32,8 @@ class Step:
     interval_s: float = 0.0
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
 
     def run(self, ctx: Context) -> Result:
         return self.action(ctx)
