@@ -160,7 +160,17 @@ STEPS = (
     CallStep("prompt backlog", "wrapper health", held(_prompt_backlog)),
     CallStep("command runner", "wrapper commands", held(_command_runner)),
     CallStep("urgent hold", "wrapper phases", held(_urgent_hold)),
-    CallStep("dependency audit", "wrapper phases", held(_dependency_audit)),
+    CallStep(
+        "dependency audit",
+        "wrapper phases",
+        held(_dependency_audit),
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=CallStep.lane,
+        effects=frozenset(),
+        feature="swarm-ordering-dependency-audit",
+    ),
     WriteStep("planning and phase pass", "wrapper phases", held(_phase_passes), writes=frozenset({PHASES})),
     CallStep(
         "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})

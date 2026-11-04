@@ -1376,6 +1376,18 @@
         "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
         "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
       ]
+    },
+    {
+      "id": "swarm-ordering-dependency-audit",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2382",
+      "behaviour": "Each tick pass records every open task dependency whose tasks share no territory and whose dependent never names the other task's code, and swarm status lists them with one health finding each.",
+      "seam": "the tick dependency audit step and agentihooks swarm status ordering_dependencies",
+      "tests": [
+        "tests/swarm_ledger/test_dependency_audit.py::test_a_dependency_with_disjoint_territories_and_no_named_code_is_reported",
+        "tests/swarm/test_ordering_dependencies.py::test_the_tick_records_each_ordering_only_dependency",
+        "tests/swarm/test_ordering_dependencies.py::test_status_prints_the_list"
+      ]
     }
   ],
   "unmapped_rules": [

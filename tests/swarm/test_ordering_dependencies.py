@@ -47,6 +47,7 @@ def doc():
 ROW = {"task": "b", "title": "hive beat", "depends_on": "a", "dependency_title": "status list"}
 
 
+@pytest.mark.feature("swarm-ordering-dependency-audit")
 def test_the_tick_records_each_ordering_only_dependency(store):
     assert ordering_dependencies.observe(store, SLUG, doc()) == [ROW]
     assert json.loads(store.redis.get(store.key(SLUG, "dependency-audit"))) == [ROW]
@@ -97,6 +98,7 @@ def test_each_ordering_only_dependency_raises_a_health_finding(store):
     assert found.evidence_identity == ("b", "a")
 
 
+@pytest.mark.feature("swarm-ordering-dependency-audit")
 def test_status_prints_the_list(store):
     ordering_dependencies.observe(store, SLUG, doc())
     assert status.status_report(store, SLUG, {"tasks": []}, found=[])["ordering_dependencies"] == [ROW]

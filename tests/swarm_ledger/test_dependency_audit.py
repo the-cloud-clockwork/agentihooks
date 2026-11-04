@@ -20,6 +20,7 @@ def spec(text=""):
     return lambda task: text or task.get("description", "")
 
 
+@pytest.mark.feature("swarm-ordering-dependency-audit")
 def test_a_dependency_with_disjoint_territories_and_no_named_code_is_reported():
     tasks = [
         task("a", ["scripts/swarm/status.py", "changelog.d/"]),
