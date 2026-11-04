@@ -1434,7 +1434,7 @@
       "behaviour": "The swarm tick sends a claimed agent that sits silent inside a declared named wait one short cache warm inbox item per forty minutes, asking for a one line reply so its prompt cache stays warm; it never asks for a handoff.",
       "seam": "The idle watch of the swarm tick through the stale nudge",
       "tests": [
-        "tests/swarm/test_tick.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
+        "tests/swarm/test_tick_cache_warm.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
       ]
     }
   ],
