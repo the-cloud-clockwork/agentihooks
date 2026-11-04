@@ -866,7 +866,7 @@ def _watch_idle(
     if timing.timed(_stuck_on_provider, slug, store, agent, observed, exhausted, now_ms):
         return timing.timed(_free_stuck, slug, store, ledger, runtime, rows, agent, now_ms)
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
-    nudged = timing.timed(_stale_nudge, slug, store, agent, observed, pending, now_ms) if claimant else []
+    nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == MASTER or (held and not exhausted):
         timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, agent.idle_ticks)
         timing.timed(store.put_agent, slug, agent)
@@ -913,9 +913,11 @@ def _stale_nudge(
     """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
     if agent.lane == MASTER or not agent.task or pending or timing.timed(outage.open_records, slug):
         return []
-    if elapsed.due(store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks, IDLE_KILL_MS):
+    if timing.timed(elapsed.due, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks, IDLE_KILL_MS):
         return []
-    if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
+    if timing.timed(_operator_at_pane, slug, store, agent, observed, now_ms) or timing.timed(
+        ledger_probe.holding, store, slug
+    ):
         return []
     return stale_nudge.nudge(InboxStore(store.redis), slug, agent, observed.provider_error, now_ms)
 
