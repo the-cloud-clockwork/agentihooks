@@ -19,8 +19,8 @@ READING = {"cpus": 64, "load5": 0.0, "available_mb": 10**6, "total_mb": 10**6}
 def counted(monkeypatch: pytest.MonkeyPatch, module: Any, name: str, value: Any) -> list[tuple]:
     calls: list[tuple] = []
 
-    def call(*args: Any) -> Any:
-        calls.append(args)
+    def call(*args: Any, **kwargs: Any) -> Any:
+        calls.append((*args, kwargs))
         return value
 
     monkeypatch.setattr(module, name, call)
@@ -79,9 +79,10 @@ def test_a_pass_cache_reads_each_value_once_and_hands_it_to_every_caller() -> No
         reads.append(1)
         return {"engineer@aaaaaa-0001"}
 
-    assert cache.once("live", read) == {"engineer@aaaaaa-0001"}
-    assert cache.once("live", read) is cache.once("live", read)
-    assert cache.once("other", lambda: 0) == 0
+    assert cache.once(read) == {"engineer@aaaaaa-0001"}
+    assert cache.once(read) is cache.once(read)
+    assert cache.once(len, "one") == 3
+    assert cache.once(len, "three") == 5
     assert len(reads) == 1
 
 
