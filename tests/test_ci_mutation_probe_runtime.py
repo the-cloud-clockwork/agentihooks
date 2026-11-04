@@ -154,7 +154,7 @@ def test_an_early_probe_runs_the_identity_group_alone_when_only_it_owns_split_mu
             ["killed", "killed", "killed", "no tests"],
             1080,
             ValueError,
-            "early mutation did not grade its assigned mutants: 1 not assigned to this shard",
+            "early mutation did not grade its assigned mutants: 1 no tests; 1 not assigned to this shard",
         ),
     ],
 )
