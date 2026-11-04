@@ -28,9 +28,12 @@ from scripts.ci_mutation.stats import split_key, write_part
 from scripts.ci_mutation.stats_dependencies import records_within
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from libcst import Module
     from libcst.metadata import MetadataWrapper
     from mutmut.mutation.file_mutation import Mutation
+    from mutmut.mutation.pragma_handling import IgnoredCode
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 # This group only loads fakeredis once per xdist worker; it guards no shared resource.
@@ -64,6 +67,7 @@ def on_changed_lines(wrapper: MetadataWrapper, mutations: list[Mutation], change
 
 
 def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list[Mutation], list[Mutation]]:
+    """Parse source once and return its metadata wrapper with the graded and the possible mutations on it."""
     import libcst as cst
     from libcst.metadata import MetadataWrapper
     from mutmut.mutation.file_mutation import NEVER_MUTATE_FUNCTION_NAMES, MutationVisitor
@@ -71,9 +75,10 @@ def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list
     from mutmut.mutation.pragma_handling import get_ignored_lines
 
     class Visitor(MutationVisitor):
-        def __init__(self, ignored, allowed) -> None:
+        def __init__(self, ignored: IgnoredCode, allowed: Callable[[cst.CSTNode], bool]) -> None:
             super().__init__(mutation_operators, ignored)
             self.allowed = allowed
+            self.refused: list[cst.CSTNode] = []
 
         # mutmut 3.6.0 skips every decorated class, yet a dataclass keeps its methods, so their trampolines work.
         def _skip_node_and_children(self, node: cst.CSTNode) -> bool:
@@ -81,17 +86,20 @@ def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list
             if not skipped or not isinstance(node, cst.FunctionDef | cst.ClassDef) or not node.decorators:
                 return skipped
             if not self.allowed(node):
+                self.refused.append(node)
                 return True
             return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
 
-    wrapper = MetadataWrapper(cst.parse_module(source))
+    wrapper = MetadataWrapper(cst.parse_module(source), unsafe_skip_copy=True)
     ignored = get_ignored_lines(filename, source, wrapper)
     graded = Visitor(
         ignored,
         lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else True,
     )
-    possible = Visitor(ignored, lambda node: True)
     wrapper.visit(graded)
+    if not graded.refused:
+        return wrapper, graded.mutations, graded.mutations
+    possible = Visitor(ignored, lambda node: True)
     wrapper.visit(possible)
     return wrapper, graded.mutations, possible.mutations
 

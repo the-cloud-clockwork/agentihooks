@@ -561,6 +561,31 @@ def test_mutant_counting_resolves_positions_on_its_one_parse(monkeypatch: pytest
     assert len(wrappers) == 1
 
 
+def test_mutant_creation_wraps_its_parse_and_visits_again_only_for_a_refused_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import libcst
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import created_mutations
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    parsed: list[libcst.Module] = []
+    parse = libcst.parse_module
+    monkeypatch.setattr(libcst, "parse_module", lambda text, *args: parsed.append(parse(text, *args)) or parsed[-1])
+    plain = "def doubled(value):\n    return value * 2\n"
+    wrapper, graded, possible = created_mutations("scripts/sample.py", plain)
+    assert wrapper.module is parsed[0]
+    assert graded
+    assert possible is graded
+    refusing = "@opaque\nclass Cached:\n    def cached(value):\n        return value - 1\n"
+    _, graded, possible = created_mutations("scripts/sample.py", refusing)
+    assert graded == []
+    assert possible
+
+
 def test_changed_module_constants_and_dataclass_fields_beside_a_decorated_class_select_without_error(monkeypatch):
     from mutmut.configuration import Config
 
