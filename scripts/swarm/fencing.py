@@ -704,7 +704,7 @@ def _index_archive(port: RedisRecords, slug: str) -> set[str]:
     rows = port.sections(slug, (ARCHIVE,))[ARCHIVE]
     heads = _heads({key: row.value for key, row in rows.items()})
     writes = [RecordWrite("put", ARCHIVED_NAMES, name, BLIND, key) for name, key in heads.items()]
-    port.fenced_batch(slug, FencedBatch((*writes, RecordWrite("put", ARCHIVED_NAMES, INDEXED, BLIND, True))))
+    port.fenced_batch(slug, FencedBatch((*writes, RecordWrite("put", ARCHIVED_NAMES, INDEXED, BLIND))))
     return set(heads)
 
 
@@ -743,7 +743,7 @@ def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) ->
         doc = _decode(entry.value)
         hydrate_archive(store, doc)
         writes = _changes(EMPTY, doc, empty)
-        writes.append(RecordWrite("put", ARCHIVED_NAMES, INDEXED, 0, True))
+        writes.append(RecordWrite("put", ARCHIVED_NAMES, INDEXED, 0))
         writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
         moved = _encode({**json.loads(entry.value), MOVED: RECORDS})
         return (lambda staged: states.queue_write(staged, slug, moved, current)), FencedBatch(tuple(writes))
