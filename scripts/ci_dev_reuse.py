@@ -27,7 +27,7 @@ def _record(evidence: Path, run: dict[str, Any]) -> dict[str, Any]:
         producer = (
             "select" if any(job["name"] == "select" and job["conclusion"] == "success" for job in jobs) else "durations"
         )
-    if not cast(bool, ci_reuse._authenticated(folder, record, jobs, producer=producer)):
+    if not ci_reuse._authenticated(folder, record, jobs, producer=producer):
         raise ValueError("unauthenticated provenance")
     expected: dict[str, Any] = {"version": 1, "run": run["id"], "attempt": run["run_attempt"], "event": run["event"]}
     if any(record.get(key) != value for key, value in expected.items()):

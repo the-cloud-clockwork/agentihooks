@@ -3,7 +3,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 WAIT_NOTICE = "the session will wait at Claude's folder trust question until someone answers it in its pane"
 

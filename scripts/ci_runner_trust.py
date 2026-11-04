@@ -165,7 +165,7 @@ def _trusted_runner(job: dict[str, Any], actors: object) -> bool:
     return _hosted(runner) or _selector(runner, actors)
 
 
-def check(workflows: dict[str, dict[str, Any]], actors: object = None) -> list[str]:
+def check(workflows: dict[str, dict[Any, Any]], actors: object = None) -> list[str]:
     if actors is not None:
         validate_actors(actors)
     problems: list[str] = []

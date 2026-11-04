@@ -385,7 +385,7 @@ def sandbox(sock: str, repo: str) -> dict[str, Any]:
     for name, policy in SANDBOX_POLICIES.items():
         policy = {**policy, **({"writableRoots": [repo]} if policy.get("writableRoots") == ["REPO"] else {})}
         r = c.request("command/exec", {"command": SANDBOX_CMD, "cwd": repo, "sandboxPolicy": policy}, 60)
-        res = r.get("result") or {}
+        res = r.get("result") or _EMPTY
         out[name] = {
             "error": r.get("error"),
             "exit": res.get("exitCode"),
