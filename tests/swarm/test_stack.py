@@ -18,6 +18,7 @@ from scripts.swarm_ledger import ledger_comments, task_dependencies
 from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState, Comment
+from scripts.tick.steps import agents as agent_steps
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -298,7 +299,7 @@ def test_a_task_parked_on_a_branchless_ops_dependency_waits_then_goes_to_the_nex
     text = doc.read_text()
     assert park(doc) == 0
     assert store.handoff("sw", "t1") == text
-    tick.agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
+    agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
     assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["parked_on"] == ["a"]
     assert not task_dependencies.ready(ledger.rows["t1"], ledger.rows)
     assert claim_hold.waits(ledger.rows["t1"], ledger.rows) == "it waits on task a"
@@ -1078,7 +1079,7 @@ def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(
     }
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["finished"]
     assert store.claimant("sw", "t1") == AGENT
-    tick.agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
+    agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
     assert [a.name for a in store.agents("sw") if a.name == AGENT] == []
     assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["parked_on"] == ["a"]
     assert store.handoff("sw", "t1") == text
@@ -1101,7 +1102,7 @@ def test_a_refused_park_leaves_no_restart_mark(parked, capsys):
 def test_the_life_launched_after_a_park_is_recorded_as_after_the_park(parked):
     store, ledger, rt, _, doc = parked
     assert park(doc) == 0
-    tick.agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
+    agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
     ledger.rows["a"]["state"] = "done"
     ledger.update_task = type(ledger).update_task.__get__(ledger)
     tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)

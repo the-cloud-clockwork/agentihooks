@@ -92,7 +92,6 @@ from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, pool, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import agents as agent_steps  # noqa: F401
 from scripts.tick.steps import masters as master_steps
 from scripts.tick.steps import observe as observe_steps
 from scripts.tick.steps import place
