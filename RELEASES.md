@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.643 · 2026-11-04
+
+### 2026-11-04 · 216a351fdbee · #9751 · @nestorcolt
+
+**Close every operator workflow viewer and redraw before keyboard walks**
+
+This change fixes a flaky test that was ejecting unrelated pull requests from the merge queue. The operator workflow package test suite could leak a browser context when an exception occurred before cleanup, poisoning later attempts and the module-scoped fixture; it also raced a cooperative render against a synchronous keyboard walk, occasionally losing focus. The fix closes every viewer context regardless of outcome and forces a synchronous redraw before the keyboard walk, making case a and c deterministic so the tick pattern's scaffold, gate, registry rule, and sweeps can merge without being ejected by this unrelated flake.
+
 ## v2.17.642 · 2026-11-04
 
 ### 2026-11-04 · 73dddfcc294b · #9742 · @nestorcolt
