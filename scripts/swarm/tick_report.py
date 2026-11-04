@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from statistics import median
 from typing import Any
 
@@ -14,7 +15,9 @@ def p95(values: list[float]) -> float | None:
     return sorted(values)[math.ceil(len(values) * 0.95) - 1] if values else None
 
 
-def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize(
+    passes: list[dict[str, Any]], steps: list[dict[str, Any]], records: Iterable[dict[str, Any]] = ()
+) -> dict[str, Any]:
     ordered = sorted(passes, key=lambda row: row["start_ms"])
     identities = {row["pass_id"] for row in ordered}
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -48,7 +51,28 @@ def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict
             for name, rows in sorted(grouped.items())
         ],
         "lanes": lane_shares([row for rows in grouped.values() for row in rows], cpu),
+        "critical_end_p95_s": p95([row["critical_end_s"] for row in ordered if "critical_end_s" in row]),
+        "records": outcomes([row for row in records if row["pass_id"] in identities]),
     }
+
+
+def outcomes(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return one row of outcome columns per step name from ``tick:records`` rows, sorted by name."""
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in records:
+        grouped[row["step"]].append(row)
+    return [
+        {
+            "step": name,
+            "records": len(rows),
+            "late_share": 100 * sum(row["outcome"] == "late" for row in rows) / len(rows),
+            "abandoned": sum(row["abandoned"] for row in rows),
+            "held": sum(row["held"] for row in rows),
+            "skipped": sum(row["skipped"] for row in rows),
+            "dropped": sum(row["dropped"] for row in rows),
+        }
+        for name, rows in sorted(grouped.items())
+    ]
 
 
 def lane_shares(steps: list[dict[str, Any]], cpu: float) -> list[dict[str, Any]]:
@@ -83,7 +107,7 @@ def read(store: Any, slug: str, passes: int) -> dict[str, Any]:
     selected = history(store, slug, "tick:passes", passes)
     identities = {row["pass_id"] for row in selected}
     steps = [row for row in history(store, slug, "tick:steps", HISTORY_LIMIT) if row.get("pass_id") in identities]
-    return summarize(selected, steps)
+    return summarize(selected, steps, history(store, slug, "tick:records", HISTORY_LIMIT))
 
 
 def pass_count(value: str) -> int:
@@ -110,4 +134,11 @@ def command(store: Any, args: argparse.Namespace) -> None:
         )
     for row in report["lanes"]:
         print(f"Lane {row['lane']}  {row['count']} steps  {row['cpu_share']:.2f}% CPU share")
+    print(f"Critical lane end p95: {seconds(report['critical_end_p95_s'])}")
+    print("Step  Records  Late share  Abandoned  Held  Skipped  Dropped")
+    for row in report["records"]:
+        print(
+            f"{row['step']}  {row['records']}  {row['late_share']:.2f}%  {row['abandoned']}  {row['held']}"
+            f"  {row['skipped']}  {row['dropped']}"
+        )
     print("CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.")
