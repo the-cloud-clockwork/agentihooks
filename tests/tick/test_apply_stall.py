@@ -149,7 +149,8 @@ def test_the_stall_applier_is_registered_with_a_store_and_a_pass_time() -> None:
 
 def test_the_master_stall_step_writes_the_stall_domain() -> None:
     step = next(step for step in masters.STEPS if step.name == "master stall")
-    assert step.writes == frozenset({tasks.STALL})
+    assert tasks.STALL in step.writes
+    assert isinstance(step, tasks.WriteStep)
 
 
 def test_apply_stall_forgets_the_held_reason_of_a_master_that_resumed(monkeypatch: pytest.MonkeyPatch) -> None:
