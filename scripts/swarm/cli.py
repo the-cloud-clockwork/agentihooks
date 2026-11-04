@@ -87,6 +87,7 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
+    ack_pass,
     affinity,
     agent_up,
     blockers,
@@ -544,17 +545,18 @@ def cmd_waits(store, args):
     except (OSError, subprocess.SubprocessError) as exc:
         timing.emit(sys.stderr, f"the scheduled swarm tick guard failed: {type(exc).__name__}: {exc}")
 
-    def check(slug):
+    def check(job: tuple[str, Callable[[RedisStore, str], list[str]]]) -> None:
+        slug, passing = job
         try:
-            for action in run_waits(store, slug):
+            for action in passing(store, slug):
                 timing.emit(sys.stdout, f"{slug}: {action}")
         except Exception as exc:
             timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
-    slugs = store.slugs()
-    if slugs:
-        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
-            list(pool.map(check, slugs))
+    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits, ack_pass.run)]
+    if jobs:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            list(pool.map(check, jobs))
 
 
 def _tickable(slug):
@@ -676,8 +678,10 @@ def cmd_tick_watch(store, args):
         repair = tick_watch.Repair(scheduled_tick.restart, respawn)
     else:
 
-        def repair(slug, now):
-            return place_master(slug, store, runtime, now)
+        def repair(slug: str, now: int) -> list[str]:
+            return tick_watch.bounded(
+                lambda: place_master(slug, store, runtime, now), tick_watch.REPAIR_S, "the master placement"
+            )
 
     tick_watch.run(store, now_ms, repair)
 

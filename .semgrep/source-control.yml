@@ -12,6 +12,7 @@ rules:
     paths:
       include:
         - "/scripts/swarm/**"
+        - "/scripts/tick/**"
         - "*.test.py"
       exclude:
         - "/scripts/swarm/github_reads.py"
