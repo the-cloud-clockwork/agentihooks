@@ -248,10 +248,13 @@ edge. Each pass box key has its own domain, `pass:<key>`, built with
 
 The registry checks these with the other domains when it builds `waves()`.
 A reader and a writer of the same `pass:<key>` with no need path between them
-raise `Unordered reader and writer in lane <lane> for pass:<key>: <first>, <second>`,
+raise `Unordered reader and writer in lane <lane> for pass:<key>: <first>, <second>`
+(`lanes <a> and <b>` when the two steps sit in different lanes),
 and two steps that store the same key with no need path raise
 `Unordered writers in ...`. A pass box hand off between steps that could run in
-either order is therefore refused at import, before any pass runs.
+either order is therefore refused when the step pool is first resolved
+(`registry.steps()`, `waves()` or `validate()`, which `engine.group_steps`
+calls), before any step of that pass runs.
 
 The delivered writers of each key:
 
@@ -268,9 +271,10 @@ The delivered writers of each key:
 | `judged`, `stop`, `started` | `intent check`, `ledger health`, `snapshot job` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
 
 Because the readers of `config` need `drained resume`, that step carries
-`DRAINED_RESUME_NEEDS` (`scripts.tick.steps.tasks`): every step that reads
-`config` before it, so the rewritten config is ordered after them. `preempt`
-needs the same chain through `PREEMPT_NEEDS` in `scripts.tick.steps.place`.
+`DRAINED_RESUME_NEEDS` (`scripts.tick.steps.tasks`) plus `sleeping`: every step
+that reads `config` before it, so the rewritten config is ordered after them.
+`preempt` needs `PREEMPT_NEEDS` in `scripts.tick.steps.place`, which includes
+`drained resume`, so it reads the rewritten config.
 
 A new step that reads a pass box value declares it like this:
 
@@ -464,7 +468,7 @@ The delivered proof and limitations are recorded in
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
 | Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
 | `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
-| `Unordered reader and writer ... for pass:<key>` at import | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
+| `Unordered reader and writer ... for pass:<key>` on the first pass | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
 | A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
