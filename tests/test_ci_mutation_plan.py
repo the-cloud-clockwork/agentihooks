@@ -1012,7 +1012,13 @@ def test_two_shards_of_one_statistics_part_measure_without_a_measured_plan(
     names = [f"scripts.sample.x_f__mutmut_{index}" for index in (1, 2, 3, 4)]
 
     def mutate(
-        root: Path, work: Path, files: dict, deadline: float, shard: tuple[int, int], group: object
+        root: Path,
+        work: Path,
+        files: dict,
+        deadline: float,
+        shard: tuple[int, int],
+        group: object,
+        first: tuple[str, ...] = (),
     ) -> tuple[dict, str]:
         owned = sorted(names)[shard[0] :: shard[1]]
         meta = work / "mutants/scripts/sample.py.meta"
