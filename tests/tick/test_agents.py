@@ -1,5 +1,8 @@
 """The agent steps run the tick's hand written agent calls from the registry, in legacy order."""
 
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,6 +17,8 @@ from scripts.tick.steps import AGENTS, PASS, TASKS, CallStep, actions, actions_o
 from scripts.tick.steps import agents as agent_steps
 
 pytestmark = pytest.mark.unit
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class _State:
@@ -151,6 +156,12 @@ def test_the_registered_agent_steps_declare_writers_the_registry_accepts() -> No
         frozenset({TASKS, Domain("pass:config"), Domain("pass:rows")}),
         frozenset({TASKS}),
     )
+
+
+def test_the_tick_module_alone_registers_every_step_its_steps_need() -> None:
+    probe = "import scripts.swarm.tick\nfrom scripts.tick import registry\nregistry.validate()\n"
+    done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=False, cwd=ROOT)
+    assert done.returncode == 0, done.stderr
 
 
 def test_a_call_step_reads_the_pass_state_and_the_tick_module() -> None:

@@ -385,7 +385,7 @@ class HerdrRuntime:
         now: float,
         demand: dict | None = None,
         requirements: dict | None = None,
-        refresh: bool = True,
+        refresh: bool = False,
     ) -> dict:
         from scripts.swarm import capacity
 

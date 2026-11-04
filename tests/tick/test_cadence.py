@@ -17,6 +17,8 @@ class TimedStep:
     needs: frozenset[str] = frozenset()
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
 
     def run(self, ctx: Context) -> Result:
         return Result()

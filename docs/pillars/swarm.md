@@ -4433,7 +4433,10 @@ Every pass appends one record to the swarm's `tick:passes` stream and every fini
 `tick:steps`, each kept to the newest 50,000. A pass record carries its start and end, its wall time, the active
 agent count, the steps that failed and its outcome, and is written even when the pass returns early or raises; a
 Redis failure leaves a journal event and keeps the pass's own result or error.
-`agentihooks swarm <id> tick-report` reads both streams; see [Tick report](../reference/tick-report.md).
+Every engine step run, held run and skipped step also appends one row to `tick:records` with its lane, outcome,
+start offset and abandoned, held, skipped and dropped write counts, and a pass record carries `critical_end_s`, the
+latest end of a step outside the slow lane. `agentihooks swarm <id> tick-report` reads all three streams; see
+[Tick report](../reference/tick-report.md) and its [Outcome columns](../reference/tick-report.md#outcome-columns).
 
 Each pass also checks its own speed: when the p95 of the last 10 passes exceeds the target of the rollout stage
 named by `AGENTIHOOKS_TICK_STAGE` (`S1` 384, `S2` 240, `S3` 120, `S4` 60 seconds, default `S1`), the tick holds new

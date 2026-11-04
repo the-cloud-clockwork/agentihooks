@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 HURRY = "Your account has fifteen percent or less quota left. Finish the current step and push."
 HANDOFF_OPENING = "Your account is at the quota handoff threshold."
 WARNING_OPENING = "QUOTA HANDOFF WARNING:"
+STALE_S = 180
 HANDOFF = HANDOFF_OPENING + (
     " Commit, push, write the Handoff v2 document, "
     "then run agentihooks swarm {slug} handoff <doc> --reason quota and stop. "
@@ -35,7 +36,7 @@ def is_notice(item: Item) -> bool:
     return item.sender == "swarm" and (item.text == HURRY or item.text.startswith((HANDOFF_OPENING, WARNING_OPENING)))
 
 
-def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
+def apply(slug: str, store: RedisStore, decision: dict[str, Any]) -> list[str]:
     """Send each working lane agent the quota notice its account level calls for, fanned out over the pass workers."""
     accounts = {(row["harness"], row["name"]): row for row in decision.get("accounts", [])}
     key = store.key(slug, "quota-notices")
@@ -71,4 +72,20 @@ def refresh(
     from scripts.swarm import quota_handoff
 
     actions = capacity.apply(slug, config, store, ledger, runtime, now_ms)
-    return actions + quota_handoff.warn(slug, store, dict(os.environ)) + apply(slug, store, capacity.read(store, slug))
+    decision: dict[str, Any] = capacity.read(store, slug)
+    return (
+        actions
+        + quota_handoff.warn(slug, store, dict(os.environ))
+        + apply(slug, store, decision)
+        + stale(decision, now_ms)
+    )
+
+
+def stale(decision: dict[str, Any], now_ms: int) -> list[str]:
+    """Name the newest quota reading's age once it passes ``STALE_S``, which means the quota prober stopped."""
+    rows: list[dict[str, Any]] = decision.get("accounts", [])
+    seen = [float(row["observed_at"]) for row in rows if row.get("observed_at") is not None]
+    if not seen:
+        return []
+    age = int(now_ms / 1000 - max(seen))
+    return [f"quota readings are {age} seconds old; the quota prober has not refreshed them"] if age > STALE_S else []

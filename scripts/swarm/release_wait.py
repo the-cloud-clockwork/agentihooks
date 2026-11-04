@@ -10,6 +10,12 @@ FIELD = "after_release"
 SOURCE = "release"
 ALERT = "The release tag lookup for {repo} failed: {why}. Tasks {tasks} stay held for a newer release until it works."
 VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+HTTPS = (
+    "-c",
+    "url.https://github.com/.insteadOf=git@github.com:",
+    "-c",
+    "url.https://github.com/.insteadOf=ssh://git@github.com/",
+)
 
 
 def version(tag: str) -> tuple[int, ...] | None:
@@ -27,13 +33,19 @@ def tags(repo: str) -> list[str]:
 
 
 def lookup(repo: str) -> tuple[list[str], str]:
-    """The origin's release tags, and why the lookup failed or ''."""
+    """The origin's release tags read over https, a failed read retried once, and why the lookup failed or ''."""
+    found, why = _attempt(repo)
+    return (found, why) if not why else _attempt(repo)
+
+
+def _attempt(repo: str) -> tuple[list[str], str]:
+    """One https read of the origin's release tags, and why it failed or ''."""
     try:
         found = subprocess.run(
-            ["git", "-C", repo, "ls-remote", "--tags", "--refs", "origin"],
+            ["git", "-C", repo, *HTTPS, "ls-remote", "--tags", "--refs", "origin"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return [], str(exc) or type(exc).__name__

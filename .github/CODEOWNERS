@@ -23,6 +23,9 @@
 /scripts/no_whole_ledger.py @nestorcolt
 /tests/WHOLE_LEDGER_ALLOWLIST.json @nestorcolt
 /tests/test_no_whole_ledger.py @nestorcolt
+/scripts/tick_pattern.py @nestorcolt
+/tests/TICK_PATTERN_ALLOWLIST.json @nestorcolt
+/tests/test_tick_pattern.py @nestorcolt
 /scripts/dead_code.py @nestorcolt
 /scripts/swallowed_exceptions.py @nestorcolt
 /scripts/locked_tests.py @nestorcolt
