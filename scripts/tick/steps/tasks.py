@@ -7,8 +7,9 @@ from typing import Any, cast
 from scripts.swarm import dev_red, dispatcher, fleet_red, prerequisite_wait, promotion_watch, release_wait
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import registry, steps, view
+from scripts.tick.engine import SLOW
 from scripts.tick.ports.records import RevisionConflict
-from scripts.tick.step import Context, Domain, Result, Write
+from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actions_of, pass_domains
 
 __all__ = [
@@ -261,9 +262,10 @@ class WriteStep:
         writes: frozenset[Domain] = frozenset(),
         needs: frozenset[str] = frozenset(),
         reads: frozenset[Domain] = frozenset(),
+        lane: Lane = CallStep.lane,
     ) -> None:
-        """Take the name, group, budgets, needs and domains of the call step running ``call``."""
-        base = CallStep(name, group, call, needs, reads, writes)
+        """Take the name, group, lane, budgets, needs and domains of the call step running ``call``."""
+        base = CallStep(name, group, call, needs, reads, writes, lane)
         self.name = base.name
         self.group = base.group
         self.call = base.call
@@ -425,6 +427,7 @@ STEPS = (
         writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
         needs=frozenset({"spawn due"}),
         reads=pass_domains("rows"),
+        lane=SLOW,
     ),
     CallStep("run window", TASK_PASSES, held(_run_window), RESUMED, CONFIG_DOC),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices), LISTED, DOC),
