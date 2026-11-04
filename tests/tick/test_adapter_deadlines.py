@@ -192,6 +192,78 @@ def test_adapters_refuse_an_expired_deadline_before_their_call(name: str) -> Non
     assert str(raised.value) == "tool deadline expired"
 
 
+LIVE = Deadline(10.0, clock=lambda: 4.0)
+
+
+class _Done:
+    """A finished command answering an empty JSON object."""
+
+    stdout = "{}"
+    returncode = 0
+
+    def check_returncode(self) -> None:
+        """Pass, as a finished command does."""
+
+
+def _timeouts(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Record the timeout of every audited gh call and charge nothing."""
+    seen: list[object] = []
+
+    def rest(caller: str, args: list[str], run: object = None, **options: object) -> _Done:
+        seen.append(options["timeout"])
+        return _Done()
+
+    monkeypatch.setattr(github_reads, "rest", rest)
+    monkeypatch.setattr(github_reads, "charge", lambda *args: None)
+    return seen
+
+
+def test_github_graph_bounds_its_call_by_the_live_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _timeouts(monkeypatch)
+    assert GitHubSourceControl("o/r", Path("."), "dev").graph("query", {}, deadline=LIVE) == {}
+    assert seen == [6.0]
+
+
+def test_github_download_bounds_its_call_by_the_live_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _timeouts(monkeypatch)
+    assert GitHubSourceControl("o/r", Path("."), "dev").download("path", deadline=LIVE) == "{}"
+    assert seen == [6.0]
+
+
+def test_github_api_calls_are_bounded_by_the_live_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _timeouts(monkeypatch)
+    GitHubSourceControl("o/r", Path("."), "dev").cancel_run(5, deadline=LIVE)
+    assert seen == [6.0]
+
+
+def test_github_tags_bounds_git_by_the_live_seconds() -> None:
+    seen: list[object] = []
+
+    def git(args: list[str], **options: object) -> _Done:
+        seen.append(options["timeout"])
+        return _Done()
+
+    port = GitHubSourceControl("o/r", Path("."), "dev", git=git)  # pyright: ignore[reportArgumentType]
+    port.tags(deadline=LIVE)
+    assert seen == [6.0]
+
+
+def test_llm_classify_gives_the_backend_the_live_seconds() -> None:
+    built: list[tuple[str, str, float]] = []
+
+    class _Decider:
+        def decide(self, request: object) -> str:
+            return "decided"
+
+    def backend(model: str, url: str, timeout: float) -> _Decider:
+        built.append((model, url, timeout))
+        return _Decider()
+
+    request = {"state": {}, "questions": {}}
+    assert ApiLlm("m", "u", backend).classify(request, deadline=LIVE) == "decided"
+    assert built == [("m", "u", 6.0)]
+
+
 class _Listing:
     """A source control port recording the deadline its open pull request listing was given."""
 
@@ -225,7 +297,12 @@ def test_fleet_red_read_caps_a_long_caller_deadline_at_its_own() -> None:
 
 
 def test_fleet_red_read_without_a_caller_deadline_gives_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("scripts.tick.deadline.monotonic", lambda: 3.0)
-    given = _read(None)
-    assert given.expires_at == 3.0 + fleet_red.SECONDS
-    assert given.clock() == 3.0
+    asked: list[float] = []
+
+    def after(seconds: float) -> Deadline:
+        asked.append(seconds)
+        return Deadline(3.0 + seconds, clock=lambda: 3.0)
+
+    monkeypatch.setattr(fleet_red.Deadline, "after", after)
+    assert _read(None).expires_at == 3.0 + fleet_red.SECONDS
+    assert asked == [fleet_red.SECONDS]
