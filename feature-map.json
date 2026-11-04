@@ -43,6 +43,24 @@
       ]
     },
     {
+      "id": "fenced-live-names-listing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g6",
+      "behaviour": "The fenced runtime lists live agent names once per tick pass, keeps that listing on the pass's process model shared by every fenced runtime of the pass, lists again after a fenced spawn, collect, expire, retire, reap, close or resume, and lists on every call outside a pass.",
+      "seam": "scripts.swarm.controller.FencedRuntime.live_names and scripts.swarm.cli.run_tick with the running scenario",
+      "tests": [
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_once_per_pass_and_serves_copies",
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_again_in_a_new_pass",
+        "tests/swarm/test_controller_live_names.py::test_live_names_outside_a_pass_lists_every_call",
+        "tests/swarm/test_controller_live_names.py::test_agent_changes_drop_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing_when_it_fails",
+        "tests/swarm/test_controller_live_names.py::test_a_change_through_one_fenced_runtime_drops_the_listing_of_another",
+        "tests/swarm/test_controller_live_names.py::test_collect_and_expire_drop_the_pass_listing",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_running_pass_lists_live_names_once_plus_once_per_launch"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-budget",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a4",
@@ -227,7 +245,11 @@
         "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu",
         "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_its_budget_journals_its_returned_write_domains",
         "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domains",
-        "tests/tick/test_abandoned_writes.py::test_a_step_left_with_only_its_actions_domain_journals_nothing"
+        "tests/tick/test_abandoned_writes.py::test_a_step_left_with_only_its_actions_domain_journals_nothing",
+        "tests/tick/test_engine_records.py::test_abandoned_write_step_reads_abandoned_with_its_writes_dropped",
+        "tests/tick/test_engine_records.py::test_steps_dropped_at_an_expired_lane_read_skipped",
+        "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95",
+        "tests/tick/test_engine_records.py::test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain"
       ]
     },
     {

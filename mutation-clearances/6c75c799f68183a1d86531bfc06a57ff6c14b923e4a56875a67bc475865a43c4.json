@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/pool.py:scripts.inbox.pool.x\u01c1MasterPool\u01c1empty:6743180dd3114f172d0c02bc66c19abda97d417e60544ee720abcc5424e231f9": {
+    "reader": "standards_reader",
+    "reason": "Replaces Any with None as the first argument of cast in redis = cast(Any, self.redis). typing.cast returns its second argument unchanged and never reads the first at runtime, so the seat check sees the same Redis client and gives the same answer."
+  }
+}
