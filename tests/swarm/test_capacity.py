@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -2611,3 +2612,68 @@ def test_an_unreachable_settings_store_reads_no_master_snapshot(monkeypatch, tmp
 
     monkeypatch.setattr(capacity.master_account, "load", down)
     assert capacity._claude({}, 1_100.0) == [capacity.Account("claude", "main", "UNKNOWN", 1, None, None)]
+
+
+def _probing(monkeypatch, ran):
+    window = balancer.QuotaWindow(used=10)
+
+    def claude(credentials, *args, **kwargs):
+        ran.extend(f"claude -p {credential.account}" for credential in credentials)
+        return [balancer.ProbeResult(c.account, "allowed", "NORMAL", 90, window, window) for c in credentials]
+
+    monkeypatch.setattr(balancer, "collect_results", COLLECT)
+    monkeypatch.setattr(balancer, "probe_credentials", claude)
+    monkeypatch.setattr(balancer.subprocess, "run", lambda argv, *a, **k: ran.append(argv))
+    monkeypatch.setattr(capacity.codex_router, "default_signed_in", lambda *a, **k: ran.append("codex login") or True)
+    monkeypatch.setattr(capacity.codex_router, "fresh_quotas", lambda *a, **k: ran.append("codex exec") or {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
+
+
+def test_a_pass_read_runs_neither_claude_nor_codex(monkeypatch, tmp_path):
+    ran = []
+    _probing(monkeypatch, ran)
+    env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
+    capacity.accounts(env, 100, refresh=False)
+    assert ran == []
+    capacity.accounts(env, 100)
+    assert ran == ["claude -p a", "codex login", "codex exec"]
+
+
+def test_the_pass_reader_defaults_to_cached_readings():
+    import inspect
+
+    from scripts.swarm.runtime import HerdrRuntime
+
+    assert inspect.signature(HerdrRuntime.quota_capacity).parameters["refresh"].default is False
+
+
+def test_the_prober_writes_the_claude_cache_the_pass_reads(monkeypatch, tmp_path):
+    ran = []
+    _probing(monkeypatch, ran)
+    env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
+    capacity.probe(env, 100)
+    assert ran == ["claude -p a", "codex login", "codex exec"]
+    assert [(at, result.account) for at, result in balancer.cached_observations(environ=env)] == [(100, "a")]
+    (row,) = [row for row in capacity.accounts(env, 130, refresh=False) if row.harness == "claude"]
+    assert (row.name, row.observed_at) == ("a", 100)
+    capacity.probe(env, 200)
+    assert ran[3:] == ["claude -p a", "codex login", "codex exec"]
+    assert [at for at, _ in balancer.cached_observations(environ=env)] == [200]
+
+
+def test_a_cached_codex_pool_takes_the_last_recorded_login(monkeypatch):
+    router = capacity.codex_router
+    ran = []
+    monkeypatch.setattr(router, "token_accounts", lambda environ: [])
+    monkeypatch.setattr(router, "refusal", lambda account, environ: "")
+    assert router.cached_signed_in() is True
+
+    def login(code):
+        return lambda argv, **kw: ran.append(argv[1:]) or SimpleNamespace(returncode=code)
+
+    assert router.default_signed_in({}, login(1)) is False
+    assert router.cached_signed_in() is False
+    assert router.CodexAccountSource(refresh=False).pool({}) == []
+    assert router.default_signed_in({}, login(0)) is True
+    assert router.CodexAccountSource(refresh=False).pool({}) == [router.CodexAccount(router.CODEX_DEFAULT)]
+    assert ran == [["login", "status"], ["login", "status"]]
