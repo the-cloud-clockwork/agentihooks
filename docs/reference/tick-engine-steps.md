@@ -45,6 +45,7 @@ that update automatically when new reports arrive.
 | `spawn` | 21.812 s | 33 s | 60 s |
 | `pane evidence` | 1.047 s | 2 s | 120 s |
 | `metrics record` | 18.905 s | 29 s | 600 s |
+| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 19.981 s | 30 s | 60 s |
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
 seconds. The group runner runs each group at its site on every pass and does
@@ -107,7 +108,14 @@ by the worker are raised to the caller.
 
 Abandoning a worker does not cancel it. Its daemon thread keeps running and
 its eventual result is dropped. External writes already performed are not
-rolled back. This delivery allows the next pass to start the same step while
+rolled back. Writes the step returns for the engine to apply, cache saves
+included, are dropped with the result. A step that finishes past its budget
+before the engine abandons it is recorded late and keeps its writes. A step
+abandoned on every pass never saves its cache, so every pass repeats the work
+the cache was meant to skip.
+The [fleet red notice](fleet-red-notice.md#the-notice-step-budget) step
+did this with its fifteen second unmeasured budget until it was measured.
+This delivery allows the next pass to start the same step while
 the earlier worker remains active. Do not interpret `late` as proof that the
 underlying call stopped or that retrying it cannot overlap.
 
@@ -128,6 +136,17 @@ snapshot job, last tick, heartbeat, status publish) and every step outside the
 report module stay critical. The command runner and quota notice run before
 spawn and stay critical, because a slow step in a group before spawn would hold
 spawn until the slow deadline.
+
+The `health findings` step stores the findings it computes in the pass box
+under `found`. The `status publish` step, in the `wrapper status` group, passes
+`box.get("found")` to `cli._publish_tick_status`, and `status.status_report`
+publishes those findings instead of calling `findings` again with the same
+inputs. When the box holds no `found`, for example because the handed off
+health step has not finished when the status publish runs, `status_report`
+finds them itself as before. The status publish declares no need on the health
+step, so it never waits for it. Over ten passes on 4 November 2026 after this
+reached the workstation's dev checkout, the status publish median fell from
+10.932 seconds to 9.244 seconds (p95 12.937 seconds).
 
 In a parallel pass `run_group` takes the slow lane steps of a group, and every
 step that needs one of them, out of the group. It runs the rest eagerly and
@@ -213,6 +232,85 @@ ledger values after the `observe` group reads them. Every group site receives it
 | `box` | The exception holder described under [Exceptions](#exceptions). The master groups (`masters`, `master seats`, `dispatch seat`, `master watch`) run through `masters.run_site`, which gives each site a fresh holder of its own |
 | `config` | The swarm config, passed at each site because a pass can change it |
 | `sleeping` | Passed only at the acks site |
+
+### Pass box edges
+
+A value one step stores in the pass box and a later step reads is a declared
+edge. Each pass box key has its own domain, `pass:<key>`, built with
+`scripts.tick.steps.pass_domain("<key>")` or, for several keys,
+`pass_domains("<key>", ...)`. Every step declares:
+
+| Declaration | Rule |
+| --- | --- |
+| `writes` | Each `pass:<key>` the step stores |
+| `reads` | Each `pass:<key>` the step reads |
+| `needs` | The step that writes each key it reads, or a step that already needs that writer |
+
+The registry checks these with the other domains when it builds `waves()`.
+A reader and a writer of the same `pass:<key>` with no need path between them
+raise `Unordered reader and writer in lane <lane> for pass:<key>: <first>, <second>`
+(`lanes <a> and <b>` when the two steps sit in different lanes),
+and two steps that store the same key with no need path raise
+`Unordered writers in ...`. A pass box hand off between steps that could run in
+either order is therefore refused when the step pool is first resolved
+(`registry.steps()`, `waves()` or `validate()`, which `engine.group_steps`
+calls), before any step of that pass runs.
+
+The delivered writers of each key:
+
+| Key | Written by | Example readers |
+| --- | --- | --- |
+| `config` | `config load`, then `stopped branch` and `drained resume` | `master wake`, `master stall`, `strays`, `orphans`, placement notices |
+| `finished` | `stopped branch` | The `start` group site in `scripts.swarm.tick`, which ends the pass |
+| `doc`, `rows` | `ledger state`; `spawn due` and `spawn` rewrite `rows` | `automated cleanup`, `launch checks`, `sleeping`, `preempt`, `spawn` |
+| `sleeping` | `sleeping` | `drained resume`, `dispatch seat`, `night watch`, `codex hook order` |
+| `agents` | `page relay` | `stall watch`, `inbox wake` |
+| `view` | `tick view` | The slow lane event steps, `health findings`, `metrics record`, `status publish` |
+| `live` | `stall watch` | `overrun pass` |
+| `found` | `health findings` | `findings pass`, `metrics record`, `status publish` |
+| `judged`, `stop`, `started` | `intent check`, `ledger health`, `snapshot job` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
+
+Because the readers of `config` need `drained resume`, that step carries
+`DRAINED_RESUME_NEEDS` (`scripts.tick.steps.tasks`) plus `sleeping`: every step
+that reads `config` before it, so the rewritten config is ordered after them.
+`preempt` needs `PREEMPT_NEEDS` in `scripts.tick.steps.place`, which includes
+`drained resume`, so it reads the rewritten config.
+
+A new step that reads a pass box value declares it like this:
+
+```python
+from scripts.tick import registry
+from scripts.tick.steps import CallStep, pass_domains
+from scripts.tick.steps.tasks import TASK_PASSES, held
+
+registry.register(
+    CallStep(
+        "example",
+        TASK_PASSES,
+        held(_example),
+        frozenset({"ledger state"}),
+        pass_domains("doc"),
+        pass_domains("example"),
+    )
+)
+```
+
+The positional order is name, group, call, `needs`, `reads`, `writes`.
+`WriteStep` takes the same `needs` and `reads` as keywords.
+
+`tests/tick/test_pass_edges.py` replays the twelve tick scenarios through
+`scripts.swarm.tick.tick` and `scripts.swarm.cli.run_tick` with a recording
+pass box and recording pass views. It records which step stored and read each
+key and names every gap:
+
+- `<step> reads pass <key> without declaring it`
+- `<step> reads pass <key> without needing its writer [<writers>]`
+- `<step> writes pass <key> without declaring it`
+
+It also fails when a registered step never ran in any scenario. The feature map
+entry `swarm-tick-pass-edges` links this behavior to the test; the delivered
+change is
+[pull request 9623](https://github.com/the-cloud-clockwork/agentihooks/pull/9623).
 
 ## Groups and their sites
 
@@ -356,6 +454,7 @@ The delivered proof and limitations are recorded in
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
 | `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
+| `tests/tick/test_pass_edges.py` | Every pass box read over the twelve tick scenarios is declared with a need on its writer and every pass box write is declared; a planted undeclared read and a planted missing need are named |
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
 | `tests/tick/test_report.py` | The slow lane report steps and a `CallStep` keeping the lane it is given |
 | `tests/tick/test_pool.py` | A parallel group returning its critical records while its slow step runs, a handed off step starting after the critical step it needs and dropped when that step was dropped, a handed off step applying its writes through the group appliers on a daemon thread named `tick-slow-lane`, the pass waiting for a hung slow step only until the slow deadline plus the grace second, and a sequential pass running slow steps in the group |
@@ -369,6 +468,8 @@ The delivered proof and limitations are recorded in
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
 | Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
 | `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
+| `Unordered reader and writer ... for pass:<key>` on the first pass | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
+| `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
 | A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |

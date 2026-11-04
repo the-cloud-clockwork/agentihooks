@@ -543,7 +543,7 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
-    monkeypatch.setattr(timer, "schedule", lambda: True)
+    monkeypatch.setattr(timer, "schedule", lambda caller: True)
     monkeypatch.setattr(timer, "undelivered", lambda: "")
     monkeypatch.setattr(timer, "guard", lambda binary: True)
 
