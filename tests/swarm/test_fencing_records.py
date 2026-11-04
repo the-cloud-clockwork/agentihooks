@@ -362,6 +362,18 @@ def test_the_authority_check_holds_on_a_swarm_not_yet_migrated(store: Any, monke
     assert read == [("claims", "journals")] * 3
 
 
+def test_the_authority_check_reads_the_records_of_a_migrated_swarm_on_any_backend(
+    store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fencing
+
+    _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["claims"].update(t1={"a": 1}))
+    monkeypatch.setattr(fencing.state, "backend", lambda: "bus")
+    assert fencing.authority_held(store, "sw", "t1")
+    assert not fencing.authority_held(store, "sw", "t3")
+
+
 def test_scalars_are_put_and_removed_as_meta_records(store: Any) -> None:
     from scripts.swarm import fencing
 

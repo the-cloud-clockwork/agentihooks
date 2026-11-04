@@ -902,8 +902,13 @@ def _watch_idle(
     if idle.idle_ticks >= IDLE_KILL_TICKS and timing.timed(
         runtime.retire, idle, homes=reaper.scratch_homes(slug, idle.task)
     ):
-        why = f"; outage recovery could not proceed: {resume.recovery_blocker(store, slug, agent)}" if pending else ""
-        return nudged + [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True) + why]
+        why = (
+            f"; outage recovery could not proceed: {timing.timed(resume.recovery_blocker, store, slug, agent)}"
+            if pending
+            else ""
+        )
+        dropped = timing.timed(_drop, slug, store, ledger, rows, idle, refund=True)
+        return nudged + [f"stalled {agent.name}" + dropped + why]
     return nudged
 
 
