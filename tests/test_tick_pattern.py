@@ -1,7 +1,6 @@
 """Tests for the gate that holds the tick step pattern against a shrink only allowlist."""
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -219,9 +218,49 @@ def test_floors_reads_only_the_measured_table() -> None:
     assert tick_pattern.floors(source) == {"a": "SLOW_S", "b": ""}
 
 
-@pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy duplicates every function body")
-def test_the_recorded_allowlist_matches_the_repository() -> None:
-    assert tick_pattern.load(_ROOT) == tick_pattern.measure(_ROOT)
+def test_a_stale_entry_for_an_untouched_file_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    lost = FULL.replace('"beat"', '"lost"')
+    base = _recorded(tmp_path / "base", {tick_pattern.TICK: TICK, STEP: lost})
+    head = _tree(tmp_path / "head", {tick_pattern.TICK: TICK, STEP: lost, "scripts/tick/steps/two.py": FULL})
+    (head / tick_pattern.ALLOWLIST).write_text(json.dumps({tick_pattern.TICK: ["def run_tick"]}))
+    assert _grade(base, head, capsys) == (0, "2 tick pattern offences in 2 files, 2 on the base allowlist, 0 errors\n")
+
+
+def test_a_changed_file_may_keep_an_offence_its_base_already_held(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    more = TICK + "def more():\n    pass\n"
+    base = _tree(tmp_path / "base", {tick_pattern.TICK: more})
+    (base / tick_pattern.ALLOWLIST).write_text("{}\n")
+    head = _recorded(tmp_path / "head", {tick_pattern.TICK: more + "X = 1\n"})
+    assert _grade(base, head, capsys) == (0, "2 tick pattern offences in 1 files, 0 on the base allowlist, 0 errors\n")
+
+
+def test_a_budgets_change_grades_every_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {STEP: FULL})
+    head = _tree(tmp_path / "head", {tick_pattern.BUDGETS: BUDGETS.replace('"beat"', '"gone"'), STEP: FULL})
+    (head / tick_pattern.ALLOWLIST).write_text((base / tick_pattern.ALLOWLIST).read_text())
+    assert _grade(base, head, capsys) == (
+        1,
+        "1 tick pattern offences in 1 files, 0 on the base allowlist, 2 errors\n"
+        f"::error::{STEP} adds step beat: no budget row; the base allowlist does not hold it\n"
+        f"::error::{tick_pattern.ALLOWLIST} differs from the head's measurement; "
+        "run python -m scripts.tick_pattern --write\n",
+    )
+
+
+def test_touched_names_changed_added_and_removed_files() -> None:
+    base = {tick_pattern.BUDGETS: "a", "kept": "1", "edited": "2", "gone": "3"}
+    head = {tick_pattern.BUDGETS: "a", "kept": "1", "edited": "9", "new": "4"}
+    assert tick_pattern.touched(base, head) == {"edited", "gone", "new"}
+    every = {tick_pattern.BUDGETS, "kept", "edited", "gone", "new"}
+    assert tick_pattern.touched(base, {**head, tick_pattern.BUDGETS: "b"}) == every
+
+
+def test_a_head_without_an_allowlist_is_red() -> None:
+    assert tick_pattern.grade({}, {}, None, set(), {}) == [
+        f"{tick_pattern.ALLOWLIST} differs from the head's measurement; run python -m scripts.tick_pattern --write"
+    ]
 
 
 def test_the_allowlist_is_sorted_json() -> None:
