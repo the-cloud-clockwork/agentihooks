@@ -206,6 +206,30 @@ def test_additive_merge_removal_of_an_already_absent_leaf_is_a_no_op():
 
 
 @pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_prunes_a_container_left_empty_by_a_removed_leaf():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"env": {"AGENTIHOOKS_VAR": "1"}, "operatorKey": "kept"}
+    prior_record = {"leaves": ["env.AGENTIHOOKS_VAR"], "lists": {}}
+
+    merged, record = _additive_merge(existing, {}, prior_record)
+
+    assert merged == {"operatorKey": "kept"}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_keeps_a_container_that_still_holds_an_operator_key():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"env": {"AGENTIHOOKS_VAR": "1", "OPERATOR_VAR": "kept"}}
+    prior_record = {"leaves": ["env.AGENTIHOOKS_VAR"], "lists": {}}
+
+    merged, record = _additive_merge(existing, {}, prior_record)
+
+    assert merged == {"env": {"OPERATOR_VAR": "kept"}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
 def test_additive_merge_processes_every_rendered_key_after_a_list_value():
     from scripts.targets.claude_target import _additive_merge
 

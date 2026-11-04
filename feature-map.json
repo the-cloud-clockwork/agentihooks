@@ -1345,6 +1345,8 @@
         "tests/test_claude_target.py::test_write_settings_removes_a_key_no_longer_rendered",
         "tests/test_claude_target.py::test_additive_merge_removes_a_three_level_leaf_no_longer_rendered",
         "tests/test_claude_target.py::test_additive_merge_removal_of_an_already_absent_leaf_is_a_no_op",
+        "tests/test_claude_target.py::test_additive_merge_prunes_a_container_left_empty_by_a_removed_leaf",
+        "tests/test_claude_target.py::test_additive_merge_keeps_a_container_that_still_holds_an_operator_key",
         "tests/test_claude_target.py::test_additive_merge_processes_every_rendered_key_after_a_list_value",
         "tests/test_claude_target.py::test_additive_merge_drops_a_stale_rendered_list_item_using_the_prior_record",
         "tests/test_claude_target.py::test_additive_merge_discards_a_stale_list_entry_when_the_list_stops_rendering",

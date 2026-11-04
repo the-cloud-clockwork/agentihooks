@@ -1001,7 +1001,7 @@
   "scripts/swarm_v2/workspaces.py": 32,
   "scripts/targets/__init__.py": 7,
   "scripts/targets/_common.py": 145,
-  "scripts/targets/claude_target.py": 124,
+  "scripts/targets/claude_target.py": 125,
   "scripts/targets/codex_hook_trust.py": 28,
   "scripts/targets/codex_target.py": 348,
   "scripts/targets/copilot_target.py": 405,

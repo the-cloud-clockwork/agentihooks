@@ -95,9 +95,17 @@ def _parent_dict(doc: _JSONDict, path: list[str]) -> _JSONDict | None:
 
 
 def _pop_path(doc: _JSONDict, path: list[str]) -> None:
-    parent = _parent_dict(doc, path[:-1])
-    if parent is not None:
-        parent.pop(path[-1], None)
+    chain: list[_JSONDict] = [doc]
+    for key in path[:-1]:
+        nxt = chain[-1].get(key)
+        if not isinstance(nxt, dict):
+            return
+        chain.append(nxt)
+    chain[-1].pop(path[-1], None)
+    for index in range(len(chain) - 1, 0, -1):
+        if chain[index]:
+            break
+        chain[index - 1].pop(path[index - 1], None)
 
 
 def _merge_tree(
