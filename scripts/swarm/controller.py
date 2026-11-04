@@ -68,7 +68,7 @@ class FencedRuntime:
         return partial(self._changing, found) if name in AGENT_CHANGES else found
 
     def live_names(self) -> set[str]:
-        """The live agent names, listed once per tick pass and listed again after a fenced runtime changes its agents."""
+        """The live agent names, listed once per tick pass and again after a fenced runtime changes its agents."""
         shared = _pass_processes()
         return self.runtime.live_names() if shared is None else shared.live_names(self.runtime.live_names)
 
