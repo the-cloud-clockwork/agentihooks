@@ -59,6 +59,10 @@ def test_a_fully_declared_step_is_clean(tmp_path: Path) -> None:
         ),
         ('register("beat", lane=l, needs=n, reads=r, writes=w, effects=e)\n', ["step beat: no feature"]),
         ("CallStep(name, 'g', call)\nregister(step)\n", []),
+        (
+            'make()("x")\nprint("x")\nregister()\nCallStep(name)\n' + FULL.replace('"beat"', '"lost"'),
+            ["step lost: no budget row"],
+        ),
     ],
 )
 def test_step_offences(tmp_path: Path, source: str, offences: list[str]) -> None:
@@ -154,9 +158,23 @@ def test_a_base_without_an_allowlist_allows_what_the_head_records(
 
 
 def test_files_outside_the_scope_are_not_graded(tmp_path: Path) -> None:
-    files = {"scripts/swarm/other.py": TICK, "hooks/hook.py": 'CallStep("lost", "g", c)\n', STEP: TICK}
+    lost = FULL.replace('"beat"', '"lost"')
+    files = {"scripts/swarm/other.py": TICK, "hooks/hook.py": 'CallStep("lost", "g", c)\n', STEP: TICK + lost}
     tree = _recorded(tmp_path, files)
-    assert tick_pattern.load(tree) == {}
+    assert tick_pattern.load(tree) == {STEP: ["step lost: no budget row"]}
+
+
+def test_the_tick_module_holds_its_step_and_def_offences(tmp_path: Path) -> None:
+    tree = _recorded(tmp_path, {tick_pattern.TICK: TICK + FULL.replace('"beat"', '"lost"')})
+    assert tick_pattern.load(tree) == {tick_pattern.TICK: ["def run_tick", "step lost: no budget row"]}
+
+
+def test_write_records_sorted_json_with_one_space_indent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "tests").mkdir()
+    monkeypatch.setattr(tick_pattern, "measure", lambda tree: {"b": ["y"], "a": ["x"]})
+    tick_pattern.write(tmp_path)
+    expected = '{\n "a": [\n  "x"\n ],\n "b": [\n  "y"\n ]\n}\n'
+    assert (tmp_path / tick_pattern.ALLOWLIST).read_text() == expected
 
 
 def test_a_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -185,7 +203,9 @@ def test_grading_defaults_the_head_to_the_working_folder(
 
 
 def test_floors_reads_only_the_measured_table() -> None:
-    source = 'OTHER = {"x": Timing(1, WIDE_S)}\nMEASURED: dict = {"a": Timing(1, SLOW_S), "b": Timing(1), 3: 4}\n'
+    source = (
+        'OTHER = {"x": Timing(1, WIDE_S)}\nMEASURED: dict = {**OTHER, 3: 4, "a": Timing(1, SLOW_S), "b": Timing(1)}\n'
+    )
     assert tick_pattern.floors(source) == {"a": "SLOW_S", "b": ""}
 
 

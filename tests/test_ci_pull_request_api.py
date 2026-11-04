@@ -197,6 +197,8 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_wiring.py",
         "scripts/feature_map.py",
         "scripts/tick_pattern.py",
+        "scripts/swarm/tick.py",
+        "scripts/tick/steps/budgets.py",
         "scripts/hive/nats_grant.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/compose-recovery-drill.sh",

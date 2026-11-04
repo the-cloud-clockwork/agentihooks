@@ -55,7 +55,7 @@ def floors(source: str) -> dict[str, str]:
             continue
         if not (isinstance(target, ast.Name) and target.id == "MEASURED" and isinstance(table, ast.Dict)):
             continue
-        for key, value in zip(table.keys, table.values, strict=True):
+        for key, value in zip(table.keys, table.values):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
             args = value.args if isinstance(value, ast.Call) else []
@@ -66,7 +66,12 @@ def floors(source: str) -> dict[str, str]:
 
 def _callee(node: ast.Call) -> str:
     func = node.func
-    name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+    if isinstance(func, ast.Name):
+        name = func.id
+    elif isinstance(func, ast.Attribute):
+        name = func.attr
+    else:
+        return ""
     return name if name in POSITIONS else ""
 
 
