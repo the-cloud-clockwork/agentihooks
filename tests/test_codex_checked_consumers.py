@@ -68,7 +68,7 @@ def test_agent_choice_quota_excludes_signed_out_default_and_keeps_signed_in_defa
     from scripts import agent_choice
     from scripts.swarm import capacity
 
-    monkeypatch.setattr(capacity, "_claude", lambda environ, now: [])
+    monkeypatch.setattr(capacity, "_claude", lambda environ, now, refresh=True: [])
     monkeypatch.setattr(capacity, "_api", lambda *args: [])
     assert agent_choice.account_has_quota("codex", "default", dict(os.environ)) is None
     assert agent_choice.choose("", dict(os.environ)) == ("", agent_choice.ALL_FULL)

@@ -75,11 +75,12 @@ def _known(environ: dict) -> set[str]:
     return filed | set(account_sessions.token_accounts(environ).values())
 
 
-def _claude(environ: dict, now: float) -> list[Account]:
+def _claude(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
-    fresh, _ = tokens.results(environ, now)
-    observed.update({result.account: (now, result) for result in fresh})
+    if refresh:
+        fresh, _ = tokens.results(environ, now)
+        observed.update({result.account: (now, result) for result in fresh})
     observed.update(_master_snapshot(environ, now))
     counts = account_sessions.sessions_by_account(environ=environ)
     routed = _known(environ)
@@ -221,12 +222,19 @@ def _refused(environ: dict) -> set[tuple[str, str]]:
     return {(balancer.HARNESS, account) for account, result in latest.items() if balancer.refused(result)}
 
 
+def probe(environ: dict[str, str], now: float) -> list[Account]:
+    """Probe stale Claude credentials and Codex readings, writing the caches a pass reads without ``refresh``."""
+    return _claude(environ, now, True) + _codex(environ, now, True)
+
+
 def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
-    """Every account with its band cap; ``refresh`` probes stale Codex readings, which costs a Codex request."""
+    """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs."""
     from scripts.routing import aggregate, reservation
 
     rows = (
-        _global(environ, now) if aggregate.enabled(environ) else _claude(environ, now) + _codex(environ, now, refresh)
+        _global(environ, now)
+        if aggregate.enabled(environ)
+        else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
     store = reservation._store(environ)
     for harness in LABELS:
