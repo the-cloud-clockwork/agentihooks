@@ -404,7 +404,10 @@ registry.register(
 ```
 
 The positional order is name, group, call, `needs`, `reads`, `writes`.
-`WriteStep` takes the same `needs` and `reads` as keywords.
+`WriteStep` takes the same `needs` and `reads` as keywords. Both also take
+`effects`, the ports the step may write through, and `feature`, its feature map
+id, as keywords; see
+[Declaring effects on a step](tick-adapters.md#declaring-effects-on-a-step).
 
 `tests/tick/test_pass_edges.py` replays the twelve tick scenarios through
 `scripts.swarm.tick.tick` and `scripts.swarm.cli.run_tick` with a recording

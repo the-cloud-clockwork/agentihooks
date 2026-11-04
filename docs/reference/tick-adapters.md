@@ -1004,6 +1004,113 @@ are not applied; calls it already made through declared ports stay made.
 Every registered step declares `effects=frozenset()` today and still reaches outside systems through the tick module.
 A step moves onto ports in its own sweep, naming the ports it writes in `effects` in the same pull request.
 
+#### Declaring effects on a step
+
+`effects` holds port names from the table under [Declared effects](#declared-effects): `ledger`, `coordination`,
+`source_control`, `runtime`, `processes`, `inbox`, `llm`, `metrics` and `host`. Read operations need no declaration;
+declare a port only when the step calls one of its write operations. `feature` is the id of the step's entry in
+`feature-map.json`.
+
+The ports reach a step only through `ctx.tools` in its `run(ctx)`. A step class that implements the `Step` protocol
+carries `effects` and `feature` as attributes and calls the ports with the deadline of its context:
+
+```python
+from dataclasses import dataclass
+
+from scripts.tick import registry
+from scripts.tick.step import Context, Domain, Lane, Result
+from scripts.tick.steps.tasks import TASK_PASSES
+
+
+@dataclass(frozen=True)
+class WakeStep:
+    """Send one wake to the first engineer seat through the inbox port."""
+
+    name: str = "example wake"
+    group: str = TASK_PASSES
+    lane: Lane = Lane("tick")
+    budget_s: float = 5.0
+    interval_s: float = 60.0
+    needs: frozenset[str] = frozenset()
+    reads: frozenset[Domain] = frozenset()
+    writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset({"inbox"})
+    feature: str = "swarm-example-wake"
+
+    def run(self, ctx: Context) -> Result:
+        """Send the wake and return no writes."""
+        ctx.tools.inbox.send("eng-1@rig-grade-swarm", "wake", deadline=ctx.deadline)
+        return Result()
+
+
+registry.register(WakeStep())
+```
+
+`CallStep` and `WriteStep` take the same two declarations as keywords after the positional name, group, call,
+`needs`, `reads` and `writes`:
+
+```python
+from scripts.tick.steps import CallStep
+from scripts.tick.steps.tasks import WriteStep
+
+CallStep("example", TASK_PASSES, _example, effects=frozenset({"inbox"}), feature="swarm-example")
+WriteStep("example sizes", TASK_PASSES, _sizes, effects=frozenset({"metrics"}), feature="swarm-example-sizes")
+```
+
+Their call receives the tick module and a pass state reader, never the `Context`, so a call step cannot reach
+`ctx.tools`; until it moves into a step class its declared effects only record intent. A step that leaves out both
+declarations has `effects=frozenset()` and `feature=""`: it may read through every port and write through none. A
+name in `effects` that is not a port name opens nothing: `for_effects` checks each port by its own name, so a
+misspelt `"source-control"` leaves `source_control` closed.
+
+#### Testing a step's effects
+
+`fake_tools()` builds unrestricted fakes, and `engine.run_step` narrows them by the step's `effects` exactly as a pass
+does. A test asserts the record's outcome and the calls each fake saw:
+
+```python
+from scripts.tick import engine
+from scripts.tick.adapters import fakes
+from scripts.tick.deadline import Deadline
+from scripts.tick.step import Context
+
+tools = fakes.fake_tools()
+record = engine.run_step(step, Context(view, Deadline.after(60.0), tools))
+assert (record.outcome, record.error) == (engine.OK, "")
+assert [call.operation for call in tools.inbox.calls] == ["send"]
+```
+
+For a step that writes outside its effects the record reads `engine.FAILED` with
+`"scripts.tick.ports.contracts.UndeclaredEffect"` as its error, and the fake of the undeclared port has no call. A test
+that builds a `Context` without `tools` and needs the pass value sets `PASS_TOOLS` and resets it with the token:
+
+```python
+from scripts.tick.ports.tools import PASS_TOOLS
+
+token = PASS_TOOLS.set(fakes.fake_tools())
+try:
+    assert Context(view, Deadline.after(1.0)).tools is PASS_TOOLS.get()
+finally:
+    PASS_TOOLS.reset(token)
+```
+
+The feature map entry `swarm-tick-declared-effects` links this behavior to `tests/tick/test_effects.py` and
+`tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group`; the
+delivered change is [pull request 9632](https://github.com/the-cloud-clockwork/agentihooks/pull/9632).
+
+#### Seeing a refused write
+
+The refusal is raised before the deadline check and before the adapter is called, so the outside system is untouched.
+The step's timing wrapper writes a finished `swarm_tick_step` journal line with `"outcome": "error"` and
+`"error": "scripts.tick.ports.contracts.UndeclaredEffect"`, stores the same fields in `tick:steps`, adds the step to
+the pass's failed steps, and `tick:records` stores the step with outcome `failed` (see [Tick report](tick-report.md)).
+A slow lane step that ends after its group returned also prints `slow lane step <name> failed:
+scripts.tick.ports.contracts.UndeclaredEffect`. Find refusals on the workstation tick with:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "1 hour ago" | grep UndeclaredEffect
+```
+
 ## Fakes for tests
 
 `scripts.tick.adapters.fakes` has `FakeLedger`, `FakeCoordination`, `FakeSourceControl`, `FakeInbox`, `FakeLlm`,
@@ -1115,6 +1222,9 @@ and call the port from the step.
 | `test_the_records_adapter_takes_no_deadline` fails | A function or method in `records_redis.py` gained a keyword-only `deadline` argument. | Remove the argument: the test expects the module to take no deadline, and its writes rely on the fence's lease and revision checks. |
 | A fleet red listing ends before 60 seconds | `fleet_red.read` was given a caller deadline with less time left, and `child` kept the earlier expiry. | Give the calling step a larger budget; the listing never runs past `SECONDS`. |
 | `UndeclaredEffect: <port> is not a declared effect` | A step called a write operation on a port missing from its effects. | Declare the port in the step's effects. |
+| A step fails with `UndeclaredEffect` although its effects name the port | The name in `effects` is misspelt, such as `"source-control"` for `source_control`, so no port opened. | Use the port names from the table under [Declared effects](#declared-effects). |
+| `AttributeError: 'NoneType' object has no attribute '<port>'` inside a step | `ctx.tools` is `None`: the `Context` was built outside a tick pass, for example by calling `scripts.swarm.tick.tick` or `run_group` directly instead of through `run_tick`. | Run the pass through `scripts.swarm.cli.run_tick`, or in a test pass `tools` to `Context` or set `PASS_TOOLS`. |
+| `test_every_registered_step_declares_no_effects_yet` fails naming a step | A registered step now declares effects. | Update that test in the same pull request that moves the step onto ports. |
 | `TypeError: tools require a Deadline keyword argument` | A restricted port was called without `deadline=`. | Pass the step's `Deadline` by keyword. |
 | `KeyError: 'unknown metrics table: <name>'` | `emit` named a table the adapter was not built with. | Add the `Table` to the `tables` mapping. |
 | `BackendFailure: <model>: timeout` from `classify` | The decisions API did not answer within `deadline.remaining`. | Raise the deadline, or build `ApiLlm` with a model that answers faster. |
