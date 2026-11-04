@@ -15,6 +15,7 @@ POOLS = f"{PREFIX}s"
 OPERATOR = "operator"
 CLAIMER = "inbox"
 CLAIM_ATTEMPTS = 3
+STARTING = "starting"
 DROPPED = object()
 
 
@@ -29,10 +30,15 @@ def number(address: str) -> int:
     return 1 if seat == MASTER else int(seat.removeprefix(f"{MASTER}-"))
 
 
+def unlaunched(agent: AgentRecord) -> bool:
+    """A master record still starting with no pane and no launch time: its launch never placed a session."""
+    return agent.state == STARTING and not agent.pane_id and not agent.launched_at
+
+
 def live_masters(redis, slug: str, agents: list | None = None) -> list[str]:
-    agents = RedisStore(redis).agents(slug) if agents is None else agents
-    waiting = {agent.name for agent in agents if agent.input_prompt}
-    return [seat for seat, name in masters.held(redis, slug, agents).items() if is_seat(seat) and name not in waiting]
+    records: list[AgentRecord] = RedisStore(redis).agents(slug) if agents is None else agents
+    absent = {agent.name for agent in records if agent.input_prompt or unlaunched(agent)}
+    return [seat for seat, name in masters.held(redis, slug, records).items() if is_seat(seat) and name not in absent]
 
 
 def turn(live: list[str], last: str, skip: str | None) -> str:
@@ -72,14 +78,14 @@ class MasterPool:
         return door, door
 
     def empty(self, slug: str, address: str) -> bool:
-        """No master is in the seat: the seat was retired, its registry occupant has finished, retired or left it, or
-        it has none and no live master record names the seat."""
+        """No master is in the seat: the seat was retired, its registry occupant has finished, retired, left it or
+        never launched, or it has none and no live master record names the seat."""
         redis = cast(Any, self.redis)
         seats = cast(Any, self.inbox).seats
         if address in masters.MasterSeats(redis).retired(slug):
             return True
         agents: list[AgentRecord] = cast(Any, RedisStore(redis)).agents(slug)
-        gone = {agent.name for agent in agents if agent.state in masters.GONE}
+        gone = {agent.name for agent in agents if agent.state in masters.GONE or unlaunched(agent)}
         occupant: str = seats.occupant(address).occupant
         if occupant:
             return occupant in gone or seats.left(occupant, address)

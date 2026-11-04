@@ -34,6 +34,7 @@ class Ledger(FakeLedger):
     def __init__(self, tasks):
         super().__init__(tasks)
         self.priorities, self.updates = [], []
+        self.phases: list[dict] = []
 
     def task(self, slug, task_id):
         assert slug == SLUG
@@ -606,6 +607,23 @@ def test_an_alert_goes_to_the_master_owning_the_task_phase():
     swarm.tick(START)
     [action] = swarm.tick(START + 10 * MINUTE)
     assert action.endswith(f"; told {seats[1]}")
+
+
+def test_an_alert_for_a_second_seat_whose_master_never_launched_lands_in_the_front_door_inbox():
+    swarm = Swarm(GREEN, task={"phase": "p2"})
+    swarm.ledger.phases = [{"id": "p1"}, {"id": "p2"}]
+    MasterSeats(swarm.store.redis).set_count(SLUG, 2)
+    front, second = masters.seats(SLUG, 2)
+    swarm.store.put_agent(SLUG, AgentRecord("master@abc-0005", MASTER, "", seat=front))
+    swarm.store.put_agent(
+        SLUG, AgentRecord("master@abc-0006", MASTER, "master-2", seat=second, state="starting", started_at=1)
+    )
+    swarm.store.seats.occupy(second, "master@abc-0006", at=1)
+    swarm.tick(START)
+    [action] = swarm.tick(START + 10 * MINUTE)
+    assert action.endswith(f"; told {front}")
+    assert [item.address for item in swarm.inbox()] == [front]
+    assert InboxStore(swarm.store.redis).inbox(second) == []
 
 
 def test_a_closed_pull_request_clears_its_queue_mark():
