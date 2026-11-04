@@ -1,3 +1,12 @@
+import sqlite3
+from typing import Any, TypeGuard
+
+NodeInfo = tuple[str, str | None, int]
+Nodes = dict[str, NodeInfo]
+Edge = tuple[str, str]
+Edges = set[Edge]
+Hierarchy = tuple[Nodes, Edges]
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS work_nodes (ledger_slug TEXT NOT NULL REFERENCES ledgers(slug) ON DELETE CASCADE, node_id TEXT NOT NULL, kind TEXT NOT NULL, parent_id TEXT, position INTEGER NOT NULL, PRIMARY KEY(ledger_slug,node_id));
 CREATE INDEX IF NOT EXISTS work_nodes_parent ON work_nodes(ledger_slug,parent_id,position);
@@ -17,42 +26,59 @@ DELETE_DEPENDENCY = "DELETE FROM work_dependencies WHERE ledger_slug=? AND node_
 INSERT_DEPENDENCY = "INSERT OR IGNORE INTO work_dependencies VALUES (?, ?, ?)"
 
 
-def text(value) -> bool:
+def text(value: object) -> bool:
     return isinstance(value, str) and bool(value)
 
 
-def parent(collection: str, item: dict) -> str | None:
-    found = item.get(LINKS.get(collection))
+def is_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
+
+
+def is_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def as_list(value: object) -> list[Any]:
+    return value if is_list(value) else []
+
+
+def as_dict(value: object) -> dict[str, Any] | None:
+    return value if is_dict(value) else None
+
+
+def parent(collection: str, item: dict[str, Any]) -> str | None:
+    found = item.get(LINKS.get(collection, ""))
     if collection == "tasks" and not text(found) and text(item.get("phase")):
         found = f"phases/{item['phase']}"
     return found if text(found) else None
 
 
-def project(state: dict) -> tuple[dict, set]:
-    nodes, dependencies = {}, set()
+def project(state: dict[str, Any]) -> Hierarchy:
+    nodes: Nodes = {}
+    dependencies: Edges = set()
     for collection, kind in KINDS.items():
-        for position, item in enumerate(state.get(collection) or []):
-            if not isinstance(item, dict) or not text(item.get("id")):
+        for position, raw in enumerate(as_list(state.get(collection))):
+            item = as_dict(raw)
+            if item is None or not text(item.get("id")):
                 continue
             node = f"{collection}/{item['id']}"
             nodes[node] = (kind, parent(collection, item), position)
-            required = item.get("depends_on")
             dependencies.update(
                 (node, f"{collection}/{other}")
-                for other in (required if isinstance(required, list) else [])
+                for other in as_list(item.get("depends_on"))
                 if text(other)
             )
     return nodes, dependencies
 
 
-def stored(connection, slug: str) -> tuple[dict, set]:
+def stored(connection: sqlite3.Connection, slug: str) -> Hierarchy:
     nodes = {
         node: (kind, parent_id, position) for node, kind, parent_id, position in connection.execute(NODES, (slug,))
     }
     return nodes, set(connection.execute(DEPENDENCIES, (slug,)))
 
 
-def apply(connection, slug: str, old: tuple, new: tuple) -> None:
+def apply(connection: sqlite3.Connection, slug: str, old: Hierarchy, new: Hierarchy) -> None:
     (old_nodes, old_dependencies), (new_nodes, new_dependencies) = old, new
     connection.executemany(DELETE_NODE, [(slug, node) for node in old_nodes if node not in new_nodes])
     connection.executemany(
@@ -62,11 +88,11 @@ def apply(connection, slug: str, old: tuple, new: tuple) -> None:
     connection.executemany(INSERT_DEPENDENCY, [(slug, *edge) for edge in new_dependencies - old_dependencies])
 
 
-def sync(connection, slug: str, state: dict) -> None:
+def sync(connection: sqlite3.Connection, slug: str, state: dict[str, Any]) -> None:
     apply(connection, slug, stored(connection, slug), project(state))
 
 
-def drift(have: tuple, want: tuple) -> dict:
+def drift(have: Hierarchy, want: Hierarchy) -> dict[str, Any]:
     (have_nodes, have_dependencies), (want_nodes, want_dependencies) = have, want
     report = {
         "missing_nodes": sorted(node for node in want_nodes if node not in have_nodes),
@@ -80,7 +106,7 @@ def drift(have: tuple, want: tuple) -> dict:
     return {**report, "drift": sum(len(found) for found in report.values())}
 
 
-def rebuild(connection, slug: str, state: dict) -> dict:
+def rebuild(connection: sqlite3.Connection, slug: str, state: dict[str, Any]) -> dict[str, Any]:
     have, want = stored(connection, slug), project(state)
     apply(connection, slug, have, want)
     return drift(have, want)
@@ -138,7 +164,7 @@ READS = {"children": CHILDREN, "subtree": SUBTREE, "ancestors": ANCESTORS, "depe
 NODE = "SELECT 1 FROM work_nodes WHERE ledger_slug=? AND node_id=?"
 
 
-def read(connection, slug: str, name: str, node: str | None = None) -> list:
+def read(connection: sqlite3.Connection, slug: str, name: str, node: str | None = None) -> list[dict[str, Any]]:
     if node is not None and connection.execute(NODE, (slug, node)).fetchone() is None:
         raise KeyError(node)
     rows = connection.execute(READS[name], {"slug": slug, "node": node})

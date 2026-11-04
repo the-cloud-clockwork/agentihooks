@@ -8,13 +8,14 @@ import threading
 import time
 from _thread import LockType
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request
 
@@ -25,20 +26,33 @@ DEFAULT_RECORDS = 1000
 MAX_RECORDS = 10000
 JOURNAL_NAME = ".request-metrics.jsonl"
 WRITES = frozenset(("POST", "PUT", "PATCH", "DELETE"))
-JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 9}
+JOURNAL_WIDTHS: dict[str, int] = {
+    "held": 2,
+    "lost": 3,
+    "evicted": 2,
+    "start": 2,
+    "flush": 2,
+    "stop": 2,
+    "s": 9,
+}
 LEGACY_SAMPLE_WIDTH = 7
-CURRENT = ContextVar("ledger_request_timing", default=None)
-SAMPLES = deque(maxlen=MAX_SAMPLES)
-PENDING = []
-GUARD = threading.Lock()
-JOURNAL_GUARD = threading.Lock()
-STARTED_AT = time.time()
-EVICTED_THROUGH = float("-inf")
-HELD_SINCE = None
-LOST = []
-JOURNAL = None
-APPENDED = 0
-STALE = False
+
+Row = tuple[Any, ...]
+LostSpan = tuple[float, float]
+JournalLine = list[Any]
+
+CURRENT: ContextVar["Timing | None"] = ContextVar("ledger_request_timing", default=None)
+SAMPLES: deque[Row] = deque(maxlen=MAX_SAMPLES)
+PENDING: list[Row] = []
+GUARD: LockType = threading.Lock()
+JOURNAL_GUARD: LockType = threading.Lock()
+STARTED_AT: float = time.time()
+EVICTED_THROUGH: float = float("-inf")
+HELD_SINCE: float | None = None
+LOST: list[LostSpan] = []
+JOURNAL: Path | None = None
+APPENDED: int = 0
+STALE: bool = False
 
 
 @dataclass
@@ -138,7 +152,7 @@ def route_name(path: str) -> str:
     return "/:slug"
 
 
-def hold(row: tuple) -> None:
+def hold(row: Row) -> None:
     global EVICTED_THROUGH
 
     if len(SAMPLES) == SAMPLES.maxlen:
@@ -168,34 +182,41 @@ def record(
             EVICTED_THROUGH = max(EVICTED_THROUGH, expired[0])
 
 
-def journal_rows(path: Path) -> Iterator[list]:
+def journal_rows(path: Path) -> Iterator[JournalLine]:
     try:
         lines = path.read_text().splitlines()
     except FileNotFoundError:
         return
     for line in lines:
         try:
-            row = json.loads(line)
+            row: Any = json.loads(line)
         except ValueError:
             continue
         if journal_row(row):
             yield row
 
 
-def journal_row(row: object) -> bool:
+def journal_row(row: Any) -> bool:
     if not isinstance(row, list) or not row or not isinstance(row[0], str):
         return False
-    if len(row) != JOURNAL_WIDTHS.get(row[0]) and not (row[0] == "s" and len(row) == LEGACY_SAMPLE_WIDTH):
+    items: list[Any] = row
+    if len(items) != JOURNAL_WIDTHS.get(items[0]) and not (items[0] == "s" and len(items) == LEGACY_SAMPLE_WIDTH):
         return False
-    texts = (2, 3) if row[0] == "s" else ()
+    texts = (2, 3) if items[0] == "s" else ()
     return all(
         isinstance(value, str) if index in texts else type(value) in (int, float) and math.isfinite(value)
-        for index, value in enumerate(row[1:], 1)
+        for index, value in enumerate(items[1:], 1)
     )
 
 
-def replay(rows: Iterator[list], started_at: float) -> tuple[list, float | None, list, float]:
-    samples, held, lost, open_since, evicted = [], None, [], None, -math.inf
+def replay(
+    rows: Iterator[JournalLine], started_at: float
+) -> tuple[list[Row], float | None, list[LostSpan], float]:
+    samples: list[Row] = []
+    held: float | None = None
+    lost: list[LostSpan] = []
+    open_since: float | None = None
+    evicted = -math.inf
     for kind, stamp, *rest in rows:
         if kind == "held":
             held = stamp
@@ -223,26 +244,31 @@ def held_since() -> float:
     return HELD_SINCE if HELD_SINCE is not None else STARTED_AT
 
 
-def journal_lines(flushed: float | None) -> list:
-    lines = [["held", held_since()], *(["lost", *span] for span in LOST), *evicted_line(), ["start", STARTED_AT]]
+def journal_lines(flushed: float | None) -> list[JournalLine]:
+    lines: list[JournalLine] = [
+        ["held", held_since()],
+        *(["lost", *span] for span in LOST),
+        *evicted_line(),
+        ["start", STARTED_AT],
+    ]
     lines += [["s", *row] for row in SAMPLES]
     return lines + ([["flush", flushed]] if flushed is not None else [])
 
 
-def evicted_line() -> list:
+def evicted_line() -> list[JournalLine]:
     return [["evicted", EVICTED_THROUGH]] if math.isfinite(EVICTED_THROUGH) else []
 
 
-def encode(lines: list) -> str:
+def encode(lines: list[JournalLine]) -> str:
     return "".join(json.dumps(line) + "\n" for line in lines)
 
 
-def append_lines(path: Path, lines: list) -> None:
+def append_lines(path: Path, lines: list[JournalLine]) -> None:
     with path.open("a") as handle:
         handle.write(encode(lines))
 
 
-def replace_lines(path: Path, lines: list) -> None:
+def replace_lines(path: Path, lines: list[JournalLine]) -> None:
     descriptor, staged = tempfile.mkstemp(dir=path.parent, prefix=path.name)
     with os.fdopen(descriptor, "w") as handle:
         handle.write(encode(lines))
@@ -255,8 +281,8 @@ def restore(path: Path) -> None:
     with JOURNAL_GUARD:
         samples, held, lost, evicted = replay(journal_rows(path), STARTED_AT)
         with GUARD:
-            floor = time.time() - RETENTION_SECONDS
-            current = list(SAMPLES)
+            floor: float = time.time() - RETENTION_SECONDS
+            current: list[Row] = list(SAMPLES)
             SAMPLES.clear()
             for row in [row for row in samples if row[0] >= floor] + current:
                 hold(row)
@@ -265,7 +291,7 @@ def restore(path: Path) -> None:
             HELD_SINCE = max(held, floor) if held is not None else None
             PENDING.clear()
             JOURNAL, STALE = path, True
-            lines = journal_lines(None)
+            lines: list[JournalLine] = journal_lines(None)
         replace_lines(path, lines)
         with GUARD:
             APPENDED, STALE = 0, False
@@ -282,8 +308,9 @@ def persist(stopped: bool = False) -> None:
         with GUARD:
             if JOURNAL is None or not (PENDING or stopped or STALE):
                 return
-            now = time.time()
-            rewrite = STALE or APPENDED + len(PENDING) > SAMPLES.maxlen
+            now: float = time.time()
+            rewrite: bool = STALE or APPENDED + len(PENDING) > SAMPLES.maxlen
+            lines: list[JournalLine]
             if rewrite:
                 lines, APPENDED = journal_lines(now), 0
             else:
@@ -300,9 +327,9 @@ def persist(stopped: bool = False) -> None:
             raise
 
 
-def measured(method: Callable) -> Callable:
+def measured(method: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(method)
-    def request(handler):
+    def request(handler: Any) -> Any:
         if CURRENT.get() is not None:
             return method(handler)
         wall, cpu = time.perf_counter(), time.thread_time()
@@ -337,8 +364,7 @@ def measured(method: Callable) -> Callable:
     return request
 
 
-@contextmanager
-def waiting() -> Iterator[None]:
+@contextmanager\ndef waiting() -> Generator[None, None, None]:
     timing = CURRENT.get()
     wall = time.perf_counter()
     if timing is not None:
@@ -358,7 +384,7 @@ def arrived() -> None:
 
 
 @contextmanager
-def client() -> Iterator[None]:
+def client() -> Generator[None, None, None]:
     timing = CURRENT.get()
     wall = time.perf_counter()
     try:
@@ -369,7 +395,7 @@ def client() -> Iterator[None]:
 
 
 @contextmanager
-def postgres() -> Iterator[None]:
+def postgres() -> Generator[None, None, None]:
     timing = CURRENT.get()
     wall = time.perf_counter()
     try:
@@ -400,12 +426,12 @@ def begin_ledger(connection: sqlite3.Connection, slug: str, statement: str) -> N
         lock(slug) if lock is not None else connection.execute(statement)
 
 
-def snapshot(start: float, end: float) -> tuple[list, dict]:
+def snapshot(start: float, end: float) -> tuple[list[Row], dict[str, Any]]:
     with GUARD:
         rows = [row for row in SAMPLES if start <= row[0] <= end]
         held = held_since()
         lost = [{"start": first, "end": last} for first, last in LOST if first <= end and last >= start]
-        coverage = {
+        coverage: dict[str, Any] = {
             "complete": held <= start and EVICTED_THROUGH < start and not lost,
             "started_at": STARTED_AT,
             "held_since": held,
@@ -416,13 +442,13 @@ def snapshot(start: float, end: float) -> tuple[list, dict]:
         return rows, coverage
 
 
-def records(hours: float, end: float | None, limit: int) -> dict:
+def records(hours: float, end: float | None, limit: int) -> dict[str, Any]:
     end = time.time() if end is None else end
     start = end - hours * 3600
     rows, coverage = snapshot(start, end)
     writes = [row for row in rows if row[1] in WRITES]
     kept = writes[-limit:]
-    routes = {}
+    routes: dict[tuple[Any, Any], dict[str, Any]] = {}
     for ended, method, route, wall, cpu, lock_wait, client_wait, postgres_wait in kept:
         entry = routes.setdefault((method, route), {"method": method, "route": route, "count": 0, "records": []})
         entry["count"] += 1
@@ -446,13 +472,14 @@ def records(hours: float, end: float | None, limit: int) -> dict:
     }
 
 
-def report(hours: float, end: float | None = None) -> dict:
+def report(hours: float, end: float | None = None) -> dict[str, Any]:
     end = time.time() if end is None else end
     start = end - hours * 3600
     rows, coverage = snapshot(start, end)
     writes = [row for row in rows if row[1] in WRITES]
     walls = sorted(row[3] for row in writes)
-    days, routes = {}, {}
+    days: dict[str, int] = {}
+    routes: dict[tuple[Any, Any], dict[str, Any]] = {}
     for ended, method, route, wall, cpu, *_waits in rows:
         entry = routes.setdefault((method, route), {"method": method, "route": route, "count": 0, "cpu_seconds": 0.0})
         entry["count"] += 1
@@ -478,7 +505,7 @@ def report(hours: float, end: float | None = None) -> dict:
     }
 
 
-def reader(query: dict) -> Callable[[], dict]:
+def reader(query: dict[str, list[str]]) -> Callable[[], dict[str, Any]]:
     hours = float(query.get("hours", ["24"])[0])
     end = float(query["end"][0]) if "end" in query else None
     if not math.isfinite(hours) or not 0 < hours <= RETENTION_SECONDS / 3600:
@@ -494,9 +521,9 @@ def reader(query: dict) -> Callable[[], dict]:
     return lambda: records(hours, end, limit)
 
 
-def endpoint(method: Callable) -> Callable:
+def endpoint(method: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(method)
-    def request(handler):
+    def request(handler: Any) -> Any:
         if handler.path.split("?", 1)[0] != "/api/v1/metrics":
             return method(handler)
         if handler.refused():
@@ -514,7 +541,7 @@ def endpoint(method: Callable) -> Callable:
     return request
 
 
-def urlopen(url: str, timeout: float):
+def urlopen(url: str, timeout: float) -> Any:
     from scripts.swarm_ledger import ledger_link
 
     return ledger_link.urlopen(Request(url), timeout)
