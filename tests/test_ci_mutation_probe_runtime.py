@@ -149,6 +149,13 @@ def test_an_early_probe_runs_the_identity_group_alone_when_only_it_owns_split_mu
             "early mutation did not grade its assigned mutants: 1 no tests; 1 without a result; "
             "ran 0.0 s past its -1.0 s budget",
         ),
+        (
+            "",
+            ["killed", "killed", "killed", "no tests"],
+            1080,
+            ValueError,
+            "early mutation did not grade its assigned mutants: 1 not assigned to this shard",
+        ),
     ],
 )
 def test_a_refused_early_probe_names_its_cause(tmp_path, monkeypatch, reason, statuses, budget, error, message):
@@ -157,7 +164,7 @@ def test_a_refused_early_probe_names_its_cause(tmp_path, monkeypatch, reason, st
     plan["splits"]["scripts.a.x_g"] = plan["splits"]["scripts.a.x_f"]
     stats = _shared(tmp_path, plan)
     monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
-    names = ["scripts.a.x_f__mutmut_1", "scripts.a.x_f__mutmut_2", "scripts.a.x_g__mutmut_1"]
+    names = ["scripts.a.x_f__mutmut_1", "scripts.a.x_f__mutmut_2", "scripts.a.x_g__mutmut_1", "scripts.a.x_h__mutmut_1"]
     rows = [{"name": name, "status": status} for name, status in zip(names, statuses)]
     monkeypatch.setattr(runner, "mutate_files", lambda *args: ({"scripts/a.py": rows}, reason))
     with pytest.raises(error) as raised:
