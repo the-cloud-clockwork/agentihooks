@@ -703,9 +703,13 @@ by the engine and does not leave the pass.
 1. Write the call as a function `(tick, get) -> actions` in a module under
    `scripts/tick/steps/`, reading its arguments with `get`.
 2. Add the step name to `budgets.MEASURED` with its measured p95 (or
-   `UNMEASURED_S`) and plan interval, then register `CallStep("<name>", <group>, <order>, held(<call>))`, choosing an
-   order that puts it where its hand written line stood. Use `held` when an
-   exception from the call must still leave the pass.
+   `UNMEASURED_S`) and plan interval, then register
+   `CallStep("<name>", <group>, held(<call>), needs=..., reads=..., writes=..., lane=..., effects=..., feature=...)`,
+   passing every field even at its default, because the
+   [tick pattern gate](tick-pattern-gate.md) refuses a step missing any of
+   them. The registry keeps registration order and orders steps further by
+   their needs, so register it where its hand written line stood. Use `held` when an exception from the
+   call must still leave the pass.
 3. Import the module in `scripts.swarm.tick` so it registers before the first
    pass, delete the hand written line, and add `tasks.raise_held(box)` after the
    group site if the site is new.
@@ -723,7 +727,19 @@ def _example(tick: Any, get: Callable[[str], Any]) -> Any:
     return tick.skip_refused(tick.example.run, get("slug"), get("store"), get("doc"))
 
 
-registry.register(CallStep("example", TASK_PASSES, 60, held(_example)))
+registry.register(
+    CallStep(
+        "example",
+        TASK_PASSES,
+        held(_example),
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=CallStep.lane,
+        effects=frozenset(),
+        feature="swarm-tick-example",
+    )
+)
 ```
 
 ## Tests
