@@ -9,6 +9,7 @@ from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2.runtime import codex
+from scripts.tick.steps import agents as agent_steps
 from tests.swarm import test_tick
 
 pytestmark = pytest.mark.unit
@@ -103,7 +104,7 @@ def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
     with timing.tick("sw"):
         tick("sw", store, ledger, runtime, now_ms=2_000)
     rows = finished(capsys)
-    reap = next(row for row in rows if row["step"] == timing.named(tick_module.agent_steps._reap))
+    reap = next(row for row in rows if row["step"] == timing.named(agent_steps._reap))
     inside = [row for row in rows if reap["started"] <= row["started"] and row is not reap]
     inside = [row for row in inside if row["started"] + row["wall_s"] <= reap["started"] + reap["wall_s"]]
     pass_wide = [timing.named(tick_module._live_names), timing.named(legacy_agents)]
@@ -136,7 +137,7 @@ def test_a_reap_pass_goes_on_to_the_next_agent_after_a_skipped_one(store, capsys
         monkeypatch.setattr(reconciler, "legacy_agents", lambda *_: agents)
         capsys.readouterr()
         with timing.tick("sw"):
-            tick_module.agent_steps._reap("sw", store, ledger, runtime, rows, 2_000)
+            agent_steps._reap("sw", store, ledger, runtime, rows, 2_000)
         return [row.get("agent") for row in finished(capsys) if row["step"] == timing.named(tick_module._watch_agent)]
 
     alone = watched(live)

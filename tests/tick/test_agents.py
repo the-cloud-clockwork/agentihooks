@@ -11,6 +11,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import AGENTS, PASS, TASKS, CallStep, actions, actions_of, agents
+from scripts.tick.steps import agents as agent_steps
 
 pytestmark = pytest.mark.unit
 
@@ -55,13 +56,13 @@ def _fakes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[Any, ...]]]
         call.__qualname__ = name
         return call
 
-    monkeypatch.setattr(tick_module.agent_steps, "_reap", fake("reap", ["reaped"]))
+    monkeypatch.setattr(agent_steps, "_reap", fake("reap", ["reaped"]))
     monkeypatch.setattr(tick_module.resume, "recover_outages", fake("recover", ["recovered"]))
-    monkeypatch.setattr(tick_module.agent_steps, "_strays", fake("strays", ["stray"]))
+    monkeypatch.setattr(agent_steps, "_strays", fake("strays", ["stray"]))
     monkeypatch.setattr(tick_module.failed_panes, "sweep", fake("panes", ["pane"]))
-    monkeypatch.setattr(tick_module.agent_steps, "_orphans", fake("orphans", ["orphan"]))
-    monkeypatch.setattr(tick_module.agent_steps, "_conversations", fake("conversations", None))
-    monkeypatch.setattr(tick_module.agent_steps, "_session_models", fake("models", ["model"]))
+    monkeypatch.setattr(agent_steps, "_orphans", fake("orphans", ["orphan"]))
+    monkeypatch.setattr(agent_steps, "_conversations", fake("conversations", None))
+    monkeypatch.setattr(agent_steps, "_session_models", fake("models", ["model"]))
     monkeypatch.setattr(tick_module.transfers, "observe", fake("transfers", ["transfer"]))
     return seen
 

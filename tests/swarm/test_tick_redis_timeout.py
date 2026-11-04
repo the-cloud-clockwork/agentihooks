@@ -5,6 +5,7 @@ from scripts.swarm import tick as tick_module
 from scripts.swarm import timing
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import skip_refused, tick
+from scripts.tick.steps import agents as agent_steps
 from tests.swarm.test_tick import FakeRuntime, tasks
 
 
@@ -32,10 +33,8 @@ class TimingOutRuntime(FakeRuntime):
 def test_a_redis_timeout_in_the_conversations_step_lets_the_pass_finish(store, monkeypatch, capsys):
     observed, models, closed, failures = [], [], [], []
     monkeypatch.setattr(transfers, "observe", lambda *args: observed.append(args[1]))
-    real_models = tick_module.agent_steps._session_models
-    monkeypatch.setattr(
-        tick_module.agent_steps, "_session_models", lambda *args: models.append(args) or real_models(*args)
-    )
+    real_models = agent_steps._session_models
+    monkeypatch.setattr(agent_steps, "_session_models", lambda *args: models.append(args) or real_models(*args))
     real_close = tick_module._close_space
     monkeypatch.setattr(tick_module, "_close_space", lambda *args: closed.append(args[0]) or real_close(*args))
     runtime = TimingOutRuntime()
