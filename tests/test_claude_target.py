@@ -416,6 +416,17 @@ def test_remove_managed_keys_returns_false_and_deletes_the_file_when_nothing_ope
 
 
 @pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_managed_keys_tolerates_a_marker_the_recorded_leaves_already_removed():
+    from scripts.targets.claude_target import SETTINGS_RECORD_KEY, ClaudeAdapter, remove_managed_keys
+
+    path = ClaudeAdapter().write_settings({install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE})
+    assert install.MANAGED_BY_KEY in install._load_state()[SETTINGS_RECORD_KEY]["leaves"]
+
+    assert remove_managed_keys(path) is False
+    assert not path.exists()
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
 def test_enabled_plugins_reads_bundle_user_and_shared_separately(tmp_path):
     from scripts.targets.claude_target import enabled_plugins
 
