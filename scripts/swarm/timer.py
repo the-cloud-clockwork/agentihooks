@@ -308,7 +308,8 @@ def _proven():
         return False
 
 
-def schedule():
+def schedule(caller: str) -> bool:
+    """Register the swarm tick cron and make sure a scheduler serves it, naming ``caller`` in what it prints."""
     from scripts.events import state
     from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
@@ -316,9 +317,13 @@ def schedule():
     try:
         scheduled_tick.ensure(Scheduler())
     except state.unavailable() as exc:
-        print(f"the scheduled swarm tick could not be registered: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(
+            f"the scheduled swarm tick could not be registered for {caller}: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
         return False
-    supervise()
+    if supervise():
+        print(f"started the scheduler for {caller}", file=sys.stderr)
     return True
 
 
@@ -415,7 +420,7 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
         for name in [*_services(expected), f"{WAITS}.timer", *([f"{UNIT}.timer"] if kept else [])]
     ]
-    return schedule() and all(proc.returncode == 0 for proc in procs)
+    return schedule("the swarm timer install") and all(proc.returncode == 0 for proc in procs)
 
 
 def guard(binary, unit_dir=None, run=subprocess.run):
@@ -451,7 +456,7 @@ def reconcile(binary, unit_dir=None, run=subprocess.run):
         names = [*_services(expected), f"{WAITS}.timer"]
         enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
         if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):
-            return schedule()
+            return schedule("the swarm timer reconcile")
     return ensure(binary, unit_dir, run)
 
 
