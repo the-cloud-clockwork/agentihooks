@@ -58,11 +58,13 @@ def test_a_late_view_keeps_events_metrics_and_heartbeat_running(
             assert release.wait(30.0)
         return refreshed
 
-    def group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
+    def group(
+        name: str, ctx: Context, steps: Any = None, apply: Any = None, finished: Any = None
+    ) -> tuple[engine.StepRecord, ...]:
         if name == "wrapper view" and outcome == engine.HELD:
             records = (engine.StepRecord("tick view", 0.0, 0.01, held=True),)
         else:
-            records = real(name, ctx)
+            records = real(name, ctx, steps, apply, finished)
         seen.append((name, ctx, records))
         return records
 
@@ -85,6 +87,6 @@ def test_a_late_view_keeps_events_metrics_and_heartbeat_running(
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
     finally:
         release.set()
-        worker = engine._RUNNING.get("tick view")
+        worker = engine._RUNNING.get(("sw", "tick view"))
         if worker is not None:
             worker.join(30.0)

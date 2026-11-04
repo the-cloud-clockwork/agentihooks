@@ -14,7 +14,9 @@ from scripts.swarm.stack import PORT_ERRORS
 from scripts.swarm.store import RedisStore
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.ports.source_control import OpenChange, RollupCheck
+from scripts.tick.step import Domain, Write
 
 MIN_OTHERS = 3
 PULL = re.compile(r"https://github\.com/([^/]+/[^/]+)/pull/\d+")
@@ -27,8 +29,11 @@ NOTICE = (
     "most other open pull requests. It is claimed again once those checks stop failing elsewhere."
 )
 
+LISTINGS = Domain("fleet red listings")
+
 Pulls = Sequence[OpenChange]
 Reader = Callable[[str], Pulls]
+Listed = tuple[Pulls | None, tuple[Write, ...]]
 
 
 def failing(pull: OpenChange) -> set[str]:
@@ -51,49 +56,96 @@ def repository(url: str) -> str:
     return found.group(1) if found else ""
 
 
-def read(repo: str, ports: Callable[[str], SourceControl] = panic.port) -> Pulls:
-    """List the repository's open pull requests with their check rollups through its source control port."""
-    return ports(repo).open_changes(deadline=Deadline.after(SECONDS))
+def read(repo: str, ports: Callable[[str], SourceControl] = panic.port, *, deadline: Deadline | None = None) -> Pulls:
+    """List the repository's open pull requests through its source control port, bounded by the caller's deadline
+    and the listing's own seconds, whichever ends first."""
+    bound = Deadline.after(SECONDS) if deadline is None else deadline.child(SECONDS)
+    return ports(repo).open_changes(deadline=bound)
 
 
-class Saved(Protocol):
-    """The Redis calls the listing cache makes."""
+class _Saved(Protocol):
+    """The Redis calls the listing cache and its saver make."""
 
     def get(self, name: str) -> str | bytes | None:
         """Return the value saved under the name, none when nothing is saved."""
         ...
 
-    def set(self, name: str, value: str, *, ex: int) -> object:
-        """Save the value under the name for ex seconds."""
+    def set(self, name: str, value: str, **kwargs: int | bool) -> object:
+        """Save the value under the name, for ex seconds and only while nothing is saved there when nx holds."""
         ...
 
 
 class Listings(Protocol):
     """The swarm store parts the listing cache reads."""
 
-    redis: Saved
+    redis: _Saved
 
     def key(self, slug: str, *parts: str) -> str:
         """Name a swarm key."""
         ...
 
 
-def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) -> Pulls | None:
-    """Return the repository's open pull requests saved in the last ten minutes, else list and save them, a failed listing as none."""
+def cached(store: Listings, slug: str, repo: str, reader: Reader | None = None) -> Listed:
+    """Return the repository's open pull requests saved in the last ten minutes with no save, else list them.
+
+    A fresh listing comes back with the write that saves it, a failed listing as none; the engine's applier saves it.
+    """
     key = store.key(slug, f"fleet-red-pulls:{repo}")
     saved = store.redis.get(key)
     if saved is not None:
-        rows = json.loads(saved)
-        if rows is None:
-            return None
-        return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows)
+        return _decoded(saved), ()
     try:
         pulls: Pulls | None = tuple((reader or read)(repo))
     except ERRORS:
         pulls = None
     listing = None if pulls is None else [[p.url, [[c.name, c.result, c.at] for c in p.checks]] for p in pulls]
-    store.redis.set(key, json.dumps(listing), ex=TTL)
-    return pulls
+    return pulls, (Write(LISTINGS, key, json.dumps(listing)),)
+
+
+def _decoded(saved: str | bytes) -> Pulls | None:
+    """Return the open pull requests of a saved listing, none when the save records a failed listing."""
+    rows = json.loads(saved)
+    if rows is None:
+        return None
+    return tuple(OpenChange(url, tuple(RollupCheck(*check) for check in checks)) for url, checks in rows)
+
+
+def saved_reader(store: Listings, slug: str) -> Reader:
+    """Return a reader serving the repository's saved listing, listing it live without saving when none is saved."""
+    return partial(_saved_or_read, store, slug)
+
+
+def _saved_or_read(store: Listings, slug: str, repo: str) -> Pulls:
+    """Return the saved listing of ``repo``, nothing for a saved failed listing, else its live listing."""
+    saved = store.redis.get(store.key(slug, f"fleet-red-pulls:{repo}"))
+    if saved is None:
+        return read(repo)
+    return _decoded(saved) or ()
+
+
+def saver(store: Listings) -> Callable[[Write], None]:
+    """Return the listings applier: it saves a listing for ten minutes only while no listing is saved under its key."""
+    return partial(_save, store)
+
+
+def _save(store: Listings, write: Write) -> None:
+    """Save the listing of ``write`` unless another pass saved one since the step read none.
+
+    A Redis timeout drops the write as a conflict, so the next pass lists and saves it again.
+    """
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    try:
+        saved = store.redis.set(write.key, str(write.value), ex=TTL, nx=True)
+    except RedisTimeoutError as exc:
+        raise RevisionConflict(f"Redis timed out saving the listing under {write.key}") from exc
+    if not saved:
+        raise RevisionConflict(f"another pass saved the listing under {write.key} since the step read none")
+
+
+def _unsaved(reader: Reader, repo: str) -> Listed:
+    """Return the reader's listing of ``repo`` with nothing to save."""
+    return reader(repo), ()
 
 
 def shared(pulls: Pulls, url: str, now_ms: int) -> set[str]:
@@ -129,15 +181,19 @@ def checker(reader: Reader | None = None, clock: Callable[[], float] = time.time
     return admits
 
 
-def notice_pass(
+def holds(
     slug: str,
     store: RedisStore,
-    ledger: Any,
     rows: dict[str, dict[str, Any]],
     now_ms: int,
     reader: Reader | None = None,
-) -> list[str]:
-    """Post one notice per unclaimed open task newly held by fleet red, and forget holds that lifted."""
+) -> tuple[list[tuple[str, str, str]], list[str], list[Write]]:
+    """Return the task, pull request and red checks of each unclaimed open task newly held, the lifted hold keys and
+    the listing saves.
+
+    A task whose hold was already noticed is left out, so the pass posts nothing for it. Nothing is posted, forgotten
+    or saved.
+    """
     unclaimed = [
         task["id"]
         for task in rows.values()
@@ -146,26 +202,37 @@ def notice_pass(
     waiting = set(unclaimed) - store.claimed(slug, unclaimed)
     cleared = [store.key(slug, f"fleet-red:{task['id']}") for task in rows.values() if task["id"] not in waiting]
     listings: dict[str, Pulls | None] = {}
-    fetch: Callable[[str], Pulls | None] = reader or partial(cached, store, slug)
-    actions = []
+    fetch: Callable[[str], Listed] = partial(_unsaved, reader) if reader else partial(cached, store, slug)
+    found: list[tuple[str, str, str]] = []
+    saves: list[Write] = []
     for task_id in [task_id for task_id in unclaimed if task_id in waiting]:
         url, key = rows[task_id]["pr_url"], store.key(slug, f"fleet-red:{task_id}")
         repo = repository(url)
         if repo not in listings:
             try:
-                listings[repo] = fetch(repo) if repo else []
+                listings[repo], listed = fetch(repo) if repo else ([], ())
             except ERRORS:
-                listings[repo] = None
+                listings[repo], listed = None, ()
+            saves.extend(listed)
         pulls = listings[repo]
         if pulls is None:
             continue
         if not held(pulls, url, now_ms):
             cleared.append(key)
             continue
-        if store.redis.set(key, url, nx=True):
-            checks = ", ".join(sorted(own(pulls, url)))
-            ledger.notice(slug, task_id, NOTICE.format(url=url, checks=checks))
-            actions.append(f"task {task_id} held unclaimed, {url} is red only from {checks}")
-    if cleared:
-        store.redis.delete(*cleared)
-    return actions
+        if not store.redis.exists(key):
+            found.append((task_id, url, ", ".join(sorted(own(pulls, url)))))
+    return found, cleared, saves
+
+
+def post(slug: str, store: RedisStore, ledger: Any, task_id: str, url: str, checks: str) -> str:
+    """Post the hold notice of ``task_id`` once, returning its action, or nothing when it was already posted."""
+    if not store.redis.set(store.key(slug, f"fleet-red:{task_id}"), url, nx=True):
+        return ""
+    ledger.notice(slug, task_id, NOTICE.format(url=url, checks=checks))
+    return held_action(task_id, url, checks)
+
+
+def held_action(task_id: str, url: str, checks: str) -> str:
+    """Return the action line naming the hold fleet red puts on ``task_id``."""
+    return f"task {task_id} held unclaimed, {url} is red only from {checks}"

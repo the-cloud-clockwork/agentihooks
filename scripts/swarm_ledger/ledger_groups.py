@@ -4,6 +4,7 @@ The lead lists `group_members`; each member carries `merged_into` and leaves the
 """
 
 import re
+from typing import Any
 
 from scripts.swarm_ledger import ledger_kinds, ports
 
@@ -19,13 +20,17 @@ ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError(f"{op['op']} needs `by`, an agent name other than operator")
     if op["op"] == "task_ungroup":
-        if set(op) != {"op", "id", "by", "item"} or not ITEM_RE.match(str(op["item"])):
-            raise ValueError("task_ungroup takes only an id, by and an item tasks/<lead id>")
+        if set(op) - {"if_match"} != {"op", "id", "by", "item"} or not ITEM_RE.match(str(op["item"])):
+            raise ValueError("task_ungroup takes only an id, by, an item tasks/<lead id> and an if_match")
+        expected = op.get("if_match", {"group_members": []})
+        members = expected.get("group_members") if isinstance(expected, dict) else None
+        if not isinstance(members, list) or set(expected) != {"group_members"} or not _task_ids(members):
+            raise ValueError("task_ungroup if_match holds only group_members, a list of task ids")
         return
     if set(op) != {"op", "id", "by", "item", "members"} or not ITEM_RE.match(str(op["item"])):
         raise ValueError("task_group takes only an id, by, an item tasks/<lead id> and members")
@@ -40,6 +45,11 @@ def check(op):
         raise ValueError("members must list distinct task ids other than the lead")
     if len(members) + 1 > MAX_TASKS:
         raise ValueError(f"a group holds at most {MAX_TASKS} tasks")
+
+
+def _task_ids(members: list[Any]) -> bool:
+    """Whether every member is a task id."""
+    return all(isinstance(m, str) and ID_RE.match(m) for m in members)
 
 
 def refusal(tasks: list[dict], known: dict, ceiling: int = CEILING) -> str:
@@ -104,10 +114,13 @@ def _group(known, op, ctx):
     return True
 
 
-def _ungroup(known, op, ctx):
+def _ungroup(known: dict[str, dict[str, Any]], op: dict[str, Any], ctx: Any) -> bool:
     lead_id = op["item"].split("/")[1]
     if not known.get(lead_id, {}).get("group_members"):
         ctx.refused.append(f"{op['item']} leads no group")
+        return False
+    if "if_match" in op and known[lead_id]["group_members"] != op["if_match"]["group_members"]:
+        ctx.refused.append(f"{op['item']} changed its group members")
         return False
     released = [m for m in known[lead_id].pop("group_members") if known.get(m, {}).get("merged_into") == lead_id]
     ctx.stamp(f"{op['item']}/group_members", op["by"])

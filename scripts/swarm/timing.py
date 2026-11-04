@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from scripts.swarm import tick_stop
+from scripts.tick import metrics as tick_metrics
 
 HISTORY_LIMIT = 50000
 PASS: ContextVar[dict[str, Any] | None] = ContextVar("tick_pass", default=None)
@@ -95,6 +96,7 @@ def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     finally:
         try:
             record.update(end_ms=time.time_ns() // 1000000, wall_s=time.perf_counter() - started)
+            tick_metrics.pass_finished(slug, record)
             finish_pass(store, slug, record)
         finally:
             PASS.reset(token)
@@ -141,6 +143,7 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
     except BaseException as exc:
         outcome = "error"
         record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
+        record.update(getattr(exc, "step_fields", dict)())
         if report and (record_failure := ON_FAILURE.get()):
             record_failure(name, exc)
         raise
@@ -156,6 +159,7 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
             reaped_child_cpu_s=(child_end.ru_utime - child.ru_utime) + (child_end.ru_stime - child.ru_stime),
         )
         emit(sys.stderr, json.dumps(record))
+        tick_metrics.step_finished(slug, record)
         if outcome != "success" and (current := PASS.get()) is not None:
             current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:
@@ -178,12 +182,17 @@ def call(function: Callable, *args, **kwargs) -> Any:
         return function(*args, **kwargs)
 
 
-def within(budget_s: float, function: Callable[..., Any], *args: Any) -> Any:
-    """Run ``function`` as a timed step whose record carries ``budget_s`` and reads late when it overruns."""
+def within(
+    budget_s: float, function: Callable[..., Any], *args: Any, lane: str | None = None, name: str | None = None
+) -> Any:
+    """Run ``function`` as a timed step recorded as ``name``, else as the function's own name, whose record carries
+    ``budget_s``, its ``lane`` when given, and reads late when it overruns."""
     keep()
-    with step(named(function)) as record:
+    with step(name or named(function)) as record:
         if record is not None:
             record["budget_s"] = budget_s
+            if lane is not None:
+                record["lane"] = lane
         started = time.monotonic()
         result = function(*args)
         if record is not None:

@@ -107,31 +107,55 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
 
 
 def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert [(step.name, step.group, step.order) for step in report.STEPS] == [
-        ("ledger event pass", "wrapper events", 10),
-        ("done recheck", "wrapper events", 20),
-        ("progress checks", "wrapper events", 30),
-        ("waits end", "wrapper events", 40),
-        ("merge pass", "wrapper events", 50),
-        ("stall watch", "wrapper events", 60),
-        ("overrun pass", "wrapper events", 70),
-        ("quiet pass", "wrapper events", 80),
-        ("doc report", "wrapper events", 90),
-        ("priorities sweep", "wrapper events", 100),
-        ("health findings", "wrapper events", 110),
-        ("findings pass", "wrapper events", 120),
-        ("metrics record", "wrapper metrics", 10),
-        ("bottleneck status", "wrapper metrics", 20),
-        ("inbox wake", "wrapper metrics", 30),
-        ("snapshot job", "wrapper metrics", 40),
-        ("last tick", "wrapper metrics", 50),
-        ("heartbeat", "after", 10),
-        ("status publish", "wrapper status", 10),
+    assert [(step.name, step.group) for step in report.STEPS] == [
+        ("ledger event pass", "wrapper events"),
+        ("done recheck", "wrapper events"),
+        ("progress checks", "wrapper events"),
+        ("waits end", "wrapper events"),
+        ("merge pass", "wrapper events"),
+        ("stall watch", "wrapper events"),
+        ("overrun pass", "wrapper events"),
+        ("quiet pass", "wrapper events"),
+        ("doc report", "wrapper events"),
+        ("priorities sweep", "wrapper events"),
+        ("health findings", "wrapper events"),
+        ("findings pass", "wrapper events"),
+        ("metrics record", "wrapper metrics"),
+        ("bottleneck status", "wrapper metrics"),
+        ("inbox wake", "wrapper metrics"),
+        ("snapshot job", "wrapper metrics"),
+        ("last tick", "wrapper metrics"),
+        ("heartbeat", "after"),
+        ("status publish", "wrapper status"),
     ]
     registered = [step for wave in registry.waves() for step in wave]
     for step in report.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
+        assert step.budget_s == budgets.timing_of(step.name)[0]
+
+
+def test_the_ledger_github_findings_and_metrics_steps_run_in_the_slow_lane() -> None:
+    lanes = {step.name: step.lane for step in report.STEPS}
+    assert {name for name, lane in lanes.items() if lane == engine.SLOW} == {
+        "ledger event pass",
+        "done recheck",
+        "progress checks",
+        "waits end",
+        "merge pass",
+        "doc report",
+        "priorities sweep",
+        "health findings",
+        "findings pass",
+        "metrics record",
+        "bottleneck status",
+    }
+    assert {lane for lane in lanes.values() if lane != engine.SLOW} == {CallStep.lane}
+
+
+def test_a_call_step_keeps_the_lane_it_is_given() -> None:
+    call = host.held(lambda cli, get: None)
+    assert CallStep("heartbeat", "g", call).lane == "tick"
+    assert CallStep("heartbeat", "g", call, lane=engine.SLOW).lane == "slow"
 
 
 def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -205,13 +229,26 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
 
 def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
     needs = {step.name: step.needs for step in report.STEPS if step.needs}
+    viewed = frozenset({"tick view"})
     assert needs == {
+        "ledger event pass": viewed,
+        "done recheck": viewed,
+        "progress checks": viewed,
+        "waits end": viewed,
+        "merge pass": viewed,
+        "stall watch": viewed | {"page relay"},
         "overrun pass": frozenset({"stall watch"}),
+        "priorities sweep": viewed,
+        "health findings": viewed,
         "findings pass": frozenset({"health findings"}),
         "metrics record": frozenset({"health findings"}),
+        "inbox wake": frozenset({"page relay"}),
+        "status publish": frozenset({"health findings"}),
     }
-    assert {step.needs for step in host.STEPS} == {frozenset()}
-    assert CallStep("heartbeat", "g", 1, host.held(lambda cli, get: None)).needs == frozenset()
+    assert {step.name: step.needs for step in host.STEPS if step.needs} == {
+        "planning after phase": frozenset({"planning and phase pass"})
+    }
+    assert CallStep("heartbeat", "g", host.held(lambda cli, get: None)).needs == frozenset()
 
 
 def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -224,4 +261,11 @@ def test_the_status_publish_hands_over_the_doc_and_view(monkeypatch: pytest.Monk
     calls: list[tuple[Any, ...]] = []
     failure = RuntimeError("tick failed")
     assert _run("wrapper status", calls, _pass(failure=failure), monkeypatch) == []
-    assert calls == [("publish", STORE, "sw", DOC, "view", failure)]
+    assert calls == [("publish", STORE, "sw", DOC, "view", failure, None)]
+
+
+def test_the_status_publish_hands_over_the_findings_the_health_step_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    found = [{"kind": "stale"}]
+    assert _run("wrapper status", calls, _pass({"found": found}), monkeypatch) == []
+    assert calls == [("publish", STORE, "sw", DOC, "view", None, found)]

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1managed:5bb031e44fce1d2c555f373c03a7e1822bf226229e26a3a96a34b9d05d3294e2": {
+    "reader": "standards-reader",
+    "reason": "typing.cast ignores its type argument and returns row.value unchanged. Replacing dict[str, Any] with None leaves the name lookup, comparison, returned boolean and exceptions identical."
+  }
+}

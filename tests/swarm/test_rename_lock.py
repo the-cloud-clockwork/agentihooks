@@ -73,9 +73,9 @@ def test_a_rename_holds_the_tick_lock_for_the_rename_lock_time(store, monkeypatc
     taken = []
     take = controller.take_tick_lock
 
-    def spy(store, slug, held, ttl_ms):
-        taken.append(ttl_ms)
-        return take(store, slug, held, ttl_ms)
+    def spy(store, slug, held, ttl_ms, caller):
+        taken.append((ttl_ms, caller))
+        return take(store, slug, held, ttl_ms, caller)
 
     def herdr(args):
         raise SwarmError("pane gone")
@@ -83,7 +83,7 @@ def test_a_rename_holds_the_tick_lock_for_the_rename_lock_time(store, monkeypatc
     monkeypatch.setattr(controller, "take_tick_lock", spy)
     with pytest.raises(SwarmError, match="pane gone"):
         rename_swarm(store, "sw", LEDGER, SimpleNamespace(herdr=herdr), 10)
-    assert taken == [LOCK_MS]
+    assert taken == [(LOCK_MS, "rename")]
 
 
 def test_a_rename_leaves_a_tick_lock_it_lost_to_another_holder(store):

@@ -3,7 +3,9 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from datetime import date, datetime
+from typing import Any
 
 from scripts.agents_quota import page_quota
 from scripts.gates import catalog, lift, modes, progress
@@ -41,6 +43,7 @@ from scripts.swarm import (
 from scripts.swarm.health import (
     activity,
     checks,
+    early_ends,
     merge_stall,
     night_watch,
     prompt_backlog,
@@ -145,6 +148,7 @@ def findings(store, slug, config, tasks, events, view=None):
         + urgent_hold.findings(store, slug)
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
+        + early_ends.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
     )
     found = outage.hold_findings(store, slug, found, agents)
     if ledger_probe.holding(store, slug):
@@ -286,7 +290,14 @@ def agent_hive(agent: AgentRecord) -> str:
     return agent.hive or reports.host(agent) or (hive_id() if agent.runtime_backend == "local" else "")
 
 
-def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None, view=None) -> dict:
+def status_report(
+    store: RedisStore,
+    slug: str,
+    state: dict[str, Any],
+    runtime: Runtime | None = None,
+    view: Callable[[str], Any] | None = None,
+    found: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     from scripts.hive import join_report
     from scripts.swarm import capacity, tick_activity
 
@@ -331,7 +342,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),
         "spawns": store.spawns(slug),
-        "findings": findings(store, slug, config, tasks, events, view),
+        "findings": found if found is not None else findings(store, slug, config, tasks, events, view),
         "launch_checks": launch_check.reports(store, slug),
         "failed_launch_panes": failed_panes.report(store, slug),
         "auto_snapshot": auto_snapshot(config),

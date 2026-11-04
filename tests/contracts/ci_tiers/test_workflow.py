@@ -23,11 +23,38 @@ UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-requir
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = (
     UNIT
-    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation", "writer-lock"}
+    | {
+        "select",
+        "lint",
+        "semgrep",
+        "sonar",
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
+        "mutation-shard",
+        "mutation",
+        "writer-lock",
+    }
     | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
 )
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
-PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}) | {
+PROMOTION = (
+    PULL_REQUEST
+    - {
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
+        "mutation-shard",
+        "mutation",
+        "lint",
+        "semgrep",
+        "test-count",
+    }
+) | {
     "queue-fail-fast",
     "reuse",
     "coverage-ratchet",
@@ -103,6 +130,8 @@ def jobs_for(event, base_ref="dev", scope="full"):
                     shards="[0, 1]",
                     stats_parts="[0, 1]",
                     sonar="run",
+                    probe="true",
+                    probe_shards="[0, 1]",
                 ),
             )
             del pending[name]
@@ -163,7 +192,15 @@ def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards() -> 
 
 def test_main_pull_requests_keep_their_nonmutation_checks() -> None:
     expected = PULL_REQUEST | _planned_jobs("pull_request")
-    assert jobs_for("pull_request", "main") == expected - {"mutation-plan", "mutation-stats", "mutation"}
+    assert jobs_for("pull_request", "main") == expected - {
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
+        "mutation-shard",
+        "mutation",
+    }
 
 
 def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_promotion_form() -> None:

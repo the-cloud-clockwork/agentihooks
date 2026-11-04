@@ -12,7 +12,16 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.killers import KillMemory, is_direct
 from scripts.ci_mutation.mutant_shards import function_name
-from scripts.ci_mutation.plan import BATCH_RUNNERS, MUTANT_SECONDS, shard_count, shard_workers
+from scripts.ci_mutation.plan import (
+    BATCH_RUNNERS,
+    MUTANT_SECONDS,
+    RUNNER_WAVES,
+    SHARD_CEILING,
+    SHARD_SETUP_SECONDS,
+    shard_capacity,
+    shard_count,
+    shard_workers,
+)
 from scripts.ci_mutation.scope import discover_changes, select_tests
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -20,7 +29,7 @@ from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 # Traced test seconds: every unit of a split mutant reruns the fastest tests, where most mutants die, then one slice.
 HEAD_SECONDS = 20.0
 SLICE_SECONDS = 120.0
-SHARD_LIMIT = 10
+PROBE_SECONDS = 120.0
 
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
@@ -104,6 +113,7 @@ def split_tests(
         "head": sorted(head),
         "slices": [sorted(chosen) for chosen in slices],
         "costs": [MUTANT_SECONDS + 1.25 * (spent + load) for load in loads],
+        "head_seconds": spent,
     }
 
 
@@ -129,7 +139,7 @@ def measured_splits(
             costs = [
                 MUTANT_SECONDS + 1.25 * (spent + sum(seconds[node] for node in chosen)) for chosen in kept["slices"]
             ]
-            splits[function] = {**kept, "costs": costs}
+            splits[function] = {**kept, "costs": costs, "head_seconds": spent}
         elif split:
             splits[function] = split
         if early := [
@@ -161,10 +171,10 @@ def plan_shards(
     costs: dict[str, float],
     target: float = 240,
     limit: int = 10,
-    splits: dict | None = None,
-    unit_costs: dict | None = None,
+    splits: dict[str, Any] | None = None,
+    unit_costs: dict[str, list[float]] | None = None,
     budget: float = 1080,
-) -> dict:
+) -> dict[str, Any]:
     splits = splits or {}
     units = {
         name: (unit_costs or {}).get(name, splits[function]["costs"])
@@ -179,11 +189,11 @@ def plan_shards(
     seconds = sum(costs[name] for name in sorted(costs))
     widest = max(map(len, units.values()), default=1)
     count = max(min(limit, widest), shard_count(seconds, len(items), target, limit, budget))
-    ceiling = max(count, min(BATCH_RUNNERS, len(items)))
+    ceiling = max(count, min(SHARD_CEILING, len(items)))
     fits = (
         count
         for count in range(count, ceiling)
-        if max(assign_units(items, units, count)[1]) <= shard_workers() * budget
+        if max(assign_units(items, units, count)[1]) <= shard_capacity(shard_workers(), budget)
     )
     count = next(fits, ceiling)
     assignments, loads = assign_units(items, units, count)
@@ -200,12 +210,34 @@ def plan_shards(
     }
 
 
+def probe_shard_count(plan: dict[str, Any]) -> int:
+    """Size the early stage so each job runs its share of split mutant heads within the early wall target."""
+    heads = [
+        MUTANT_SECONDS + 1.25 * plan["splits"][function]["head_seconds"]
+        for name in plan["assignments"]
+        if (function := function_name(name)) in plan["splits"]
+    ]
+    wanted = math.ceil(sum(heads) / (shard_workers() * PROBE_SECONDS))
+    return max(1, min(BATCH_RUNNERS, len(heads), wanted))
+
+
+def observed_unit(memory: KillMemory | None, name: str, split: dict[str, Any], tests: Collection[str]) -> float | None:
+    """Return a unit's observed cost with its head, adding the head estimate to a slice a probed shard ran alone."""
+    if memory is None:
+        return None
+    observed = memory.cost(name, {*split["head"], *tests})
+    if observed is not None:
+        return observed
+    alone = memory.cost(name, tests)
+    return None if alone is None else alone + 1.25 * split.get("head_seconds", 0.0)
+
+
 def measured_plan(
     groups: list[tuple[list[str], list[dict]]],
     memory: KillMemory | None = None,
     limit: int = 10,
     direct: Mapping[str, Collection[str]] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     limit = min(limit, sum(len(names) for names, _ in groups))
     costs, splits, unit_costs = {}, {}, {}
     for names, results in groups:
@@ -218,9 +250,10 @@ def measured_plan(
             split = group_splits[function]
             unit_costs[name] = []
             for tests, fallback in zip(split["slices"], split["costs"], strict=True):
-                observed = memory.cost(name, {*split["head"], *tests}) if memory is not None else None
+                observed = observed_unit(memory, name, split, tests)
                 unit_costs[name].append(observed if observed is not None else split.get("first", fallback))
-    return plan_shards(costs, limit=limit, splits=splits, unit_costs=unit_costs)
+    plan = plan_shards(costs, limit=limit, splits=splits, unit_costs=unit_costs)
+    return {**plan, "probe_shards": probe_shard_count(plan)} if plan["splits"] else plan
 
 
 def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
@@ -263,16 +296,28 @@ def budget_overrun(plan: dict[str, Any], budget: float) -> str:
     """Describe a plan whose slowest shard cannot finish within the shard budget, or return an empty string."""
     slowest: float = max(plan["shard_worker_seconds"])
     workers: int = plan["workers"]
-    if slowest <= workers * budget:
+    shard = shard_capacity(workers, budget)
+    if slowest <= shard:
         return ""
+    units: dict[str, list[float]] = plan.get("unit_costs", {})
+    largest, name = max(
+        [(cost, name) for name, cost in plan["costs"].items() if name not in units]
+        + [(max(costs), name) for name, costs in units.items()]
+    )
+    budgeted = f"against the {budget:.0f} second shard budget less {SHARD_SETUP_SECONDS:.0f} seconds of setup"
+    if largest > shard:
+        return (
+            f"Mutant {name} alone needs {largest:.0f} worker seconds on one shard, {budgeted}, so no shard count"
+            " or pull request split can grade it; shorten or split the tests that cover it."
+        )
     total: float = plan["estimated_worker_seconds"]
-    capacity = SHARD_LIMIT * workers * budget
+    capacity = SHARD_CEILING * shard
     parts = max(2, math.ceil(total / capacity))
     return (
         f"The slowest mutation shard needs {slowest:.0f} worker seconds, {slowest / workers:.0f} seconds on"
-        f" {workers} workers, against the {budget:.0f} second shard budget. The change needs {total:.0f} worker"
-        f" seconds and {SHARD_LIMIT} shards hold at most {capacity:.0f}, so split it into at least {parts} pull"
-        " requests."
+        f" {workers} workers, {budgeted}. The change needs {total:.0f} worker seconds and {SHARD_CEILING} shards in"
+        f" {RUNNER_WAVES} waves of {BATCH_RUNNERS} runners hold at most {capacity:.0f}, so split it into at least"
+        f" {parts} pull requests."
     )
 
 
@@ -297,12 +342,16 @@ def main() -> int:
     print(f"Measured mutation worker seconds: {plan['estimated_worker_seconds']:.1f}")
     print(f"Measured mutation shards: {plan['shards']}; assigned mutants: {len(plan['assignments'])}")
     if overrun := budget_overrun(plan, args.budget):
-        print(f"::error title=Mutation plan over budget::{overrun}")
-        return 1
+        if not plan["splits"] or overrun.startswith("Mutant "):
+            print(f"::error title=Mutation plan over budget::{overrun}")
+            return 1
+        print(f"Before the early stage: {overrun} The replan grades the budget after the early stage.")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(plan['shards'])))}\n")
             stream.write(f"probe={json.dumps(bool(plan['splits']))}\n")
+            if plan["splits"]:
+                stream.write(f"probe_shards={json.dumps(list(range(plan.get('probe_shards', plan['shards']))))}\n")
     return 0
 
 

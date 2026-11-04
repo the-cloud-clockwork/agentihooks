@@ -29,14 +29,16 @@ class View:
 @dataclass
 class FakeStep:
     name: str
-    order: int
     action: Callable[[Context], Result]
     group: str = "tasks"
     lane: Lane = Lane("main")
     budget_s: float = 5.0
     interval_s: float = 0.0
     needs: frozenset[str] = frozenset()
+    reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
     seen: list[Context] = field(default_factory=list)
 
     def run(self, ctx: Context) -> Result:
@@ -66,10 +68,10 @@ def test_run_group_runs_group_steps_in_order_and_continues_after_failure_and_exi
         return action
 
     steps = [
-        FakeStep("third", 3, note("third")),
-        FakeStep("first", 1, note("first", RuntimeError("boom"))),
-        FakeStep("other", 0, note("other"), group="place"),
-        FakeStep("second", 2, note("second", SystemExit(3))),
+        FakeStep("third", note("third"), needs=frozenset({"second"})),
+        FakeStep("first", note("first", RuntimeError("boom"))),
+        FakeStep("other", note("other"), group="place"),
+        FakeStep("second", note("second", SystemExit(3)), needs=frozenset({"first"})),
     ]
     records = engine.run_group("tasks", context(clock), steps)
     assert ran == ["first", "second", "third"]
@@ -88,7 +90,7 @@ def test_overrun_is_recorded_late_and_next_step_still_runs() -> None:
         clock.now += 7.5
         return Result()
 
-    steps = [FakeStep("slow", 1, slow), FakeStep("after", 2, done)]
+    steps = [FakeStep("slow", slow), FakeStep("after", done)]
     records = engine.run_group("tasks", context(clock), steps)
     assert [(record.name, record.outcome) for record in records] == [("slow", engine.LATE), ("after", engine.OK)]
     assert records[0].wall_s == 7.5
@@ -102,7 +104,7 @@ def test_step_exactly_on_budget_is_ok() -> None:
         clock.now += 5.0
         return Result()
 
-    assert engine.run_step(FakeStep("exact", 1, exact), context(clock)).outcome == engine.OK
+    assert engine.run_step(FakeStep("exact", exact), context(clock)).outcome == engine.OK
 
 
 def test_failed_record_carries_wall_time() -> None:
@@ -112,7 +114,7 @@ def test_failed_record_carries_wall_time() -> None:
         clock.now += 2.0
         raise ValueError("bad")
 
-    record = engine.run_step(FakeStep("fail", 1, fail), context(clock))
+    record = engine.run_step(FakeStep("fail", fail), context(clock))
     assert (record.outcome, record.wall_s, record.budget_s, record.error, record.result) == (
         engine.FAILED,
         2.0,
@@ -130,14 +132,14 @@ def test_failed_record_names_the_exception_module() -> None:
     def fail(ctx: Context) -> Result:
         raise StepFault
 
-    record = engine.run_step(FakeStep("fail", 1, fail), context(Clock()))
+    record = engine.run_step(FakeStep("fail", fail), context(Clock()))
     assert record.error == f"{__name__}.StepFault"
 
 
 def test_each_step_gets_its_own_budget_deadline_capped_by_the_group() -> None:
     clock = Clock()
-    roomy = FakeStep("roomy", 1, done, budget_s=5.0)
-    capped = FakeStep("capped", 2, done, budget_s=500.0)
+    roomy = FakeStep("roomy", done, budget_s=5.0)
+    capped = FakeStep("capped", done, budget_s=500.0)
     parent = context(clock, 60.0)
     engine.run_group("tasks", parent, [roomy, capped])
     assert roomy.seen[0].deadline.expires_at == 105.0
@@ -158,21 +160,39 @@ def test_context_changes_inside_a_step_do_not_leak() -> None:
         seen.append(MARK.get())
         return Result()
 
-    engine.run_group("tasks", context(clock), [FakeStep("mark", 1, mark), FakeStep("read", 2, read)])
+    engine.run_group("tasks", context(clock), [FakeStep("mark", mark), FakeStep("read", read)])
     assert seen == ["clean"]
     assert MARK.get() == "clean"
 
 
 def test_step_runs_through_timing_call() -> None:
     clock = Clock()
-    step = FakeStep("timed", 1, done)
+    step = FakeStep("timed", done)
     with mock.patch.object(engine.timing, "within", return_value=Result()) as call:
         record = engine.run_step(step, context(clock))
     budget, function, ctx = call.call_args.args
+    assert call.call_args.kwargs == {"lane": "main", "name": "timed"}
     assert budget == 5.0
     assert function == step.run
     assert ctx.deadline.expires_at == 105.0
     assert record.result == Result()
+
+
+def test_registered_step_records_and_reports_under_its_own_name() -> None:
+    import json
+
+    import fakeredis
+
+    from scripts.swarm import tick_report, timing
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    with timing.tick("sw", store), timing.pass_record(store, "sw"):
+        engine.run_step(FakeStep("spawn", done), context(Clock()))
+    steps = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
+    passes = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:passes"))]
+    assert [row["step"] for row in steps] == ["spawn"]
+    assert [row["step"] for row in tick_report.summarize(passes, steps)["steps"]] == ["spawn"]
 
 
 def test_tick_stop_is_not_swallowed() -> None:
@@ -182,16 +202,16 @@ def test_tick_stop_is_not_swallowed() -> None:
         raise tick_stop.Stopped
 
     with pytest.raises(tick_stop.Stopped):
-        engine.run_step(FakeStep("stop", 1, stop), context(Clock()))
+        engine.run_step(FakeStep("stop", stop), context(Clock()))
 
 
 def test_group_steps_reads_registered_steps_by_default() -> None:
     fresh = registry.Registry()
-    later = FakeStep("later", 2, done)
-    earlier = FakeStep("earlier", 1, done)
+    later = FakeStep("later", done, needs=frozenset({"earlier"}))
+    earlier = FakeStep("earlier", done)
     fresh.register(later)
     fresh.register(earlier)
-    fresh.register(FakeStep("elsewhere", 0, done, group="close"))
+    fresh.register(FakeStep("elsewhere", done, group="close"))
     with mock.patch.object(registry, "registry", fresh):
         assert engine.group_steps("tasks") == (earlier, later)
         assert [record.name for record in engine.run_group("tasks", context(Clock()))] == ["earlier", "later"]

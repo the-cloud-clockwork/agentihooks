@@ -44,7 +44,6 @@ class _Slots:
 
 
 STORE = SimpleNamespace(redis="redis")
-TICK = object()
 
 
 def _pass(box: dict[str, Any] | None = None, **extra: object) -> dict[str, Any]:
@@ -78,11 +77,9 @@ def _cli(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespace
         skip_refused=skip_refused,
         _intent_pass=intent_pass,
         _phase_steps=phase_steps,
+        _planning_after_phase=lambda *args: calls.append(("after", *args)) or ["planned again"],
         relay=relay,
         refresh_job=refresh_job,
-        tick=TICK,
-        routed=lambda herdr: ("routed", herdr),
-        HerdrRuntime=lambda: "herdr",
     )
 
 
@@ -109,26 +106,26 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
 
 
 def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert [(step.name, step.group, step.order) for step in host.STEPS] == [
-        ("inbox relay", "wrapper probes", 10),
-        ("launch slots", "wrapper probes", 20),
-        ("outage probes", "wrapper probes", 30),
-        ("hive ledger", "wrapper probes", 40),
-        ("ledger health", "wrapper probes", 50),
-        ("host pressure", "wrapper health", 10),
-        ("ledger watchdog", "wrapper health", 20),
-        ("ledger probe", "wrapper health", 30),
-        ("prompt backlog", "wrapper health", 40),
-        ("command runner", "wrapper commands", 10),
-        ("urgent hold", "wrapper phases", 10),
-        ("planning and phase pass", "wrapper phases", 20),
-        ("refresh job", "wrapper refresh", 10),
-        ("intent check", "wrapper intent", 10),
-        ("reboot pass", "wrapper reboot", 10),
-        ("tick call", "wrapper reboot", 20),
-        ("outbox migration", "wrapper relay", 10),
-        ("page relay", "wrapper relay", 20),
-        ("tick view", "wrapper view", 10),
+    assert [(step.name, step.group) for step in host.STEPS] == [
+        ("inbox relay", "wrapper probes"),
+        ("launch slots", "wrapper probes"),
+        ("outage probes", "wrapper probes"),
+        ("hive ledger", "wrapper probes"),
+        ("ledger health", "wrapper probes"),
+        ("host pressure", "wrapper health"),
+        ("ledger watchdog", "wrapper health"),
+        ("ledger probe", "wrapper health"),
+        ("prompt backlog", "wrapper health"),
+        ("command runner", "wrapper commands"),
+        ("urgent hold", "wrapper phases"),
+        ("planning and phase pass", "wrapper phases"),
+        ("planning after phase", "wrapper phases"),
+        ("refresh job", "wrapper refresh"),
+        ("intent check", "wrapper intent"),
+        ("reboot pass", "wrapper reboot"),
+        ("outbox migration", "wrapper relay"),
+        ("page relay", "wrapper relay"),
+        ("tick view", "wrapper view"),
     ]
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:
@@ -216,21 +213,21 @@ def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[Any, ...]] = []
-    state = _pass(inbox="inbox", doc="doc")
-    assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked"]
+    box: dict[str, Any] = {}
+    state = _pass(box, inbox="inbox", doc="doc")
+    assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked", "planned again"]
     assert calls == [
         ("call", urgent_hold.observe, STORE, "sw", "doc", 7),
         ("phases", "inbox", STORE, "sw", "doc", "ledger"),
+        ("after", "inbox", STORE, "sw", "ledger", box),
     ]
 
 
-def test_the_tick_call_runs_after_the_reboot_pass_with_the_pass_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
-    assert calls[1] == ("call", TICK, "sw", STORE, "ledger", "runtime", 7)
-    calls.clear()
-    _run("wrapper reboot", calls, _pass(runtime=None), monkeypatch)
-    assert calls[1] == ("call", TICK, "sw", STORE, "ledger", ("routed", "herdr"), 7)
+def test_no_host_step_wraps_the_tick_and_the_reboot_site_holds_only_the_reboot_pass() -> None:
+    registered = [step for wave in registry.waves() for step in wave]
+    assert "tick call" not in {step.name for step in registered}
+    assert "tick call" not in budgets.MEASURED
+    assert [step.name for step in engine.group_steps("wrapper reboot")] == ["reboot pass"]
 
 
 class _Agent:
@@ -289,8 +286,8 @@ def test_the_intent_check_keeps_its_judgement_in_the_box(monkeypatch: pytest.Mon
 
 def test_the_reboot_pass_boots_with_the_fenced_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
-    assert calls[0] == ("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)
+    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1"]
+    assert calls == [("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)]
 
 
 def test_a_raising_step_skips_the_rest_and_raises_at_the_site(monkeypatch: pytest.MonkeyPatch) -> None:

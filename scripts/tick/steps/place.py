@@ -2,27 +2,52 @@
 
 from collections.abc import Callable
 from functools import partial
+from types import MappingProxyType
 from typing import Any
 
+from scripts.swarm import ack_pass, lost_runner, quota_notice, time_left
 from scripts.tick import registry
-from scripts.tick.steps import CallStep, budgets
-from scripts.tick.steps.tasks import held
+from scripts.tick.engine import SLOW
+from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_domains
+from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
 
-__all__ = ["ACKS", "PLACEMENT", "STEPS"]
+__all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
 
 Get = Callable[[str], Any]
+NOTICES = "placement notices"
 ACKS = "placement acks"
 PLACEMENT = "placement"
+PREEMPT_NEEDS = frozenset(
+    {"reap", "drained resume", "recover outages", "retire idle master", "prerequisite reopen", "fleet red notice"}
+)
+RESUMED = frozenset({"drained resume"})
+CONFIG_DOC = pass_domains("config", "doc")
+TASK_STATE = pass_domains("config", "rows", "doc")
+PLACED = frozenset({AGENTS, TASKS})
 
 
-def _spawn_args(get: Get) -> tuple[Any, ...]:
-    keys = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
-    return tuple(get(key) for key in keys)
+_SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
+
+
+def _quota_notice(tick: Any, get: Get) -> Any:
+    keys = ("slug", "config", "store", "ledger", "runtime", "now_ms")
+    return tick.skip_refused(quota_notice.refresh, *map(get, keys))
+
+
+def _lost_runner(tick: Any, get: Get) -> Any:
+    keys = ("slug", "config", "store", "now_ms")
+    return tick.skip_refused(lost_runner.sweep, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
+
+
+def _time_left(tick: Any, get: Get) -> Any:
+    keys = ("slug", "store", "ledger", "runtime", "config", "doc")
+    return tick.skip_refused(time_left.refresh, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _collect_acks(tick: Any, get: Get) -> Any:
     keys = ("slug", "config", "store", "ledger", "runtime", "doc", "now_ms")
-    return tick.skip_refused(tick._collect_acks, *map(get, keys))
+    with ack_pass.collecting(get("store"), get("slug")) as taken:
+        return tick.skip_refused(tick._collect_acks, *map(get, keys)) if taken else []
 
 
 def _codex_hook_order(tick: Any, get: Get) -> Any:
@@ -32,9 +57,8 @@ def _codex_hook_order(tick: Any, get: Get) -> Any:
 
 
 def _rank_pass(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(
-        tick.dispatcher.rank_pass, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
-    )
+    keys = ("slug", "config", "store", "ledger", "doc", "now_ms")
+    return tick.skip_refused(rank_writes, tick, *map(get, keys))
 
 
 def _bottleneck_remedy(tick: Any, get: Get) -> Any:
@@ -59,20 +83,37 @@ def _spawn(tick: Any, get: Get) -> Any:
         and tick.readiness.tick_places(config.engine, get("rows"))
         and tick.panic.state(store) is None
     ):
+        rows = dict(get("rows"))
+        args = tuple(rows if key == "rows" else get(key) for key in _SPAWN_KEYS)
         with tick._placement_pass(get("runtime")):
-            found = tick.skip_refused(tick._spawn, *_spawn_args(get))
+            found = tick.skip_refused(tick._spawn, *args)
+        get("box")["rows"] = MappingProxyType(rows)
         store.redis.delete(get("due"))
         return found
     return []
 
 
 STEPS = (
-    CallStep("collect acks", ACKS, 10, held(_collect_acks)),
-    CallStep("codex hook order", ACKS, 20, held(_codex_hook_order)),
-    CallStep("rank pass", PLACEMENT, 10, held(_rank_pass)),
-    CallStep("bottleneck remedy", PLACEMENT, 20, held(_bottleneck_remedy)),
-    CallStep("preempt", PLACEMENT, 30, held(_preempt)),
-    CallStep("spawn", PLACEMENT, 40, held(_spawn), budgets.SPAWN_NEEDS),
+    CallStep("quota notice", NOTICES, held(_quota_notice), RESUMED, CONFIG_DOC),
+    CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config"), lane=SLOW),
+    CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC, lane=SLOW),
+    CallStep("collect acks", ACKS, held(_collect_acks), RESUMED, CONFIG_DOC),
+    CallStep("codex hook order", ACKS, held(_codex_hook_order), frozenset({"sleeping"}), pass_domains("sleeping")),
+    WriteStep("rank pass", PLACEMENT, held(_rank_pass), writes=frozenset({RANK}), needs=RESUMED, reads=CONFIG_DOC),
+    CallStep(
+        "bottleneck remedy", PLACEMENT, held(_bottleneck_remedy), frozenset({"ledger state"}), pass_domains("doc")
+    ),
+    CallStep(
+        "preempt", PLACEMENT, held(_preempt), PREEMPT_NEEDS, frozenset({AGENTS}) | TASK_STATE, frozenset({AGENTS})
+    ),
+    CallStep(
+        "spawn",
+        PLACEMENT,
+        held(_spawn),
+        budgets.SPAWN_NEEDS,
+        frozenset({AGENTS, TASKS, SWARM}) | TASK_STATE,
+        PLACED | pass_domains("rows"),
+    ),
 )
 
 for _step in STEPS:

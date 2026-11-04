@@ -39,9 +39,9 @@ def _steps(release: Event, read: list[object]) -> tuple[CallStep, CallStep]:
         read.append(get("box")["found"])
         return ["used"]
 
-    writer = CallStep("health findings", GROUP, 10, host.held(write))
+    writer = CallStep("health findings", GROUP, host.held(write))
     writer.budget_s = 0.1
-    reader = CallStep("findings pass", GROUP, 20, host.held(use), frozenset({"health findings"}))
+    reader = CallStep("findings pass", GROUP, host.held(use), frozenset({"health findings"}))
     return writer, reader
 
 
@@ -50,7 +50,7 @@ def release() -> Iterator[Event]:
     event = Event()
     yield event
     event.set()
-    running = engine._RUNNING.get("health findings")
+    running = engine._RUNNING.get((None, "health findings"))
     if running is not None:
         running.join(30.0)
 

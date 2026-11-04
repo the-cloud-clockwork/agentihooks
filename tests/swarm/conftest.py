@@ -79,3 +79,17 @@ def confirmed_required_checks(monkeypatch):
     from scripts.swarm import waits
 
     monkeypatch.setattr(waits, "required_green", lambda target, head: True)
+
+
+@pytest.fixture(autouse=True)
+def bounded_fencing_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import fencing
+
+    original = fencing.uniform
+
+    def bounded_uniform(low: float, high: float) -> float:
+        assert low == 0.001
+        assert high == 0.032
+        return original(low, high)
+
+    monkeypatch.setattr(fencing, "uniform", bounded_uniform)

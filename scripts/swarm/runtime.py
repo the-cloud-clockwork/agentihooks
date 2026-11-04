@@ -13,6 +13,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from scripts import agent_choice, front_door_route, master_claude_login
 from scripts.handoff import envelope
@@ -138,13 +139,16 @@ def _lane_default(lane, agent, chosen, config=None):
     return model_pick.ModelPick(_set(chosen.get("model")) or model, chosen.get("effort"))
 
 
-def herdr_call(args):
+def herdr_call(args: list[str]) -> dict[str, Any]:
+    """Run one herdr command, holding a host herdr slot so at most six run at once."""
     from scripts.herdr_host import _cli, binary
+    from scripts.tick import pool
 
-    if args[:2] == ["pane", "read"]:
-        done = subprocess.run([binary(), *args], capture_output=True, text=True, timeout=30, check=True)
-        return {"text": done.stdout}
-    return _cli(args, dict(os.environ))
+    with pool.limit("herdr"):
+        if args[:2] == ["pane", "read"]:
+            done = subprocess.run([binary(), *args], capture_output=True, text=True, timeout=30, check=True)
+            return {"text": done.stdout}
+        return _cli(args, dict(os.environ))
 
 
 def herdr_target(name):
@@ -381,7 +385,7 @@ class HerdrRuntime:
         now: float,
         demand: dict | None = None,
         requirements: dict | None = None,
-        refresh: bool = True,
+        refresh: bool = False,
     ) -> dict:
         from scripts.swarm import capacity
 

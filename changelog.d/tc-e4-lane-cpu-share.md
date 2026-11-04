@@ -1,0 +1,1 @@
+The tick engine records each step's lane on its timing record, and `agentihooks swarm <slug> tick-report` prints every lane's share of step CPU, the measurement that decides whether tick lanes run as separate processes.

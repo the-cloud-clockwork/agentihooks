@@ -3,6 +3,7 @@
 import sys
 import urllib.error
 import uuid
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -48,6 +49,16 @@ def _ledger():
     return ledger
 
 
+@dataclass(frozen=True)
+class FreezeWords:
+    """The words and focus queue place a freeze write carries."""
+
+    reason: str = ""
+    quote: str = ""
+    position: str = ""
+    only: bool = False
+
+
 class LedgerClient:
     def __init__(self, service: bool = False, read_timeout: float | None = None) -> None:
         self.service = service
@@ -72,6 +83,10 @@ class LedgerClient:
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
+        if ops:
+            from scripts.tick import view
+
+            view.wrote()
         return state
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
@@ -246,12 +261,15 @@ class LedgerClient:
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
-    def freeze(self, slug, verb, target, by=None, reason="", quote=""):
-        fields = {"target": target, **({"reason": reason} if reason else {}), **({"quote": quote} if quote else {})}
+    def freeze(
+        self, slug: str, verb: str, target: str, by: str | None = None, words: FreezeWords | None = None
+    ) -> None:
+        given = {key: value for key, value in asdict(words or FreezeWords()).items() if value}
         if verb == "unfreeze":
-            op = _op("freeze_clear", by, **fields)
+            given = {key: value for key, value in given.items() if key in ("reason", "quote")}
+            op = _op("freeze_clear", by, target=target, **given)
         else:
-            op = _op("freeze_set", by, verb=verb, **fields)
+            op = _op("freeze_set", by, verb=verb, target=target, **given)
         if by is None:
             op.pop("by")
         self._call(slug, [op])
@@ -259,8 +277,9 @@ class LedgerClient:
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
 
-    def ungroup_tasks(self, slug, lead):
-        self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
+    def ungroup_tasks(self, slug: str, lead: str, if_match: dict[str, list[str]] | None = None) -> None:
+        guard = {} if if_match is None else {"if_match": if_match}
+        self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}", **guard)])
 
     def rank_task(self, slug, task_id, rank, by, if_owned=False):
         guard = {"if_owned": True} if if_owned else {}

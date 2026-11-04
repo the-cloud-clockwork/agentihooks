@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm.lost_runner import home as _agentihooks_home
+from scripts.tick import pool
 from scripts.tick.adapters import github as _github
 
 CALLER = ContextVar("github_caller", default="swarm.rest")
@@ -218,13 +219,14 @@ def rest(
 
     path = gh_audit.endpoint(_github.command(args)) if args[0] == "api" else None
     if path is None:
-        return run(_github.command(args), **options)
+        with pool.limit("github"):
+            return run(_github.command(args), **options)
     endpoint = next(word for word in args[1:] if word.split("?")[0].removeprefix("/") == path)
     paginate = "--paginate" in args
     include = "--include" in args or "-i" in args
     command = _github.command(args if include or not paginate else [*args, "--include"])
     try:
-        with gh_audit.uncharged():
+        with gh_audit.uncharged(), pool.limit("github"):
             result = run(command, **options)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         if not _not_modified(exc.stdout):

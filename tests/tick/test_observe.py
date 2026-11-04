@@ -1,7 +1,7 @@
 """The start and observation steps run the tick's hand written start and observe calls from the registry."""
 
 from contextlib import contextmanager
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -115,8 +115,22 @@ def _observe_fakes(monkeypatch: pytest.MonkeyPatch, store: _Store) -> list[tuple
     return seen
 
 
+def test_the_pass_setup_steps_clear_the_spawn_hold_and_update_the_pass_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deleted: list[str] = []
+    budgeted: list[tuple[object, str]] = []
+    store = SimpleNamespace(redis=SimpleNamespace(delete=deleted.append), key=lambda slug, name: f"{slug}:{name}")
+    monkeypatch.setattr(tick_module.engine, "update_pass_budget", lambda store, slug: budgeted.append((store, slug)))
+    assert observe.step_spawn_hold_clear("sw", store) == []
+    assert deleted == [f"sw:{tick_module.SPAWN_HOLD}"]
+    assert observe.step_pass_budget("sw", store) == []
+    assert budgeted == [(store, "sw")]
+
+
 def test_the_start_and_observe_steps_sit_in_their_groups_in_legacy_order() -> None:
     assert [step.name for step in engine.group_steps("start")] == ["config load", "stopped branch"]
+    assert [step.name for step in engine.group_steps(observe.PASS_SETUP)] == ["spawn hold clear", "pass budget"]
     assert [step.name for step in engine.group_steps("observe")] == [
         "pane evidence",
         "execution reconcile",
@@ -131,7 +145,7 @@ def test_the_start_and_observe_steps_sit_in_their_groups_in_legacy_order() -> No
         "track outages",
         "verify",
     ]
-    assert len(observe.STEPS) == 14
+    assert len(observe.STEPS) == 16
 
 
 def test_a_running_swarm_loads_its_config_and_skips_the_stopped_branch() -> None:
@@ -278,6 +292,25 @@ def test_the_spawn_due_step_spawns_only_when_due_on_a_running_tick_swarm(
     assert step.run(_ctx(pass_state)).writes[0].value == []
     assert ("spawn" in [name for name, _ in seen]) is spawned
     assert store.redis.keys.get("sw:spawn-due") == due
+
+
+def test_the_spawn_due_step_passes_a_row_copy_and_refreshes_box_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _Store("running", {"sw:spawn-due": 1})
+    seen = _observe_fakes(monkeypatch, store)
+    rows: Any = MappingProxyType({"t1": {"id": "t1"}})
+    box: dict[str, Any] = {"rows": rows, "doc": {"tasks": []}}
+    config = SimpleNamespace(state="running", engine="tick")
+    step: Any = observe.step_spawn_due
+    actions = step("sw", config, store, _Ledger(), "runtime", 7, box)
+    assert actions == ["spawned"]
+    spawn_calls = [args for name, args in seen if name == "spawn"]
+    assert len(spawn_calls) == 1
+    claimed = spawn_calls[0][5]
+    assert claimed == dict(rows)
+    assert claimed is not None
+    assert claimed is not rows
+    assert box["rows"] == dict(rows)
+    assert box["rows"] is not rows
 
 
 def test_a_step_that_raises_holds_its_exception_and_stops_the_later_steps(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -34,7 +34,7 @@ def scheduler(monkeypatch):
 @pytest.fixture
 def distributed(monkeypatch, scheduler):
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
-    monkeypatch.setattr(timer, "schedule", lambda: pytest.fail("the swarm tick was scheduled"))
+    monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the swarm tick was scheduled"))
     monkeypatch.setattr(timer, "undelivered", lambda: pytest.fail("the tick delivery was read"))
 
 
@@ -131,7 +131,7 @@ def test_every_systemctl_call_captures_text_output_within_thirty_seconds(tmp_pat
 
 
 def test_a_distributed_install_retires_every_engine_unit_it_finds(tmp_path, distributed):
-    engine = [*timer.units(BINARY), *timer.tick_units(BINARY), *timer.DROPPED]
+    engine = [*timer.units(BINARY), *timer.tick_units(), *timer.DROPPED]
     for name in engine:
         (tmp_path / name).write_text("[Unit]\n")
     calls = []

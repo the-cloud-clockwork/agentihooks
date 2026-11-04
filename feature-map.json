@@ -43,6 +43,24 @@
       ]
     },
     {
+      "id": "fenced-live-names-listing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g6",
+      "behaviour": "The fenced runtime lists live agent names once per tick pass, keeps that listing on the pass's process model shared by every fenced runtime of the pass, lists again after a fenced spawn, collect, expire, retire, reap, close or resume, and lists on every call outside a pass.",
+      "seam": "scripts.swarm.controller.FencedRuntime.live_names and scripts.swarm.cli.run_tick with the running scenario",
+      "tests": [
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_once_per_pass_and_serves_copies",
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_again_in_a_new_pass",
+        "tests/swarm/test_controller_live_names.py::test_live_names_outside_a_pass_lists_every_call",
+        "tests/swarm/test_controller_live_names.py::test_agent_changes_drop_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing_when_it_fails",
+        "tests/swarm/test_controller_live_names.py::test_a_change_through_one_fenced_runtime_drops_the_listing_of_another",
+        "tests/swarm/test_controller_live_names.py::test_collect_and_expire_drop_the_pass_listing",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_running_pass_lists_live_names_once_plus_once_per_launch"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-budget",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a4",
@@ -84,17 +102,79 @@
       ]
     },
     {
+      "id": "swarm-tick-declared-effects",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h4",
+      "behaviour": "The tick wrapper builds the real port tools once per pass and the engine hands each step only the ports its declared effects name: a step that calls a write operation on any other port raises UndeclaredEffect and is recorded failed, while every existing step declares no effects.",
+      "seam": "scripts.tick.engine.run_step with Context.tools narrowed by Tools.for_effects(step.effects), fed by scripts.swarm.cli.run_tick through scripts.tick.ports.tools.PASS_TOOLS",
+      "tests": [
+        "tests/tick/test_effects.py::test_a_step_sends_through_its_declared_inbox",
+        "tests/tick/test_effects.py::test_a_ledger_write_outside_the_declared_effects_goes_red",
+        "tests/tick/test_effects.py::test_a_step_without_effects_cannot_write",
+        "tests/tick/test_effects.py::test_a_context_built_inside_a_pass_carries_the_pass_tools",
+        "tests/tick/test_effects.py::test_call_and_write_steps_declare_their_effects_and_feature",
+        "tests/tick/test_effects.py::test_every_registered_step_declares_no_effects_yet",
+        "tests/tick/test_effects.py::test_a_step_of_a_parallel_pass_reaches_its_declared_ports",
+        "tests/tick/test_effects.py::test_the_pass_spool_opens_once_and_appends_every_batch",
+        "tests/tick/test_effects.py::test_the_pass_tools_wire_every_real_adapter_for_the_swarm",
+        "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
+      ]
+    },
+    {
+      "id": "swarm-tick-declared-edges",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
+      "behaviour": "Tick steps carry no hand written order: each declares its needs, reads and writes, the registry waves keep reap before the orphan reopen before spawn, preempt after reap and settle last, every group still runs in today's order, and the reap, reopen and spawn, drained to running and settle last scenarios hold through the tick core.",
+      "seam": "scripts.tick.registry.waves and ordered, scripts.tick.engine.group_steps and scripts.swarm.tick.tick with fake Redis, ledger and runtime",
+      "tests": [
+        "tests/swarm/test_tick_declared_edges.py::test_registry_waves_reproduce_todays_constraints",
+        "tests/swarm/test_tick_declared_edges.py::test_every_group_runs_in_todays_order_from_needs_and_registration",
+        "tests/swarm/test_tick_declared_edges.py::test_the_steps_on_each_edge_declare_what_they_read_and_write",
+        "tests/swarm/test_tick_declared_edges.py::test_a_reaped_or_orphaned_task_is_reopened_then_spawned_in_one_pass",
+        "tests/swarm/test_tick_declared_edges.py::test_a_drained_swarm_with_new_work_runs_again_before_the_spawn_check",
+        "tests/swarm/test_tick_declared_edges.py::test_settle_runs_last_and_drains_only_a_pass_with_nothing_left_to_spawn",
+        "tests/swarm/test_tick_declared_edges.py::test_a_pass_that_spawned_work_ends_on_the_spawn_without_draining"
+      ]
+    },
+    {
+      "id": "swarm-tick-pass-edges",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g9",
+      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, over the twelve tick scenarios through the tick core and the fenced command entry point; a planted undeclared read or missing need is named.",
+      "seam": "scripts.tick.registry.waves and the step declarations of scripts.tick.steps, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with a recording pass box and pass views",
+      "tests": [
+        "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
+        "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
+        "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
+      ]
+    },
+    {
+      "id": "swarm-tick-no-shared-rows",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",
+      "behaviour": "Tick steps share no mutable ledger state: the pass hands steps a read only rows mapping, spawn preparation and reaping work on their own copies, the ledger view is deep frozen under CI so a step changing it fails, and a ledger write marks the held view stale so the next step reads a fresh one.",
+      "seam": "scripts.tick.view.LedgerView with scripts.tick.view.current and wrote, and the rows mapping scripts.tick.steps.observe.step_ledger_state puts in the pass box",
+      "tests": [
+        "tests/tick/test_no_mutation.py::test_a_step_mutating_the_view_fails_under_ci",
+        "tests/tick/test_no_mutation.py::test_outside_ci_the_view_holds_the_state_it_was_given",
+        "tests/tick/test_no_mutation.py::test_a_ledger_write_makes_the_next_step_read_a_fresh_view",
+        "tests/tick/test_no_mutation.py::test_a_ledger_client_write_marks_the_held_view_stale",
+        "tests/tick/test_no_mutation.py::test_the_pass_hands_steps_rows_no_step_can_assign_into"
+      ]
+    },
+    {
       "id": "swarm-tick-step-overlap-hold",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-overlap-hold",
-      "behaviour": "A tick step still running from an earlier pass is held, not started again: the engine records it as held while its earlier run is alive, so placement runs once across two overlapping passes, and the step runs again once that earlier run ends.",
+      "behaviour": "A tick step still running from an earlier pass is held, not started again: the engine records it as held while its earlier run is alive, so placement runs once across two overlapping passes, and the step runs again once that earlier run ends. The hold is per swarm: a late step in one swarm's pass never holds the same step in another swarm's pass.",
       "seam": "scripts.tick.engine.run_step and scripts.tick.engine.run_group",
       "tests": [
         "tests/tick/test_step_overlap.py::test_a_step_whose_earlier_run_is_alive_is_held_without_running",
         "tests/tick/test_step_overlap.py::test_a_step_runs_again_once_its_earlier_run_ended",
         "tests/tick/test_step_overlap.py::test_another_step_is_not_held_by_a_running_one",
         "tests/tick/test_step_overlap.py::test_placement_runs_once_across_two_overlapping_passes",
-        "tests/tick/test_step_overlap.py::test_a_held_record_reads_held_unless_it_failed"
+        "tests/tick/test_step_overlap.py::test_a_held_record_reads_held_unless_it_failed",
+        "tests/tick/test_step_overlap.py::test_a_late_step_in_one_swarm_does_not_hold_the_same_step_in_another"
       ]
     },
     {
@@ -108,6 +188,34 @@
         "tests/tick/test_left_value.py::test_a_held_writer_skips_its_reader_and_the_pass_completes",
         "tests/tick/test_left_value.py::test_an_observe_step_missing_a_pass_value_is_skipped_without_holding_an_error",
         "tests/tick/test_left_value.py::test_a_pass_box_names_the_left_value_as_a_key_error"
+      ]
+    },
+    {
+      "id": "swarm-tick-early-end-stamp",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-early-end-stamp",
+      "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick.",
+      "seam": "scripts.swarm.cli.run_tick ending on scripts.tick.steps.Left, with the left step names kept on scripts.tick.steps.PassBox",
+      "tests": [
+        "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
+        "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
+        "tests/tick/test_early_end.py::test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once"
+      ]
+    },
+    {
+      "id": "swarm-tick-early-end-streak",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2369",
+      "behaviour": "Consecutive tick passes that end early on the same missing pass value raise one information only health finding naming the value and the count once the count reaches AGENTIHOOKS_HEALTH_EARLY_ENDS, and a full pass clears it.",
+      "seam": "scripts.swarm.status.findings after scripts.swarm.cli.run_tick passes that end on scripts.tick.steps.Left",
+      "tests": [
+        "tests/tick/test_early_end_streak.py::test_passes_ending_early_on_one_value_raise_one_finding_at_the_threshold",
+        "tests/tick/test_early_end_streak.py::test_a_full_pass_clears_the_finding",
+        "tests/tick/test_early_end_streak.py::test_an_early_end_on_another_value_restarts_the_count",
+        "tests/tick/test_early_end_streak.py::test_the_health_setting_sets_the_threshold",
+        "tests/tick/test_early_end_streak.py::test_the_threshold_takes_only_a_positive_whole_number",
+        "tests/tick/test_early_end_streak.py::test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_of_one",
+        "tests/tick/test_early_end_streak.py::test_each_early_end_of_the_report_step_counts_the_missing_value"
       ]
     },
     {
@@ -131,7 +239,17 @@
         "tests/swarm/test_tick_records.py::test_step_history_is_bounded_and_keeps_the_journal",
         "tests/swarm/test_tick_records.py::test_tick_pass_is_recorded_even_when_a_step_raises",
         "tests/swarm/test_tick_records.py::test_budgeted_step_record_reads_late_past_its_budget_and_not_failed",
-        "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps"
+        "tests/swarm/test_tick_records.py::test_budgeted_step_record_carries_its_lane_only_when_given",
+        "tests/swarm/test_tick_records.py::test_budgeted_step_records_and_fails_under_the_name_it_is_given",
+        "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps",
+        "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_its_budget_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_step_left_with_only_its_actions_domain_journals_nothing",
+        "tests/tick/test_engine_records.py::test_abandoned_write_step_reads_abandoned_with_its_writes_dropped",
+        "tests/tick/test_engine_records.py::test_steps_dropped_at_an_expired_lane_read_skipped",
+        "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95",
+        "tests/tick/test_engine_records.py::test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain"
       ]
     },
     {
@@ -563,12 +681,12 @@
     {
       "id": "swarm-focus",
       "origin": "inventory",
-      "behaviour": "A focus holds normal work outside it, urgent tasks and Doctor fixes pass, and focused work takes at most half the lane slots.",
+      "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
       "seam": "scripts.swarm.freeze focus and scripts.swarm.focus_budget",
       "tests": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
-        "tests/swarm/test_freeze.py::test_an_urgent_task_and_a_doctor_fix_pass_a_focus",
-        "tests/swarm/test_focus_budget.py::test_ten_lane_slots_allocate_five_focused_and_five_normal_tasks"
+        "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks"
       ]
     },
     {
@@ -899,12 +1017,15 @@
     {
       "id": "ledger-event-relay",
       "origin": "inventory",
-      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order, and a crash between publish and mark never duplicates an event.",
+      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
       "seam": "The ledger outbox relay",
       "tests": [
         "tests/swarm_ledger/test_outbox_relay.py::test_the_relay_publishes_each_unsent_row_on_its_subject_with_the_row_id_and_marks_it_sent",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_sent_row_is_never_published_again",
-        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event"
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data"
       ]
     },
     {
@@ -1175,12 +1296,14 @@
     {
       "id": "ledger-item-reads",
       "origin": "inventory",
-      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API and refuses other items; ledger tasks lists open tasks one line each.",
+      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API, or every task or freeze as JSON, and refuses other items; ledger tasks lists open tasks one line each.",
       "seam": "agentihooks ledger get and ledger tasks",
       "tests": [
         "tests/swarm_ledger/test_item_reads.py::test_get_prints_one_item_read_through_the_ledger_api",
         "tests/swarm_ledger/test_item_reads.py::test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities",
-        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection"
+        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection",
+        "tests/swarm_ledger/test_item_reads.py::test_get_tasks_prints_every_task_row_as_json_through_the_collection_read",
+        "tests/swarm_ledger/test_item_reads.py::test_get_freezes_prints_every_freeze_and_focus_record_as_json"
       ]
     },
     {
