@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.623 · 2026-11-04
+
+### 2026-11-04 · d03515863099 · #9610 · @nestorcolt
+
+**Let the task update guard match size and group members**
+
+This change extends the ledger's task_update guard so a write can require that a task's difficulty (size) and group_members are unchanged on the server, not just ownership fields as before. It adds defaults for tasks missing these fields, validates malformed guards with clear errors, and checks each matched field in `_guarded`. This matters because it lays the groundwork for atomic tick size and group release writes, letting future appliers safely compare-and-set these fields without race conditions, though wiring that in is deferred to a follow-up task while issue #9598 stays open.
+
 ## v2.17.620 · 2026-11-04
 
 ### 2026-11-04 · 792810298be5 · #9606 · @nestorcolt
