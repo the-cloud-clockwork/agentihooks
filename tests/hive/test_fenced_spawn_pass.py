@@ -72,7 +72,9 @@ def test_concurrent_launches_in_one_pass_stop_at_the_local_cap(
     setup.store.update(setup.config.slug, local_max_agents=LAUNCHES - 2)
     fenced.begin_placement_pass()
     refusals = refuse_together(fenced, 0)
+    rechecked = fenced.placement_refusal("eng", {"id": "task-9"})
     fenced.end_placement_pass()
+    assert "local machine runs 3 of its 3 agents" in rechecked
     admitted = [index for index, refused in refusals.items() if not refused]
     full = [refused for refused in refusals.values() if "local machine runs 3 of its 3 agents" in refused]
     assert (len(admitted), len(full)) == (LAUNCHES - 2, 2)
