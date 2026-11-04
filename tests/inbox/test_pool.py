@@ -811,6 +811,13 @@ def test_an_item_for_a_backend_seat_whose_master_finished_goes_to_the_front_door
     assert [i.id for i in inbox.pending_mail("sw-master-1")] == [item.id]
 
 
+def test_an_item_for_a_backend_seat_whose_master_is_retiring_goes_to_the_front_door(swarm, inbox):
+    _masters(swarm, 2, {"sw-master-2": "retiring"})
+    item = inbox.send("ledger", SECOND, "alert al-6 (sync)")
+    assert inbox.get(item.id).address == FRONT
+    assert inbox.open_items(SECOND) == []
+
+
 def test_an_item_for_a_live_backend_seat_stays_with_that_seat(swarm, inbox):
     _masters(swarm, 2)
     item = inbox.send("ledger", SECOND, "alert al-2 (sync)")
