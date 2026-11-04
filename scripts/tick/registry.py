@@ -1,11 +1,23 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from copy import copy
 from importlib import import_module
 from itertools import combinations
 from math import isfinite
 
 from scripts.tick.step import Step
 
-__all__ = ["Registry", "latest_start", "ordered", "register", "registry", "require", "steps", "validate", "waves"]
+__all__ = [
+    "Registry",
+    "latest_start",
+    "ordered",
+    "register",
+    "registry",
+    "require",
+    "site_edges",
+    "steps",
+    "validate",
+    "waves",
+]
 
 
 def _validate_timing(steps: list[Step]) -> None:
@@ -144,3 +156,23 @@ def latest_start(name: str, steps: list[Step]) -> float:
         for step in wave:
             starts[step.name] = max((starts[need] + by_name[need].budget_s for need in step.needs), default=0.0)
     return starts[name]
+
+
+def _barrier(step: Step, needs: frozenset[str]) -> Step:
+    """Return a copy of ``step`` that needs ``needs`` too, the barrier edges of its site."""
+    edged = copy(step)
+    object.__setattr__(edged, "needs", step.needs | needs)
+    return edged
+
+
+def site_edges(steps: Iterable[Step], sites: Sequence[str]) -> tuple[Step, ...]:
+    """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
+    site that holds steps; steps of groups outside ``sites`` keep their own needs."""
+    found = tuple(steps)
+    members = {site: frozenset(step.name for step in found if step.group == site) for site in sites}
+    barrier: dict[str, frozenset[str]] = {}
+    previous: frozenset[str] = frozenset()
+    for site in sites:
+        barrier[site] = previous
+        previous = members[site] or previous
+    return tuple(_barrier(step, barrier[step.group]) if barrier.get(step.group) else step for step in found)

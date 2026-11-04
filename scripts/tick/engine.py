@@ -32,6 +32,7 @@ __all__ = [
     "cadence_s",
     "group_steps",
     "interval_s",
+    "run_graph",
     "run_group",
     "run_step",
 ]
@@ -158,7 +159,28 @@ def run_group(
     off too while that step still runs; it is dropped when that step was dropped or left running past its budget or
     its lane.
     """
-    ordered = group_steps(name, steps)
+    return _scheduled(group_steps(name, steps), ctx, apply, finished)
+
+
+def run_graph(
+    steps: Iterable[Step],
+    ctx: Context,
+    apply: Appliers | None = None,
+    finished: Callable[[tuple[StepRecord, ...]], object] | None = None,
+) -> tuple[StepRecord, ...]:
+    """Run every step of ``steps`` as one graph, each after the steps among them it needs, scheduled as
+    ``run_group`` schedules one group: one at a time outside a parallel pass, eagerly on the pass workers inside one,
+    slow lane steps and the steps that need them handed to ``finished``."""
+    return _scheduled(registry.ordered(steps), ctx, apply, finished)
+
+
+def _scheduled(
+    ordered: tuple[Step, ...],
+    ctx: Context,
+    apply: Appliers | None,
+    finished: Callable[[tuple[StepRecord, ...]], object] | None,
+) -> tuple[StepRecord, ...]:
+    """Run ``ordered`` in one schedule, applying each step's writes through ``apply`` as it ends."""
     found = pool.active()
     if found is None or not found.parallel:
         return tuple(_sequential(step, ctx, apply or {}) for step in ordered)
