@@ -179,8 +179,8 @@ def grade(
     held: dict[str, list[str]],
 ) -> list[str]:
     """Reject a missing base allowlist, offences in a changed file and records of an unchanged one that neither
-    the base allowlist nor the base measurement held holds, and a changed file whose head record differs from its
-    measurement."""
+    the base allowlist nor the base measurement held holds, and a missing head allowlist or a changed file whose head record differs from
+    its measurement."""
     if base is None:
         return [f"{ALLOWLIST} is missing from the base"]
     graded = {name: head.get(name, []) for name in changed}
