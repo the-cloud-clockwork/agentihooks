@@ -135,5 +135,28 @@ def test_finished_step_row_names_its_lane_and_offset() -> None:
     assert found["start_s"] >= 0 and not found["skipped"] and found["dropped"] == 0
 
 
+def test_parallel_step_row_carries_its_start_offset_and_moves_the_critical_lane_end() -> None:
+    store = Store()
+    with recording(store) as current, pool.running(critical_s=5.0):
+        engine.run_group("planted", Context(View(), Deadline.after(60.0)), [ok_step()])
+    (found,) = store.records()
+    assert isinstance(found["start_s"], float) and found["start_s"] >= 0
+    assert current["critical_end_s"] == found["start_s"] + found["wall_s"]
+
+
+def test_handed_off_step_dropped_with_its_need_journals_a_skipped_slow_lane_row() -> None:
+    store = Store()
+    follow = ok_step()
+    follow.name, follow.lane, follow.needs = "slow follow", engine.SLOW, frozenset({"size pass"})
+    later: list[tuple[engine.StepRecord, ...]] = []
+    with recording(store), pool.running(critical_s=0.0, slow_s=3.0):
+        engine.run_group("planted", Context(View(), Deadline.after(60.0)), [ok_step(), follow], finished=later.append)
+    assert [[row.name for row in records] for records in later] == [["slow follow"]]
+    assert [(row["step"], row["lane"], row["outcome"], row["dropped"]) for row in store.records()] == [
+        ("size pass", "tick", engine.SKIPPED, 0),
+        ("slow follow", "slow", engine.SKIPPED, 0),
+    ]
+
+
 def ok_step() -> WriteStep:
     return WriteStep("size pass", "planted", lambda tick, get: [])
