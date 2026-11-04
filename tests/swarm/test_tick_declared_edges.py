@@ -6,7 +6,7 @@ import pytest
 
 import scripts.swarm.cli  # noqa: F401
 from scripts.tick import engine, registry
-from scripts.tick.steps import AGENTS, SWARM, TASKS, actions_of, budgets
+from scripts.tick.steps import AGENTS, SWARM, TASKS, actions_of, budgets, pass_domains
 from tests.swarm.tick_scenarios.test_characterisation import replay
 
 TODAY = {
@@ -100,11 +100,21 @@ def test_every_group_runs_in_todays_order_from_needs_and_registration() -> None:
 @pytest.mark.feature("swarm-tick-declared-edges")
 def test_the_steps_on_each_edge_declare_what_they_read_and_write() -> None:
     wave_of()
-    assert declared("reap") == (frozenset({AGENTS}), frozenset({AGENTS, TASKS, actions_of("reap")}))
-    assert declared("orphans") == (frozenset({TASKS}), frozenset({TASKS, actions_of("orphans")}))
-    assert declared("preempt") == (frozenset({AGENTS}), frozenset({AGENTS, actions_of("preempt")}))
-    assert declared("spawn") == (frozenset({AGENTS, TASKS, SWARM}), frozenset({AGENTS, TASKS, actions_of("spawn")}))
-    assert declared("settle") == (frozenset({AGENTS, TASKS, SWARM}), frozenset({SWARM, actions_of("settle")}))
+    state = pass_domains("config", "rows", "doc")
+    assert declared("reap") == (
+        frozenset({AGENTS}) | pass_domains("rows"),
+        frozenset({AGENTS, TASKS, actions_of("reap")}),
+    )
+    assert declared("orphans") == (
+        frozenset({TASKS}) | pass_domains("config", "rows"),
+        frozenset({TASKS, actions_of("orphans")}),
+    )
+    assert declared("preempt") == (frozenset({AGENTS}) | state, frozenset({AGENTS, actions_of("preempt")}))
+    assert declared("spawn") == (
+        frozenset({AGENTS, TASKS, SWARM}) | state,
+        frozenset({AGENTS, TASKS, actions_of("spawn")}) | pass_domains("rows"),
+    )
+    assert declared("settle") == (frozenset({AGENTS, TASKS, SWARM}) | state, frozenset({SWARM, actions_of("settle")}))
 
 
 @pytest.mark.feature("swarm-tick-declared-edges")

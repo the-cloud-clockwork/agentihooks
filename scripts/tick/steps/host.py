@@ -18,7 +18,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
-from scripts.tick.steps import CallStep, Left
+from scripts.tick.steps import CallStep, Left, pass_domains
 from scripts.tick.steps.tasks import PHASES, WriteStep
 
 Get = Callable[[str], Any]
@@ -147,7 +147,7 @@ STEPS = (
     CallStep("launch slots", "wrapper probes", held(_launch_slots)),
     CallStep("outage probes", "wrapper probes", held(_outage_probes)),
     CallStep("hive ledger", "wrapper probes", held(_hive_ledger)),
-    CallStep("ledger health", "wrapper probes", held(_ledger_health)),
+    CallStep("ledger health", "wrapper probes", held(_ledger_health), writes=pass_domains("stop")),
     CallStep("host pressure", "wrapper health", held(_host_pressure)),
     CallStep("ledger watchdog", "wrapper health", held(_ledger_watchdog)),
     CallStep("ledger probe", "wrapper health", held(_ledger_probe)),
@@ -159,11 +159,11 @@ STEPS = (
         "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})
     ),
     CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
-    CallStep("intent check", "wrapper intent", held(_intent_check)),
+    CallStep("intent check", "wrapper intent", held(_intent_check), writes=pass_domains("judged")),
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
-    CallStep("page relay", "wrapper relay", held(_page_relay)),
-    CallStep("tick view", "wrapper view", held(_tick_view)),
+    CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),
+    CallStep("tick view", "wrapper view", held(_tick_view), writes=pass_domains("view")),
 )
 
 for _step in STEPS:

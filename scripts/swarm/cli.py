@@ -260,12 +260,18 @@ def now_ms():
 
 
 def _publish_tick_status(
-    store: Any, slug: str, doc: Any, view: Any = None, failure: BaseException | None = None
+    store: Any,
+    slug: str,
+    doc: Any,
+    view: Any = None,
+    failure: BaseException | None = None,
+    found: list[dict[str, Any]] | None = None,
 ) -> None:
+    """Publish the tick status, reusing ``found`` health findings, and raise a publish error only for a passing tick."""
     from scripts.swarm import command_runner
 
     try:
-        timing.call(command_runner.publish, store, slug, doc, view)
+        timing.call(command_runner.publish, store, slug, doc, view, found)
     except Exception:
         if failure is None:
             raise

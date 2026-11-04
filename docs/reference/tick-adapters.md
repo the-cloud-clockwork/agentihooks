@@ -144,9 +144,76 @@ step_deadline = deadline.child(2.0)
 | `child(seconds)` | A deadline `seconds` from now, capped at the parent's expiry. |
 | `live()` | `remaining`, or `TimeoutError("tool deadline expired")` once `expired` is true. |
 
-The inbox adapter calls `scripts.tick.adapters.inbox.check(deadline)` first. The host, llm and metrics adapters reuse
-the same function, the ledger and coordination adapters call `deadline.live()`, and the source control, runtime and
-processes adapters make the same check themselves, so all nine refuse with the same message.
+Every adapter method that takes a `deadline` keyword calls `deadline.live()` in its own body before it touches
+Redis, the network, SQLite, git, herdr or a job, so all nine adapters refuse an expired deadline with the same
+message. A method that calls another method or helper still makes its own check first, so a read through
+`graph` is refused before it is charged to the caller's budget. Where a call takes a timeout, the adapter
+passes the seconds `live()` returned: `gh api` and `git ls-remote` in the source control adapter, the decisions API
+in the llm adapter, and the ledger client's request timeout, which is the smaller of its own timeout and those seconds.
+
+The fenced records adapter, `records_redis.RedisRecords`, takes no deadline. Its writes rely on the fence's lease and
+revision checks and their retries.
+
+`scripts.swarm.fleet_red.read(repo, ports, deadline=...)` takes the caller's deadline and gives `open_changes` a
+child of it capped at `fleet_red.SECONDS` (60), so the listing ends at whichever comes first. Without a caller
+deadline it gives `open_changes` a fresh 60 second deadline.
+
+The unit test `tests/tick/test_adapter_deadlines.py` walks every module in `scripts/tick/adapters` except `fakes.py`
+by its syntax tree and fails on a method with a keyword-only `deadline` argument whose first statement, after its
+docstring and local imports, does not call `deadline.live()`. It prints the methods and checks it counted per
+module, and a planted method without a check is named in the failure. The same file asserts that the records adapter
+takes no deadline and that every source control, runtime, inbox, host, metrics, llm and processes method refuses an
+expired deadline before touching its outside system. The ledger and coordination adapters keep their own expiry tests.
+
+### Writing an adapter method with a deadline
+
+Take the deadline as a keyword-only argument named `deadline`, and make the first statement after the docstring and
+local imports call `deadline.live()`. Keep the seconds it returns when the outside call takes a timeout.
+
+```python
+def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str:
+    """Read whether the issue is open or closed."""
+    deadline.live()
+    return self._api([f"repos/{reference.repository}/issues/{reference.number}"], deadline)["state"]
+
+
+def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
+    """List the remote tags with the commits they name."""
+    timeout = deadline.live()
+    result = self.git(
+        ["git", "ls-remote", "--tags", "origin"],
+        cwd=self.root,
+        timeout=timeout,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    rows = [line.partition("\t") for line in result.stdout.splitlines() if line]
+    return tuple(Tag(ref.removeprefix("refs/tags/"), sha) for sha, _, ref in rows if not ref.endswith("^{}"))
+```
+
+The walk counts any call to `deadline.live()` inside the first statement, so `timeout = deadline.live()`,
+`self.clients(deadline.live())` and `max(1, int(deadline.live() * 1000))` all pass. It grades only `def` methods
+with a keyword-only argument named `deadline`; a check on another name such as `budget.live()`, or a check placed
+after other work, is reported as missing. A caller that needs a shorter bound for one outside call passes
+`deadline.child(seconds)`, as `fleet_red.read` does, so the call ends at the earlier of the two expiries.
+
+The walk runs in the unit suite in CI. Local test runs are blocked by default, so push and read the result on the
+pull request. The walk is skipped inside a mutation run, where `MUTANT_UNDER_TEST` is set, because the mutated copy
+rewrites every method body. It prints one line per module, which shows in the failure message or with `pytest -s`:
+
+```text
+coordination: 6 methods, 6 checks
+github: 20 methods, 20 checks
+host: 2 methods, 2 checks
+inbox: 3 methods, 3 checks
+ledger: 2 methods, 2 checks
+llm: 1 methods, 1 checks
+metrics: 1 methods, 1 checks
+processes: 2 methods, 2 checks
+records_redis: 0 methods, 0 checks
+runtime: 4 methods, 4 checks
+```
 
 ## Ledger adapter
 
@@ -429,15 +496,46 @@ answer missing a field reads as a refusal instead of a traceback.
 
 ## The gate on gh commands
 
-Swarm code reaches GitHub through the port. The Semgrep rule `swarm-source-control-port` in
-`.semgrep/source-control.yml` fails the scan on either form of a `gh` command in a Python file under `scripts/swarm`:
+Swarm and tick code reach GitHub through the port. The Semgrep rule `swarm-source-control-port` in
+`.semgrep/source-control.yml` fails the scan on either form of a `gh` command in a Python file under `scripts/swarm` or
+`scripts/tick`:
 
 - a list literal starting with `"gh"`, such as `["gh", "pr", "view", url]` or `["gh", *args]`;
 - a call to `scripts.tick.adapters.github.command`, the adapter's `gh` command builder, under any import alias.
 
-`git` commands are not matched. `.semgrep/source-control.test.py` holds the failing and passing fixtures, graded with
-`semgrep --test` in the same workflow step that scans the code; the rule also includes `*.test.py` so that fixture file
-is scanned.
+The rule's `paths.include` lists `/scripts/swarm/**`, `/scripts/tick/**` and `*.test.py`; a unit test in
+`tests/test_ci_semgrep.py` pins that list. Every tick module falls under the rule, step modules, ports and adapters
+alike, except the GitHub adapter, which stays on the exception list below. Tick code reads source control through a
+`SourceControl` port, such as `Tools.source_control`:
+
+```python
+import subprocess
+
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+
+def state_by_gh(number: int) -> str:
+    return subprocess.run(["gh", "pr", "view", str(number), "--json", "state"], capture_output=True, text=True).stdout
+
+
+def state_by_port(port: SourceControl, number: int, deadline: Deadline) -> ChangeState:
+    return port.change(ChangeRef("the-cloud-clockwork/agentihooks", number), deadline=deadline)
+```
+
+In a module under `scripts/tick`, the first function fails the scan and the second passes. A finding opens with the
+file and the rule; the scan then prints the rule message and the matching line:
+
+```text
+scripts/tick/<module>.py
+❯❯❱ semgrep.swarm-source-control-port
+```
+
+`git` commands are not matched. `.semgrep/source-control.test.py` holds the failing and passing fixtures, a tick step
+that builds a `gh` list and one that reads through the port included, graded with `semgrep --test` in the same
+workflow step that scans the code; the rule also includes `*.test.py` so that fixture file is scanned. The fixture
+grades the pattern shapes; the repository scan in the same step grades the path include.
 
 Files that still build `gh` commands are listed twice and must match: in the rule's `paths.exclude` and in
 `.semgrep/source-control-allowlist.json`. The list only shrinks. The Semgrep workflow step
@@ -926,6 +1024,9 @@ and call the port from the step.
 | `CalledProcessError` from source control `tags` | `git ls-remote` failed in `root`, for example no `origin` remote or no access. | Run `git ls-remote --tags origin` in that folder. |
 | `TimeoutExpired` from a source control operation | `gh` or `git` outlived what was left of the deadline. | Give the step a larger deadline; `checks`, `runs` and `merge` spend it on two or more calls. |
 | `TimeoutError: tool deadline expired` | The deadline passed before the call; no outside system was touched. | Give the step a larger budget or check `deadline.remaining` before a slow call. |
+| `test_every_adapter_method_checks_its_deadline` fails with `unchecked: <module>.<method>` | That adapter method takes a `deadline` keyword but its first statement does not call `deadline.live()`. | Make `deadline.live()` the first statement after the docstring and local imports, as under [Writing an adapter method with a deadline](#writing-an-adapter-method-with-a-deadline). |
+| `test_the_records_adapter_takes_no_deadline` fails | A function or method in `records_redis.py` gained a keyword-only `deadline` argument. | Remove the argument: the test expects the module to take no deadline, and its writes rely on the fence's lease and revision checks. |
+| A fleet red listing ends before 60 seconds | `fleet_red.read` was given a caller deadline with less time left, and `child` kept the earlier expiry. | Give the calling step a larger budget; the listing never runs past `SECONDS`. |
 | `UndeclaredEffect: <port> is not a declared effect` | A step called a write operation on a port missing from its effects. | Declare the port in the step's effects. |
 | `TypeError: tools require a Deadline keyword argument` | A restricted port was called without `deadline=`. | Pass the step's `Deadline` by keyword. |
 | `KeyError: 'unknown metrics table: <name>'` | `emit` named a table the adapter was not built with. | Add the `Table` to the `tables` mapping. |
@@ -942,7 +1043,7 @@ and call the port from the step.
 | `SwarmError` from `coordination.configure` | A changed field failed the store's checks, such as an unknown `state` or `autonomy`. | Pass a value the store accepts. |
 | `ledger.export` or `ledger.mutate` runs past its deadline | The deadline bounds each HTTP request, and a call can make several. | Size the deadline for the retries, or check `deadline.remaining` between calls. |
 | `Unsupported(name)` from `host.read` or `host.run` | The host has no reading or job by that name. | Add it to the `JobHost` mappings or handle the missing capability in the step. |
-| Semgrep `swarm-source-control-port` finding in a swarm file | The file builds a `gh` command, as a list or through `github.command`. | Call the matching port operation instead; add one to the port as described under [The gate on gh commands](#the-gate-on-gh-commands) when none fits. |
+| Semgrep `swarm-source-control-port` finding in a file under `scripts/swarm` or `scripts/tick` | The file builds a `gh` command, as a list or through `github.command`. | Call the matching port operation instead; add one to the port as described under [The gate on gh commands](#the-gate-on-gh-commands) when none fits. |
 | `source control exceptions grew: [<paths>]` from the Semgrep workflow | The pull request added a path to `.semgrep/source-control-allowlist.json`. | Remove it and move that file's calls onto the port. |
 | `SwarmError: cannot tell whether the repo has issues: <detail>` from `swarm park` | The `issues_enabled` read failed, timed out, or GitHub answered without `has_issues`. | Check `gh api repos/<owner>/<name>` from the worktree, then park again. |
 | `panic cancel failed: <error>` in the tick output | A fix pull request or a fleet repository's run list could not be read, or a cancel was refused. | Check the `--fix` address and the login's access to each fleet repository; the tick retries a minute later. |

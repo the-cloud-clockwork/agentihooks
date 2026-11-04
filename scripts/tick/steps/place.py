@@ -7,7 +7,7 @@ from typing import Any
 
 from scripts.swarm import ack_pass, lost_runner, quota_notice, time_left
 from scripts.tick import registry
-from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets
+from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_domains
 from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
 
 __all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
@@ -16,7 +16,12 @@ Get = Callable[[str], Any]
 NOTICES = "placement notices"
 ACKS = "placement acks"
 PLACEMENT = "placement"
-PREEMPT_NEEDS = frozenset({"reap"})
+PREEMPT_NEEDS = frozenset(
+    {"reap", "drained resume", "recover outages", "retire idle master", "prerequisite reopen", "fleet red notice"}
+)
+RESUMED = frozenset({"drained resume"})
+CONFIG_DOC = pass_domains("config", "doc")
+TASK_STATE = pass_domains("config", "rows", "doc")
 PLACED = frozenset({AGENTS, TASKS})
 
 
@@ -88,15 +93,26 @@ def _spawn(tick: Any, get: Get) -> Any:
 
 
 STEPS = (
-    CallStep("quota notice", NOTICES, held(_quota_notice)),
-    CallStep("lost runner", NOTICES, held(_lost_runner)),
-    CallStep("time left", NOTICES, held(_time_left)),
-    CallStep("collect acks", ACKS, held(_collect_acks)),
-    CallStep("codex hook order", ACKS, held(_codex_hook_order)),
-    WriteStep("rank pass", PLACEMENT, held(_rank_pass), writes=frozenset({RANK})),
-    CallStep("bottleneck remedy", PLACEMENT, held(_bottleneck_remedy)),
-    CallStep("preempt", PLACEMENT, held(_preempt), PREEMPT_NEEDS, frozenset({AGENTS}), frozenset({AGENTS})),
-    CallStep("spawn", PLACEMENT, held(_spawn), budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), PLACED),
+    CallStep("quota notice", NOTICES, held(_quota_notice), RESUMED, CONFIG_DOC),
+    CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config")),
+    CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC),
+    CallStep("collect acks", ACKS, held(_collect_acks), RESUMED, CONFIG_DOC),
+    CallStep("codex hook order", ACKS, held(_codex_hook_order), frozenset({"sleeping"}), pass_domains("sleeping")),
+    WriteStep("rank pass", PLACEMENT, held(_rank_pass), writes=frozenset({RANK}), needs=RESUMED, reads=CONFIG_DOC),
+    CallStep(
+        "bottleneck remedy", PLACEMENT, held(_bottleneck_remedy), frozenset({"ledger state"}), pass_domains("doc")
+    ),
+    CallStep(
+        "preempt", PLACEMENT, held(_preempt), PREEMPT_NEEDS, frozenset({AGENTS}) | TASK_STATE, frozenset({AGENTS})
+    ),
+    CallStep(
+        "spawn",
+        PLACEMENT,
+        held(_spawn),
+        budgets.SPAWN_NEEDS,
+        frozenset({AGENTS, TASKS, SWARM}) | TASK_STATE,
+        PLACED | pass_domains("rows"),
+    ),
 )
 
 for _step in STEPS:
