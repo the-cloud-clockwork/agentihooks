@@ -42,7 +42,8 @@ class Listing:
 
 
 def fenced(runtime: Listing) -> controller.FencedRuntime:
-    return controller.FencedRuntime(None, "sw", SimpleNamespace(epoch=1), runtime, controller.LOCAL)  # pyright: ignore[reportArgumentType]
+    store = SimpleNamespace(redis="fixture-redis")
+    return controller.FencedRuntime(store, "sw", SimpleNamespace(epoch=1), runtime, controller.LOCAL)  # pyright: ignore[reportArgumentType]
 
 
 def pass_tools() -> Any:
@@ -134,8 +135,10 @@ def test_spawn_drops_the_pass_listing_when_it_fails(in_pass: Any, monkeypatch: p
     released: list[str] = []
     monkeypatch.setattr(lease, "require_epoch", lambda store, slug, epoch: None)
     monkeypatch.setattr(commands, "hive_id", lambda: "fixture-hive")
-    monkeypatch.setattr(local_slots, "release", lambda store, machine, slug, name: released.append(name))
-    monkeypatch.setattr(admission, "release", lambda redis, machine, key: released.append(key))
+    monkeypatch.setattr(
+        local_slots, "release", lambda store, machine, slug, name: released.append(f"{machine} {slug} {name}")
+    )
+    monkeypatch.setattr(admission, "release", lambda redis, machine, key: released.append(f"{redis} {machine} {key}"))
 
     def failed(config: Any, lane: str, name: str, task: dict[str, Any]) -> str:
         runtime.live.add(name)
@@ -147,7 +150,10 @@ def test_spawn_drops_the_pass_listing_when_it_fails(in_pass: Any, monkeypatch: p
         wrapped.spawn("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"})  # pyright: ignore[reportArgumentType]
     assert wrapped.live_names() == {"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"}
     assert runtime.listings == 2
-    assert released == ["engineer@a1b2c3-0002", "sw/engineer@a1b2c3-0002"]
+    assert released == [
+        "fixture-hive sw engineer@a1b2c3-0002",
+        "fixture-redis fixture-hive sw/engineer@a1b2c3-0002",
+    ]
 
 
 @pytest.mark.feature("fenced-live-names-listing")

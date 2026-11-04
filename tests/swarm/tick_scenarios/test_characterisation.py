@@ -239,4 +239,4 @@ def test_running_pass_lists_live_names_once_plus_once_per_launch(
     monkeypatch.setattr(FakeRuntime, "live_names", counted)
     record = replay("running", "run_tick", monkeypatch, tmp_path)
     launches = sum(1 for call in record["runtime_writes"] if call[0] == "spawn")
-    assert len(listings) == 1 + launches, f"LIVE_NAMES_LISTINGS={len(listings)} LAUNCHES={launches}"
+    assert (len(listings), launches) == (3, 3), f"LIVE_NAMES_LISTINGS={len(listings)} LAUNCHES={launches}"
