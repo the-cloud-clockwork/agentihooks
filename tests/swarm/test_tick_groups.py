@@ -148,8 +148,7 @@ def test_the_tick_wrapper_runs_its_groups_before_and_after_the_tick(
         "wrapper view",
         "wrapper events",
         "wrapper metrics",
-        "after",
-        "wrapper status",
+        "closing",
     ]
 
 
@@ -171,7 +170,8 @@ def test_the_wrapper_hands_metrics_the_action_count_and_after_the_reread_doc(
     cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
     sites = dict(seen)
     assert isinstance(sites["wrapper metrics"].view.read(PASS, "count"), int)
-    assert sites["after"].view.read(PASS, "doc") is states[-1]
+    assert sites["closing"].view.read(PASS, "doc") is states[-1]
+    assert sites["closing"].view.read(PASS, "ended") == report.FULL
     assert len(states) > 1
 
 
@@ -264,8 +264,7 @@ def test_a_tick_value_left_past_its_budget_drops_the_tick_actions_and_the_wrappe
         "wrapper view",
         "wrapper events",
         "wrapper metrics",
-        "after",
-        "wrapper status",
+        "closing",
     ]
 
 
@@ -283,7 +282,8 @@ def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
     monkeypatch.setattr(command_runner, "consume", consume)
     with pytest.raises(RuntimeError, match="^consume failed$"):
         cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
-    assert [name for name, _ in seen][-2:] == ["wrapper commands", "wrapper status"]
+    assert [name for name, _ in seen][-2:] == ["wrapper commands", "closing"]
+    assert dict(seen)["closing"].view.read(PASS, "ended") is None
 
 
 def test_a_wrapper_value_left_past_its_budget_ends_the_tick_naming_the_value_and_the_step(
@@ -316,7 +316,8 @@ def test_a_wrapper_value_left_past_its_budget_ends_the_tick_naming_the_value_and
         if running is not None:
             running.join(30.0)
     assert called == [True]
-    assert [name for name, _ in seen][-3:] == ["wrapper metrics", "after", "wrapper status"]
+    assert [name for name, _ in seen][-2:] == ["wrapper metrics", "closing"]
+    assert dict(seen)["closing"].view.read(PASS, "ended") == report.EARLY
 
 
 def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(
