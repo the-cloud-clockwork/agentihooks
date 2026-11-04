@@ -626,6 +626,50 @@ def test_an_alert_for_a_second_seat_whose_master_never_launched_lands_in_the_fro
     assert InboxStore(swarm.store.redis).inbox(second) == []
 
 
+def test_the_tick_stall_step_tells_the_front_door_when_the_second_seat_never_launched(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.tick.steps import report
+
+    swarm = Swarm(GREEN, task={"phase": "p2"})
+    swarm.ledger.phases = [{"id": "p1"}, {"id": "p2"}]
+    MasterSeats(swarm.store.redis).set_count(SLUG, 2)
+    front, second = masters.seats(SLUG, 2)
+    swarm.store.put_agent(SLUG, AgentRecord("master@abc-0005", MASTER, "", seat=front))
+    swarm.store.put_agent(
+        SLUG, AgentRecord("master@abc-0006", MASTER, "master-2", seat=second, state="starting", started_at=1)
+    )
+    swarm.store.seats.occupy(second, "master@abc-0006", at=1)
+    for name in stall_watch.ENV.values():
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(stall_watch, "ready_lanes", lambda *args: lambda lane: [])
+    monkeypatch.setattr(release_wait, "checker", lambda repo: lambda task: True)
+    runtime = SimpleNamespace(live_names=lambda: {OWNER, "master@abc-0005"}, retire=lambda agent, homes: True)
+    now = [START]
+    cli = SimpleNamespace(skip_refused=lambda function, *args: function(*args), now_ms=lambda: now[0])
+
+    def step() -> list[str]:
+        values = {
+            "store": swarm.store,
+            "slug": SLUG,
+            "ledger": swarm.ledger,
+            "runtime": runtime,
+            "agents": swarm.store.agents(SLUG),
+            "box": {},
+            "view": swarm.pulls.get,
+            "doc": swarm.ledger.state(SLUG),
+            "config": SimpleNamespace(repo="/repo"),
+        }
+        return report._stall_watch(cli, values.__getitem__)
+
+    step()
+    now[0] = START + 10 * MINUTE
+    [action] = step()
+    assert action.endswith(f"; told {front}")
+    assert [item.address for item in swarm.inbox()] == [front]
+    assert InboxStore(swarm.store.redis).inbox(second) == []
+
+
 def test_a_closed_pull_request_clears_its_queue_mark():
     swarm = Swarm(QUEUED)
     swarm.tick(START)
