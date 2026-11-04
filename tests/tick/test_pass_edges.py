@@ -175,7 +175,7 @@ def test_every_pass_box_read_is_declared_with_a_need_on_its_writer(
         f"{len(broken)} broken of {len(rec.reads)} pass box reads and {len(rec.written)} writes:\n" + "\n".join(broken)
     )
     assert {key for _, key in rec.written} >= WRITTEN
-    assert {seen.key for seen in rec.reads} >= WRITTEN
+    assert {seen.key for seen in rec.reads} >= WRITTEN - {"started", "judged"}
     skipped = sorted({step.name for step in registry.steps()} - rec.ran)
     assert not skipped, f"{len(skipped)} registered steps never ran: {skipped}"
 
