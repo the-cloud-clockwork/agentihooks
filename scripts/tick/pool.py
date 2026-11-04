@@ -14,6 +14,8 @@ from typing import IO, TypeVar
 from scripts.tick.deadline import Deadline
 
 __all__ = [
+    "CLOSING_LANE",
+    "CLOSING_S",
     "CRITICAL_S",
     "LIMITS",
     "PARALLEL",
@@ -35,6 +37,8 @@ CRITICAL_S = 110.0
 SLOW_S = 400.0
 WORKERS = 8
 SLOW_LANE = "slow"
+CLOSING_LANE = "closing"
+CLOSING_S = 30.0
 LATER_GRACE_S = 1.0
 LIMITS = {"herdr": 6, "github": 4}
 
@@ -53,6 +57,8 @@ class Pass:
     critical: Deadline
     slow: Deadline
     slots: BoundedSemaphore
+    closing_s: float = CLOSING_S
+    closer: list[Deadline] = field(default_factory=list[Deadline], compare=False)
     later: list[Thread] = field(default_factory=list[Thread], compare=False)
     handed: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
     gone: set[str] = field(default_factory=set[str], compare=False)
@@ -103,8 +109,17 @@ class Pass:
         """Return whether steps and per agent work of this pass run concurrently."""
         return self.mode == PARALLEL
 
+    def close(self) -> Deadline:
+        """Start the closing lane's deadline of ``closing_s`` seconds on the first call and return it on every call."""
+        with self.guard:
+            if not self.closer:
+                self.closer.append(Deadline.after(self.closing_s))
+            return self.closer[0]
+
     def lane(self, name: str) -> Deadline:
-        """Return the deadline of lane ``name``: the slow lane's for slow steps, the critical lane's otherwise."""
+        """Return the deadline of lane ``name``: the slow lane's, the closing lane's, else the critical lane's."""
+        if name == CLOSING_LANE:
+            return self.close()
         return self.slow if name == SLOW_LANE else self.critical
 
 
@@ -147,13 +162,15 @@ def running(
     critical_s: float = CRITICAL_S,
     slow_s: float = SLOW_S,
     heartbeat: Callable[[], object] | None = None,
+    closing_s: float = CLOSING_S,
 ) -> Generator[Pass, None, None]:
     """Run one pass in ``mode``; a parallel pass writes ``heartbeat`` by the critical deadline without slow work."""
     if mode not in (PARALLEL, SEQUENTIAL):
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
     if workers < 1:
         raise ValueError("a pass needs at least one worker")
-    current = Pass(mode, workers, Deadline.after(critical_s), Deadline.after(slow_s), BoundedSemaphore(workers))
+    lanes = (Deadline.after(critical_s), Deadline.after(slow_s))
+    current = Pass(mode, workers, *lanes, BoundedSemaphore(workers), closing_s)
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
     try:

@@ -152,6 +152,6 @@ def test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_o
 
 @pytest.mark.feature("swarm-tick-early-end-streak")
 def test_each_early_end_of_the_report_step_counts_the_missing_value(store: Any) -> None:
-    report.early_end(store, "sw", 1000, {}, Left("agents"), [])
-    report.early_end(store, "sw", 2000, {}, Left("agents"), [])
+    report.early_end(store, "sw", Left("agents"), [])
+    report.early_end(store, "sw", Left("agents"), [])
     assert early_ends.read(store, "sw") == {"value": "agents", "count": 2}

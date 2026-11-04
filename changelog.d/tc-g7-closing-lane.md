@@ -1,0 +1,1 @@
+The heartbeat, last tick and status publish steps run in a closing group from the tick pass finally on their own closing lane, started when the finally begins, so an expired critical lane no longer drops them; a completed or early ended pass stamps last tick and the heartbeat there, and the after and wrapper status groups are gone.
