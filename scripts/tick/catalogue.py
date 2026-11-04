@@ -33,8 +33,8 @@ def load(root: Path) -> Catalogue:
     """The catalogue recorded in ``root``, refusing an index that names a scenario no golden records."""
     features = frozenset(entry["id"] for entry in json.loads((root / FEATURE_MAP).read_text())["features"])
     index = json.loads((root / INDEX).read_text())
-    listed = {step: frozenset(names) for step, names in index["scenarios"].items()}
-    unknown = sorted(frozenset().union(*listed.values()) - scenarios(root))
+    listed: dict[str, frozenset[str]] = {step: frozenset(names) for step, names in index["scenarios"].items()}
+    unknown = sorted(frozenset[str]().union(*listed.values()) - scenarios(root))
     if unknown:
         raise ValueError(f"{INDEX} names unknown scenarios: {', '.join(unknown)}")
     return Catalogue(features, listed, frozenset(index["unmapped"]))
