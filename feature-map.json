@@ -100,6 +100,18 @@
       ]
     },
     {
+      "id": "swarm-tick-pass-edges",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g9",
+      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, over the twelve tick scenarios through the tick core and the fenced command entry point; a planted undeclared read or missing need is named.",
+      "seam": "scripts.tick.registry.waves and the step declarations of scripts.tick.steps, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with a recording pass box and pass views",
+      "tests": [
+        "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
+        "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
+        "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
+      ]
+    },
+    {
       "id": "swarm-tick-no-shared-rows",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",
