@@ -339,6 +339,10 @@ def test_drift_names_stale_records_padded_records_and_a_missing_allowlist() -> N
         f"a.py measures def two; {allowlist} does not record it",
         f"a.py no longer measures def one; {allowlist} still records it",
     ]
+    assert tick_pattern.drift({"b.py": ["def two"]}, {"a.py": ["def one"]}) == [
+        f"a.py measures def one; {allowlist} does not record it",
+        f"b.py no longer measures def two; {allowlist} still records it",
+    ]
     assert tick_pattern.drift({"gone.py": ["def x"]}, {}) == [
         f"gone.py no longer measures def x; {allowlist} still records it"
     ]

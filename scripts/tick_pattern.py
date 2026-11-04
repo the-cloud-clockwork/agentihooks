@@ -206,8 +206,7 @@ def drift(recorded: dict[str, list[str]] | None, head: dict[str, list[str]]) -> 
         errors += [
             f"{name} measures {offence}; {ALLOWLIST} does not record it"
             for offence in sorted(measured_here - recorded_here)
-        ]
-        errors += [
+        ] + [
             f"{name} no longer measures {offence}; {ALLOWLIST} still records it"
             for offence in sorted(recorded_here - measured_here)
         ]
