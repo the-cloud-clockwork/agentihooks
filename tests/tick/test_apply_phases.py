@@ -58,7 +58,7 @@ def test_the_phase_step_returns_a_write_per_checkbox_guarded_on_the_done_state_i
         "tasks": [{"id": "t1", "phase": "p1", "state": "done"}, {"id": "t2", "phase": "p2", "state": "open"}],
     }
     ledger = Unread([])
-    assert tasks.phase_writes(phases.phase_changes("sw", doc, ledger)) == [
+    assert tasks.phase_writes(phases.phase_changes(doc)) == [
         Write(tasks.PHASES, "p1", phases.PhaseChange("p1", "Build", True, 1, ()), expected=False),
         Write(tasks.PHASES, "p2", phases.PhaseChange("p2", "Ship", False, 1, ("t2",)), expected=True),
     ]
@@ -66,7 +66,7 @@ def test_the_phase_step_returns_a_write_per_checkbox_guarded_on_the_done_state_i
 
 
 def test_the_phase_step_returns_no_write_for_a_ledger_without_phases() -> None:
-    assert phases.phase_changes("sw", {"tasks": [{"id": "t1", "state": "done"}]}, Unread([])) == []
+    assert phases.phase_changes({"tasks": [{"id": "t1", "state": "done"}]}) == []
 
 
 def test_the_phase_step_finds_a_task_under_its_slice_and_skips_out_of_scope_tasks() -> None:
@@ -79,7 +79,22 @@ def test_the_phase_step_finds_a_task_under_its_slice_and_skips_out_of_scope_task
             {"id": "t3", "phase": "elsewhere", "state": "open"},
         ],
     }
-    assert phases.phase_changes("sw", doc, Unread([])) == [phases.PhaseChange("p1", "Build", False, 1, ("t1",))]
+    assert phases.phase_changes(doc) == [phases.PhaseChange("p1", "Build", False, 1, ("t1",))]
+
+
+def test_the_projection_reports_a_task_with_no_state_as_open() -> None:
+    doc = {"phases": [{"id": "p1"}], "tasks": [{"id": "t1", "phase": "p1"}, {"id": "t2", "phase": "p1", "done": True}]}
+    assert phases.projected_phase_tasks(doc) == {"p1": [("t1", "open"), ("t2", "done")]}
+
+
+@pytest.mark.timeout(5)
+def test_the_projection_stops_at_a_slice_that_names_itself_as_its_phase() -> None:
+    doc = {
+        "phases": [{"id": "p1"}],
+        "slices": [{"id": "s1", "phase": "slices/s2"}, {"id": "s2", "phase": "slices/s1"}],
+        "tasks": [{"id": "t1", "slice": "slices/s1", "state": "open"}],
+    }
+    assert phases.projected_phase_tasks(doc) == {"p1": []}
 
 
 def test_the_phase_applier_sets_the_checkbox_marks_the_box_and_returns_its_action(
@@ -182,7 +197,7 @@ def _phase_pass(ledger: Ledger, doc: dict[str, Any], box: dict[str, Any]) -> lis
     step = tasks.WriteStep(
         "planning and phase pass",
         "phase writes",
-        lambda tick, get: tasks.phase_writes(phases.phase_changes(get("slug"), get("doc"), get("ledger"))),
+        lambda tick, get: tasks.phase_writes(phases.phase_changes(get("doc"))),
         writes=frozenset({tasks.PHASES}),
     )
     ctx = Context(_State({"slug": "sw", "doc": doc, "ledger": ledger}), Deadline.after(60.0))

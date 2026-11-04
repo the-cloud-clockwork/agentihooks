@@ -24,7 +24,7 @@ class PhaseChange:
     open_ids: tuple[str, ...]
 
 
-def phase_changes(slug: str, doc: dict[str, Any], ledger: Any) -> list[str | PhaseChange]:
+def phase_changes(doc: dict[str, Any]) -> list[str | PhaseChange]:
     """Return each phase whose tasks call for a tick or a reopen, writing nothing, from the pass document alone."""
     under = projected_phase_tasks(doc)
     return [change for phase in doc.get("phases", []) if (change := _change(phase, under)) is not None]

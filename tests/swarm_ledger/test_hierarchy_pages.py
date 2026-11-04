@@ -147,7 +147,7 @@ def test_the_phase_pass_of_a_ledger_above_the_cap_reads_no_page(large, monkeypat
     monkeypatch.setattr(masters, "held", lambda redis, slug, agents: {})
     document = state(40, 100)
     store, ledger = SimpleNamespace(agents=lambda slug: [], redis=None), Ledger()
-    found = phases.phase_changes(SLUG, document, ledger)
+    found = phases.phase_changes(document)
     actions = [
         phases.apply_change(Inbox(), store, SLUG, ledger, change)
         for change in found

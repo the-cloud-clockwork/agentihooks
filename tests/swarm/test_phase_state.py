@@ -16,7 +16,7 @@ def doc(phases, tasks=()):
 def phase_pass(inbox, store, slug, data, ledger):
     from scripts.swarm import phases
 
-    found = phases.phase_changes(slug, data, ledger)
+    found = phases.phase_changes(data)
     return [item if isinstance(item, str) else phases.apply_change(inbox, store, slug, ledger, item) for item in found]
 
 

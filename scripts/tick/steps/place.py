@@ -7,6 +7,7 @@ from typing import Any
 
 from scripts.swarm import ack_pass, lost_runner, quota_notice, time_left
 from scripts.tick import registry
+from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_domains
 from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
 
@@ -94,8 +95,8 @@ def _spawn(tick: Any, get: Get) -> Any:
 
 STEPS = (
     CallStep("quota notice", NOTICES, held(_quota_notice), RESUMED, CONFIG_DOC),
-    CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config")),
-    CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC),
+    CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config"), lane=SLOW),
+    CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC, lane=SLOW),
     CallStep("collect acks", ACKS, held(_collect_acks), RESUMED, CONFIG_DOC),
     CallStep("codex hook order", ACKS, held(_codex_hook_order), frozenset({"sleeping"}), pass_domains("sleeping")),
     WriteStep("rank pass", PLACEMENT, held(_rank_pass), writes=frozenset({RANK}), needs=RESUMED, reads=CONFIG_DOC),

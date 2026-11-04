@@ -7,8 +7,9 @@ from typing import Any, cast
 from scripts.swarm import dev_red, dispatcher, fleet_red, phases, prerequisite_wait, promotion_watch, release_wait
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import registry, steps, view
+from scripts.tick.engine import SLOW
 from scripts.tick.ports.records import RevisionConflict
-from scripts.tick.step import Context, Domain, Result, Write
+from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actions_of, pass_domains
 
 __all__ = [
@@ -308,9 +309,10 @@ class WriteStep:
         writes: frozenset[Domain] = frozenset(),
         needs: frozenset[str] = frozenset(),
         reads: frozenset[Domain] = frozenset(),
+        lane: Lane = CallStep.lane,
     ) -> None:
-        """Take the name, group, budgets, needs and domains of the call step running ``call``."""
-        base = CallStep(name, group, call, needs, reads, writes)
+        """Take the name, group, lane, budgets, needs and domains of the call step running ``call``."""
+        base = CallStep(name, group, call, needs, reads, writes, lane)
         self.name = base.name
         self.group = base.group
         self.call = base.call
@@ -340,16 +342,22 @@ def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 
 def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
-    """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it."""
+    """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it.
+
+    The expected fields go to the ledger as its ``if_match`` guard, so the server compares and sets them in one apply.
+    """
     expected = cast(dict[str, Any], write.expected or {})
     task = read(write.key)
     moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
     if moved:
         raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
+    fields = cast(dict[str, Any], write.value)
     try:
-        ledger.update_task(slug, write.key, write.value)
+        held = ledger.update_task(slug, write.key, fields, if_match=expected or None)
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
+    if changed := sorted(key for key in expected if key in fields and held.get(key, "") != fields[key]):
+        raise RevisionConflict(f"task {write.key} changed {', '.join(changed)} on the ledger before the write")
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] | None]]:
@@ -404,13 +412,16 @@ def group_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | 
 
 
 def _release_group(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
-    """Release the group under the lead of ``write`` unless its members moved or the ledger refuses it."""
+    """Release the group under the lead of ``write`` unless its members moved or the ledger refuses it.
+
+    The expected members go to the ledger as its ``if_match`` guard, so the server compares them before it releases.
+    """
     expected = cast(dict[str, Any], write.expected or {})
     task = read(write.key)
     if task is not None and list(task.get("group_members") or []) != expected.get("group_members", []):
         raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
     try:
-        ledger.ungroup_tasks(slug, write.key)
+        ledger.ungroup_tasks(slug, write.key, if_match={"group_members": list(expected.get("group_members", []))})
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the release of the group under task {write.key}") from exc
 
@@ -474,6 +485,7 @@ STEPS = (
         writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
         needs=frozenset({"spawn due"}),
         reads=pass_domains("rows"),
+        lane=SLOW,
     ),
     CallStep("run window", TASK_PASSES, held(_run_window), RESUMED, CONFIG_DOC),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices), LISTED, DOC),
