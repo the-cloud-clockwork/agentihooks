@@ -47,9 +47,15 @@ class CallStep:
         self.needs = needs
         self.group = group
         self.call = call
-        self.budget_s, self.interval_s = budgets.timing_of(name)
+        self.interval_s = budgets.timing_of(name)[1]
+        self.floor_s = budgets.floor_of(name)
         self.reads = reads
         self.writes = writes | {actions_of(name)}
+
+    @property
+    def budget_s(self) -> float:
+        """Return the step's budget this pass: its live budget, never under its floor."""
+        return budgets.budget_of(self.name)
 
     def run(self, ctx: Context) -> Result:
         """Run the call with the tick module and a reader of the pass state, writing its actions."""

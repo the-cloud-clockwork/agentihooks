@@ -57,7 +57,7 @@ def floors(source: str) -> dict[str, str]:
             target, table = node.targets[0], node.value
         else:
             continue
-        if not (isinstance(target, ast.Name) and target.id == "MEASURED" and isinstance(table, ast.Dict)):
+        if not (isinstance(target, ast.Name) and target.id == "FLOORS" and isinstance(table, ast.Dict)):
             continue
         for key, value in zip(table.keys, table.values):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
