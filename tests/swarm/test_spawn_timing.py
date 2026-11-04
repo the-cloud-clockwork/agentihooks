@@ -117,7 +117,7 @@ def test_the_running_filter_keeps_the_lane_agents_that_still_own_their_task() ->
 
 
 def test_spawn_order_times_the_running_filter_and_focus_placement_once_per_lane_inside_it(
-    store, capsys, monkeypatch
+    store: RedisStore, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
     monkeypatch.setattr(capacity, "caps", lambda decision, config: {"eng": 1, "ci": 1})
