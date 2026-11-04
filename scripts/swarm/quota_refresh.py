@@ -60,7 +60,7 @@ def answer_all(store: RedisStore, execute: Callable[[str, dict], str]) -> list[s
     return lines
 
 
-def probe(environ: dict, now: float) -> list[str]:
+def probe(environ: dict[str, str], now: float) -> list[str]:
     """Probe every stale quota reading so the tick pass reads fresh caches, logging one line per probe."""
     from scripts.swarm import capacity
 

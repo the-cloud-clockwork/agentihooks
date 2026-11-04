@@ -1,5 +1,6 @@
 import json
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -300,7 +301,8 @@ def test_the_quota_notice_step_adds_the_reading_age(monkeypatch):
     monkeypatch.setattr(quota_handoff, "warn", lambda *args: ["warn"])
     monkeypatch.setattr(capacity, "read", lambda store, slug: {"accounts": [{"name": "a", "observed_at": 1.0}]})
     monkeypatch.setattr(quota_notice, "apply", lambda slug, store, decision: ["notice"])
-    assert quota_notice.refresh("sw", "config", "store", "ledger", "runtime", 1_000_000) == [
+    stub: Any = None
+    assert quota_notice.refresh("sw", stub, stub, stub, stub, 1_000_000) == [
         "capacity",
         "warn",
         "notice",

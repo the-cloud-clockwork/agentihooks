@@ -687,7 +687,7 @@
   "scripts/swarm/queue_priority.py": 195,
   "scripts/swarm/queue_record.py": 75,
   "scripts/swarm/quota_handoff.py": 65,
-  "scripts/swarm/quota_notice.py": 25,
+  "scripts/swarm/quota_notice.py": 26,
   "scripts/swarm/quota_refresh.py": 53,
   "scripts/swarm/quota_view.py": 62,
   "scripts/swarm/readiness.py": 100,

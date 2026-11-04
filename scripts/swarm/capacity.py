@@ -75,7 +75,7 @@ def _known(environ: dict) -> set[str]:
     return filed | set(account_sessions.token_accounts(environ).values())
 
 
-def _claude(environ: dict, now: float, refresh: bool) -> list[Account]:
+def _claude(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     if refresh:
@@ -222,7 +222,7 @@ def _refused(environ: dict) -> set[tuple[str, str]]:
     return {(balancer.HARNESS, account) for account, result in latest.items() if balancer.refused(result)}
 
 
-def probe(environ: dict, now: float) -> list[Account]:
+def probe(environ: dict[str, str], now: float) -> list[Account]:
     """Probe stale Claude credentials and Codex readings, writing the caches a pass reads without ``refresh``."""
     return _claude(environ, now, True) + _codex(environ, now, True)
 

@@ -72,7 +72,7 @@ def refresh(
     from scripts.swarm import quota_handoff
 
     actions = capacity.apply(slug, config, store, ledger, runtime, now_ms)
-    decision = capacity.read(store, slug)
+    decision = dict[str, Any](capacity.read(store, slug))
     return (
         actions
         + quota_handoff.warn(slug, store, dict(os.environ))
@@ -81,8 +81,9 @@ def refresh(
     )
 
 
-def stale(decision: dict, now_ms: int) -> list[str]:
+def stale(decision: dict[str, Any], now_ms: int) -> list[str]:
     """Name the newest quota reading's age once it passes ``STALE_S``, which means the quota prober stopped."""
-    seen = [row["observed_at"] for row in decision.get("accounts", []) if row.get("observed_at") is not None]
+    rows: list[dict[str, Any]] = decision.get("accounts", [])
+    seen = [float(row["observed_at"]) for row in rows if row.get("observed_at") is not None]
     age = int(now_ms / 1000 - max(seen)) if seen else 0
     return [f"quota readings are {age} seconds old; the quota prober has not refreshed them"] if age > STALE_S else []

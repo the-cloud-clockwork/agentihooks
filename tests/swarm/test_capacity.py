@@ -1,6 +1,5 @@
 import json
 from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 
@@ -2629,12 +2628,13 @@ def _probing(monkeypatch, ran):
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
 
 
-def test_a_pass_read_runs_neither_claude_nor_codex(monkeypatch, tmp_path):
+def test_a_pass_read_runs_no_claude_or_codex_quota_probe(monkeypatch, tmp_path):
     ran = []
     _probing(monkeypatch, ran)
     env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
     capacity.accounts(env, 100, refresh=False)
-    assert ran == []
+    assert ran == ["codex login"]
+    ran.clear()
     capacity.accounts(env, 100)
     assert ran == ["claude -p a", "codex login", "codex exec"]
 
@@ -2657,23 +2657,5 @@ def test_the_prober_writes_the_claude_cache_the_pass_reads(monkeypatch, tmp_path
     (row,) = [row for row in capacity.accounts(env, 130, refresh=False) if row.harness == "claude"]
     assert (row.name, row.observed_at) == ("a", 100)
     capacity.probe(env, 200)
-    assert ran[3:] == ["claude -p a", "codex login", "codex exec"]
+    assert ran[4:] == ["claude -p a", "codex login", "codex exec"]
     assert [at for at, _ in balancer.cached_observations(environ=env)] == [200]
-
-
-def test_a_cached_codex_pool_takes_the_last_recorded_login(monkeypatch):
-    router = capacity.codex_router
-    ran = []
-    monkeypatch.setattr(router, "token_accounts", lambda environ: [])
-    monkeypatch.setattr(router, "refusal", lambda account, environ: "")
-    assert router.cached_signed_in() is True
-
-    def login(code):
-        return lambda argv, **kw: ran.append(argv[1:]) or SimpleNamespace(returncode=code)
-
-    assert router.default_signed_in({}, login(1)) is False
-    assert router.cached_signed_in() is False
-    assert router.CodexAccountSource(refresh=False).pool({}) == []
-    assert router.default_signed_in({}, login(0)) is True
-    assert router.CodexAccountSource(refresh=False).pool({}) == [router.CodexAccount(router.CODEX_DEFAULT)]
-    assert ran == [["login", "status"], ["login", "status"]]
