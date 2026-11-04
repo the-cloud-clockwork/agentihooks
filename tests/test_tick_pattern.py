@@ -111,7 +111,9 @@ def test_a_planted_banned_import_is_red(tmp_path: Path, capsys: pytest.CaptureFi
             "from scripts.inbox.store import InboxStore\n",
             ["import scripts.inbox.store", "import scripts.inbox.store.InboxStore"],
         ),
-        ("from .. import inbox\n", ["import relative .."]),
+        ("from ...inbox import store\n", ["import scripts.inbox", "import scripts.inbox.store"]),
+        ("from ... import inbox\n", ["import scripts.inbox"]),
+        ("from .. import inbox\nfrom . import budgets\n", []),
         ("from scripts.tick.ports import Tools\nimport scripts.inboxes\n", []),
     ],
 )

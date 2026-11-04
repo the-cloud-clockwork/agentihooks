@@ -97,17 +97,18 @@ def steps(tree: ast.Module, rows: dict[str, str]) -> list[str]:
     return found
 
 
-def banned(tree: ast.Module) -> list[str]:
-    """Imports in tree that reach an adapted implementation, and every relative import."""
+def banned(tree: ast.Module, name: str) -> list[str]:
+    """Imports in the module named by its path name that reach an adapted implementation, relative ones resolved."""
+    package = name.removesuffix(".py").split("/")[:-1]
     found: list[str] = []
     for node in ast.walk(tree):
         names: list[str] = []
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level:
-            found.append(f"import relative {'.' * node.level}{node.module or ''}")
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names = [node.module, *(f"{node.module}.{alias.name}" for alias in node.names)]
+        elif isinstance(node, ast.ImportFrom):
+            parts = package[: len(package) - node.level + 1] if node.level else []
+            module = ".".join([*parts, *([node.module] if node.module else [])])
+            names = [module, *(f"{module}.{alias.name}" for alias in node.names)]
         found += [
             f"import {name}" for name in names if any(name == ban or name.startswith(f"{ban}.") for ban in BANNED)
         ]
@@ -135,7 +136,7 @@ def measure(tree: Path) -> dict[str, list[str]]:
         if name == TICK:
             found += names(parsed)
         if name.startswith(STEPS) and not name.startswith(ADAPTERS):
-            found += banned(parsed)
+            found += banned(parsed, name)
         if found:
             measured[name] = sorted(set(found))
     return measured
