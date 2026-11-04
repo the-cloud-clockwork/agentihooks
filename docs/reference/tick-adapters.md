@@ -188,22 +188,31 @@ def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
         text=True,
         check=True,
     )
+    rows = [line.partition("\t") for line in result.stdout.splitlines() if line]
+    return tuple(Tag(ref.removeprefix("refs/tags/"), sha) for sha, _, ref in rows if not ref.endswith("^{}"))
 ```
 
 The walk counts any call to `deadline.live()` inside the first statement, so `timeout = deadline.live()`,
 `self.clients(deadline.live())` and `max(1, int(deadline.live() * 1000))` all pass. It grades only `def` methods
-whose argument is literally named `deadline`; a check on another name such as `budget.live()`, or a check placed
+with a keyword-only argument named `deadline`; a check on another name such as `budget.live()`, or a check placed
 after other work, is reported as missing. A caller that needs a shorter bound for one outside call passes
 `deadline.child(seconds)`, as `fleet_red.read` does, so the call ends at the earlier of the two expiries.
 
 The walk runs in the unit suite in CI. Local test runs are blocked by default, so push and read the result on the
 pull request. The walk is skipped inside a mutation run, where `MUTANT_UNDER_TEST` is set, because the mutated copy
-rewrites every method body. Its output lists one line per module:
+rewrites every method body. It prints one line per module, which shows in the failure message or with `pytest -s`:
 
 ```text
 coordination: 6 methods, 6 checks
 github: 20 methods, 20 checks
 host: 2 methods, 2 checks
+inbox: 3 methods, 3 checks
+ledger: 2 methods, 2 checks
+llm: 1 methods, 1 checks
+metrics: 1 methods, 1 checks
+processes: 2 methods, 2 checks
+records_redis: 0 methods, 0 checks
+runtime: 4 methods, 4 checks
 ```
 
 ## Ledger adapter
@@ -1016,7 +1025,7 @@ and call the port from the step.
 | `TimeoutExpired` from a source control operation | `gh` or `git` outlived what was left of the deadline. | Give the step a larger deadline; `checks`, `runs` and `merge` spend it on two or more calls. |
 | `TimeoutError: tool deadline expired` | The deadline passed before the call; no outside system was touched. | Give the step a larger budget or check `deadline.remaining` before a slow call. |
 | `test_every_adapter_method_checks_its_deadline` fails with `unchecked: <module>.<method>` | That adapter method takes a `deadline` keyword but its first statement does not call `deadline.live()`. | Make `deadline.live()` the first statement after the docstring and local imports, as under [Writing an adapter method with a deadline](#writing-an-adapter-method-with-a-deadline). |
-| `test_the_records_adapter_takes_no_deadline` fails | A `deadline` argument was added to `records_redis.RedisRecords`. | Remove the argument: the records adapter's writes rely on the fence's lease and revision checks, and the test expects it to take no deadline. |
+| `test_the_records_adapter_takes_no_deadline` fails | A function or method in `records_redis.py` gained a keyword-only `deadline` argument. | Remove the argument: the test expects the module to take no deadline, and its writes rely on the fence's lease and revision checks. |
 | A fleet red listing ends before 60 seconds | `fleet_red.read` was given a caller deadline with less time left, and `child` kept the earlier expiry. | Give the calling step a larger budget; the listing never runs past `SECONDS`. |
 | `UndeclaredEffect: <port> is not a declared effect` | A step called a write operation on a port missing from its effects. | Declare the port in the step's effects. |
 | `TypeError: tools require a Deadline keyword argument` | A restricted port was called without `deadline=`. | Pass the step's `Deadline` by keyword. |
