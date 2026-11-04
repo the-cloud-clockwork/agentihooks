@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.625 · 2026-11-04
+
+### 2026-11-04 · cda4cddf2d55 · #9609 · @nestorcolt
+
+**Raise a health finding for tick passes that keep ending early on the same missing value**
+
+Swarm status now surfaces a new information-only health finding, kind `early end`, when several consecutive tick passes stop early on the same missing value, with the streak length controlled by `AGENTIHOOKS_HEALTH_EARLY_ENDS` (default 3). The heartbeat still gets stamped and nothing is blocked; the finding is purely visible so the stale watcher can notice a tick that keeps doing no work. A single full pass resets the streak. Includes tests, feature map entry, and docs updates for the new threshold.
+
 ## v2.17.623 · 2026-11-04
 
 ### 2026-11-04 · d03515863099 · #9610 · @nestorcolt
