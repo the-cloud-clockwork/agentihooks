@@ -104,17 +104,17 @@ def test_the_shards_size_against_the_budget_the_early_stage_left():
     assert probed.probed_plan(merged, 237.0)["shards"] == 3
 
 
-def test_a_large_remainder_spreads_until_no_shard_holds_over_six_minutes_per_worker():
+def test_a_large_remainder_spreads_until_no_shard_plans_past_six_minutes_with_its_setup():
     plan = _plan()
-    whole = {f"scripts.a.x_w{index}__mutmut_1": 700.0 for index in range(12)}
+    whole = {f"scripts.a.x_w{index}__mutmut_1": 350.0 for index in range(12)}
     plan["assignments"].update(dict.fromkeys(whole, 0))
     plan["costs"].update(whole)
     merged = probe.merge_probes(plan, _records(plan))
     replanned = probed.probed_plan(merged, 1080)
     assert replanned["shards"] == 12
-    assert max(replanned["shard_worker_seconds"]) == pytest.approx(845.6)
-    assert probed.SHARD_WORK_SECONDS * 3 == 1080
-    assert max(replanned["shard_worker_seconds"]) <= 1080
+    assert max(replanned["shard_worker_seconds"]) == pytest.approx(495.6)
+    assert probed.SHARD_WALL_SECONDS == 360
+    assert max(replanned["shard_worker_seconds"]) <= 3 * (360 - 180)
 
 
 def test_a_survivor_unit_runs_its_slice_alone_or_costs_what_it_last_took(tmp_path: Path):
