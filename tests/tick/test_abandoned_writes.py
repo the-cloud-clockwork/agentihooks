@@ -86,19 +86,19 @@ def test_a_write_step_left_at_its_budget_journals_its_returned_write_domains(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     store, release = Store(), Event()
-    step = WriteStep("planted write", "planted", waiting(release), writes=frozenset({Domain("tasks"), Domain("ranks")}))
+    step = WriteStep("rank pass", "planted", waiting(release), writes=frozenset({Domain("tasks"), Domain("ranks")}))
     step.budget_s = 1.0
     try:
         with recording(store):
             engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])
     finally:
         release.set()
-        joined("planted write")
+        joined("rank pass")
     lines = journal(capsys.readouterr().err)
     assert [(row["slug"], row["step"], row["budget_s"], row["writes"]) for row in lines] == [
-        ("sw", "planted write", 1.0, ["ranks", "tasks"])
+        ("sw", "rank pass", 1.0, ["ranks", "tasks"])
     ]
-    assert [(row["step"], row["abandoned"], row["dropped"]) for row in store.records()] == [("planted write", True, 3)]
+    assert [(row["step"], row["abandoned"], row["dropped"]) for row in store.records()] == [("rank pass", True, 3)]
 
 
 @pytest.mark.feature("swarm-tick-cost-report")
@@ -106,29 +106,29 @@ def test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domain
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     store, release = Store(), Event()
-    step = WriteStep("lane write", "planted", waiting(release), writes=frozenset({Domain("tasks")}))
+    step = WriteStep("grouping release", "planted", waiting(release), writes=frozenset({Domain("tasks")}))
     step.budget_s = 30.0
     try:
         with recording(store), pool.running(critical_s=0.3):
             engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])
     finally:
         release.set()
-        joined("lane write")
+        joined("grouping release")
     assert [(row["step"], row["budget_s"], row["writes"]) for row in journal(capsys.readouterr().err)] == [
-        ("lane write", 30.0, ["tasks"])
+        ("grouping release", 30.0, ["tasks"])
     ]
 
 
 @pytest.mark.feature("swarm-tick-cost-report")
 def test_a_step_left_with_only_its_actions_domain_journals_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     store, release = Store(), Event()
-    step = CallStep("planted call", "planted", waiting(release))
+    step = CallStep("release alert", "planted", waiting(release))
     step.budget_s = 0.05
     try:
         with recording(store):
             engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])
     finally:
         release.set()
-        joined("planted call")
+        joined("release alert")
     assert journal(capsys.readouterr().err) == []
-    assert [(row["step"], row["abandoned"]) for row in store.records()] == [("planted call", True)]
+    assert [(row["step"], row["abandoned"]) for row in store.records()] == [("release alert", True)]
