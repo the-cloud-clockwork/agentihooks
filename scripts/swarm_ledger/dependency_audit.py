@@ -39,15 +39,19 @@ def names_code(text: str, dependency: Task) -> bool:
     )
 
 
+def closed(task: Task) -> bool:
+    return task.get("state") == "done" or bool(task.get("out_of_scope") or task.get("merged_into"))
+
+
 def audit(tasks: list[Task], spec: Spec) -> list[dict[str, str]]:
     rows: dict[str, Task] = {task["id"]: task for task in tasks}
     found: list[dict[str, str]] = []
     for task in tasks:
-        if task.get("state") == "done":
+        if closed(task):
             continue
         for dep_id in task.get("depends_on") or ():
             dependency = rows.get(dep_id)
-            if dependency is None or dependency.get("state") == "done" or shares_code(task, dependency):
+            if dependency is None or closed(dependency) or shares_code(task, dependency):
                 continue
             text = spec(task)
             if text is not None and not names_code(text, dependency):
