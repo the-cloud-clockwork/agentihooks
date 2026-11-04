@@ -46,15 +46,12 @@ def cache_due(wait: dict[str, object] | None, last_ms: int, now_ms: int) -> bool
     until = wait.get("until", 0)
     reason = wait.get("reason", "")
     named = bool(wait.get("on")) or bool(str(reason).strip())
-    return isinstance(until, int) and until > now_ms and named and now_ms - last_ms > CACHE_LIMIT_MS
-
-
-def _window(limit_ms: int, last_ms: int, now_ms: int) -> int:
-    return (now_ms - last_ms) // limit_ms
+    fresh = isinstance(until, int) and until > now_ms
+    return bool(last_ms) and fresh and named and now_ms - last_ms > CACHE_LIMIT_MS
 
 
 def window(last_ms: int, now_ms: int) -> int:
-    return _window(LIMIT_MS, last_ms, now_ms)
+    return (now_ms - last_ms) // LIMIT_MS
 
 
 def item_id(slug: str, name: str, last_ms: int, now_ms: int) -> str:
@@ -63,7 +60,7 @@ def item_id(slug: str, name: str, last_ms: int, now_ms: int) -> str:
 
 
 def cache_item_id(slug: str, name: str, last_ms: int, now_ms: int) -> str:
-    key = f"{CACHE_REF}:{slug}:{name}:{last_ms}:{_window(CACHE_LIMIT_MS, last_ms, now_ms)}"
+    key = f"{CACHE_REF}:{slug}:{name}:{last_ms}:{(now_ms - last_ms) // CACHE_LIMIT_MS}"
     return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 

@@ -198,7 +198,7 @@ def test_a_named_wait_past_forty_minutes_of_silence_gets_one_cache_warm_item(inb
     [item] = cache_items(inbox)
     assert item.id == cache_id and item.ref == f"{stale_nudge.CACHE_REF}:{cache_id}"
     assert "Cache warm check on swarm sw" in item.text and "keep your wait on t1" in item.text
-    assert "hand off" not in item.text.lower() and "end" not in item.text.lower()
+    assert not [word for word in ("hand off", "handoff", "ended", "retire", "reopen") if word in item.text.lower()]
 
 
 def test_a_second_cache_warm_item_waits_for_the_next_forty_minute_window(inbox):
@@ -227,3 +227,9 @@ def test_cache_due_is_false_once_the_wait_itself_ends(inbox):
     idle.declare_wait(inbox.redis, "sw", NAME, BASE + CACHE_LIMIT - MINUTE, "checks on the pull request", BASE)
     assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT + MINUTE) != []
     assert cache_items(inbox) == []
+
+
+def test_cache_due_is_false_without_a_known_activity_time():
+    wait = {"until": BASE + 3 * CACHE_LIMIT, "reason": "checks on the pull request"}
+    assert not stale_nudge.cache_due(wait, 0, BASE)
+    assert stale_nudge.cache_due(wait, BASE - CACHE_LIMIT - 1, BASE)
