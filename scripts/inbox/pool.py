@@ -2,7 +2,7 @@
 order, and each is claimed by exactly one live master, in round robin seat order. Operator items never enter it."""
 
 from scripts.inbox import intent
-from scripts.inbox.seats import is_seat, master_of, seat_address
+from scripts.inbox.seats import is_seat, master_of
 from scripts.inbox.store import POOL_HOLDER, POOL_SKIP
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import MASTER, RedisStore
@@ -62,10 +62,11 @@ class MasterPool:
     def rerouted(self, requested: str, address: str) -> tuple[str, str]:
         """An item for an empty backend master seat is sent to the front door seat instead, so the pool hands it to a
         live master; every other address is kept."""
-        seat, _, slug = address.partition("@")
-        if not (is_seat(address) and seat.startswith(f"{MASTER}-")) or not self.empty(slug, address):
+        if not (is_seat(address) and address.startswith(f"{MASTER}-")):
             return requested, address
-        door = seat_address(slug, MASTER)
+        door = master_of(address)
+        if not self.empty(slug_of(door), address):
+            return requested, address
         return door, door
 
     def empty(self, slug: str, address: str) -> bool:
