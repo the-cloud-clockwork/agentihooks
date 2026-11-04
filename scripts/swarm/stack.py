@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
-from scripts.swarm import apply_wait
+from scripts.swarm import apply_wait, git_https
 from scripts.swarm.ledger_client import LedgerClient, pass_state
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
@@ -27,7 +27,7 @@ WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skil
 
 def shell(argv: list[str]) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        return git_https.run(argv, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
         raise SwarmError(f"{' '.join(argv[:2])} could not run: {exc}") from exc
 

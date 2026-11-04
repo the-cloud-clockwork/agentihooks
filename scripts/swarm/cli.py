@@ -104,6 +104,7 @@ from scripts.swarm import (
     doc_report,
     done_gate,
     failed_panes,
+    git_https,
     idle,
     launch_check,
     ledger_events,
@@ -1703,7 +1704,7 @@ def cmd_review(store, args):
 
 def _git(run, *args):
     try:
-        return run(["git", *args], capture_output=True, text=True, timeout=20)
+        return git_https.run(["git", *args], runner=run, timeout=20)
     except (OSError, subprocess.SubprocessError) as exc:
         raise SwarmError(f"git {args[0]} could not run: {exc}") from exc
 
