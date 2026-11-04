@@ -909,8 +909,9 @@ tasks outside the focus queue, once for the focused ones. Each `placeable` row i
 `scripts.swarm.profile_first.decided` row and one `scripts.swarm.seat_spawn.placed_elsewhere` row for every task it
 checks, until the lane's free room is filled. After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue once.
 
-Over a window recorded entirely after pull request 9673 merged, `_running`, `ready_in_order` and `focus_budget.place`
-have equal counts, one per lane per spawn order, and `placeable` has twice that count.
+The code fixes the counts: `_running`, `ready_in_order` and `focus_budget.place` each run once per lane per spawn
+order, and `placeable` twice, so over a window recorded entirely after pull request 9673 merged the first three have
+equal counts and `placeable` has twice that.
 
 Read the rows with:
 
@@ -919,8 +920,8 @@ agentihooks swarm <swarm slug> tick-report --passes 60 \
   | grep -E 'capacity|claim_key|yielding|claim_view|_spawn_order|_running|ready_in_order|focus_budget|profile_first|placed_elsewhere|_ranked'
 ```
 
-A snapshot of the spawn order rows from the workstation tick of `rig-grade-swarm`, at 15:04 UTC on 4 November 2026,
-after pull request 9673 merged, with three lanes:
+A snapshot of the spawn order rows from the workstation tick of `rig-grade-swarm`, read at 15:04 UTC on 4 November
+2026 over a window that began before pull request 9673 merged, with three lanes:
 
 ```text
 scripts.swarm.focus_budget.place  138  0.054s  1.585s  0.18%
