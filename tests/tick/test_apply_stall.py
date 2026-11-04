@@ -209,7 +209,8 @@ class _State:
 
 
 def _stall_pass() -> list[str]:
-    step = next(step for step in masters.STEPS if step.name == "master stall")
+    real = next(step for step in masters.STEPS if step.name == "master stall")
+    step = tasks.WriteStep("master stall", "stall writes", real.call, writes=frozenset({tasks.STALL}))
     state = {"slug": "sw", "config": RUNNING, "store": "store", "ledger": "ledger", "runtime": Runtime(), "now_ms": 7}
     state["box"] = {}
     ctx = Context(_State(state), Deadline.after(60.0))
