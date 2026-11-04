@@ -824,9 +824,9 @@ def retire_all(names_and_pids):
 
 ## One placement scan per placement pass
 
-The spawn step places a lane's ready tasks in one placement pass: `_spawn` in `scripts.swarm.tick` calls the
-runtime's `begin_placement_pass` before it reads capacity, and `_placement_pass` calls `end_placement_pass` when the
-pass ends, even when it raises. On `controller.FencedRuntime` the pass holds one `local_slots.PassCache` in
+The spawn step places a lane's ready tasks in one placement pass: `_spawn_order` in `scripts.swarm.tick` calls the
+runtime's `begin_placement_pass` before it reads capacity, and the place and observe steps wrap their launches in
+`tick._placement_pass`, which calls `end_placement_pass` when the pass ends, even when it raises. On `controller.FencedRuntime` the pass holds one `local_slots.PassCache` in
 `_local_slots_cache`; `end_placement_pass` drops it, so the next pass starts empty.
 
 `PassCache.once(read, *args)` returns the pass's result of `read(*args)`. The first call with a given function and
@@ -843,7 +843,7 @@ thread, gets the same value without reading again. A different function or diffe
 `FencedRuntime._local_refusal` passes the pass cache to `local_slots.claim`, so each claim counts the live workers
 from the pass scan. The claim hash is never cached: every claim still reads it under `WATCH` and retries on a
 `WatchError`, so concurrent launches in one pass cannot take more than `local-max-agents` slots between them.
-`local_slots.occupancy`, read by `swarm autoscale`, takes no cache and scans each time.
+`local_slots.occupancy`, read by the hive launch, the swarm probe and the spawn stall health check, takes no cache and scans each time.
 
 Before this cache, five concurrent launches in one pass ran about twenty `/proc` walks at once, and each fenced spawn
 took ten seconds or more: the tc-g8 measurement over sixty passes put the fenced runtime spawn at
