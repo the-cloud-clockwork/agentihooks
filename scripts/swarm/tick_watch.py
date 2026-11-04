@@ -5,11 +5,11 @@ import json
 import sys
 import time
 from collections.abc import Callable
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import blockers, panic, sd_notify, tick_heartbeat, timing
+from scripts.swarm import blockers, panic, scheduled_tick, sd_notify, tick_heartbeat, timing
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
 
@@ -20,6 +20,8 @@ PASS_S = 60
 SLUG_PASS_S = 120
 BEAT_S = 30
 BLOCKED_LIMIT = 5
+REPAIR_S = SLUG_PASS_S - 20
+RESTART_S = scheduled_tick.STOP_S + 5
 WATCHDOG = "WATCHDOG=1"
 ALERT = (
     "The tick of swarm {slug} is stale: {evidence}. Until it recovers no swarm alert, nudge, merge or spawn happens; "
@@ -74,20 +76,57 @@ def watch_pass(
 
 
 class Repair:
-    """The scheduler serves every swarm on the machine, so it restarts at most once per stale window."""
+    """The scheduler serves every swarm on the machine, so it restarts at most once per stale window.
 
-    def __init__(self, restart: Callable[[], str], respawn: Callable[[str], list[str]]):
+    The restart runs under its own bound and the respawn under what is left of the repair bound, so a hung herdr
+    read or spawn returns the repair inside the pass deadline and never counts as a blocked pass.
+    """
+
+    def __init__(
+        self,
+        restart: Callable[[], str],
+        respawn: Callable[[str], list[str]],
+        bounds: tuple[float, float] = (RESTART_S, REPAIR_S),
+    ) -> None:
         self.restart, self.respawn, self.restarted, self.lock = restart, respawn, None, Lock()
+        self.bounds = bounds
 
     def __call__(self, slug: str, now: int) -> list[str]:
-        actions = []
         with self.lock:
             due = self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS
             if due:
                 self.restarted = now
-        if due:
-            actions.append(self.restart())
-        return actions + self.respawn(slug)
+        deadline = time.monotonic() + self.bounds[1]
+        actions = bounded(lambda: [self.restart()], min(self.bounds), "the scheduler restart") if due else []
+        left = max(deadline - time.monotonic(), 0)
+        return actions + bounded(lambda: self.respawn(slug), left, "the master respawn")
+
+
+def bounded(call: Callable[[], list[str]], limit_s: float, step: str) -> list[str]:
+    """Return the actions of one repair step, or the plain words of its timeout when it outlasts ``limit_s``.
+
+    A step left running finishes on its own thread while the repair goes on, so the next step can overlap it,
+    and an error it raises after its bound is reported on stderr.
+    """
+    done: list[list[str]] = []
+    failed: list[Exception] = []
+    abandoned = Event()
+
+    def work() -> None:
+        try:
+            done.append(call())
+        except Exception as exc:
+            if abandoned.is_set():
+                timing.emit(sys.stderr, f"{step} failed after its bound: {type(exc).__name__}: {exc}")
+            failed.append(exc)
+
+    worker = Thread(target=work, daemon=True)
+    worker.start()
+    worker.join(limit_s)
+    abandoned.set()
+    if failed:
+        raise failed[0]
+    return done[0] if done else [f"left {step} running after {limit_s:.1f} seconds"]
 
 
 def _alert(store: RedisStore, slug: str, now: int, episode: dict[str, Any] | None, evidence: list[str]) -> list[str]:
