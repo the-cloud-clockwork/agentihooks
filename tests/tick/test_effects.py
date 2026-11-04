@@ -3,6 +3,7 @@
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
@@ -143,3 +144,47 @@ def test_the_pass_spool_opens_once_and_appends_every_batch(monkeypatch: pytest.M
     spool.append_many([], first)
     assert opened == [("spool", ("sink", True))]
     assert appended == [([("rows", [{"a": 1}])], first), ([], first)]
+
+
+def _recorder(name: str) -> Callable[..., tuple[object, ...]]:
+    def build(*args: object, **kwargs: object) -> tuple[object, ...]:
+        return name, args, tuple(sorted(kwargs.items()))
+
+    return build
+
+
+@pytest.mark.feature("swarm-tick-declared-effects")
+def test_the_pass_tools_wire_every_real_adapter_for_the_swarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "ClientLedger",
+        "resource_client",
+        "StoreCoordination",
+        "GitHubSourceControl",
+        "RouterRuntime",
+        "PassProcesses",
+        "StoreInbox",
+        "InboxStore",
+        "ApiLlm",
+        "SpoolMetrics",
+        "local_host",
+    ):
+        monkeypatch.setattr(cli, name, _recorder(name))
+    monkeypatch.setattr(cli, "Path", SimpleNamespace(cwd=lambda: "cwd"))
+    monkeypatch.setattr(cli, "routed", lambda environ: SimpleNamespace(router=("router", environ)))
+    monkeypatch.setattr(cli, "_PassSpool", lambda: "spool")
+    monkeypatch.setattr(cli.classifier_settings, "load", lambda: SimpleNamespace(models=["first", "second"], url="url"))
+    records = [SimpleNamespace(name="eng-1"), SimpleNamespace(name="eng-2")]
+    store = SimpleNamespace(redis="redis", agents=lambda slug: records if slug == "sw" else [])
+    tools = cli._pass_tools(store, "sw", "owner")  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+    assert tools.ledger == ("ClientLedger", ("sw", ("resource_client", ("sw",), (("service", True),))), ())
+    assert tools.coordination == ("StoreCoordination", (store, "sw", "owner"), ())
+    assert tools.source_control == ("GitHubSourceControl", ("", "cwd", "dev"), ())
+    assert tools.processes == ("PassProcesses", (), ())
+    assert tools.inbox == ("StoreInbox", (("InboxStore", ("redis",), ()), "tick@sw"), ())
+    assert tools.llm == ("ApiLlm", ("first", "url"), ())
+    assert tools.metrics == ("SpoolMetrics", ("spool", {}), ())
+    assert tools.host == ("local_host", (store, "sw", os.environ), ())
+    runtime: tuple[str, tuple[object, Callable[[str], object]], tuple[()]] = tools.runtime  # pyright: ignore[reportAssignmentType]
+    assert runtime[1][0] == ("router", os.environ)
+    agent = runtime[1][1]
+    assert (agent("eng-2"), agent("eng-1"), agent("eng-9")) == (records[1], records[0], None)
