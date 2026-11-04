@@ -3,6 +3,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -515,3 +516,65 @@ def test_a_minute_due_while_the_supervisor_recycles_fires_once_on_the_restarted_
     assert scheduler.run_due(now=due + 31) == 0
     assert fired == [due]
     assert scheduler.get(entry_id).record["due"] == due + 60
+
+
+def test_ensure_names_the_missing_or_dead_entry_it_recreates_and_stays_quiet_on_a_live_one(capsys):
+    scheduler = _scheduler()
+    first = scheduled_tick.ensure(scheduler)
+    scheduled_tick.ensure(scheduler)
+    scheduler.get(first).cancel()
+    second = scheduled_tick.ensure(scheduler)
+    scheduler.change(lambda document: document["entries"].pop(second))
+    third = scheduled_tick.ensure(scheduler)
+    assert capsys.readouterr().err.splitlines() == [
+        f"recreated the swarm tick cron entry as {first}: entry '' was unregistered",
+        f"recreated the swarm tick cron entry as {second}: entry {first!r} was cancelled",
+        f"recreated the swarm tick cron entry as {third}: entry {second!r} was missing",
+    ]
+
+
+def _restart_said(capsys: pytest.CaptureFixture[str], stale: Callable[[], str]) -> tuple[str, str]:
+    said = scheduled_tick.restart(lambda *args: None, lambda: True, lambda seconds: None, stale)
+    return said, capsys.readouterr().err
+
+
+def test_a_restart_names_the_stale_delivery_evidence_it_acted_on(capsys):
+    assert _restart_said(capsys, lambda: "the last swarm tick was delivered 700 seconds ago") == (
+        "restarted the scheduler tick",
+        "restarting the scheduler: the last swarm tick was delivered 700 seconds ago\n",
+    )
+
+
+def test_a_restart_on_a_current_delivery_says_the_record_is_current(capsys):
+    assert (
+        _restart_said(capsys, lambda: "")[1] == "restarting the scheduler: the swarm tick delivery record is current\n"
+    )
+
+
+def test_a_restart_names_an_unreadable_delivery_record_and_still_restarts(capsys):
+    from redis.exceptions import ConnectionError
+
+    def down() -> str:
+        raise ConnectionError("refused")
+
+    assert _restart_said(capsys, down) == (
+        "restarted the scheduler tick",
+        "restarting the scheduler: the swarm tick delivery record could not be read: ConnectionError: refused\n",
+    )
+
+
+def test_a_restart_left_to_a_running_tick_prints_no_restart_reason(capsys):
+    with machine_lock(scheduled_tick.LOCK):
+        said = scheduled_tick.restart(lambda *args: None, lambda: True, lambda seconds: None, lambda: "stale")
+    assert (said, capsys.readouterr().err) == ("left the scheduler alone: a swarm tick is still running", "")
+
+
+def test_a_default_restart_reads_the_timer_delivery_and_names_itself_to_the_schedule(monkeypatch, capsys):
+    from scripts.swarm import timer
+
+    callers = []
+    monkeypatch.setattr(timer, "undelivered", lambda: "no scheduler has delivered a swarm tick yet")
+    monkeypatch.setattr(timer, "schedule", lambda caller: callers.append(caller) or True)
+    assert scheduled_tick.restart(lambda *args: None, None, lambda seconds: None) == "restarted the scheduler tick"
+    assert callers == ["the scheduler restart"]
+    assert capsys.readouterr().err == "restarting the scheduler: no scheduler has delivered a swarm tick yet\n"

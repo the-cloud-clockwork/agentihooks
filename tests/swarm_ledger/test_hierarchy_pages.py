@@ -146,7 +146,13 @@ def test_the_phase_pass_reads_every_page_of_a_ledger_above_the_cap(large, monkey
 
     monkeypatch.setattr(masters, "held", lambda redis, slug, agents: {})
     document = state(40, 100)
-    actions = phases.phase_pass(Inbox(), SimpleNamespace(agents=lambda slug: [], redis=None), SLUG, document, Ledger())
+    store, ledger = SimpleNamespace(agents=lambda slug: [], redis=None), Ledger()
+    found = phases.phase_changes(SLUG, document, ledger)
+    actions = [
+        phases.apply_change(Inbox(), store, SLUG, ledger, change)
+        for change in found
+        if isinstance(change, phases.PhaseChange)
+    ]
     assert ticked == [(f"p{n}", n % 2 == 0) for n in range(40)]
     assert actions == [f"phase p{n} {'ticked' if n % 2 == 0 else 'reopened'}" for n in range(40)]
     assert len(served.paths) > 1

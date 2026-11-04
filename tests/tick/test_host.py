@@ -77,6 +77,7 @@ def _cli(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespace
         skip_refused=skip_refused,
         _intent_pass=intent_pass,
         _phase_steps=phase_steps,
+        _planning_after_phase=lambda *args: calls.append(("after", *args)) or ["planned again"],
         relay=relay,
         refresh_job=refresh_job,
     )
@@ -118,6 +119,7 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("command runner", "wrapper commands"),
         ("urgent hold", "wrapper phases"),
         ("planning and phase pass", "wrapper phases"),
+        ("planning after phase", "wrapper phases"),
         ("refresh job", "wrapper refresh"),
         ("intent check", "wrapper intent"),
         ("reboot pass", "wrapper reboot"),
@@ -211,11 +213,13 @@ def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[Any, ...]] = []
-    state = _pass(inbox="inbox", doc="doc")
-    assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked"]
+    box: dict[str, Any] = {}
+    state = _pass(box, inbox="inbox", doc="doc")
+    assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked", "planned again"]
     assert calls == [
         ("call", urgent_hold.observe, STORE, "sw", "doc", 7),
         ("phases", "inbox", STORE, "sw", "doc", "ledger"),
+        ("after", "inbox", STORE, "sw", "ledger", box),
     ]
 
 

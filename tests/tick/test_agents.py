@@ -11,6 +11,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import AGENTS, PASS, TASKS, CallStep, actions, actions_of, agents
+from scripts.tick.steps import agents as agent_steps
 
 pytestmark = pytest.mark.unit
 
@@ -55,13 +56,13 @@ def _fakes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[Any, ...]]]
         call.__qualname__ = name
         return call
 
-    monkeypatch.setattr(tick_module, "_reap", fake("reap", ["reaped"]))
+    monkeypatch.setattr(agent_steps, "_reap", fake("reap", ["reaped"]))
     monkeypatch.setattr(tick_module.resume, "recover_outages", fake("recover", ["recovered"]))
-    monkeypatch.setattr(tick_module, "_strays", fake("strays", ["stray"]))
+    monkeypatch.setattr(agent_steps, "_strays", fake("strays", ["stray"]))
     monkeypatch.setattr(tick_module.failed_panes, "sweep", fake("panes", ["pane"]))
-    monkeypatch.setattr(tick_module, "_orphans", fake("orphans", ["orphan"]))
-    monkeypatch.setattr(tick_module, "_conversations", fake("conversations", None))
-    monkeypatch.setattr(tick_module, "_session_models", fake("models", ["model"]))
+    monkeypatch.setattr(agent_steps, "_orphans", fake("orphans", ["orphan"]))
+    monkeypatch.setattr(agent_steps, "_conversations", fake("conversations", None))
+    monkeypatch.setattr(agent_steps, "_session_models", fake("models", ["model"]))
     monkeypatch.setattr(tick_module.transfers, "observe", fake("transfers", ["transfer"]))
     return seen
 
@@ -135,16 +136,21 @@ def test_a_call_step_is_placed_and_bounded_as_registered() -> None:
 
 
 def test_the_registered_agent_steps_declare_writers_the_registry_accepts() -> None:
-    fresh = registry.Registry()
-    for step in agents.STEPS:
-        fresh.register(step)
-    fresh.validate()
+    registry.validate()
     assert {domain for step in agents.STEPS for domain in step.writes} == {
         actions_of(step.name) for step in agents.STEPS
     } | {AGENTS, TASKS}
     declared = {step.name: (step.needs, step.reads, step.writes - {actions_of(step.name)}) for step in agents.STEPS}
-    assert declared["reap"] == (frozenset(), frozenset({AGENTS}), frozenset({AGENTS, TASKS}))
-    assert declared["orphans"] == (frozenset({"reap"}), frozenset({TASKS}), frozenset({TASKS}))
+    assert declared["reap"] == (
+        frozenset({"spawn due"}),
+        frozenset({AGENTS, Domain("pass:rows")}),
+        frozenset({AGENTS, TASKS}),
+    )
+    assert declared["orphans"] == (
+        frozenset({"reap", "drained resume"}),
+        frozenset({TASKS, Domain("pass:config"), Domain("pass:rows")}),
+        frozenset({TASKS}),
+    )
 
 
 def test_a_call_step_reads_the_pass_state_and_the_tick_module() -> None:
