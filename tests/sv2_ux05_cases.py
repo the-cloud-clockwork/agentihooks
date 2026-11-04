@@ -231,7 +231,8 @@ class Viewer:
               const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
               const state = await import(new URL("state.js", main));
               const page = await import(new URL("render.js", main));
-              for (let i = 0; i < 300 && !Object.keys(state.tips).length; i++) await new Promise((done) => setTimeout(done, 50));
+              const pause = () => new Promise((done) => setTimeout(done, 50));
+              for (let i = 0; i < 300 && !Object.keys(state.tips).length; i++) await pause();
               if (!Object.keys(state.tips).length) throw new Error("the page never applied its tips");
               await page.render();
             }"""
