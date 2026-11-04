@@ -1259,8 +1259,8 @@ def _member_reap(remote: SimpleNamespace, names: list[str]) -> SimpleNamespace:
     remote.runtime.observe = Mock(return_value=PaneObservation("unknown"))
     remote.runtime.retire = Mock(side_effect=AssertionError("a vanished hive member needs no remote command"))
     now = LAUNCHED + remote.reports.STARTUP_MS
-    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, now)
-    again = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, now + 1)
+    actions = tick.agent_steps._reap("fixture", remote.store, ledger, remote.runtime, rows, now)
+    again = tick.agent_steps._reap("fixture", remote.store, ledger, remote.runtime, rows, now + 1)
     return SimpleNamespace(agent=agent, ledger=ledger, rows=rows, actions=actions, again=again)
 
 
