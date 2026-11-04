@@ -8,11 +8,12 @@ import pytest
 
 from scripts import terminate_agent
 from scripts.hive import headroom
-from scripts.swarm import commands, local_slots, timing
+from scripts.swarm import commands, lease, local_slots, timing
 from scripts.swarm.controller import FencedRuntime
 from tests.hive.test_controller_launch import setup as setup
 
 LAUNCHES = 5
+NOW = 1_800_000_000_000
 READING = {"cpus": 64, "load5": 0.0, "available_mb": 10**6, "total_mb": 10**6}
 
 
@@ -29,6 +30,7 @@ def counted(monkeypatch: pytest.MonkeyPatch, module: Any, name: str, value: Any)
 
 def local(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> tuple[FencedRuntime, list, list]:
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(lease, "now_ms", lambda store: NOW)
     setup.store.update(setup.config.slug, local_max_agents=LAUNCHES)
     scans = counted(monkeypatch, terminate_agent, "sessions", [])
     readings = counted(monkeypatch, headroom, "measure", READING)
@@ -61,8 +63,7 @@ def test_concurrent_launches_in_one_pass_scan_processes_and_read_the_host_once(
     assert refusals == dict.fromkeys(range(LAUNCHES), "")
     assert len(setup.store.redis.hgetall(local_slots.key("workstation"))) == LAUNCHES
     assert (len(scans), len(readings)) == (1, 1)
-    pending, now, keywords = readings[0]
-    assert (pending, isinstance(now, int), keywords) == (0, True, {"previous": {"saved": "workstation"}})
+    assert readings == [(0, NOW, {"previous": {"saved": "workstation"}})]
 
 
 def test_concurrent_launches_in_one_pass_stop_at_the_local_cap(
