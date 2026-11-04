@@ -125,14 +125,14 @@ def test_put_checks_managed_names_outside_the_swarm_write_lock(
 ) -> None:
     registry = store.execution_registry
     managed = registry.managed
-    probes: list[bool] = []
+    probes: list[tuple[bool, str]] = []
 
     def probing(slug: str, name: str) -> bool:
-        probes.append(lock_free(slug))
+        probes.append((lock_free(slug), name))
         return managed(slug, name)
 
     monkeypatch.setattr(registry, "managed", probing)
     agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-1@fixture", started_at=123)
     store.put_agent("fixture", agent)
-    assert probes == [True]
+    assert probes == [(True, agent.name)]
     assert [row.name for row in store.agents("fixture")] == [agent.name]
