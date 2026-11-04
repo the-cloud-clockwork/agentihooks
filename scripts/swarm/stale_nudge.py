@@ -3,7 +3,7 @@
 import hashlib
 
 from scripts.inbox.store import DuplicateItem, InboxStore, Item
-from scripts.swarm import idle, timing
+from scripts.swarm import idle
 from scripts.swarm.store import AgentRecord
 
 LIMIT_MS = 10 * 60_000
@@ -56,17 +56,15 @@ def interrupts(item: Item, now_ms: int) -> bool:
 
 def nudge(inbox: InboxStore, slug: str, agent: AgentRecord, provider_error: str, now_ms: int) -> list[str]:
     redis = inbox.redis
-    beat = timing.timed(idle.heartbeat, redis, slug, agent.name)
+    beat = idle.heartbeat(redis, slug, agent.name)
     last_ms = last_activity(beat, agent)
-    if not stale(beat, last_ms, timing.timed(idle.wait, redis, slug, agent.name), provider_error, now_ms):
+    if not stale(beat, last_ms, idle.wait(redis, slug, agent.name), provider_error, now_ms):
         return []
     reason = ERROR_REASON if provider_error else IDLE_REASON
     nudge_id = item_id(slug, agent.name, last_ms, now_ms)
     text = TEXT.format(slug=slug, reason=reason, task=agent.task)
     try:
-        item = timing.timed(
-            inbox.send, SENDER, agent.name, text, ref=f"{REF}:{nudge_id}", task=agent.task, item_id=nudge_id
-        )
+        item = inbox.send(SENDER, agent.name, text, ref=f"{REF}:{nudge_id}", task=agent.task, item_id=nudge_id)
     except DuplicateItem:
         return []
     redis.set(idle.key(slug, LAST, agent.name), now_ms, ex=idle.BEAT_TTL_S)

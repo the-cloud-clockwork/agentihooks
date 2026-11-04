@@ -759,7 +759,7 @@ def _watch_remote(
     """A remote agent is judged by its own runtime, never by this host's process table: no answer keeps it suspect,
     holding its claim, neither retired nor dropped."""
     timing.timed(store.refresh, slug, agent.task, agent.name, LEASE_MS)
-    if timing.timed(runtime.observe, agent).state == "unknown":
+    if runtime.observe(agent).state == "unknown":
         if agent.state == SUSPECT:
             return []
         timing.timed(store.put_agent, slug, replace(agent, state=SUSPECT))
