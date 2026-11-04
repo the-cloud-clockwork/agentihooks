@@ -277,8 +277,9 @@ class LedgerClient:
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
 
-    def ungroup_tasks(self, slug, lead):
-        self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
+    def ungroup_tasks(self, slug: str, lead: str, if_match: dict[str, list[str]] | None = None) -> None:
+        guard = {} if if_match is None else {"if_match": if_match}
+        self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}", **guard)])
 
     def rank_task(self, slug, task_id, rank, by, if_owned=False):
         guard = {"if_owned": True} if if_owned else {}

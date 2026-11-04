@@ -37,6 +37,8 @@ class FakeStep:
     needs: frozenset[str] = frozenset()
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
     seen: list[Context] = field(default_factory=list)
 
     def run(self, ctx: Context) -> Result:
