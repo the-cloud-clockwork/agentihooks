@@ -95,7 +95,8 @@ def test_migration_copies_the_document_into_records_and_reads_it_back(store: Any
     after = fencing.read(store, "sw")
     assert written == 10
     assert after[fencing.RECORDS_SLUG] == "sw"
-    assert fencing.records(store, "sw").record("sw", fencing.ARCHIVED_NAMES, "old").value == "z"
+    indexed = fencing.records(store, "sw").record("sw", fencing.ARCHIVED_NAMES, "old")
+    assert indexed is not None and indexed.value == "z"
     skipped = ("archive_ref", fencing.RECORDS_SLUG)
     assert {key: value for key, value in after.items() if key not in skipped} == {
         key: value for key, value in before.items() if key not in skipped

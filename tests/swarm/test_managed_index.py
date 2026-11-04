@@ -84,7 +84,8 @@ def test_a_swarm_migrated_before_the_index_builds_it_once(store: RedisStore, mon
     assert registry.managed("fixture", "someone@fixture") is False
     assert len(reads) == 1
     index = fencing.records(store, "fixture")
-    assert index.record("fixture", fencing.ARCHIVED_NAMES, first.name).value == first.execution_id
+    indexed = index.record("fixture", fencing.ARCHIVED_NAMES, first.name)
+    assert indexed is not None and indexed.value == first.execution_id
     assert index.record("fixture", fencing.ARCHIVED_NAMES, third.name) is None
 
 
