@@ -3,6 +3,7 @@ import sqlite3
 
 import pytest
 
+from scripts.events import catalogue
 from scripts.events.envelope import Envelope
 from scripts.swarm_ledger.repository import outbox, postgres, sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
@@ -49,7 +50,13 @@ def test_a_task_change_writes_one_outbox_row_carrying_the_changed_task(tmp_path)
     task = next(task for task in state["tasks"] if task["id"] == "t2")
     assert (row_id, slug, revision, subject) == (event.id, "ledger", state["_meta"]["rev"], "swarm.ledger.task.t2")
     assert (event.type, event.swarm, event.entity, event.key) == ("task.changed", "ledger", "task", "t2")
-    assert (event.version, event.author, event.cause, event.data) == (state["_meta"]["rev"], "ledger", None, task)
+    assert (event.version, event.author, event.cause, event.data) == (
+        state["_meta"]["rev"],
+        "ledger",
+        None,
+        catalogue.filled("task", task),
+    )
+    assert set(event.data) == catalogue.TASK_FIELDS
 
 
 def test_a_phase_change_writes_one_outbox_row_carrying_the_changed_phase(tmp_path):
@@ -62,7 +69,8 @@ def test_a_phase_change_writes_one_outbox_row_carrying_the_changed_phase(tmp_pat
         "p1",
         state["_meta"]["rev"],
     )
-    assert event.data == state["phases"][0] and event.data["done"] is True
+    assert event.data == catalogue.filled("phase", state["phases"][0]) and event.data["done"] is True
+    assert set(event.data) == catalogue.PHASE_FIELDS
     assert rows(repo)[0][3] == "swarm.ledger.phase.p1"
 
 
@@ -82,7 +90,10 @@ def test_creating_a_ledger_writes_one_outbox_row_per_task_and_phase(tmp_path):
         (state["_meta"]["rev"], "swarm.ledger.task.t1"),
         (state["_meta"]["rev"], "swarm.ledger.task.t2"),
     ]
-    assert [event.data for event in events(repo)] == [state["phases"][0], *state["tasks"]]
+    assert [event.data for event in events(repo)] == [
+        catalogue.filled("phase", state["phases"][0]),
+        *(catalogue.filled("task", task) for task in state["tasks"]),
+    ]
 
 
 def test_a_replacing_import_writes_rows_for_the_tasks_and_phases_it_changes_and_removes(tmp_path):
@@ -91,7 +102,7 @@ def test_a_replacing_import_writes_rows_for_the_tasks_and_phases_it_changes_and_
     replacement = {**source, "tasks": [{**source["tasks"][0], "title": "renamed"}]}
     repo.import_document("ledger", replacement, replace=True)
     assert [(row[3], event.type, event.data) for row, event in zip(rows(repo), events(repo))] == [
-        ("swarm.ledger.task.t1", "task.changed", replacement["tasks"][0]),
+        ("swarm.ledger.task.t1", "task.changed", catalogue.filled("task", replacement["tasks"][0])),
         ("swarm.ledger.task.t2", "task.removed", {}),
     ]
 

@@ -1,7 +1,9 @@
 import json
+import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -113,20 +115,22 @@ def test_the_scheduler_fires_the_tick_holder_every_minute(monkeypatch):
 
 
 class _Tick:
-    def __init__(self, codes):
+    pid = 4_194_305
+
+    def __init__(self, codes: list[int | None]) -> None:
         self.codes, self.waits, self.signals = list(codes), [], []
 
-    def wait(self, timeout=None):
+    def wait(self, timeout: float | None = None) -> int:
         self.waits.append(timeout)
         code = self.codes.pop(0)
         if code is None:
-            raise subprocess.TimeoutExpired("agentihooks", timeout)
+            raise subprocess.TimeoutExpired("agentihooks", timeout or 0)
         return code
 
-    def terminate(self):
+    def terminate(self) -> None:
         self.signals.append("terminate")
 
-    def kill(self):
+    def kill(self) -> None:
         self.signals.append("kill")
 
 
@@ -205,16 +209,172 @@ def test_the_holder_holds_the_tick_lock_while_the_tick_runs(monkeypatch):
     assert held == [True]
 
 
-def test_a_tick_past_its_timeout_is_terminated_then_killed():
-    tick = _Tick([None, 143])
-    assert scheduled_tick._finish(tick) == 143
-    assert tick.waits == [540, 90]
-    assert tick.signals == ["terminate"]
+class _Group:
+    def __init__(self, members: int = 0, stubborn: bool = False) -> None:
+        self.members, self.stubborn, self.sent = members, stubborn, []
 
+    def __call__(self, pgid: int, number: int) -> None:
+        self.sent.append((pgid, number))
+        if number == signal.SIGKILL or not self.stubborn:
+            self.members = 0
+
+    def alive(self, pgid: int) -> bool:
+        return self.members > 0
+
+
+PID = _Tick.pid
+
+
+def test_a_tick_past_its_timeout_signals_its_whole_group_then_kills_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
+    group = _Group(members=1)
+    tick = _Tick([None, 143])
+    assert scheduled_tick._finish(tick, group, group.alive) == 143
+    assert tick.waits == [540, 90]
+    assert group.sent == [(PID, signal.SIGTERM)]
+    assert tick.signals == []
+
+    group = _Group(members=1, stubborn=True)
     tick = _Tick([None, None, -9])
-    assert scheduled_tick._finish(tick) == -9
+    assert scheduled_tick._finish(tick, group, group.alive) == -9
     assert tick.waits == [540, 90, None]
-    assert tick.signals == ["terminate", "kill"]
+    assert group.sent == [(PID, signal.SIGTERM), (PID, signal.SIGKILL)]
+
+
+def test_a_tick_that_exits_clean_after_its_timeout_still_ends_its_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
+    group = _Group(members=1, stubborn=True)
+    assert scheduled_tick._finish(_Tick([None, 0]), group, group.alive) == 0
+    assert group.sent == [(PID, signal.SIGTERM), (PID, signal.SIGTERM), (PID, signal.SIGKILL)]
+    assert not group.alive(PID)
+
+
+def test_the_unit_holder_runs_the_tick_without_recording_a_scheduler_delivery(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import timer
+
+    monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    recorded = []
+    monkeypatch.setattr(scheduled_tick, "_delivered", recorded.append)
+    assert scheduled_tick.main(lambda argv, **kwargs: _Tick([0]), record=False) == 0
+    assert recorded == []
+    assert scheduled_tick.main(lambda argv, **kwargs: _Tick([0])) == 0
+    assert len(recorded) == 1
+
+
+def test_a_clean_pass_leaves_its_group_alone() -> None:
+    group = _Group(members=1)
+    assert scheduled_tick._finish(_Tick([0]), group, group.alive) == 0
+    assert group.sent == []
+
+
+def test_a_failed_pass_ends_what_is_left_of_its_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
+    group = _Group(members=2)
+    assert scheduled_tick._finish(_Tick([1]), group, group.alive) == 1
+    assert group.sent == [(PID, signal.SIGTERM)]
+    assert not group.alive(PID)
+
+    group = _Group(members=2, stubborn=True)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
+    assert scheduled_tick._finish(_Tick([1]), group, group.alive) == 1
+    assert group.sent == [(PID, signal.SIGTERM), (PID, signal.SIGKILL)]
+    assert not group.alive(PID)
+
+    group = _Group()
+    assert scheduled_tick._finish(_Tick([1]), group, group.alive) == 1
+    assert group.sent == []
+
+
+class _Fading:
+    def __init__(self, lives: list[bool]) -> None:
+        self.lives, self.checked, self.sent = list(lives), [], []
+
+    def __call__(self, pgid: int, number: int) -> None:
+        self.sent.append((pgid, number))
+
+    def alive(self, pgid: int) -> bool:
+        self.checked.append(pgid)
+        return self.lives.pop(0) if self.lives else False
+
+
+def test_the_sweep_polls_the_group_until_it_empties_before_killing(monkeypatch: pytest.MonkeyPatch) -> None:
+    slept = []
+    monkeypatch.setattr(scheduled_tick.time, "sleep", slept.append)
+    group = _Fading([True, True, True, False])
+    scheduled_tick._sweep(PID, group, group.alive)
+    assert group.sent == [(PID, signal.SIGTERM)]
+    assert slept == [0.2, 0.2]
+    assert group.checked == [PID] * 4
+
+
+def test_the_sweep_kills_once_its_grace_is_spent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduled_tick.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 0)
+    group = _Fading([True, True])
+    scheduled_tick._sweep(PID, group, group.alive)
+    assert group.sent == [(PID, signal.SIGTERM), (PID, signal.SIGKILL)]
+    assert group.checked == [PID, PID]
+
+
+def test_a_tick_killed_after_its_stop_grace_still_sweeps_its_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduled_tick.time, "sleep", lambda _s: None)
+    group = _Fading([])
+    assert scheduled_tick._finish(_Tick([None, None, 0]), group, group.alive) == 0
+    assert group.checked == [PID]
+
+
+class _Listed:
+    def __init__(self, entries: list[Path]) -> None:
+        self.entries = entries
+
+    def iterdir(self) -> list[Path]:
+        return self.entries
+
+
+def test_an_unreadable_process_does_not_hide_a_live_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "5").mkdir()
+    (tmp_path / "6").mkdir()
+    (tmp_path / "6" / "stat").write_text("6 (py) S 1 77 77 0")
+    monkeypatch.setattr(scheduled_tick, "PROC", _Listed([tmp_path / "5", tmp_path / "6"]))
+    assert scheduled_tick._group_alive(77)
+
+
+def test_a_group_of_only_zombies_counts_as_ended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for pid, state, pgrp in ((10, "Z", 77), (11, "S", 78), (12, "S", 77)):
+        (tmp_path / str(pid)).mkdir()
+        (tmp_path / str(pid) / "stat").write_text(f"{pid} (py) thing) {state} 1 {pgrp} 77 0")
+    (tmp_path / "self").mkdir()
+    monkeypatch.setattr(scheduled_tick, "PROC", tmp_path)
+    assert scheduled_tick._group_alive(77)
+    (tmp_path / "12" / "stat").write_text("12 (py) Z 1 77 77 0")
+    assert not scheduled_tick._group_alive(77)
+    assert scheduled_tick._group_alive(78)
+
+
+def test_a_failed_pass_leaves_no_child_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(scheduled_tick, "SWEEP_S", 2)
+    pid_file = tmp_path / "child"
+    tick = subprocess.Popen(["sh", "-c", f"sleep 300 & echo $! > {pid_file}; exit 3"], start_new_session=True)
+    assert scheduled_tick._finish(tick) == 3
+    child = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while tick_reaper.alive(child) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not tick_reaper.alive(child)
+
+
+def test_the_holder_starts_the_tick_as_its_own_process_group(monkeypatch):
+    from scripts.swarm import timer
+
+    monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    launched = []
+    scheduled_tick.main(lambda argv, **kwargs: launched.append(kwargs) or _Tick([0]))
+    assert launched[0]["start_new_session"] is True
 
 
 def _holding(monkeypatch):

@@ -1,6 +1,6 @@
 """Registered tick steps that run a hand written call of the tick pass against the pass state."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from functools import partial
 from importlib import import_module
 from typing import Any, cast
@@ -82,8 +82,23 @@ class Left(KeyError):
 
 
 class PassBox(dict[str, Any]):
-    """The pass box: reading a value no step stored raises ``Left`` instead of a plain ``KeyError``."""
+    """The pass box: reading a value no step stored raises ``Left`` instead of a plain ``KeyError``.
+
+    ``left`` names each step the pass left running, dropped or held, shared by every box handed the same list.
+    """
+
+    def __init__(self, values: Mapping[str, Any] | None = None, *, left: list[str] | None = None) -> None:
+        """Start a box holding ``values`` and keeping the names of the steps its pass left in ``left``, a new list when
+        not given."""
+        super().__init__(values or {})
+        self.left: list[str] = [] if left is None else left
 
     def __missing__(self, key: str) -> Any:
         """Raise ``Left`` naming the value no step stored."""
         raise Left(key)
+
+
+def note_left(box: object, records: Iterable[StepRecord]) -> None:
+    """Add to a pass ``box`` the name of each recorded step left running past its budget, dropped or held."""
+    if isinstance(box, PassBox):
+        box.left.extend(record.name for record in records if record.abandoned or record.held)

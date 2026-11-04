@@ -3,6 +3,7 @@ from threading import Event
 
 import pytest
 
+from scripts.swarm import timing
 from scripts.tick import engine
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
@@ -45,8 +46,8 @@ def _ctx() -> Context:
 def _finish(step: BlockingStep) -> None:
     step.release.set()
     assert step.ended.wait(30.0)
-    engine._RUNNING[step.name].join(30.0)
-    assert not engine._RUNNING[step.name].is_alive()
+    engine._RUNNING[(None, step.name)].join(30.0)
+    assert not engine._RUNNING[(None, step.name)].is_alive()
 
 
 @pytest.mark.feature("swarm-tick-step-overlap-hold")
@@ -108,3 +109,26 @@ def test_a_held_record_reads_held_unless_it_failed() -> None:
     assert engine.StepRecord("x", 0.0, 5.0, held=True).outcome == engine.HELD
     assert engine.StepRecord("x", 0.0, 5.0, error="boom", held=True).outcome == engine.FAILED
     assert engine.HELD == "held"
+
+
+@pytest.mark.feature("swarm-tick-step-overlap-hold")
+def test_a_late_step_in_one_swarm_does_not_hold_the_same_step_in_another() -> None:
+    late = BlockingStep("overlap swarm health step")
+    other = BlockingStep("overlap swarm health step", budget_s=5.0)
+    other.release.set()
+    try:
+        with timing.tick("overlap first swarm"):
+            first = engine.run_step(late, _ctx())
+        with timing.tick("overlap second swarm"):
+            second = engine.run_step(other, _ctx())
+        with timing.tick("overlap first swarm"):
+            again = engine.run_step(late, _ctx())
+    finally:
+        late.release.set()
+        assert late.ended.wait(30.0)
+        engine._RUNNING[("overlap first swarm", late.name)].join(30.0)
+    assert first.outcome == engine.LATE
+    assert (second.outcome, second.held) == (engine.OK, False)
+    assert other.runs == [1]
+    assert again == engine.StepRecord(late.name, 0.0, late.budget_s, held=True)
+    assert late.runs == [1]
