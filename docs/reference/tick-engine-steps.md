@@ -549,7 +549,8 @@ returns `Stall` items.
    the ledger server as `if_match`, which compares the same fields in the same
    apply: the server refuses an ungroup whose members moved, and leaves a task
    update unapplied when a guarded field moved. The size applier then checks
-   the task the server returned and treats an unchanged guarded field as moved.
+   the task the server returned and treats a guarded field that does not hold the
+   new value as moved.
 4. A guarded value that moved, a refused ledger call (`LedgerRefused`), a
    failed fleet red notice, or a write whose value is not the expected type
    raises `RevisionConflict`. A failed fleet red notice first deletes its hold
@@ -581,7 +582,10 @@ dropped write phases p2 of step planning and phase pass: phase p2 changed its ch
 dropped write master stall master@s1-2 of step master stall: master master@s1-2 is no longer the live master of swarm s1; the next pass recomputes it
 ```
 
-The line joins the pass actions in the tick journal. The step's own action
+The line joins the pass actions in the tick journal. Each step record also
+lands in the `tick:records` stream with its `dropped` and `conflicts` counts,
+and `swarm <id> tick-report` sums them in its Dropped column (see
+[Outcome columns](tick-report.md#outcome-columns)). The step's own action
 line, such as `sized task t7 M by rule`, is still reported for that pass even
 though its write was dropped, so read both lines together.
 
@@ -606,9 +610,11 @@ parallel pass:
 3. The next pass reads revision 2, returns a write expecting it, and the write
    lands: `t1` is at revision 3 with `M from revision 2` and nothing is dropped.
 
-`tests/tick/test_apply_rank.py` and `tests/tick/test_apply_phases.py` run the
-same drop and recompute for a rank pass whose heads another pass moved and for
-a phase checkbox another writer moved.
+`tests/tick/test_apply_rank.py`, `tests/tick/test_apply_phases.py`,
+`tests/tick/test_apply_fleet_red.py` and `tests/tick/test_apply_stall.py` run
+the same drop and recompute for a rank pass whose heads another pass moved, a
+phase checkbox another writer moved, a hold a seat claimed mid pass and a
+stall of a master another master replaced.
 
 ### Writing a step that returns writes
 
@@ -715,6 +721,10 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_place.py` | Group membership and orders; `lost runner` and `time left` in lane `slow` and every other placement step in lane `tick`; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
 | `tests/tick/test_abandoned_writes.py` | A write step abandoned at its budget, and one abandoned when its lane expired, each journal one `swarm_tick_step_abandoned` line with the swarm, step, budget and sorted write domains; a call step abandoned with only its actions domain journals nothing |
 | `tests/tick/test_apply.py` | The dropped write and its recompute, sequential and parallel; writes without an applier pass through; both appliers write while their guard holds, drop a moved guard and turn a refused ledger call into a conflict; appliers need a ledger and a swarm; the size pass and grouping release return guarded writes and leave the document as read; a write step keeps every attribute of its call step |
+| `tests/tick/test_apply_rank.py` | The rank pass returns one write guarded on the heads it read; the applier takes it while the saved heads hold, takes a proposing pass whatever the heads, drops moved heads, and the engine keeps applied actions after the step actions and beside a later dropped write |
+| `tests/tick/test_apply_phases.py` | A write per checkbox guarded on the done state read; the applier marks the box and sets the checkbox, writes through without a held view, and drops a moved, lost or refused checkbox |
+| `tests/tick/test_apply_fleet_red.py` | Guarded hold writes, lifted and listing writes; the applier posts while the task stays open and unclaimed, drops a moved or claimed task, and forgets a failed notice so the next pass posts it again |
+| `tests/tick/test_apply_stall.py` | The stall pass decides and writes nothing; the applier drops a stall once another master holds the seat, recomputed on the next pass |
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
 | `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
