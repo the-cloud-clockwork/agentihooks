@@ -1362,6 +1362,7 @@
         "tests/test_claude_target.py::test_remove_managed_keys_returns_true_when_operator_content_remains",
         "tests/test_claude_target.py::test_remove_managed_keys_tolerates_state_with_no_recorded_keys_at_all",
         "tests/test_claude_target.py::test_remove_managed_keys_returns_false_and_deletes_the_file_when_nothing_operator_owned_remains",
+        "tests/test_claude_target.py::test_remove_managed_keys_tolerates_a_marker_the_recorded_leaves_already_removed",
         "tests/test_claude_target.py::test_enabled_plugins_reads_bundle_user_and_shared_separately",
         "tests/test_claude_target.py::test_enabled_plugins_records_the_union_of_owned_and_layered_names",
         "tests/test_claude_target.py::test_write_settings_keeps_hooks_and_enabled_plugins_out_of_the_generic_merge",
