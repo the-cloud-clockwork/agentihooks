@@ -510,7 +510,7 @@ lands only while what the step read still holds the value it saw.
 | `domain` | What the write changes; selects the applier |
 | `key` | The record: a task id, a phase id, the swarm or the master name |
 | `value` | The change to make |
-| `expected` | The guard: what the step read. Defaults to `None`, which the task appliers read as no fields to compare |
+| `expected` | The guard: what the step read. Defaults to `None`, which the size and group appliers read as no fields to compare |
 
 These steps return writes. Every domain constant except `fleet_red.LISTINGS`
 lives in `scripts.tick.steps.tasks`.
@@ -552,7 +552,7 @@ returns `Stall` items.
    the task the server returned and treats a guarded field that does not hold the
    new value as moved.
 4. A guarded value that moved, a refused ledger call (`LedgerRefused`), a
-   failed fleet red notice, or a write whose value is not the expected type
+   fleet red task a seat claimed since the read, a failed fleet red notice, or a write whose value is not the expected type
    raises `RevisionConflict`. A failed fleet red notice first deletes its hold
    mark, so the next pass posts it again.
 5. The engine catches `RevisionConflict`, adds the write to the step record's
@@ -598,7 +598,8 @@ decided again from the new state. No queue of dropped writes is kept.
 ### Conflict scenario
 
 `tests/tick/test_apply.py` holds the scenario both sequentially and on a
-parallel pass:
+parallel pass, with a test step named `size` that writes a test domain `tasks`
+guarded on a revision number:
 
 1. Task `t1` is at revision 1. The step reads it and returns a write expecting
    revision 1; a concurrent writer moves `t1` to revision 2 before the write is
@@ -650,7 +651,7 @@ as described above.
 
 - The held view compare sees only changes up to the view's latest refresh.
   Without a held view the task, group, fleet red and phase appliers skip that
-  compare; a task the view lacks compares as empty. The size and group writes
+  compare; a task the view lacks compares as empty, and a phase it lacks as not done. The size and group writes
   are still compared on the server through `if_match`; the fleet red, phase,
   rank and stall writes are not.
 - A dropped write waits a whole pass for its recompute.
