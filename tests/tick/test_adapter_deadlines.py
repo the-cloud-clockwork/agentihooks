@@ -24,15 +24,27 @@ NO_DEADLINE = "records_redis.py"
 REF = ChangeRef("o/r", 7)
 
 
+def _first_statement(method: ast.FunctionDef) -> ast.stmt | None:
+    """Return the first statement of the method body after its docstring and local imports."""
+    body = [
+        statement
+        for statement in method.body
+        if not isinstance(statement, (ast.Import, ast.ImportFrom))
+        and not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant))
+    ]
+    return body[0] if body else None
+
+
 def _checks(method: ast.FunctionDef) -> bool:
-    """Say whether the method body calls live on its deadline argument."""
-    return any(
+    """Say whether the method's first statement calls live on its deadline argument, before any other work."""
+    first = _first_statement(method)
+    return first is not None and any(
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "live"
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "deadline"
-        for node in ast.walk(method)
+        for node in ast.walk(first)
     )
 
 
@@ -79,6 +91,22 @@ def test_a_planted_method_without_a_check_is_named() -> None:
         "        return 2\n"
     )
     assert coverage(source) == (2, ["planted"])
+
+
+def test_a_check_after_other_work_is_not_a_check() -> None:
+    source = (
+        "def late(*, deadline):\n"
+        '    """Docstring."""\n'
+        "    call()\n"
+        "    deadline.live()\n"
+        "def imported(*, deadline):\n"
+        '    """Docstring."""\n'
+        "    from x import y\n"
+        "    return y(deadline.live())\n"
+        "def empty(*, deadline):\n"
+        '    """Docstring."""\n'
+    )
+    assert coverage(source) == (3, ["late", "empty"])
 
 
 def test_live_on_another_name_is_not_a_check() -> None:

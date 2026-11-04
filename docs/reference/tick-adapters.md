@@ -159,10 +159,11 @@ child of it capped at `fleet_red.SECONDS` (60), so the listing ends at whichever
 deadline it gives `open_changes` a fresh 60 second deadline.
 
 The unit test `tests/tick/test_adapter_deadlines.py` walks every module in `scripts/tick/adapters` except `fakes.py`
-by its syntax tree and fails on a method with a keyword-only `deadline` argument whose body never calls
-`deadline.live()`. It prints the methods and checks it counted per module, and a planted method without a check is
-named in the failure. The same file asserts that the records adapter takes no deadline and that each adapter method
-refuses an expired deadline before touching its outside system.
+by its syntax tree and fails on a method with a keyword-only `deadline` argument whose first statement, after its
+docstring and local imports, does not call `deadline.live()`. It prints the methods and checks it counted per
+module, and a planted method without a check is named in the failure. The same file asserts that the records adapter
+takes no deadline and that every source control, runtime, inbox, host, metrics, llm and processes method refuses an
+expired deadline before touching its outside system. The ledger and coordination adapters keep their own expiry tests.
 
 ## Ledger adapter
 
