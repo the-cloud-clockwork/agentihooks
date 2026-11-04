@@ -225,13 +225,16 @@ class Viewer:
         self.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
 
     def redraw(self) -> None:
-        """Draw the page once in full so no earlier cooperative render replaces the rows a keyboard walk crosses."""
+        """Wait for the tips render, then draw the page in full so no earlier render replaces the walked rows."""
         self.tab.evaluate(
             """async () => {
               const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
-              await (await import(new URL("render.js", main))).render();
+              const [state, page] = await Promise.all(["state.js", "render.js"].map((name) => import(new URL(name, main))));
+              window.__redraw = { state, page };
             }"""
         )
+        self.wait("() => Object.keys(window.__redraw.state.tips).length > 0")
+        self.tab.evaluate("() => window.__redraw.page.render()")
 
     def wait(self, script: str, arg=None) -> None:
         self.tab.wait_for_function(script, arg=arg, timeout=15000)
