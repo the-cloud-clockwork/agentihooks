@@ -997,7 +997,7 @@ def test_an_alert_joins_every_piece_of_evidence(store):
 def test_the_scheduler_restart_registers_through_the_swarm_timer_by_default(monkeypatch):
     from scripts.swarm import timer
 
-    monkeypatch.setattr(timer, "schedule", lambda: True)
+    monkeypatch.setattr(timer, "schedule", lambda caller: True)
 
     assert scheduled_tick.restart(lambda *args: None, None, lambda s: None) == "restarted the scheduler tick"
 

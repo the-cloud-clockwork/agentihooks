@@ -330,7 +330,7 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
     monkeypatch.setattr(timer.time, "sleep", slept.append)
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
-    monkeypatch.setattr(timer, "schedule", lambda: scheduled.append(True) or True)
+    monkeypatch.setattr(timer, "schedule", lambda caller: scheduled.append(caller) or True)
     (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
     (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
     groups = [("/user.slice/agentihooks-swarm.service", "2")]
@@ -349,7 +349,7 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
         "its unit files stay until a later pass\n"
     )
     assert clock[-1] >= timer.DRAIN_S + timer.KILL_WAIT_S
-    assert scheduled == [True]
+    assert scheduled == ["the swarm timer install"]
     assert slept and set(slept) == {1}
     plain = {"capture_output": True, "text": True, "timeout": 30, "check": False}
     assert {argv[2]: kwargs for argv, kwargs in calls if argv[2] in ("show", "kill")} == {"show": plain, "kill": plain}
@@ -562,7 +562,7 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
 
 
 def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_any_delivery(tmp_path, monkeypatch):
-    monkeypatch.setattr(timer, "schedule", lambda: False)
+    monkeypatch.setattr(timer, "schedule", lambda caller: False)
     monkeypatch.setattr(timer, "undelivered", lambda: NONE_YET)
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is False
@@ -588,7 +588,7 @@ def test_reconcile_of_current_units_returns_whether_the_tick_is_scheduled(tmp_pa
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
     for outcome in (True, False):
-        monkeypatch.setattr(timer, "schedule", lambda outcome=outcome: outcome)
+        monkeypatch.setattr(timer, "schedule", lambda caller, outcome=outcome: outcome)
         calls.clear()
         assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is outcome
         assert {argv[2] for argv, _ in calls} == {"is-enabled"}
@@ -609,12 +609,12 @@ def test_schedule_registers_the_tick_and_starts_the_scheduler_runner(monkeypatch
         "ensure_running",
         lambda environ: seen.append(("runner", environ["AGENTIHOOKS_SWARM_REDIS_URL"], environ["SCHEDULE_MARKER"])),
     )
-    assert real_schedule() is True
+    assert real_schedule("the proof") is True
     assert seen == [("tick", "redis"), ("runner", "redis://127.0.0.1:6379/0", "kept")]
 
     seen.clear()
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://swarm:6379/3")
-    assert real_schedule() is True
+    assert real_schedule("the proof") is True
     assert seen[1] == ("runner", "redis://swarm:6379/3", "kept")
 
 
@@ -631,9 +631,24 @@ def test_schedule_reports_a_redis_failure_and_starts_no_runner(monkeypatch, caps
     monkeypatch.setattr(store, "redis_client", lambda: "redis")
     monkeypatch.setattr(scheduled_tick, "ensure", refuse)
     monkeypatch.setattr(service, "ensure_running", lambda environ: started.append(True))
-    assert real_schedule() is False
+    assert real_schedule("the proof") is False
     assert started == []
-    assert capsys.readouterr().err == "the scheduled swarm tick could not be registered: ConnectionError: down\n"
+    assert (
+        capsys.readouterr().err
+        == "the scheduled swarm tick could not be registered for the proof: ConnectionError: down\n"
+    )
+
+
+@pytest.mark.parametrize(("started", "said"), [(True, "started the scheduler for the proof\n"), (False, "")])
+def test_schedule_names_its_caller_only_when_it_starts_the_scheduler(monkeypatch, capsys, started, said):
+    from scripts.scheduler import service
+    from scripts.swarm import scheduled_tick, store
+
+    monkeypatch.setattr(store, "redis_client", lambda: "redis")
+    monkeypatch.setattr(scheduled_tick, "ensure", lambda scheduler: "entry")
+    monkeypatch.setattr(service, "ensure_running", lambda environ: started)
+    assert real_schedule("the proof") is True
+    assert capsys.readouterr().err == said
 
 
 TICK_SERVICE = (

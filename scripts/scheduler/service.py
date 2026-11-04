@@ -120,12 +120,24 @@ def supervise(stop: Event | None = None) -> None:
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
-                if stopped.wait(1) or _abandoned(starter):
+                if _ends(stopped, starter):
                     child.terminate()
                     child.wait()
                     return
-            if stopped.wait(1) or _abandoned(starter):
+            print(f"the scheduler runner {child.pid} exited with code {child.returncode}", file=sys.stderr)
+            if _ends(stopped, starter):
                 return
+            print(f"the scheduler supervisor {os.getpid()} starts its runner again", file=sys.stderr)
+
+
+def _ends(stopped: Event, starter: int) -> bool:
+    """Wait one second for a stop, then end when the starter is gone; a signal prints its own line from the handler."""
+    if stopped.wait(1):
+        return True
+    if not _abandoned(starter):
+        return False
+    print(f"the scheduler supervisor {os.getpid()} stops: its starter {starter} is gone", file=sys.stderr)
+    return True
 
 
 def _mark_unit() -> None:
@@ -258,10 +270,19 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
 def _supervised() -> None:
     stop = Event()
     previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+
+    def stopping(number: int, frame: object) -> None:
+        unit = " from its unit" if os.environ.get(UNIT_ENV) else ""
+        print(f"the scheduler supervisor {os.getpid()} stops on {signal.Signals(number).name}{unit}", file=sys.stderr)
+        stop.set()
+
     try:
         for sig in previous:
-            signal.signal(sig, lambda *_: stop.set())
+            signal.signal(sig, stopping)
         supervise(stop)
+    except BaseException as exc:
+        print(f"the scheduler supervisor {os.getpid()} exits on {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)

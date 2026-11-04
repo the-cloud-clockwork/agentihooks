@@ -287,7 +287,11 @@ def test_supervisor_entrypoint_stops_on_signals_and_restores_handlers(monkeypatc
     def wire(number, handler):
         handlers[number] = handler
 
-    monkeypatch.setattr(service, "signal", SimpleNamespace(SIGTERM=15, SIGINT=2, getsignal=handlers.get, signal=wire))
+    monkeypatch.setattr(
+        service,
+        "signal",
+        SimpleNamespace(SIGTERM=15, SIGINT=2, getsignal=handlers.get, signal=wire, Signals=signal.Signals),
+    )
     calls = []
 
     def supervise(stop):
@@ -814,3 +818,67 @@ def test_a_bus_runtime_folder_is_named_by_its_bus_identity(environ, identity):
     folder = service.runtime_dir({"AGENTIHOOKS_STATE_BACKEND": "bus", **environ})
     digest = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
     assert folder == Path.home() / ".cache" / "agentihooks" / "scheduler" / digest
+
+
+def test_a_supervisor_names_each_runner_exit_and_its_respawn(monkeypatch, tmp_path, capsys):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    children = [Mock(pid=101, returncode=1), Mock(pid=102, returncode=-9)]
+    for child in children:
+        child.poll.return_value = child.returncode
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=Mock(side_effect=children)))
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.side_effect = [False, True]
+    service.supervise(stop)
+    assert capsys.readouterr().err.splitlines() == [
+        "the scheduler runner 101 exited with code 1",
+        f"the scheduler supervisor {os.getpid()} starts its runner again",
+        "the scheduler runner 102 exited with code -9",
+    ]
+
+
+@pytest.mark.parametrize(("parents", "polls"), [([41, 41, 1], [None, None, None]), ([41, 1], [1, 1])])
+def test_a_tied_supervisor_names_its_gone_starter_as_the_reason_it_stops(monkeypatch, tmp_path, capsys, parents, polls):
+    from scripts.scheduler import service
+
+    _tied_supervisor(monkeypatch, tmp_path, service, parents, polls)
+    said = capsys.readouterr().err.splitlines()
+    assert said[-1] == f"the scheduler supervisor {os.getpid()} stops: its starter 41 is gone"
+    assert sum("is gone" in line for line in said) == 1
+
+
+@pytest.mark.parametrize(("unit", "suffix"), [("", ""), ("1", " from its unit")])
+def test_a_signalled_supervisor_names_the_signal_and_its_unit(monkeypatch, capsys, unit, suffix):
+    from scripts.scheduler import service
+
+    monkeypatch.setenv(service.UNIT_ENV, unit)
+
+    def supervise(stop):
+        os.kill(os.getpid(), signal.SIGTERM)
+        os.kill(os.getpid(), signal.SIGINT)
+        assert stop.is_set() is True
+
+    monkeypatch.setattr(service, "supervise", supervise)
+    assert service.main(["supervise"]) == 0
+    pid = os.getpid()
+    assert capsys.readouterr().err.splitlines() == [
+        f"the scheduler supervisor {pid} stops on SIGTERM{suffix}",
+        f"the scheduler supervisor {pid} stops on SIGINT{suffix}",
+    ]
+
+
+def test_a_supervisor_that_raises_names_the_exception_it_exits_on(monkeypatch, capsys):
+    from scripts.scheduler import service
+
+    def supervise(stop):
+        raise RuntimeError("the runner record is unreadable")
+
+    monkeypatch.setattr(service, "supervise", supervise)
+    with pytest.raises(RuntimeError, match="^the runner record is unreadable$"):
+        service.main(["supervise"])
+    assert capsys.readouterr().err == (
+        f"the scheduler supervisor {os.getpid()} exits on RuntimeError: the runner record is unreadable\n"
+    )
