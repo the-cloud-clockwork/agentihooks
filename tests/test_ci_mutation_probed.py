@@ -113,7 +113,8 @@ def test_a_large_remainder_spreads_until_no_shard_holds_over_six_minutes_per_wor
     replanned = probed.probed_plan(merged, 1080)
     assert replanned["shards"] == 12
     assert max(replanned["shard_worker_seconds"]) == pytest.approx(845.6)
-    assert max(replanned["shard_worker_seconds"]) <= 3 * probed.SHARD_WORK_SECONDS == 1080
+    assert probed.SHARD_WORK_SECONDS * 3 == 1080
+    assert max(replanned["shard_worker_seconds"]) <= 1080
 
 
 def test_a_survivor_unit_runs_its_slice_alone_or_costs_what_it_last_took(tmp_path: Path):

@@ -25,7 +25,7 @@ def survivor_units(plan: dict[str, Any], name: str, memory: KillMemory | None) -
 
 
 def probed_plan(plan: dict[str, Any], budget: float, memory: KillMemory | None = None) -> dict[str, Any]:
-    """Size the shards from what the early stage left, at most six minutes of work per worker on each shard."""
+    """Size shards of whole mutants and survivor slices, each at most six minutes of work per worker."""
     results = plan["probe"]["results"]
     survivors = sorted(name for name, status in results.items() if status == "survived")
     killed = sorted(name for name, status in results.items() if status == "killed")
