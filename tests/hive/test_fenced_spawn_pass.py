@@ -56,7 +56,7 @@ def test_concurrent_launches_in_one_pass_scan_processes_and_read_the_host_once(
     setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fenced, scans, readings = local(setup, monkeypatch)
-    monkeypatch.setattr(lease, "now_ms", lambda store: NOW)
+    monkeypatch.setattr(lease, "now_ms", lambda store: NOW if store is setup.store else 0)
     fenced.begin_placement_pass()
     refusals = refuse_together(fenced, 0)
     fenced.end_placement_pass()
