@@ -16,13 +16,13 @@ class PassProcesses:
         self._table: dict[int, Process] | None = None
 
     def scan(self, *, deadline: Deadline) -> dict[int, Process]:
-        if deadline.expired:
-            raise TimeoutError("tool deadline expired")
+        deadline.live()
         if self._table is None:
             self._table = self._scan()
         return self._table
 
     def rescan(self, *, deadline: Deadline) -> dict[int, Process]:
         """Replace the pass snapshot with a fresh scan, for a process started after the first read."""
+        deadline.live()
         self._table = None
         return self.scan(deadline=deadline)

@@ -248,4 +248,11 @@ def test_the_status_publish_hands_over_the_doc_and_view(monkeypatch: pytest.Monk
     calls: list[tuple[Any, ...]] = []
     failure = RuntimeError("tick failed")
     assert _run("wrapper status", calls, _pass(failure=failure), monkeypatch) == []
-    assert calls == [("publish", STORE, "sw", DOC, "view", failure)]
+    assert calls == [("publish", STORE, "sw", DOC, "view", failure, None)]
+
+
+def test_the_status_publish_hands_over_the_findings_the_health_step_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    found = [{"kind": "stale"}]
+    assert _run("wrapper status", calls, _pass({"found": found}), monkeypatch) == []
+    assert calls == [("publish", STORE, "sw", DOC, "view", None, found)]

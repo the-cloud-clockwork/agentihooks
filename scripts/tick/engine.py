@@ -142,43 +142,55 @@ def run_group(
     applied on the scheduling thread as each step ends, and a lane past its deadline drops its unfinished steps and
     every step that needs them. Slow lane steps, and the steps that need them, start once the group's other steps
     end and run on after the group returns: the pass joins them when it ends and hands their records to ``finished``.
+    A step that needs a step an earlier group of the pass handed off starts once that step ended or was held, handed
+    off too while that step still runs; it is dropped when that step was dropped or left running past its budget or
+    its lane.
     """
     ordered = group_steps(name, steps)
     found = pool.active()
     if found is None or not found.parallel:
         return tuple(_sequential(step, ctx, apply or {}) for step in ordered)
-    later = _slow_lane(ordered)
+    later = _slow_lane(ordered, found.pending())
     names = {step.name for step in later}
     records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
     if later:
-        dropped = frozenset(record.name for record in records if record.abandoned)
-        found.detach(partial(_run_later, later, dropped, ctx, found, apply or {}, finished))
+        found.hand(names)
+        gone = _gone(later, frozenset(record.name for record in records if record.abandoned))
+        for each in gone:
+            found.end(each, True)
+        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished))
     return records
 
 
-def _slow_lane(ordered: tuple[Step, ...]) -> tuple[Step, ...]:
-    """Return the slow lane steps of ``ordered`` and every step that needs one of them, in group order."""
-    names: set[str] = set()
+def _slow_lane(ordered: tuple[Step, ...], handed: frozenset[str]) -> tuple[Step, ...]:
+    """Return the slow lane steps of ``ordered`` and every step that needs one of them or a still running ``handed``
+    step of an earlier group, in group order."""
+    names: set[str] = set(handed)
     for step in ordered:
         if step.lane == SLOW or step.needs & names:
             names.add(step.name)
     return tuple(step for step in ordered if step.name in names)
 
 
+def _gone(later: tuple[Step, ...], dropped: frozenset[str]) -> frozenset[str]:
+    """Return ``dropped`` with every step of ``later`` that needs one of them, directly or through another."""
+    gone = set(dropped)
+    for step in later:
+        if step.needs & gone:
+            gone.add(step.name)
+    return frozenset(gone)
+
+
 def _run_later(
     later: tuple[Step, ...],
-    dropped: frozenset[str],
+    gone: frozenset[str],
     ctx: Context,
     found: pool.Pass,
     apply: Appliers,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
 ) -> None:
-    """Run the handed off steps on the pass workers, dropping each that needs a ``dropped`` step, then hand their
-    records in group order to ``finished``."""
-    gone = set(dropped)
-    for step in later:
-        if step.needs & gone:
-            gone.add(step.name)
+    """Run the handed off steps on the pass workers, dropping each in ``gone``, then hand their records in group
+    order to ``finished``."""
     ran = {record.name: record for record in _eager(tuple(s for s in later if s.name not in gone), ctx, found, apply)}
     records = tuple(ran.get(step.name) or _skipped(step, _offset()) for step in later)
     if finished is not None:
@@ -205,9 +217,8 @@ def _offset() -> float | None:
 def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord:
     """Append one ``tick:records`` row for ``record`` while a pass is recording, and return the record unchanged.
 
-    A step outside the slow lane moves the pass record's ``critical_end_s`` to its end offset when that is later.
-
-    An abandoned step that started counts every write domain it declares as dropped, since its result never applies.
+    A step outside the slow lane moves the pass record's ``critical_end_s`` to its end offset when that is later. An
+    abandoned step that started counts every write domain it declares as dropped, since its result never applies.
     """
     store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
     if store is None or slug is None or current is None:
@@ -269,6 +280,21 @@ def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
     return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock))
 
 
+def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) -> StepRecord:
+    """Run ``step`` once every handed off step of an earlier group in ``earlier`` has ended or was held, dropping it
+    when one of them was dropped or its lane ran out first."""
+    lane = found.lane(step.lane)
+    if earlier and (not found.ended(earlier, lane.remaining) or lane.expired):
+        return StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
+    return run_step(step, ctx)
+
+
+def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
+    """Mark the record's step ended on the pass, dropped when it was abandoned, and return the record."""
+    found.end(record.name, record.abandoned)
+    return record
+
+
 def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: Appliers) -> tuple[StepRecord, ...]:
     """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended.
 
@@ -291,9 +317,13 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                 offsets[step.name] = _offset()
                 if step.needs & dropped or lane.expired:
                     dropped.add(step.name)
-                    records[step.name] = StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
+                    records[step.name] = _ended(
+                        found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
+                    )
                 else:
-                    future = executor.submit(copy_context().run, run_step, step, _lane_context(step, ctx, found))
+                    earlier = found.handed_of(step.needs - names)
+                    lane_ctx = _lane_context(step, ctx, found)
+                    future = executor.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
                     running[future] = (step, clock(), lane)
             if not running:
                 if not ready:
@@ -303,12 +333,13 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
             done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
             for future in done:
                 step, _, _ = running.pop(future)
-                records[step.name] = _applied(future.result(), apply)
+                records[step.name] = _ended(found, _applied(future.result(), apply))
             for future, (step, started, lane) in list(running.items()):
                 if lane.expired:
                     running.pop(future)
                     dropped.add(step.name)
-                    records[step.name] = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
+                    left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
+                    records[step.name] = _ended(found, left)
     finally:
         executor.shutdown(False, cancel_futures=True)
     return tuple(_journal(step, records[step.name], offsets[step.name]) for step in ordered)
