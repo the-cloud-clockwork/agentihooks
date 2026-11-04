@@ -2615,7 +2615,8 @@ def test_an_unreachable_settings_store_reads_no_master_snapshot(monkeypatch, tmp
     assert capacity._claude({}, 1_100.0) == [capacity.Account("claude", "main", "UNKNOWN", 1, None, None)]
 
 
-def _probing(monkeypatch, ran):
+def _probing(monkeypatch, ran, calls=None):
+    calls = [] if calls is None else calls
     window = balancer.QuotaWindow(used=10)
 
     def claude(credentials, *args, **kwargs):
@@ -2625,8 +2626,16 @@ def _probing(monkeypatch, ran):
     monkeypatch.setattr(balancer, "collect_results", COLLECT)
     monkeypatch.setattr(balancer, "probe_credentials", claude)
     monkeypatch.setattr(balancer.subprocess, "run", lambda argv, *a, **k: ran.append(argv))
-    monkeypatch.setattr(capacity.codex_router, "default_signed_in", lambda *a, **k: ran.append("codex login") or True)
-    monkeypatch.setattr(capacity.codex_router, "fresh_quotas", lambda *a, **k: ran.append("codex exec") or {})
+    monkeypatch.setattr(
+        capacity.codex_router,
+        "default_signed_in",
+        lambda *a, **k: calls.append(("login", a, k)) or ran.append("codex login") or True,
+    )
+    monkeypatch.setattr(
+        capacity.codex_router,
+        "fresh_quotas",
+        lambda *a, **k: calls.append(("exec", a, k)) or ran.append("codex exec") or {},
+    )
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
 
 
@@ -2670,11 +2679,15 @@ def test_the_pass_reader_defaults_to_cached_readings():
 
 
 def test_the_prober_writes_the_claude_cache_the_pass_reads(monkeypatch, tmp_path):
-    ran = []
-    _probing(monkeypatch, ran)
+    ran, calls = [], []
+    _probing(monkeypatch, ran, calls)
     env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
     capacity.probe(env, 100)
     assert ran == ["claude -p a", "codex login", "codex exec"]
+    assert [(kind, env in args or env in kwargs.values()) for kind, args, kwargs in calls] == [
+        ("login", True),
+        ("exec", True),
+    ]
     assert [(at, result.account) for at, result in balancer.cached_observations(environ=env)] == [(100, "a")]
     (row,) = [row for row in capacity.accounts(env, 130, refresh=False) if row.harness == "claude"]
     assert (row.name, row.observed_at) == ("a", 100)
