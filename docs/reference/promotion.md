@@ -17,8 +17,9 @@ The `promote` job in `.github/workflows/test.yml` is the last job of a `dev` pus
 | The event is `push` and the ref is `refs/heads/dev` | job `if` in `test.yml`, repeated in `promote.yml` and `promote.cjs` |
 | `Gate — Required` succeeded | `needs.gate-required.result == 'success'` |
 | Hierarchy CPU proof succeeded | `needs.hierarchy-cpu.result == 'success'`; see [Hierarchy CPU proof at promotion](delivery-tiers.md#hierarchy-cpu-proof-at-promotion) |
+| Whole tree tick pattern matches its allowlist | `needs.tick-pattern-tree.result == 'success'`; `python -m scripts.tick_pattern --tree` fails on any file whose measurement differs from `tests/TICK_PATTERN_ALLOWLIST.json`, drift that pull requests grading only their changed files cannot see |
 | Sonar produced an analysis | `needs.sonar.outputs.analysis != ''` |
-| No dependency failed or was cancelled | `gate-required`, `refresh-durations`, `coverage-baseline`, `flake-budget`, `sonar` and `hierarchy-cpu`; `!contains(needs.*.result, 'failure')` and `'cancelled'` |
+| No dependency failed or was cancelled | `gate-required`, `refresh-durations`, `coverage-baseline`, `flake-budget`, `sonar`, `hierarchy-cpu` and `tick-pattern-tree`; `!contains(needs.*.result, 'failure')` and `'cancelled'` |
 | The run was not cancelled | `!cancelled()` |
 
 Pull request and merge queue runs never promote. A dispatched Tests run never promotes.

@@ -114,6 +114,7 @@ MOVED = {
     ("test.yml", "stage-budget"): LIGHT,
     ("test.yml", "test-count"): QUEUED,
     ("test.yml", "test-summary"): LIGHT,
+    ("test.yml", "tick-pattern-tree"): LIGHT,
     ("test.yml", "unit"): QUEUED,
     ("test.yml", "unit-lost"): LIGHT,
     ("test.yml", "unit-rerun"): QUEUED,

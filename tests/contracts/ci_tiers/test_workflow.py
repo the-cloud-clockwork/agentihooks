@@ -72,6 +72,7 @@ PROMOTION = (
     "writer-lock",
     "ledger-load",
     "hierarchy-cpu",
+    "tick-pattern-tree",
     "kind-due",
     "helm-kind",
     "stage-budget",
