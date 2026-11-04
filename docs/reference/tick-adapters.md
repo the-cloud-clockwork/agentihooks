@@ -822,6 +822,73 @@ def retire_all(names_and_pids):
     return [reaper.retire(name, pid, []) for name, pid in names_and_pids]
 ```
 
+## One placement scan per placement pass
+
+The spawn step places a lane's ready tasks in one placement pass: `_spawn` in `scripts.swarm.tick` calls the
+runtime's `begin_placement_pass` before it reads capacity, and `_placement_pass` calls `end_placement_pass` when the
+pass ends, even when it raises. On `controller.FencedRuntime` the pass holds one `local_slots.PassCache` in
+`_local_slots_cache`; `end_placement_pass` drops it, so the next pass starts empty.
+
+`PassCache.once(read, *args)` returns the pass's result of `read(*args)`. The first call with a given function and
+arguments runs the read under the cache's lock and keeps the value; every later call in that pass, from any launch
+thread, gets the same value without reading again. A different function or different arguments is a separate entry.
+
+| Read | Inside a placement pass | Outside a placement pass |
+|---|---|---|
+| Live session scan, `local_slots.live`, which walks `/proc` through `terminate_agent.sessions` | Once per pass, `cache.once(live)` | On every `running`, `held` and `claim` call |
+| Swarm agent records of every swarm, `local_slots._scanned` | Once per pass, keyed by the store | On every call |
+| The workstation host reading, `controller._host_reading(store, machine)`, which runs `headroom.measure` against the machine's last saved reading | Once per pass and machine | On every `_workstation_room` call |
+| The local slot claims hash, `local_slots.key(machine)` | Read and written on every claim under `WATCH` | The same |
+
+`FencedRuntime._local_refusal` passes the pass cache to `local_slots.claim`, so each claim counts the live workers
+from the pass scan. The claim hash is never cached: every claim still reads it under `WATCH` and retries on a
+`WatchError`, so concurrent launches in one pass cannot take more than `local-max-agents` slots between them.
+`local_slots.occupancy`, read by `swarm autoscale`, takes no cache and scans each time.
+
+Before this cache, five concurrent launches in one pass ran about twenty `/proc` walks at once, and each fenced spawn
+took ten seconds or more: the tc-g8 measurement over sixty passes put the fenced runtime spawn at
+a median of 10.9 seconds and a p95 of 15.4 seconds per launch.
+
+A value read once holds for the whole pass. A session that starts or ends during the pass, or a host reading that
+changes, is seen by the next pass, about a minute later. The claim hash still bounds the slots taken.
+
+Use the cache for another read that every launch of a pass repeats:
+
+```python
+from scripts.swarm import local_slots
+
+
+def placed(store, slug, tasks):
+    cache = local_slots.PassCache()
+    return [local_slots.running(store, slug, task, cache) for task in tasks]
+```
+
+`tests.hive.test_fenced_spawn_pass` holds the contract: five launches started together in one pass make one session
+scan and one host reading and claim five slots; with a local cap of three they admit three and refuse two; the next
+pass scans again; a refusal outside a pass scans on every call.
+
+### Timed rows inside a fenced spawn
+
+`FencedRuntime._spawn` records two timed rows through `timing.step` for every launch, inside the spawn step's own
+row:
+
+| Step row | Times |
+|---|---|
+| `scripts.swarm.controller.FencedRuntime._refusal` | The placement refusal: the deployment mode refusal, then either the local refusal (workstation room and the local slot claim) or the hive and backend refusal, which on a hive placement can reach the workstation claim |
+| `scripts.swarm.controller.FencedRuntime.runtime_spawn` | The wrapped runtime's `spawn`: the herdr pane, the Kubernetes worker or the hive launch |
+
+Both rows pass `report=False`: a raised error still ends the row with outcome `error` and propagates, but it does not
+reach the spawn stall failure hook, `timing.ON_FAILURE`, so one failed launch is recorded once, under the step that
+called the spawn. The rows show in `swarm <id> tick-report` as their own step rows; see
+[Tick report](tick-report.md#output).
+
+```bash
+agentihooks swarm <swarm slug> tick-report --passes 60 | grep -E 'spawn|FencedRuntime'
+```
+
+When `runtime_spawn` takes most of a slow `spawn` row, the wrapped runtime is the slow part; when `_refusal` does,
+look at the placement reads in the table above.
+
 ## One lease heartbeat per tick pass
 
 `scripts.swarm.lease.held_pass(store, slug, held)` holds the controller lease for one tick pass. `run_tick` enters it
@@ -1054,6 +1121,9 @@ and call the port from the step.
 | `Outcome(..., Status.UNAVAILABLE, "", detail="no agent named <handle>")` from `runtime.inspect` or `runtime.stop` | The `agents` lookup found no record for that name. | Check the name against the swarm's agent records; the router was not called. |
 | `TypeError` from `runtime.launch` | The request mapping lacks one of `config`, `lane`, `name`, `task`, or carries another key. | Pass exactly those four keys. |
 | `runtime.panes` returns `[]` | herdr answered without a `panes` list. | Run `herdr pane list` on the host and check the herdr server is up. |
+| The `spawn` step row is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Check the caller runs inside `begin_placement_pass` and `end_placement_pass`, and route a repeated read through the pass cache, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
+| The `spawn` step row is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
+| Two launches in one pass are refused as local full although a session ended during the pass | The pass reads the live session scan once, so the ended session still counts until the pass ends. | No action; the next pass scans again. |
 | A reaped or retired process was not found in a tick pass | The process exited before selection, so its `/proc` entry was gone and the snapshot was kept. | No action; the process is already gone. |
 | HTTP 409 `stale_controller`, `the controller lease is stale`, on `ledger.mutate` or a `LedgerClient` write | The operation carried a `controller_epoch` that is no longer the live lease of that ledger: another controller took over. | No action in the step. The pass stops at its next step boundary, where `keep_tick` raises, and a later pass acquires the lease again once no other controller holds it. |
 | `SwarmError: the controller lease is stale` at the start of a pass or before a launch | `held_pass` renewal or `require_epoch` found another controller's lease. | Check which hive holds the swarm's lease; a pass on this controller resumes only once it acquires the lease. |
