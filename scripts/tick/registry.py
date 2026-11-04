@@ -27,7 +27,7 @@ class Catalogue:
     unmapped: frozenset[str] = frozenset()
 
 
-def _unmapped_reasons(step: Step, catalogue: Catalogue) -> list[str]:
+def _catalogue_gaps(step: Step, catalogue: Catalogue) -> list[str]:
     """Each way ``step`` lacks a feature map entry or a scenario in ``catalogue``."""
     reasons = [f"feature {step.feature!r} is not a feature map id"] if step.feature not in catalogue.features else []
     return reasons + ([] if catalogue.scenarios.get(step.name) else ["no scenario lists it"])
@@ -37,7 +37,7 @@ def _catalogue_errors(steps: list[Step], catalogue: Catalogue) -> list[str]:
     """Refuse each step lacking a feature map entry or a scenario unless unmapped, and each stale unmapped entry."""
     errors: list[str] = []
     for step in steps:
-        reasons = _unmapped_reasons(step, catalogue)
+        reasons = _catalogue_gaps(step, catalogue)
         if reasons and step.name not in catalogue.unmapped:
             errors.append(f"Step {step.name}: {'; '.join(reasons)}")
         elif not reasons and step.name in catalogue.unmapped:

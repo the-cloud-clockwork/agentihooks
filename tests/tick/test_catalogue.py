@@ -149,6 +149,18 @@ def test_the_unmapped_steps_only_shrink() -> None:
     ]
 
 
+def test_step_modules_cover_the_step_package() -> None:
+    found = catalogue().step_modules()
+    assert {"scripts.tick.steps.observe", "scripts.tick.steps.tasks", "scripts.tick.steps.budgets"} <= set(found)
+    assert found == sorted(found)
+    assert "scripts.tick.steps" not in found
+
+
+def test_check_reports_an_unknown_scenario(tmp_path: Path) -> None:
+    root = tree(tmp_path, {"scenarios": {"spawn": ["missing"]}, "unmapped": []})
+    assert catalogue().check(root) == [f"{catalogue().INDEX} names unknown scenarios: missing"]
+
+
 def test_unmapped_reads_a_tree_or_nothing(tmp_path: Path) -> None:
     module = catalogue()
     assert module.unmapped(tmp_path) is None

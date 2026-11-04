@@ -7,18 +7,21 @@ runs it from the base tree's copy of this module so a head cannot loosen it.
 
 import argparse
 import json
+import pkgutil
 from importlib import import_module
 from pathlib import Path
 
-from scripts.tick import registry
+from scripts.tick import registry, steps
 from scripts.tick.registry import Catalogue
 
 FEATURE_MAP = Path("feature-map.json")
 INDEX = Path("tests/swarm/tick_scenarios/steps.json")
 GOLDENS = Path("tests/swarm/tick_scenarios/goldens.json")
-STEP_MODULES = tuple(
-    f"scripts.tick.steps.{name}" for name in ("observe", "agents", "host", "masters", "place", "report", "tasks")
-)
+
+
+def step_modules() -> list[str]:
+    """Every module of the step package, discovered from its path."""
+    return sorted(f"{steps.__name__}.{module.name}" for module in pkgutil.iter_modules(steps.__path__))
 
 
 def scenarios(root: Path) -> frozenset[str]:
@@ -52,7 +55,7 @@ def grown(base: frozenset[str] | None, head: frozenset[str]) -> list[str]:
 
 def check(root: Path) -> list[str]:
     """Every error of the registered steps against the catalogue of ``root``."""
-    for module in STEP_MODULES:
+    for module in step_modules():
         import_module(module)
     try:
         registry.validate(load(root))
