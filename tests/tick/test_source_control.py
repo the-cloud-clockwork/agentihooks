@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm import release_wait
 from scripts.tick.adapters import fakes, github
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Unsupported
@@ -696,7 +697,8 @@ def test_github_tags_read_the_git_remote(tmp_path: Path) -> None:
     provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=git)
 
     assert provider.tags(deadline=_deadline()) == (port.Tag("v1.0.0", "a1"), port.Tag("v1.1.0", "c3"))
-    assert seen == [(["git", "ls-remote", "--tags", "origin"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})]
+    command = ["git", *release_wait.HTTPS, "ls-remote", "--tags", "origin"]
+    assert seen == [(command, {"cwd": tmp_path, "timeout": 9, **OPTIONS})]
 
 
 def test_github_defaults() -> None:
