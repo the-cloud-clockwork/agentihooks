@@ -783,9 +783,12 @@ fresh = shared.rescan(deadline=Deadline.after(10.0))
 |---|---|
 | `scan()` | Reads the process table on the first call and returns that same dictionary on every later call. |
 | `rescan()` | Drops the held table and reads a fresh one, which later `scan` calls then return. |
+| `live_names(listing)` | Calls `listing()` on the first read, keeps that set and returns a new copy of it on every later read. |
+| `forget_names()` | Drops the held live names set, so the next `live_names` call lists again. |
 
-`table is again` holds. Build a new `PassProcesses` for each pass; one instance never refreshes by itself. Both
-operations refuse an expired deadline before reading `/proc`.
+`table is again` holds. Build a new `PassProcesses` for each pass; one instance never refreshes by itself. `scan`
+and `rescan` refuse an expired deadline before reading `/proc`; `live_names` and `forget_names` take no deadline and
+read no process table.
 
 ## One process scan per tick pass
 
@@ -821,6 +824,72 @@ from scripts.swarm import reaper
 def retire_all(names_and_pids):
     return [reaper.retire(name, pid, []) for name, pid in names_and_pids]
 ```
+
+## One live names listing per tick pass
+
+`controller.FencedRuntime.live_names` returns the names of the swarm's live agents. On the herdr runtime that listing
+walks `/proc` through `terminate_agent.sessions`, checks each managed agent's server, and adds the hive's names, and
+many tick steps read it: the agent checks in `scripts.swarm.tick`, resume, master launch and wake, master stall,
+lifetime and status. Inside a
+tick pass the fenced runtime lists once and every later read in the pass gets the same names.
+
+| Read | Inside a tick pass | Outside a tick pass |
+|---|---|---|
+| `FencedRuntime.live_names()` | `PassProcesses.live_names(runtime.live_names)` on the pass's process model: the first read lists, later reads get a copy of that set | The wrapped runtime's `live_names()` on every call |
+| The wrapped runtime's own `live_names()` | Lists on every call | The same |
+
+- The listing is held on the `PassProcesses` in the `processes` port of `PASS_TOOLS`, which `run_tick` sets after
+  `lease.held_pass` and resets when the pass ends, even when it raises; see
+  [Effects in a tick pass](#effects-in-a-tick-pass). Every `FencedRuntime` built in that pass shares the one listing,
+  and a change through one of them drops it for all.
+- Each read returns a new `set`, so a caller that adds or removes a name does not change what the next read returns.
+- A pass is any code running while `PASS_TOOLS` holds a `Tools` whose `processes` is a `PassProcesses`. With no pass
+  tools, or with a `processes` port of another type such as a test fake, every call lists.
+
+These fenced operations drop the listing when they return, and also when they raise, so the next read lists again
+and sees the agent the call started or stopped:
+
+| Operation | Where it is wrapped |
+|---|---|
+| `spawn` | Around the placed launch, after the lease epoch check; a lease refusal raises before the launch and keeps the listing |
+| `collect`, `expire` | Around the hive launch's `collect` or `expire`, after the lease epoch check |
+| `retire`, `reap_name`, `close_space`, `close_pane`, `resume` | Named in `controller.AGENT_CHANGES`; `__getattr__` forwards them to the wrapped runtime through `_changing` |
+
+Any other forwarded attribute, such as `retire_pane`, `retire_process`, `original_runtime` or `herdr_runtime`, keeps
+the listing. A call made on one of those, or on the wrapped runtime directly, is not seen until the pass ends or one of
+the operations above runs.
+
+```python
+from scripts.swarm import controller, lease
+from scripts.swarm.commands import hive_id
+from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import connect
+
+store, slug = connect(), "rig-grade-swarm"
+held = lease.acquire(store, slug, hive_id())
+if held is not None:
+    deployment = controller.deployment_for(store.config(slug), {})
+    fenced = controller.FencedRuntime(store, slug, held, HerdrRuntime(), deployment)
+    first = fenced.live_names()
+    second = fenced.live_names()
+```
+
+Outside a pass, as in this example run from a shell, `first` and `second` each come from their own listing. Inside a
+pass they come from one listing; a `fenced.retire(agent)` between them would make `second` list again.
+
+A new step that stops or starts agents through a new runtime method drops the listing by adding the method name to
+`AGENT_CHANGES`, or by calling the operation through `FencedRuntime._changing`, as `spawn`, `collect` and `expire` do:
+
+```python
+AGENT_CHANGES = frozenset(["retire", "reap_name", "close_space", "close_pane", "resume", "retire_pane"])
+```
+
+`tests/swarm/test_controller_live_names.py` holds the contract under the `fenced-live-names-listing` feature: one
+listing per pass with copies served, a new pass lists again, every call lists outside a pass, each agent change drops
+the listing, a spawn drops it whether it succeeds or fails, and a change through one fenced runtime drops the listing of
+another. `test_running_pass_lists_live_names_once_plus_once_per_launch` in
+`tests/swarm/tick_scenarios/test_characterisation.py` replays the running scenario through `run_tick` and expects three
+listings for its three launches.
 
 ## One placement scan per placement pass
 
@@ -967,6 +1036,7 @@ before each step are in [Controller lease during long steps](../pillars/swarm.md
 | `FencedRuntime.spawn`, `collect`, `expire` | Call `lease.require_epoch`, one lease read with no renewal, and raise `SwarmError("the controller lease is stale")` when another controller now holds the lease. |
 | `FencedRuntime.has_capacity` | Applies the deployment mode refusal, then asks the wrapped runtime's `has_capacity` for a local deployment; it does not touch the lease. |
 | `FencedRuntime.launch_room` | Reads the room left for launches; it does not touch the lease. |
+| `FencedRuntime.live_names` and the agent changes | Read and drop the pass's shared live names listing, described under [One live names listing per tick pass](#one-live-names-listing-per-tick-pass); they do not touch the lease. |
 | Every other `FencedRuntime` attribute | Forwarded to the wrapped runtime, such as `herdr_runtime`, `original_runtime` and `hive_launch`, with no renewal, fencing or thread. |
 | The ledger client | Used as given; no wrapper renews the lease on ledger calls. |
 
@@ -1189,6 +1259,9 @@ and call the port from the step.
 | The `spawn` step row is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
 | Two launches in one pass are refused as local full although a session ended during the pass | The pass reads the live session scan once, so the ended session still counts until the pass ends. | No action; the next pass scans again. |
 | A reaped or retired process was not found in a tick pass | The process exited before selection, so its `/proc` entry was gone and the snapshot was kept. | No action; the process is already gone. |
+| A step in a tick pass sees an agent as live after it was stopped, or misses one that started | The change went through the wrapped runtime, such as `original_runtime` or `herdr_runtime`, or through a forwarded method outside `AGENT_CHANGES`, so the pass listing was kept. | Make the change through the `FencedRuntime` with one of the listed operations, or add the operation to `AGENT_CHANGES`, as under [One live names listing per tick pass](#one-live-names-listing-per-tick-pass). |
+| The live names listing runs on every read in a tick pass | The caller holds the raw runtime given to `run_tick`, not the `FencedRuntime`, or reads before `PASS_TOOLS` is set or after it is reset. | Read through the pass's `FencedRuntime`; the wrapper probes group runs before it exists and lists on each call. |
+| `test_running_pass_lists_live_names_once_plus_once_per_launch` fails with `LIVE_NAMES_LISTINGS=<n> LAUNCHES=<m>` | The running scenario's listing count moved: a change dropped the listing too often, stopped dropping it, or changed the number of launches. | Compare the counts with the change; a new listing read after the last launch or a new agent change adds one listing. |
 | HTTP 409 `stale_controller`, `the controller lease is stale`, on `ledger.mutate` or a `LedgerClient` write | The operation carried a `controller_epoch` that is no longer the live lease of that ledger: another controller took over. | No action in the step. The pass stops at its next step boundary, where `keep_tick` raises, and a later pass acquires the lease again once no other controller holds it. |
 | `SwarmError: the controller lease is stale` at the start of a pass or before a launch | `held_pass` renewal or `require_epoch` found another controller's lease. | Check which hive holds the swarm's lease; a pass on this controller resumes only once it acquires the lease. |
 | `coordination.lease` returns `None` | Another owner holds a live lease, or the swarm's controller host names another owner. | Run the step on the controller that holds the lease. |
