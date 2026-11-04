@@ -75,7 +75,7 @@ def test_a_failed_download_names_the_outage_waits_and_downloads_once_more(job, i
     assert (tmp_path / "slept").read_text() == "30\n"
 
 
-def test_each_retried_shared_mutation_stats_download_gives_up_after_one_minute():
+def test_each_retried_shared_mutation_stats_download_gives_up_after_one_minute() -> None:
     attempts = [
         step
         for workflow in ("test.yml", "mutation-preflight.yml")
@@ -85,4 +85,4 @@ def test_each_retried_shared_mutation_stats_download_gives_up_after_one_minute()
         and (step.get("continue-on-error") or step["name"].endswith("attempt 2"))
     ]
     assert len(attempts) == 10
-    assert {step["timeout-minutes"] for step in attempts} == {1}
+    assert {step.get("timeout-minutes") for step in attempts} == {1}
