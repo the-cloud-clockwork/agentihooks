@@ -297,7 +297,7 @@ STOP = ["systemctl", "--user", "stop", "agentihooks-swarm.service"]
 
 def test_an_upgrade_ends_what_the_tick_service_left_and_waits_for_its_group_before_scheduling(tmp_path, monkeypatch):
     calls, clock = [], [0.0]
-    monkeypatch.setattr(timer, "schedule", lambda: calls.append((["schedule"], {})) or True)
+    monkeypatch.setattr(timer, "schedule", lambda caller: calls.append((["schedule"], {})) or True)
     monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
     monkeypatch.setattr(timer.time, "sleep", lambda seconds: None)
     (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\nOnUnitActiveSec=60s\n")

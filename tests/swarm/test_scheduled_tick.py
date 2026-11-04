@@ -3,6 +3,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -532,7 +533,7 @@ def test_ensure_names_the_missing_or_dead_entry_it_recreates_and_stays_quiet_on_
     ]
 
 
-def _restart_said(capsys, stale) -> tuple[str, str]:
+def _restart_said(capsys: pytest.CaptureFixture[str], stale: Callable[[], str]) -> tuple[str, str]:
     said = scheduled_tick.restart(lambda *args: None, lambda: True, lambda seconds: None, stale)
     return said, capsys.readouterr().err
 
