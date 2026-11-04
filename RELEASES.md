@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.633 · 2026-11-04
+
+### 2026-11-04 · 8c40a11dc829 · #9608 · @nestorcolt
+
+**Tick report columns for late, abandoned, held, skipped and dropped writes**
+
+This change adds new columns to the tick report so each pass now surfaces counts of writes that were late, abandoned, held, skipped, or dropped, giving the operator visibility into pass health beyond simple pass/fail timing. Tests were written first to pin down the expected report shape, then the reporting logic was extended to populate these fields from existing pass data, closing out task tc-g15 under the under-a-minute tick phase without altering the core scheduling loop.
+
+### 2026-11-04 · 6fd9969e2d82 · #9652 · @nestorcolt
+
+**Name the caller and holder in the tick lock stale error and journal each take and release**
+
+When the tick lock goes stale, you'll now see exactly who tried to take it and who's actually holding it, instead of a bare error — and every take or release of that lock writes a one-line journal entry to stderr naming the caller and what happened. This makes future stale-lock incidents diagnosable from logs alone rather than requiring guesswork. Under the hood, lock reads now go through a typed helper instead of a cast, which also trims a few type errors from the codebase. This closes out task tc-g14 toward the under-a-minute tick phase.
+
 ## v2.17.631 · 2026-11-04
 
 ### 2026-11-04 · 80bb6f4290ea · #9663 · @nestorcolt
