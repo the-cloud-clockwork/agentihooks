@@ -108,6 +108,12 @@ def _urgent_hold(cli: Any, get: Get) -> None:
     timing.call(urgent_hold.observe, get("store"), get("slug"), get("doc"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
+def _dependency_audit(cli: Any, get: Get) -> None:
+    from scripts.swarm.health import ordering_dependencies
+
+    timing.call(ordering_dependencies.observe, get("store"), get("slug"), get("doc"))  # pyright: ignore[reportUnknownMemberType]
+
+
 def _phase_passes(cli: Any, get: Get) -> Any:
     return cli._phase_steps(get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"))
 
@@ -149,6 +155,7 @@ STEPS = (
     CallStep("prompt backlog", "wrapper health", held(_prompt_backlog)),
     CallStep("command runner", "wrapper commands", held(_command_runner)),
     CallStep("urgent hold", "wrapper phases", held(_urgent_hold)),
+    CallStep("dependency audit", "wrapper phases", held(_dependency_audit)),
     CallStep("planning and phase pass", "wrapper phases", held(_phase_passes)),
     CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
     CallStep("intent check", "wrapper intent", held(_intent_check), writes=pass_domains("judged")),

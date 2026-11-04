@@ -106,6 +106,7 @@ MEASURED: dict[str, Timing] = {
     "prompt backlog": Timing(0.007, WIDE_S),
     "command runner": Timing(0.256, CRITICAL_S),
     "urgent hold": Timing(0.088, CRITICAL_S),
+    "dependency audit": Timing(UNMEASURED_S, CRITICAL_S),
     "planning and phase pass": Timing(7.626, CRITICAL_S),
     "refresh job": Timing(0.012, SLOW_S),
     "intent check": Timing(5.331, CRITICAL_S),

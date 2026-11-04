@@ -83,6 +83,7 @@ def test_the_spec_is_read_only_for_the_dependent_and_only_when_territories_are_d
         (task("b", ["changelog.d/"], ["a"]), task("a", ["scripts/x.py"])),
         (task("b", ["docs/"], ["a"]), task("a", ["changelog.d/x.md"])),
         (task("b", [], ["a"]), task("a", ["scripts/x.py"])),
+        (task("b", ["", "/"], ["a"]), task("a", ["scripts/x.py"])),
         (task("b", ["docs/"], ["missing"]), task("a", ["scripts/x.py"])),
     ],
 )
