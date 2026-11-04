@@ -9,7 +9,7 @@ from typing import Any
 
 from scripts.swarm.store import SwarmConfig
 from scripts.tick import registry
-from scripts.tick.steps import CallStep, Left, PassBox
+from scripts.tick.steps import CallStep, Left, PassBox, pass_domains
 
 tick: Any = import_module("scripts.swarm.tick")
 
@@ -189,23 +189,42 @@ def step_pass_budget(slug: str, store: Any) -> list[str]:
     return []
 
 
+CONFIGURED = frozenset({"stopped branch"})
+LISTED = frozenset({"spawn due"})
+CONFIG = pass_domains("config")
+ROWS = pass_domains("rows")
+
 STEPS = (
-    CallStep("config load", "start", partial(_run, step_config_load)),
-    CallStep("stopped branch", "start", partial(_run, step_stopped_branch)),
+    CallStep("config load", "start", partial(_run, step_config_load), writes=CONFIG),
+    CallStep(
+        "stopped branch",
+        "start",
+        partial(_run, step_stopped_branch),
+        frozenset({"config load"}),
+        CONFIG,
+        pass_domains("finished", "config"),
+    ),
     CallStep("spawn hold clear", PASS_SETUP, partial(_run, step_spawn_hold_clear)),
     CallStep("pass budget", PASS_SETUP, partial(_run, step_pass_budget)),
     CallStep("pane evidence", "observe", partial(_run, step_pane_evidence)),
     CallStep("execution reconcile", "observe", partial(_run, step_execution_reconcile)),
-    CallStep("master move fail over", "observe", partial(_run, step_master_move_fail_over)),
-    CallStep("recover master", "observe", partial(_run, step_recover_master)),
-    CallStep("ledger state", "observe", partial(_run, step_ledger_state)),
-    CallStep("automated cleanup", "observe", partial(_run, step_automated_cleanup)),
-    CallStep("spawn due", "observe", partial(_run, step_spawn_due)),
+    CallStep("master move fail over", "observe", partial(_run, step_master_move_fail_over), CONFIGURED, CONFIG),
+    CallStep("recover master", "observe", partial(_run, step_recover_master), CONFIGURED, CONFIG),
+    CallStep("ledger state", "observe", partial(_run, step_ledger_state), writes=pass_domains("doc", "rows")),
+    CallStep("automated cleanup", "observe", partial(_run, step_automated_cleanup), frozenset({"ledger state"}), ROWS),
+    CallStep(
+        "spawn due",
+        "observe",
+        partial(_run, step_spawn_due),
+        frozenset({"stopped branch", "ledger state", "automated cleanup"}),
+        pass_domains("config", "rows", "doc"),
+        ROWS,
+    ),
     CallStep("exits sweep", "observe", partial(_run, step_exits_sweep)),
-    CallStep("master start watch", "observe", partial(_run, step_master_start_watch)),
-    CallStep("launch checks", "observe", partial(_run, step_launch_checks)),
-    CallStep("track outages", "observe", partial(_run, step_track_outages)),
-    CallStep("verify", "observe", partial(_run, step_verify)),
+    CallStep("master start watch", "observe", partial(_run, step_master_start_watch), CONFIGURED, CONFIG),
+    CallStep("launch checks", "observe", partial(_run, step_launch_checks), LISTED, pass_domains("rows", "doc")),
+    CallStep("track outages", "observe", partial(_run, step_track_outages), LISTED, ROWS),
+    CallStep("verify", "observe", partial(_run, step_verify), LISTED, ROWS),
 )
 
 list(map(registry.register, STEPS))

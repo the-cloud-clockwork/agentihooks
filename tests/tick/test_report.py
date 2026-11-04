@@ -229,10 +229,21 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
 
 def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
     needs = {step.name: step.needs for step in report.STEPS if step.needs}
+    viewed = frozenset({"tick view"})
     assert needs == {
+        "ledger event pass": viewed,
+        "done recheck": viewed,
+        "progress checks": viewed,
+        "waits end": viewed,
+        "merge pass": viewed,
+        "stall watch": viewed | {"page relay"},
         "overrun pass": frozenset({"stall watch"}),
+        "priorities sweep": viewed,
+        "health findings": viewed,
         "findings pass": frozenset({"health findings"}),
         "metrics record": frozenset({"health findings"}),
+        "inbox wake": frozenset({"page relay"}),
+        "status publish": frozenset({"health findings"}),
     }
     assert {step.needs for step in host.STEPS} == {frozenset()}
     assert CallStep("heartbeat", "g", host.held(lambda cli, get: None)).needs == frozenset()
