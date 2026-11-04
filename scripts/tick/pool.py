@@ -7,7 +7,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import BoundedSemaphore, Lock, Thread, Timer, local
+from threading import BoundedSemaphore, Event, Lock, Thread, Timer, local
+from time import monotonic
 from typing import IO, TypeVar
 
 from scripts.tick.deadline import Deadline
@@ -53,6 +54,43 @@ class Pass:
     slow: Deadline
     slots: BoundedSemaphore
     later: list[Thread] = field(default_factory=list[Thread], compare=False)
+    handed: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
+    gone: set[str] = field(default_factory=set[str], compare=False)
+    guard: Lock = field(default_factory=Lock, compare=False)
+
+    def hand(self, names: Iterable[str]) -> None:
+        """Mark each step in ``names`` handed off to run on after its group, pending until ``end`` marks it."""
+        with self.guard:
+            self.handed.update((name, Event()) for name in names)
+
+    def pending(self) -> frozenset[str]:
+        """Return the handed off steps not yet marked ended."""
+        with self.guard:
+            return frozenset(name for name, event in self.handed.items() if not event.is_set())
+
+    def handed_of(self, names: Iterable[str]) -> frozenset[str]:
+        """Return the steps in ``names`` that a group of this pass handed off."""
+        with self.guard:
+            return frozenset(name for name in names if name in self.handed)
+
+    def end(self, name: str, dropped: bool) -> None:
+        """Mark handed off step ``name`` ended, ``dropped`` when it never ran or ran past its lane; ignore others."""
+        with self.guard:
+            if name not in self.handed:
+                return
+            if dropped:
+                self.gone.add(name)
+            self.handed[name].set()
+
+    def ended(self, names: Iterable[str], timeout: float) -> bool:
+        """Return whether every handed off step in ``names`` ended within ``timeout`` seconds and none was dropped."""
+        with self.guard:
+            events = [self.handed[name] for name in set(names)]
+        until = monotonic() + timeout
+        if not all(event.wait(until - monotonic()) for event in events):
+            return False
+        with self.guard:
+            return not self.gone.intersection(names)
 
     def detach(self, work: Callable[[], object]) -> None:
         """Start ``work`` under the caller's copied context on a daemon thread the pass joins when it ends."""
