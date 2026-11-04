@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from threading import Lock, Thread, current_thread
+from threading import Event, Lock, Thread, current_thread
 from threading import enumerate as threads
 
 import pytest
@@ -109,3 +109,33 @@ def test_a_fan_out_inside_a_fanned_out_action_runs_inline() -> None:
     with pool.running(workers=WORKERS):
         assert pool.fan_out(action, range(2)) == [[0, 1], [0, 1]]
     assert set(inner) <= set(outer)
+
+
+def test_a_step_waiting_on_a_handed_off_step_holds_no_pass_worker() -> None:
+    gate = Event()
+
+    def held(ctx: Context) -> Result:
+        assert gate.wait(3), "the critical step never got a worker"
+        return Result()
+
+    def free(ctx: Context) -> Result:
+        gate.set()
+        return Result()
+
+    def quick(ctx: Context) -> Result:
+        return Result()
+
+    later: list[tuple[engine.StepRecord, ...]] = []
+    slow = Lane("slow")
+    with pool.running(workers=2, critical_s=4.0, slow_s=4.0):
+        engine.run_group(
+            "waits one", _ctx(), (Step("waits held", held, "waits one", lane=slow),), finished=later.append
+        )
+        needing = Step("waits needing", quick, "waits two", frozenset({"waits held"}), slow)
+        engine.run_group("waits two", _ctx(), (needing,), finished=later.append)
+        rows = engine.run_group("waits three", _ctx(), (Step("waits free", free, "waits three"),))
+    assert [record.outcome for record in rows] == [engine.OK]
+    assert sorted(record.name for row in later for record in row if record.outcome == engine.OK) == [
+        "waits held",
+        "waits needing",
+    ]

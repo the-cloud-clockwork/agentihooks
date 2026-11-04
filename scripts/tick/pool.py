@@ -2,7 +2,7 @@
 
 import fcntl
 from collections.abc import Callable, Generator, Iterable
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
@@ -74,6 +74,11 @@ class Pass:
         """Return the steps in ``names`` that a group of this pass handed off."""
         with self.guard:
             return frozenset(name for name in names if name in self.handed)
+
+    def settled(self, names: Iterable[str]) -> bool:
+        """Return whether every handed off step in ``names`` was marked ended, dropped or not."""
+        with self.guard:
+            return all(self.handed[name].is_set() for name in names)
 
     def end(self, name: str, dropped: bool) -> None:
         """Mark handed off step ``name`` ended, ``dropped`` when it never ran or ran past its lane; ignore others."""
@@ -186,8 +191,10 @@ def fan_out(action: Callable[[Item], Found], items: Iterable[Item]) -> list[Foun
     found, values = active(), list(items)
     if found is None or not found.parallel or len(values) < 2 or getattr(_FANNED, "inside", False):
         return [action(value) for value in values]
-    futures = [found.fans.submit(copy_context().run, _slotted, found.slots, action, value) for value in values]
+    futures: list[Future[Found]] = []
     try:
+        for value in values:
+            futures.append(found.fans.submit(copy_context().run, _slotted, found.slots, action, value))
         wait(futures)
         return [future.result() for future in futures]
     finally:

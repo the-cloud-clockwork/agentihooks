@@ -43,6 +43,7 @@ LATE = "late"
 FAILED = "failed"
 HELD = "held"
 SKIPPED = "skipped"
+SETTLE_S = 0.05
 
 _RUNNING: dict[tuple[str | None, str], Thread] = {}
 _RUNNING_LOCK = Lock()
@@ -306,6 +307,14 @@ def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) 
     return run_step(step, ctx)
 
 
+def _waiting(step: Step, names: set[str], found: pool.Pass) -> bool:
+    """Return whether ``step`` still waits, inside its lane, on a handed off step of an earlier group of the pass.
+
+    Such a step is submitted only once that step ended, so it never holds a pass worker while it waits.
+    """
+    return not found.lane(step.lane).expired and not found.settled(found.handed_of(step.needs - names))
+
+
 def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
     """Mark the record's step ended on the pass, dropped when it was abandoned, and return the record."""
     found.end(record.name, record.abandoned)
@@ -327,7 +336,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
     submitted: list[Future[StepRecord]] = []
     try:
         while pending or running:
-            ready = [step for step in pending if step.needs & names <= records.keys()]
+            ready = [s for s in pending if s.needs & names <= records.keys() and not _waiting(s, names, found)]
             for step in ready:
                 pending.remove(step)
                 lane = found.lane(step.lane)
@@ -343,11 +352,14 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                     future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
                     submitted.append(future)
                     running[future] = (step, clock(), lane)
+            held = any(_waiting(step, names, found) for step in pending)
             if not running:
-                if not ready:
+                if not ready and not held:
                     raise ValueError(f"steps {sorted(step.name for step in pending)} wait on needs that never end")
+                if held:
+                    time.sleep(SETTLE_S)
                 continue
-            timeout = min(lane.remaining for _, _, lane in running.values())
+            timeout = min([lane.remaining for _, _, lane in running.values()] + ([SETTLE_S] if held else []))
             done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
             for future in done:
                 step, _, _ = running.pop(future)
