@@ -90,7 +90,8 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
+        lane = engine.SLOW if step.name == "fleet red notice" else CallStep.lane
+        assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
 
 
 def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
