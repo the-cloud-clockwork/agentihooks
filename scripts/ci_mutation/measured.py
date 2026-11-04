@@ -201,7 +201,7 @@ def plan_shards(
     wall: float | None = None,
 ) -> dict[str, Any]:
     splits = splits or {}
-    units = {
+    units: dict[str, list[float]] = {
         name: (unit_costs or {}).get(name, splits[function]["costs"])
         for name in costs
         if (function := function_name(name)) in splits
