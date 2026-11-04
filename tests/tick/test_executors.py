@@ -2,7 +2,8 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from threading import Lock, current_thread
+from threading import Lock, Thread, current_thread
+from threading import enumerate as threads
 
 import pytest
 
@@ -14,6 +15,7 @@ pytestmark = pytest.mark.unit
 
 WORKERS = 3
 GROUPS = ("executors one", "executors two", "executors three")
+POOLED = ("tick-", "ThreadPoolExecutor")
 
 
 class View:
@@ -43,10 +45,10 @@ def _ctx() -> Context:
     return Context(View(), Deadline.after(10.0))
 
 
-def _recording(names: set[str], lock: Lock) -> Callable[[Context], Result]:
+def _recording(seen: dict[int, Thread], lock: Lock) -> Callable[[Context], Result]:
     def note(value: int) -> int:
         with lock:
-            names.add(current_thread().name)
+            seen.update((id(thread), thread) for thread in threads() if thread.name.startswith(POOLED))
         return value
 
     def action(ctx: Context) -> Result:
@@ -57,26 +59,27 @@ def _recording(names: set[str], lock: Lock) -> Callable[[Context], Result]:
     return action
 
 
-def _group(group: str, names: set[str], lock: Lock) -> tuple[Step, ...]:
-    steps = [Step(f"{group} {index}", _recording(names, lock), group) for index in range(8)]
+def _group(group: str, seen: dict[int, Thread], lock: Lock) -> tuple[Step, ...]:
+    steps = [Step(f"{group} {index}", _recording(seen, lock), group) for index in range(8)]
     if group == GROUPS[-1]:
         steps[-1] = Step(steps[-1].name, steps[-1].action, group, lane=Lane("slow"))
     return tuple(steps)
 
 
 def test_a_pass_of_three_groups_of_eight_steps_uses_at_most_two_executors_and_the_slow_lane_thread() -> None:
-    names: set[str] = set()
+    seen: dict[int, Thread] = {}
+    before = set(threads())
     lock = Lock()
     rows: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(workers=WORKERS):
         for group in GROUPS:
-            rows.append(engine.run_group(group, _ctx(), _group(group, names, lock), finished=rows.append))
-    workers = names - {current_thread().name}
-    assert len(workers) <= 2 * WORKERS + 1, sorted(workers)
-    assert sum(name.startswith("tick-step") for name in workers) <= WORKERS
-    assert sum(name.startswith("tick-fan-out") for name in workers) <= WORKERS
-    assert sum(name == "tick-slow-lane" for name in workers) == 1
-    assert {name.split("_")[0] for name in workers} <= {"tick-step", "tick-fan-out", "tick-slow-lane"}
+            rows.append(engine.run_group(group, _ctx(), _group(group, seen, lock), finished=rows.append))
+    names = sorted(thread.name for thread in seen.values() if thread not in before)
+    assert len(names) <= 2 * WORKERS + 1, f"{len(names)} pooled threads: {names}"
+    assert sum(name.startswith("tick-step") for name in names) <= WORKERS
+    assert sum(name.startswith("tick-fan-out") for name in names) <= WORKERS
+    assert names.count("tick-slow-lane") == 1
+    assert {name.split("_")[0] for name in names} <= {"tick-step", "tick-fan-out", "tick-slow-lane"}
     assert sum(len(row) for row in rows) == 24
     assert all(record.outcome == engine.OK for row in rows for record in row)
 
