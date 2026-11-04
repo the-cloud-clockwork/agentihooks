@@ -2,14 +2,14 @@
 
 from collections.abc import Callable
 from functools import partial
-from typing import Any, cast
+from typing import Any, Unpack, cast
 
 from scripts.swarm import dev_red, dispatcher, fleet_red, prerequisite_wait, promotion_watch, release_wait
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import registry, steps, view
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Result, Write
-from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actions_of
+from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Declared, Left, actions_of, pass_domains
 
 __all__ = [
     "CLOSE",
@@ -259,11 +259,12 @@ class WriteStep:
         group: str,
         call: Callable[[Any, Get], Any],
         writes: frozenset[Domain] = frozenset(),
-        effects: frozenset[str] = frozenset(),
-        feature: str = "",
+        needs: frozenset[str] = frozenset(),
+        reads: frozenset[Domain] = frozenset(),
+        **declared: Unpack[Declared],
     ) -> None:
-        """Take the name, group, budgets, domains, effects and feature of the call step running ``call``."""
-        base = CallStep(name, group, call, writes=writes, effects=effects, feature=feature)
+        """Take the name, group, budgets, needs, domains, effects and feature of the call step running ``call``."""
+        base = CallStep(name, group, call, needs, reads, writes, **declared)
         self.effects = base.effects
         self.feature = base.feature
         self.name = base.name
@@ -384,28 +385,66 @@ def _close_space(tick: Any, get: Get) -> Any:
     return tick.skip_refused(tick._close_space, get("slug"), get("config"), get("store"), get("runtime"))
 
 
+DRAINED_RESUME_NEEDS = frozenset(
+    {
+        "stopped branch",
+        "master move fail over",
+        "recover master",
+        "spawn due",
+        "master start watch",
+        "strays",
+        "master wake",
+        "master stall",
+        "prompt stall",
+    }
+)
+RESUMED = frozenset({"drained resume"})
+LISTED = frozenset({"ledger state"})
+DOC = pass_domains("doc")
+CONFIG_DOC = pass_domains("config", "doc")
+
 STEPS = (
-    CallStep("sleeping", DRAINED, held(_sleeping)),
-    CallStep("drained resume", DRAINED, held(_drained_resume), frozenset({"sleeping"})),
-    CallStep("dev red reopen", REOPENS, held(_dev_red_reopen)),
-    CallStep("prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"})),
-    CallStep("promotion refresh", REOPENS, held(_promotion_refresh)),
-    CallStep("release alert", REOPENS, held(_release_alert)),
+    CallStep(
+        "sleeping", DRAINED, held(_sleeping), frozenset({"spawn due"}), pass_domains("rows"), pass_domains("sleeping")
+    ),
+    CallStep(
+        "drained resume",
+        DRAINED,
+        held(_drained_resume),
+        DRAINED_RESUME_NEEDS | {"sleeping"},
+        pass_domains("config", "rows", "doc", "sleeping"),
+        pass_domains("config"),
+    ),
+    CallStep("dev red reopen", REOPENS, held(_dev_red_reopen), RESUMED, pass_domains("config", "rows")),
+    CallStep(
+        "prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"}), pass_domains("rows")
+    ),
+    CallStep("promotion refresh", REOPENS, held(_promotion_refresh), RESUMED, CONFIG_DOC),
+    CallStep("release alert", REOPENS, held(_release_alert), RESUMED, CONFIG_DOC),
     WriteStep(
         "fleet red notice",
         REOPENS,
         held(_fleet_red_notice),
         writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
+        needs=frozenset({"spawn due"}),
+        reads=pass_domains("rows"),
     ),
-    CallStep("run window", TASK_PASSES, held(_run_window)),
-    CallStep("verification notices", TASK_PASSES, held(_verification_notices)),
-    WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES})),
-    WriteStep("grouping release", TASK_PASSES, held(_grouping_release), writes=frozenset({GROUPS})),
-    CallStep("dispatcher group", TASK_PASSES, held(_dispatcher_group)),
+    CallStep("run window", TASK_PASSES, held(_run_window), RESUMED, CONFIG_DOC),
+    CallStep("verification notices", TASK_PASSES, held(_verification_notices), LISTED, DOC),
+    WriteStep("size pass", TASK_PASSES, held(_size_pass), writes=frozenset({SIZES}), needs=LISTED, reads=DOC),
+    WriteStep(
+        "grouping release", TASK_PASSES, held(_grouping_release), writes=frozenset({GROUPS}), needs=LISTED, reads=DOC
+    ),
+    CallStep("dispatcher group", TASK_PASSES, held(_dispatcher_group), RESUMED, CONFIG_DOC),
     CallStep(
-        "settle", CLOSE, held(_settle), frozenset({"spawn"}), frozenset({AGENTS, TASKS, SWARM}), frozenset({SWARM})
+        "settle",
+        CLOSE,
+        held(_settle),
+        frozenset({"spawn"}),
+        frozenset({AGENTS, TASKS, SWARM}) | pass_domains("config", "rows", "doc"),
+        frozenset({SWARM}),
     ),
-    CallStep("close space", CLOSE, held(_close_space)),
+    CallStep("close space", CLOSE, held(_close_space), RESUMED, pass_domains("config")),
 )
 
 for _step in STEPS:

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from scripts.tick import registry
-from scripts.tick.steps import AGENTS, TASKS, CallStep
+from scripts.tick.steps import AGENTS, TASKS, CallStep, pass_domains
 
 Get = Callable[[str], Any]
 
@@ -53,12 +53,22 @@ def _transfers(tick: Any, get: Get) -> Any:
     return tick.skip_refused(tick.transfers.observe, get("store"), get("slug"), get("runtime").live_names())
 
 
+LISTED = frozenset({"spawn due"})
+ROWS = pass_domains("rows")
+
 STEPS = (
-    CallStep("reap", "agents", _reap, reads=frozenset({AGENTS}), writes=frozenset({AGENTS, TASKS})),
-    CallStep("recover outages", "agents", _recover_outages),
-    CallStep("strays", "agents", _strays),
+    CallStep("reap", "agents", _reap, LISTED, frozenset({AGENTS}) | ROWS, frozenset({AGENTS, TASKS})),
+    CallStep("recover outages", "agents", _recover_outages, LISTED, ROWS),
+    CallStep("strays", "agents", _strays, frozenset({"stopped branch"}), pass_domains("config")),
     CallStep("failed panes", "agents", _failed_panes),
-    CallStep("orphans", "tasks", _orphans, frozenset({"reap"}), frozenset({TASKS}), frozenset({TASKS})),
+    CallStep(
+        "orphans",
+        "tasks",
+        _orphans,
+        frozenset({"reap", "drained resume"}),
+        frozenset({TASKS}) | pass_domains("config", "rows"),
+        frozenset({TASKS}),
+    ),
     CallStep("conversations", "close", _conversations),
     CallStep("session models", "close", _session_models),
     CallStep("handoff transfers", "close", _transfers),

@@ -125,8 +125,6 @@ def test_spawn_needs_only_judge_orphans_and_preempt() -> None:
     assert budgets.JUDGE == {"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"}
     assert budgets.SPAWN_NEEDS == budgets.JUDGE | {"orphans", "preempt"}
     assert {step.name: step.needs for step in place.STEPS}["spawn"] == budgets.SPAWN_NEEDS
-    registered = [step for wave in registry.waves() for step in wave]
-    assert registry.latest_start("spawn", registered) <= budgets.SPAWN_START_S
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")

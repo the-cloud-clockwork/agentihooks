@@ -62,6 +62,16 @@ def actions_of(name: str) -> Domain:
     return Domain(f"actions:{name}")
 
 
+def pass_domain(key: str) -> Domain:
+    """Return the domain of the pass box value stored under ``key``."""
+    return Domain(f"pass:{key}")
+
+
+def pass_domains(*keys: str) -> frozenset[Domain]:
+    """Return the domains of the pass box values stored under ``keys``."""
+    return frozenset(map(pass_domain, keys))
+
+
 def actions(records: Iterable[StepRecord]) -> list[str]:
     """Return the actions the recorded steps wrote to their own domains, then each write they dropped, in step order."""
     return [action for record in records for action in _step_actions(record)]
