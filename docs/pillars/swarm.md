@@ -4451,8 +4451,9 @@ a deadline and is refused once it has passed; the records port has its Redis ada
 under `scripts/tick` outside the adapters that imports an adapted implementation directly (see
 [The import check](../reference/tick-adapters.md#the-import-check)). Most registered steps still run a call of the tick module, which reaches those systems
 itself; every pass already scans processes through the processes adapter and holds one lease heartbeat. Each pass
-builds the real adapters once, and the engine hands every step only write access to the ports its declared effects
-name; a write through any other port fails the step (see
+builds the real adapters once. A step that reads `ctx.tools` gets write access only to the ports its declared effects
+name, and a write through another port fails it; call steps only record their effects until they move into step
+classes (see
 [Effects in a tick pass](../reference/tick-adapters.md#effects-in-a-tick-pass)). See
 [Tick adapters](../reference/tick-adapters.md) and [Fencing records](../reference/fencing-records.md).
 

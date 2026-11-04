@@ -1024,7 +1024,7 @@ from scripts.tick.steps.tasks import TASK_PASSES
 
 @dataclass(frozen=True)
 class WakeStep:
-    """Send one wake to the first engineer seat through the inbox port."""
+    """Send one wake to the first engineer seat of the example swarm `rig-grade-swarm` through the inbox port."""
 
     name: str = "example wake"
     group: str = TASK_PASSES
@@ -1051,9 +1051,9 @@ their domain arguments:
 
 ```python
 from scripts.tick.steps import CallStep
-from scripts.tick.steps.tasks import WriteStep
+from scripts.tick.steps.tasks import WriteStep, held
 
-CallStep("example", TASK_PASSES, _example, effects=frozenset({"inbox"}), feature="swarm-example")
+CallStep("example", TASK_PASSES, held(_example), effects=frozenset({"inbox"}), feature="swarm-example")
 WriteStep("example sizes", TASK_PASSES, _sizes, effects=frozenset({"metrics"}), feature="swarm-example-sizes")
 ```
 
@@ -1061,7 +1061,8 @@ Their call receives the tick module and a pass state reader, never the `Context`
 `ctx.tools`; until it moves into a step class its declared effects only record intent. A step that leaves out both
 declarations has `effects=frozenset()` and `feature=""`: it may read through every port and write through none. A
 name in `effects` that is not a port name opens nothing: `for_effects` checks each port by its own name, so a
-misspelt `"source-control"` leaves `source_control` closed.
+misspelt `"source-control"` leaves `source_control` closed. Registration does not check effect names; a misspelt name
+surfaces as `UndeclaredEffect` at the step's first write through that port.
 
 #### Testing a step's effects
 
@@ -1102,7 +1103,7 @@ delivered change is [pull request 9632](https://github.com/the-cloud-clockwork/a
 #### Seeing a refused write
 
 The refusal is raised before the deadline check and before the adapter is called, so the outside system is untouched.
-The step's timing wrapper writes a finished `swarm_tick_step` journal line with `"outcome": "error"` and
+Inside a swarm tick pass run by `run_tick` against the swarm's Redis store, the step's timing wrapper writes a finished `swarm_tick_step` journal line with `"outcome": "error"` and
 `"error": "scripts.tick.ports.contracts.UndeclaredEffect"`, stores the same fields in `tick:steps`, adds the step to
 the pass's failed steps, and `tick:records` stores the step with outcome `failed` (see [Tick report](tick-report.md)).
 A slow lane step that ends after its group returned also prints `slow lane step <name> failed:
