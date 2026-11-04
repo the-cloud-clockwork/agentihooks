@@ -45,9 +45,7 @@ CARD_KEYS = ("id", "title", "description", "territory", "difficulty", "lane", "p
 
 def pool(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     live: list[dict[str, Any]] = _live(doc, "tasks")
-    pending: dict[str, dict[str, Any]] = {
-        t["id"]: t for t in live if not _finished(t) and not t.get("merged_into")
-    }
+    pending: dict[str, dict[str, Any]] = {t["id"]: t for t in live if not _finished(t) and not t.get("merged_into")}
     inputs: dict[str, Any] = _tick_inputs(doc.get("_meta") or {}) or {}
     held: set[str] = _frozen(doc, pending, inputs)
     chained: set[str] = _chained(pending)
@@ -161,16 +159,12 @@ def _group_problems(group: Any, known: dict[str, dict[str, Any]], seen: set[str]
     seen.update(ids)
     if reason := ledger_groups.refusal([known[i] for i in ids], known, ledger_groups.FOLD_CEILING):
         found.append(reason)
-    seams = group.get("seams")
-    if (
-        not isinstance(seams, list)
-        or len(seams) != len(ids)
-        or not all(isinstance(s, str) and s for s in cast("list[Any]", seams))
-    ):
+    seams_raw = group.get("seams")
+    seams = cast("list[Any]", seams_raw) if isinstance(seams_raw, list) else None
+    if seams is None or len(seams) != len(ids) or not all(isinstance(s, str) and s for s in seams):
         found.append(f"seams must list {len(ids)} plain sentences, one per folded task")
     else:
-        typed_seams = cast("list[Any]", seams)
-        found += [f"seam {NUMBERS[i]} {p}" for i, s in enumerate(typed_seams) for p in plain_problems(s, known)]
+        found += [f"seam {NUMBERS[i]} {p}" for i, s in enumerate(seams) for p in plain_problems(s, known)]
     done = group.get("done")
     if done is None:
         return found
@@ -198,9 +192,8 @@ def _path(text: str) -> str:
 
 
 def description(doc: dict[str, Any], lead: dict[str, Any], group: dict[str, Any]) -> str:
-    phase = next(
-        (p for p in doc.get("phases") or [] if p.get("id") == lead.get("phase")), cast("dict[str, Any]", {})
-    )
+    phases = cast("list[Any]", doc.get("phases") or [])
+    phase = next((p for p in phases if p.get("id") == lead.get("phase")), cast("dict[str, Any]", {}))
     mission = ": ".join(filter(None, (phase.get("title"), _sentence(phase.get("description")))))
     lines = [
         f"Parent intent: {_sentence(doc.get('overview')) or UNSTATED}.",

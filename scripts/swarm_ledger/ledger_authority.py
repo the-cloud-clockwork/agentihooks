@@ -10,6 +10,7 @@ import time
 from collections.abc import Mapping
 from functools import lru_cache
 from os import environ
+from typing import Any, cast
 
 import jwt
 
@@ -18,19 +19,19 @@ from scripts.swarm_ledger import hive_work, ports
 from scripts.swarm_ledger.ledger_link import remote
 
 
-def resolve_name(name):
+def resolve_name(name: str) -> str:
     return ports.swarm().naming.resolve_name(name)
 
 
-def connect(environ=None):
+def connect(environ: Mapping[str, str] | None = None) -> Any:
     return ports.swarm().store.connect(environ)
 
 
-def agent_token(admin, slug, name):
+def agent_token(admin: str, slug: str, name: str) -> str:
     return hmac.new(admin.encode(), f"{slug}\n{name}".encode(), hashlib.sha256).hexdigest()
 
 
-def _same(given, expected):
+def _same(given: str, expected: str) -> bool:
     return hmac.compare_digest(given.encode(), expected.encode())
 
 
@@ -55,7 +56,7 @@ def tick_principal(token: str, slug: str) -> str | None:
     return "" if _same(token, tick_token(secret, slug, expires)) else None
 
 
-def principal(admin: str, slug: str, token: str, agent: str) -> str | None:
+def principal(admin: str, slug: str, token: str | None, agent: str | None) -> str | None:
     """'' for the operator, the agent's name for a bound agent, None for a refused credential."""
     if not admin or not token:
         return None
@@ -68,10 +69,10 @@ def principal(admin: str, slug: str, token: str, agent: str) -> str | None:
     return None
 
 
-def hive_principal(slug: str, token: str, agent: str) -> str | None:
+def hive_principal(slug: str, token: str, agent: str | None) -> str | None:
     with hive_work.bounded():
         member = ports.hive().auth.agent_member(ports.swarm().store.redis_client(), token, slug, agent)
-    return agent if member and hive_agent(member, slug, agent) else None
+    return agent if member and hive_agent(member, slug, cast(str, agent)) else None
 
 
 def caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
@@ -102,7 +103,7 @@ def credential_caller(headers: Mapping[str, str], admin: str, slug: str) -> str 
     return agent if _same(token, agent_token(secret, slug, agent)) else None
 
 
-def access_operator(assertion) -> bool:
+def access_operator(assertion: str | None) -> bool:
     team = environ.get("SWARM_ACCESS_TEAM", "").removeprefix("https://")
     audience = environ.get("SWARM_ACCESS_AUD")
     if not assertion or not team or not audience:
@@ -128,13 +129,14 @@ def access_keys(url: str) -> jwt.PyJWKClient:
     return jwt.PyJWKClient(url, cache_keys=True, timeout=10)
 
 
-def hive_member(credential):
+def hive_member(credential: str | None) -> str | None:
     return ports.hive().auth.ledger_member(ports.swarm().store.redis_client(), credential) if credential else None
 
 
 def hive_agent(member: str, slug: str, name: str) -> bool:
-    from scripts.doctor.priming import doctor_slug
+    from scripts.doctor import priming
 
+    doctor_slug = cast(Any, priming).doctor_slug
     store = ports.swarm().store.connect()
     return any(
         agent.name == name and agent.hive == member
@@ -158,7 +160,7 @@ def controller_credential(credential: str | None) -> bool:
     return bool(credential) and ports.hive().auth.controller(ports.swarm().store.redis_client(), credential)
 
 
-def refusal(name, op):
+def refusal(name: str, op: dict[str, Any]) -> str:
     if not name:
         return ""
     by = op.get("by")
@@ -179,7 +181,7 @@ def refusal(name, op):
     return ""
 
 
-def claim_refusal(by):
+def claim_refusal(by: str) -> str:
     from redis import RedisError
 
     NameRegistry = ports.swarm().naming.NameRegistry

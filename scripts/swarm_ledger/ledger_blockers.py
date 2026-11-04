@@ -8,6 +8,7 @@ comment listing every attempt, the critic resolution and the blocker reason.
 
 import hashlib
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from scripts.swarm_ledger import ledger_freezes, ports
@@ -192,7 +193,7 @@ def _escalate(
     return True
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: "Context") -> bool:
     row = find(doc, op["item"])
     if row is None:
         return False
@@ -209,7 +210,7 @@ def apply(doc, op, ctx):
     return done
 
 
-def asked_item(op: dict) -> str:
+def asked_item(op: dict[str, Any]) -> str:
     if op["op"] == "priority":
         return op["item"]
     found = NEEDS_OPERATOR.match(op["path"]) if op["op"] == "set" else None
@@ -219,17 +220,23 @@ def asked_item(op: dict) -> str:
 class Gate:
     """At delegate or full autonomy, an agent write that puts an item before the operator waits on the protocol."""
 
-    def __init__(self, slug: str, inner=None) -> None:
+    def __init__(self, slug: str, inner: Any = None) -> None:
         self.slug, self.inner = slug, inner
 
-    def apply(self, doc: dict, op: dict, ctx, apply) -> bool:
+    def apply(
+        self,
+        doc: dict[str, Any],
+        op: dict[str, Any],
+        ctx: "Context",
+        apply: Callable[[dict[str, Any], dict[str, Any], "Context"], bool],
+    ) -> bool:
         refused = self.refusal(doc, op)
         if refused:
             ctx.refused.append(refused)
             return False
         return self.inner.apply(doc, op, ctx, apply) if self.inner else apply(doc, op, ctx)
 
-    def refusal(self, doc: dict, op: dict) -> str:
+    def refusal(self, doc: dict[str, Any], op: dict[str, Any]) -> str:
         by = op.get("by")
         if by is None or by in SERVICE or not ports.swarm().front_door.asks_operator(op):
             return ""

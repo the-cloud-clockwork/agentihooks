@@ -148,9 +148,7 @@ def first_shown(session: dict[str, Any], owed: list[dict[str, Any]]) -> list[dic
     except ImportError:
         return owed
     marks_for = cast("Callable[[str], Any]", seen.marks_for)
-    first_showing = cast(
-        "Callable[[Any, str, str, list[dict[str, Any]]], list[dict[str, Any]]]", seen.first_showing
-    )
+    first_showing = cast("Callable[[Any, str, str, list[dict[str, Any]]], list[dict[str, Any]]]", seen.first_showing)
     marks = marks_for(session["slug"])
     return first_showing(marks, session["name"], session["slug"], owed)
 
@@ -217,6 +215,7 @@ def outcome_seen(session: dict[str, Any]) -> bool:
 
 def on_tool(payload: dict[str, Any], session: dict[str, Any], state: dict[str, Any], sfile: Path) -> None:
     import ledger_gate
+
     from scripts.gates import progress
 
     outcome_of = cast("Callable[[str | None], str]", progress.outcome_of)
@@ -343,13 +342,15 @@ def dispatch(payload: dict[str, Any]) -> None:
         resolve_name = ports.swarm().naming.resolve_name
 
         session["name"] = resolve_name(session["name"])
-    handler = HANDLERS.get(payload.get("hook_event_name"))
+    hook_event_name = cast(str, payload.get("hook_event_name"))
+    handler = HANDLERS.get(hook_event_name)
     if session is None or handler is None:
         return
     import ledger_gate
 
-    from scripts.swarm_ledger.storage import read_ledger
+    from scripts.swarm_ledger import storage
 
+    read_ledger = cast("Callable[..., dict[str, Any] | None]", storage.read_ledger)
     state = read_ledger(LEDGER_DIR, session["slug"], *GATE_READS)
     if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or ledger_gate.closed(state):
         return
@@ -361,7 +362,7 @@ def dispatch(payload: dict[str, Any]) -> None:
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-        dispatch(payload if isinstance(payload, dict) else {})
+        dispatch(cast("dict[str, Any]", payload) if isinstance(payload, dict) else {})
     except Exception as exc:  # fail open: a broken hook must never stop an agent
         log(f"hook error: {exc!r}")
     return 0
