@@ -4,7 +4,16 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any, Unpack, cast
 
-from scripts.swarm import dev_red, dispatcher, fleet_red, phases, prerequisite_wait, promotion_watch, release_wait
+from scripts.swarm import (
+    dev_red,
+    dispatcher,
+    fleet_red,
+    master_stall,
+    phases,
+    prerequisite_wait,
+    promotion_watch,
+    release_wait,
+)
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import registry, steps, view
 from scripts.tick.engine import SLOW
@@ -21,6 +30,7 @@ __all__ = [
     "PHASE_CHANGED",
     "PHASES",
     "SIZES",
+    "STALL",
     "RAISED",
     "RANK",
     "REOPENS",
@@ -38,6 +48,8 @@ __all__ = [
     "raise_held",
     "rank_writer",
     "rank_writes",
+    "stall_writer",
+    "stall_writes",
     "release_writes",
     "size_writes",
     "sleeping_of",
@@ -53,6 +65,7 @@ FLEET_RED = Domain("fleet red")
 FLEET_RED_LIFTED = Domain("fleet red lifted")
 RANK = Domain("rank")
 PHASES = Domain("phases")
+STALL = Domain("master stall")
 PHASE_CHANGED = "phase changed"
 TASK_PASSES = "task passes"
 CLOSE = "close"
@@ -274,6 +287,32 @@ def _done_of(row: object) -> bool:
             return False
 
 
+def stall_writes(found: list[str | master_stall.Stall]) -> list[str | Write]:
+    """Return a write for each stall decision ``found`` names, guarded on the master it read, and its other lines."""
+    return [
+        Write(STALL, item.master.name, item, expected=item.master.name)
+        if isinstance(item, master_stall.Stall)
+        else item
+        for item in found
+    ]
+
+
+def stall_writer(slug: str, store: Any, ledger: Any, now_ms: int) -> Callable[[Write], list[str]]:
+    """Return the master stall applier: it takes a stall decision only while its master is still the live master."""
+    return partial(_apply_stall, slug, store, ledger, now_ms)
+
+
+def _apply_stall(slug: str, store: Any, ledger: Any, now_ms: int, write: Write) -> list[str]:
+    """Take the stall decision of ``write``, dropping it as a conflict once another master took the seat or none is live."""
+    match write.value:
+        case master_stall.Stall() as stall:
+            if master_stall.live_name(store, slug) != write.expected:
+                raise RevisionConflict(f"master {write.expected} is no longer the live master of swarm {slug}")
+            return master_stall.apply_stall(slug, store, ledger, stall, now_ms)
+        case _:
+            raise RevisionConflict(f"the stall write of {write.key} carries no stall")
+
+
 def _run_window(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
         tick.run_window.step, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
@@ -377,6 +416,8 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] 
         found[FLEET_RED_LIFTED] = lifted_writer(store)
         found[fleet_red.LISTINGS] = fleet_red.saver(store)
         found[RANK] = rank_writer(store)
+        if (now_ms := state.get("now_ms")) is not None:
+            found[STALL] = stall_writer(slug, store, ledger, now_ms)
         if (inbox := state.get("inbox")) is not None and (box := state.get("box")) is not None:
             found[PHASES] = phase_writer(slug, ledger, inbox, store, box)
     return found
