@@ -293,16 +293,22 @@ def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 
 def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
-    """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it."""
+    """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it.
+
+    The expected fields go to the ledger as its ``if_match`` guard, so the server compares and sets them in one apply.
+    """
     expected = cast(dict[str, Any], write.expected or {})
     task = read(write.key)
     moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
     if moved:
         raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
+    fields = cast(dict[str, Any], write.value)
     try:
-        ledger.update_task(slug, write.key, write.value)
+        held = ledger.update_task(slug, write.key, fields, if_match=expected or None)
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
+    if kept := sorted(key for key in expected if key in fields and held.get(key) != fields[key]):
+        raise RevisionConflict(f"task {write.key} changed {', '.join(kept)} on the ledger before the write")
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] | None]]:
@@ -355,13 +361,17 @@ def group_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | 
 
 
 def _release_group(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
-    """Release the group under the lead of ``write`` unless its members moved or the ledger refuses it."""
+    """Release the group under the lead of ``write`` unless its members moved or the ledger refuses it.
+
+    The expected members go to the ledger as its ``if_match`` guard, so the server compares them before it releases.
+    """
     expected = cast(dict[str, Any], write.expected or {})
     task = read(write.key)
     if task is not None and list(task.get("group_members") or []) != expected.get("group_members", []):
         raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
+    guard = {"group_members": expected["group_members"]} if "group_members" in expected else None
     try:
-        ledger.ungroup_tasks(slug, write.key)
+        ledger.ungroup_tasks(slug, write.key, if_match=guard)
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the release of the group under task {write.key}") from exc
 

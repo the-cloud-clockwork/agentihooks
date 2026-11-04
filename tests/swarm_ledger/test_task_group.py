@@ -296,35 +296,37 @@ def test_ungroup_of_a_task_without_a_group_changes_nothing(with_ungroup):
     assert rejected == ["ungroup-2"]
 
 
-def guarded_ungroup(lead, members, n=1):
-    op = {"op": "task_ungroup", "id": f"ungroup-{n}", "by": "swarm", "item": f"tasks/{lead}"}
-    op["if_match"] = {"group_members": members}
+def guarded_ungroup(lead: str, members: list[str], n: int = 1) -> tuple[dict, list]:
+    op = {
+        "op": "task_ungroup",
+        "id": f"ungroup-{n}",
+        "by": "swarm",
+        "item": f"tasks/{lead}",
+        "if_match": {"group_members": members},
+    }
     core.check_op(op)
     return core.sync(SLUG, ops=[op])
 
 
-def test_ungroup_releases_while_the_lead_holds_the_members_it_expects(with_ungroup):
+def test_ungroup_releases_while_the_lead_holds_the_members_it_expects(with_ungroup: None) -> None:
     group("t1", ["t2", "t3"])
     state, rejected = guarded_ungroup("t1", ["t2", "t3"])
     assert rejected == []
     assert "group_members" not in rows(state)["t1"] and "merged_into" not in rows(state)["t2"]
 
 
-def test_ungroup_refuses_after_a_concurrent_regroup_moved_the_members(with_ungroup):
+def test_ungroup_refuses_after_a_concurrent_regroup_moved_the_members(with_ungroup: None) -> None:
     group("t1", ["t2", "t3"])
-    doc = repository.bound(core).export_document(SLUG)
-    next(t for t in doc["tasks"] if t["id"] == "t1")["group_members"] = ["t2"]
-    repository.bound(core).import_document(SLUG, doc, replace=True)
-    state, rejected = guarded_ungroup("t1", ["t2", "t3"])
+    state, rejected = guarded_ungroup("t1", ["t2"])
     assert rejected == ["ungroup-1"]
     assert state["_meta"]["warnings"][-1] == "tasks/t1 changed its group members"
-    assert rows(state)["t1"]["group_members"] == ["t2"] and rows(state)["t2"]["merged_into"] == "t1"
+    assert rows(state)["t1"]["group_members"] == ["t2", "t3"] and rows(state)["t3"]["merged_into"] == "t1"
 
 
 @pytest.mark.parametrize(
     "if_match", [{"group_members": "t2"}, {"group_members": ["bad id"]}, {"claimed_by": "x"}, ["t2"]]
 )
-def test_a_malformed_ungroup_guard_is_refused(if_match):
+def test_a_malformed_ungroup_guard_is_refused(if_match: object) -> None:
     op = {"op": "task_ungroup", "id": "u", "by": "swarm", "item": "tasks/t1", "if_match": if_match}
     with pytest.raises(ValueError, match="^task_ungroup if_match holds only group_members, a list of task ids$"):
         core.check_op(op)
