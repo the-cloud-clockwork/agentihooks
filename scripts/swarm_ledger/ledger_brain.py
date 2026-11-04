@@ -56,8 +56,10 @@ def check_binding(value: object) -> None:
 def check_learning(value: object) -> None:
     """Refuse a learning outcome that is not a supported kind with bounded source evidence."""
     learning = mapping(value)
-    if learning is None or set(learning) != {"kind", "content", "sources"}:
+    if learning is None or set(learning) - {"seat"} != {"kind", "content", "sources"}:
         raise ValueError("learning needs kind, content and sources")
+    if "seat" in learning and not text(learning["seat"], 200):
+        raise ValueError("learning seat must be a bounded seat address")
     if learning["kind"] not in KINDS or not text(learning["content"], 4096):
         raise ValueError("learning needs a supported lesson, decision or explicit no new learning result")
     sources = cast(list[object], learning["sources"]) if isinstance(learning["sources"], list) else None

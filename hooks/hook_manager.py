@@ -2358,6 +2358,10 @@ def on_stop(payload: dict) -> None:
                 timeout_sec=60,
                 task_name="brain_writer",
             )
+            if transcript_path and os.environ.get("AGENTIHOOKS_SWARM_TASK"):
+                from hooks.context.task_learning import record
+
+                fork_and_call(record, session_id, transcript_path, timeout_sec=60, task_name="task_learning")
     except Exception as e:
         log("brain_writer_hook dispatch failed", {"error": str(e)})
 

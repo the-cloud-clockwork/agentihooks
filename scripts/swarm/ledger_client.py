@@ -150,6 +150,10 @@ class LedgerClient:
     def add_task(self, slug, fields, by):
         self._call(slug, [{**_op("task_add", by), **fields}])
 
+    def record_learning(self, slug: str, ops: list[dict[str, Any]]) -> None:
+        """Submit brain learning operations for one task."""
+        self._call(slug, ops)
+
     def _notice(self, slug, op, kind):
         op = {**op, "text": notice_text.plain(op["text"], kind)}
         try:
