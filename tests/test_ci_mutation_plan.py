@@ -996,6 +996,69 @@ def test_reports_distinguish_complete_survivor_grades_from_budget_exhaustion(tmp
     assert report["shard"]["wall_seconds"] >= 0
 
 
+def test_two_shards_of_one_statistics_part_measure_without_a_measured_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_mutation import merge
+    from scripts.ci_mutation.runner import run_gate
+    from scripts.ci_mutation.stats import SharedStats
+
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/sample.py").write_text("def f():\n    return 1\n")
+    (tmp_path / "tests/test_sample.py").write_text("pass\n")
+    stats = tmp_path / "stats"
+    stats.mkdir()
+    names = [f"scripts.sample.x_f__mutmut_{index}" for index in (1, 2, 3, 4)]
+
+    def mutate(
+        root: Path, work: Path, files: dict, deadline: float, shard: tuple[int, int], group: object
+    ) -> tuple[dict, str]:
+        owned = sorted(names)[shard[0] :: shard[1]]
+        meta = work / "mutants/scripts/sample.py.meta"
+        meta.parent.mkdir(parents=True)
+        meta.write_text(json.dumps({"exit_code_by_key": {name: 1 if name in owned else None for name in names}}))
+        rows = [{"name": name, "status": "killed", "lines": [], "fingerprint": ""} for name in owned]
+        return {"scripts/sample.py": rows}, ""
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
+    folder = tmp_path / "shards"
+    for index in (0, 1):
+        output = folder / f"mutation-report-{index}"
+        report = run_gate(
+            tmp_path, {"scripts/sample.py": {2}}, output, 1080, shard=(index, 2), stats=SharedStats(stats, "head")
+        )
+        assert report["shard"]["index"] == index
+        assert report["shard"]["total"] == 2
+        assert report["shard"]["expected"] == 2
+        assert report["shard"]["graded"] == 2
+        assert report["shard"]["complete"] is True
+        assert report["shard"]["budget_exhausted"] is False
+        assert report["shard"]["estimated_worker_seconds"] == 0.0
+    monkeypatch.chdir(tmp_path)
+    gate = tmp_path / "gate"
+    assert merge.main([str(folder), "--prefix", "mutation-report-", "--shards", "2", "--output", str(gate)]) == 0
+    assert json.loads((gate / "report.json").read_text())["failed"] is False
+
+
+def test_a_shard_without_a_plan_slices_each_mutmut_run_on_its_own(tmp_path: Path) -> None:
+    from scripts.ci_mutation import runner
+    from scripts.ci_mutation.stats import SharedStats
+
+    stats = tmp_path / "stats"
+    stats.mkdir()
+    output = tmp_path / "output"
+    for run, name in (("0-a", "scripts.a.x_f__mutmut_1"), ("1-b", "scripts.b.x_f__mutmut_1")):
+        meta = output / run / "mutants/scripts/sample.py.meta"
+        meta.parent.mkdir(parents=True)
+        meta.write_text(json.dumps({"exit_code_by_key": {name: 1}}))
+    report: dict = {"files": [], "not_mutated": []}
+    runner.record_shard_measurement(report, output, SharedStats(stats, "head"), 0.0, 1080, (0, 2))
+    assert report["shard"]["expected"] == 2
+    assert report["shard"]["graded"] == 2
+    assert report["shard"]["complete"] is True
+
+
 def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp_path, monkeypatch):
     from scripts.ci_mutation.runner import run_gate
     from scripts.ci_mutation.stats import SharedStats

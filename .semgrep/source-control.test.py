@@ -28,3 +28,13 @@ def aliased(url):
 
     # ruleid: swarm-source-control-port
     return subprocess.run(adapter.command(["pr", "view", url]), capture_output=True)
+
+
+def tick_step(context, number):
+    # ruleid: swarm-source-control-port
+    return context.run(["gh", "pr", "view", str(number)])
+
+
+def tick_port(context, number):
+    # ok: swarm-source-control-port
+    return context.source_control.pull_request(number)

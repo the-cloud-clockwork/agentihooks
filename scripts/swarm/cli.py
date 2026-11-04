@@ -87,6 +87,7 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
+    ack_pass,
     affinity,
     agent_up,
     blockers,
@@ -194,6 +195,7 @@ from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.steps import Left, PassBox
 from scripts.tick.steps import host as host_steps
+from scripts.tick.steps import report as report_steps
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -333,6 +335,14 @@ def _intent_pass(inbox, store, slug, doc, ledger, config):
     return view, skip_refused(check.run, doc)
 
 
+def _tick_groups(store: RedisStore, slug: str, ledger: Any, runtime: Any) -> list[str]:
+    """Run the tick's registered groups at the wrapper's reboot site, no actions when a value they read was left."""
+    try:
+        return tick(slug, store, ledger, runtime, now_ms())
+    except Left:
+        return []
+
+
 @timing.instrument_tick
 @scope.one_pass()
 @outage.guard_tick
@@ -366,7 +376,7 @@ def run_tick(
         tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc, view, beating = {}, None, ExitStack()
+    doc, view, beating, box = {}, None, ExitStack(), PassBox()
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.enter_context(
@@ -381,7 +391,6 @@ def run_tick(
             _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
-        box: dict[str, Any] = PassBox()
         passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         run_group("wrapper probes", **passing)
         host_steps.raise_held(box)
@@ -419,13 +428,14 @@ def run_tick(
             run_group("wrapper refresh", **passing, scheduled=scheduled)
             host_steps.raise_held(box)
             doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
-            judging: dict[str, Any] = PassBox()
+            judging: dict[str, Any] = PassBox(left=box.left)
             with ThreadPoolExecutor(max_workers=1) as worker:
                 judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
                 judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
                 try:
                     actions += run_group("wrapper reboot", **passing)
                     host_steps.raise_held(box)
+                    actions += _tick_groups(store, slug, ledger, runtime)
                 finally:
                     judged.result()
                     host_steps.raise_held(judging)
@@ -449,8 +459,8 @@ def run_tick(
             host_steps.raise_held(box)
             started = box["started"]
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
-    except Left:
-        return []
+    except Left as missing:
+        return report_steps.early_end(store, slug, now_ms(), doc, missing, box.left)
     finally:
         try:
             published: dict[str, Any] = PassBox()
@@ -535,17 +545,18 @@ def cmd_waits(store, args):
     except (OSError, subprocess.SubprocessError) as exc:
         timing.emit(sys.stderr, f"the scheduled swarm tick guard failed: {type(exc).__name__}: {exc}")
 
-    def check(slug):
+    def check(job: tuple[str, Callable[[RedisStore, str], list[str]]]) -> None:
+        slug, passing = job
         try:
-            for action in run_waits(store, slug):
+            for action in passing(store, slug):
                 timing.emit(sys.stdout, f"{slug}: {action}")
         except Exception as exc:
             timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
-    slugs = store.slugs()
-    if slugs:
-        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
-            list(pool.map(check, slugs))
+    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits, ack_pass.run)]
+    if jobs:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            list(pool.map(check, jobs))
 
 
 def _tickable(slug):
@@ -667,8 +678,10 @@ def cmd_tick_watch(store, args):
         repair = tick_watch.Repair(scheduled_tick.restart, respawn)
     else:
 
-        def repair(slug, now):
-            return place_master(slug, store, runtime, now)
+        def repair(slug: str, now: int) -> list[str]:
+            return tick_watch.bounded(
+                lambda: place_master(slug, store, runtime, now), tick_watch.REPAIR_S, "the master placement"
+            )
 
     tick_watch.run(store, now_ms, repair)
 
