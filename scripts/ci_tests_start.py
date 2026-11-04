@@ -10,22 +10,35 @@ def _api(endpoint: str) -> dict:
     )
 
 
-def verify(repository: str, head: str, attempts: int = 36, interval: float = 5, event: str = "pull_request") -> str:
+def verify(
+    repository: str,
+    head: str,
+    attempts: int = 36,
+    interval: float = 5,
+    event: str = "pull_request",
+    waits: int = 240,
+) -> str:
+    """Wait for the head's Tests run to list a job, polling a queued or running run up to ``waits`` times."""
     problem = "Tests run is missing for this head."
-    for attempt in range(attempts):
+    for poll in range(waits):
         runs = _api(f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event={event}&per_page=1")[
             "workflow_runs"
         ]
         matching = [run for run in runs if run["head_sha"] == head]
         if matching:
             run = matching[0]
-            if run["status"] == "completed" and run["conclusion"] != "success":
+            completed = run["status"] == "completed"
+            if completed and run["conclusion"] != "success":
                 return f"Tests run {run['id']} ended with {run['conclusion']}."
             jobs = _api(f"repos/{repository}/actions/runs/{run['id']}/jobs?filter=latest&per_page=1")
             if jobs["total_count"] > 0:
                 return ""
             problem = f"Tests run {run['id']} has no jobs."
-        if attempt + 1 < attempts:
+            if completed:
+                return problem
+        elif poll + 1 >= attempts:
+            return problem
+        if poll + 1 < waits:
             time.sleep(interval)
     return problem
 
