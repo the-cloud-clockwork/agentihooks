@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
@@ -381,6 +381,11 @@ def _ended_boot(held: dict, host: str) -> bool:
     return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 
 
+def _lock_raw(pipe: Any, key: str) -> str | None:
+    """Read the tick lock value through a watched pipeline."""
+    return pipe.get(key)
+
+
 def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int, caller: str = "unnamed") -> str | None:
     from redis.exceptions import WatchError
 
@@ -389,7 +394,7 @@ def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int,
     with store.redis.pipeline() as pipe:
         pipe.watch(key)
         lease.require(store, slug, held)
-        raw = cast(str | None, pipe.get(key))
+        raw = _lock_raw(pipe, key)
         if raw and not _dead(raw):
             _journal_lock(slug, caller, "refused", raw)
             return None
@@ -410,7 +415,7 @@ def release_tick_lock(store: RedisStore, slug: str, token: str, caller: str = "u
     key = store.key(slug, "tick-lock")
     with store.redis.pipeline() as pipe:
         pipe.watch(key)
-        raw = cast(str | None, pipe.get(key))
+        raw = _lock_raw(pipe, key)
         if raw != token:
             _journal_lock(slug, caller, "found another holder", raw)
             return
@@ -435,7 +440,7 @@ def keep_tick(
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(key)
-                raw = cast(str | None, pipe.get(key))
+                raw = _lock_raw(pipe, key)
                 if raw != token:
                     raise SwarmError(
                         f"the tick lock is stale: {caller} expected token {_token_prefix(token)}, {_lock_holder(raw)}"
