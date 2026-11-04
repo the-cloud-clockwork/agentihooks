@@ -3,8 +3,8 @@
 Per graded file it records: each top level def and class name in the tick module, each registered step
 missing a budget row, an interval from the set, a lane or a needs, reads, writes, effects or feature
 declaration, and each import of an adapted implementation from a module outside the adapters. Only files
-whose text the head changes against the base grade, every file when the budgets table changes, so a stale
-entry for an untouched file never fails. A changed file may hold only offences its base allowlist or its base
+whose text or measurement the head changes against the base grade, as a budgets table change does, so a
+stale entry for an untouched file never fails. A changed file may hold only offences its base allowlist or its base
 measurement holds for it, and its head record must match its measurement; an unchanged file's head record
 may hold only what those hold.
 """
@@ -151,12 +151,13 @@ def measure(tree: Path) -> dict[str, list[str]]:
     return measured(scoped(tree))
 
 
-def touched(base: dict[str, str], head: dict[str, str]) -> set[str]:
-    """Path names whose text differs between the base and head texts; every name when the budgets table differs."""
+def touched(
+    base: dict[str, str], head: dict[str, str], held: dict[str, list[str]], found: dict[str, list[str]]
+) -> set[str]:
+    """Path names whose text or measurement differs between the base texts and measurement held and the head
+    texts and measurement found."""
     every = set(base) | set(head)
-    if base.get(BUDGETS) != head.get(BUDGETS):
-        return every
-    return {name for name in every if base.get(name) != head.get(name)}
+    return {name for name in every if base.get(name) != head.get(name) or held.get(name) != found.get(name)}
 
 
 def load(tree: Path) -> dict[str, list[str]] | None:
@@ -212,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    errors = grade(base, head, recorded, touched(prior, texts), held)
+    errors = grade(base, head, recorded, touched(prior, texts, held, head), held)
     total = sum(map(len, head.values()))
     allowed = sum(map(len, (base or {}).values()))
     print(f"{total} tick pattern offences in {len(head)} files, {allowed} on the base allowlist, {len(errors)} errors")

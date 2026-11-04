@@ -252,7 +252,9 @@ def test_a_changed_file_may_keep_an_offence_its_base_already_held(
     assert _grade(base, head, capsys) == (0, "2 tick pattern offences in 1 files, 0 on the base allowlist, 0 errors\n")
 
 
-def test_a_budgets_change_grades_every_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_budgets_change_grades_the_files_whose_measurement_it_moves(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     base = _recorded(tmp_path / "base", {STEP: FULL})
     head = _tree(tmp_path / "head", {tick_pattern.BUDGETS: BUDGETS.replace('"beat"', '"gone"'), STEP: FULL})
     (head / tick_pattern.ALLOWLIST).write_text((base / tick_pattern.ALLOWLIST).read_text())
@@ -266,11 +268,23 @@ def test_a_budgets_change_grades_every_file(tmp_path: Path, capsys: pytest.Captu
 
 
 def test_touched_names_changed_added_and_removed_files() -> None:
-    base = {tick_pattern.BUDGETS: "a", "kept": "1", "edited": "2", "gone": "3"}
-    head = {tick_pattern.BUDGETS: "a", "kept": "1", "edited": "9", "new": "4"}
-    assert tick_pattern.touched(base, head) == {"edited", "gone", "new"}
-    every = {tick_pattern.BUDGETS, "kept", "edited", "gone", "new"}
-    assert tick_pattern.touched(base, {**head, tick_pattern.BUDGETS: "b"}) == every
+    base = {"kept": "1", "edited": "2", "gone": "3", "moved": "4"}
+    head = {"kept": "1", "edited": "9", "new": "4", "moved": "4"}
+    held = {"moved": ["step a: no budget row"], "gone": ["def x"]}
+    assert tick_pattern.touched(base, head, held, {}) == {"edited", "gone", "new", "moved"}
+    assert tick_pattern.touched(base, head, held, held) == {"edited", "gone", "new"}
+
+
+def test_a_budgets_change_leaves_drift_in_an_untouched_file_green(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lost = FULL.replace('"beat"', '"lost"')
+    base = _tree(tmp_path / "base", {STEP: lost})
+    (base / tick_pattern.ALLOWLIST).write_text("{}\n")
+    budgets = BUDGETS.replace('"odd"', '"other"')
+    head = _tree(tmp_path / "head", {tick_pattern.BUDGETS: budgets, STEP: lost})
+    (head / tick_pattern.ALLOWLIST).write_text("{}\n")
+    assert _grade(base, head, capsys) == (0, "1 tick pattern offences in 1 files, 0 on the base allowlist, 0 errors\n")
 
 
 def test_a_head_without_an_allowlist_is_red() -> None:
