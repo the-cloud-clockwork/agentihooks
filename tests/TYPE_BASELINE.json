@@ -1444,7 +1444,7 @@
   "tests/swarm/test_outbox_senders.py": 1,
   "tests/swarm/test_overlays.py": 1,
   "tests/swarm/test_pane_evidence.py": 6,
-  "tests/swarm/test_phase_state.py": 11,
+  "tests/swarm/test_phase_state.py": 10,
   "tests/swarm/test_planner_controls.py": 3,
   "tests/swarm/test_planner_lane.py": 1,
   "tests/swarm/test_pr_wait.py": 13,
