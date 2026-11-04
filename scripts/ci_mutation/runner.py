@@ -391,16 +391,21 @@ def mutate_files(
 def record_shard_measurement(
     report: dict, output: Path, stats: SharedStats | None, started: float, budget: float, shard: tuple[int, int]
 ) -> None:
-    if stats is None or stats.part is not None or not (stats.folder / "plan.json").is_file():
+    """Record the shard's expected and graded mutant counts, owning names by the plan or by sorted slice per run."""
+    if stats is None or stats.part is not None:
         return
-    plan = json.loads((stats.folder / "plan.json").read_text())
-    owned = {name for name, assignment in plan["assignments"].items() if holds(assignment, shard[0])}
-    completed = set()
+    plan_path = stats.folder / "plan.json"
+    plan = json.loads(plan_path.read_text()) if plan_path.is_file() else None
+    runs: dict[str, dict[str, int | None]] = {}
     for path in output.glob("*/mutants/**/*.py.meta"):
-        data = json.loads(path.read_text())
-        completed.update(
-            name for name, status in data["exit_code_by_key"].items() if status is not None and name in owned
-        )
+        runs.setdefault(path.relative_to(output).parts[0], {}).update(json.loads(path.read_text())["exit_code_by_key"])
+    if plan is None:
+        owned = {name for codes in runs.values() for name in sorted(codes)[shard[0] :: shard[1]]}
+    else:
+        owned = {name for name, assignment in plan["assignments"].items() if holds(assignment, shard[0])}
+    completed = {
+        name for codes in runs.values() for name, status in codes.items() if status is not None and name in owned
+    }
     graded = max(
         len(completed),
         sum(count for file in report["files"] for status, count in file["counts"].items() if status != "not checked")
@@ -416,7 +421,7 @@ def record_shard_measurement(
         "graded": graded,
         "complete": graded == len(owned) and not report["not_mutated"],
         "budget_exhausted": exhausted,
-        "estimated_worker_seconds": sum(unit_cost(plan, name, shard[0]) for name in owned),
+        "estimated_worker_seconds": sum(unit_cost(plan, name, shard[0]) for name in owned) if plan else 0.0,
     }
     print(json.dumps({"shard": report["shard"]}), flush=True)
 
