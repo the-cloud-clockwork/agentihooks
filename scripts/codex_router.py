@@ -50,6 +50,7 @@ PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single 
 PROBE_TIMEOUT_S = 90
 CODEX_BIN = "codex"
 ATTEMPTS_FILE = "codex-probe-attempts.json"
+LOGIN_FILE = "codex-login.json"
 READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
 READING_MAX_AGE_H = 6.0
 HOUR_S = 3600
@@ -228,11 +229,29 @@ def default_signed_in(environ: Mapping[str, str], run: Callable = subprocess.run
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return status.returncode == 0
+    signed_in = status.returncode == 0
+    with contextlib.suppress(OSError):
+        _login_path().write_text(json.dumps(signed_in))
+    return signed_in
+
+
+def _login_path() -> Path:
+    return Path.home() / ".agentihooks" / LOGIN_FILE
+
+
+def cached_signed_in() -> bool:
+    """The default account's login status the last ``default_signed_in`` saw; signed in when none was recorded."""
+    with contextlib.suppress(OSError, ValueError):
+        return json.loads(_login_path().read_text()) is not False
+    return True
 
 
 def accounts(environ: Mapping[str, str], run: Callable = subprocess.run) -> list[CodexAccount]:
     return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT, signed_in=default_signed_in(environ, run))]
+
+
+def cached_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
+    return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT, signed_in=cached_signed_in())]
 
 
 def routing_pool(environ: Mapping[str, str], run: Callable = subprocess.run) -> list[CodexAccount]:
@@ -512,7 +531,7 @@ class CodexAccountSource:
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
         found = [
             account
-            for account in accounts(environ, *self._run())
+            for account in (accounts(environ, *self._run()) if self.refresh else cached_accounts(environ))
             if account.signed_in and not refusal(account, environ)
         ]
         return routed(found, environ)

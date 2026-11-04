@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 HURRY = "Your account has fifteen percent or less quota left. Finish the current step and push."
 HANDOFF_OPENING = "Your account is at the quota handoff threshold."
 WARNING_OPENING = "QUOTA HANDOFF WARNING:"
+STALE_S = 180
 HANDOFF = HANDOFF_OPENING + (
     " Commit, push, write the Handoff v2 document, "
     "then run agentihooks swarm {slug} handoff <doc> --reason quota and stop. "
@@ -71,4 +72,17 @@ def refresh(
     from scripts.swarm import quota_handoff
 
     actions = capacity.apply(slug, config, store, ledger, runtime, now_ms)
-    return actions + quota_handoff.warn(slug, store, dict(os.environ)) + apply(slug, store, capacity.read(store, slug))
+    decision = capacity.read(store, slug)
+    return (
+        actions
+        + quota_handoff.warn(slug, store, dict(os.environ))
+        + apply(slug, store, decision)
+        + stale(decision, now_ms)
+    )
+
+
+def stale(decision: dict, now_ms: int) -> list[str]:
+    """Name the newest quota reading's age once it passes ``STALE_S``, which means the quota prober stopped."""
+    seen = [row["observed_at"] for row in decision.get("accounts", []) if row.get("observed_at") is not None]
+    age = int(now_ms / 1000 - max(seen)) if seen else 0
+    return [f"quota readings are {age} seconds old; the quota prober has not refreshed them"] if age > STALE_S else []

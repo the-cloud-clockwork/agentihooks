@@ -209,9 +209,10 @@ def test_run_listens_on_the_wake_channel_and_answers_every_swarm_on_each_wake(st
 
     monkeypatch.setattr(store.redis, "pubsub", PubSub)
     monkeypatch.setattr(quota_refresh, "answer_all", answer_all)
+    monkeypatch.setattr(quota_refresh.time, "monotonic", lambda: 1000.0)
     with pytest.raises(Stop):
-        quota_refresh.run(store, execute, 7)
-    assert seen == [("subscribe", quota_refresh.WAKE), ("wait", 7), ("wait", 7)]
+        quota_refresh.run(store, execute, 7, lambda: seen.append("probe"))
+    assert seen == [("subscribe", quota_refresh.WAKE), "probe", ("wait", 7), ("wait", 7)]
     assert rounds == [(store, execute), (store, execute)]
 
 

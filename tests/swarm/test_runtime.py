@@ -1310,11 +1310,11 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     runtime = HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, scaling="manual")
     runtime.quota_capacity(config, [], 5.0, {"eng": 1})
-    assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
+    assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": False, "demand": {"eng": 1}}
     runtime.quota_capacity(config, [], 5.0, {"eng": 0})
-    assert seen["refresh"] is True
-    runtime.quota_capacity(config, [], 5.0, {"eng": 0}, refresh=False)
     assert seen["refresh"] is False
+    runtime.quota_capacity(config, [], 5.0, {"eng": 0}, refresh=True)
+    assert seen["refresh"] is True
 
 
 def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):

@@ -1,6 +1,7 @@
 """Answers quota refresh requests queued from the ledger page, probed on the hive as they land."""
 
 import json
+import time
 from collections.abc import Callable
 
 from scripts.swarm import commands
@@ -10,6 +11,7 @@ COMMAND = "quota"
 WAKE = f"{PREFIX}:quota-refresh"
 WAIT_S = 30
 PAGE_TTL_S = 300
+PROBE_S = 60
 
 
 def request(store: RedisStore, slug: str) -> dict:
@@ -58,9 +60,28 @@ def answer_all(store: RedisStore, execute: Callable[[str, dict], str]) -> list[s
     return lines
 
 
-def run(store: RedisStore, execute: Callable[[str, dict], str], wait_s: float) -> None:
+def probe(environ: dict, now: float) -> list[str]:
+    """Probe every stale quota reading so the tick pass reads fresh caches, logging one line per probe."""
+    from scripts.swarm import capacity
+
+    line = f"quota probe read {len(capacity.probe(environ, now))} accounts"
+    print(line, flush=True)
+    return [line]
+
+
+def probe_due(prober: Callable[[], object], due: float, now: float) -> float:
+    """Run ``prober`` once ``due`` has passed and return when the next probe is due."""
+    if now < due:
+        return due
+    prober()
+    return now + PROBE_S
+
+
+def run(store: RedisStore, execute: Callable[[str, dict], str], wait_s: float, prober: Callable[[], object]) -> None:
     pubsub = store.redis.pubsub()
     pubsub.subscribe(WAKE)
+    due = 0.0
     while True:
+        due = probe_due(prober, due, time.monotonic())
         pubsub.get_message(timeout=wait_s)
         answer_all(store, execute)
