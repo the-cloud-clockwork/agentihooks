@@ -74,7 +74,7 @@ def test_tags_asks_origin_for_tag_refs_with_a_bounded_wait(monkeypatch):
     assert calls == [
         (
             ["git", "-C", "/repo", *release_wait.HTTPS, "ls-remote", "--tags", "--refs", "origin"],
-            {"capture_output": True, "text": True, "timeout": 30},
+            {"capture_output": True, "text": True, "timeout": 15},
         )
     ]
 
@@ -135,16 +135,16 @@ def test_a_working_lookup_reads_once(monkeypatch):
     assert len(calls) == 1
 
 
-def test_tags_is_empty_when_the_lookup_times_out_and_the_timeout_is_not_retried(monkeypatch):
-    calls = []
+def test_a_timed_out_lookup_is_retried_once_and_both_attempts_fit_the_old_thirty_seconds(monkeypatch):
+    waits = []
 
     def run(args, **kwargs):
-        calls.append(args)
+        waits.append(kwargs["timeout"])
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
     monkeypatch.setattr(release_wait.subprocess, "run", run)
     assert release_wait.tags("/repo") == []
-    assert len(calls) == 1
+    assert waits == [15, 15]
 
 
 @pytest.mark.parametrize(("error", "why"), [(OSError(), "OSError"), (OSError("no git"), "no git")])
