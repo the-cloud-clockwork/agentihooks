@@ -245,7 +245,9 @@ def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
         "inbox wake": frozenset({"page relay"}),
         "status publish": frozenset({"health findings"}),
     }
-    assert {step.needs for step in host.STEPS} == {frozenset()}
+    assert {step.name: step.needs for step in host.STEPS if step.needs} == {
+        "planning after phase": frozenset({"planning and phase pass"})
+    }
     assert CallStep("heartbeat", "g", host.held(lambda cli, get: None)).needs == frozenset()
 
 

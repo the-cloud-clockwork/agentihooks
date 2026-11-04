@@ -48,6 +48,8 @@ class SizeStep:
     needs: frozenset[str] = frozenset()
     reads: frozenset[Domain] = frozenset({TASKS})
     writes: frozenset[Domain] = frozenset({TASKS})
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
 
     def run(self, ctx: Context) -> Result:
         found = ctx.view.read(TASKS, "t1")
@@ -122,15 +124,24 @@ def test_a_write_defaults_to_no_expected_revision() -> None:
 
 
 class Ledger:
-    def __init__(self, refuse: bool = False) -> None:
+    def __init__(self, refuse: bool = False, held: dict[str, dict[str, object]] | None = None) -> None:
         self.refuse = refuse
+        self.held = held if held is not None else {}
         self.updates: list[tuple[str, str, object]] = []
+        self.guards: list[dict[str, object] | None] = []
 
-    def update_task(self, slug: str, task_id: str, fields: object) -> dict[str, object]:
+    def update_task(
+        self, slug: str, task_id: str, fields: dict[str, object], if_match: dict[str, object] | None = None
+    ) -> dict[str, object]:
         if self.refuse:
             raise LedgerRefused("refused")
+        self.guards.append(if_match)
+        task = self.held.setdefault(task_id, {"id": task_id})
+        if any(task.get(key, "") != value for key, value in (if_match or {}).items()):
+            return dict(task)
+        task.update(fields)
         self.updates.append((slug, task_id, fields))
-        return {}
+        return dict(task)
 
 
 def test_the_tasks_applier_writes_while_the_expected_fields_hold() -> None:
@@ -219,12 +230,16 @@ def test_a_write_step_keeps_every_attribute_of_its_call_step() -> None:
 
 
 class GroupLedger:
-    def __init__(self, refuse: bool = False) -> None:
+    def __init__(self, refuse: bool = False, members: dict[str, list[str]] | None = None) -> None:
         self.refuse = refuse
+        self.members = members if members is not None else {}
         self.ungrouped: list[tuple[str, str]] = []
+        self.guards: list[dict[str, list[str]] | None] = []
 
-    def ungroup_tasks(self, slug: str, lead: str) -> None:
-        if self.refuse:
+    def ungroup_tasks(self, slug: str, lead: str, if_match: dict[str, list[str]] | None = None) -> None:
+        self.guards.append(if_match)
+        held = self.members.get(lead)
+        if self.refuse or (if_match is not None and held is not None and held != if_match["group_members"]):
             raise LedgerRefused("refused")
         self.ungrouped.append((slug, lead))
 
@@ -296,6 +311,85 @@ def test_the_groups_applier_reads_no_expected_members_as_none() -> None:
     apply(Write(tasks.GROUPS, "l1", []))
 
     assert ledger.ungrouped == [("sw", "l1")]
+
+
+def test_the_tasks_applier_compares_and_sets_its_expected_fields_on_the_server() -> None:
+    ledger = Ledger()
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
+
+    apply(Write(TASKS, "t1", {"difficulty": "M"}, expected={"difficulty": ""}))
+
+    assert ledger.guards == [{"difficulty": ""}]
+    assert ledger.held["t1"]["difficulty"] == "M"
+
+
+def test_the_tasks_applier_sends_no_guard_for_a_write_without_expected_fields() -> None:
+    ledger = Ledger()
+    apply = tasks.task_writer("sw", ledger, {}.get)
+
+    apply(Write(TASKS, "t1", {"difficulty": "M"}))
+
+    assert ledger.guards == [None]
+
+
+def test_the_tasks_applier_drops_a_size_a_concurrent_write_set_after_the_step_read() -> None:
+    ledger = Ledger(held={"t1": {"id": "t1", "difficulty": "L"}})
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
+
+    with pytest.raises(RevisionConflict) as refused:
+        apply(Write(TASKS, "t1", {"difficulty": "M", "difficulty_source": "rule"}, expected={"difficulty": ""}))
+    assert str(refused.value) == "task t1 changed difficulty on the ledger before the write"
+    assert ledger.held["t1"] == {"id": "t1", "difficulty": "L"}
+    assert ledger.updates == []
+
+
+def test_the_tasks_applier_names_every_field_a_concurrent_write_set_after_the_step_read() -> None:
+    ledger = Ledger(held={"t1": {"id": "t1", "difficulty": "L", "size": "XL"}})
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
+
+    with pytest.raises(RevisionConflict) as refused:
+        apply(Write(TASKS, "t1", {"size": "S", "difficulty": "M"}, expected={"size": "", "difficulty": ""}))
+    assert str(refused.value) == "task t1 changed difficulty, size on the ledger before the write"
+    assert ledger.updates == []
+
+
+def test_the_tasks_applier_reads_a_field_the_ledger_left_out_as_empty() -> None:
+    ledger = SimpleNamespace(update_task=lambda *args, **kwargs: {})
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
+
+    apply(Write(TASKS, "t1", {"difficulty": ""}, expected={"difficulty": ""}))
+
+
+def test_the_groups_applier_compares_and_sets_the_members_on_the_server() -> None:
+    ledger = GroupLedger(members={"l1": ["m1", "m2"]})
+    apply = tasks.group_writer("sw", ledger, {"l1": {"id": "l1", "group_members": ["m1", "m2"]}}.get)
+
+    apply(Write(tasks.GROUPS, "l1", ["m1"], expected={"group_members": ["m1", "m2"]}))
+
+    assert ledger.guards == [{"group_members": ["m1", "m2"]}]
+    assert ledger.ungrouped == [("sw", "l1")]
+
+
+def test_the_groups_applier_drops_a_release_a_concurrent_regroup_beat_on_the_server() -> None:
+    ledger = GroupLedger(members={"l1": ["m1", "m3"]})
+    apply = tasks.group_writer("sw", ledger, {"l1": {"id": "l1", "group_members": ["m1", "m2"]}}.get)
+
+    with pytest.raises(RevisionConflict) as refused:
+        apply(Write(tasks.GROUPS, "l1", ["m1"], expected={"group_members": ["m1", "m2"]}))
+    assert str(refused.value) == "the ledger refused the release of the group under task l1"
+    assert ledger.ungrouped == []
+
+
+def test_the_groups_applier_guards_a_release_without_expected_members_on_no_members() -> None:
+    ledger = GroupLedger(members={"l1": ["m1"]})
+    apply = tasks.group_writer("sw", ledger, {}.get)
+
+    with pytest.raises(RevisionConflict) as refused:
+        apply(Write(tasks.GROUPS, "l1", []))
+    assert str(refused.value) == "the ledger refused the release of the group under task l1"
+
+    assert ledger.guards == [{"group_members": []}]
+    assert ledger.ungrouped == []
 
 
 def test_the_grouping_release_returns_a_write_for_every_stopped_lead() -> None:

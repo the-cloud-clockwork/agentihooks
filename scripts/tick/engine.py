@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextvars import Context as ContextCopy
@@ -93,7 +94,8 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
         earlier = _RUNNING.get(key)
         if earlier is not None and earlier.is_alive():
             return StepRecord(step.name, 0.0, step.budget_s, held=True)
-        worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline)), daemon=True)
+        tools = None if ctx.tools is None else ctx.tools.for_effects(step.effects)
+        worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline, tools)), daemon=True)
         _RUNNING[key] = worker
         worker.start()
     worker.join(step.budget_s)
@@ -101,8 +103,17 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
 
 
 def _left(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
-    """Record a step still running at its budget as abandoned, keeping its wall time."""
+    """Record a step still running at its budget as abandoned, keeping its wall time, and journal its lost writes."""
+    _abandoned(step)
     return StepRecord(step.name, wall_s, step.budget_s, abandoned=True)
+
+
+def _abandoned(step: Step) -> None:
+    """Journal one ``swarm_tick_step_abandoned`` line for ``step`` when it declares writes beyond its own actions."""
+    writes = sorted(step.writes - {Domain(f"actions:{step.name}")})
+    if writes:
+        line = {"event": "swarm_tick_step_abandoned", "slug": timing.SWARM.get(), "step": step.name}
+        print(json.dumps({**line, "budget_s": step.budget_s, "writes": writes}), file=sys.stderr, flush=True)
 
 
 def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
@@ -224,7 +235,7 @@ def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
     """Return ``ctx`` with its deadline capped by the deadline of the step's lane."""
     lane = found.lane(step.lane)
     clock = ctx.deadline.clock
-    return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock))
+    return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock), ctx.tools)
 
 
 def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) -> StepRecord:
@@ -281,6 +292,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                 if lane.expired:
                     running.pop(future)
                     dropped.add(step.name)
+                    _abandoned(step)
                     left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
                     records[step.name] = _ended(found, left)
     finally:
