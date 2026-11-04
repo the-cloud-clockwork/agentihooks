@@ -66,16 +66,9 @@ def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
 
 
 def refresh(
-    slug: str,
-    config: SwarmConfig,
-    store: RedisStore,
-    ledger: Ledger,
-    runtime: Runtime,
-    now_ms: int,
-    doc: dict[str, Any] | None = None,
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, runtime: Runtime, now_ms: int
 ) -> list[str]:
-    """Scale the swarm's caps from the pass document, warn agents on quota and send the capacity notices."""
     from scripts.swarm import quota_handoff
 
-    actions = capacity.apply(slug, config, store, ledger, runtime, now_ms, doc)
+    actions = capacity.apply(slug, config, store, ledger, runtime, now_ms)
     return actions + quota_handoff.warn(slug, store, dict(os.environ)) + apply(slug, store, capacity.read(store, slug))

@@ -1145,26 +1145,6 @@ def test_capacity_evidence_has_the_swarm_task_actor_and_stable_time():
     assert capacity.status_line({}) == "quota capacity has not been observed"
 
 
-def test_capacity_scales_from_the_pass_document_without_a_ledger_read():
-    store = _store()
-    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
-    store.create(config)
-    ledger = FakeLedger([{"id": "e"}])
-    doc = ledger.state("sw")
-    ledger.state = lambda slug: pytest.fail("capacity read the ledger again")
-    ledger.comment = lambda *args, **kwargs: None
-    runtime = FakeRuntime()
-    demands = []
-
-    def quota(cfg, agents, now, demand, requirements):
-        demands.append(demand)
-        return capacity.calculate(cfg, [account()], agents, demand)
-
-    runtime.quota_capacity = quota
-    capacity.apply("sw", config, store, ledger, runtime, 1000, doc)
-    assert demands == [{"eng": 1, "ci": 0, "plan": 0}]
-
-
 def test_capacity_can_comment_after_every_task_has_closed():
     store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)

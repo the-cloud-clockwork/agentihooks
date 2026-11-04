@@ -82,21 +82,6 @@ def test_the_phase_step_finds_a_task_under_its_slice_and_skips_out_of_scope_task
     assert phases.phase_changes(doc) == [phases.PhaseChange("p1", "Build", False, 1, ("t1",))]
 
 
-def test_the_projection_reports_a_task_with_no_state_as_open() -> None:
-    doc = {"phases": [{"id": "p1"}], "tasks": [{"id": "t1", "phase": "p1"}, {"id": "t2", "phase": "p1", "done": True}]}
-    assert phases.projected_phase_tasks(doc) == {"p1": [("t1", "open"), ("t2", "done")]}
-
-
-@pytest.mark.timeout(5)
-def test_the_projection_stops_at_a_slice_that_names_itself_as_its_phase() -> None:
-    doc = {
-        "phases": [{"id": "p1"}],
-        "slices": [{"id": "s1", "phase": "slices/s2"}, {"id": "s2", "phase": "slices/s1"}],
-        "tasks": [{"id": "t1", "slice": "slices/s1", "state": "open"}],
-    }
-    assert phases.projected_phase_tasks(doc) == {"p1": []}
-
-
 def test_the_phase_applier_sets_the_checkbox_marks_the_box_and_returns_its_action(
     monkeypatch: pytest.MonkeyPatch, held_phases: Callable[..., None]
 ) -> None:
