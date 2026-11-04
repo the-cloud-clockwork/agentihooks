@@ -80,15 +80,18 @@ def test_tags_asks_origin_for_tag_refs_with_a_bounded_wait(monkeypatch):
 
 
 @pytest.mark.parametrize("remote", ["git@github.com:owner/project.git", "ssh://git@github.com/owner/project.git"])
-def test_the_lookup_reads_a_github_ssh_origin_over_https(origin, remote):
+def test_the_lookup_reads_a_github_ssh_origin_over_https(origin, remote, monkeypatch):
     git("remote", "set-url", "origin", remote, cwd=origin)
-    shown = subprocess.run(
-        ["git", "-C", str(origin), *release_wait.HTTPS, "remote", "get-url", "origin"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert shown.stdout.strip() == "https://github.com/owner/project.git"
+    real, urls = subprocess.run, []
+
+    def run(args, **kwargs):
+        at = args.index("ls-remote")
+        urls.append(real([*args[:at], "ls-remote", "--get-url", "origin"], **kwargs).stdout.strip())
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(release_wait.subprocess, "run", run)
+    assert release_wait.lookup(str(origin)) == ([], "")
+    assert urls == ["https://github.com/owner/project.git"]
 
 
 def test_one_failed_lookup_is_retried_before_it_counts(monkeypatch):

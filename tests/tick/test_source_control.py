@@ -701,6 +701,29 @@ def test_github_tags_read_the_git_remote(tmp_path: Path) -> None:
     assert seen == [(command, {"cwd": tmp_path, "timeout": 9, **OPTIONS})]
 
 
+def test_github_tags_read_a_github_ssh_origin_over_https(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "remote", "add", "origin", "git@github.com:owner/project.git"],
+        check=True,
+        capture_output=True,
+    )
+    urls: list[str] = []
+
+    def git(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        at = command.index("ls-remote")
+        shown = subprocess.run(
+            [*command[:at], "ls-remote", "--get-url", "origin"], cwd=tmp_path, capture_output=True, text=True
+        )
+        urls.append(shown.stdout.strip())
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=git)
+
+    assert provider.tags(deadline=_deadline()) == ()
+    assert urls == ["https://github.com/owner/project.git"]
+
+
 def test_github_defaults() -> None:
     provider = github.GitHubSourceControl("owner/project", Path("."), "main")
 
