@@ -11,7 +11,7 @@ from scripts.swarm import affinity, launch_check, master_retire, naming
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import pass_state
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, AgentRecord
 
 STALLED = "stalled"
 RESUMED = "the master resumed work"
@@ -45,7 +45,7 @@ Re-read the ledger and the master inbox, then continue as master.
 class Stall:
     """A master stall decision: the master, forget, stop or retire, its quiet minutes, held reason and live pane."""
 
-    master: Any
+    master: AgentRecord
     action: str
     minutes: int
     held_for: str
