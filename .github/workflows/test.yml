@@ -2773,14 +2773,16 @@ jobs:
             exit 1
           fi
 
-      # dev's copy grades against the base's allowlist; until dev carries the grader, the head's copy grades.
       - name: Hold the tick step pattern
         if: ${{ !cancelled() }}
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/tick_pattern.py" ]]; then
             cd "$RUNNER_TEMP/grader"
+            python -m scripts.tick_pattern --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+          else
+            echo "::error::dev carries no scripts/tick_pattern.py, so nothing trusted can grade."
+            exit 1
           fi
-          python -m scripts.tick_pattern --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       - name: Reject new Python comments and preserve comment free files
         if: ${{ !cancelled() }}
