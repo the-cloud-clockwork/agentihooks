@@ -116,6 +116,36 @@ def test_the_running_filter_keeps_the_lane_agents_that_still_own_their_task() ->
     assert tick_module._running(agents, rows, "ci") == [rows["t4"]]
 
 
+def test_spawn_order_times_the_running_filter_and_focus_placement_once_per_lane_inside_it(
+    store, capsys, monkeypatch
+) -> None:
+    ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
+    monkeypatch.setattr(capacity, "caps", lambda decision, config: {"eng": 1, "ci": 1})
+    with timing.tick("sw"):
+        timing.timed(
+            tick_module._spawn_order,
+            "sw",
+            store.config("sw"),
+            store,
+            [],
+            ledger.rows,
+            ledger.state("sw"),
+            FakeRuntime(),
+        )
+    rows = finished(capsys)
+    (order,) = [row for row in rows if row["step"] == timing.named(tick_module._spawn_order)]
+    parts = [timing.named(tick_module._running), timing.named(focus_budget.place)]
+    inside = [
+        row["step"]
+        for row in rows
+        if row["step"] in parts
+        and row["started"] >= order["started"]
+        and row["started"] + row["wall_s"] <= order["started"] + order["wall_s"]
+    ]
+    assert sorted(inside) == sorted(parts * 2)
+    assert [row["step"] for row in rows if row["step"] in parts] == inside
+
+
 def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
     from scripts.hub.reconciler import legacy_agents
 
