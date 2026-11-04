@@ -63,12 +63,20 @@ class MasterPool:
         """An item for an empty backend master seat is sent to the front door seat instead, so the pool hands it to a
         live master; every other address is kept."""
         seat, _, slug = address.partition("@")
-        if not (is_seat(address) and seat.startswith(f"{MASTER}-")):
-            return requested, address
-        if address in masters.occupied(self.redis, slug, RedisStore(self.redis).agents(slug)):
+        if not (is_seat(address) and seat.startswith(f"{MASTER}-")) or not self.empty(slug, address):
             return requested, address
         door = seat_address(slug, MASTER)
         return door, door
+
+    def empty(self, slug: str, address: str) -> bool:
+        """No master is in the seat: its registry occupant has finished, retired or left it, or it has none and no
+        live master record names the seat."""
+        agents = RedisStore(self.redis).agents(slug)
+        gone = {agent.name for agent in agents if agent.state in masters.GONE}
+        occupant = self.inbox.seats.occupant(address).occupant
+        if occupant:
+            return occupant in gone or self.inbox.seats.left(occupant, address)
+        return not any(a.lane == MASTER and a.seat == address and a.name not in gone for a in agents)
 
     def stage_add(self, pipe, item) -> None:
         """pipe is in MULTI; the score is the item's place in its front door's arrival order."""
