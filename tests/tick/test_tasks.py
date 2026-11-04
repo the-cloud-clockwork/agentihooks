@@ -83,7 +83,7 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
         "grouping release",
         "dispatcher group",
     ]
-    assert [step.name for step in engine.group_steps(tasks.CLOSE)][-2:] == ["settle", "close space"]
+    assert [step.name for step in engine.group_steps(tasks.CLOSE) if step in tasks.STEPS] == ["settle", "close space"]
     assert [step.group for step in tasks.STEPS] == (
         [tasks.DRAINED] * 2 + [tasks.REOPENS] * 5 + [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
     )
