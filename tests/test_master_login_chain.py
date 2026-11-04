@@ -591,6 +591,22 @@ def test_browser_request_without_a_task_keeps_a_stable_item_identity(tmp_path, m
     assert inbox.send.call_args.kwargs == {"task": "", "item_id": "request"}
 
 
+def test_browser_request_waits_while_native_login_has_printed_no_link(tmp_path, monkeypatch):
+    from scripts.inbox import store
+
+    output = tmp_path / "auth.log"
+    output.write_text("Opening browser to sign in\n")
+    target = tmp_path / "slot" / "claude"
+    target.mkdir(parents=True)
+    env = {"AGENTIHOOKS_SWARM": "proof", "AGENTIHOOKS_AGENT_NAME": "engineer@proof"}
+    inbox = SimpleNamespace(send=Mock(), close=Mock())
+    monkeypatch.setattr(store, "new_item_id", lambda: pytest.fail("no link must not mint a request"))
+    assert chain._request(inbox, env, target, output) is None
+    inbox.send.assert_not_called()
+    inbox.close.assert_not_called()
+    assert not (target.parent / "login-notifications.jsonl").exists()
+
+
 def test_a_transient_send_failure_cancels_the_request_immediately(tmp_path, monkeypatch):
     from redis.exceptions import RedisError
 

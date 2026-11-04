@@ -1,9 +1,12 @@
 import copy
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm import cli
 from scripts.swarm.store import AgentRecord
+from scripts.tick.step import Write
+from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 
@@ -26,8 +29,10 @@ def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, mon
     else:
         ledger.rows["t1"]["depends_on"] = ["t2"]
         ledger.rows["t2"].update(state="blocked")
-    for task_id, fields in difficulty.sizes(ledger.state("sw")):
-        ledger.update_task("sw", task_id, fields)
+    apply = task_steps.task_writer("sw", ledger, ledger.rows.get)
+    for item in task_steps.size_writes(SimpleNamespace(difficulty=difficulty), ledger.state("sw")):
+        if isinstance(item, Write):
+            apply(item)
     before = copy.deepcopy(ledger.rows)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")

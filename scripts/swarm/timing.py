@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from scripts.swarm import tick_stop
+from scripts.tick import metrics as tick_metrics
 
 HISTORY_LIMIT = 50000
 PASS: ContextVar[dict[str, Any] | None] = ContextVar("tick_pass", default=None)
@@ -95,6 +96,7 @@ def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     finally:
         try:
             record.update(end_ms=time.time_ns() // 1000000, wall_s=time.perf_counter() - started)
+            tick_metrics.pass_finished(slug, record)
             finish_pass(store, slug, record)
         finally:
             PASS.reset(token)
@@ -141,6 +143,7 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
     except BaseException as exc:
         outcome = "error"
         record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
+        record.update(getattr(exc, "step_fields", dict)())
         if report and (record_failure := ON_FAILURE.get()):
             record_failure(name, exc)
         raise
@@ -156,6 +159,7 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
             reaped_child_cpu_s=(child_end.ru_utime - child.ru_utime) + (child_end.ru_stime - child.ru_stime),
         )
         emit(sys.stderr, json.dumps(record))
+        tick_metrics.step_finished(slug, record)
         if outcome != "success" and (current := PASS.get()) is not None:
             current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:

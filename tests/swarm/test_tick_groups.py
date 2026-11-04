@@ -8,13 +8,13 @@ from typing import Any
 import pytest
 
 from scripts.inbox import wake
-from scripts.swarm import cli, command_runner, controller, snapshot_job
+from scripts.swarm import cli, command_runner, controller, reboot, snapshot_job
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import PASS, observe, report
+from scripts.tick.steps import PASS, Left, observe, report
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -189,6 +189,86 @@ def test_the_wrapper_steps_after_fencing_read_the_fenced_runtime(
         assert isinstance(sites[group].view.read(PASS, "runtime"), controller.FencedRuntime)
 
 
+def test_the_wrapper_runs_the_tick_with_the_fenced_pass_state_and_keeps_its_actions(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    calls: list[tuple[Any, ...]] = []
+
+    def ticked(*args: Any) -> list[str]:
+        calls.append(args)
+        return ["tick acted"]
+
+    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
+    monkeypatch.setattr(cli, "tick", ticked)
+    monkeypatch.setattr(reboot, "boot_pass", lambda *args: ["rebooted"])
+    found = cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert found[found.index("rebooted") :][:2] == ["rebooted", "tick acted"]
+    [(slug, held, used, runtime, now)] = calls
+    assert (slug, held, used, now) == ("sw", swarm, ledger, 9_000_000)
+    assert isinstance(runtime, controller.FencedRuntime)
+
+
+def test_a_failed_reboot_pass_raises_before_the_tick_runs(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    calls: list[tuple[Any, ...]] = []
+
+    def failed(*args: Any) -> list[str]:
+        raise RuntimeError("reboot failed")
+
+    monkeypatch.setattr(cli, "tick", lambda *args: calls.append(args) or [])
+    monkeypatch.setattr(reboot, "boot_pass", failed)
+    with pytest.raises(RuntimeError, match="^reboot failed$"):
+        cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert calls == []
+
+
+def test_a_failed_tick_raises_out_of_the_tick_wrapper(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+
+    def failed(*args: Any) -> list[str]:
+        raise RuntimeError("tick failed")
+
+    monkeypatch.setattr(cli, "tick", failed)
+    with pytest.raises(RuntimeError, match="^tick failed$"):
+        cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert "wrapper relay" not in [name for name, _ in seen]
+
+
+def test_a_tick_value_left_past_its_budget_drops_the_tick_actions_and_the_wrapper_goes_on(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+
+    def left(*args: Any) -> list[str]:
+        raise Left("config")
+
+    monkeypatch.setattr(cli, "tick", left)
+    assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == []
+    assert [name for name, _ in seen][-6:] == [
+        "wrapper relay",
+        "wrapper view",
+        "wrapper events",
+        "wrapper metrics",
+        "after",
+        "wrapper status",
+    ]
+
+
 def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
@@ -206,7 +286,7 @@ def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
     assert [name for name, _ in seen][-2:] == ["wrapper commands", "wrapper status"]
 
 
-def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
+def test_a_wrapper_value_left_past_its_budget_ends_the_tick_naming_the_value_and_the_step(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -226,10 +306,13 @@ def test_a_wrapper_value_left_past_its_budget_ends_the_tick_with_no_actions(
 
     monkeypatch.setattr(snapshot_job, "start", start)
     try:
-        assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == []
+        assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == [
+            "pass ended early: no step stored started, the pass left snapshot job"
+        ]
+        assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
     finally:
         release.set()
-        running = engine._RUNNING.get("snapshot job")
+        running = engine._RUNNING.get(("sw", "snapshot job"))
         if running is not None:
             running.join(30.0)
     assert called == [True]

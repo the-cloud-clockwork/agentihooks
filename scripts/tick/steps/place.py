@@ -5,7 +5,7 @@ from functools import partial
 from types import MappingProxyType
 from typing import Any
 
-from scripts.swarm import lost_runner, quota_notice, time_left
+from scripts.swarm import ack_pass, lost_runner, quota_notice, time_left
 from scripts.tick import registry
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets
 from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
@@ -40,7 +40,8 @@ def _time_left(tick: Any, get: Get) -> Any:
 
 def _collect_acks(tick: Any, get: Get) -> Any:
     keys = ("slug", "config", "store", "ledger", "runtime", "doc", "now_ms")
-    return tick.skip_refused(tick._collect_acks, *map(get, keys))
+    with ack_pass.collecting(get("store"), get("slug")) as taken:
+        return tick.skip_refused(tick._collect_acks, *map(get, keys)) if taken else []
 
 
 def _codex_hook_order(tick: Any, get: Get) -> Any:

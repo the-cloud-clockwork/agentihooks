@@ -50,7 +50,7 @@ def release() -> Iterator[Event]:
     event = Event()
     yield event
     event.set()
-    running = engine._RUNNING.get("health findings")
+    running = engine._RUNNING.get((None, "health findings"))
     if running is not None:
         running.join(30.0)
 

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult, YesNo
@@ -7,6 +9,8 @@ from scripts.swarm import grouping
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable, tick
+from scripts.tick.step import Write
+from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 PAGE = "scripts/swarm_ledger/static/js/render.js"
@@ -404,16 +408,20 @@ def test_a_group_applied_in_a_tick_spawns_only_its_lead_with_member_specs(asked,
 class ReleaseLedger(GroupLedger):
     def __init__(self, tasks):
         super().__init__(tasks)
-        self.ungrouped, self.stamps = [], {}
+        self.ungrouped, self.stamps, self.view = [], {}, {}
 
     def state(self, slug):
         found = super().state(slug)
         found["_meta"]["stamps"] = self.stamps
         return found
 
-    def ungroup_tasks(self, slug, lead):
+    def ungroup_tasks(self, slug: str, lead: str) -> None:
         assert slug == "sw"
         self.ungrouped.append(lead)
+        if lead in self.view:
+            for member in self.view[lead].pop("group_members"):
+                if self.view.get(member, {}).get("merged_into") == lead:
+                    del self.view[member]["merged_into"]
 
 
 ENGINEER = "engineer@abcdef-0001"
@@ -436,15 +444,16 @@ def release(store, found, claim=None, handoff=None):
     return ledger, released(store, ledger, found)
 
 
-def released(store, ledger, found):
-    known = {t["id"]: t for t in found["tasks"]}
+def released(store: RedisStore, ledger: ReleaseLedger, found: dict) -> list[str]:
+    """Apply the grouping release writes through the groups applier, the ledger releasing each group in ``found``."""
+    ledger.view = {t["id"]: t for t in found["tasks"]}
+    apply = task_steps.group_writer("sw", ledger, ledger.view.get)
     actions = []
-    for lead_id, why, members in grouping.releases("sw", store, found):
-        ledger.ungroup_tasks("sw", lead_id)
-        known[lead_id].pop("group_members")
-        for member in members:
-            del known[member]["merged_into"]
-        actions.append(grouping.released_action(lead_id, why, members))
+    for item in task_steps.release_writes(SimpleNamespace(grouping=grouping), "sw", store, found):
+        if isinstance(item, Write):
+            apply(item)
+        else:
+            actions.append(item)
     return actions
 
 
