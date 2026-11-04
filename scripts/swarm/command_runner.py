@@ -1,6 +1,8 @@
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
+from typing import Any
 
 from scripts.swarm import commands, lifecycle
 from scripts.swarm.status import status_report
@@ -48,8 +50,14 @@ def consume(store: RedisStore, slug: str) -> list[str]:
     return commands.consume(store, slug, commands.hive_id(), lambda row: execute(store, slug, row))
 
 
-def publish(store: RedisStore, slug: str, ledger: dict, view=None) -> None:
+def publish(
+    store: RedisStore,
+    slug: str,
+    ledger: dict[str, Any],
+    view: Callable[[str], Any] | None = None,
+    found: list[dict[str, Any]] | None = None,
+) -> None:
+    """Mirror the ledger workspace and publish the status report, reusing the pass's ``found`` health findings."""
     ledger_workspace.mirror(store, slug, ledger)
-    commands.publish(
-        store, slug, status_report(store, slug, ledger, None, view), ledger_workspace.published(store, slug, ledger)
-    )
+    report = status_report(store, slug, ledger, None, view, found)
+    commands.publish(store, slug, report, ledger_workspace.published(store, slug, ledger))
