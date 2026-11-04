@@ -2697,7 +2697,9 @@ def _planner_imports(path: Path) -> set[str]:
                     and node.level == 0
                     and node.module.split(".")[0] in ("scripts", "tests")
                 }
-            else:
+            elif not (
+                isinstance(child, ast.If) and isinstance(child.test, ast.Name) and child.test.id == "TYPE_CHECKING"
+            ):
                 pending.append(child)
     return found
 

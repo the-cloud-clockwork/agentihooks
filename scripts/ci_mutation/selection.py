@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import json
 import multiprocessing
@@ -35,12 +37,12 @@ GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 IMPORT_GROUPS = {"fakeredis"}
 
 
-def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple["Module", list["Mutation"]]:
+def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[Module, list[Mutation]]:
     wrapper, mutations, _ = created_mutations(filename, source)
     return wrapper.module, on_changed_lines(wrapper, mutations, changed)
 
 
-def on_changed_lines(wrapper: "MetadataWrapper", mutations: list["Mutation"], changed: set[int]) -> list["Mutation"]:
+def on_changed_lines(wrapper: MetadataWrapper, mutations: list[Mutation], changed: set[int]) -> list[Mutation]:
     """Keep the mutations whose changed source lines meet changed, reusing the positions wrapper resolved before."""
     from libcst.metadata import WhitespaceInclusivePositionProvider
 
@@ -61,7 +63,7 @@ def on_changed_lines(wrapper: "MetadataWrapper", mutations: list["Mutation"], ch
     return selected
 
 
-def created_mutations(filename: str, source: str) -> tuple["MetadataWrapper", list["Mutation"], list["Mutation"]]:
+def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list[Mutation], list[Mutation]]:
     import libcst as cst
     from libcst.metadata import MetadataWrapper
     from mutmut.mutation.file_mutation import NEVER_MUTATE_FUNCTION_NAMES, MutationVisitor
