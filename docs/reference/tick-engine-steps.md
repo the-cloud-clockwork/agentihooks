@@ -134,6 +134,17 @@ report module stay critical. The command runner and quota notice run before
 spawn and stay critical, because a slow step in a group before spawn would hold
 spawn until the slow deadline.
 
+The `health findings` step stores the findings it computes in the pass box
+under `found`. The `status publish` step, in the `wrapper status` group, passes
+`box.get("found")` to `cli._publish_tick_status`, and `status.status_report`
+publishes those findings instead of calling `findings` again with the same
+inputs. When the box holds no `found`, for example because the handed off
+health step has not finished when the status publish runs, `status_report`
+finds them itself as before. The status publish declares no need on the health
+step, so it never waits for it. Over ten passes on 4 November 2026 after this
+reached the workstation's dev checkout, the status publish median fell from
+10.932 seconds to 9.244 seconds (p95 12.937 seconds).
+
 In a parallel pass `run_group` takes the slow lane steps of a group, and every
 step that needs one of them, out of the group. It runs the rest eagerly and
 returns their records at once; the handed off steps start afterwards on a
