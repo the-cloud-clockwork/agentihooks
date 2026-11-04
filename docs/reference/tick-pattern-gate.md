@@ -306,16 +306,17 @@ each offence kind for `CallStep`, `WriteStep` and `register`, positional and
 keyword; a new tick module `def`, a planted banned import and relative import
 resolution are red; adapters and the tick module may import adapted modules;
 a pull request cannot allowlist its own offence; kept and removed offences
-are green; a base without an allowlist is red; files outside the scope; the written
-JSON format; parse failures; a stale record for an untouched file is green
+are green; a base without an allowlist is red; files outside the scope; the
+written JSON format; parse failures; a stale record for an untouched file is green
 and a padded one red; a changed file keeping an offence its base held; and a
 budgets change grading the step files whose measurement it moves.
 
 The missing grader branch is workflow shell with no unit test. Pull request
-9726 proved both bootstrap removals red with planted steps on its own head in
+9726 proved both bootstrap removals red with two plant steps on a diffcheck
+branch cut from its head, which rerun the step body in the lint job of
 [run 41894163480](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41894163480):
 one removed the grader copy, the other removed the allowlist from the base
-tree.
+tree, and each printed its error above.
 
 ## Troubleshooting
 
