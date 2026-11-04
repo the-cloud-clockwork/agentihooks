@@ -708,6 +708,7 @@ def test_a_regrowth_leaves_an_ask_that_moved_elsewhere(swarm):
 def test_a_retired_seat_names_why_it_moved_and_withdrew_items_and_skips_closed_ones(swarm):
     store, _ = swarm
     inbox = InboxStore(store.redis)
+    store.seats.occupy(THIRD, f"{SLUG}-master-3", 1)
     done = inbox.send(f"{SLUG}-eng-1", THIRD, "already answered")
     inbox.withdraw(done.id, "swarm", "answered elsewhere")
     waiting = inbox.send(f"{SLUG}-eng-1", THIRD, "still open")
