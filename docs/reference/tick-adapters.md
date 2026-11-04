@@ -1046,8 +1046,8 @@ class WakeStep:
 registry.register(WakeStep())
 ```
 
-`CallStep` and `WriteStep` take the same two declarations as keywords after the positional name, group, call,
-`needs`, `reads` and `writes`:
+`CallStep` and `WriteStep` take the same two declarations as keywords after the positional name, group and call and
+their domain arguments:
 
 ```python
 from scripts.tick.steps import CallStep
@@ -1075,6 +1075,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context
 
 tools = fakes.fake_tools()
+step = WakeStep()
 record = engine.run_step(step, Context(view, Deadline.after(60.0), tools))
 assert (record.outcome, record.error) == (engine.OK, "")
 assert [call.operation for call in tools.inbox.calls] == ["send"]
