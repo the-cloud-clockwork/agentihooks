@@ -58,10 +58,10 @@ The number counts the Claude and Codex rows the probe built.
 ```bash
 systemctl --user status agentihooks-quota-prober.service
 journalctl --user -u agentihooks-quota-prober.service --since "5 min ago" | grep "quota probe read"
-agentihooks balance
+agentihooks quota
 ```
 
-A healthy service logs a `quota probe read` line about once a minute. The `AGE` column of `agentihooks balance`
+A healthy service logs a `quota probe read` line about once a minute. The `AGE` column of `agentihooks quota`
 shows how old each account's reading is.
 
 Restart the service after a Codex re-login or a token change, because it keeps the environment it started with:
@@ -99,9 +99,11 @@ The tick report's step actions and the pass log carry the line. Three minutes co
 
 | Test | Proves |
 | --- | --- |
-| `tests/swarm/test_capacity.py::test_a_pass_read_runs_no_claude_or_codex_quota_probe` | `accounts(refresh=False)` runs only the Codex login check; `accounts()` runs `claude -p`, the login check and `codex exec` |
+| `tests/swarm/test_capacity.py::test_a_pass_read_runs_only_the_local_codex_login_status_check` | `accounts(refresh=False)` runs only the Codex login check; `accounts()` runs `claude -p`, the login check and `codex exec` |
+| `tests/swarm/test_capacity.py::test_the_quota_notice_step_runs_no_claude_or_codex_quota_probe` | A whole quota notice step stores a capacity decision while running only the Codex login check |
 | `tests/swarm/test_capacity.py::test_the_pass_reader_defaults_to_cached_readings` | `HerdrRuntime.quota_capacity` defaults `refresh` to `False` |
 | `tests/swarm/test_capacity.py::test_the_prober_writes_the_claude_cache_the_pass_reads` | A probe writes the Claude cache and a later pass read reports that probe's `observed_at` |
+| `tests/swarm/test_capacity.py::test_a_probe_refreshes_claude_and_codex_at_the_given_time` | `capacity.probe` calls the Claude and Codex readers with `refresh=True` at the given time |
 | `tests/swarm/test_quota_refresh.py::test_the_prober_probes_once_a_minute_between_wakes` | `probe_due` probes at once, then sixty seconds after each probe |
 | `tests/swarm/test_quota_refresh.py::test_main_runs_the_quota_prober_without_a_slug_on_the_hive_command_runner` | `swarm prober` hands the loop a probe over this process's environment and wall clock |
 | `tests/swarm/test_quota_refresh.py::test_the_quota_notice_names_a_reading_over_three_minutes_old` | The stale line appears at 181 seconds, not at 180, and never without readings |
