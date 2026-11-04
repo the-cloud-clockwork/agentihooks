@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from hashlib import sha256
 from random import uniform
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from scripts.events import state
 from scripts.events.bus import StateConflict
@@ -69,6 +69,8 @@ RECORDS_SLUG = "records_slug"
 ARCHIVE = "archive"
 ARCHIVE_REF = "archive_ref"
 BY_NAME = "by-name"
+ARCHIVED_NAMES = "archived-names"
+INDEXED = ""
 MOVED = "moved_to"
 SECTIONS = tuple(name for name, value in EMPTY.items() if isinstance(value, dict))
 LOADED = (META, *(name for name in SECTIONS if name != ARCHIVE), BY_NAME)
@@ -213,7 +215,7 @@ def _section_changes(
 
 
 def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, dict[str, Record]]) -> list[RecordWrite]:
-    """Every record a change wrote, each expecting the revision it was read at, plus the derived name index."""
+    """Every record a change wrote, each expecting the revision it was read at, plus the derived name indexes."""
     writes: list[RecordWrite] = []
     for name in sorted((before.keys() | after.keys()) - {ARCHIVE_REF, RECORDS_SLUG}):
         if name in SECTIONS:
@@ -223,7 +225,12 @@ def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, di
         elif name not in before or before[name] != after[name]:
             writes.append(RecordWrite("put", META, name, _expected(loaded, META, name), after[name]))
     heads = (_heads(before.get("executions", {})), _heads(after.get("executions", {})))
-    return writes + _section_changes(BY_NAME, heads[0], heads[1], loaded)
+    archived = (_heads(before.get(ARCHIVE, {})), _heads(after.get(ARCHIVE, {})))
+    return (
+        writes
+        + _section_changes(BY_NAME, heads[0], heads[1], loaded)
+        + _section_changes(ARCHIVED_NAMES, archived[0], archived[1], loaded)
+    )
 
 
 class Reads(dict[str, Any]):
@@ -693,6 +700,26 @@ def records(store: Any, slug: str) -> Records:
     return _migrated(store, slug) or WholeDocumentRecords(store)
 
 
+def _index_archive(port: RedisRecords, slug: str) -> set[str]:
+    rows = port.sections(slug, (ARCHIVE,))[ARCHIVE]
+    heads = _heads({key: row.value for key, row in rows.items()})
+    writes = [RecordWrite("put", ARCHIVED_NAMES, name, BLIND, key) for name, key in heads.items()]
+    port.fenced_batch(slug, FencedBatch((*writes, RecordWrite("put", ARCHIVED_NAMES, INDEXED, BLIND))))
+    return set(heads)
+
+
+def archived_name(store: Any, slug: str, name: str) -> bool:
+    """Whether an archived execution carries the name: one index read once migrated, built once from the archive."""
+    port = _migrated(store, slug)
+    if port is None:
+        rows = WholeDocumentRecords(store).sections(slug, (ARCHIVE,))[ARCHIVE]
+        return any(cast(dict[str, Any], row.value)["name"] == name for row in rows.values())
+    found, indexed = port.redis.hmget(port.key(slug, ARCHIVED_NAMES), name, INDEXED)
+    if found is not None:
+        return True
+    return indexed is None and name in _index_archive(port, slug)
+
+
 def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) -> int:
     """Moves the fencing document onto per record keys once every live reader and writer has both layouts.
 
@@ -716,6 +743,7 @@ def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) ->
         doc = _decode(entry.value)
         hydrate_archive(store, doc)
         writes = _changes(EMPTY, doc, empty)
+        writes.append(RecordWrite("put", ARCHIVED_NAMES, INDEXED, 0))
         writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
         moved = _encode({**json.loads(entry.value), MOVED: RECORDS})
         return (lambda staged: states.queue_write(staged, slug, moved, current)), FencedBatch(tuple(writes))
