@@ -56,13 +56,11 @@ def test_the_closing_lane_starts_once_when_the_pass_closes_and_outlives_the_crit
 
 
 def test_the_closing_lane_is_unstarted_until_the_pass_closes() -> None:
-    lanes = (Deadline.after(1.0), Deadline.after(1.0))
-    executors = (pool.ThreadPoolExecutor(max_workers=1), pool.ThreadPoolExecutor(max_workers=1))
-    current = pool.Pass(pool.PARALLEL, 1, *lanes, pool.BoundedSemaphore(1), *executors)
-    assert current.closer == []
-    assert current.closing_s == pool.CLOSING_S == 30.0
-    current.close()
-    assert len(current.closer) == 1
+    with pool.running(workers=1, critical_s=1.0, slow_s=1.0) as current:
+        assert current.closer == []
+        assert current.closing_s == pool.CLOSING_S == 30.0
+        current.close()
+        assert len(current.closer) == 1
 
 
 def test_closing_steps_run_after_the_critical_lane_expired_while_critical_steps_drop() -> None:
