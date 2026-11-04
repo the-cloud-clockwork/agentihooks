@@ -11,7 +11,7 @@ import pytest
 
 from scripts.tick import registry
 from scripts.tick.step import Context, Domain, Result, Step
-from scripts.tick.steps import PassBox, masters
+from scripts.tick.steps import PassBox, masters, pass_domain
 from tests.swarm.tick_scenarios.test_characterisation import SCENARIOS, replay
 
 tick_module = import_module("scripts.swarm.tick")
@@ -22,10 +22,6 @@ KEYS = frozenset(
     {"config", "finished", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found", "started", "stop"}
 )
 WRITTEN = frozenset({"config", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found", "started"})
-
-
-def pass_of(key: str) -> Domain:
-    return Domain(f"pass:{key}")
 
 
 @dataclass(frozen=True)
@@ -66,8 +62,8 @@ class Recorder:
 
     def viewed(self, box: object, key: str, value: object) -> None:
         step = STEP.get()
-        if step is not None and key in KEYS and (writer := self.writer(key, value, box)) is not None:
-            self.reads.add(Seen(step, key, writer))
+        if step is not None and key in KEYS:
+            self.reads.add(Seen(step, key, self.writer(key, value, box)))
 
 
 def named(run: Callable[[Context], Result], name: str) -> Callable[[Context], Result]:
@@ -148,14 +144,14 @@ def violations(rec: Recorder) -> list[str]:
     out: list[str] = []
     for seen in sorted(rec.reads, key=lambda seen: (seen.step, seen.key, seen.writer or "")):
         step = by_name[seen.step]
-        if pass_of(seen.key) not in step.reads:
+        if pass_domain(seen.key) not in step.reads:
             out.append(f"{seen.step} reads pass {seen.key} without declaring it")
-        declared = {other.name for other in steps if pass_of(seen.key) in other.writes}
+        declared = {other.name for other in steps if pass_domain(seen.key) in other.writes}
         writers = {seen.writer} if seen.writer else declared
         if not writers & (before[seen.step] | {seen.step}):
             out.append(f"{seen.step} reads pass {seen.key} without needing its writer {sorted(writers)}")
     for name, key in sorted(rec.written):
-        if pass_of(key) not in by_name[name].writes:
+        if pass_domain(key) not in by_name[name].writes:
             out.append(f"{name} writes pass {key} without declaring it")
     return out
 
@@ -183,13 +179,13 @@ def test_every_pass_box_read_is_declared_with_a_need_on_its_writer(
 @pytest.mark.feature("swarm-tick-pass-edges")
 def test_a_planted_undeclared_read_is_named(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     verify = next(step for step in registry.steps() if step.name == "verify")
-    monkeypatch.setattr(verify, "reads", verify.reads - {pass_of("rows")})
+    monkeypatch.setattr(verify, "reads", verify.reads - {pass_domain("rows")})
     rec = replayed(monkeypatch, tmp_path, (("running", "tick"),))
     assert "verify reads pass rows without declaring it" in violations(rec)
 
 
 @pytest.mark.feature("swarm-tick-pass-edges")
-def test_a_planted_missing_need_is_named(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_a_planted_missing_need_is_named() -> None:
     rec = Recorder()
     rec.reads.add(Seen("bottleneck status", "found", "health findings"))
     assert violations(rec) == [

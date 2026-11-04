@@ -382,7 +382,7 @@ def _close_space(tick: Any, get: Get) -> Any:
     return tick.skip_refused(tick._close_space, get("slug"), get("config"), get("store"), get("runtime"))
 
 
-CONFIG_READERS = frozenset(
+DRAINED_RESUME_NEEDS = frozenset(
     {
         "stopped branch",
         "master move fail over",
@@ -408,7 +408,7 @@ STEPS = (
         "drained resume",
         DRAINED,
         held(_drained_resume),
-        CONFIG_READERS | {"sleeping"},
+        DRAINED_RESUME_NEEDS | {"sleeping"},
         pass_domains("config", "rows", "doc", "sleeping"),
         pass_domains("config"),
     ),
