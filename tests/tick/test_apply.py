@@ -341,6 +341,16 @@ def test_the_tasks_applier_drops_a_size_a_concurrent_write_set_after_the_step_re
     assert ledger.updates == []
 
 
+def test_the_tasks_applier_names_every_field_a_concurrent_write_set_after_the_step_read() -> None:
+    ledger = Ledger(held={"t1": {"id": "t1", "difficulty": "L", "size": "XL"}})
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
+
+    with pytest.raises(RevisionConflict) as refused:
+        apply(Write(TASKS, "t1", {"size": "S", "difficulty": "M"}, expected={"size": "", "difficulty": ""}))
+    assert str(refused.value) == "task t1 changed difficulty, size on the ledger before the write"
+    assert ledger.updates == []
+
+
 def test_the_tasks_applier_reads_a_field_the_ledger_left_out_as_empty() -> None:
     ledger = SimpleNamespace(update_task=lambda *args, **kwargs: {})
     apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
