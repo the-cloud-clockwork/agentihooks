@@ -174,6 +174,9 @@ its measured p95 in `budgets.MEASURED` through a pull request. Nothing reads
 the line back; it is evidence for an operator or an agent, not an input to
 the next pass.
 
+The tick report counts these runs per step in its Late share, Abandoned, Held and Dropped columns; see
+[Outcome columns](tick-report.md#outcome-columns).
+
 ### Lanes
 
 A parallel pass gives each lane its own deadline: 110 seconds for the critical
