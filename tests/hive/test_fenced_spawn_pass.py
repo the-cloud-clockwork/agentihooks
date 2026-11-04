@@ -65,6 +65,21 @@ def test_concurrent_launches_in_one_pass_scan_processes_and_read_the_host_once(
     assert (pending, isinstance(now, int), keywords) == (0, True, {"previous": {"saved": "workstation"}})
 
 
+def test_concurrent_launches_in_one_pass_stop_at_the_local_cap(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fenced, scans, _ = local(setup, monkeypatch)
+    setup.store.update(setup.config.slug, local_max_agents=LAUNCHES - 2)
+    fenced.begin_placement_pass()
+    refusals = refuse_together(fenced, 0)
+    fenced.end_placement_pass()
+    admitted = [index for index, refused in refusals.items() if not refused]
+    full = [refused for refused in refusals.values() if "local machine runs 3 of its 3 agents" in refused]
+    assert (len(admitted), len(full)) == (LAUNCHES - 2, 2)
+    assert len(setup.store.redis.hgetall(local_slots.key("workstation"))) == LAUNCHES - 2
+    assert len(scans) == 1
+
+
 def test_the_next_pass_scans_again_and_a_launch_outside_a_pass_scans_each_time(
     setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
