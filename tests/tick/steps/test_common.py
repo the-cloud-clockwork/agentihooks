@@ -211,3 +211,91 @@ def test_skip_dropped_retries_once_then_skips(capsys: pytest.CaptureFixture[str]
     name = f"{__name__}.{dead.__qualname__}"
     assert common.skip_dropped(dead) == [f"skipped {name}: its Redis connection dropped or timed out twice"]
     assert f"{name} skipped, its Redis connection dropped or timed out twice: down" in capsys.readouterr().err
+
+
+class _DropStore:
+    """Claim store fake that records every call the drop helper makes."""
+
+    def __init__(self, claims: int) -> None:
+        self.redis = "redis"
+        self.held_claims = claims
+        self.calls: list[tuple[object, ...]] = []
+
+    def claims(self, slug: str, task: str) -> int:
+        self.calls.append(("claims", slug, task))
+        return self.held_claims
+
+    def claim_generation(self, slug: str, task: str) -> int:
+        self.calls.append(("claim_generation", slug, task))
+        return 5
+
+    def refund_held_claim(self, slug: str, task: str, name: str, generation: int) -> None:
+        self.calls.append(("refund", slug, task, name, generation))
+
+    def release(self, slug: str, task: str, name: str) -> None:
+        self.calls.append(("release", slug, task, name))
+
+    def drop_agent(self, slug: str, name: str) -> None:
+        self.calls.append(("drop_agent", slug, name))
+
+
+class _DropLedger(_Ledger):
+    """Ledger fake that also answers the live task read with a fixed row."""
+
+    def __init__(self, live: dict[str, object], row: dict[str, object]) -> None:
+        super().__init__(live)
+        self.row = row
+
+    def task(self, slug: str, task_id: str) -> dict[str, object]:
+        self.calls.append(("task", slug, task_id))
+        return self.row
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+@pytest.mark.parametrize(
+    ("row", "refund", "claims", "live_row", "refunded", "reopened"),
+    [
+        ({"state": "claimed", "claimed_by": "a", "claim_generation": 2}, True, 1, None, True, True),
+        ({"state": "claimed", "claimed_by": "a", "claim_generation": 2}, False, 1, None, False, True),
+        ({"state": "claimed", "claimed_by": "a", "claim_generation": 2}, True, 0, None, False, True),
+        ({"state": "claimed", "claimed_by": "a", "claim_generation": 2}, True, 1, {"state": "open"}, False, True),
+        ({"state": "claimed", "claimed_by": "a"}, True, 1, None, True, True),
+        ({"state": "claimed", "claimed_by": "b", "claim_generation": 2}, True, 1, None, False, False),
+        ({"state": "open", "claimed_by": "a", "claim_generation": 2}, True, 1, None, False, False),
+        ({"state": "pr", "claimed_by": "a", "awaiting": "merge", "claim_generation": 2}, True, 1, None, False, False),
+    ],
+)
+def test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task(
+    monkeypatch: pytest.MonkeyPatch,
+    row: dict[str, object],
+    refund: bool,
+    claims: int,
+    live_row: dict[str, object] | None,
+    refunded: bool,
+    reopened: bool,
+) -> None:
+    settled: list[tuple[object, ...]] = []
+    monkeypatch.setattr(tick, "InboxStore", lambda redis: ("inbox", redis))
+    monkeypatch.setattr(tick.exits, "settle", lambda *args: settled.append(args))
+    monkeypatch.setattr(tick, "awaiting_merge", lambda task: task.get("awaiting") == "merge")
+    store = _DropStore(claims)
+    expected = {"claimed_by": "a", "claim_generation": row.get("claim_generation", 0)}
+    ledger = _DropLedger({"state": "open", "claimed_by": ""}, live_row or {**row, **expected})
+    agent = SimpleNamespace(name="a", task="t1", seat="eng-1@slug")
+    rows: dict[str, dict[str, object]] = {"t1": dict(row)}
+    options = {"refund": True} if refund else {}
+    assert common._drop("slug", store, ledger, rows, agent, **options) == (", task t1 reopened" if reopened else "")
+    held = row["state"] in tick.ACTIVE and row["claimed_by"] == "a" and row.get("awaiting") != "merge"
+    calls: list[tuple[object, ...]] = [("claims", "slug", "t1")] if refund and held else []
+    calls.append(("claim_generation", "slug", "t1"))
+    if refunded:
+        calls.append(("refund", "slug", "t1", "a", 5))
+    calls += [("release", "slug", "t1", "a"), ("drop_agent", "slug", "a")]
+    assert store.calls == calls
+    ledger_calls: list[tuple[object, ...]] = [("task", "slug", "t1")] if refund and held and claims > 0 else []
+    if held:
+        ledger_calls.append(
+            ("slug", "t1", {"state": "open", "claimed_by": ""}, {"if_state": tick.ACTIVE, "if_match": expected})
+        )
+    assert ledger.calls == ledger_calls
+    assert settled == [(("inbox", "redis"), "a", "eng-1@slug" if reopened else "", "stopped")]
