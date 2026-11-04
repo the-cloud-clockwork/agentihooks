@@ -4346,7 +4346,7 @@ One tick pass reconciles one swarm with its agents, panes, ledger and hives. The
 groups, and every piece of work inside a group is a registered step. The step names, the group each belongs to and
 the place each group runs in the pass are listed in
 [Tick engine steps](../reference/tick-engine-steps.md#groups-and-their-sites); this section covers how the engine runs
-them, the two lanes, the declared budgets and intervals, the records a pass leaves, the ports steps reach outside
+them, the three lanes, the declared budgets and intervals, the records a pass leaves, the ports steps reach outside
 systems through, and the cadence the passes run at.
 
 In the observe group the execution reconcile step ends any orphan execution still holding a seat (see
@@ -5115,14 +5115,15 @@ green runs, [39380496940](https://github.com/the-cloud-clockwork/agentihooks/act
 
 ### Tick heartbeat and stale watcher
 
-Every tick pass that runs to its end, or ends early because no step stored a value a later step needed, writes
-the swarm's heartbeat and last tick to Redis from the closing group of its `finally`: when the pass ended, and when
+Every tick pass that runs to its end, or ends early because no step stored a value a later step needed, writes the
+swarm's heartbeat and last tick to Redis from the closing group of its `finally`: when the pass ended, and when
 each input it decided on was last observed. Only a full pass clears the early end streak; a pass that raised or
-returned before its end writes neither (see [The closing lane](../reference/tick-engine-steps.md#the-closing-lane)). The host room counts from its last capacity decision, the quota from the
-freshest account observation, and the ledger revision from the pass that last saw it change. The ledger probe
-writes the ledger every pass, so a revision that holds still is a write that never lands; a ledger the tick cannot
-read ends the pass early, which shows as no completed pass. An input never observed is recorded as unknown and
-never judged.
+returned before its end writes neither (see
+[The closing lane](../reference/tick-engine-steps.md#the-closing-lane)). The host room counts from its last
+capacity decision, the quota from the freshest account observation, and the ledger revision from the pass that last
+saw it change. The ledger probe writes the ledger every pass, so a revision that holds still is a write that never
+lands; a ledger the tick cannot read ends the pass early, which shows as no completed pass. An input never observed
+is recorded as unknown and never judged.
 
 The tick is stale when no pass has completed for 10 minutes, or when an input it decided on was 10 minutes old at
 its last pass. The tick never judges itself: `agentihooks swarm tick-watch`, a process apart from the tick that

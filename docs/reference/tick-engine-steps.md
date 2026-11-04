@@ -197,8 +197,8 @@ These steps declare the slow lane:
 
 Last tick, heartbeat and status publish declare the closing lane. The other
 report steps (stall watch, overrun pass, quiet pass, inbox wake, snapshot job)
-and every other step stay critical. The command runner and the quota notice run before spawn and stay
-critical. The quota notice step reads cached quota and runs no Claude or Codex
+and every other step stay critical. The command runner and the quota notice
+run before spawn and stay critical. The quota notice step reads cached quota and runs no Claude or Codex
 quota probe; the quota prober service writes those caches once a minute
 ([Quota prober](quota-prober.md)).
 
