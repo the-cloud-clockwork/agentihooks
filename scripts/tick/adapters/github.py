@@ -79,13 +79,6 @@ def command(args: list[str]) -> list[str]:
     return ["gh", *args]
 
 
-def _live(deadline: Deadline) -> float:
-    """Return the seconds left on the deadline, refusing an expired one before any external call."""
-    if deadline.expired:
-        raise TimeoutError("tool deadline expired")
-    return deadline.remaining
-
-
 def _status_check(row: dict[str, Any]) -> CheckState:
     """Read one commit status as a check, still running while the status is pending."""
     url = row["target_url"] or ""
@@ -136,7 +129,7 @@ class GitHubSourceControl:
 
     def _call(self, args: list[str], deadline: Deadline) -> str:
         """Run one audited gh api call inside the deadline and return its output."""
-        timeout = _live(deadline)
+        timeout = deadline.live()
         result = github_reads.rest(
             CALLER,
             ["api", *args],
@@ -180,6 +173,7 @@ class GitHubSourceControl:
 
     def change(self, reference: ChangeRef, *, deadline: Deadline) -> ChangeState:
         """Read the state of one change."""
+        deadline.live()
         body = self._api([f"repos/{reference.repository}/pulls/{reference.number}"], deadline)
         fork: dict[str, str] | None = body["head"]["repo"]
         return ChangeState(
@@ -197,6 +191,7 @@ class GitHubSourceControl:
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
         """Read the check runs and commit statuses on the change's current head."""
+        deadline.live()
         head = self.change(reference, deadline=deadline).head
         rows = self._pages(f"repos/{reference.repository}/commits/{head}/check-runs?", "check_runs", deadline)
         statuses = self._api([f"repos/{reference.repository}/commits/{head}/status"], deadline)["statuses"]
@@ -205,6 +200,7 @@ class GitHubSourceControl:
 
     def runs(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[Run, ...]:
         """Read the workflow runs on the change's current head."""
+        deadline.live()
         head = self.change(reference, deadline=deadline).head
         rows = self._pages(f"repos/{reference.repository}/actions/runs?head_sha={head}&", "workflow_runs", deadline)
         return tuple(
@@ -214,6 +210,7 @@ class GitHubSourceControl:
 
     def enqueue(self, reference: ChangeRef, *, deadline: Deadline) -> QueueEntry | Unsupported:
         """Queue the change at its current head, or answer Unsupported without a merge queue."""
+        deadline.live()
         owner, name = reference.repository.split("/")
         variables = {"owner": owner, "name": name, "number": reference.number, "base": self.base}
         repository = self._graphql(_PULL, variables, deadline)["repository"]
@@ -225,6 +222,7 @@ class GitHubSourceControl:
 
     def merge(self, reference: ChangeRef, *, deadline: Deadline) -> Merged:
         """Squash merge the change pinned to the head it was read at."""
+        deadline.live()
         head = self.change(reference, deadline=deadline).head
         path = f"repos/{reference.repository}/pulls/{reference.number}/merge"
         body = self._api([path, "-X", "PUT", "-f", f"sha={head}", "-f", "merge_method=squash"], deadline)
@@ -232,6 +230,7 @@ class GitHubSourceControl:
 
     def queue_health(self, *, deadline: Deadline) -> QueueHealth | Unsupported:
         """Read the depth and entry states of the base branch merge queue."""
+        deadline.live()
         queue = self._queue(deadline)
         if queue is None:
             return Unsupported("queue_health")
@@ -240,7 +239,7 @@ class GitHubSourceControl:
 
     def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
         """List the remote tags with the commits they name."""
-        timeout = _live(deadline)
+        timeout = deadline.live()
         result = self.git(
             ["git", "ls-remote", "--tags", "origin"],
             cwd=self.root,
@@ -254,48 +253,58 @@ class GitHubSourceControl:
 
     def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment:
         """Post a comment on the change."""
+        deadline.live()
         path = f"repos/{reference.repository}/issues/{reference.number}/comments"
         posted = self._api([path, "-f", f"body={body}"], deadline)
         return Comment(reference, posted["html_url"])
 
     def capabilities(self, *, deadline: Deadline) -> Capabilities:
         """Report which optional operations this repository supports."""
+        deadline.live()
         return Capabilities(merge_queue=self._queue(deadline) is not None)
 
     def issue_state(self, reference: ChangeRef, *, deadline: Deadline) -> str:
         """Read whether the issue is open or closed."""
+        deadline.live()
         return self._api([f"repos/{reference.repository}/issues/{reference.number}"], deadline)["state"]
 
     def close_issue(self, reference: ChangeRef, *, deadline: Deadline) -> str:
         """Close the issue and return the state it reports after the write."""
+        deadline.live()
         path = f"repos/{reference.repository}/issues/{reference.number}"
         return self._api([path, "-X", "PATCH", "-f", "state=closed"], deadline)["state"]
 
     def rate_limit(self, *, deadline: Deadline) -> RateLimit:
         """Read the core REST quota of the login, a read GitHub does not charge."""
+        deadline.live()
         core = self._api(["rate_limit"], deadline)["resources"]["core"]
         return RateLimit(core["used"], core["remaining"], core["reset"])
 
     def issues_enabled(self, *, deadline: Deadline) -> bool:
         """Read whether the repository takes issues."""
+        deadline.live()
         return self._api([f"repos/{self.repository}"], deadline)["has_issues"]
 
     def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]:
         """Read the newest workflow runs of the repository, one page."""
+        deadline.live()
         rows = self._api([f"repos/{self.repository}/actions/runs?per_page={_PAGE}"], deadline)["workflow_runs"]
         return tuple(RepositoryRun(row["id"], row["head_branch"], row["event"], row["status"]) for row in rows)
 
     def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
         """Ask GitHub to cancel one workflow run of the repository; its answer carries no body to read."""
+        deadline.live()
         self._call([f"repos/{self.repository}/actions/runs/{run_id}/cancel", "-X", "POST"], deadline)
 
     def merged_at(self, commit: str, *, deadline: Deadline) -> str | None:
         """Read when the first merged change carrying the commit merged, None when none did."""
+        deadline.live()
         rows = self._api([f"repos/{self.repository}/commits/{commit}/pulls"], deadline)
         return next((row["merged_at"] for row in rows if row["merged_at"]), None)
 
     def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]:
         """List the repository's open pull requests with their check rollups, at most eight pages of twenty five."""
+        deadline.live()
         owner, name = self.repository.split("/")
         variables: dict[str, str | int] = {"owner": owner, "name": name}
         changes: list[OpenChange] = []
@@ -311,6 +320,7 @@ class GitHubSourceControl:
         self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline
     ) -> tuple[WorkflowRun, ...]:
         """List one workflow's runs for an event that finished with a conclusion since a UTC stamp, every page."""
+        deadline.live()
         path = (
             f"repos/{self.repository}/actions/workflows/{workflow}/runs"
             f"?event={event}&status={conclusion}&exclude_pull_requests=true&created=>={since}&"
@@ -324,7 +334,7 @@ class GitHubSourceControl:
             ["api", path],
             run=self.gh or subprocess.run,
             cwd=self.root,
-            timeout=_live(deadline),
+            timeout=deadline.live(),
             capture_output=True,
         )
         result.check_returncode()
@@ -332,6 +342,7 @@ class GitHubSourceControl:
 
     def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any:
         """Run one GraphQL document under the reader the caller names and return its whole body, errors included."""
+        timeout = deadline.live()
         flags = [word for name, value in variables.items() for word in ("-f", f"{name}={value}")]
         caller = github_reads.CALLER.get(CALLER)
         github_reads.charge(caller, "graphql", time.time())
@@ -340,7 +351,7 @@ class GitHubSourceControl:
             ["api", "graphql", "-f", f"query={document}", *flags],
             run=self.gh or subprocess.run,
             cwd=self.root,
-            timeout=_live(deadline),
+            timeout=timeout,
             capture_output=True,
             text=True,
             check=True,
