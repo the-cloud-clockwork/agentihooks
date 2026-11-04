@@ -83,14 +83,23 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
         "grouping release",
         "dispatcher group",
     ]
-    assert [step.name for step in engine.group_steps(tasks.CLOSE)][-2:] == ["settle", "close space"]
+    assert [step.name for step in engine.group_steps(tasks.CLOSE) if step in tasks.STEPS] == ["settle", "close space"]
     assert [step.group for step in tasks.STEPS] == (
         [tasks.DRAINED] * 2 + [tasks.REOPENS] * 5 + [tasks.TASK_PASSES] * 5 + [tasks.CLOSE] * 2
     )
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
+        lane = engine.SLOW if step.name == "fleet red notice" else CallStep.lane
+        assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
+
+
+def test_a_write_step_runs_in_the_lane_it_is_given() -> None:
+    step = tasks.WriteStep("fleet red notice", tasks.REOPENS, lambda tick, get: [], lane=engine.SLOW)
+    assert (step.lane, tasks.WriteStep("rank pass", tasks.REOPENS, lambda tick, get: []).lane) == (
+        engine.SLOW,
+        CallStep.lane,
+    )
 
 
 def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
