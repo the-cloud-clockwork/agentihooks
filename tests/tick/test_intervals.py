@@ -126,14 +126,17 @@ def test_a_skipped_step_counts_as_ended_for_its_dependents(recording: Any) -> No
 @pytest.mark.feature("swarm-tick-step-isolation")
 def test_a_failed_run_records_its_end_and_a_late_run_does_not(recording: Any) -> None:
     store, _, _ = recording
-    timing.PASS.set({"pass_id": "p0", "start_ms": BASE_S * 1000})
-    for record, kept in (
-        (engine.StepRecord("failed", 1.0, 5.0, "builtins.ValueError"), True),
-        (engine.StepRecord("late", 9.0, 5.0), False),
-        (engine.StepRecord("held", 0.0, 5.0, held=True), False),
-    ):
-        engine._journal(Counted(record.name, budgets.WIDE_S), record, 0.0)
-        assert (record.name in store.redis.hgetall(store.key("sw", timing.STEP_RAN))) is kept
+    token = timing.PASS.set({"pass_id": "p0", "start_ms": BASE_S * 1000})
+    try:
+        for record, kept in (
+            (engine.StepRecord("failed", 1.0, 5.0, "builtins.ValueError"), True),
+            (engine.StepRecord("late", 9.0, 5.0), False),
+            (engine.StepRecord("held", 0.0, 5.0, held=True), False),
+        ):
+            engine._journal(Counted(record.name, budgets.WIDE_S), record, 0.0)
+            assert (record.name in store.redis.hgetall(store.key("sw", timing.STEP_RAN))) is kept
+    finally:
+        timing.PASS.reset(token)
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
@@ -158,6 +161,6 @@ def test_a_step_above_sixty_seconds_writing_a_pass_box_is_refused() -> None:
 @pytest.mark.feature("swarm-tick-step-isolation")
 def test_every_registered_step_writing_the_pass_state_runs_every_pass() -> None:
     wide = sorted(
-        step.name for step in registry.steps() if PASS in step.writes and step.interval_s > budgets.CRITICAL_S
+        step.name for step in registry.steps() if PASS in step.writes and step.interval_s > registry.PASS_BOX_INTERVAL_S
     )
     assert wide == []

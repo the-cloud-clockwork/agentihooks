@@ -205,7 +205,7 @@ def _run_later(
     found: pool.Pass,
     apply: Appliers,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
-    rest: frozenset[str] = frozenset(),
+    rest: frozenset[str],
 ) -> None:
     """Run the handed off steps on the pass workers, dropping each in ``gone`` and skipping each in ``rest``, then
     hand their records in group order to ``finished``."""
@@ -216,7 +216,7 @@ def _run_later(
         finished(records)
 
 
-def _sequential(step: Step, ctx: Context, apply: Appliers, rest: frozenset[str] = frozenset()) -> StepRecord:
+def _sequential(step: Step, ctx: Context, apply: Appliers, rest: frozenset[str]) -> StepRecord:
     """Run ``step`` alone, or skip it when it is in ``rest``, apply its writes and journal its record with its start
     offset in the pass."""
     offset = _offset()
@@ -238,7 +238,8 @@ def resting(ordered: Iterable[Step], cadence: float) -> frozenset[str]:
     inside its pass runs again on the pass its interval falls due. Without a recording store nothing rests.
     """
     store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
-    wide = {step.name: interval_s(step, cadence) for step in ordered if interval_s(step, cadence) > CRON_S}
+    every = {step.name: interval_s(step, cadence) for step in ordered}
+    wide = {name: seconds for name, seconds in every.items() if seconds > CRON_S}
     if store is None or slug is None or not wide:
         return frozenset()
     now = time.time() if current is None else current["start_ms"] / 1000
