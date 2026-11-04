@@ -587,11 +587,13 @@ def test_reconcile_of_current_units_returns_whether_the_tick_is_scheduled(tmp_pa
     monkeypatch.setattr(timer, "reconcile", real_reconcile)
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    callers = []
     for outcome in (True, False):
-        monkeypatch.setattr(timer, "schedule", lambda caller, outcome=outcome: outcome)
+        monkeypatch.setattr(timer, "schedule", lambda caller, outcome=outcome: callers.append(caller) or outcome)
         calls.clear()
         assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is outcome
         assert {argv[2] for argv, _ in calls} == {"is-enabled"}
+    assert callers == ["the swarm timer reconcile", "the swarm timer reconcile"]
 
 
 def test_schedule_registers_the_tick_and_starts_the_scheduler_runner(monkeypatch):

@@ -74,7 +74,7 @@ def watch_pass(
         told = _alert(store, slug, now, episode, evidence)
         if not repair or tick_heartbeat.halted(store, slug):
             return told
-        print(f"{slug}: repairing the stale tick on: {'; '.join(evidence)}", file=sys.stderr, flush=True)
+        print(f"{slug}: repairing the stale tick on: {'; '.join(evidence)}", file=sys.stderr)
         return told + repair(slug, now)
 
 
