@@ -198,3 +198,46 @@ def test_main_prints_each_error_and_fails(tmp_path: Path, capsys: pytest.Capture
     assert catalogue().main(["shrink", "--base", str(head), "--head", str(base)]) == 0
     assert catalogue().main(["check", "--root", str(ROOT)]) == 0
     assert capsys.readouterr().out.splitlines()[-1] == "0 tick catalogue errors"
+
+
+def test_scenarios_strip_only_the_entry_point(tmp_path: Path) -> None:
+    root = tree(tmp_path, {"scenarios": {}, "unmapped": []})
+    goldens = {"run_tick/deep/name": {}, "plain": {}, "tick/running": {}}
+    (root / "tests/swarm/tick_scenarios/goldens.json").write_text(json.dumps(goldens))
+    assert catalogue().scenarios(root) == frozenset({"deep/name", "plain", "running"})
+
+
+def test_load_names_every_unknown_scenario(tmp_path: Path) -> None:
+    root = tree(tmp_path, {"scenarios": {"full": ["other", "missing"]}, "unmapped": []})
+    with pytest.raises(ValueError) as error:
+        catalogue().load(root)
+    assert str(error.value) == f"{catalogue().INDEX} names unknown scenarios: missing, other"
+
+
+def spied(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[object, ...]]]:
+    calls: list[tuple[str, tuple[object, ...]]] = []
+    module = catalogue()
+    monkeypatch.setattr(module, "check", lambda *given: calls.append(("check", given)) or [])
+    monkeypatch.setattr(module, "shrink", lambda *given: calls.append(("shrink", given)) or [])
+    return calls
+
+
+def test_main_passes_paths_to_each_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = spied(monkeypatch)
+    assert catalogue().main(["check"]) == 0
+    assert catalogue().main(["check", "--root", "tree"]) == 0
+    assert catalogue().main(["shrink", "--base", "old", "--head", "new"]) == 0
+    assert calls == [
+        ("check", (Path("."),)),
+        ("check", (Path("tree"),)),
+        ("shrink", (Path("old"), Path("new"))),
+    ]
+
+
+@pytest.mark.parametrize("argv", [[], ["shrink", "--head", "new"], ["shrink", "--base", "old"], ["shrink"]])
+def test_main_refuses_a_missing_command_or_tree(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
+    calls = spied(monkeypatch)
+    with pytest.raises(SystemExit) as exit_:
+        catalogue().main(argv)
+    assert exit_.value.code == 2
+    assert calls == []
