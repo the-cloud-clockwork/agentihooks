@@ -46,7 +46,7 @@ def _parse(name: str, source: str) -> ast.Module:
 def floors(source: str) -> dict[str, str]:
     """The interval name each step row of the budgets source declares, keyed by step name."""
     rows: dict[str, str] = {}
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(_parse(BUDGETS, source)):
         if isinstance(node, ast.AnnAssign):
             target, table = node.target, node.value
         elif isinstance(node, ast.Assign) and len(node.targets) == 1:

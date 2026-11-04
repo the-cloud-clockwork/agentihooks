@@ -185,6 +185,14 @@ def test_a_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.C
     assert out.startswith(f"::error::cannot parse {STEP}: ")
 
 
+def test_a_budgets_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {STEP: FULL})
+    head = _tree(tmp_path / "head", {tick_pattern.BUDGETS: "MEASURED = {\n", STEP: FULL})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert out.startswith(f"::error::cannot parse {tick_pattern.BUDGETS}: ")
+
+
 def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         tick_pattern.main([])
