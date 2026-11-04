@@ -294,7 +294,7 @@ class OwnershipOperationContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "^if_match claim_generation must be a nonnegative integer$"):
                 ledger_tasks.check(change)
 
-    def test_the_operation_guard_matches_size_and_group_members_with_legacy_defaults(self):
+    def test_the_operation_guard_matches_size_and_group_members_with_legacy_defaults(self) -> None:
         from scripts.swarm_ledger import ledger_tasks
 
         doc = make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
@@ -328,7 +328,7 @@ class OwnershipOperationContract(unittest.TestCase):
         self.assertEqual(task["difficulty"], "L")
         self.assertEqual(ctx.refused, [])
 
-    def test_the_operation_validator_rejects_malformed_size_and_group_member_guards(self):
+    def test_the_operation_validator_rejects_malformed_size_and_group_member_guards(self) -> None:
         from scripts.swarm_ledger import ledger_tasks
 
         change = op("task_update", 1, item="tasks/t1", fields={"state": "open"}, if_match={"difficulty": 1})
