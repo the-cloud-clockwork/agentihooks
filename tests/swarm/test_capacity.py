@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -278,7 +279,7 @@ def test_tick_capacity_balance_and_quota_list_the_same_accounts_and_caps(monkeyp
     assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail", "other"]
 
 
-def test_quota_capacity_with_all_zero_demand_still_refreshes_codex_before_its_drain_decisions(tmp_path, monkeypatch):
+def test_quota_capacity_with_all_zero_demand_leaves_codex_refresh_to_the_prober(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 
     calls = []
@@ -292,10 +293,12 @@ def test_quota_capacity_with_all_zero_demand_still_refreshes_codex_before_its_dr
     rt = module.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     rt.quota_capacity(config, [], 100, {"eng": 0, "ci": 0, "plan": 0})
+    assert calls == []
+    rt.quota_capacity(config, [], 100, {"eng": 0, "ci": 0, "plan": 0}, refresh=True)
     assert calls == [1]
 
 
-def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatch):
+def test_quota_capacity_with_nonzero_demand_leaves_codex_refresh_to_the_prober(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 
     calls = []
@@ -308,7 +311,7 @@ def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatc
     rt = module.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     rt.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
-    assert calls == [1]
+    assert calls == []
 
 
 def test_one_seat_goes_to_the_empty_lane_before_another_engineer():
@@ -2611,3 +2614,94 @@ def test_an_unreachable_settings_store_reads_no_master_snapshot(monkeypatch, tmp
 
     monkeypatch.setattr(capacity.master_account, "load", down)
     assert capacity._claude({}, 1_100.0) == [capacity.Account("claude", "main", "UNKNOWN", 1, None, None)]
+
+
+def _probing(monkeypatch, ran, calls=None):
+    calls = [] if calls is None else calls
+    window = balancer.QuotaWindow(used=10)
+
+    def claude(credentials, *args, **kwargs):
+        ran.extend(f"claude -p {credential.account}" for credential in credentials)
+        return [balancer.ProbeResult(c.account, "allowed", "NORMAL", 90, window, window) for c in credentials]
+
+    monkeypatch.setattr(balancer, "collect_results", COLLECT)
+    monkeypatch.setattr(balancer, "probe_credentials", claude)
+    monkeypatch.setattr(balancer.subprocess, "run", lambda argv, *a, **k: ran.append(argv))
+    monkeypatch.setattr(
+        capacity.codex_router,
+        "default_signed_in",
+        lambda *a, **k: calls.append(("login", a, k)) or ran.append("codex login") or True,
+    )
+    monkeypatch.setattr(
+        capacity.codex_router,
+        "fresh_quotas",
+        lambda *a, **k: calls.append(("exec", a, k)) or ran.append("codex exec") or {},
+    )
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
+
+
+def test_a_pass_read_runs_only_the_local_codex_login_status_check(monkeypatch, tmp_path):
+    ran = []
+    _probing(monkeypatch, ran)
+    env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
+    capacity.accounts(env, 100, refresh=False)
+    assert ran == ["codex login"]
+    ran.clear()
+    capacity.accounts(env, 100)
+    assert ran == ["claude -p a", "codex login", "codex exec"]
+
+
+def test_the_quota_notice_step_runs_no_claude_or_codex_quota_probe(monkeypatch, tmp_path):
+    from scripts.swarm import quota_handoff, quota_notice
+    from scripts.swarm import runtime as module
+
+    ran = []
+    _probing(monkeypatch, ran)
+    monkeypatch.setattr(quota_handoff, "warn", lambda *args: [])
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AH_CC_TOKEN_a", "fake-a")
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    ledger: Any = FakeLedger([{"id": "e0"}])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = module.HerdrRuntime(home=tmp_path)
+    rt.host = _roomy_host
+    quota_notice.refresh("sw", store.config("sw"), store, ledger, rt, 100_000)
+    assert capacity.read(store, "sw")["observed_at"] == 100_000
+    assert set(ran) == {"codex login"}
+
+
+def test_the_pass_reader_defaults_to_cached_readings():
+    import inspect
+
+    from scripts.swarm.runtime import HerdrRuntime
+
+    assert inspect.signature(HerdrRuntime.quota_capacity).parameters["refresh"].default is False
+
+
+def test_the_prober_writes_the_claude_cache_the_pass_reads(monkeypatch, tmp_path):
+    ran, calls = [], []
+    _probing(monkeypatch, ran, calls)
+    env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
+    capacity.probe(env, 100)
+    assert ran == ["claude -p a", "codex login", "codex exec"]
+    assert [(kind, env in args or env in kwargs.values()) for kind, args, kwargs in calls] == [
+        ("login", True),
+        ("exec", True),
+    ]
+    assert [(at, result.account) for at, result in balancer.cached_observations(environ=env)] == [(100, "a")]
+    (row,) = [row for row in capacity.accounts(env, 130, refresh=False) if row.harness == "claude"]
+    assert (row.name, row.observed_at) == ("a", 100)
+    ran.clear()
+    capacity.probe(env, 200)
+    assert ran == ["claude -p a", "codex login", "codex exec"]
+    assert [at for at, _ in balancer.cached_observations(environ=env)] == [200]
+
+
+def test_a_probe_refreshes_claude_and_codex_at_the_given_time(monkeypatch):
+    calls = []
+    monkeypatch.setattr(capacity, "_claude", lambda *args: calls.append(("claude", *args)) or ["c"])
+    monkeypatch.setattr(capacity, "_codex", lambda *args: calls.append(("codex", *args)) or ["x"])
+    env = {"K": "v"}
+    assert capacity.probe(env, 7.0) == ["c", "x"]
+    assert calls == [("claude", env, 7.0, True), ("codex", env, 7.0, True)]
