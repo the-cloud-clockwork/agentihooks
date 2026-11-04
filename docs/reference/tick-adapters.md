@@ -429,15 +429,46 @@ answer missing a field reads as a refusal instead of a traceback.
 
 ## The gate on gh commands
 
-Swarm code reaches GitHub through the port. The Semgrep rule `swarm-source-control-port` in
-`.semgrep/source-control.yml` fails the scan on either form of a `gh` command in a Python file under `scripts/swarm`:
+Swarm and tick code reach GitHub through the port. The Semgrep rule `swarm-source-control-port` in
+`.semgrep/source-control.yml` fails the scan on either form of a `gh` command in a Python file under `scripts/swarm` or
+`scripts/tick`:
 
 - a list literal starting with `"gh"`, such as `["gh", "pr", "view", url]` or `["gh", *args]`;
 - a call to `scripts.tick.adapters.github.command`, the adapter's `gh` command builder, under any import alias.
 
-`git` commands are not matched. `.semgrep/source-control.test.py` holds the failing and passing fixtures, graded with
-`semgrep --test` in the same workflow step that scans the code; the rule also includes `*.test.py` so that fixture file
-is scanned.
+The rule's `paths.include` lists `/scripts/swarm/**`, `/scripts/tick/**` and `*.test.py`; a unit test in
+`tests/test_ci_semgrep.py` pins that list. Every tick module falls under the rule, step modules, ports and adapters
+alike, except the GitHub adapter, which stays on the exception list below. Tick code reads source control through a
+`SourceControl` port, such as `Tools.source_control`:
+
+```python
+import subprocess
+
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+
+def state_by_gh(number: int) -> str:
+    return subprocess.run(["gh", "pr", "view", str(number), "--json", "state"], capture_output=True, text=True).stdout
+
+
+def state_by_port(port: SourceControl, number: int, deadline: Deadline) -> ChangeState:
+    return port.change(ChangeRef("the-cloud-clockwork/agentihooks", number), deadline=deadline)
+```
+
+In a module under `scripts/tick`, the first function fails the scan and the second passes. A finding names the file
+and the rule:
+
+```text
+scripts/tick/<module>.py
+❯❯❱ semgrep.swarm-source-control-port
+```
+
+`git` commands are not matched. `.semgrep/source-control.test.py` holds the failing and passing fixtures, a tick step
+that builds a `gh` list and one that calls the port included, graded with `semgrep --test` in the same workflow step that scans the code; the rule also
+includes `*.test.py` so that fixture file is scanned. The fixture grades the pattern shapes; the repository scan in the
+same step grades the path include.
 
 Files that still build `gh` commands are listed twice and must match: in the rule's `paths.exclude` and in
 `.semgrep/source-control-allowlist.json`. The list only shrinks. The Semgrep workflow step
@@ -942,7 +973,7 @@ and call the port from the step.
 | `SwarmError` from `coordination.configure` | A changed field failed the store's checks, such as an unknown `state` or `autonomy`. | Pass a value the store accepts. |
 | `ledger.export` or `ledger.mutate` runs past its deadline | The deadline bounds each HTTP request, and a call can make several. | Size the deadline for the retries, or check `deadline.remaining` between calls. |
 | `Unsupported(name)` from `host.read` or `host.run` | The host has no reading or job by that name. | Add it to the `JobHost` mappings or handle the missing capability in the step. |
-| Semgrep `swarm-source-control-port` finding in a swarm file | The file builds a `gh` command, as a list or through `github.command`. | Call the matching port operation instead; add one to the port as described under [The gate on gh commands](#the-gate-on-gh-commands) when none fits. |
+| Semgrep `swarm-source-control-port` finding in a file under `scripts/swarm` or `scripts/tick` | The file builds a `gh` command, as a list or through `github.command`. | Call the matching port operation instead; add one to the port as described under [The gate on gh commands](#the-gate-on-gh-commands) when none fits. |
 | `source control exceptions grew: [<paths>]` from the Semgrep workflow | The pull request added a path to `.semgrep/source-control-allowlist.json`. | Remove it and move that file's calls onto the port. |
 | `SwarmError: cannot tell whether the repo has issues: <detail>` from `swarm park` | The `issues_enabled` read failed, timed out, or GitHub answered without `has_issues`. | Check `gh api repos/<owner>/<name>` from the worktree, then park again. |
 | `panic cancel failed: <error>` in the tick output | A fix pull request or a fleet repository's run list could not be read, or a cancel was refused. | Check the `--fix` address and the login's access to each fleet repository; the tick retries a minute later. |
