@@ -366,14 +366,16 @@ def run_tick(
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return ["the swarm belongs to another hive"]
-    token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
+    token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS, "pass")
     if token is None:
         return ["another tick is running"]
-    tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token))
+    tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token, "pass stop"))
 
     def before_step():
         tick_stop.check()
-        tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
+        tick_activity.keep(
+            store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS, "pass step"), now_ms
+        )
 
     keeping = timing.BEFORE_STEP.set(before_step)
     doc, view, beating, box = {}, None, ExitStack(), PassBox()
@@ -382,7 +384,7 @@ def run_tick(
         beating.enter_context(
             pool.running(
                 mode=store.config(slug).tick_mode,
-                heartbeat=lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS),
+                heartbeat=lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS, "pass heartbeat"),
             )
         )
         timing.keep()
@@ -472,7 +474,7 @@ def run_tick(
             beating.close()
             timing.BEFORE_STEP.reset(keeping)
             tick_stop.drop(token)
-            controller.release_tick_lock(store, slug, token)
+            controller.release_tick_lock(store, slug, token, "pass")
 
 
 def cmd_list(store, args):

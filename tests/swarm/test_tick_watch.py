@@ -628,11 +628,11 @@ def test_respawn_master_spawns_a_master_into_an_empty_front_door_seat(store, mon
     agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER)
 
     taken, take = [], controller.take_tick_lock
-    monkeypatch.setattr(controller, "take_tick_lock", lambda *args: taken.append(args[-1]) or take(*args))
+    monkeypatch.setattr(controller, "take_tick_lock", lambda *args: taken.append(args[3:]) or take(*args))
 
     actions = tick.respawn_master("sw", store, runtime, START)
 
-    assert taken[:1] == [lease.ttl_ms()]
+    assert taken[:1] == [(lease.ttl_ms(), "respawn master")]
     assert not store.redis.exists(store.key("sw", "tick-lock"))
     assert lease.current(store, "sw").owner == "home"
     assert actions[0] == "dropped the gone master master@a1b2c3-0001"

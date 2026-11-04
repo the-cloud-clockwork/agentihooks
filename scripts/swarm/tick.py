@@ -1984,7 +1984,7 @@ def respawn_master(slug, store, runtime, now_ms):
             _recover_master(slug, config, store, fenced, now_ms) or _master(slug, config, store, fenced, now_ms)
         )
 
-    return _under_tick_lock(slug, store, respawn)
+    return _under_tick_lock(slug, store, respawn, "respawn master")
 
 
 def place_master(slug, store, runtime, now_ms):
@@ -1994,10 +1994,10 @@ def place_master(slug, store, runtime, now_ms):
         fenced = controller.FencedRuntime(store, slug, held, runtime, controller.deployment_for(config, os.environ))
         return _master(slug, config, store, fenced, now_ms)
 
-    return _under_tick_lock(slug, store, place)
+    return _under_tick_lock(slug, store, place, "place master")
 
 
-def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
+def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str) -> Any:
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 
@@ -2006,7 +2006,7 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
     held = lease.acquire(store, slug, hive_id())
     if held is None:
         return []
-    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms())
+    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms(), caller)
     if token is None:
         return []
     try:
@@ -2016,7 +2016,7 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any) -> Any:
         with lease.held_pass(store, slug, held):
             return act(config, held)
     finally:
-        controller.release_tick_lock(store, slug, token)
+        controller.release_tick_lock(store, slug, token, caller)
 
 
 def _settle(

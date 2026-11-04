@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
@@ -381,43 +381,54 @@ def _ended_boot(held: dict, host: str) -> bool:
     return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 
 
-def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:
+def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int, caller: str = "unnamed") -> str | None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
     token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex, **_holder()})
+    raw: str | None = None
     with store.redis.pipeline() as pipe:
         try:
             pipe.watch(key)
             lease.require(store, slug, held)
-            raw = pipe.get(key)
+            raw = cast("str | None", pipe.get(key))
             if raw and not _dead(raw):
+                _journal_lock(slug, caller, "refused", raw)
                 return None
             pipe.multi()
             pipe.set(key, token, px=ttl_ms)
             pipe.execute()
+            _journal_lock(slug, caller, "replaced a dead holder" if raw else "taken", raw)
             return token
         except WatchError:
+            _journal_lock(slug, caller, "refused", raw)
             return None
 
 
-def release_tick_lock(store: RedisStore, slug: str, token: str) -> None:
+def release_tick_lock(store: RedisStore, slug: str, token: str, caller: str = "unnamed") -> None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
+    raw: str | None = None
     with store.redis.pipeline() as pipe:
         try:
             pipe.watch(key)
-            if pipe.get(key) != token:
+            raw = cast("str | None", pipe.get(key))
+            if raw != token:
+                _journal_lock(slug, caller, "found another holder", raw)
                 return
             pipe.multi()
             pipe.delete(key)
             pipe.execute()
+            _journal_lock(slug, caller, "released", raw)
         except WatchError:
+            _journal_lock(slug, caller, "found another holder", raw)
             return
 
 
-def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_ms: int) -> None:
+def keep_tick(
+    store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_ms: int, caller: str = "unnamed"
+) -> None:
     from redis.exceptions import WatchError
 
     lease.renew(store, slug, held)
@@ -426,14 +437,36 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(key)
-                if pipe.get(key) != token:
-                    raise SwarmError("the tick lock is stale")
+                raw = cast("str | None", pipe.get(key))
+                if raw != token:
+                    raise SwarmError(
+                        f"the tick lock is stale: {caller} expected token {_token_prefix(token)}, {_lock_holder(raw)}"
+                    )
                 pipe.multi()
                 pipe.pexpire(key, ttl_ms)
                 pipe.execute()
                 return
             except WatchError:
                 continue
+
+
+def _token_prefix(value: str) -> str:
+    decoded: dict[str, Any] = json.loads(value) if value.startswith("{") else {}
+    return str(decoded.get("token", value))[:8]
+
+
+def _lock_holder(raw: str | None) -> str:
+    if raw is None:
+        return "the key is absent"
+    held: dict[str, Any] = json.loads(raw) if raw.startswith("{") else {}
+    fields = " ".join(f"{name} {held.get(name, 'unknown')}" for name in ("epoch", "host", "pid", "start"))
+    return f"held by {fields} token {_token_prefix(raw)}"
+
+
+def _journal_lock(slug: str, caller: str, outcome: str, raw: str | None) -> None:
+    line = {"event": "swarm_tick_lock", "slug": slug, "caller": caller, "outcome": outcome, "holder": _lock_holder(raw)}
+    sys.stderr.write(json.dumps(line) + "\n")
+    sys.stderr.flush()
 
 
 def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
