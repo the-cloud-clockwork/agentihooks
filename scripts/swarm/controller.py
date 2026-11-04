@@ -20,6 +20,7 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
+from scripts.tick.adapters.processes import PassProcesses
 from scripts.tick.ports.tools import PASS_TOOLS
 
 if TYPE_CHECKING:
@@ -46,7 +47,6 @@ class FencedRuntime:
     def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
         self._local_slots_cache: local_slots.PassCache | None = None
-        self._names: tuple[object, set[str]] | None = None
         self.kubernetes_proof = (
             slug.startswith("proof-") and os.environ.get("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF") == slug
         )
@@ -68,19 +68,16 @@ class FencedRuntime:
         return partial(self._changing, found) if name in AGENT_CHANGES else found
 
     def live_names(self) -> set[str]:
-        """The live agent names, listed once per tick pass and listed again after this runtime changes its agents."""
-        current = PASS_TOOLS.get()
-        if current is None:
-            return self.runtime.live_names()
-        if self._names is None or self._names[0] is not current:
-            self._names = (current, set(self.runtime.live_names()))
-        return set(self._names[1])
+        """The live agent names, listed once per tick pass and listed again after a fenced runtime changes its agents."""
+        shared = _pass_processes()
+        return self.runtime.live_names() if shared is None else shared.live_names(self.runtime.live_names)
 
     def _changing(self, operation: Any, *args: Any, **kwargs: Any) -> Any:
         try:
             return operation(*args, **kwargs)
         finally:
-            self._names = None
+            if (shared := _pass_processes()) is not None:
+                shared.forget_names()
 
     def _mode_refusal(self) -> str:
         if self.deployment == LOCAL:
@@ -237,7 +234,7 @@ class FencedRuntime:
         room = getattr(self.runtime, "launch_room", None)
         return room(config) if room else 1
 
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> "Placed":
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         task = _master_task(lane, task)
         try:
@@ -275,7 +272,7 @@ class FencedRuntime:
         with timing.step(f"{__name__}.FencedRuntime.runtime_spawn", report=False):
             return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
-    def collect(self, config, lane, name, task):
+    def collect(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
         from scripts.swarm.tick import SpawnError
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
@@ -286,12 +283,12 @@ class FencedRuntime:
             raise SpawnError(outcome.detail, outcome.status)
         return outcome.value
 
-    def expire(self, config, lane, name, task):
+    def expire(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        return self.runtime.hive_launch.expire(request)
+        return self._changing(self.runtime.hive_launch.expire, request)
 
 
 def _host_reading(store: RedisStore, machine: str) -> dict[str, Any] | None:
@@ -301,6 +298,12 @@ def _host_reading(store: RedisStore, machine: str) -> dict[str, Any] | None:
     now = lease.now_ms(store)
     reading: dict[str, Any] | None = headroom.measure(0, now, previous=headroom.read(store.redis, machine, now))
     return reading
+
+
+def _pass_processes() -> PassProcesses | None:
+    """The running tick pass's process model, which holds its shared live names listing."""
+    processes = getattr(PASS_TOOLS.get(), "processes", None)
+    return processes if isinstance(processes, PassProcesses) else None
 
 
 def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:

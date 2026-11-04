@@ -46,15 +46,17 @@
       "id": "fenced-live-names-listing",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g6",
-      "behaviour": "The fenced runtime lists live agent names once per tick pass, lists again after its own spawn, collect, retire, reap, close or resume, and lists on every call outside a pass.",
+      "behaviour": "The fenced runtime lists live agent names once per tick pass, keeps that listing on the pass's process model shared by every fenced runtime of the pass, lists again after a fenced spawn, collect, expire, retire, reap, close or resume, and lists on every call outside a pass.",
       "seam": "scripts.swarm.controller.FencedRuntime.live_names and scripts.swarm.cli.run_tick with the running scenario",
       "tests": [
         "tests/swarm/test_controller_live_names.py::test_live_names_lists_once_per_pass_and_serves_copies",
         "tests/swarm/test_controller_live_names.py::test_live_names_lists_again_in_a_new_pass",
         "tests/swarm/test_controller_live_names.py::test_live_names_outside_a_pass_lists_every_call",
         "tests/swarm/test_controller_live_names.py::test_agent_changes_drop_the_pass_listing",
-        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing_even_when_it_fails",
-        "tests/swarm/test_controller_live_names.py::test_collect_drops_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing_when_it_fails",
+        "tests/swarm/test_controller_live_names.py::test_a_change_through_one_fenced_runtime_drops_the_listing_of_another",
+        "tests/swarm/test_controller_live_names.py::test_collect_and_expire_drop_the_pass_listing",
         "tests/swarm/tick_scenarios/test_characterisation.py::test_running_pass_lists_live_names_once_plus_once_per_launch"
       ]
     },

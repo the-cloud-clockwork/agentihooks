@@ -5,7 +5,9 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import controller, lease
+from scripts.hive import admission
+from scripts.swarm import commands, controller, lease, local_slots
+from scripts.tick.adapters.processes import PassProcesses
 from scripts.tick.ports.tools import PASS_TOOLS
 
 
@@ -43,9 +45,13 @@ def fenced(runtime: Listing) -> controller.FencedRuntime:
     return controller.FencedRuntime(None, "sw", SimpleNamespace(epoch=1), runtime, controller.LOCAL)  # pyright: ignore[reportArgumentType]
 
 
+def pass_tools() -> Any:
+    return SimpleNamespace(processes=PassProcesses())
+
+
 @pytest.fixture
 def in_pass() -> Any:
-    token = PASS_TOOLS.set(object())  # pyright: ignore[reportArgumentType]
+    token = PASS_TOOLS.set(pass_tools())
     yield
     PASS_TOOLS.reset(token)
 
@@ -65,7 +71,7 @@ def test_live_names_lists_again_in_a_new_pass() -> None:
     runtime = Listing()
     wrapped = fenced(runtime)
     for _ in range(2):
-        token = PASS_TOOLS.set(object())  # pyright: ignore[reportArgumentType]
+        token = PASS_TOOLS.set(pass_tools())
         wrapped.live_names()
         wrapped.live_names()
         PASS_TOOLS.reset(token)
@@ -104,7 +110,7 @@ def test_agent_changes_drop_the_pass_listing(in_pass: Any, operation: str, args:
 
 
 @pytest.mark.feature("fenced-live-names-listing")
-def test_spawn_drops_the_pass_listing_even_when_it_fails(in_pass: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spawn_drops_the_pass_listing(in_pass: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = Listing()
     wrapped = fenced(runtime)
     monkeypatch.setattr(lease, "require_epoch", lambda store, slug, epoch: None)
@@ -116,19 +122,62 @@ def test_spawn_drops_the_pass_listing_even_when_it_fails(in_pass: Any, monkeypat
 
     monkeypatch.setattr(wrapped, "_spawn", placed)
     wrapped.live_names()
-    assert wrapped.spawn("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"}) == "placed"
+    assert wrapped.spawn("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"}) == "placed"  # pyright: ignore[reportArgumentType]
     assert wrapped.live_names() == {"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"}
     assert runtime.listings == 2
 
 
 @pytest.mark.feature("fenced-live-names-listing")
-def test_collect_drops_the_pass_listing(in_pass: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spawn_drops_the_pass_listing_when_it_fails(in_pass: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = Listing()
+    wrapped = fenced(runtime)
+    released: list[str] = []
+    monkeypatch.setattr(lease, "require_epoch", lambda store, slug, epoch: None)
+    monkeypatch.setattr(commands, "hive_id", lambda: "fixture-hive")
+    monkeypatch.setattr(local_slots, "release", lambda store, machine, slug, name: released.append(name))
+    monkeypatch.setattr(admission, "release", lambda redis, machine, key: released.append(key))
+
+    def failed(config: Any, lane: str, name: str, task: dict[str, Any]) -> str:
+        runtime.live.add(name)
+        raise RuntimeError("launch failed")
+
+    monkeypatch.setattr(wrapped, "_spawn", failed)
+    wrapped.live_names()
+    with pytest.raises(RuntimeError, match="^launch failed$"):
+        wrapped.spawn("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"})  # pyright: ignore[reportArgumentType]
+    assert wrapped.live_names() == {"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"}
+    assert runtime.listings == 2
+    assert released == ["engineer@a1b2c3-0002", "sw/engineer@a1b2c3-0002"]
+
+
+@pytest.mark.feature("fenced-live-names-listing")
+def test_a_change_through_one_fenced_runtime_drops_the_listing_of_another(in_pass: Any) -> None:
+    runtime = Listing()
+    first, second = fenced(runtime), fenced(runtime)
+    first.live_names()
+    second.live_names()
+    assert runtime.listings == 1
+    first.retire("engineer@a1b2c3-0001")
+    runtime.live.clear()
+    assert second.live_names() == set()
+    assert runtime.listings == 2
+
+
+@pytest.mark.feature("fenced-live-names-listing")
+def test_collect_and_expire_drop_the_pass_listing(in_pass: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = Listing()
     outcome = SimpleNamespace(ok=True, value="collected", detail="", status="ok")
-    runtime.hive_launch = SimpleNamespace(collect=lambda request: outcome)  # pyright: ignore[reportAttributeAccessIssue]
+    requests: list[Any] = []
+    runtime.hive_launch = SimpleNamespace(  # pyright: ignore[reportAttributeAccessIssue]
+        collect=lambda request: requests.append(request) or outcome,
+        expire=lambda request: requests.append(request) or "expired",
+    )
     wrapped = fenced(runtime)
     monkeypatch.setattr(lease, "require_epoch", lambda store, slug, epoch: None)
     wrapped.live_names()
-    assert wrapped.collect("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"}) == "collected"
+    assert wrapped.collect("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"}) == "collected"  # pyright: ignore[reportArgumentType]
     wrapped.live_names()
-    assert runtime.listings == 2
+    assert wrapped.expire("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"}) == "expired"  # pyright: ignore[reportArgumentType]
+    wrapped.live_names()
+    assert runtime.listings == 3
+    assert [request.task for request in requests] == [{"id": "t1", "controller_epoch": 1}] * 2
