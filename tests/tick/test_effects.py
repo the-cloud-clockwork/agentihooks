@@ -1,11 +1,14 @@
 """Tick steps reach outside systems only through the ports their declared effects name."""
 
+import os
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import pytest
 
-import scripts.swarm.cli  # noqa: F401
-from scripts.tick import engine, registry
+import scripts.swarm.cli as cli
+from scripts.swarm import metrics_outbox
+from scripts.tick import engine, pool, registry
 from scripts.tick.adapters import fakes
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.tools import PASS_TOOLS
@@ -54,7 +57,7 @@ def _nothing(tick: object, read: object) -> list[str]:
     return []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-declared-effects")
 def test_a_step_sends_through_its_declared_inbox() -> None:
     tools = fakes.fake_tools()
     record = _run(EffectStep(frozenset({"inbox"})), tools)
@@ -62,7 +65,7 @@ def test_a_step_sends_through_its_declared_inbox() -> None:
     assert [call.operation for call in tools.inbox.calls] == ["send"]  # pyright: ignore[reportAttributeAccessIssue]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-declared-effects")
 def test_a_ledger_write_outside_the_declared_effects_goes_red() -> None:
     tools = fakes.fake_tools()
     record = _run(EffectStep(frozenset({"inbox"}), mutate=True), tools)
@@ -71,7 +74,7 @@ def test_a_ledger_write_outside_the_declared_effects_goes_red() -> None:
     assert tools.ledger.calls == []  # pyright: ignore[reportAttributeAccessIssue]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-declared-effects")
 def test_a_step_without_effects_cannot_write() -> None:
     tools = fakes.fake_tools()
     record = _run(EffectStep(frozenset()), tools)
@@ -79,7 +82,7 @@ def test_a_step_without_effects_cannot_write() -> None:
     assert tools.inbox.calls == []  # pyright: ignore[reportAttributeAccessIssue]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-declared-effects")
 def test_a_context_built_inside_a_pass_carries_the_pass_tools() -> None:
     tools = fakes.fake_tools()
     assert Context(View(), Deadline.after(1.0)).tools is None
@@ -90,7 +93,7 @@ def test_a_context_built_inside_a_pass_carries_the_pass_tools() -> None:
         PASS_TOOLS.reset(token)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-declared-effects")
 def test_call_and_write_steps_declare_their_effects_and_feature() -> None:
     name = "last tick"
     assert (CallStep(name, "close", _nothing).effects, CallStep(name, "close", _nothing).feature) == (frozenset(), "")
@@ -101,6 +104,42 @@ def test_call_and_write_steps_declare_their_effects_and_feature() -> None:
     assert WriteStep(name, "close", _nothing).effects == frozenset()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-declared-effects")
 def test_every_registered_step_declares_no_effects_yet() -> None:
     assert {step.name: step.effects for step in registry.steps() if step.effects} == {}
+
+
+@pytest.mark.feature("swarm-tick-declared-effects")
+def test_a_step_of_a_parallel_pass_reaches_its_declared_ports() -> None:
+    tools = fakes.fake_tools()
+    step = EffectStep(frozenset({"inbox"}))
+    with pool.running(workers=2):
+        records = engine.run_group(step.group, Context(View(), Deadline.after(60.0), tools), [step])  # pyright: ignore[reportArgumentType]
+    assert [(record.outcome, record.error) for record in records] == [(engine.OK, "")]
+    assert [call.operation for call in tools.inbox.calls] == ["send"]  # pyright: ignore[reportAttributeAccessIssue]
+
+
+@pytest.mark.feature("swarm-tick-declared-effects")
+def test_the_pass_spool_opens_once_and_appends_every_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[tuple[object, object]] = []
+    appended: list[tuple[object, object]] = []
+
+    class Box:
+        def __init__(self, path: object, sink: object) -> None:
+            opened.append((path, sink))
+
+        def append_many(self, batches: object, checkpoint: object) -> None:
+            appended.append((batches, checkpoint))
+
+    def settings(environ: object) -> tuple[str, bool]:
+        return "sink", environ is os.environ
+
+    monkeypatch.setattr(metrics_outbox, "Outbox", Box)
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: "spool")
+    monkeypatch.setattr(metrics_outbox, "settings", settings)
+    first: Callable[..., None] = print
+    spool = cli._PassSpool()  # pyright: ignore[reportPrivateUsage]
+    spool.append_many([("rows", [{"a": 1}])], first)
+    spool.append_many([], first)
+    assert opened == [("spool", ("sink", True))]
+    assert appended == [([("rows", [{"a": 1}])], first), ([], first)]

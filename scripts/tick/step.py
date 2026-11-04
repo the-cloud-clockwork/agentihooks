@@ -4,7 +4,7 @@ from typing import NewType, Protocol
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
 
-__all__ = ["Context", "Domain", "Lane", "Result", "Step", "View", "Write"]
+__all__ = ["Context", "Domain", "Lane", "Result", "Runs", "Step", "View", "Write"]
 
 Domain = NewType("Domain", str)
 Lane = NewType("Lane", str)
@@ -34,7 +34,13 @@ class Context:
     tools: Tools | None = field(default_factory=PASS_TOOLS.get)
 
 
-class Step(Protocol):
+class Runs(Protocol):
+    """A unit the tick engine runs with the pass context."""
+
+    def run(self, ctx: Context) -> Result: ...
+
+
+class Step(Runs, Protocol):
     @property
     def name(self) -> str: ...
 
@@ -64,5 +70,3 @@ class Step(Protocol):
 
     @property
     def feature(self) -> str: ...
-
-    def run(self, ctx: Context) -> Result: ...

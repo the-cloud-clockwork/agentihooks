@@ -96,6 +96,8 @@
         "tests/tick/test_effects.py::test_a_context_built_inside_a_pass_carries_the_pass_tools",
         "tests/tick/test_effects.py::test_call_and_write_steps_declare_their_effects_and_feature",
         "tests/tick/test_effects.py::test_every_registered_step_declares_no_effects_yet",
+        "tests/tick/test_effects.py::test_a_step_of_a_parallel_pass_reaches_its_declared_ports",
+        "tests/tick/test_effects.py::test_the_pass_spool_opens_once_and_appends_every_batch",
         "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
       ]
     },
