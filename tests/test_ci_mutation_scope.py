@@ -970,3 +970,37 @@ def test_module_facts_names_every_import_and_nested_function_from_one_parse(monk
     }
     assert scope.module_facts(source)[1] == {"TestGroup.test_one", "TestGroup.test_one.helper", "test_two"}
     assert parsed == [source]
+
+
+def test_a_held_tests_folder_is_read_once_and_each_selection_is_made_once(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_first.py").write_text("from hooks.context import first_sample\n")
+    (tests / "test_second.py").write_text("from hooks.context import second_sample\n")
+    first, second = Path("hooks/context/first_sample.py"), Path("hooks/context/second_sample.py")
+    reads, reached = [], []
+    read_text = Path.read_text
+    reaching = scope.reaching_tests
+
+    def read(path, *args, **kwargs):
+        reads.append(path)
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(scope, "reaching_tests", lambda *args: reached.append(args[1:3]) or reaching(*args))
+    with scope.held_tests(tmp_path):
+        for _ in range(2):
+            assert select_tests(tmp_path, first) == ["tests/test_first.py"]
+            assert select_tests(tmp_path, second) == ["tests/test_second.py"]
+            assert select_tests(tmp_path, first, helpers=False) == ["tests/test_first.py"]
+            select_tests(tmp_path, first).append("tests/test_appended.py")
+        assert scope.held_text(tests / "test_first.py") == "from hooks.context import first_sample\n"
+    held = sorted(path for path in reads if tmp_path in path.parents)
+    assert held == [tests / "test_first.py", tests / "test_second.py"]
+    assert reached == [(first, True), (second, True), (first, False)]
+    assert scope.HELD == {}
+    (tests / "test_late.py").write_text("from hooks.context import first_sample\n")
+    assert select_tests(tmp_path, first) == ["tests/test_first.py", "tests/test_late.py"]
+    assert scope.held_text(tests / "test_late.py") == "from hooks.context import first_sample\n"

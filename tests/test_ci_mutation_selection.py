@@ -534,6 +534,33 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert mutation_counts("scripts/sample.py", source, {9, 14}) == (0, ["cached"])
 
 
+def test_mutant_counting_resolves_positions_on_its_one_parse(monkeypatch):
+    import libcst
+    from libcst import metadata
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import changed_mutations, mutation_counts
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = "def doubled(value):\n    return value * 2\n\n\ndef tripled(value):\n    return value * 3\n"
+    expected = len(changed_mutations("scripts/sample.py", source, {2, 6})[1])
+    parses, wrappers = [], []
+    parse = libcst.parse_module
+    init = metadata.MetadataWrapper.__init__
+    monkeypatch.setattr(libcst, "parse_module", lambda text, *args: parses.append(text) or parse(text, *args))
+    monkeypatch.setattr(
+        metadata.MetadataWrapper,
+        "__init__",
+        lambda wrapper, *args, **kwargs: wrappers.append(wrapper) or init(wrapper, *args, **kwargs),
+    )
+    assert mutation_counts("scripts/sample.py", source, {2, 6}) == (expected, [])
+    assert expected > 0
+    assert parses == [source]
+    assert len(wrappers) == 1
+
+
 def test_changed_module_constants_and_dataclass_fields_beside_a_decorated_class_select_without_error(monkeypatch):
     from mutmut.configuration import Config
 
