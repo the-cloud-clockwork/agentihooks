@@ -60,13 +60,13 @@ def test_readiness_requires_each_current_worker_and_both_masters_to_authenticate
     assert authority_context.secret() is None
 
 
-def test_a_master_without_an_execution_reads_ready_only_when_launched_after_staging(
+def _legacy_master_readiness(
     pending: tuple[RedisStore, list[AgentRecord], str],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     launched_at: int,
-    ready: bool,
-) -> None:
+) -> tuple[dict, AgentRecord]:
+    """Authenticate every actor and a master in seat three with no execution identity; return the last report."""
     store, actors, secret = pending
     seat = f"{masters.seat(3)}@{SLUG}"
     master = AgentRecord(store.next_name(SLUG, "master"), "master", "proof", seat=seat, launched_at=launched_at)
@@ -82,9 +82,27 @@ def test_a_master_without_an_execution_reads_ready_only_when_launched_after_stag
 
     for actor in actors:
         report(actor)
-    status = report(legacy)
-    assert status["ready"] is ready
-    assert status["missing"] == ([] if ready else [legacy.name])
+    return report(legacy), legacy
+
+
+def test_a_master_without_an_execution_launched_after_staging_reads_ready(
+    pending: tuple[RedisStore, list[AgentRecord], str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    status, _ = _legacy_master_readiness(pending, monkeypatch, capsys, 10001)
+    assert status["ready"] is True
+    assert status["missing"] == []
+
+
+def test_a_master_without_an_execution_launched_before_staging_stays_missing(
+    pending: tuple[RedisStore, list[AgentRecord], str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    status, legacy = _legacy_master_readiness(pending, monkeypatch, capsys, 9999)
+    assert status["ready"] is False
+    assert status["missing"] == [legacy.name]
 
 
 @pytest.mark.parametrize("command", ["ledger", "swarm"])
