@@ -890,6 +890,60 @@ agentihooks swarm <swarm slug> tick-report --passes 60 | grep -E 'spawn|FencedRu
 When `runtime_spawn` takes most of a slow `spawn` row, the wrapped runtime is the slow part; when `_refusal` does,
 look at the placement reads in the table above.
 
+### Timed rows inside spawn order
+
+`_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
+`scripts.swarm.tick._spawn_order`. Every part it runs is timed through `timing.timed`, so each part has a row of its
+own nested inside that one. Once per pass it reads the capacity decision and the lane caps, the dispatched claim key
+and the claim view; then, for each lane in the caps, it runs four parts in this order:
+
+| Step row | Runs | Times |
+|---|---|---|
+| `scripts.swarm.tick._running` | Once per lane | The running agent filter: the task rows of the lane's agents that have not ended and still own their task. Its length is the lane's busy count, which offsets the rank of every task queued for the lane |
+| `scripts.swarm.tick.ready_in_order` | Once per lane | The lane's ready tasks in ledger or dispatched order |
+| `scripts.swarm.focus_budget.place` | Once per lane | Focus budget placement: which ready tasks fit the lane cap after the running ones, and which wait. Every `profile_first.placeable` call it makes runs inside this row |
+| `scripts.swarm.profile_first.placeable` | Twice per lane, from inside focus placement: once for the ready tasks outside the focus queue, once for the focused ones | Which of those tasks the runtime can place in the lane, up to the free room, and which are refused |
+
+After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue once. A pass over a swarm with two lanes
+therefore adds two `_running` rows and two `focus_budget.place` rows, so each of their counts in the report is the
+number of spawn order rows times the number of lanes.
+
+Before these rows, a pass could spend twenty one seconds in spawn order while no timed row inside it went over two
+seconds, which left the spawn p95 near thirty one seconds with no row naming where the time went. Read the rows with:
+
+```bash
+agentihooks swarm <swarm slug> tick-report --passes 60 \
+  | grep -E '_spawn_order|_running|focus_budget|placeable|ready_in_order|_ranked|claim_view'
+```
+
+On the workstation tick of `rig-grade-swarm`, at 15:04 UTC on 4 November 2026, after pull request 9673 merged, the
+command printed:
+
+```text
+scripts.swarm.focus_budget.place  138  0.054s  1.585s  0.18%
+scripts.swarm.profile_first.placeable  426  0.000s  0.311s  0.29%
+scripts.swarm.tick._ranked  71  0.002s  0.009s  0.00%
+scripts.swarm.tick._running  138  0.000s  0.001s  0.00%
+scripts.swarm.tick._spawn_order  71  3.336s  17.861s  2.26%
+scripts.swarm.tick.claim_view  71  0.050s  0.196s  0.02%
+scripts.swarm.tick.ready_in_order  213  0.111s  2.357s  0.80%
+```
+
+The columns are count, median, p95 and CPU share; see [Tick report](tick-report.md#output). Rows nest, so a part's
+time also counts in `_spawn_order`, and `placeable` time also counts in `focus_budget.place`.
+
+| What the report shows | Where the time goes |
+|---|---|
+| `_spawn_order` p95 well above the sum of its parts' p95 | Time outside the timed parts: the runtime's `begin_placement_pass`, the readiness and decision filters on the ready list, or the final focus sort. None of these has a row |
+| `focus_budget.place` close to `_spawn_order` | Placement is the slow part; compare it with `placeable`. When `placeable` is small, the time is in focus placement itself |
+| `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter reads no store, so it grows only with those |
+| `ready_in_order` or `claim_view` close to `_spawn_order` | The ledger reads behind the ready list and the claim view are the slow part |
+
+`tests/swarm/test_spawn_timing.py` holds the contract: a spawn pass times each part inside the spawn step, spawn order
+times the running filter and focus placement once per lane inside its own row, and the running filter keeps only the
+lane's agents that have not ended and still own their task, with a placeholder row for an agent whose task row is
+missing.
+
 ## One lease heartbeat per tick pass
 
 `scripts.swarm.lease.held_pass(store, slug, held)` holds the controller lease for one tick pass. `run_tick` enters it
