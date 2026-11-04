@@ -84,6 +84,22 @@
       ]
     },
     {
+      "id": "swarm-tick-declared-effects",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h4",
+      "behaviour": "The tick wrapper builds the real port tools once per pass and the engine hands each step only the ports its declared effects name: a step that calls a write operation on any other port raises UndeclaredEffect and is recorded failed, while every existing step declares no effects.",
+      "seam": "scripts.tick.engine.run_step with Context.tools narrowed by Tools.for_effects(step.effects), fed by scripts.swarm.cli.run_tick through scripts.tick.ports.tools.PASS_TOOLS",
+      "tests": [
+        "tests/tick/test_effects.py::test_a_step_sends_through_its_declared_inbox",
+        "tests/tick/test_effects.py::test_a_ledger_write_outside_the_declared_effects_goes_red",
+        "tests/tick/test_effects.py::test_a_step_without_effects_cannot_write",
+        "tests/tick/test_effects.py::test_a_context_built_inside_a_pass_carries_the_pass_tools",
+        "tests/tick/test_effects.py::test_call_and_write_steps_declare_their_effects_and_feature",
+        "tests/tick/test_effects.py::test_every_registered_step_declares_no_effects_yet",
+        "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
+      ]
+    },
+    {
       "id": "swarm-tick-declared-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",

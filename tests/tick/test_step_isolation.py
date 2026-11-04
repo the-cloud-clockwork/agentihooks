@@ -29,6 +29,8 @@ class TimedStep:
     interval_s: float = 60.0
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
     started: list[float] = field(default_factory=list)
 
     def run(self, ctx: Context) -> Result:
