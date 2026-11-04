@@ -1,5 +1,6 @@
 import json
 import subprocess
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -210,7 +211,7 @@ def test_run_listens_on_the_wake_channel_and_answers_every_swarm_on_each_wake(st
 
     monkeypatch.setattr(store.redis, "pubsub", PubSub)
     monkeypatch.setattr(quota_refresh, "answer_all", answer_all)
-    monkeypatch.setattr(quota_refresh.time, "monotonic", lambda: 1000.0)
+    monkeypatch.setattr(quota_refresh, "time", SimpleNamespace(monotonic=lambda: 0.5))
     with pytest.raises(Stop):
         quota_refresh.run(store, execute, 7, lambda: seen.append("probe"))
     assert seen == [("subscribe", quota_refresh.WAKE), "probe", ("wait", 7), ("wait", 7)]
@@ -269,14 +270,15 @@ def test_the_prober_probes_once_a_minute_between_wakes():
     assert quota_refresh.PROBE_S == 60
 
 
-def test_a_probe_reads_every_account_with_refresh_and_logs_one_line(monkeypatch, capsys):
+def test_a_probe_reads_every_account_with_refresh_and_logs_one_flushed_line(monkeypatch):
     from scripts.swarm import capacity
 
-    seen = []
+    seen, printed = [], []
     monkeypatch.setattr(capacity, "probe", lambda environ, now: seen.append((environ, now)) or ["a", "b"])
+    monkeypatch.setattr(quota_refresh, "print", lambda *args, **kwargs: printed.append((args, kwargs)), raising=False)
     assert quota_refresh.probe({"K": "v"}, 5.0) == ["quota probe read 2 accounts"]
     assert seen == [({"K": "v"}, 5.0)]
-    assert capsys.readouterr().out == "quota probe read 2 accounts\n"
+    assert printed == [(("quota probe read 2 accounts",), {"flush": True})]
 
 
 def test_the_quota_notice_names_a_reading_over_three_minutes_old():

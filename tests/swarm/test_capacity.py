@@ -2682,3 +2682,12 @@ def test_the_prober_writes_the_claude_cache_the_pass_reads(monkeypatch, tmp_path
     capacity.probe(env, 200)
     assert ran == ["claude -p a", "codex login", "codex exec"]
     assert [at for at, _ in balancer.cached_observations(environ=env)] == [200]
+
+
+def test_a_probe_refreshes_claude_and_codex_at_the_given_time(monkeypatch):
+    calls = []
+    monkeypatch.setattr(capacity, "_claude", lambda *args: calls.append(("claude", *args)) or ["c"])
+    monkeypatch.setattr(capacity, "_codex", lambda *args: calls.append(("codex", *args)) or ["x"])
+    env = {"K": "v"}
+    assert capacity.probe(env, 7.0) == ["c", "x"]
+    assert calls == [("claude", env, 7.0, True), ("codex", env, 7.0, True)]
