@@ -1562,6 +1562,15 @@ def _collect_acks(
     return actions
 
 
+def _running(agents: list[AgentRecord], rows: dict[str, Any], lane: str) -> list[dict[str, Any]]:
+    """The task rows of the lane's agents that have not ended and still own their task."""
+    return [
+        rows.get(a.task, {"id": a.task, "lane": a.lane})
+        for a in agents
+        if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
+    ]
+
+
 def _spawn_order(
     slug: str,
     config: SwarmConfig,
@@ -1582,18 +1591,14 @@ def _spawn_order(
     claims = timing.timed(claim_view, slug, store, rows, doc, dispatched)
     queue, waits = [], []
     for lane, cap in caps.items():
-        running = [
-            rows.get(a.task, {"id": a.task, "lane": a.lane})
-            for a in agents
-            if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
-        ]
+        running = timing.timed(_running, agents, rows, lane)
         busy = len(running)
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
         ready = [task for task in ready if readiness.tick_launches(config.engine, task)]
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
-        ready, refused = focus_budget.place(doc, ready, lane, cap, running, locate)
+        ready, refused = timing.timed(focus_budget.place, doc, ready, lane, cap, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
     ranked = timing.timed(_ranked, slug, store, queue, dispatched)
