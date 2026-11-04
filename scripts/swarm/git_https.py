@@ -30,10 +30,10 @@ def environment(base: Mapping[str, str]) -> dict[str, str]:
 
 
 def run(argv: list[str], runner: Runner | None = None, **options: Any) -> subprocess.CompletedProcess[str]:
-    """Run argv; a publickey refusal is run once more over https, with the settings for that call only."""
+    """Run argv; a git call refused over ssh publickey runs once more over https for that call only."""
     call = runner or subprocess.run
     done = call(argv, capture_output=True, text=True, **options)
-    if done.returncode == 0 or REFUSED not in done.stderr:
+    if done.returncode == 0 or argv[0] != "git" or REFUSED not in done.stderr:
         return done
     base = options.pop("env", None)
     return call(argv, capture_output=True, text=True, env=environment(os.environ if base is None else base), **options)

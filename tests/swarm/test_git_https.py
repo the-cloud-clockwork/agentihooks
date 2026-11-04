@@ -60,6 +60,13 @@ def test_only_a_failed_publickey_refusal_is_retried(answer: tuple[int, str, str]
     assert len(calls) == 1
 
 
+def test_a_script_that_prints_a_publickey_refusal_is_never_rerun() -> None:
+    calls, fake = answers((1, "", REFUSAL))
+    done = git_https.run(["bash", "wt.sh", "done", "w"], runner=fake)
+    assert (done.returncode, done.stderr) == (1, REFUSAL)
+    assert len(calls) == 1
+
+
 def test_a_publickey_refusal_is_retried_once_over_https_for_that_call_only() -> None:
     base = {"PATH": "/bin", "GH_TOKEN": "tok"}
     calls, fake = answers((128, "", REFUSAL), (0, "pushed\n", ""))
