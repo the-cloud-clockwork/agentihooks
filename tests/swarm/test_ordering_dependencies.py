@@ -68,9 +68,9 @@ def test_the_plan_lines_are_read_from_the_ledger_being_audited(store, monkeypatc
     from scripts.swarm_ledger import dependency_audit
 
     monkeypatch.setattr(dependency_audit.plan_read, "exact", lambda ledger, row: ledger["plan"])
-    ledger = doc()
-    ledger["plan"] = "beat faster still"
-    ledger["tasks"][1]["plan_lines"] = "1-2"
+    tasks = doc()["tasks"]
+    tasks[1]["plan_lines"] = "1-2"
+    ledger: dict[str, object] = {"tasks": tasks, "plan": "beat faster still"}
     assert ordering_dependencies.observe(store, SLUG, ledger) == [ROW]
 
 
