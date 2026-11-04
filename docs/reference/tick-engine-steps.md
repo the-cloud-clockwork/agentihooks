@@ -45,6 +45,7 @@ that update automatically when new reports arrive.
 | `spawn` | 21.812 s | 33 s | 60 s |
 | `pane evidence` | 1.047 s | 2 s | 120 s |
 | `metrics record` | 18.905 s | 29 s | 600 s |
+| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 19.981 s | 30 s | 60 s |
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
 seconds. The group runner runs each group at its site on every pass and does
@@ -107,7 +108,14 @@ by the worker are raised to the caller.
 
 Abandoning a worker does not cancel it. Its daemon thread keeps running and
 its eventual result is dropped. External writes already performed are not
-rolled back. This delivery allows the next pass to start the same step while
+rolled back. Writes the step returns for the engine to apply, cache saves
+included, are dropped with the result. A step that finishes past its budget
+before the engine abandons it is recorded late and keeps its writes. A step
+abandoned on every pass never saves its cache, so every pass repeats the work
+the cache was meant to skip.
+The [fleet red notice](fleet-red-notice.md#the-notice-step-budget) step
+did this with its fifteen second unmeasured budget until it was measured.
+This delivery allows the next pass to start the same step while
 the earlier worker remains active. Do not interpret `late` as proof that the
 underlying call stopped or that retrying it cannot overlap.
 
@@ -128,6 +136,17 @@ snapshot job, last tick, heartbeat, status publish) and every step outside the
 report module stay critical. The command runner and quota notice run before
 spawn and stay critical, because a slow step in a group before spawn would hold
 spawn until the slow deadline.
+
+The `health findings` step stores the findings it computes in the pass box
+under `found`. The `status publish` step, in the `wrapper status` group, passes
+`box.get("found")` to `cli._publish_tick_status`, and `status.status_report`
+publishes those findings instead of calling `findings` again with the same
+inputs. When the box holds no `found`, for example because the handed off
+health step has not finished when the status publish runs, `status_report`
+finds them itself as before. The status publish declares no need on the health
+step, so it never waits for it. Over ten passes on 4 November 2026 after this
+reached the workstation's dev checkout, the status publish median fell from
+10.932 seconds to 9.244 seconds (p95 12.937 seconds).
 
 In a parallel pass `run_group` takes the slow lane steps of a group, and every
 step that needs one of them, out of the group. It runs the rest eagerly and
