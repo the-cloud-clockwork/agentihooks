@@ -180,7 +180,7 @@ def launched(agent: AgentRecord) -> dict[str, Any]:
         confirmed = dict[str, Any](binding.confirm(Path(validation["report"]), agent.profile, agent.harness, account))
     except (OSError, ValueError, TypeError, KeyError):
         return validation
-    return {**validation, "home": confirmed["home"]}
+    return {**validation, "home": confirmed.get("home")}
 
 
 def assignment(agent: AgentRecord) -> dict:
