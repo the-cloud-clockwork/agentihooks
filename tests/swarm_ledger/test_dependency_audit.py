@@ -115,6 +115,24 @@ def test_a_task_without_a_title_is_named_by_its_id():
     ]
 
 
+def test_a_closed_task_listed_first_does_not_end_the_audit():
+    tasks = [
+        task("z", ["scripts/z.py"], state="done"),
+        task("a", ["scripts/x.py"]),
+        task("b", ["docs/"], ["a"]),
+    ]
+    assert [row["task"] for row in dependency_audit.audit(tasks, spec())] == ["b"]
+
+
+def test_a_skipped_dependency_does_not_end_the_dependents_other_dependencies():
+    tasks = [
+        task("a", ["docs/guide.md"]),
+        task("c", ["scripts/x.py"]),
+        task("b", ["docs/"], ["missing", "a", "c"]),
+    ]
+    assert [row["depends_on"] for row in dependency_audit.audit(tasks, spec())] == ["c"]
+
+
 def test_the_plan_text_is_the_description_and_the_exact_plan_lines(monkeypatch):
     seen = []
 

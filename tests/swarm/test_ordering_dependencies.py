@@ -59,6 +59,21 @@ def test_a_later_pass_replaces_the_recorded_list(store):
     assert ordering_dependencies.read(store, SLUG) == []
 
 
+def test_a_ledger_without_tasks_records_an_empty_list(store):
+    assert ordering_dependencies.observe(store, SLUG, {}) == []
+    assert ordering_dependencies.read(store, SLUG) == []
+
+
+def test_the_plan_lines_are_read_from_the_ledger_being_audited(store, monkeypatch):
+    from scripts.swarm_ledger import dependency_audit
+
+    monkeypatch.setattr(dependency_audit.plan_read, "exact", lambda ledger, row: ledger["plan"])
+    ledger = doc()
+    ledger["plan"] = "beat faster still"
+    ledger["tasks"][1]["plan_lines"] = "1-2"
+    assert ordering_dependencies.observe(store, SLUG, ledger) == [ROW]
+
+
 def test_nothing_recorded_reads_as_an_empty_list(store):
     assert ordering_dependencies.read(store, SLUG) == []
     assert ordering_dependencies.findings(store, SLUG) == []
