@@ -747,7 +747,8 @@ def _package_conditions_offline(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _real_daemon_hive_id() -> None:
     """Rebind the hive daemon's hive_id to the real one, which a first import under a stub may have captured."""
-    daemon = sys.modules.get("scripts.hive.daemon")
-    commands = sys.modules.get("scripts.swarm.commands")
-    if daemon is not None and commands is not None:
+    if "scripts.hive.daemon" in sys.modules:
+        from scripts.hive import daemon
+        from scripts.swarm import commands
+
         daemon.hive_id = commands.hive_id
