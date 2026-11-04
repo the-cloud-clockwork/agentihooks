@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Event, Lock, Thread, current_thread
 from threading import enumerate as threads
+from time import sleep
 
 import pytest
 
@@ -139,3 +140,34 @@ def test_a_step_waiting_on_a_handed_off_step_holds_no_pass_worker() -> None:
         "waits held",
         "waits needing",
     ]
+
+
+def test_a_slow_step_still_waits_on_a_handed_off_step_after_the_critical_lane_ends() -> None:
+    gate = Event()
+
+    def held(ctx: Context) -> Result:
+        assert gate.wait(2), "the slow step that frees the gate never got a worker"
+        return Result()
+
+    def free(ctx: Context) -> Result:
+        gate.set()
+        return Result()
+
+    def quick(ctx: Context) -> Result:
+        return Result()
+
+    later: list[tuple[engine.StepRecord, ...]] = []
+    slow = Lane("slow")
+    with pool.running(workers=2, critical_s=0.05, slow_s=4.0) as found:
+        engine.run_group(
+            "lanes one", _ctx(), (Step("lanes held", held, "lanes one", lane=slow),), finished=later.append
+        )
+        needing = Step("lanes needing", quick, "lanes two", frozenset({"lanes held"}), slow)
+        engine.run_group("lanes two", _ctx(), (needing,), finished=later.append)
+        sleep(0.2)
+        assert found.critical.expired
+        engine.run_group(
+            "lanes three", _ctx(), (Step("lanes free", free, "lanes three", lane=slow),), finished=later.append
+        )
+    outcomes = {record.name: record.outcome for row in later for record in row}
+    assert outcomes == {"lanes held": engine.OK, "lanes needing": engine.OK, "lanes free": engine.OK}

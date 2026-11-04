@@ -312,7 +312,8 @@ def _waiting(step: Step, names: set[str], found: pool.Pass) -> bool:
 
     Such a step is submitted only once that step ended, so it never holds a pass worker while it waits.
     """
-    return not found.lane(step.lane).expired and not found.settled(found.handed_of(step.needs - names))
+    earlier = found.handed_of(step.needs - names)
+    return bool(earlier) and not found.lane(step.lane).expired and not found.settled(earlier)
 
 
 def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
