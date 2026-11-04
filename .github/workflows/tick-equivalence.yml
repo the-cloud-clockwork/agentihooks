@@ -47,7 +47,15 @@ jobs:
         run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
       - name: Refuse tick steps without a feature entry and a scenario
         working-directory: head
-        run: python -m scripts.tick.catalogue check --base ../base
+        run: python -m scripts.tick.catalogue check
+      - name: Hold the unmapped tick steps to a shrink only list from the base grader copy
+        run: |
+          grader=head
+          if [[ -f base/scripts/tick/catalogue.py ]]; then
+            grader=base
+          fi
+          cd "$grader"
+          python -m scripts.tick.catalogue shrink --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"
       - name: Replay tick scenarios on base and head concurrently and check the dropped action
         env:
           TICK_EQUIVALENCE_PLANT: ${{ inputs.tick_plant && '1' || '0' }}

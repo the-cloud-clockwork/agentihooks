@@ -1,7 +1,8 @@
 """Check every registered tick step against the feature map and the scenario index.
 
 ``check`` loads ``feature-map.json`` and ``tests/swarm/tick_scenarios/steps.json``, imports every step module and
-validates the registry with that catalogue. The index's unmapped steps may only shrink against a base tree.
+validates the registry with that catalogue. ``shrink`` refuses an unmapped step a base tree's index does not hold; CI
+runs it from the base tree's copy of this module so a head cannot loosen it.
 """
 
 import argparse
@@ -49,28 +50,32 @@ def grown(base: frozenset[str] | None, head: frozenset[str]) -> list[str]:
     return [f"Unmapped step {name} is new; map it to a feature and a scenario instead" for name in sorted(head - base)]
 
 
-def check(root: Path, base: Path | None = None) -> list[str]:
-    """Every error of the registered steps against the catalogue of ``root`` and its unmapped steps against ``base``."""
+def check(root: Path) -> list[str]:
+    """Every error of the registered steps against the catalogue of ``root``."""
     for module in STEP_MODULES:
         import_module(module)
-    catalogue = load(root)
-    errors = grown(None if base is None else unmapped(base), catalogue.unmapped)
     try:
-        registry.validate(catalogue)
+        registry.validate(load(root))
     except ValueError as exc:
-        errors += str(exc).splitlines()
-    return errors
+        return str(exc).splitlines()
+    return []
+
+
+def shrink(base: Path, head: Path) -> list[str]:
+    """Every unmapped step the index of ``head`` adds to the index of ``base``."""
+    return grown(unmapped(base), unmapped(head) or frozenset())
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Check the registered steps of a tree against its catalogue and a base tree."""
+    """Check the registered steps of a tree against its catalogue, or its unmapped steps against a base tree."""
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
-    command = commands.add_parser("check")
-    command.add_argument("--root", type=Path, default=Path("."))
-    command.add_argument("--base", type=Path)
+    commands.add_parser("check").add_argument("--root", type=Path, default=Path("."))
+    shrinking = commands.add_parser("shrink")
+    shrinking.add_argument("--base", type=Path, required=True)
+    shrinking.add_argument("--head", type=Path, required=True)
     args = parser.parse_args(argv)
-    errors = check(args.root, args.base)
+    errors = check(args.root) if args.command == "check" else shrink(args.base, args.head)
     print(f"{len(errors)} tick catalogue errors")
     for error in errors:
         print(f"::error::{error}")

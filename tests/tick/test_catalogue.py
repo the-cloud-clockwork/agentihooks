@@ -157,20 +157,32 @@ def test_unmapped_reads_a_tree_or_nothing(tmp_path: Path) -> None:
 
 
 def test_the_recorded_catalogue_holds_every_registered_step() -> None:
-    assert catalogue().check(ROOT, ROOT) == []
+    assert catalogue().check(ROOT) == []
 
 
-def test_check_reports_a_grown_unmapped_list(tmp_path: Path) -> None:
-    base = tree(tmp_path, {"scenarios": {}, "unmapped": []})
-    found = catalogue().check(ROOT, base)
+def test_check_reports_a_step_the_index_drops(tmp_path: Path) -> None:
+    root = tree(tmp_path, {"scenarios": {}, "unmapped": []})
+    found = catalogue().check(root)
     assert found
-    assert all(line.endswith("map it to a feature and a scenario instead") for line in found)
+    assert all(line.endswith("feature '' is not a feature map id; no scenario lists it") for line in found)
+
+
+def test_shrink_refuses_a_grown_unmapped_list(tmp_path: Path) -> None:
+    base = tree(tmp_path / "base", {"scenarios": {}, "unmapped": ["a"]})
+    head = tree(tmp_path / "head", {"scenarios": {}, "unmapped": ["b", "a"]})
+    assert catalogue().shrink(base, head) == ["Unmapped step b is new; map it to a feature and a scenario instead"]
+    assert catalogue().shrink(head, base) == []
+    assert catalogue().shrink(tmp_path / "none", head) == []
 
 
 def test_main_prints_each_error_and_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    base = tree(tmp_path, {"scenarios": {}, "unmapped": []})
-    assert catalogue().main(["check", "--root", str(ROOT), "--base", str(base)]) == 1
-    printed = capsys.readouterr().out.splitlines()
-    assert printed[0] == f"{len(printed) - 1} tick catalogue errors"
-    assert printed[1].startswith("::error::Unmapped step ")
-    assert catalogue().main(["check", "--root", str(ROOT), "--base", str(ROOT)]) == 0
+    base = tree(tmp_path / "base", {"scenarios": {}, "unmapped": []})
+    head = tree(tmp_path / "head", {"scenarios": {}, "unmapped": ["a"]})
+    assert catalogue().main(["shrink", "--base", str(base), "--head", str(head)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "1 tick catalogue errors",
+        "::error::Unmapped step a is new; map it to a feature and a scenario instead",
+    ]
+    assert catalogue().main(["shrink", "--base", str(head), "--head", str(base)]) == 0
+    assert catalogue().main(["check", "--root", str(ROOT)]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "0 tick catalogue errors"
