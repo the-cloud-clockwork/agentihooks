@@ -186,15 +186,14 @@ def test_wait_polls_only_the_jobs_page_until_every_shard_passes():
 @pytest.mark.parametrize("name", ["unit (3.12, 1)", "unit rerun (3.12, 1)"])
 def test_a_queued_planned_job_never_extends_the_watch_deadline(name):
     queued = {"name": name, "status": "queued", "conclusion": None}
-    passed = {**queued, "status": "completed", "conclusion": "success"}
     with (
-        patch.object(ci_gate_shards, "api", side_effect=[[{"jobs": [queued]}], [{"jobs": [passed]}]]),
-        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 300]),
+        patch.object(ci_gate_shards, "api", return_value=[{"jobs": [queued]}]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 200, 300]),
         patch.object(ci_gate_shards.time, "sleep") as sleep,
-        pytest.raises(RuntimeError, match="timed out after 300 s and 1 polls"),
+        pytest.raises(RuntimeError, match="timed out after 300 s and 2 polls"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1])
-    sleep.assert_called_once_with(15)
+    assert [call.args for call in sleep.call_args_list] == [(15,), (15,)]
     assert ci_gate_shards.rate_limit.deadline == 300
 
 
@@ -203,12 +202,25 @@ def test_a_queued_job_outside_the_plan_never_extends_the_watch_deadline(name):
     queued = {"name": name, "status": "queued", "conclusion": None}
     with (
         patch.object(ci_gate_shards, "api", return_value=[{"jobs": [queued]}]),
-        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 200, 300]),
         patch.object(ci_gate_shards.time, "sleep"),
-        pytest.raises(RuntimeError, match="timed out"),
+        pytest.raises(RuntimeError, match="timed out after 300 s and 2 polls"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1])
     assert ci_gate_shards.rate_limit.deadline == 300
+
+
+def test_a_wait_that_never_polls_names_every_planned_shard():
+    with (
+        patch.object(ci_gate_shards, "api", side_effect=AssertionError("must not poll")),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 300]),
+        pytest.raises(RuntimeError) as raised,
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1])
+    assert str(raised.value) == (
+        "Shard verification timed out after 300 s and 0 polls before every expected shard succeeded;"
+        " still waiting on every planned shard"
+    )
 
 
 def test_waiting_names_each_missing_shard_by_its_unit_and_rerun_state():

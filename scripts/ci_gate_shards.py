@@ -85,7 +85,7 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], *, recover
         time.sleep(POLL_SECONDS)
     raise RuntimeError(
         f"Shard verification timed out after {WAIT_SECONDS} s and {polls} polls before every expected shard"
-        f" succeeded; still waiting on {'; '.join(pending)}"
+        f" succeeded; still waiting on {'; '.join(pending) or 'every planned shard'}"
     )
 
 
