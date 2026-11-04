@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.641 · 2026-11-04
+
+### 2026-11-04 · 07eda110e3b5 · #9734 · @nestorcolt
+
+**Time box the shared mutation stats download and plan probed shards for the lowest stage wall**
+
+This change fixes two sources of wasted CI time in test sharding. Each retried "Download the shared mutation stats" step now times out after one minute instead of three, so a stall triggers the existing retry logic quickly rather than stalling a shard. Separately, the shard planner now picks the shard count with the lowest overall stage wall time, choosing one wave of longer shards over two waves of shorter ones when a remainder can't fit a single six-minute wave, cutting replan times from 80 shards and two waves down to a much faster single-wave plan.
+
+### 2026-11-04 · 79d12f0579b7 · #9720 · @nestorcolt
+
+**Publish heartbeat, last tick and status from the pass finally on a closing lane**
+
+This change moves heartbeat, last tick, and status publishing out of the critical lane's deadline and into a dedicated closing lane that the pool's Pass starts on first use, governed by its own `closing_s` deadline. Previously an expired critical lane could drop these writes, risking the stale watcher restarting a live scheduler; now they publish reliably from `run_tick`'s finally block on full or early-ended passes, while stopped, halted, probe-failed, or raised passes stamp nothing, matching current behavior.
+
+### 2026-11-04 · dcb7e6071fe0 · #9686 · @nestorcolt
+
+**One ledger read per pass**
+
+This change cuts redundant ledger reads during each pass by making `view.document` return the already-held view instead of re-reading the ledger unless it's stale, so every full-document read within a pass shares one read. Phase change detection now works off that held pass document via a new projection module, and `promotion_watch.refresh` and `cli._phase_steps` were updated to stop issuing extra reads. Capacity keeps a separate call since threading the document through it pushed test selection over budget. Net effect: fewer ledger reads per pass, verified by mutation tests and live tick timing, with no behavior change.
+
+### 2026-11-04 · b2a4d06848d8 · #9729 · @nestorcolt
+
+**Mutation probe names the mutant status it refused instead of a budget message**
+
+When the early mutation probe shard refused a mutant result, it always blamed a budget timeout, which was misleading when the real cause was something like a mutant returning "no tests." Now the probe tallies each refused status by name and counts owned mutants still missing a result, only mentioning budget when elapsed time actually exceeded it. This makes failures self-explanatory, so an engineer seeing "no tests" in the message knows immediately what to fix instead of chasing a nonexistent timing problem.
+
 ## v2.17.637 · 2026-11-04
 
 ### 2026-11-04 · 2da5164ff443 · #9701 · @nestorcolt
