@@ -786,8 +786,9 @@ fresh = shared.rescan(deadline=Deadline.after(10.0))
 | `live_names(listing)` | Calls `listing()` on the first read, keeps that set and returns a new copy of it on every later read. |
 | `forget_names()` | Drops the held live names set, so the next `live_names` call lists again. |
 
-`table is again` holds. Build a new `PassProcesses` for each pass; one instance never refreshes by itself. Both
-operations refuse an expired deadline before reading `/proc`.
+`table is again` holds. Build a new `PassProcesses` for each pass; one instance never refreshes by itself. `scan`
+and `rescan` refuse an expired deadline before reading `/proc`; `live_names` and `forget_names` take no deadline and
+read no process table.
 
 ## One process scan per tick pass
 
@@ -828,7 +829,8 @@ def retire_all(names_and_pids):
 
 `controller.FencedRuntime.live_names` returns the names of the swarm's live agents. On the herdr runtime that listing
 walks `/proc` through `terminate_agent.sessions`, checks each managed agent's server, and adds the hive's names, and
-many tick steps read it: the reaper, resume, master launch and wake, stall and lifetime checks, and status. Inside a
+many tick steps read it: the agent checks in `scripts.swarm.tick`, resume, master launch and wake, master stall,
+lifetime and status. Inside a
 tick pass the fenced runtime lists once and every later read in the pass gets the same names.
 
 | Read | Inside a tick pass | Outside a tick pass |
