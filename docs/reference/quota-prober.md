@@ -44,7 +44,8 @@ Each round of the loop:
    ledger page asks for a refresh.
 3. Answers every pending ledger page quota request (`answer_all`).
 
-A probe can only start at the top of a round, so the real gap between probes is between 60 and about 90 seconds.
+A probe can only start at the top of a round, so probes run about 60 seconds apart, longer when a probe or a page
+answer runs past that.
 Each probe prints one line to the service log:
 
 ```text
@@ -64,7 +65,9 @@ agentihooks quota
 A healthy service logs a `quota probe read` line about once a minute. The `AGE` column of `agentihooks quota`
 shows how old each account's reading is.
 
-Restart the service after a Codex re-login or a token change, because it keeps the environment it started with:
+Restart the service after changing an `AH_CC_TOKEN_<slug>` or `AH_CX_TOKEN_<slug>` value, because it keeps the
+environment it started with. A re-login of the default Codex account needs no restart: the login check reads
+Codex's own files on every probe.
 
 ```bash
 systemctl --user restart agentihooks-quota-prober.service
@@ -115,6 +118,6 @@ The tick report's step actions and the pass log carry the line. Three minutes co
 | --- | --- | --- |
 | `quota readings are N seconds old; the quota prober has not refreshed them` in the pass actions | The prober service is stopped, failing or not installed on this host | `systemctl --user status agentihooks-quota-prober.service`; read its journal; reinstall the swarm timers when the unit is missing |
 | The prober logs `quota probe read` but the stale line stays | Every probe failed to record a reading, for example every token expired | Run `agentihooks balance` and fix the accounts it reports; see [Refreshing tokens](../pillars/load-balancing.md#refreshing-tokens) |
-| An account shows its old state after a re-login | The prober kept its old environment | Restart the prober service |
+| An account shows its old state after a token change | The prober kept its old environment | Restart the prober service |
 | Spawns land on an account that ran out a minute ago | The pass read the last probe, taken before the account ran out | Expected inside one probe gap; the next probe closes the account |
 | Ledger page quota refresh never answers | The prober service is down; it answers page requests too | Restart the service and check its journal |
