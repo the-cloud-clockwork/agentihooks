@@ -1,6 +1,10 @@
+import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from importlib import import_module
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -260,3 +264,41 @@ def test_module_registry_api() -> None:
         assert module.waves() == ((step,),)
     finally:
         module.registry = original
+
+
+PROVIDER = (
+    "from scripts.tick import registry\n"
+    "from scripts.tick.steps import CallStep\n"
+    "registry.register(CallStep('strays', 'agents', lambda tick, get: []))\n"
+)
+
+
+@pytest.fixture
+def provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    name = f"registry_provider_{uuid4().hex}"
+    (tmp_path / f"{name}.py").write_text(PROVIDER)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    module = registry()
+    monkeypatch.setattr(module, "registry", module.Registry())
+    yield name
+    sys.modules.pop(name, None)
+
+
+def test_validation_loads_a_required_module_with_the_steps_a_step_needs(provider: str) -> None:
+    module = registry()
+    module.register(SampleStep("failed panes", frozenset({"strays"})))
+    module.require(provider)
+    assert provider not in sys.modules
+    assert module.validate() is None
+    assert provider in sys.modules
+    assert [step.name for step in module.steps()] == ["failed panes", "strays"]
+
+
+def test_waves_load_a_required_module_before_ordering(provider: str) -> None:
+    module = registry()
+    needer = SampleStep("failed panes", frozenset({"strays"}))
+    module.register(needer)
+    module.require(provider)
+    first, second = module.waves()
+    assert [step.name for step in first] == ["strays"]
+    assert second == (needer,)
