@@ -1103,11 +1103,12 @@ delivered change is [pull request 9632](https://github.com/the-cloud-clockwork/a
 #### Seeing a refused write
 
 The refusal is raised before the deadline check and before the adapter is called, so the outside system is untouched.
-Inside a swarm tick pass run by `run_tick` against the swarm's Redis store, the step's timing wrapper writes a finished `swarm_tick_step` journal line with `"outcome": "error"` and
-`"error": "scripts.tick.ports.contracts.UndeclaredEffect"`, stores the same fields in `tick:steps`, adds the step to
-the pass's failed steps, and `tick:records` stores the step with outcome `failed` (see [Tick report](tick-report.md)).
-A slow lane step that ends after its group returned also prints `slow lane step <name> failed:
-scripts.tick.ports.contracts.UndeclaredEffect`. Find refusals on the workstation tick with:
+Inside a swarm tick pass run by `run_tick` against the swarm's Redis store, the step's timing wrapper writes a finished
+`swarm_tick_step` journal line with `"outcome": "error"` and `"error": "scripts.tick.ports.contracts.UndeclaredEffect"`,
+stores the same fields in `tick:steps`, adds the step to the pass's failed steps, and `tick:records` stores the step
+with outcome `failed` (see [Tick report](tick-report.md)). A slow lane step that ends after its group returned also
+prints `slow lane step <name> failed: scripts.tick.ports.contracts.UndeclaredEffect`. Find refusals on the workstation
+tick with:
 
 ```bash
 journalctl --user -t agentihooks-swarm --since "1 hour ago" | grep UndeclaredEffect
