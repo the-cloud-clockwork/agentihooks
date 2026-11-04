@@ -52,6 +52,8 @@ def test_a_sibling_folder_with_a_shared_prefix_is_not_an_overlap():
         "call scripts.swarm.status from the tick",
         "everything under scripts/hive moves",
         "import scripts.hive and reuse it",
+        "reuse scripts.hive.daemon",
+        "(status.py) grows",
     ],
 )
 def test_a_dependent_whose_plan_names_the_other_tasks_code_is_not_reported(text):
@@ -120,10 +122,33 @@ def test_the_plan_text_is_the_description_and_the_exact_plan_lines(monkeypatch):
     assert seen == [(doc, "b")]
 
 
-@pytest.mark.parametrize("error", [ValueError("no range"), FileNotFoundError("gone"), OSError("down")])
-def test_an_unreadable_plan_falls_back_to_the_description(monkeypatch, error):
+@pytest.mark.parametrize("error", [ValueError("no range"), FileNotFoundError("gone"), ConnectionError("down")])
+def test_an_unreadable_plan_reads_as_unknown(monkeypatch, error):
     def exact(doc, row):
         raise error
 
     monkeypatch.setattr(dependency_audit.plan_read, "exact", exact)
-    assert dependency_audit.plan_text({})({"id": "b", "description": "do it", "plan_lines": "3-4"}) == "do it\n"
+    assert dependency_audit.plan_text({})({"id": "b", "description": "do it", "plan_lines": "3-4"}) is None
+
+
+def test_a_dependent_whose_plan_is_unknown_is_not_reported():
+    tasks = [task("a", ["scripts/x.py"]), task("b", ["docs/"], ["a"])]
+    assert dependency_audit.audit(tasks, lambda row: None) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "touch scripts/swarm_ledger/ledger.py",
+        "import scripts.hive_beat",
+        "edit mystatus.py",
+        "edit status.pyc",
+        "edit old-status.py",
+    ],
+)
+def test_a_longer_name_that_only_contains_the_code_does_not_name_it(text):
+    tasks = [
+        task("a", ["scripts/swarm", "scripts/hive/", "lib/status.py"]),
+        task("b", ["docs/"], ["a"], description=text),
+    ]
+    assert [row["task"] for row in dependency_audit.audit(tasks, spec())] == ["b"]

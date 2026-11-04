@@ -15,22 +15,18 @@ EVIDENCE = (
 )
 
 
-def _redis(store: RedisStore) -> Any:
-    return store.redis  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-
-
 def observe(store: RedisStore, slug: str, doc: dict[str, Any]) -> list[dict[str, str]]:
     """Audit the ledger's open dependencies and save the ordering only ones for status."""
     found = dependency_audit.audit(doc.get("tasks", []), dependency_audit.plan_text(doc))
     timing.keep()
-    _redis(store).set(store.key(slug, KEY), json.dumps(found))
+    store.redis.set(store.key(slug, KEY), json.dumps(found))  # pyright: ignore[reportUnknownMemberType]
     return found
 
 
 def read(store: RedisStore, slug: str) -> list[dict[str, str]]:
     """The ordering only dependencies the last tick pass saved."""
-    raw = _redis(store).get(store.key(slug, KEY))
-    return json.loads(raw) if raw else []
+    raw = store.redis.get(store.key(slug, KEY))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return json.loads(raw) if isinstance(raw, str) else []
 
 
 def findings(store: RedisStore, slug: str) -> list[Finding]:

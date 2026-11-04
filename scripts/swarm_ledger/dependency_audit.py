@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 from pathlib import PurePosixPath
 from typing import Any
@@ -7,7 +8,7 @@ from scripts.swarm_ledger import plan_read
 SHARED = ("changelog.d",)
 
 Task = dict[str, Any]
-Spec = Callable[[Task], str]
+Spec = Callable[[Task], str | None]
 
 
 def code_paths(task: Task) -> list[str]:
@@ -31,7 +32,11 @@ def shares_code(task: Task, dependency: Task) -> bool:
 
 
 def names_code(text: str, dependency: Task) -> bool:
-    return any(name in text for path in code_paths(dependency) for name in names(path))
+    return any(
+        re.search(rf"(?<![\w-]){re.escape(name)}(?!\w)", text)
+        for path in code_paths(dependency)
+        for name in names(path)
+    )
 
 
 def audit(tasks: list[Task], spec: Spec) -> list[dict[str, str]]:
@@ -44,7 +49,8 @@ def audit(tasks: list[Task], spec: Spec) -> list[dict[str, str]]:
             dependency = rows.get(dep_id)
             if dependency is None or dependency.get("state") == "done" or shares_code(task, dependency):
                 continue
-            if not names_code(spec(task), dependency):
+            text = spec(task)
+            if text is not None and not names_code(text, dependency):
                 found.append(
                     {
                         "task": task["id"],
@@ -57,13 +63,13 @@ def audit(tasks: list[Task], spec: Spec) -> list[dict[str, str]]:
 
 
 def plan_text(doc: dict[str, Any]) -> Spec:
-    def text(task: Task) -> str:
+    def text(task: Task) -> str | None:
         lines = ""
         if task.get("plan_lines"):
             try:
                 lines = plan_read.exact(doc, task)  # pyright: ignore[reportUnknownMemberType]
-            except (ValueError, OSError):
-                lines = ""
+            except Exception:
+                return None
         return f"{task.get('description', '')}\n{lines}"
 
     return text

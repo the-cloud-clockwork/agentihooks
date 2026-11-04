@@ -87,17 +87,6 @@ def test_status_prints_the_list(store):
     assert status.status_report(store, SLUG, {"tasks": []}, found=[])["ordering_dependencies"] == [ROW]
 
 
-def test_status_raises_a_finding_per_ordering_only_dependency(store, monkeypatch):
-    monkeypatch.setattr(status.health, "findings", lambda *a, **k: [])
-    for name in OTHER_FINDINGS:
-        monkeypatch.setattr(f"scripts.swarm.status.{name}.findings", lambda *a, **k: [])
-    ordering_dependencies.observe(store, SLUG, doc())
-    found = status.findings(store, SLUG, store.config(SLUG), [], [])
-    assert [(row["id"], row["kind"]) for row in found] == [
-        ("ordering-only-dependency/b-after-a", "ordering only dependency")
-    ]
-
-
 OTHER_FINDINGS = (
     "live_binding",
     "retire_watch",
@@ -113,3 +102,26 @@ OTHER_FINDINGS = (
     "standing",
     "early_ends",
 )
+
+
+def test_status_raises_a_finding_per_ordering_only_dependency(store, monkeypatch):
+    seen = []
+
+    def ledger_findings(ledger, *rest):
+        seen.append(("health", ledger["tasks"]))
+        return []
+
+    def none(first, slug, *rest):
+        assert first in (store, store.redis)
+        seen.append(slug)
+        return []
+
+    monkeypatch.setattr(status.health, "findings", ledger_findings)
+    for name in OTHER_FINDINGS:
+        monkeypatch.setattr(f"scripts.swarm.status.{name}.findings", none)
+    ordering_dependencies.observe(store, SLUG, doc())
+    found = status.findings(store, SLUG, store.config(SLUG), [], [])
+    assert [(row["id"], row["kind"]) for row in found] == [
+        ("ordering-only-dependency/b-after-a", "ordering only dependency")
+    ]
+    assert seen == [("health", []), *[SLUG] * len(OTHER_FINDINGS)]
