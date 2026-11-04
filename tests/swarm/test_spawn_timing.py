@@ -147,6 +147,41 @@ def test_spawn_order_times_the_running_filter_and_focus_placement_once_per_lane_
     assert [row["step"] for row in rows if row["step"] in parts] == inside
 
 
+class PlacingRuntime(FakeRuntime):
+    def begin_placement_pass(self) -> None:
+        self.placing = True
+
+
+def test_spawn_order_times_every_remaining_part_inside_it(
+    store: RedisStore, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import readiness
+
+    ledger, runtime = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}]), PlacingRuntime()
+    monkeypatch.setattr(capacity, "caps", lambda decision, config: {"eng": 1, "ci": 1})
+    with timing.tick("sw"):
+        timing.timed(
+            tick_module._spawn_order, "sw", store.config("sw"), store, [], ledger.rows, ledger.state("sw"), runtime
+        )
+    rows = finished(capsys)
+    (order,) = [row for row in rows if row["step"] == timing.named(tick_module._spawn_order)]
+    parts = [
+        timing.named(PlacingRuntime.begin_placement_pass),
+        timing.named(readiness.launchable),
+        timing.named(focus_budget.ranks),
+        timing.named(focus_budget.ordered),
+    ]
+    inside = [
+        row["step"]
+        for row in rows
+        if row["step"] in parts
+        and row["started"] >= order["started"]
+        and row["started"] + row["wall_s"] <= order["started"] + order["wall_s"]
+    ]
+    assert sorted(inside) == sorted([*parts, timing.named(readiness.launchable)])
+    assert runtime.placing is True
+
+
 def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
     from scripts.hub.reconciler import legacy_agents
 

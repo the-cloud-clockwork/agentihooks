@@ -186,3 +186,10 @@ def test_ranks_match_path_focuses_without_testing_each_one_against_every_task(mo
     }
     assert focus_budget.ranks(found) == {f"t{n}": n for n in range(20)}
     assert calls == []
+
+
+def test_the_focus_sort_orders_the_queue_by_focus_rank_and_keeps_ties_in_queue_order() -> None:
+    from scripts.swarm import focus_budget
+
+    queue = [("eng", work("a")), ("ci", work("b")), ("eng", work("c")), ("eng", work("d"))]
+    assert focus_budget.ordered(queue, {"a": 1, "b": 0, "c": 1, "d": 0}) == [queue[1], queue[3], queue[0], queue[2]]
