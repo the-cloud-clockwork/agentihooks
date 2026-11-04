@@ -288,7 +288,7 @@ class TestSeparatorGuard:
 
 class TestSettingsRestore:
     @pytest.mark.feature("claude-settings-additive-merge")
-    def test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins(self, home, monkeypatch):
+    def test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins(self, home, monkeypatch, capsys):
         import argparse
 
         from scripts.targets import claude_target
@@ -326,6 +326,8 @@ class TestSettingsRestore:
 
         install.uninstall_global(argparse.Namespace(yes=True))
 
+        printed = capsys.readouterr().out
+        assert f"  {settings}  (remove agentihooks-added keys; operator keys kept)" in printed
         remaining = json.loads(settings.read_text())
         assert remaining == {
             "operatorKey": "kept",

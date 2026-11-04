@@ -138,8 +138,10 @@ def _additive_merge(existing: _JSONDict, rendered: _JSONDict, prior_record: _JSO
 
     A dict value recurses, a list value unions with existing order first and
     the rendered entries appended, and a scalar leaf is overwritten. A path
-    or list entry prior_record names but rendered no longer carries is
-    removed; a path never recorded here is never touched.
+    prior_record names but rendered no longer carries is removed; a list
+    entry prior_record names but rendered no longer carries is discarded
+    from the list it names, leaving every other entry; a path or entry
+    never recorded here is never touched.
     """
     new_leaves: set[str] = set()
     new_lists: dict[str, list[Any]] = {}
@@ -147,20 +149,25 @@ def _additive_merge(existing: _JSONDict, rendered: _JSONDict, prior_record: _JSO
 
     for dotted in set(prior_record.get("leaves", [])) - new_leaves:
         _pop_path(merged, dotted.split("."))
-    for dotted in set(prior_record.get("lists", {})) - set(new_lists):
-        _pop_path(merged, dotted.split("."))
+    prior_lists: _JSONDict = prior_record.get("lists", {})
+    for dotted in set(prior_lists) - set(new_lists):
+        _discard_list_entries(merged, dotted, prior_lists[dotted])
 
     return merged, {"leaves": sorted(new_leaves), "lists": new_lists}
+
+
+def _discard_list_entries(doc: _JSONDict, dotted: str, written: list[Any]) -> None:
+    path = dotted.split(".")
+    parent = _parent_dict(doc, path[:-1])
+    if isinstance(parent, dict) and isinstance(parent.get(path[-1]), list):
+        parent[path[-1]] = [item for item in parent[path[-1]] if item not in written]
 
 
 def _remove_recorded_settings(doc: _JSONDict, record: _JSONDict) -> None:
     for dotted in record.get("leaves", []):
         _pop_path(doc, dotted.split("."))
     for dotted, written in record.get("lists", {}).items():
-        path = dotted.split(".")
-        parent = _parent_dict(doc, path[:-1])
-        if isinstance(parent, dict) and isinstance(parent.get(path[-1]), list):
-            parent[path[-1]] = [item for item in parent[path[-1]] if item not in written]
+        _discard_list_entries(doc, dotted, written)
 
 
 def _remove_owned_hooks(doc: _JSONDict, owned: set[str]) -> None:
