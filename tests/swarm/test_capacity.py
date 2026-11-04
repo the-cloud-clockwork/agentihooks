@@ -2641,6 +2641,26 @@ def test_a_pass_read_runs_no_claude_or_codex_quota_probe(monkeypatch, tmp_path):
     assert ran == ["claude -p a", "codex login", "codex exec"]
 
 
+def test_the_quota_notice_step_runs_no_claude_or_codex_quota_probe(monkeypatch, tmp_path):
+    from scripts.swarm import quota_handoff, quota_notice
+    from scripts.swarm import runtime as module
+
+    ran = []
+    _probing(monkeypatch, ran)
+    monkeypatch.setattr(quota_handoff, "warn", lambda *args: [])
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AH_CC_TOKEN_a", "fake-a")
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    ledger = FakeLedger([{"id": "e0"}])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = module.HerdrRuntime(home=tmp_path)
+    rt.host = _roomy_host
+    quota_notice.refresh("sw", store.config("sw"), store, ledger, rt, 100_000)
+    assert capacity.read(store, "sw")["observed_at"] == 100_000
+    assert set(ran) == {"codex login"}
+
+
 def test_the_pass_reader_defaults_to_cached_readings():
     import inspect
 
