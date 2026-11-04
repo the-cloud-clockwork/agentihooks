@@ -16,11 +16,11 @@ def verify(
     attempts: int = 36,
     interval: float = 5,
     event: str = "pull_request",
-    waits: int = 240,
+    waits: int = 36,
 ) -> str:
     """Wait for the head's Tests run to list a job, polling a queued or running run up to ``waits`` times."""
     problem = "Tests run is missing for this head."
-    for poll in range(waits):
+    for poll in range(max(attempts, waits)):
         runs = _api(f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event={event}&per_page=1")[
             "workflow_runs"
         ]
@@ -34,12 +34,11 @@ def verify(
             if jobs["total_count"] > 0:
                 return ""
             problem = f"Tests run {run['id']} has no jobs."
-            if completed:
+            if completed or poll + 1 >= waits:
                 return problem
         elif poll + 1 >= attempts:
             return problem
-        if poll + 1 < waits:
-            time.sleep(interval)
+        time.sleep(interval)
     return problem
 
 
@@ -48,8 +47,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--head", required=True)
     parser.add_argument("--event", default="pull_request")
+    parser.add_argument("--waits", type=int, default=36)
     args = parser.parse_args(argv)
-    problem = verify(args.repository, args.head, event=args.event)
+    problem = verify(args.repository, args.head, event=args.event, waits=args.waits)
     if problem:
         print(f"::error::{problem}")
         return 1

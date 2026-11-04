@@ -59,7 +59,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python -m scripts.gate_protected --head "$HEAD_SHA"
-          python -m scripts.ci_tests_start --repository "$GITHUB_REPOSITORY" --head "$HEAD_SHA"
+          python -m scripts.ci_tests_start --repository "$GITHUB_REPOSITORY" --head "$HEAD_SHA" --waits 120
 
       - name: Report Gate Required on the head
         if: ${{ always() }}

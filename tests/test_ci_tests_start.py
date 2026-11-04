@@ -92,7 +92,7 @@ def test_command_reports_startup_result(monkeypatch, capsys, problem, code, outp
     calls = []
     monkeypatch.setattr(ci_tests_start, "verify", lambda *args, **kwargs: calls.append((args, kwargs)) or problem)
     assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head"]) == code
-    assert calls == [(("owner/repo", "head"), {"event": "pull_request"})]
+    assert calls == [(("owner/repo", "head"), {"event": "pull_request", "waits": 36})]
     assert capsys.readouterr().out == output
 
 
@@ -244,7 +244,21 @@ def test_a_run_that_never_lists_jobs_is_red_after_the_wait_bound(monkeypatch: py
 
 def test_default_wait_for_a_started_run_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     running = {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "queued", "conclusion": None}]}
-    module, calls, sleeps = _replay(monkeypatch, [running, {"total_count": 0}] * 240)
+    module, calls, sleeps = _replay(monkeypatch, [running, {"total_count": 0}] * 36)
     assert module.verify("owner/repo", "head") == "Tests run 11 has no jobs."
-    assert len(calls) == 480
-    assert sleeps == [5] * 239
+    assert len(calls) == 72
+    assert sleeps == [5] * 35
+
+
+def test_command_passes_the_started_run_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import ci_tests_start
+
+    calls: list[tuple[tuple[str, str], dict[str, object]]] = []
+
+    def verify(*args: str, **kwargs: object) -> str:
+        calls.append((args, kwargs))
+        return ""
+
+    monkeypatch.setattr(ci_tests_start, "verify", verify)
+    assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head", "--waits", "120"]) == 0
+    assert calls == [(("owner/repo", "head"), {"event": "pull_request", "waits": 120})]
