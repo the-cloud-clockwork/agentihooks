@@ -167,6 +167,30 @@ def assign_units(
     return {**split, **whole}, loads
 
 
+def stage_wall(count: int, loads: list[float]) -> float:
+    """Price a shard stage as its waves on the batch runner pool, each paying a job's setup and its slowest shard."""
+    return math.ceil(count / BATCH_RUNNERS) * (SHARD_SETUP_SECONDS + max(loads) / shard_workers())
+
+
+def quickest_count(
+    items: list[tuple[float, str, int | None]],
+    units: dict[str, list[float]],
+    counts: range,
+    capacity: float,
+    wall: float,
+) -> int:
+    """Return the fewest shards whose stage fits the wall, else the budget fitting count with the lowest stage wall."""
+    walls: dict[int, float] = {}
+    for count in counts:
+        loads = assign_units(items, units, count)[1]
+        if max(loads) > capacity:
+            continue
+        walls[count] = stage_wall(count, loads)
+        if walls[count] <= wall:
+            return count
+    return min(walls, key=lambda count: (walls[count], count), default=counts[-1])
+
+
 def plan_shards(
     costs: dict[str, float],
     target: float = 240,
@@ -174,6 +198,7 @@ def plan_shards(
     splits: dict[str, Any] | None = None,
     unit_costs: dict[str, list[float]] | None = None,
     budget: float = 1080,
+    wall: float | None = None,
 ) -> dict[str, Any]:
     splits = splits or {}
     units = {
@@ -190,12 +215,12 @@ def plan_shards(
     widest = max(map(len, units.values()), default=1)
     count = max(min(limit, widest), shard_count(seconds, len(items), target, limit, budget))
     ceiling = max(count, min(SHARD_CEILING, len(items)))
-    fits = (
-        count
-        for count in range(count, ceiling)
-        if max(assign_units(items, units, count)[1]) <= shard_capacity(shard_workers(), budget)
-    )
-    count = next(fits, ceiling)
+    capacity = shard_capacity(shard_workers(), budget)
+    if wall is None:
+        fits = (count for count in range(count, ceiling) if max(assign_units(items, units, count)[1]) <= capacity)
+        count = next(fits, ceiling)
+    else:
+        count = quickest_count(items, units, range(count, ceiling + 1), capacity, wall)
     assignments, loads = assign_units(items, units, count)
     return {
         "shards": count,

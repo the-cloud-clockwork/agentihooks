@@ -4245,6 +4245,7 @@ jobs:
         with: *mutation-refine-download-planned-mutation-test-selection
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         id: download-refine-shared-mutation-stats
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -4261,6 +4262,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *mutation-refine-download-the-shared-mutation-stats
@@ -4450,6 +4452,7 @@ jobs:
           python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-the-shared-mutation-stats
         continue-on-error: true
@@ -4467,6 +4470,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *mutation-download-the-shared-mutation-stats
