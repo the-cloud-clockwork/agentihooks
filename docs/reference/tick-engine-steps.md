@@ -119,23 +119,94 @@ This delivery allows the next pass to start the same step while
 the earlier worker remains active. Do not interpret `late` as proof that the
 underlying call stopped or that retrying it cannot overlap.
 
+### The abandoned write journal line
+
+Every step abandoned while still running prints one JSON line to standard
+error when it declares write domains beyond its own `actions:<name>` domain.
+The tick journal (`journalctl --user -t agentihooks-swarm`) keeps it:
+
+```json
+{"event": "swarm_tick_step_abandoned", "slug": "rig-grade-swarm", "step": "fleet red notice", "budget_s": 30.0, "writes": ["fleet red", "fleet red lifted", "fleet red listings"]}
+```
+
+| Field | Value |
+| --- | --- |
+| `event` | Always `swarm_tick_step_abandoned` |
+| `slug` | The swarm of the pass, from `scripts.swarm.timing.SWARM`; `null` when the step ran outside a recorded tick |
+| `step` | The step name |
+| `budget_s` | The step's waiting budget in seconds, from `budgets.timing_of(<step>)[0]` |
+| `writes` | Every write domain the step declares except `actions:<name>`, sorted. These are the writes the engine drops with the result |
+
+`scripts.tick.engine._abandoned` writes the line at the two places a running
+step is abandoned:
+
+- `run_step` waited the full `budget_s` and the worker has not returned. This
+  holds in a sequential pass and in a parallel pass alike.
+- In a parallel pass the step's lane deadline ran out while the step was
+  still running: 110 seconds for the critical lane, 400 for the slow lane.
+
+A step dropped before it starts, because a step it needs was dropped or its
+lane had already expired, writes no line: it never ran, so it had no writes to
+lose. A `CallStep` declares only its `actions:<name>` domain unless it is given
+more, so an abandoned call step with no extra writes also writes no line. A
+`WriteStep` such as `rank pass`, `size pass`, `grouping release` or
+`fleet red notice` always names the domains its writes would have changed.
+
+Find the lines of the last twelve hours and count them per step:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "-12h" \
+  | grep '"event": "swarm_tick_step_abandoned"' \
+  | sed 's/^[^{]*//' \
+  | python3 -c 'import sys, json, collections
+c = collections.Counter((r["slug"], r["step"], tuple(r["writes"])) for r in map(json.loads, sys.stdin))
+for (slug, step, writes), n in c.most_common(): print(n, slug, step, ", ".join(writes))'
+```
+
+A step that appears on most passes loses its writes every time, as the fleet
+red notice did before its budget was measured. Compare its wall time in
+`agentihooks swarm <slug> tick-report --passes 10` with its budget and raise
+its measured p95 in `budgets.MEASURED` through a pull request. Nothing reads
+the line back; it is evidence for an operator or an agent, not an input to
+the next pass.
+
 ### Lanes
 
 A parallel pass gives each lane its own deadline: 110 seconds for the critical
 lane, which holds every step whose lane is not `slow`, and 400 seconds for the
-slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`). These report steps
-in `scripts.tick.steps.report` declare the slow lane:
+slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`). These steps declare
+the slow lane:
 
-| Group | Slow lane steps |
-| --- | --- |
-| `wrapper events` | ledger event pass, done recheck, progress checks, waits end, merge pass, doc report, priorities sweep, health findings, findings pass |
-| `wrapper metrics` | metrics record, bottleneck status |
+| Module | Group | Slow lane steps |
+| --- | --- | --- |
+| `scripts.tick.steps.report` | `wrapper events` | ledger event pass, done recheck, progress checks, waits end, merge pass, doc report, priorities sweep, health findings, findings pass |
+| `scripts.tick.steps.report` | `wrapper metrics` | metrics record, bottleneck status |
+| `scripts.tick.steps.tasks` | `reopen passes` | [fleet red notice](fleet-red-notice.md#the-slow-lane) |
+| `scripts.tick.steps.place` | `placement notices` | lost runner, time left |
 
 The other report steps (stall watch, overrun pass, quiet pass, inbox wake,
-snapshot job, last tick, heartbeat, status publish) and every step outside the
-report module stay critical. The command runner and quota notice run before
-spawn and stay critical, because a slow step in a group before spawn would hold
-spawn until the slow deadline.
+snapshot job, last tick, heartbeat, status publish) and every other step stay
+critical. The command runner and the quota notice run before spawn and stay
+critical.
+
+Before spawn, the slow lane steps are the ones no placement step waits on, or
+whose wait is bounded by their own budget. `lost runner` and `time left` have
+no dependents, so the pass moves from `placement notices` straight to
+`placement acks` while they run. `fleet red notice` is in `PREEMPT_NEEDS`, so
+`preempt` and `spawn`, which needs `preempt`, wait for it: in a parallel pass
+they are handed off behind it and start the moment it ends, while the rest of
+`reopen passes`, all of `task passes`, the placement acks, the master seats,
+`rank pass` and `bottleneck remedy` run without waiting. The notice step's
+budget is 30 seconds, so `preempt` waits at most about 30 seconds after the
+notice step started. When the notice step is abandoned at that budget,
+`preempt` and `spawn` are dropped for the pass and recorded late, and the
+next pass places; the `spawn-due` marker then makes the `spawn due` step place
+first. `preempt` and `spawn` keep the critical deadline: when the critical
+lane expires first they are dropped and recorded late too.
+
+The move took these three steps off the critical chain. Its measured effect
+on the pass is not recorded in this document; read it with
+`agentihooks swarm <slug> tick-report --passes 10`.
 
 The `health findings` step stores the findings it computes in the pass box
 under `found`. The `status publish` step, in the `wrapper status` group, passes
@@ -160,9 +231,11 @@ tick site passes one that prints their actions, then
 with its repr. When the
 pass ends, `scripts.tick.pool.running` joins each handed off thread for at
 most the slow lane time left plus `LATER_GRACE_S` (one second), one thread
-after another, so each extra hung thread adds about one second. A handed off
-step waits only for the steps of its own group: a need on a step of another
-group is not waited for in a parallel pass. In sequential mode every step runs
+after another, so each extra hung thread adds about one second. A step that
+needs a step an earlier group handed off, and that is still running, is handed
+off too and starts once that step ends; it is dropped when that step was
+dropped or ran past its budget or lane. A need on a step of an earlier group
+that ran critical and already ended is met at once. In sequential mode every step runs
 in group order, each in its own daemon thread the caller waits on up to its
 budget, slow lane included.
 
@@ -178,6 +251,30 @@ from scripts.tick.engine import SLOW
 
 CallStep("example", "wrapper events", held(_example), lane=SLOW)
 ```
+
+A `WriteStep` (`scripts.tick.steps.tasks.WriteStep`) takes the same `lane`
+keyword and passes it to the `CallStep` it builds; without it the step runs in
+lane `tick`:
+
+```python
+from scripts.tick.engine import SLOW
+from scripts.tick.steps.tasks import WriteStep
+
+WriteStep(
+    "fleet red notice",
+    REOPENS,
+    held(_fleet_red_notice),
+    writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
+    needs=frozenset({"spawn due"}),
+    reads=pass_domains("rows"),
+    lane=SLOW,
+)
+```
+
+A slow write step's writes are applied through the group's appliers on the
+`tick-slow-lane` thread when it ends. If it is abandoned at its budget or its
+lane deadline, its writes are dropped and the
+[abandoned write journal line](#the-abandoned-write-journal-line) names them.
 
 A critical step that needs a slow step is handed off with it, so it starts only
 after that slow step ends, yet it keeps the critical deadline: if the critical
@@ -326,10 +423,10 @@ and placement steps are in bold; the others hold steps from other changes.
 | 5 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
 | 6 | `drained resume` | After the masters | sleeping, drained resume |
 | 7 | `tasks` | After `drained resume` | orphans |
-| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) |
+| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) (slow lane) |
 | 9 | **`task passes`** | After `reopen passes` | run window, verification notices, size pass, grouping release, dispatcher group |
 | 10 | `place` | First line inside the placing lock | |
-| 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner, time left |
+| 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner (slow lane), time left (slow lane) |
 | 12 | **`placement acks`** | After `placement notices`, inside the placing lock | collect acks, codex hook order |
 | 13 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
 | 14 | **`placement`** | After the master seats, inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
@@ -449,8 +546,9 @@ The delivered proof and limitations are recorded in
 | Test | What it holds |
 | --- | --- |
 | `tests/tick/test_step_isolation.py` | The 300 second predecessor scenario, completed results, abandoned wall time and daemon worker, budget calculation, undeclared timing refusal, registered timings, spawn prerequisites and longest path start bound |
-| `tests/tick/test_tasks.py` | The task passes and close steps make the old calls in order, and a held exception skips the rest and is raised at the site |
-| `tests/tick/test_place.py` | Group membership and orders; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
+| `tests/tick/test_tasks.py` | The task passes and close steps make the old calls in order, a held exception skips the rest and is raised at the site, `fleet red notice` sits in lane `slow` with every other task step in lane `tick`, and a `WriteStep` keeps the lane it is given |
+| `tests/tick/test_place.py` | Group membership and orders; `lost runner` and `time left` in lane `slow` and every other placement step in lane `tick`; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
+| `tests/tick/test_abandoned_writes.py` | A write step abandoned at its budget, and one abandoned when its lane expired, each journal one `swarm_tick_step_abandoned` line with the swarm, step, budget and sorted write domains; a call step abandoned with only its actions domain journals nothing |
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
 | `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
@@ -471,6 +569,9 @@ The delivered proof and limitations are recorded in
 | `Unordered reader and writer ... for pass:<key>` on the first pass | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
 | A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
+| `swarm_tick_step_abandoned` in the tick journal | That step was still running at its budget or its lane deadline and the writes it names were dropped. Its worker may still finish its external calls. One line now and then is a slow call; the same step on most passes means its budget is below its real wall time, see [The abandoned write journal line](#the-abandoned-write-journal-line) |
+| A step is late in `tick-report` but no `swarm_tick_step_abandoned` line exists | The step declares no write beyond its own `actions:<name>` domain, or it was dropped before it started because a step it needs was dropped or its lane had expired. Neither loses writes |
+| Preempt and spawn are late in a pass with no critical lane overrun | `fleet red notice` ran past its 30 second budget; both wait for it and are dropped when it is abandoned. Look for its `swarm_tick_step_abandoned` line in the same pass |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |

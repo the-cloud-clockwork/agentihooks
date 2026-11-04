@@ -147,6 +147,47 @@ python -c 'from scripts.tick.steps.budgets import timing_of; print(timing_of("fl
 
 It prints `(30.0, 60.0)`: a 30 second budget and a 60 second interval.
 
+## The slow lane
+
+The `fleet red notice` step is a `WriteStep` in the `reopen passes` group with
+`lane=SLOW`. In a parallel pass the group hands it off: it starts once the
+group's critical steps (dev red reopen, prerequisite reopen, promotion
+refresh, release alert) end, and runs on the slow lane thread while the pass
+goes on through `task passes` and into the placing lock. Its writes, the
+listing save included, are applied through the group's appliers when it ends,
+so a notice step that ends within its 30 second budget keeps its save on the
+slow lane exactly as it did on the critical lane.
+
+`preempt` and `spawn` still wait for it, because `fleet red notice` is in
+`scripts.tick.steps.place.PREEMPT_NEEDS` and `spawn` needs `preempt`: the
+claim hold has to be decided before an agent is placed on a red task. Every
+other step between the notice step and `preempt` runs without waiting. When
+the notice step runs past its budget it is abandoned: its writes are dropped,
+`preempt` and `spawn` are dropped and recorded late for that pass, and the
+tick journal gets one line naming the lost writes:
+
+```json
+{"event": "swarm_tick_step_abandoned", "slug": "rig-grade-swarm", "step": "fleet red notice", "budget_s": 30.0, "writes": ["fleet red", "fleet red lifted", "fleet red listings"]}
+```
+
+Find these lines:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "-6h" \
+  | grep '"event": "swarm_tick_step_abandoned"' | grep '"step": "fleet red notice"'
+```
+
+Read the lane the step runs in:
+
+```bash
+python3 -c 'from scripts.tick.steps.tasks import STEPS; print([s.lane for s in STEPS if s.name == "fleet red notice"])'
+```
+
+It prints `['slow']`. See [Lanes](tick-engine-steps.md#lanes) for how the
+pass hands off slow steps and
+[The abandoned write journal line](tick-engine-steps.md#the-abandoned-write-journal-line)
+for every field of the line.
+
 ## Usage
 
 Read the step's time over the last sixty tick passes:
@@ -217,6 +258,8 @@ The constants are code: change them through a pull request.
   step saves, each claim view pays one listing per repository.
 - The notice step budget is a checked in measurement. A live listing that
   grows past 30 seconds makes the step late again and drops its save.
+- On the slow lane the notice step still gates placement: `preempt` and
+  `spawn` wait for it, and an abandoned notice step drops both for that pass.
 
 ## Troubleshooting
 
@@ -227,6 +270,7 @@ The constants are code: change them through a pull request.
 | A task stays held after the shared checks went green | The cached listing is up to ten minutes old; delete the key to read GitHub now |
 | A task is claimed although the notice pass holds it | `GET` the cache key: `null` makes the claim filter admit every task. With no key the claim filter lists live and admits every task when that listing fails; read the tick log for `fleet red hold skipped` |
 | The cache key never appears and the notice step runs over 15 seconds | `tick-report --passes 10` shows the step's wall time; a step still running at its budget is abandoned and its save dropped. Compare that wall time with `timing_of("fleet red notice")` and raise the measured p95 in `budgets.MEASURED` through a pull request |
+| Preempt and spawn are late in a pass with no critical lane overrun | The notice step ran past its 30 second budget on the slow lane and both were dropped behind it. Its `swarm_tick_step_abandoned` line in the same pass confirms it; treat it as the step over 15 seconds above |
 | The quota notice step costs tens of seconds | Its capacity read builds the claim view; with no cache key every read lists GitHub. Check the cache key's `TTL` and the notice step as above |
 
 ## Tests
@@ -235,6 +279,8 @@ The constants are code: change them through a pull request.
 | --- | --- |
 | `tests/swarm/test_fleet_red.py` | Hold rules, the notice pass, the cache listing once per ten minutes, one cache entry per swarm and repository, a failed listing cached as none for each port error, an empty listing cached, the default reader, the notice pass reading through the cache, no notice while a failed listing is cached, the claim view judging a saved listing without listing again, the claim view admitting every task under a saved failed listing, and the notice step budget above the 16.6 second live listing |
 | `tests/tick/test_apply_fleet_red.py` | The notice step's guarded hold writes and lifted write, the applier posting while the task stays open and unclaimed, dropping a hold whose task moved or a seat claimed, forgetting a failed notice, and a claimed hold dropped then posted on the next pass |
+| `tests/tick/test_tasks.py` | The notice step in lane `slow` with its measured budget, and a `WriteStep` keeping the lane it is given |
+| `tests/tick/test_abandoned_writes.py` | A write step abandoned at its budget or at an expired lane journaling one `swarm_tick_step_abandoned` line with its sorted write domains |
 | `tests/tick/test_source_control.py` | The GitHub open listing: one page when there is no next page, and the stop after eight pages of twenty five |
 
 Related: [Tick engine steps](tick-engine-steps.md), [Tick adapters](tick-adapters.md),
