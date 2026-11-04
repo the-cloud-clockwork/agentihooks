@@ -2678,6 +2678,7 @@ def test_the_prober_writes_the_claude_cache_the_pass_reads(monkeypatch, tmp_path
     assert [(at, result.account) for at, result in balancer.cached_observations(environ=env)] == [(100, "a")]
     (row,) = [row for row in capacity.accounts(env, 130, refresh=False) if row.harness == "claude"]
     assert (row.name, row.observed_at) == ("a", 100)
+    ran.clear()
     capacity.probe(env, 200)
-    assert ran[4:] == ["claude -p a", "codex login", "codex exec"]
+    assert ran == ["claude -p a", "codex login", "codex exec"]
     assert [at for at, _ in balancer.cached_observations(environ=env)] == [200]

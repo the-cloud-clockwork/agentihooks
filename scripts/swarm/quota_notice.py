@@ -72,7 +72,7 @@ def refresh(
     from scripts.swarm import quota_handoff
 
     actions = capacity.apply(slug, config, store, ledger, runtime, now_ms)
-    decision = dict[str, Any](capacity.read(store, slug))
+    decision: dict[str, Any] = capacity.read(store, slug)
     return (
         actions
         + quota_handoff.warn(slug, store, dict(os.environ))
