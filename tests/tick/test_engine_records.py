@@ -1,6 +1,7 @@
 """Engine step records in the tick:records stream and the report columns built from them."""
 
 import json
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import Event
@@ -157,6 +158,30 @@ def test_handed_off_step_dropped_with_its_need_journals_a_skipped_slow_lane_row(
         ("slow follow", "slow", engine.SKIPPED, 0),
     ]
     assert [isinstance(row["start_s"], float) and row["start_s"] >= 0 for row in store.records()] == [True, True]
+
+
+def test_critical_lane_end_counts_from_the_pass_start_and_keeps_a_later_end() -> None:
+    store = Store()
+    with recording(store) as current:
+        current["start_ms"] = time.time() * 1000
+        engine.run_group("planted", Context(View(), Deadline.after(60.0)), [ok_step()])
+        (found,) = store.records()
+        assert 0 <= found["start_s"] < 1.0
+        assert current["critical_end_s"] == found["start_s"] + found["wall_s"] < 1.0
+        current["critical_end_s"] = 500.0
+        engine.run_group("planted", Context(View(), Deadline.after(60.0)), [ok_step()])
+    assert current["critical_end_s"] == 500.0 and len(store.records()) == 2
+
+
+def test_recording_pass_without_a_store_journals_nothing() -> None:
+    current = {"pass_id": "p1", "start_ms": 1000, "end_ms": 61000, "wall_s": 60.0, "failed_steps": []}
+    token = timing.PASS.set(current)
+    try:
+        with timing.tick("sw", None):
+            engine.run_group("planted", Context(View(), Deadline.after(60.0)), [ok_step()])
+    finally:
+        timing.PASS.reset(token)
+    assert "critical_end_s" not in current
 
 
 def ok_step() -> WriteStep:
