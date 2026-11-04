@@ -846,12 +846,12 @@ from the pass scan. The claim hash is never cached: every claim still reads it u
 `local_slots.occupancy`, read by the hive launch, the swarm probe and the spawn stall health check, takes no cache and scans each time.
 
 Before this cache, each launch walked `/proc` three times, once each through `running`, `held` and `claim`, so five
-concurrent launches in one pass ran fifteen walks at once. The tick report the swarm master took over sixty passes
-before the change, recorded in the requirements of the fenced spawn task, put the fenced runtime spawn at a median of
-10.9 seconds and a p95 of 15.4 seconds per launch.
+concurrent launches in one pass ran fifteen walks at once. `agentihooks swarm rig-grade-swarm tick-report --passes 60`, run on
+the workstation tick before pull request 9630 merged on 4 November 2026, put the fenced runtime spawn at a median of
+10.9 seconds and a p95 of 15.4 seconds per launch. Run the same command after a change to compare.
 
 A value read once holds for the whole pass. A session that starts or ends during the pass, or a host reading that
-changes, is seen by the next pass, about a minute later. The claim hash still bounds the slots taken.
+changes, is seen by the next placement pass. The claim hash still bounds the slots taken.
 
 Use the cache for another read that every launch of a pass repeats:
 
