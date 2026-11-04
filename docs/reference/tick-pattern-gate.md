@@ -170,9 +170,10 @@ its text did not change.
 ### What fails
 
 - The base has no `tests/TICK_PATTERN_ALLOWLIST.json`. Grading stops at this
-  error: no file is graded and no other error is reported, because without a
-  base list there is nothing to hold the head against. A head allowlist does
-  not stand in for the missing base one.
+  error: the head is still measured for the summary line, but no offence is
+  checked and no other error is reported, because without a base list there
+  is nothing to hold the head against. A head allowlist does not stand in for
+  the missing base one.
 - A touched file holds an offence that neither the base allowlist nor the
   base measurement holds for it. The base measurement counts so that a file
   may keep an offence it already had when the base allowlist missed it.
@@ -309,6 +310,12 @@ are green; a base without an allowlist is red; files outside the scope; the writ
 JSON format; parse failures; a stale record for an untouched file is green
 and a padded one red; a changed file keeping an offence its base held; and a
 budgets change grading the step files whose measurement it moves.
+
+The missing grader branch is workflow shell with no unit test. Pull request
+9726 proved both bootstrap removals red with planted steps on its own head in
+[run 41894163480](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41894163480):
+one removed the grader copy, the other removed the allowlist from the base
+tree.
 
 ## Troubleshooting
 
