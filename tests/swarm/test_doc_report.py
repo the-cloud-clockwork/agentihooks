@@ -3,7 +3,7 @@ import json
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import doc_report
+from scripts.swarm import doc_report, timing
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 from tests.swarm.test_cli import env, run  # noqa: F401
 
@@ -29,6 +29,7 @@ def test_configured_watchdog_receives_tick_and_done_reports(env, monkeypatch):  
     inbox = InboxStore(store.redis)
     assert len(inbox.inbox("watchdog-session")) == 1
     ledger.rows["t2"].update(state="done", pr_url=PR, doc_items=["2 Second item"])
+    store.redis.hdel(RedisStore(store.redis).key("sw", timing.STEP_RAN), "doc report")
     cli.run_tick(store, "sw", ledger=ledger, runtime=runtime)
     assert {item.task for item in inbox.inbox("watchdog-session")} == {"t1", "t2"}
     assert not inbox.inbox("wrong-address")
