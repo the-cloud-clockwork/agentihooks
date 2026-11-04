@@ -166,9 +166,8 @@ def test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group(
     run("sw", "create", "--repo", "/repo")
     seen = _spy(monkeypatch)
     cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
-    passed = {id(ctx.tools) for _, ctx in seen}
-    [tools] = {ctx.tools for _, ctx in seen if ctx.tools is not None}
-    assert len(passed) == 1
+    tools = seen[0][1].tools
+    assert all(ctx.tools is tools for _, ctx in seen)
     assert isinstance(tools, Tools)
     assert isinstance(tools.inbox, StoreInbox)
     cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
