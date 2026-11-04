@@ -18,7 +18,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, Left, PassBox, actions, budgets
+from scripts.tick.steps import PASS, CallStep, Left, PassBox, actions, budgets, pass_domains
 
 __all__ = [
     "DISPATCH",
@@ -207,17 +207,28 @@ def _master_alarm(tick: Any, get: Get) -> Any:
     return tick.skip_refused(SEAT.master_alarm.run, get("slug"), get("store"), get("runtime"), promoted)
 
 
+CONFIGURED = frozenset({"stopped branch"})
+RESUMED = frozenset({"drained resume"})
+LISTED = frozenset({"ledger state"})
+CONFIG = pass_domains("config")
+
 STEPS = (
-    CallStep("master wake", MASTERS, _held(_master_wake)),
-    CallStep("retire idle master", MASTERS, _held(_retire_idle_master)),
-    CallStep("master stall", MASTERS, _held(_master_stall)),
-    CallStep("prompt stall", MASTERS, _held(_prompt_stall)),
-    CallStep("master down", SEATS, _held(_master_down)),
-    CallStep("tick master", SEATS, _held(_tick_master)),
-    CallStep("master scale", SEATS, _held(_master_scale)),
-    CallStep("seat alarm", SEATS, _held(_seat_alarm)),
-    CallStep("dispatch seat", DISPATCH, _held(_dispatch_seat)),
-    CallStep("night watch", WATCH, _held(_night_watch)),
+    CallStep("master wake", MASTERS, _held(_master_wake), CONFIGURED | LISTED, pass_domains("config", "doc")),
+    CallStep("retire idle master", MASTERS, _held(_retire_idle_master), frozenset({"spawn due"}), pass_domains("rows")),
+    CallStep("master stall", MASTERS, _held(_master_stall), CONFIGURED, CONFIG),
+    CallStep("prompt stall", MASTERS, _held(_prompt_stall), CONFIGURED, CONFIG),
+    CallStep("master down", SEATS, _held(_master_down), RESUMED, CONFIG),
+    CallStep("tick master", SEATS, _held(_tick_master), RESUMED, pass_domains("config", "doc")),
+    CallStep("master scale", SEATS, _held(_master_scale), RESUMED, pass_domains("config", "doc")),
+    CallStep("seat alarm", SEATS, _held(_seat_alarm), LISTED, pass_domains("doc")),
+    CallStep(
+        "dispatch seat",
+        DISPATCH,
+        _held(_dispatch_seat),
+        RESUMED | {"sleeping"},
+        pass_domains("config", "doc", "sleeping"),
+    ),
+    CallStep("night watch", WATCH, _held(_night_watch), LISTED | {"sleeping"}, pass_domains("doc", "sleeping")),
     CallStep("master alarm", WATCH, _held(_master_alarm)),
 )
 
