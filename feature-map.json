@@ -114,6 +114,19 @@
       ]
     },
     {
+      "id": "swarm-tick-launch-cluster",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h11",
+      "behaviour": "The launch check and acknowledgement helpers live in the observe step module and the spawn outcome and admission helpers in the place step module; the swarm tick module re-exports each one and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.observe and scripts.tick.steps.place, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_launch_cluster.py::test_tick_reexports_the_moved_launch_name",
+        "tests/tick/steps/test_launch_cluster.py::test_the_tick_module_holds_no_launch_definition",
+        "tests/tick/steps/test_launch_cluster.py::test_moved_launch_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_launch_cluster.py::test_an_acknowledging_check_reads_the_launch_through_the_tick_master_lane"
+      ]
+    },
+    {
       "id": "swarm-tick-declared-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
