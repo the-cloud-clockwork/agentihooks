@@ -4,11 +4,12 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any, cast
 
-from scripts.swarm import dev_red, dispatcher, fleet_red, prerequisite_wait, promotion_watch, release_wait
+from scripts.swarm import dev_red, dispatcher, fleet_red, phases, prerequisite_wait, promotion_watch, release_wait
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.tick import registry, steps, view
+from scripts.tick.engine import SLOW
 from scripts.tick.ports.records import RevisionConflict
-from scripts.tick.step import Context, Domain, Result, Write
+from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actions_of, pass_domains
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     "FLEET_RED",
     "FLEET_RED_LIFTED",
     "GROUPS",
+    "PHASE_CHANGED",
+    "PHASES",
     "SIZES",
     "RAISED",
     "RANK",
@@ -30,6 +33,8 @@ __all__ = [
     "group_writer",
     "held",
     "lifted_writer",
+    "phase_writer",
+    "phase_writes",
     "raise_held",
     "rank_writer",
     "rank_writes",
@@ -47,6 +52,8 @@ SIZES = Domain("sizes")
 FLEET_RED = Domain("fleet red")
 FLEET_RED_LIFTED = Domain("fleet red lifted")
 RANK = Domain("rank")
+PHASES = Domain("phases")
+PHASE_CHANGED = "phase changed"
 TASK_PASSES = "task passes"
 CLOSE = "close"
 RAISED = "raised"
@@ -226,6 +233,47 @@ def _apply_ranking(store: Any, write: Write) -> list[str]:
             raise RevisionConflict(f"the rank write of swarm {write.key} carries no rank pass")
 
 
+def phase_writes(found: list[str | phases.PhaseChange]) -> list[str | Write]:
+    """Return a write for each phase change ``found`` names, guarded on the done state it read, and its other lines."""
+    return [
+        Write(PHASES, item.phase_id, item, expected=not item.done) if isinstance(item, phases.PhaseChange) else item
+        for item in found
+    ]
+
+
+def phase_writer(slug: str, ledger: Any, inbox: Any, store: Any, box: Any) -> Callable[[Write], list[str]]:
+    """Return the phases applier: it sets a phase checkbox only while the done state the step read still holds."""
+    return partial(_apply_phase, slug, ledger, inbox, store, box)
+
+
+def _apply_phase(slug: str, ledger: Any, inbox: Any, store: Any, box: Any, write: Write) -> list[str]:
+    """Mark the pass box and set the checkbox of ``write``, dropping it as a conflict once the phase moved.
+
+    The phase is read from the held view after the pass's latest write; without a held view the write goes through.
+    """
+    match write.value:
+        case phases.PhaseChange() as change:
+            held = view.current()
+            if held is not None and _done_of(held.read("phases", change.phase_id)) != write.expected:
+                raise RevisionConflict(f"phase {change.phase_id} changed its checkbox since the phase pass read it")
+            box[PHASE_CHANGED] = True
+            try:
+                return [phases.apply_change(inbox, store, slug, ledger, change)]
+            except LedgerRefused as exc:
+                raise RevisionConflict(f"the ledger refused the checkbox of phase {change.phase_id}") from exc
+        case _:
+            raise RevisionConflict(f"the phase write of {write.key} carries no phase change")
+
+
+def _done_of(row: object) -> bool:
+    """Return the done state of a phase row, false for a row that is missing or carries no done flag."""
+    match row:
+        case {"done": bool() as done}:
+            return done
+        case _:
+            return False
+
+
 def _run_window(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
         tick.run_window.step, get("slug"), get("config"), get("store"), get("ledger"), get("doc"), get("now_ms")
@@ -261,9 +309,10 @@ class WriteStep:
         writes: frozenset[Domain] = frozenset(),
         needs: frozenset[str] = frozenset(),
         reads: frozenset[Domain] = frozenset(),
+        lane: Lane = CallStep.lane,
     ) -> None:
-        """Take the name, group, budgets, needs and domains of the call step running ``call``."""
-        base = CallStep(name, group, call, needs, reads, writes)
+        """Take the name, group, lane, budgets, needs and domains of the call step running ``call``."""
+        base = CallStep(name, group, call, needs, reads, writes, lane)
         self.name = base.name
         self.group = base.group
         self.call = base.call
@@ -293,16 +342,22 @@ def task_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
 
 
 def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
-    """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it."""
+    """Write the task fields of ``write`` unless a field it expects moved or the ledger refuses it.
+
+    The expected fields go to the ledger as its ``if_match`` guard, so the server compares and sets them in one apply.
+    """
     expected = cast(dict[str, Any], write.expected or {})
     task = read(write.key)
     moved = [] if task is None else sorted(key for key, value in expected.items() if task.get(key, "") != value)
     if moved:
         raise RevisionConflict(f"task {write.key} changed {', '.join(moved)} since the step read it")
+    fields = cast(dict[str, Any], write.value)
     try:
-        ledger.update_task(slug, write.key, write.value)
+        held = ledger.update_task(slug, write.key, fields, if_match=expected or None)
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
+    if changed := sorted(key for key in expected if key in fields and held.get(key, "") != fields[key]):
+        raise RevisionConflict(f"task {write.key} changed {', '.join(changed)} on the ledger before the write")
 
 
 def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] | None]]:
@@ -319,6 +374,8 @@ def appliers(state: dict[str, Any]) -> dict[Domain, Callable[[Write], list[str] 
         found[FLEET_RED_LIFTED] = lifted_writer(store)
         found[fleet_red.LISTINGS] = fleet_red.saver(store)
         found[RANK] = rank_writer(store)
+        if (inbox := state.get("inbox")) is not None and (box := state.get("box")) is not None:
+            found[PHASES] = phase_writer(slug, ledger, inbox, store, box)
     return found
 
 
@@ -355,13 +412,16 @@ def group_writer(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | 
 
 
 def _release_group(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | None], write: Write) -> None:
-    """Release the group under the lead of ``write`` unless its members moved or the ledger refuses it."""
+    """Release the group under the lead of ``write`` unless its members moved or the ledger refuses it.
+
+    The expected members go to the ledger as its ``if_match`` guard, so the server compares them before it releases.
+    """
     expected = cast(dict[str, Any], write.expected or {})
     task = read(write.key)
     if task is not None and list(task.get("group_members") or []) != expected.get("group_members", []):
         raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
     try:
-        ledger.ungroup_tasks(slug, write.key)
+        ledger.ungroup_tasks(slug, write.key, if_match={"group_members": list(expected.get("group_members", []))})
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the release of the group under task {write.key}") from exc
 
@@ -425,6 +485,7 @@ STEPS = (
         writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
         needs=frozenset({"spawn due"}),
         reads=pass_domains("rows"),
+        lane=SLOW,
     ),
     CallStep("run window", TASK_PASSES, held(_run_window), RESUMED, CONFIG_DOC),
     CallStep("verification notices", TASK_PASSES, held(_verification_notices), LISTED, DOC),
