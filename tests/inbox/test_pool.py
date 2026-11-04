@@ -818,6 +818,14 @@ def test_an_item_for_a_backend_seat_whose_master_is_retiring_goes_to_the_front_d
     assert inbox.open_items(SECOND) == []
 
 
+def test_an_item_for_a_retired_backend_seat_goes_to_the_front_door_while_its_occupant_lingers(swarm, inbox):
+    _masters(swarm, 2)
+    MasterSeats(swarm.redis).retire(SLUG, SECOND, 1)
+    item = inbox.send("ledger", SECOND, "alert al-7 (sync)")
+    assert inbox.get(item.id).address == FRONT
+    assert inbox.open_items(SECOND) == []
+
+
 def test_an_item_for_a_live_backend_seat_stays_with_that_seat(swarm, inbox):
     _masters(swarm, 2)
     item = inbox.send("ledger", SECOND, "alert al-2 (sync)")

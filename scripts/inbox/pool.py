@@ -69,8 +69,10 @@ class MasterPool:
         return door, door
 
     def empty(self, slug: str, address: str) -> bool:
-        """No master is in the seat: its registry occupant has finished, retired or left it, or it has none and no
-        live master record names the seat."""
+        """No master is in the seat: the seat was retired, its registry occupant has finished, retired or left it, or
+        it has none and no live master record names the seat."""
+        if address in masters.MasterSeats(self.redis).retired(slug):
+            return True
         agents = RedisStore(self.redis).agents(slug)
         gone = {agent.name for agent in agents if agent.state in masters.GONE}
         occupant = self.inbox.seats.occupant(address).occupant
