@@ -20,6 +20,7 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
+from scripts.tick.ports.tools import PASS_TOOLS
 
 if TYPE_CHECKING:
     from scripts.hive.admission import Room
@@ -33,6 +34,7 @@ NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes r
 WORKSTATION = "the workstation hive spawns {lane} work"
 DISABLED = "the {backend} runtime is disabled on this controller"
 OVERFLOW = "the local machine takes {lane} work"
+AGENT_CHANGES = frozenset(["retire", "reap_name", "close_space", "close_pane", "resume"])
 
 
 def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
@@ -44,6 +46,7 @@ class FencedRuntime:
     def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
         self._local_slots_cache: local_slots.PassCache | None = None
+        self._names: tuple[object, set[str]] | None = None
         self.kubernetes_proof = (
             slug.startswith("proof-") and os.environ.get("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF") == slug
         )
@@ -61,7 +64,23 @@ class FencedRuntime:
         self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self.runtime, name)
+        found = getattr(self.runtime, name)
+        return partial(self._changing, found) if name in AGENT_CHANGES else found
+
+    def live_names(self) -> set[str]:
+        """The live agent names, listed once per tick pass and listed again after this runtime changes its agents."""
+        current = PASS_TOOLS.get()
+        if current is None:
+            return self.runtime.live_names()
+        if self._names is None or self._names[0] is not current:
+            self._names = (current, set(self.runtime.live_names()))
+        return set(self._names[1])
+
+    def _changing(self, operation: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            self._names = None
 
     def _mode_refusal(self) -> str:
         if self.deployment == LOCAL:
@@ -222,7 +241,7 @@ class FencedRuntime:
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         task = _master_task(lane, task)
         try:
-            return self._spawn(config, lane, name, task)
+            return self._changing(self._spawn, config, lane, name, task)
         except BaseException:
             from scripts.hive import admission
             from scripts.swarm.commands import hive_id
@@ -262,7 +281,7 @@ class FencedRuntime:
 
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        outcome = self.runtime.hive_launch.collect(request)
+        outcome = self._changing(self.runtime.hive_launch.collect, request)
         if not outcome.ok:
             raise SpawnError(outcome.detail, outcome.status)
         return outcome.value

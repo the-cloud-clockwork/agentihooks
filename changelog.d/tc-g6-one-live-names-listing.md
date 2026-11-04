@@ -1,0 +1,1 @@
+`FencedRuntime.live_names` lists the live agent names once per tick pass, keyed on the pass's `PASS_TOOLS`, and serves a copy of that listing to every later read in the pass. Its own `spawn`, `collect`, `retire`, `reap_name`, `close_space`, `close_pane` and `resume` drop the listing, so the next read lists again; outside a pass every call lists.
