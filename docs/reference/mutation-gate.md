@@ -775,8 +775,8 @@ optimistic by a third and a shard could run past its budget.
 
 Most planning steps run on the light or standard runner, whose own CPU
 limits are two and five, so they cannot read the batch quota from their
-cgroup. The one exception is the
-**Refine mutation shards from measured statistics** step inside the `stats`
+cgroup. The one exception is the **Refine mutation shards from measured
+statistics** step inside the `stats`
 job, which runs only when a single job covers the whole plan and runs on the
 batch runner itself; it reads the variable like the others. Each planning step
 passes the batch runner's quota in `MUTATION_SHARD_CPU_QUOTA`, and
