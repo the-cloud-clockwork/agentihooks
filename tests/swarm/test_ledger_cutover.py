@@ -60,7 +60,6 @@ def test_readiness_requires_each_current_worker_and_both_masters_to_authenticate
     assert authority_context.secret() is None
 
 
-@pytest.mark.parametrize(("launched_at", "ready"), [(10001, True), (9999, False)])
 def test_a_master_without_an_execution_reads_ready_only_when_launched_after_staging(
     pending: tuple[RedisStore, list[AgentRecord], str],
     monkeypatch: pytest.MonkeyPatch,
@@ -74,11 +73,16 @@ def test_a_master_without_an_execution_reads_ready_only_when_launched_after_stag
     store.put_agent(SLUG, master)
     legacy = next(agent for agent in store.agents(SLUG) if agent.seat == seat)
     assert legacy.execution_id == ""
-    for actor in [*actors, legacy]:
+
+    def report(actor: AgentRecord) -> dict:
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", actor.name)
         monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", ledger_authority.agent_token(secret, SLUG, actor.name))
         assert cli.main([SLUG, "ledger-ready"]) == 0
-        status = json.loads(capsys.readouterr().out)
+        return json.loads(capsys.readouterr().out)
+
+    for actor in actors:
+        report(actor)
+    status = report(legacy)
     assert status["ready"] is ready
     assert status["missing"] == ([] if ready else [legacy.name])
 
