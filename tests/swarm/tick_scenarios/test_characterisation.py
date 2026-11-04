@@ -163,15 +163,12 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     monkeypatch.setattr(time, "time", lambda: BASE_MS / 1000)
     monkeypatch.setattr(cli, "now_ms", lambda: BASE_MS)
-    monkeypatch.setattr(
-        timing,
-        "time",
-        Mock(
-            monotonic=Mock(return_value=0.0),
-            perf_counter=Mock(return_value=0.0),
-            time_ns=Mock(return_value=BASE_MS * 1000000),
-        ),
+    clock = Mock(
+        monotonic=Mock(return_value=0.0),
+        perf_counter=Mock(return_value=0.0),
+        time_ns=Mock(return_value=BASE_MS * 1000000),
     )
+    monkeypatch.setattr(timing, "time", clock)
     if cadence := CADENCES.get(scenario):
         monkeypatch.setenv("AGENTIHOOKS_TICK_CADENCE", cadence)
     appended = Mock()
@@ -190,7 +187,7 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
         monkeypatch.setattr(cli, "now_ms", lambda: now)
         if scenario in CADENCES or scenario == "interval":
             monkeypatch.setattr(time, "time", lambda: now / 1000)
-            timing.time.time_ns.return_value = now * 1000000
+            clock.time_ns.return_value = now * 1000000
         if entry == "tick":
             actions.append(tick_module.tick("sw", store, ledger, runtime, now_ms=now))
         else:

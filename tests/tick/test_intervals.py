@@ -43,6 +43,8 @@ class Counted:
     budget_s: float = 5.0
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
     runs: list[float] = field(default_factory=list)
 
     def run(self, ctx: Context) -> Result:
