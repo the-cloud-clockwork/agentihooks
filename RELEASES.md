@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.634 · 2026-11-04
+
+### 2026-11-04 · 00bf6cd33454 · #9673 · @nestorcolt
+
+**Time focus budget placement and the running agent filter in spawn order**
+
+Spawn order now emits a per-lane timed step row for focus budget placement (scripts.swarm.focus_budget.place) and for the running agent filter (scripts.swarm.tick._running, pulled out of the inline list in _spawn_order), nested under the existing _spawn_order row. This closes a visibility gap where a 21-second spawn order pass had no timed row above two seconds, so the tick report can now show exactly where those seconds go, supporting the push to keep every tick pass under sixty seconds. Verified with full mutation coverage and a live tick report showing both new rows with medians.
+
 ## v2.17.633 · 2026-11-04
 
 ### 2026-11-04 · 8c40a11dc829 · #9608 · @nestorcolt
