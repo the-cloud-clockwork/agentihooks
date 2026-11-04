@@ -11,7 +11,21 @@ from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, actions, actions_of, budgets, place, tasks
+from scripts.tick.steps import (
+    AGENTS,
+    PASS,
+    SWARM,
+    TASKS,
+    CallStep,
+    actions,
+    actions_of,
+    budgets,
+    pass_domains,
+    place,
+    tasks,
+)
+
+BOXED = ("config", "rows", "doc", "sleeping")
 
 pytestmark = pytest.mark.unit
 
@@ -143,12 +157,19 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
         "preempt",
         "spawn",
     ]
-    declared = {step.name: (step.needs, step.reads, step.writes - {actions_of(step.name)}) for step in place.STEPS}
-    assert declared["preempt"] == (frozenset({"reap"}), frozenset({AGENTS}), frozenset({AGENTS}))
-    assert declared["spawn"] == (budgets.SPAWN_NEEDS, frozenset({AGENTS, TASKS, SWARM}), frozenset({AGENTS, TASKS}))
-    assert declared["rank pass"] == (frozenset(), frozenset(), frozenset({tasks.RANK}))
-    assert {name: value for name, value in declared.items() if name not in {"preempt", "spawn", "rank pass"}} == {
-        name: (frozenset(), frozenset(), frozenset())
+    declared = {
+        step.name: (step.needs, step.reads - pass_domains(*BOXED), step.writes - {actions_of(step.name)})
+        for step in place.STEPS
+    }
+    assert declared["preempt"] == (place.PREEMPT_NEEDS, frozenset({AGENTS}), frozenset({AGENTS}))
+    assert declared["spawn"] == (
+        budgets.SPAWN_NEEDS,
+        frozenset({AGENTS, TASKS, SWARM}),
+        frozenset({AGENTS, TASKS, Domain("pass:rows")}),
+    )
+    assert declared["rank pass"] == (frozenset({"drained resume"}), frozenset(), frozenset({tasks.RANK}))
+    assert {name: value[1:] for name, value in declared.items() if name not in {"preempt", "spawn", "rank pass"}} == {
+        name: (frozenset(), frozenset())
         for name in (
             "quota notice",
             "lost runner",

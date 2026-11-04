@@ -100,6 +100,18 @@
       ]
     },
     {
+      "id": "swarm-tick-pass-edges",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g9",
+      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, over the twelve tick scenarios through the tick core and the fenced command entry point; a planted undeclared read or missing need is named.",
+      "seam": "scripts.tick.registry.waves and the step declarations of scripts.tick.steps, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with a recording pass box and pass views",
+      "tests": [
+        "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
+        "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
+        "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
+      ]
+    },
+    {
       "id": "swarm-tick-no-shared-rows",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",
@@ -151,6 +163,22 @@
         "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
         "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
         "tests/tick/test_early_end.py::test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once"
+      ]
+    },
+    {
+      "id": "swarm-tick-early-end-streak",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2369",
+      "behaviour": "Consecutive tick passes that end early on the same missing pass value raise one information only health finding naming the value and the count once the count reaches AGENTIHOOKS_HEALTH_EARLY_ENDS, and a full pass clears it.",
+      "seam": "scripts.swarm.status.findings after scripts.swarm.cli.run_tick passes that end on scripts.tick.steps.Left",
+      "tests": [
+        "tests/tick/test_early_end_streak.py::test_passes_ending_early_on_one_value_raise_one_finding_at_the_threshold",
+        "tests/tick/test_early_end_streak.py::test_a_full_pass_clears_the_finding",
+        "tests/tick/test_early_end_streak.py::test_an_early_end_on_another_value_restarts_the_count",
+        "tests/tick/test_early_end_streak.py::test_the_health_setting_sets_the_threshold",
+        "tests/tick/test_early_end_streak.py::test_the_threshold_takes_only_a_positive_whole_number",
+        "tests/tick/test_early_end_streak.py::test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_of_one",
+        "tests/tick/test_early_end_streak.py::test_each_early_end_of_the_report_step_counts_the_missing_value"
       ]
     },
     {

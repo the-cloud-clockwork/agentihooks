@@ -56,9 +56,11 @@ def repository(url: str) -> str:
     return found.group(1) if found else ""
 
 
-def read(repo: str, ports: Callable[[str], SourceControl] = panic.port) -> Pulls:
-    """List the repository's open pull requests with their check rollups through its source control port."""
-    return ports(repo).open_changes(deadline=Deadline.after(SECONDS))
+def read(repo: str, ports: Callable[[str], SourceControl] = panic.port, *, deadline: Deadline | None = None) -> Pulls:
+    """List the repository's open pull requests through its source control port, bounded by the caller's deadline
+    and the listing's own seconds, whichever ends first."""
+    bound = Deadline.after(SECONDS) if deadline is None else deadline.child(SECONDS)
+    return ports(repo).open_changes(deadline=bound)
 
 
 class _Saved(Protocol):

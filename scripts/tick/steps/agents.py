@@ -6,7 +6,7 @@ from typing import Any
 
 from scripts.swarm.store import AgentRecord
 from scripts.tick import registry
-from scripts.tick.steps import AGENTS, TASKS, CallStep
+from scripts.tick.steps import AGENTS, TASKS, CallStep, pass_domains
 
 tick: Any = import_module("scripts.swarm.tick")
 
@@ -142,12 +142,22 @@ def _transfers(tick: Any, get: Get) -> Any:
     return tick.skip_refused(tick.transfers.observe, get("store"), get("slug"), get("runtime").live_names())
 
 
+LISTED = frozenset({"spawn due"})
+ROWS = pass_domains("rows")
+
 STEPS = (
-    CallStep("reap", "agents", _reap_step, reads=frozenset({AGENTS}), writes=frozenset({AGENTS, TASKS})),
-    CallStep("recover outages", "agents", _recover_outages),
-    CallStep("strays", "agents", _strays_step),
+    CallStep("reap", "agents", _reap_step, LISTED, frozenset({AGENTS}) | ROWS, frozenset({AGENTS, TASKS})),
+    CallStep("recover outages", "agents", _recover_outages, LISTED, ROWS),
+    CallStep("strays", "agents", _strays_step, frozenset({"stopped branch"}), pass_domains("config")),
     CallStep("failed panes", "agents", _failed_panes),
-    CallStep("orphans", "tasks", _orphans_step, frozenset({"reap"}), frozenset({TASKS}), frozenset({TASKS})),
+    CallStep(
+        "orphans",
+        "tasks",
+        _orphans_step,
+        frozenset({"reap", "drained resume"}),
+        frozenset({TASKS}) | pass_domains("config", "rows"),
+        frozenset({TASKS}),
+    ),
     CallStep("conversations", "close", _conversations_step),
     CallStep("session models", "close", _session_models_step),
     CallStep("handoff transfers", "close", _transfers),
