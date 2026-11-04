@@ -12,12 +12,12 @@ def rename_swarm(store, slug, ledger, runtime, at):
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         raise SwarmError(f"swarm {slug}: belongs to another hive")
-    token = controller.take_tick_lock(store, slug, held, LOCK_MS)
+    token = controller.take_tick_lock(store, slug, held, LOCK_MS, "rename")
     if token is None:
         raise SwarmError(f"swarm {slug}: another tick or rename is running")
 
     def keep():
-        controller.keep_tick(store, slug, held, token, LOCK_MS)
+        controller.keep_tick(store, slug, held, token, LOCK_MS, "rename")
 
     try:
         config = store.ensure_code(slug)
@@ -55,7 +55,7 @@ def rename_swarm(store, slug, ledger, runtime, at):
                 actions.append(f"renamed space {workspace['workspace_id']} to {label}")
         return actions
     finally:
-        controller.release_tick_lock(store, slug, token)
+        controller.release_tick_lock(store, slug, token, "rename")
 
 
 def _name_session(store, slug, runtime, pane_id, new):
