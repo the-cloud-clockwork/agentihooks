@@ -171,5 +171,6 @@ def test_main_prints_each_error_and_fails(tmp_path: Path, capsys: pytest.Capture
     base = tree(tmp_path, {"scenarios": {}, "unmapped": []})
     assert catalogue().main(["check", "--root", str(ROOT), "--base", str(base)]) == 1
     printed = capsys.readouterr().out.splitlines()
-    assert printed[0].startswith("::error::Unmapped step ")
+    assert printed[0] == f"{len(printed) - 1} tick catalogue errors"
+    assert printed[1].startswith("::error::Unmapped step ")
     assert catalogue().main(["check", "--root", str(ROOT), "--base", str(ROOT)]) == 0
