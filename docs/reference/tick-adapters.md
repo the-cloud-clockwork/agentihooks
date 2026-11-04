@@ -981,8 +981,8 @@ tasks outside the focus queue, once for the focused ones. Each `placeable` row i
 `scripts.swarm.profile_first.decided` row and one `scripts.swarm.seat_spawn.placed_elsewhere` row for every task it
 checks, until the lane's free room is filled. After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue
 once, `scripts.swarm.focus_budget.ranks` reads each task's focus rank and `scripts.swarm.focus_budget.ordered` sorts
-the queue by that rank. Every part of spawn order now has a row, so the summed part estimates account for the
-`_spawn_order` estimate, short only by the bookkeeping between them.
+the queue by that rank. Every call in spawn order that reads the store, the runtime or the ledger document has a row;
+only the local queue and wait list bookkeeping between them is untimed.
 
 The code fixes the counts: `_running`, `ready_in_order` and `focus_budget.place` each run once per lane per spawn
 order, and `placeable` twice, so over a window recorded entirely after pull request 9673 merged the first three have
