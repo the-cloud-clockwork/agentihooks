@@ -466,8 +466,6 @@ def run_tick(
         return report_steps.early_end(store, slug, missing, box.left)
     finally:
         try:
-            if (current := pool.active()) is not None:
-                current.close()
             published: dict[str, Any] = PassBox()
             closing: dict[str, Any] = {
                 "store": store,

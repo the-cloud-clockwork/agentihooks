@@ -49,7 +49,8 @@ def test_the_closing_lane_starts_once_when_the_pass_closes_and_outlives_the_crit
         assert current.lane(pool.CLOSING_LANE) is closing
         assert closing is not current.critical
         assert closing is not current.slow
-        assert closing.remaining > 4.0
+        assert current.closing_s == 5.0
+        assert 0.0 < closing.remaining <= 5.0
 
 
 def test_the_closing_lane_is_unstarted_until_the_pass_closes() -> None:
