@@ -19,7 +19,7 @@ steps that moved out of the hand written pass.
 | --- | --- | --- |
 | Registry | `scripts.tick.registry` | Holds every registered step. `waves()` orders them by `order` and `needs` and refuses duplicate names, unknown dependencies, dependency cycles, a budget that is not a finite positive number, a negative interval, and two steps that write the same domain, or where one reads a domain the other writes, with no dependency between them, in one lane or across lanes |
 | Group run | `scripts.tick.engine.run_group` | Runs the steps of one group sorted by `order`. Each step runs in a daemon thread under a copied context and a child deadline of its own budget; the engine waits at most that budget. A step that raises is recorded `failed`, one that runs past its budget is recorded `late`, and neither stops the next step |
-| Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments, hands the engine the task appliers (`tasks.appliers(state)`) and returns the actions the steps wrote, then a line for each write the engine dropped, in step order. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
+| Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments, hands the engine the task appliers (`tasks.appliers(state)`) and returns, per step in order, its own actions, then the action lines its appliers returned, then a line for each of its writes the engine dropped. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
 | Write applier | `run_group(..., apply=...)` | A map of domain to a function that applies one `Write`. As each step ends, the engine passes every write of a mapped domain to its applier; an applier that raises `RevisionConflict` drops that write. See [Steps that return writes](#steps-that-return-writes) |
 | Call step | `scripts.tick.steps.CallStep` | A step that runs one call of the tick module. It reads the pass state through the view and writes the actions it returned to its own domain, `actions:<step name>` |
 | Write step | `scripts.tick.steps.tasks.WriteStep` | A call step whose call returns action lines mixed with `Write` objects. It keeps every attribute of the `CallStep` it builds and splits the returned list: the strings go to `actions:<step name>`, the writes go to the engine |
@@ -510,7 +510,7 @@ lands only while what the step read still holds the value it saw.
 | `domain` | What the write changes; selects the applier |
 | `key` | The record: a task id, a phase id, the swarm or the master name |
 | `value` | The change to make |
-| `expected` | The guard: what the step read. Defaults to `None`, which the size and group appliers read as no fields to compare |
+| `expected` | The guard: what the step read. Defaults to `None`, which the size applier reads as no fields to compare and the group applier as an expected empty member list |
 
 These steps return writes. Every domain constant except `fleet_red.LISTINGS`
 lives in `scripts.tick.steps.tasks`.
@@ -521,7 +521,7 @@ lives in `scripts.tick.steps.tasks`.
 | grouping release (`task passes`) | `groups` | lead task id | `{"group_members": [...]}`: the lead still holds the members the step read | `group_writer`: `ledger.ungroup_tasks` with the guard as `if_match` |
 | fleet red notice (`reopen passes`, slow lane) | `fleet red` | task id | `{"state": "open", "pr_url": url, "claimed_by": ""}` | `fleet_red_writer`: posts the hold notice only while no seat claimed the task |
 | fleet red notice | `fleet red lifted` | swarm | none | `lifted_writer`: deletes the hold marks the write names, one per line |
-| fleet red notice | `fleet red listings` | listing key | none | `fleet_red.saver`: saves the open pull request listing |
+| fleet red notice | `fleet red listings` | listing key | no listing saved under the key (Redis `nx`) | `fleet_red.saver`: saves the open pull request listing for ten minutes; a Redis timeout also drops it |
 | rank pass (`placement`) | `rank` | swarm | the saved claim queue heads the pass read | `rank_writer`: `dispatcher.apply_ranking`; a pass that lands no heads only proposes ranks and takes no guard |
 | planning and phase pass (`wrapper phases`) | `phases` | phase id | `not change.done`: the done state the step read | `phase_writer`: marks the pass box and sets the checkbox through `phases.apply_change` |
 | master stall (`masters`) | `master stall` | master name | the master name the step read | `stall_writer`: `master_stall.apply_stall` while that master is still the live master |
@@ -531,7 +531,8 @@ yields each unsized open task's fields (at most `PER_TICK`, five, per pass);
 `grouping.releases(slug, store, doc)` returns each stopped lead with the reason
 and its members; `fleet_red.holds` returns new holds, lifted marks and listing
 saves; `dispatcher.rank_decision` returns one `Ranking`;
-`phases.phase_changes` returns `PhaseChange` items; `master_stall.stalls`
+`phases.phase_changes` returns `PhaseChange` items, or one skip line when the
+hierarchy read fails; `master_stall.stalls`
 returns `Stall` items.
 
 ### How the engine applies writes
@@ -549,11 +550,14 @@ returns `Stall` items.
    the ledger server as `if_match`, which compares the same fields in the same
    apply: the server refuses an ungroup whose members moved, and leaves a task
    update unapplied when a guarded field moved. The size applier then checks
-   the task the server returned and treats a guarded field that does not hold the
-   new value as moved.
-4. A guarded value that moved, a refused ledger call (`LedgerRefused`), a
-   fleet red task a seat claimed since the read, a failed fleet red notice, or a write whose value is not the expected type
-   raises `RevisionConflict`. A failed fleet red notice first deletes its hold
+   the task the server returned and treats a guarded field the update also
+   writes, which does not hold the written value, as moved.
+4. Each of these raises `RevisionConflict`: a guarded value that moved, a
+   ledger call the task, group or phase applier finds refused
+   (`LedgerRefused`), a fleet red task a seat claimed since the read
+   (`_post_hold`), a failed fleet red notice, a listing another pass already
+   saved, or a write whose value is not the expected type. The rank and stall
+   appliers do not catch `LedgerRefused`. A failed fleet red notice first deletes its hold
    mark, so the next pass posts it again.
 5. The engine catches `RevisionConflict`, adds the write to the step record's
    `dropped` and the reason to `conflicts`, and goes on with the next write.
@@ -621,7 +625,9 @@ stall of a master another master replaced.
 
 Return action strings and `Write` objects from the call and register it as a
 `WriteStep` that declares its write domain, so `waves()` can order it against
-other writers of that domain:
+other writers of that domain. `waves()` refuses two writers of one domain with
+no dependency between them, so the example, which writes `SIZES` beside the
+size pass, needs it:
 
 ```python
 from collections.abc import Callable
@@ -639,7 +645,9 @@ def _example(tick: Any, get: Callable[[str], Any]) -> list[str | Write]:
     ]
 
 
-registry.register(WriteStep("example", TASK_PASSES, held(_example), writes=frozenset({SIZES})))
+registry.register(
+    WriteStep("example", TASK_PASSES, held(_example), writes=frozenset({SIZES}), needs=frozenset({"size pass"}))
+)
 ```
 
 A write to a domain with no applier at the site is neither applied nor dropped:
@@ -651,13 +659,15 @@ as described above.
 
 - The held view compare sees only changes up to the view's latest refresh.
   Without a held view the task, group, fleet red and phase appliers skip that
-  compare; a task the view lacks compares as empty, and a phase it lacks as not done. The size and group writes
-  are still compared on the server through `if_match`; the fleet red, phase,
+  compare; a task the view lacks compares as empty, and a phase it lacks as
+  not done. The size and group writes are still compared on the server through `if_match`; the fleet red, phase,
   rank and stall writes are not.
 - A dropped write waits a whole pass for its recompute.
-- `LedgerRefused` in a write step's applier is a dropped write with a
-  `dropped write` line, where the old in-step calls produced a
+- `LedgerRefused` in the task, group, phase or fleet red applier is a dropped
+  write with a `dropped write` line, where the old in-step calls produced a
   `skipped ...: the ledger refused its write` line through `skip_refused`.
+- `LedgerRefused` in the rank or stall applier is not caught by the engine and
+  leaves the group run, like any other applier exception.
 
 ## Exceptions
 
