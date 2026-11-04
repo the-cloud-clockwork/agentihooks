@@ -199,7 +199,7 @@ def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         tick_pattern.main([])
     assert raised.value.code == 2
-    assert capsys.readouterr().err.splitlines()[-1].endswith(": error: grading needs --base")
+    assert capsys.readouterr().err.splitlines()[-1].endswith(": error: one of the arguments --base --write is required")
 
 
 def test_grading_defaults_the_head_to_the_working_folder(

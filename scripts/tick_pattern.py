@@ -173,24 +173,22 @@ def grade(
 def main(argv: list[str] | None = None) -> int:
     """Grade the head against the base, or record the head's allowlist with --write."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base")
-    parser.add_argument("--head", default=".")
-    parser.add_argument("--write", action="store_true")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--base")
+    mode.add_argument("--write", action="store_true")
+    parser.add_argument("--head", type=Path, default=Path("."))
     args = parser.parse_args(argv)
-    if not (args.write or args.base):
-        parser.error("grading needs --base")
-    tree = Path(args.head)
     try:
         if args.write:
-            write(tree)
+            write(args.head)
             return 0
-        head, recorded, base = measure(tree), load(tree), load(Path(args.base))
+        head, recorded, base = measure(args.head), load(args.head), load(Path(args.base))
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
     errors = grade(base, head, recorded)
-    held = sum(len(offences) for offences in head.values())
-    allowed = sum(len(offences) for offences in (base or {}).values())
+    held = sum(map(len, head.values()))
+    allowed = sum(map(len, (base or {}).values()))
     print(f"{held} tick pattern offences in {len(head)} files, {allowed} on the base allowlist, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
