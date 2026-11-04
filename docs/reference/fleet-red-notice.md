@@ -108,13 +108,15 @@ which made the quota notice step the slowest step of the pass.
 
 ## The notice step budget
 
-The engine waits on a step for its budget and drops the result of a late
-step, the writes it returns included (see
+The engine waits on a step for its budget. A step still running when its
+budget runs out is abandoned, and its result, the writes it returns included,
+is dropped (see
 [When a step exceeds its budget](tick-engine-steps.md#when-a-step-exceeds-its-budget)).
-The listing save is one of those writes. With no measured timing the
+A step that finishes just past its budget is recorded late but keeps its
+writes. The listing save is one of those writes. With no measured timing the
 `fleet red notice` step had the fifteen second unmeasured budget, while one
-live listing took about 16.5 seconds, so every pass was late, the save never
-landed and every pass listed again.
+live listing took about 16.6 seconds, so the step was abandoned on every pass
+that listed, the save never landed and every pass listed again.
 
 `budgets.MEASURED["fleet red notice"]` now carries the step's measured p95 of
 19.981 seconds, from `tick-report --passes 10` on 3 November 2026 at 18:30
@@ -220,7 +222,7 @@ The constants are code: change them through a pull request.
 | No notice although most pull requests share a red check | `GET` the cache key. `null` means the last listing failed: delete the key to list again, or wait out the ten minutes. Otherwise confirm at least three other pull requests have a check that finished in the last six hours |
 | A task stays held after the shared checks went green | The cached listing is up to ten minutes old; delete the key to read GitHub now |
 | A task is claimed although the notice pass holds it | `GET` the cache key: `null` makes the claim filter admit every task. With no key the claim filter lists live and admits every task when that listing fails; read the tick log for `fleet red hold skipped` |
-| The cache key never appears and the notice step runs over 15 seconds | Read the step's record in the tick journal: `late true` means the result and its save were dropped. Compare its wall time with `timing_of("fleet red notice")` and raise the measured p95 in `budgets.MEASURED` through a pull request |
+| The cache key never appears and the notice step runs over 15 seconds | `tick-report --passes 10` shows the step's wall time; a step still running at its budget is abandoned and its save dropped. Compare that wall time with `timing_of("fleet red notice")` and raise the measured p95 in `budgets.MEASURED` through a pull request |
 | The quota notice step costs tens of seconds | Its capacity read builds the claim view; with no cache key every read lists GitHub. Check the cache key's `TTL` and the notice step as above |
 
 ## Tests
