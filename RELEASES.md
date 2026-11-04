@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.627 · 2026-11-04
+
+### 2026-11-04 · 2bf6333b3e29 · #9622 · @nestorcolt
+
+**Document the saved fleet red listing, the notice step budget and the status publish findings reuse**
+
+This change updates the documentation to reflect behavior already shipped in the scale proof work: the tick claim filter now reads the saved fleet red listing via `fleet_red.saved_reader`, the notice step keeps its listing save within a measured thirty second budget, late steps drop their returned writes and cache saves, and status publish reuses health findings the pass already computed. It adds usage, limits, troubleshooting, and test coverage notes, plus reference index entries, so operators have an accurate record of what fifteen-agent scale proof actually does and why it stays fast.
+
 ## v2.17.626 · 2026-11-04
 
 ### 2026-11-04 · d073f36132e1 · #9628 · @nestorcolt
