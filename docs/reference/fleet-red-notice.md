@@ -55,9 +55,13 @@ held again later. The tick action line reads
 ## The open pull request listing
 
 Both sites list open pull requests through the repository's source control
-port, `SourceControl.open_changes`, with a 60 second deadline (`SECONDS`). The
-GitHub adapter asks GraphQL for open pull requests with each head commit's
-check rollup:
+port, `SourceControl.open_changes`, with a 60 second deadline (`SECONDS`).
+`fleet_red.read(repo, ports, deadline=...)` takes an optional caller deadline
+and passes `deadline.child(SECONDS)`, so the listing ends at the caller's
+expiry or after 60 seconds, whichever comes first. Without a caller deadline
+it passes a fresh `Deadline.after(SECONDS)`. The GitHub adapter checks the
+deadline before its first GraphQL call and asks for open pull requests with
+each head commit's check rollup:
 
 | Setting | Value |
 | --- | --- |
