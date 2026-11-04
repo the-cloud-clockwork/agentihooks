@@ -56,8 +56,9 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
    branch at that first push, in every repo; never wait for the branch
    mutation preflight before opening it. Read the test red in CI on the
    pull request. Then commit the least code to green, push and read it green
-   in CI; the pull request's own mutation checks gate the merge. Lint, format and size may run locally; tests and mutation never run
-   on this machine unless the user set `AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true`.
+   in CI; the pull request's own mutation checks gate the merge. Lint,
+   format and size may run locally; tests and mutation never run on this
+   machine unless the user set `AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true`.
 3. Record the pull request with `agentihooks swarm <slug> pr <url>` and mark
    it ready once its checks are green.
 4. Record landed work in plain words:
