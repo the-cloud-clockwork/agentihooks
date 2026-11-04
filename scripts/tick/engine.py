@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, Future, wait
 from contextvars import Context as ContextCopy
 from contextvars import copy_context
 from dataclasses import dataclass, replace
@@ -324,7 +324,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
     pending = list(ordered)
     running: dict[Future[StepRecord], tuple[Step, float, Deadline]] = {}
     offsets: dict[str, float | None] = {}
-    executor = ThreadPoolExecutor(max_workers=found.workers)
+    submitted: list[Future[StepRecord]] = []
     try:
         while pending or running:
             ready = [step for step in pending if step.needs & names <= records.keys()]
@@ -340,7 +340,8 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                 else:
                     earlier = found.handed_of(step.needs - names)
                     lane_ctx = _lane_context(step, ctx, found)
-                    future = executor.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
+                    future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
+                    submitted.append(future)
                     running[future] = (step, clock(), lane)
             if not running:
                 if not ready:
@@ -359,7 +360,8 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                     left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
                     records[step.name] = _ended(found, left)
     finally:
-        executor.shutdown(False, cancel_futures=True)
+        for future in submitted:
+            future.cancel()
     return tuple(_journal(step, records[step.name], offsets[step.name]) for step in ordered)
 
 

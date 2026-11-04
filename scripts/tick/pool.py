@@ -53,6 +53,8 @@ class Pass:
     critical: Deadline
     slow: Deadline
     slots: BoundedSemaphore
+    steps: ThreadPoolExecutor
+    fans: ThreadPoolExecutor
     later: list[Thread] = field(default_factory=list[Thread], compare=False)
     handed: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
     gone: set[str] = field(default_factory=set[str], compare=False)
@@ -153,7 +155,15 @@ def running(
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
     if workers < 1:
         raise ValueError("a pass needs at least one worker")
-    current = Pass(mode, workers, Deadline.after(critical_s), Deadline.after(slow_s), BoundedSemaphore(workers))
+    current = Pass(
+        mode,
+        workers,
+        Deadline.after(critical_s),
+        Deadline.after(slow_s),
+        BoundedSemaphore(workers),
+        ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-step"),
+        ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-fan-out"),
+    )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
     try:
@@ -161,6 +171,8 @@ def running(
     finally:
         for thread in current.later:
             thread.join(max(0.0, current.slow.remaining) + LATER_GRACE_S)
+        current.steps.shutdown(wait=False, cancel_futures=True)
+        current.fans.shutdown(wait=False, cancel_futures=True)
         _ACTIVE.reset(token)
         if beat is not None:
             beat.close()
@@ -174,13 +186,13 @@ def fan_out(action: Callable[[Item], Found], items: Iterable[Item]) -> list[Foun
     found, values = active(), list(items)
     if found is None or not found.parallel or len(values) < 2 or getattr(_FANNED, "inside", False):
         return [action(value) for value in values]
-    executor = ThreadPoolExecutor(max_workers=min(found.workers, len(values)), thread_name_prefix="tick-fan-out")
+    futures = [found.fans.submit(copy_context().run, _slotted, found.slots, action, value) for value in values]
     try:
-        futures = [executor.submit(copy_context().run, _slotted, found.slots, action, value) for value in values]
         wait(futures)
         return [future.result() for future in futures]
     finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+        for future in futures:
+            future.cancel()
 
 
 _FANNED = local()
