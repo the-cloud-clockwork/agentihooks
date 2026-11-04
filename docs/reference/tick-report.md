@@ -31,6 +31,10 @@ reap  60  9.112s  14.511s  21.40%
 ...
 Lane slow  550 steps  64.20% CPU share
 Lane tick  2940 steps  35.80% CPU share
+Critical lane end p95: 38.402s
+Step  Records  Late share  Abandoned  Held  Skipped  Dropped
+fleet red notice  60  8.33%  5  0  0  15
+...
 CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.
 ```
 
@@ -77,12 +81,31 @@ Without `--passes` the report reads 100 passes.
 Until the second reading is taken lane processes are not built: both lanes run as threads of one tick process (see
 [Lanes](tick-engine-steps.md#lanes)).
 
+## Outcome columns
+
+After the lane lines the report prints the critical lane end and one outcome row per step name, sorted by name, from
+the `tick:records` stream of the same passes:
+
+| Column | Meaning |
+|---|---|
+| Critical lane end p95 | The 95th percentile over the window of each pass's latest step end outside the slow lane, in seconds from the pass start: start offset plus wall time. |
+| Records | Engine step records of that step in the window, one per run, held or skipped run. |
+| Late share | Percent of those records whose outcome is `late`: the step ran past its budget or was left running. |
+| Abandoned | Runs still going at their budget or lane deadline; the engine left them running and dropped their result. |
+| Held | Runs refused because the step's earlier run for the same swarm was still alive. |
+| Skipped | Steps dropped before they started, because their lane deadline had passed or a step they need was dropped. |
+| Dropped | Writes that never applied: compare and set conflicts of finished runs, plus every write domain an abandoned run declares. |
+
+Only steps the tick engine runs write these records; a window without them prints the header alone and
+`Critical lane end p95: n/a`.
+
 ## Where the numbers come from
 
 | Stream | One record per | Fields the report reads | Kept |
 |---|---|---|---|
 | `tick:passes` | Tick pass | `pass_id`, `start_ms`, `end_ms`, `wall_s` | Newest 50,000 |
 | `tick:steps` | Finished step | `pass_id`, `step`, `wall_s`, `own_cpu_s`, `reaped_child_cpu_s` | Newest 50,000 |
+| `tick:records` | Engine step record | `pass_id`, `step`, `lane`, `outcome`, `wall_s`, `budget_s`, `start_s`, `abandoned`, `held`, `skipped`, `dropped`, `conflicts` | Newest 50,000 |
 
 Both streams sit under the swarm's own Redis key prefix. A pass record also carries the active agent count, the
 steps that failed and its outcome (`success`, `stopped` or `error`). The report takes the newest passes, then only the

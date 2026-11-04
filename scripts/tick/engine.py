@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextvars import Context as ContextCopy
@@ -56,6 +57,7 @@ class StepRecord:
     result: Result | None = None
     abandoned: bool = False
     held: bool = False
+    skipped: bool = False
     dropped: tuple[Write, ...] = ()
     conflicts: tuple[str, ...] = ()
     applied: tuple[str, ...] = ()
@@ -143,7 +145,7 @@ def run_group(
     ordered = group_steps(name, steps)
     found = pool.active()
     if found is None or not found.parallel:
-        return tuple(_applied(run_step(step, ctx), apply or {}) for step in ordered)
+        return tuple(_sequential(step, ctx, apply or {}) for step in ordered)
     later = _slow_lane(ordered)
     names = {step.name for step in later}
     records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {})
@@ -177,9 +179,56 @@ def _run_later(
         if step.needs & gone:
             gone.add(step.name)
     ran = {record.name: record for record in _eager(tuple(s for s in later if s.name not in gone), ctx, found, apply)}
-    records = tuple(ran.get(step.name, StepRecord(step.name, 0.0, step.budget_s, abandoned=True)) for step in later)
+    records = tuple(ran.get(step.name) or _skipped(step, _offset()) for step in later)
     if finished is not None:
         finished(records)
+
+
+def _sequential(step: Step, ctx: Context, apply: Appliers) -> StepRecord:
+    """Run ``step`` alone, apply its writes and journal its record with its start offset in the pass."""
+    offset = _offset()
+    return _journal(step, _applied(run_step(step, ctx), apply), offset)
+
+
+def _skipped(step: Step, offset: float | None) -> StepRecord:
+    """Return and journal the record of ``step`` dropped before it started."""
+    return _journal(step, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True), offset)
+
+
+def _offset() -> float | None:
+    """Return the seconds since the recording pass started, or None outside a recording pass."""
+    current = timing.PASS.get()
+    return None if current is None else time.time() - current["start_ms"] / 1000
+
+
+def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord:
+    """Append one ``tick:records`` row for ``record`` while a pass is recording, and return the record unchanged.
+
+    An abandoned step that started counts every write domain it declares as dropped, since its result never applies.
+    """
+    store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
+    if store is None or slug is None or current is None:
+        return record
+    if record.result is not None:
+        dropped = len(record.dropped)
+    else:
+        dropped = len(step.writes) if record.abandoned and not record.skipped else 0
+    row = {
+        "pass_id": current["pass_id"],
+        "step": record.name,
+        "lane": step.lane,
+        "outcome": record.outcome,
+        "wall_s": record.wall_s,
+        "budget_s": record.budget_s,
+        "start_s": offset,
+        "abandoned": record.abandoned and not record.skipped,
+        "held": record.held,
+        "skipped": record.skipped,
+        "dropped": dropped,
+        "conflicts": len(record.conflicts),
+    }
+    timing.append_record(store, slug, "tick:records", row)
+    return record
 
 
 def _applied(record: StepRecord, apply: Appliers) -> StepRecord:
@@ -226,6 +275,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
     dropped: set[str] = set()
     pending = list(ordered)
     running: dict[Future[StepRecord], tuple[Step, float, Deadline]] = {}
+    offsets: dict[str, float | None] = {}
     executor = ThreadPoolExecutor(max_workers=found.workers)
     try:
         while pending or running:
@@ -233,9 +283,10 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
             for step in ready:
                 pending.remove(step)
                 lane = found.lane(step.lane)
+                offsets[step.name] = _offset()
                 if step.needs & dropped or lane.expired:
                     dropped.add(step.name)
-                    records[step.name] = StepRecord(step.name, 0.0, step.budget_s, abandoned=True)
+                    records[step.name] = StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
                 else:
                     future = executor.submit(copy_context().run, run_step, step, _lane_context(step, ctx, found))
                     running[future] = (step, clock(), lane)
@@ -255,7 +306,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                     records[step.name] = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
     finally:
         executor.shutdown(False, cancel_futures=True)
-    return tuple(records[step.name] for step in ordered)
+    return tuple(_journal(step, records[step.name], offsets[step.name]) for step in ordered)
 
 
 PASS_BUDGET_HOLD = "tick:budget-hold"
