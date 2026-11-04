@@ -1,0 +1,6 @@
+{
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x__pop_path:0631f94fa7124076e3837e6876231d8da7093a01a6926d79fd81a6359458899b": {
+    "reader": "engineer",
+    "reason": "\"break\" becomes \"return\" inside the prune loop, which is the last statement of the function with nothing after it. Breaking out of the loop and returning bare both end the function the same way, implicitly returning None; no input distinguishes them."
+  }
+}

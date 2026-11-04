@@ -1,5 +1,5 @@
 {
-  "scripts/targets/claude_target.py:scripts.targets.claude_target.x__remove_owned_plugins__mutmut_13:0f7bb872f37b4646474f36d50027b8136b1fc97d281e640259fd199458108454": {
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x__remove_owned_plugins:0f7bb872f37b4646474f36d50027b8136b1fc97d281e640259fd199458108454": {
     "reader": "engineer",
     "reason": "doc.pop(\"enabledPlugins\", None) becomes doc.pop(\"enabledPlugins\"). This line runs only inside \"if not plugins:\", reached only when plugins is the same dict object doc.get(\"enabledPlugins\") returned, proven a dict earlier in the function and never reassigned, so the key \"enabledPlugins\" is always present in doc at this point. Both forms pop the same key and return the same (unused) value; the default is never exercised and the final doc is identical for every input."
   }

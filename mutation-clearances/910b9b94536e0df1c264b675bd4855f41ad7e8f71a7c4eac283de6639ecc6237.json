@@ -1,5 +1,5 @@
 {
-  "scripts/targets/claude_target.py:scripts.targets.claude_target.x__remove_owned_hooks__mutmut_30:d63c81de17dfb1aa3ac15463201c313d3d6db353bdcd4a5b54404acc0f7a0c20": {
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x__remove_owned_hooks:d63c81de17dfb1aa3ac15463201c313d3d6db353bdcd4a5b54404acc0f7a0c20": {
     "reader": "engineer",
     "reason": "doc.pop(\"hooks\", None) becomes doc.pop(\"hooks\"). This line runs only inside \"if not hooks:\", reached only when hooks is the same dict object doc.get(\"hooks\") returned, proven a dict earlier in the function and never reassigned, so the key \"hooks\" is always present in doc at this point. Both forms pop the same key and return the same (unused) value; the default is never exercised and the final doc is identical for every input."
   }

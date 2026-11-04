@@ -1,0 +1,6 @@
+{
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x_remove_managed_keys:d2af1c7c4050683674977b8a80e3b343325f94bdd22a6229119e63a729875e3c": {
+    "reader": "engineer",
+    "reason": "doc.pop(_i.MANAGED_BY_KEY, None) drops its default. The function already returned False earlier unless doc.get(_i.MANAGED_BY_KEY) == _i.MANAGED_BY_VALUE, so the key is proven present by the time this line runs and nothing removes it beforehand. The default is never exercised; the result is identical for every input."
+  }
+}
