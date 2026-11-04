@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, wait
 from contextvars import Context as ContextCopy
 from contextvars import copy_context
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import partial
 from threading import Lock, Thread
 from typing import Any
@@ -27,6 +27,8 @@ __all__ = [
     "LATE",
     "OK",
     "Appliers",
+    "Gate",
+    "SiteGate",
     "StepRecord",
     "cadence_breaches",
     "cadence_s",
@@ -39,6 +41,7 @@ __all__ = [
 ]
 
 Appliers = Mapping[Domain, Callable[[Write], list[str] | None]]
+Gate = Callable[[Step, Mapping[str, "StepRecord"]], bool]
 
 OK = "ok"
 LATE = "late"
@@ -172,11 +175,13 @@ def run_graph(
     ctx: Context,
     apply: Appliers | None = None,
     finished: Callable[[tuple[StepRecord, ...]], object] | None = None,
+    gate: Gate | None = None,
 ) -> tuple[StepRecord, ...]:
     """Run every step of ``steps`` as one graph, each after the steps among them it needs, scheduled as
     ``run_group`` schedules one group: one at a time outside a parallel pass, eagerly on the pass workers inside one,
-    slow lane steps and the steps that need them handed to ``finished``."""
-    return _scheduled(registry.ordered(steps), ctx, apply, finished)
+    slow lane steps and the steps that need them handed to ``finished``. A step ``gate`` shuts as it becomes ready
+    rests: it starts no thread and ends at once for the steps that need it."""
+    return _scheduled(registry.ordered(steps), ctx, apply, finished, gate)
 
 
 def _scheduled(
@@ -184,22 +189,64 @@ def _scheduled(
     ctx: Context,
     apply: Appliers | None,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
+    gate: Gate | None = None,
 ) -> tuple[StepRecord, ...]:
-    """Run ``ordered`` in one schedule, applying each step's writes through ``apply`` as it ends."""
+    """Run ``ordered`` in one schedule, applying each step's writes through ``apply`` as it ends and resting each
+    step ``gate`` shuts as it becomes ready."""
     rest = resting(ordered, cadence_s())
     found = pool.active()
     if found is None or not found.parallel:
-        return tuple(_sequential(step, ctx, apply or {}, rest) for step in ordered)
+        return _in_turn(ordered, ctx, apply or {}, rest, gate)
     later = _slow_lane(ordered, found.pending())
     names = {step.name for step in later}
-    records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {}, rest)
+    records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {}, rest, gate)
     if later:
         found.hand(names)
         gone = _gone(later, frozenset(record.name for record in records if record.abandoned))
         for each in gone:
             found.end(each, True)
-        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished, rest))
+        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished, rest, gate))
     return records
+
+
+def _in_turn(
+    ordered: tuple[Step, ...], ctx: Context, apply: Appliers, rest: frozenset[str], gate: Gate | None
+) -> tuple[StepRecord, ...]:
+    """Run ``ordered`` one step at a time, resting each step in ``rest`` or shut by ``gate``."""
+    records: dict[str, StepRecord] = {}
+    for step in ordered:
+        records[step.name] = _sequential(step, ctx, apply, rest | _shut(gate, step, records))
+    return tuple(records.values())
+
+
+def _shut(gate: Gate | None, step: Step, records: Mapping[str, StepRecord]) -> frozenset[str]:
+    """Return the name of ``step`` when ``gate`` shuts it now that it is ready, else nothing."""
+    return frozenset() if gate is None or gate(step, records) else frozenset({step.name})
+
+
+@dataclass
+class SiteGate:
+    """Open or shut each step of a pass graph as it becomes ready.
+
+    A site's hook runs once, when the site's first step is ready, and shuts the whole site when it answers false;
+    ``shut`` shuts single steps and is asked before and after the hook. ``seen`` holds the records of the steps that
+    ended before the latest step became ready.
+    """
+
+    hooks: Mapping[str, Callable[[], bool]]
+    shut: Callable[[Step], bool]
+    seen: dict[str, StepRecord] = field(default_factory=dict[str, StepRecord])
+    opened: dict[str, bool] = field(default_factory=dict[str, bool])
+
+    def __call__(self, step: Step, records: Mapping[str, StepRecord]) -> bool:
+        """Return whether ``step`` runs, running its site's hook first when it is the site's first ready step."""
+        self.seen.update(records)
+        if self.shut(step):
+            return False
+        if step.group not in self.opened:
+            hook = self.hooks.get(step.group)
+            self.opened[step.group] = hook is None or hook()
+        return self.opened[step.group] and not self.shut(step)
 
 
 def _slow_lane(ordered: tuple[Step, ...], handed: frozenset[str]) -> tuple[Step, ...]:
@@ -229,11 +276,12 @@ def _run_later(
     apply: Appliers,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
     rest: frozenset[str],
+    gate: Gate | None = None,
 ) -> None:
-    """Run the handed off steps on the pass workers, dropping each in ``gone`` and skipping each in ``rest``, then
-    hand their records in group order to ``finished``."""
+    """Run the handed off steps on the pass workers, dropping each in ``gone`` and skipping each in ``rest`` or shut
+    by ``gate``, then hand their records in group order to ``finished``."""
     kept = tuple(s for s in later if s.name not in gone)
-    ran = {record.name: record for record in _eager(kept, ctx, found, apply, rest)}
+    ran = {record.name: record for record in _eager(kept, ctx, found, apply, rest, gate)}
     records = tuple(ran.get(step.name) or _skipped(step, _offset()) for step in later)
     if finished is not None:
         finished(records)
@@ -399,7 +447,12 @@ def _expire(
 
 
 def _eager(
-    ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: Appliers, rest: frozenset[str] = frozenset()
+    ordered: tuple[Step, ...],
+    ctx: Context,
+    found: pool.Pass,
+    apply: Appliers,
+    rest: frozenset[str] = frozenset(),
+    gate: Gate | None = None,
 ) -> tuple[StepRecord, ...]:
     """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended.
 
@@ -423,7 +476,7 @@ def _eager(
                 pending.remove(step)
                 lane = found.lane(step.lane)
                 offsets[step.name] = _offset()
-                if step.name in rest:
+                if step.name in rest | _shut(gate, step, records):
                     records[step.name] = _ended(found, _rested(step))
                 elif step.needs & dropped or lane.expired:
                     dropped.add(step.name)

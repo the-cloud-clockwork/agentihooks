@@ -58,11 +58,11 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Iterable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-from contextvars import copy_context
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -178,7 +178,17 @@ from scripts.swarm.store import (
     Unreachable,
     connect,
 )
-from scripts.swarm.tick import agent_status, primed, run_group, skip_refused, spawn_holds, tick
+from scripts.swarm.tick import (
+    TICK_SITES,
+    TickSites,
+    agent_status,
+    primed,
+    run_group,
+    run_sites,
+    skip_refused,
+    spawn_holds,
+    tick,
+)
 from scripts.swarm_ledger import (
     ledger_creator,
     ledger_kinds,
@@ -190,7 +200,8 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
-from scripts.tick import pool
+from scripts.tick import engine, pool
+from scripts.tick import registry as step_registry
 from scripts.tick import view as ledger_view
 from scripts.tick.adapters.coordination import StoreCoordination
 from scripts.tick.adapters.github import GitHubSourceControl
@@ -205,7 +216,8 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
-from scripts.tick.steps import Left, PassBox, budgets
+from scripts.tick.steps import Left, PassBox, budgets, note_left
+from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
 from scripts.tick.steps import tasks as task_steps
@@ -238,6 +250,18 @@ TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 HIVE_PLACEMENT = "hive-placement"
 ON_OFF = {"on": True, "off": False}
 PLACEMENT_NODES = "placement-nodes"
+WRAPPER_PREFIX = (
+    "wrapper probes",
+    "wrapper health",
+    "wrapper commands",
+    "wrapper phases",
+    "wrapper refresh",
+    "wrapper intent",
+    "wrapper reboot",
+)
+PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
+INTENT_JOINS = {"wrapper intent": "wrapper relay"}
+HEALTH_SITES = ("wrapper health", "wrapper commands")
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -350,12 +374,131 @@ def _intent_pass(inbox, store, slug, doc, ledger, config):
     return view, skip_refused(check.run, doc)
 
 
-def _tick_groups(store: RedisStore, slug: str, ledger: Any, runtime: Any) -> list[str]:
-    """Run the tick's registered groups at the wrapper's reboot site, no actions when a value they read was left."""
-    try:
-        return tick(slug, store, ledger, runtime, now_ms())
-    except Left:
-        return []
+@dataclass
+class _Wrapper:
+    """The wrapper's sites of a pass graph: the checks the hand written wrapper ran between its groups, and the
+    actions it returned in their order."""
+
+    store: RedisStore
+    slug: str
+    ledger: Any
+    held: Any
+    beating: ExitStack
+    state: dict[str, Any]
+    box: PassBox
+    ticks: TickSites
+    watching: ExitStack = dataclass_field(default_factory=ExitStack)
+    seen: dict[str, Any] = dataclass_field(default_factory=dict[str, Any])
+    ended: list[str] | None = None
+    checked: list[str] = dataclass_field(default_factory=list[str])
+
+    def __post_init__(self) -> None:
+        """Hand the intent check its own box, sharing the pass's left steps, and end the tick's scan with the watch."""
+        self.judging = PassBox(left=self.box.left)
+        self.state["judging"] = self.judging
+        self.groups = {step.name: step.group for step in step_registry.steps()}
+        self.watching.callback(self.ticks.close)
+
+    def hooks(self) -> dict[str, Callable[[], bool]]:
+        """Return the checks run before the wrapper's health, commands, phases, intent, relay, view and metrics sites."""
+        return {
+            "wrapper health": self._fence,
+            "wrapper commands": self._watch,
+            "wrapper phases": self._read,
+            "wrapper intent": self._judge,
+            "wrapper relay": self._judged,
+            "wrapper view": self._reread,
+            "wrapper metrics": self._count,
+        }
+
+    def shut(self, step: Any) -> bool:
+        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
+        commands once the ledger was binned or gone, and as the tick's sites say."""
+        stopped = step.group != "wrapper probes" and "stop" in self.box
+        return stopped or self.ended is not None or self.ticks.shut(step)
+
+    def actions(self, records: Iterable[Any]) -> list[str]:
+        """Return the pass actions in the hand written order: health, commands, then the counted actions, then metrics."""
+        found = tuple(records)
+        return self._acted(found, HEALTH_SITES) + self._counted(found) + self._acted(found, ("wrapper metrics",))
+
+    def _acted(self, records: Iterable[Any], sites: tuple[str, ...]) -> list[str]:
+        """Return the actions of the records of steps at ``sites``, in record order."""
+        return actions_of(record for record in records if self.groups.get(record.name) in sites)
+
+    def _counted(self, records: tuple[Any, ...]) -> list[str]:
+        """Return the actions metrics counts: phases and reboot, the tick unless it left a value, intent and events."""
+        tick = [] if self.ticks.left else self._acted(records, TICK_SITES)
+        early = self._acted(records, ("wrapper phases", "wrapper reboot"))
+        return early + tick + self.checked + self._acted(records, ("wrapper events",))
+
+    def _noted(self, found: dict[str, Any], key: str) -> Any:
+        """Return ``found[key]``, noting the steps the pass left on the box first when no step stored it."""
+        try:
+            return found[key]
+        except Left:
+            note_left(self.box, self.seen.values())
+            raise
+
+    def _fence(self) -> bool:
+        """Hold the pass's ledger view and fence the runtime the rest of the pass uses."""
+        from scripts.swarm import controller
+
+        _hold_view(self.beating, self.slug, self.ledger)
+        deployment = controller.deployment_for(self.store.config(self.slug), os.environ)
+        runtime = controller.FencedRuntime(self.store, self.slug, self.held, self.state["runtime"], deployment)
+        self.state["runtime"] = runtime
+        return True
+
+    def _watch(self) -> bool:
+        """Watch the rest of the pass for spawn stalls, until the graph returns."""
+        from scripts.swarm.health import spawn_stall
+
+        watched = spawn_stall.watch(self.store, self.slug, self.ledger, now_ms, self.state["runtime"])
+        self.watching.enter_context(watched)
+        return True
+
+    def _read(self) -> bool:
+        """End the pass when the ledger is binned or gone, else read its pass state and clear the halt marks."""
+        store, slug, ledger = self.store, self.slug, self.ledger
+        if timing.call(ledger.binned, slug):
+            self.ended = _bin_stop(store, slug, ledger, self.state["runtime"])
+            return False
+        try:
+            self.box["doc"] = timing.call(ledger_client.pass_state, ledger, slug)
+        except LedgerGone as exc:
+            first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
+            self.ended = (
+                [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
+            )
+            return False
+        store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
+        return True
+
+    def _judge(self) -> bool:
+        """Read the pass state and config the intent check judges against."""
+        self.judging["doc"] = timing.call(ledger_client.pass_state, self.ledger, self.slug)
+        self.judging["config"] = self.store.config(self.slug)
+        return True
+
+    def _judged(self) -> bool:
+        """End the tick's scan, raise what the intent check held and keep its view and checked actions."""
+        self.ticks.close()
+        host_steps.raise_held(self.judging)
+        self.box["view"], self.checked = self._noted(self.judging, "judged")
+        return True
+
+    def _reread(self) -> bool:
+        """Read the pass state, config and task rows again for the view, events and metrics sites."""
+        self._noted(self.box, "agents")
+        doc = timing.call(ledger_client.pass_state, self.ledger, self.slug)
+        self.box.update(doc=doc, config=self.store.config(self.slug), rows={t["id"]: t for t in doc["tasks"]})
+        return True
+
+    def _count(self) -> bool:
+        """Hand metrics the number of actions the pass counted so far."""
+        self.box["count"] = len(self._counted(tuple(self.seen.values())))
+        return True
 
 
 class _PassSpool:
@@ -449,72 +592,23 @@ def run_tick(
             _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
             return actions
-        passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
-        run_group("wrapper probes", **passing)
+        state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
+        state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
+        ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
+        wrapper = _Wrapper(store, slug, ledger, held, beating, state, box, ticks)
+        gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen)
+        try:
+            records = run_sites(PASS_SITES, state, box, gate, ticks.apply, INTENT_JOINS)
+        finally:
+            wrapper.watching.close()
+        doc, view = box.get("doc", doc), box.get("view")
+        host_steps.raise_held(wrapper.judging)
         host_steps.raise_held(box)
-        if "stop" in box:
-            return box["stop"]
-        _hold_view(beating, slug, ledger)
-        runtime = controller.FencedRuntime(
-            store,
-            slug,
-            held,
-            runtime or routed(herdr=HerdrRuntime()),
-            controller.deployment_for(store.config(slug), os.environ),
-        )
-        from scripts.swarm.health import spawn_stall
-
-        passing |= {"ledger": ledger, "runtime": runtime}
-        probed = run_group("wrapper health", **passing)
-        host_steps.raise_held(box)
-        with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
-            controls = run_group("wrapper commands", **passing)
-            host_steps.raise_held(box)
-            if timing.call(ledger.binned, slug):
-                return _bin_stop(store, slug, ledger, runtime)
-            inbox = InboxStore(store.redis)
-            try:
-                doc = timing.call(ledger_client.pass_state, ledger, slug)
-            except LedgerGone as exc:
-                first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
-                return (
-                    [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
-                )
-            store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
-            actions = run_group("wrapper phases", **passing, inbox=inbox, doc=doc)
-            host_steps.raise_held(box)
-            run_group("wrapper refresh", **passing, scheduled=scheduled)
-            host_steps.raise_held(box)
-            doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
-            judging: dict[str, Any] = PassBox(left=box.left)
-            with ThreadPoolExecutor(max_workers=1) as worker:
-                judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
-                judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
-                try:
-                    actions += run_group("wrapper reboot", **passing)
-                    host_steps.raise_held(box)
-                    actions += _tick_groups(store, slug, ledger, runtime)
-                finally:
-                    judged.result()
-                    host_steps.raise_held(judging)
-                    view, checked = judging["judged"]
-            actions += checked
-            run_group("wrapper relay", **passing, inbox=inbox)
-            host_steps.raise_held(box)
-            agents = box["agents"]
-            doc, config = timing.call(ledger_client.pass_state, ledger, slug), store.config(slug)
-            run_group("wrapper view", **passing, inbox=inbox, doc=doc, view=view)
-            host_steps.raise_held(box)
-            view = box.get("view", view)
-            rows = {t["id"]: t for t in doc["tasks"]}
-            passing |= {"inbox": inbox, "doc": doc, "config": config, "view": view, "rows": rows, "agents": agents}
-            actions += run_group("wrapper events", **passing)
-            host_steps.raise_held(box)
-            actions += run_group("wrapper metrics", **passing, count=len(actions))
-            host_steps.raise_held(box)
-            doc = timing.call(ledger_client.pass_state, ledger, slug)
-            ended = report_steps.FULL
-            return probed + controls + actions
+        if "stop" in box or wrapper.ended is not None:
+            return box.get("stop") or wrapper.ended or []
+        doc = timing.call(ledger_client.pass_state, ledger, slug)
+        ended = report_steps.FULL
+        return wrapper.actions(records)
     except Left as missing:
         ended = report_steps.EARLY
         return report_steps.early_end(store, slug, missing, box.left)

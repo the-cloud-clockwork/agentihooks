@@ -52,6 +52,7 @@ def _catalogue_errors(steps: list[Step], catalogue: Catalogue) -> list[str]:
 
 PASS_BOX = "pass:"
 PASS_BOX_INTERVAL_S = 60.0
+SLOW_LANE = "slow"
 
 
 def _validate_timing(steps: list[Step]) -> None:
@@ -208,14 +209,32 @@ def _barrier(step: Step, needs: frozenset[str]) -> Step:
     return edged
 
 
-def site_edges(steps: Iterable[Step], sites: Sequence[str]) -> tuple[Step, ...]:
+def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, str] | None = None) -> tuple[Step, ...]:
     """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
-    site that holds steps; steps of groups outside ``sites`` keep their own needs."""
+    site that holds steps; steps of groups outside ``sites`` keep their own needs.
+
+    A slow lane step, and every step needing one, is no barrier for a later site. A site that ``joins`` maps to a
+    later site is no barrier for the sites between: only the steps of the site it names need it too.
+    """
     found = tuple(steps)
-    members = {site: frozenset(step.name for step in found if step.group == site) for site in sites}
+    late = _late(found)
+    members = {site: frozenset(s.name for s in found if s.group == site and s.name not in late) for site in sites}
     barrier: dict[str, frozenset[str]] = {}
+    held: dict[str, frozenset[str]] = {}
     previous: frozenset[str] = frozenset()
     for site in sites:
-        barrier[site] = previous
-        previous = members[site] or previous
+        barrier[site] = previous | held.pop(site, frozenset())
+        if joins and site in joins:
+            held[joins[site]] = held.get(joins[site], frozenset()) | members[site]
+        else:
+            previous = members[site] or previous
     return tuple(_barrier(step, barrier[step.group]) if barrier.get(step.group) else step for step in found)
+
+
+def _late(steps: tuple[Step, ...]) -> frozenset[str]:
+    """Return the slow lane steps of ``steps`` and every step needing one of them, directly or through another."""
+    late: set[str] = set()
+    for step in ordered(steps):
+        if step.lane == SLOW_LANE or step.needs & late:
+            late.add(step.name)
+    return frozenset(late)
