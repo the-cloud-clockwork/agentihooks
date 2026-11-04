@@ -159,7 +159,7 @@ def test_an_early_probe_runs_the_identity_group_alone_when_only_it_owns_split_mu
     ],
 )
 def test_a_refused_early_probe_names_its_cause(tmp_path, monkeypatch, reason, statuses, elapsed, error, message):
-    """One probe shard owns the three x_f and x_g mutants; x_h belongs to no shard, and the clock advances by elapsed."""
+    """One probe shard owns the x_f and x_g mutants; x_h belongs to no shard. The clock advances by elapsed."""
     plan = _plan()
     plan["probe_shards"] = 1
     plan["splits"]["scripts.a.x_g"] = plan["splits"]["scripts.a.x_f"]
