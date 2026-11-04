@@ -234,8 +234,9 @@ def resting(ordered: Iterable[Step], cadence: float) -> frozenset[str]:
     """Return the steps of ``ordered`` whose interval at ``cadence`` has not elapsed since their last ended run.
 
     Only a step whose interval is above one cron minute can rest. A step rests while the pass start, or the clock
-    outside a recording pass, is within its interval less one cron minute of its last end, so a step ending anywhere
-    inside its pass runs again on the pass its interval falls due. Without a recording store nothing rests.
+    outside a recording pass, is within its interval less one cron minute of its last end, so a step runs again on
+    the first pass starting more than that after its last end, up to one cron minute before its full interval has
+    passed since that end. Without a recording store nothing rests.
     """
     store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
     every = {step.name: interval_s(step, cadence) for step in ordered}

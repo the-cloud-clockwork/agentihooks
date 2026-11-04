@@ -161,6 +161,9 @@ def test_a_step_above_sixty_seconds_writing_a_pass_box_is_refused() -> None:
 @pytest.mark.feature("swarm-tick-step-isolation")
 def test_every_registered_step_writing_the_pass_state_runs_every_pass() -> None:
     wide = sorted(
-        step.name for step in registry.steps() if PASS in step.writes and step.interval_s > registry.PASS_BOX_INTERVAL_S
+        step.name
+        for step in registry.steps()
+        if any(domain == PASS or domain.startswith(registry.PASS_BOX) for domain in step.writes)
+        and step.interval_s > registry.PASS_BOX_INTERVAL_S
     )
     assert wide == []

@@ -42,7 +42,7 @@ SCENARIOS = (
     "interval",
     "interval-slow",
 )
-PASSES = {"second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 180_000)}
+PASSES = {"second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 60_000)}
 CADENCES = {"interval-slow": "3"}
 LEDGER_WRITES = ("update_task", "notify", "mark_swarm", "rank_task", "comment", "join", "notice")
 RUNTIME_WRITES = ("spawn", "retire", "reap_name", "nudge", "name_pane", "close_space", "close_pane")
@@ -275,7 +275,7 @@ def assert_rests(record: dict[str, Any], gap_s: float, lane: str | None) -> set[
     first, *later = record["step_rows"]
     ran = {name for name, (outcome, rested) in first.items() if name in wide and not rested}
     ran &= {name for name, (outcome, _) in first.items() if outcome in (engine.OK, engine.FAILED)}
-    assert ran, "the first pass must run a step with an interval above one cron minute"
+    assert ran == set(wide), f"the first pass left {sorted(set(wide) - ran)} unrun"
     always = set(ran)
     for index, rows in enumerate(later, start=1):
         expected = {name for name in ran if index * gap_s <= wide[name] - engine.CRON_S}
@@ -300,11 +300,11 @@ def test_interval_slow_scenario_runs_a_slow_step_once_in_three_passes(
 ) -> None:
     record = replay("interval-slow", "run_tick", monkeypatch, tmp_path)
     assert len(record["step_rows"]) == 3
-    assert assert_rests(record, 180.0, engine.SLOW)
+    assert assert_rests(record, 60.0, engine.SLOW)
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
-@pytest.mark.parametrize(("scenario", "gap_s", "lane"), [("interval", 60.0, None), ("interval-slow", 180.0, "slow")])
+@pytest.mark.parametrize(("scenario", "gap_s", "lane"), [("interval", 60.0, None), ("interval-slow", 60.0, "slow")])
 def test_engine_ignoring_the_last_run_hash_breaks_the_interval_scenarios(
     scenario: str, gap_s: float, lane: str | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
