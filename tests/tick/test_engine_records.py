@@ -156,6 +156,7 @@ def test_handed_off_step_dropped_with_its_need_journals_a_skipped_slow_lane_row(
         ("size pass", "tick", engine.SKIPPED, 0),
         ("slow follow", "slow", engine.SKIPPED, 0),
     ]
+    assert [isinstance(row["start_s"], float) and row["start_s"] >= 0 for row in store.records()] == [True, True]
 
 
 def ok_step() -> WriteStep:
