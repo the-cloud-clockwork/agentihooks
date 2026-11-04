@@ -640,7 +640,7 @@
   "scripts/swarm/master_prompt_stall.py": 135,
   "scripts/swarm/master_questions.py": 64,
   "scripts/swarm/master_retire.py": 28,
-  "scripts/swarm/master_stall.py": 138,
+  "scripts/swarm/master_stall.py": 87,
   "scripts/swarm/master_start.py": 62,
   "scripts/swarm/master_wake.py": 40,
   "scripts/swarm/merge_path.py": 206,
