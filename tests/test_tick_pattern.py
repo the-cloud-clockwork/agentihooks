@@ -161,6 +161,16 @@ def test_a_base_without_an_allowlist_is_red(tmp_path: Path, capsys: pytest.Captu
     )
 
 
+def test_a_clean_head_on_a_base_without_an_allowlist_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _tree(tmp_path / "base", {tick_pattern.TICK: "X = 1\n"})
+    head = _recorded(tmp_path / "head", {tick_pattern.TICK: "X = 1\n"})
+    assert _grade(base, head, capsys) == (
+        1,
+        "0 tick pattern offences in 0 files, 0 on the base allowlist, 1 errors\n"
+        f"::error::{tick_pattern.ALLOWLIST} is missing from the base\n",
+    )
+
+
 def test_files_outside_the_scope_are_not_graded(tmp_path: Path) -> None:
     lost = FULL.replace('"beat"', '"lost"')
     files = {"scripts/swarm/other.py": TICK, "hooks/hook.py": 'CallStep("lost", "g", c)\n', STEP: TICK + lost}
