@@ -9,7 +9,6 @@ from typing import Any
 from scripts.swarm.timing import HISTORY_LIMIT
 
 PAGE_SIZE = 256
-SLOW_LANE = "slow"
 
 
 def p95(values: list[float]) -> float | None:
@@ -52,36 +51,28 @@ def summarize(
             for name, rows in sorted(grouped.items())
         ],
         "lanes": lane_shares([row for rows in grouped.values() for row in rows], cpu),
-        **outcomes([row for row in records if row["pass_id"] in identities]),
+        "critical_end_p95_s": p95([row["critical_end_s"] for row in ordered if "critical_end_s" in row]),
+        "records": outcomes([row for row in records if row["pass_id"] in identities]),
     }
 
 
-def outcomes(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Return per step outcome columns from ``tick:records`` rows and the p95 of each pass's critical lane end.
-
-    A pass's critical lane end is the latest start offset plus wall time of its steps outside the slow lane.
-    """
+def outcomes(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return one row of outcome columns per step name from ``tick:records`` rows, sorted by name."""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    ends: dict[str, float] = {}
     for row in records:
         grouped[row["step"]].append(row)
-        if row["lane"] != SLOW_LANE and row["start_s"] is not None:
-            ends[row["pass_id"]] = max(ends.get(row["pass_id"], 0.0), row["start_s"] + row["wall_s"])
-    return {
-        "critical_end_p95_s": p95(list(ends.values())),
-        "records": [
-            {
-                "step": name,
-                "records": len(rows),
-                "late_share": 100 * sum(row["outcome"] == "late" for row in rows) / len(rows),
-                "abandoned": sum(row["abandoned"] for row in rows),
-                "held": sum(row["held"] for row in rows),
-                "skipped": sum(row["skipped"] for row in rows),
-                "dropped": sum(row["dropped"] for row in rows),
-            }
-            for name, rows in sorted(grouped.items())
-        ],
-    }
+    return [
+        {
+            "step": name,
+            "records": len(rows),
+            "late_share": 100 * sum(row["outcome"] == "late" for row in rows) / len(rows),
+            "abandoned": sum(row["abandoned"] for row in rows),
+            "held": sum(row["held"] for row in rows),
+            "skipped": sum(row["skipped"] for row in rows),
+            "dropped": sum(row["dropped"] for row in rows),
+        }
+        for name, rows in sorted(grouped.items())
+    ]
 
 
 def lane_shares(steps: list[dict[str, Any]], cpu: float) -> list[dict[str, Any]]:

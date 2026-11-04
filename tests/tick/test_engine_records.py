@@ -53,12 +53,11 @@ def recording(store: Store) -> Iterator[dict[str, Any]]:
 
 
 def planted(release: Event) -> WriteStep:
-    step = WriteStep(
-        "size pass",
-        "planted",
-        lambda tick, get: release.wait(30),
-        writes=frozenset({Domain("tasks"), Domain("ranks")}),
-    )
+    def call(tick: Any, get: Any) -> list[object]:
+        release.wait(30)
+        return []
+
+    step = WriteStep("size pass", "planted", call, writes=frozenset({Domain("tasks"), Domain("ranks")}))
     step.budget_s = 0.05
     return step
 
@@ -94,24 +93,30 @@ def test_steps_dropped_at_an_expired_lane_read_skipped() -> None:
     with recording(store), pool.running(critical_s=0.0):
         records = engine.run_group("late lane", Context(View(), Deadline.after(60.0)), steps)
     assert records[0].skipped and records[0].abandoned
-    assert [(row["step"], row["skipped"], row["abandoned"], row["dropped"]) for row in store.records()] == [
-        ("size pass", True, True, 0)
+    rows = store.records()
+    assert [(row["step"], row["skipped"], row["abandoned"], row["dropped"], row["outcome"]) for row in rows] == [
+        ("size pass", True, False, 0, engine.SKIPPED)
     ]
+    assert tick_report.outcomes(rows)[0]["late_share"] == 0.0
 
 
 @pytest.mark.feature("swarm-tick-cost-report")
-def test_records_carry_lane_and_start_offset_and_report_the_critical_lane_end() -> None:
+def test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95() -> None:
+    store = Store()
+    slow = ok_step()
+    slow.lane = engine.SLOW
+    with recording(store) as current:
+        engine.run_group("planted", Context(View(), Deadline.after(60.0)), [slow])
+        assert "critical_end_s" not in current
+        engine.run_group("planted", Context(View(), Deadline.after(60.0)), [ok_step()])
+    (_, critical) = store.records()
+    assert current["critical_end_s"] == critical["start_s"] + critical["wall_s"]
     passes = [
-        {"pass_id": "a", "start_ms": 0, "end_ms": 50000, "wall_s": 50.0},
-        {"pass_id": "b", "start_ms": 60000, "end_ms": 90000, "wall_s": 30.0},
+        {"pass_id": "a", "start_ms": 0, "end_ms": 50000, "wall_s": 50.0, "critical_end_s": 12.0},
+        {"pass_id": "b", "start_ms": 60000, "end_ms": 90000, "wall_s": 30.0, "critical_end_s": 5.0},
+        {"pass_id": "c", "start_ms": 95000, "end_ms": 99000, "wall_s": 4.0},
     ]
-    records = [
-        row("a", "spawn", "tick", 2.0, 10.0),
-        row("a", "sweep", "slow", 5.0, 40.0),
-        row("b", "spawn", "tick", 1.0, 4.0),
-        row("orphan", "spawn", "tick", 90.0, 1.0),
-    ]
-    assert tick_report.summarize(passes, [], records)["critical_end_p95_s"] == 12.0
+    assert tick_report.summarize(passes, [])["critical_end_p95_s"] == 12.0
 
 
 def test_record_row_without_a_recording_pass_writes_nothing() -> None:
@@ -132,20 +137,3 @@ def test_finished_step_row_names_its_lane_and_offset() -> None:
 
 def ok_step() -> WriteStep:
     return WriteStep("size pass", "planted", lambda tick, get: [])
-
-
-def row(pass_id: str, name: str, lane: str, start: float, wall: float) -> dict[str, Any]:
-    return {
-        "pass_id": pass_id,
-        "step": name,
-        "lane": lane,
-        "outcome": "ok",
-        "wall_s": wall,
-        "budget_s": 60.0,
-        "start_s": start,
-        "abandoned": False,
-        "held": False,
-        "skipped": False,
-        "dropped": 0,
-        "conflicts": 0,
-    }

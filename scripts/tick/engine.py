@@ -41,6 +41,7 @@ OK = "ok"
 LATE = "late"
 FAILED = "failed"
 HELD = "held"
+SKIPPED = "skipped"
 
 _RUNNING: dict[tuple[str | None, str], Thread] = {}
 _RUNNING_LOCK = Lock()
@@ -204,6 +205,8 @@ def _offset() -> float | None:
 def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord:
     """Append one ``tick:records`` row for ``record`` while a pass is recording, and return the record unchanged.
 
+    A step outside the slow lane moves the pass record's ``critical_end_s`` to its end offset when that is later.
+
     An abandoned step that started counts every write domain it declares as dropped, since its result never applies.
     """
     store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
@@ -217,7 +220,7 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         "pass_id": current["pass_id"],
         "step": record.name,
         "lane": step.lane,
-        "outcome": record.outcome,
+        "outcome": SKIPPED if record.skipped else record.outcome,
         "wall_s": record.wall_s,
         "budget_s": record.budget_s,
         "start_s": offset,
@@ -227,6 +230,8 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         "dropped": dropped,
         "conflicts": len(record.conflicts),
     }
+    if step.lane != SLOW and offset is not None:
+        current["critical_end_s"] = max(current.get("critical_end_s", 0.0), offset + record.wall_s)
     timing.append_record(store, slug, "tick:records", row)
     return record
 

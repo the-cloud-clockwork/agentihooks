@@ -168,7 +168,7 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    row = {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}
+    row = {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0, "critical_end_s": 1.25}
     store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps(row)})
     store.redis.xadd(store.key("sw", "tick:steps"), {"record": json.dumps(step("a", "launch", 1, 1, 0))})
     outcome = {
