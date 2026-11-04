@@ -294,6 +294,57 @@ class OwnershipOperationContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "^if_match claim_generation must be a nonnegative integer$"):
                 ledger_tasks.check(change)
 
+    def test_the_operation_guard_matches_size_and_group_members_with_legacy_defaults(self):
+        from scripts.swarm_ledger import ledger_tasks
+
+        doc = make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        ctx = core.Context(doc["_meta"], 1_000, SLUG)
+        task = doc["tasks"][0]
+        sized = op(
+            "task_update",
+            1,
+            item="tasks/t1",
+            fields={"difficulty": "S"},
+            if_match={"difficulty": "", "group_members": []},
+        )
+        ledger_tasks.check(sized)
+        self.assertTrue(ledger_tasks.apply(doc, sized, ctx))
+        self.assertEqual(task["difficulty"], "S")
+        task["group_members"] = ["t2", "t3"]
+        for n, expected in enumerate(({"difficulty": ""}, {"group_members": ["t2"]}, {"group_members": []}), 2):
+            stale = op("task_update", n, item="tasks/t1", fields={"difficulty": "L"}, if_match=expected)
+            ledger_tasks.check(stale)
+            self.assertTrue(ledger_tasks.apply(doc, stale, ctx))
+            self.assertEqual(task["difficulty"], "S")
+        fresh = op(
+            "task_update",
+            5,
+            item="tasks/t1",
+            fields={"difficulty": "L"},
+            if_match={"difficulty": "S", "group_members": ["t2", "t3"]},
+        )
+        ledger_tasks.check(fresh)
+        self.assertTrue(ledger_tasks.apply(doc, fresh, ctx))
+        self.assertEqual(task["difficulty"], "L")
+        self.assertEqual(ctx.refused, [])
+
+    def test_the_operation_validator_rejects_malformed_size_and_group_member_guards(self):
+        from scripts.swarm_ledger import ledger_tasks
+
+        change = op("task_update", 1, item="tasks/t1", fields={"state": "open"}, if_match={"difficulty": 1})
+        with self.assertRaisesRegex(ValueError, "^if_match ownership fields must be strings$"):
+            ledger_tasks.check(change)
+        for members in ("t2", ["t2", 3], ["bad id"], None):
+            change = op(
+                "task_update", 2, item="tasks/t1", fields={"state": "open"}, if_match={"group_members": members}
+            )
+            with self.assertRaisesRegex(ValueError, "^if_match group_members must list task ids$"):
+                ledger_tasks.check(change)
+        for members in ([], ["t2", "t3"]):
+            ledger_tasks.check(
+                op("task_update", 3, item="tasks/t1", fields={"state": "open"}, if_match={"group_members": members})
+            )
+
 
 class TaskCli(unittest.TestCase):
     def test_task_commands_send_task_ops(self):
