@@ -36,7 +36,7 @@ def is_notice(item: Item) -> bool:
     return item.sender == "swarm" and (item.text == HURRY or item.text.startswith((HANDOFF_OPENING, WARNING_OPENING)))
 
 
-def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
+def apply(slug: str, store: RedisStore, decision: dict[str, Any]) -> list[str]:
     """Send each working lane agent the quota notice its account level calls for, fanned out over the pass workers."""
     accounts = {(row["harness"], row["name"]): row for row in decision.get("accounts", [])}
     key = store.key(slug, "quota-notices")

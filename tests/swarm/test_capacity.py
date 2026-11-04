@@ -278,7 +278,7 @@ def test_tick_capacity_balance_and_quota_list_the_same_accounts_and_caps(monkeyp
     assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail", "other"]
 
 
-def test_quota_capacity_with_all_zero_demand_still_refreshes_codex_before_its_drain_decisions(tmp_path, monkeypatch):
+def test_quota_capacity_with_all_zero_demand_leaves_codex_refresh_to_the_prober(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 
     calls = []
@@ -292,10 +292,12 @@ def test_quota_capacity_with_all_zero_demand_still_refreshes_codex_before_its_dr
     rt = module.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     rt.quota_capacity(config, [], 100, {"eng": 0, "ci": 0, "plan": 0})
+    assert calls == []
+    rt.quota_capacity(config, [], 100, {"eng": 0, "ci": 0, "plan": 0}, refresh=True)
     assert calls == [1]
 
 
-def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatch):
+def test_quota_capacity_with_nonzero_demand_leaves_codex_refresh_to_the_prober(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 
     calls = []
@@ -308,7 +310,7 @@ def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatc
     rt = module.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     rt.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
-    assert calls == [1]
+    assert calls == []
 
 
 def test_one_seat_goes_to_the_empty_lane_before_another_engineer():
