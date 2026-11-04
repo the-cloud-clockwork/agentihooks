@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.637 · 2026-11-04
+
+### 2026-11-04 · 2da5164ff443 · #9701 · @nestorcolt
+
+**Document the spawn order timed rows for the running agent filter and focus placement**
+
+This change adds documentation covering the timed rows that pull request #9673 introduced inside spawn order, specifically naming each timed segment (`_running`, `ready_in_order`, `focus_budget.place`, `profile_first.placeable`, `_ranked`) and explaining how to read them via the tick report command. It updates tick-adapters.md with a new section, links it from tick-report.md and index.md, and includes a changelog fragment. This matters because it gives operators a clear, verified reference for diagnosing where spawn order time is spent, backed by a live reading from the workstation tick, supporting the goal of keeping every pass under sixty seconds.
+
 ## v2.17.634 · 2026-11-04
 
 ### 2026-11-04 · 00bf6cd33454 · #9673 · @nestorcolt
