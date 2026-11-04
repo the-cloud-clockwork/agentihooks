@@ -532,8 +532,7 @@ yields each unsized open task's fields (at most `PER_TICK`, five, per pass);
 and its members; `fleet_red.holds` returns new holds, lifted marks and listing
 saves; `dispatcher.rank_decision` returns one `Ranking`;
 `phases.phase_changes` returns `PhaseChange` items, or one skip line when the
-hierarchy read fails; `master_stall.stalls`
-returns `Stall` items.
+hierarchy read fails; `master_stall.stalls` returns `Stall` items.
 
 ### How the engine applies writes
 
@@ -557,8 +556,8 @@ returns `Stall` items.
    (`LedgerRefused`), a fleet red task a seat claimed since the read
    (`_post_hold`), a failed fleet red notice, a listing another pass already
    saved, or a write whose value is not the expected type. The rank and stall
-   appliers do not catch `LedgerRefused`. A failed fleet red notice first deletes its hold
-   mark, so the next pass posts it again.
+   appliers do not catch `LedgerRefused`. A failed fleet red notice first
+   deletes its hold mark, so the next pass posts it again.
 5. The engine catches `RevisionConflict`, adds the write to the step record's
    `dropped` and the reason to `conflicts`, and goes on with the next write.
    Any other exception from an applier is not caught. Action lines an applier
@@ -574,8 +573,8 @@ group run and the `wrapper` group runs of the swarm command all pass this map.
 ### Dropped writes and the recompute
 
 A dropped write is not retried in the same pass. `steps.actions(records)`
-returns each step's own actions, then the action lines its appliers returned,
-then one line per dropped write:
+returns, per step in order, its own actions, then the action lines its appliers
+returned, then one line per write that step dropped:
 
 ```text
 dropped write sizes t7 of step size pass: task t7 changed difficulty since the step read it; the next pass recomputes it
@@ -660,14 +659,16 @@ as described above.
 - The held view compare sees only changes up to the view's latest refresh.
   Without a held view the task, group, fleet red and phase appliers skip that
   compare; a task the view lacks compares as empty, and a phase it lacks as
-  not done. The size and group writes are still compared on the server through `if_match`; the fleet red, phase,
-  rank and stall writes are not.
+  not done. The size and group writes are still compared on the server
+  through `if_match`; the fleet red, phase, rank and stall writes are not.
 - A dropped write waits a whole pass for its recompute.
-- `LedgerRefused` in the task, group, phase or fleet red applier is a dropped
-  write with a `dropped write` line, where the old in-step calls produced a
+- `LedgerRefused` in the task, group or phase applier is a dropped write with
+  a `dropped write` line, where the old in-step calls produced a
   `skipped ...: the ledger refused its write` line through `skip_refused`.
 - `LedgerRefused` in the rank or stall applier is not caught by the engine and
   leaves the group run, like any other applier exception.
+- Any exception from the fleet red notice, `LedgerRefused` included, is a
+  dropped write whose line names the failed hold notice.
 
 ## Exceptions
 
