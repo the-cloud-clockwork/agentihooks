@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 from urllib.parse import unquote, urlsplit
 
@@ -15,6 +16,9 @@ from scripts.swarm_v2.herdr import visibility
 from scripts.swarm_v2.herdr.visibility import View
 from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_swarm_layout import URL, status
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Browser
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 INPUTS = ("operator-workflow.json", "context-evidence.json")
@@ -220,6 +224,15 @@ class Viewer:
     def settled(self) -> None:
         self.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
 
+    def redraw(self) -> None:
+        """Draw the page once in full so no earlier cooperative render replaces the rows a keyboard walk crosses."""
+        self.tab.evaluate(
+            """async () => {
+              const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+              await (await import(new URL("render.js", main))).render();
+            }"""
+        )
+
     def wait(self, script: str, arg=None) -> None:
         self.tab.wait_for_function(script, arg=arg, timeout=15000)
 
@@ -309,6 +322,7 @@ def _launch_and_attach(browser, swarm: Swarm, counts: Counter) -> dict:
     swarm.launch(opened)
     name = swarm.agent.name
     launcher.wait_row(name, "kubernetes")
+    launcher.redraw()
     launcher.button(name, "message").focus()
     launcher.tab.keyboard.press("Tab")
     focused = launcher.tab.evaluate("() => document.activeElement.getAttribute('aria-label')")
@@ -498,6 +512,7 @@ def _case_c(browser, data: dict) -> tuple[dict, dict, Counter]:
     viewer.tab.wait_for_timeout(1500)
     restored = {"row": viewer.row(name), "controls": viewer.controls(name)}
     counts["stale_marks_cleared"] += 1
+    viewer.redraw()
     viewer.button(name, "drain").focus()
     viewer.tab.keyboard.press("Tab")
     keyboard = viewer.tab.evaluate("() => document.activeElement.getAttribute('aria-label') || ''")
@@ -544,8 +559,12 @@ def _case_c(browser, data: dict) -> tuple[dict, dict, Counter]:
 RUNNERS = {"a": _case_a, "b": _case_b, "c": _case_c}
 
 
-def run_case(case: str, browser) -> dict:
-    checks, observed, counts = RUNNERS[case](browser, fixture())
+def run_case(case: str, browser: "Browser") -> dict:
+    try:
+        checks, observed, counts = RUNNERS[case](browser, fixture())
+    finally:
+        for context in list(browser.contexts):
+            context.close()
     return {
         "case": CASES[case],
         "package": "SV2-UX-05",
