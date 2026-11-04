@@ -1425,6 +1425,17 @@
       "tests": [
         "tests/swarm/test_overrun.py::test_an_agent_far_past_the_report_limit_is_only_ever_reported_never_asked_or_retired"
       ]
+    },
+    {
+      "id": "stale-nudge-cache-warm",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "The swarm tick sends a claimed agent that sits silent inside a declared named wait one short cache warm inbox item per forty minutes, asking for a one line reply so its prompt cache stays warm; it never asks for a handoff.",
+      "seam": "The idle watch of the swarm tick through the stale nudge",
+      "tests": [
+        "tests/swarm/test_tick.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
+      ]
     }
   ],
   "unmapped_rules": [
