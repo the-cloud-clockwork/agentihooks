@@ -340,6 +340,13 @@ def test_the_tasks_applier_drops_a_size_a_concurrent_write_set_after_the_step_re
     assert ledger.updates == []
 
 
+def test_the_tasks_applier_reads_a_field_the_ledger_left_out_as_empty() -> None:
+    ledger = SimpleNamespace(update_task=lambda *args, **kwargs: {})
+    apply = tasks.task_writer("sw", ledger, {"t1": {"id": "t1"}}.get)
+
+    apply(Write(TASKS, "t1", {"difficulty": ""}, expected={"difficulty": ""}))
+
+
 def test_the_groups_applier_compares_and_sets_the_members_on_the_server() -> None:
     ledger = GroupLedger(members={"l1": ["m1", "m2"]})
     apply = tasks.group_writer("sw", ledger, {"l1": {"id": "l1", "group_members": ["m1", "m2"]}}.get)
@@ -359,13 +366,15 @@ def test_the_groups_applier_drops_a_release_a_concurrent_regroup_beat_on_the_ser
     assert ledger.ungrouped == []
 
 
-def test_the_groups_applier_sends_no_guard_for_a_release_without_expected_members() -> None:
-    ledger = GroupLedger()
+def test_the_groups_applier_guards_a_release_without_expected_members_on_no_members() -> None:
+    ledger = GroupLedger(members={"l1": ["m1"]})
     apply = tasks.group_writer("sw", ledger, {}.get)
 
-    apply(Write(tasks.GROUPS, "l1", []))
+    with pytest.raises(RevisionConflict, match="^the ledger refused the release of the group under task l1$"):
+        apply(Write(tasks.GROUPS, "l1", []))
 
-    assert ledger.guards == [None]
+    assert ledger.guards == [{"group_members": []}]
+    assert ledger.ungrouped == []
 
 
 def test_the_grouping_release_returns_a_write_for_every_stopped_lead() -> None:

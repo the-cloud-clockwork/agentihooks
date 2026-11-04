@@ -307,7 +307,7 @@ def _write_task(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] | N
         held = ledger.update_task(slug, write.key, fields, if_match=expected or None)
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the write of task {write.key}") from exc
-    if kept := sorted(key for key in expected if key in fields and held.get(key) != fields[key]):
+    if kept := sorted(key for key in expected if key in fields and held.get(key, "") != fields[key]):
         raise RevisionConflict(f"task {write.key} changed {', '.join(kept)} on the ledger before the write")
 
 
@@ -369,9 +369,8 @@ def _release_group(slug: str, ledger: Any, read: Callable[[str], dict[str, Any] 
     task = read(write.key)
     if task is not None and list(task.get("group_members") or []) != expected.get("group_members", []):
         raise RevisionConflict(f"task {write.key} changed group_members since the step read it")
-    guard = {"group_members": expected["group_members"]} if "group_members" in expected else None
     try:
-        ledger.ungroup_tasks(slug, write.key, if_match=guard)
+        ledger.ungroup_tasks(slug, write.key, if_match={"group_members": list(expected.get("group_members", []))})
     except LedgerRefused as exc:
         raise RevisionConflict(f"the ledger refused the release of the group under task {write.key}") from exc
 
