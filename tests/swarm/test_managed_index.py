@@ -85,6 +85,22 @@ def test_a_swarm_migrated_before_the_index_builds_it_once(store: RedisStore, mon
     assert len(reads) == 1
 
 
+def test_a_restore_that_drops_an_archived_name_drops_it_from_the_index(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fencing.migrate_records(store, "fixture", writers_upgraded=True)
+    saved = fencing.read(store, "fixture")
+    first, second, third = history(store)
+    registry = store.execution_registry
+    registry.archive("fixture")
+    assert registry.managed("fixture", first.name) is True
+    fencing.replace(store, "fixture", saved)
+    reads = archive_reads(monkeypatch)
+    assert registry.managed("fixture", first.name) is False
+    assert registry.managed("fixture", third.name) is False
+    assert reads == []
+
+
 def lock_free(slug: str) -> bool:
     found: list[bool] = []
 
