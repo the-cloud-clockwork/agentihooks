@@ -233,11 +233,9 @@ def test_rendered_swarm_engineer_skill_reads_red_and_green_in_ci(world):
 
     assert "lint and tests green" not in text
     steps = (
-        "branch mutation preflight",
-        "read it red on that branch push's preflight run",
-        "wait until it is green on the current head",
-        "then open the first draft",
-        "read it red in CI on a draft pull request",
+        "open a draft pull request into the base branch at that first push",
+        "never wait for the branch mutation preflight",
+        "Read the test red in CI on the pull request",
         "read it green in CI",
         "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN",
     )

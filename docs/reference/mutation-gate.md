@@ -17,7 +17,7 @@ gh workflow run proofs.yml \
   -f base=origin/dev
 ```
 
-For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
+For a stacked branch, set `base` to its dependency branch. Open the draft pull request at the first push; never wait for Mutation preflight before opening it. A branch push with no open pull request still runs the preflight. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
 ## Required gate proof
 
@@ -601,7 +601,7 @@ turn an empty or failed collection into a passing run.
 
 ### Inspect a branch run
 
-Push the branch before opening its pull request, then inspect its preflight:
+A branch push with no open pull request runs its preflight; inspect it:
 
 ```bash
 gh run list --workflow mutation-preflight.yml --branch <branch> --limit 5
