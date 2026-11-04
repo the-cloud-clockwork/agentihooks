@@ -597,9 +597,15 @@ def _current_owner(agent, row):
     return row.get("claimed_by", "") in ("", agent.name)
 
 
-def _restore_owner(slug, store, ledger, rows, agent):
+def _restore_owner(
+    slug: str, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], agent: AgentRecord
+) -> None:
     row = rows.get(agent.task, {})
-    if _ended(agent, rows) or not _current_owner(agent, row) or not store.ensure_claim(slug, agent, LEASE_MS):
+    if (
+        _ended(agent, rows)
+        or not _current_owner(agent, row)
+        or not timing.timed(store.ensure_claim, slug, agent, LEASE_MS)
+    ):
         return
     if row.get("out_of_scope") or row.get("state") not in ("open", "claimed", "pr"):
         return
@@ -614,7 +620,9 @@ def _restore_owner(slug, store, ledger, rows, agent):
     fields = {"claimed_by": agent.name}
     if row["state"] == "open":
         fields["state"] = "pr" if row.get("pr_url") else "claimed"
-    rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=(row["state"],), if_match=expected)
+    rows[agent.task] = timing.timed(
+        ledger.update_task, slug, agent.task, fields, if_state=(row["state"],), if_match=expected
+    )
 
 
 def _drop_remote(slug, store, ledger, rows, agent, reason):
@@ -795,8 +803,16 @@ def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
     ]
 
 
-def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
-    if revoked_seats.on_revoked(agent):
+def _watch_agent(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
+    if timing.timed(revoked_seats.on_revoked, agent):
         return _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms)
     return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
@@ -842,7 +858,7 @@ def _watch_idle(
     if timing.timed(_stuck_on_provider, slug, store, agent, observed, exhausted, now_ms):
         return _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
-    nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
+    nudged = timing.timed(_stale_nudge, slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == MASTER or (held and not exhausted):
         timing.timed(elapsed.hold, store, slug, elapsed.IDLE_SINCE, agent.name, agent.idle_ticks)
         timing.timed(store.put_agent, slug, agent)
