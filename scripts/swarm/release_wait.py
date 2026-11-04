@@ -33,25 +33,26 @@ def tags(repo: str) -> list[str]:
 
 
 def lookup(repo: str) -> tuple[list[str], str]:
-    """The origin's release tags read over https, retried once, and why the lookup failed or ''."""
-    found, why = _attempt(repo)
-    return (found, why) if not why else _attempt(repo)
-
-
-def _attempt(repo: str) -> tuple[list[str], str]:
-    """One read of the origin's release tags, and why it failed or ''."""
+    """The origin's release tags read over https, a failed exit retried once, and why the lookup failed or ''."""
     try:
-        found = subprocess.run(
-            ["git", "-C", repo, *HTTPS, "ls-remote", "--tags", "--refs", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        found = _ls_remote(repo)
+        if found.returncode:
+            found = _ls_remote(repo)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return [], str(exc) or type(exc).__name__
     if found.returncode:
         return [], f"git ls-remote exited {found.returncode}"
     return [ref.removeprefix("refs/tags/") for _, ref in (line.split("\t") for line in found.stdout.splitlines())], ""
+
+
+def _ls_remote(repo: str) -> subprocess.CompletedProcess[str]:
+    """One https read of the origin's tag refs."""
+    return subprocess.run(
+        ["git", "-C", repo, *HTTPS, "ls-remote", "--tags", "--refs", "origin"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
 
 
 def alert_pass(slug: str, config: object, ledger: object, doc: dict) -> list[str]:

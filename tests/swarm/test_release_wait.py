@@ -135,12 +135,16 @@ def test_a_working_lookup_reads_once(monkeypatch):
     assert len(calls) == 1
 
 
-def test_tags_is_empty_when_the_lookup_times_out(monkeypatch):
+def test_tags_is_empty_when_the_lookup_times_out_and_the_timeout_is_not_retried(monkeypatch):
+    calls = []
+
     def run(args, **kwargs):
+        calls.append(args)
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
     monkeypatch.setattr(release_wait.subprocess, "run", run)
     assert release_wait.tags("/repo") == []
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(("error", "why"), [(OSError(), "OSError"), (OSError("no git"), "no git")])
