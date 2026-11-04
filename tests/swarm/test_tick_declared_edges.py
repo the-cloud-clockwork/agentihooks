@@ -55,7 +55,8 @@ TODAY = {
         "health findings",
         "findings pass",
     ],
-    "wrapper metrics": ["metrics record", "bottleneck status", "inbox wake", "snapshot job", "last tick"],
+    "wrapper metrics": ["metrics record", "bottleneck status", "inbox wake", "snapshot job"],
+    "closing": ["last tick", "heartbeat", "status publish"],
 }
 EDGES = (
     ("reap", "orphans"),
