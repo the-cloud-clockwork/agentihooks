@@ -36,6 +36,7 @@ class Recorder:
     writes: list[tuple[int, str, object, str]] = field(default_factory=list)
     reads: set[Seen] = field(default_factory=set)
     written: set[tuple[str, str]] = field(default_factory=set)
+    ran: set[str] = field(default_factory=set)
 
     def wrote(self, box: object, key: str, value: object) -> None:
         step = STEP.get()
@@ -66,8 +67,9 @@ class Recorder:
             self.reads.add(Seen(step, key, self.writer(key, value, box)))
 
 
-def named(run: Callable[[Context], Result], name: str) -> Callable[[Context], Result]:
+def named(run: Callable[[Context], Result], name: str, rec: Recorder) -> Callable[[Context], Result]:
     def recorded(ctx: Context) -> Result:
+        rec.ran.add(name)
         token = STEP.set(name)
         try:
             return run(ctx)
@@ -80,7 +82,7 @@ def named(run: Callable[[Context], Result], name: str) -> Callable[[Context], Re
 def record(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     rec = Recorder()
     for step in registry.steps():
-        monkeypatch.setattr(step, "run", named(step.run, step.name))
+        monkeypatch.setattr(step, "run", named(step.run, step.name, rec))
 
     def setitem(box: dict[str, Any], key: str, value: object) -> None:
         rec.wrote(box, key, value)
@@ -173,7 +175,9 @@ def test_every_pass_box_read_is_declared_with_a_need_on_its_writer(
         f"{len(broken)} broken of {len(rec.reads)} pass box reads and {len(rec.written)} writes:\n" + "\n".join(broken)
     )
     assert {key for _, key in rec.written} >= WRITTEN
-    assert len(rec.reads) >= len(WRITTEN)
+    assert {seen.key for seen in rec.reads} >= WRITTEN
+    skipped = sorted({step.name for step in registry.steps()} - rec.ran)
+    assert not skipped, f"{len(skipped)} registered steps never ran: {skipped}"
 
 
 @pytest.mark.feature("swarm-tick-pass-edges")
