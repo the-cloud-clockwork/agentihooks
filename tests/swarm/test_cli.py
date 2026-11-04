@@ -1592,12 +1592,16 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
 
     ledger.relay = refuse
     ran = []
-    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (wake, "maintenance")):
+    for module, name in (
+        (cli.ledger_events, "event_pass"),
+        (cli.task_steps.phases, "phase_changes"),
+        (wake, "maintenance"),
+    ):
         real = getattr(module, name)
         monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
     item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "operator", "the job finished at 18:45")
     cli.run_tick(store, "sw")
-    assert ran == ["phase_pass", "event_pass", "maintenance"]
+    assert ran == ["phase_changes", "event_pass", "maintenance"]
     assert InboxStore(store.redis).get(item.id).state == "cancelled"
 
 

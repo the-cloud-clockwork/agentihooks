@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -104,8 +105,17 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
 
 
 def _left(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
-    """Record a step still running at its budget as abandoned, keeping its wall time."""
+    """Record a step still running at its budget as abandoned, keeping its wall time, and journal its lost writes."""
+    _abandoned(step)
     return StepRecord(step.name, wall_s, step.budget_s, abandoned=True)
+
+
+def _abandoned(step: Step) -> None:
+    """Journal one ``swarm_tick_step_abandoned`` line for ``step`` when it declares writes beyond its own actions."""
+    writes = sorted(step.writes - {Domain(f"actions:{step.name}")})
+    if writes:
+        line = {"event": "swarm_tick_step_abandoned", "slug": timing.SWARM.get(), "step": step.name}
+        print(json.dumps({**line, "budget_s": step.budget_s, "writes": writes}), file=sys.stderr, flush=True)
 
 
 def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
@@ -338,6 +348,7 @@ def _eager(ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: App
                 if lane.expired:
                     running.pop(future)
                     dropped.add(step.name)
+                    _abandoned(step)
                     left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
                     records[step.name] = _ended(found, left)
     finally:

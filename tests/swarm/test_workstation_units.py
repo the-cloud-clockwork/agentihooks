@@ -34,7 +34,7 @@ def scheduler(monkeypatch):
 @pytest.fixture
 def distributed(monkeypatch, scheduler):
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
-    monkeypatch.setattr(timer, "schedule", lambda: pytest.fail("the swarm tick was scheduled"))
+    monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the swarm tick was scheduled"))
     monkeypatch.setattr(timer, "undelivered", lambda: pytest.fail("the tick delivery was read"))
 
 

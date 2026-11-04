@@ -43,6 +43,7 @@ from scripts.swarm import (
 from scripts.swarm.health import (
     activity,
     checks,
+    early_ends,
     merge_stall,
     night_watch,
     prompt_backlog,
@@ -147,6 +148,7 @@ def findings(store, slug, config, tasks, events, view=None):
         + urgent_hold.findings(store, slug)
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
+        + early_ends.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
     )
     found = outage.hold_findings(store, slug, found, agents)
     if ledger_probe.holding(store, slug):
