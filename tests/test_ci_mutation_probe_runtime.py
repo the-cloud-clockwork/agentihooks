@@ -116,14 +116,14 @@ def test_an_early_probe_runs_the_identity_group_alone_when_only_it_owns_split_mu
 
 
 @pytest.mark.parametrize(
-    ("reason", "statuses", "budget", "error", "message"),
+    ("reason", "statuses", "elapsed", "error", "message"),
     [
-        ("over budget", [], 1080, RuntimeError, "early mutation failed: over budget\n"),
-        ("", [], 1080, ValueError, "early mutation did not grade its assigned mutants: 3 without a result"),
+        ("over budget", [], 0, RuntimeError, "early mutation failed: over budget\n"),
+        ("", [], 0, ValueError, "early mutation did not grade its assigned mutants: 3 without a result"),
         (
             "",
             ["no tests", "killed", "survived"],
-            1080,
+            0,
             ValueError,
             "early mutation did not grade its assigned mutants: 1 no tests",
         ),
@@ -137,38 +137,40 @@ def test_an_early_probe_runs_the_identity_group_alone_when_only_it_owns_split_mu
         (
             "",
             ["killed", "killed", "survived"],
-            -1,
+            1200,
             ValueError,
-            "early mutation did not grade its assigned mutants: ran 0.0 s past its -1.0 s budget",
+            "early mutation did not grade its assigned mutants: ran 1200.0 s, over its 1080.0 s budget",
         ),
         (
             "",
             ["killed", "no tests"],
-            -1,
+            1080.5,
             ValueError,
             "early mutation did not grade its assigned mutants: 1 no tests; 1 without a result; "
-            "ran 0.0 s past its -1.0 s budget",
+            "ran 1080.5 s, over its 1080.0 s budget",
         ),
         (
             "",
             ["killed", "killed", "killed", "no tests"],
-            1080,
+            0,
             ValueError,
             "early mutation did not grade its assigned mutants: 1 no tests; 1 not assigned to this shard",
         ),
     ],
 )
-def test_a_refused_early_probe_names_its_cause(tmp_path, monkeypatch, reason, statuses, budget, error, message):
+def test_a_refused_early_probe_names_its_cause(tmp_path, monkeypatch, reason, statuses, elapsed, error, message):
+    """One probe shard owns the three x_f and x_g mutants; x_h belongs to no shard, and the clock advances by elapsed."""
     plan = _plan()
     plan["probe_shards"] = 1
     plan["splits"]["scripts.a.x_g"] = plan["splits"]["scripts.a.x_f"]
     stats = _shared(tmp_path, plan)
-    monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
+    clock = iter([100, 100 + elapsed])
+    monkeypatch.setattr(probe.time, "monotonic", lambda: next(clock, 100 + elapsed))
     names = ["scripts.a.x_f__mutmut_1", "scripts.a.x_f__mutmut_2", "scripts.a.x_g__mutmut_1", "scripts.a.x_h__mutmut_1"]
     rows = [{"name": name, "status": status} for name, status in zip(names, statuses)]
     monkeypatch.setattr(runner, "mutate_files", lambda *args: ({"scripts/a.py": rows}, reason))
     with pytest.raises(error) as raised:
-        probe.run_probe(tmp_path, {"scripts/a.py": ({2}, ["tests/a.py"])}, stats, (0, 1), budget)
+        probe.run_probe(tmp_path, {"scripts/a.py": ({2}, ["tests/a.py"])}, stats, (0, 1), 1080)
     assert str(raised.value) == message
 
 

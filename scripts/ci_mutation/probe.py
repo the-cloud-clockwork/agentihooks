@@ -89,11 +89,14 @@ def worker_failure(work: Path, reason: str) -> RuntimeError:
 def refusals(owned: set[str], rows: dict[str, str], seconds: float, budget: float) -> str:
     """Name every reason an early shard's grading is refused, or return an empty string when it is complete."""
     statuses = Counter(status for status in rows.values() if status not in {"killed", "survived"})
-    parts = [", ".join(f"{count} {status}" for status, count in sorted(statuses.items()))]
-    parts.append(f"{len(owned - set(rows))} without a result" if owned - set(rows) else "")
-    parts.append(f"{len(set(rows) - owned)} not assigned to this shard" if set(rows) - owned else "")
-    parts.append(f"ran {seconds:.1f} s past its {budget:.1f} s budget" if seconds > budget else "")
-    return "; ".join(part for part in parts if part)
+    parts = [", ".join(f"{count} {status}" for status, count in sorted(statuses.items()))] if statuses else []
+    if owned - set(rows):
+        parts.append(f"{len(owned - set(rows))} without a result")
+    if set(rows) - owned:
+        parts.append(f"{len(set(rows) - owned)} not assigned to this shard")
+    if seconds > budget:
+        parts.append(f"ran {seconds:.1f} s, over its {budget:.1f} s budget")
+    return "; ".join(parts)
 
 
 def merge_probes(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
