@@ -1583,7 +1583,7 @@ def _spawn_order(
     from scripts.swarm import capacity, focus_budget
 
     if begin := getattr(runtime, "begin_placement_pass", None):
-        begin()
+        timing.timed(begin)
 
     decision = timing.timed(capacity.read, store, slug)
     caps = timing.timed(capacity.caps, decision, config)
@@ -1594,16 +1594,14 @@ def _spawn_order(
         running = timing.timed(_running, agents, rows, lane)
         busy = len(running)
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
-        ready = [task for task in ready if readiness.tick_launches(config.engine, task)]
-        if "tasks" in decision:
-            ready = [task for task in ready if task["id"] in decision["tasks"]]
+        ready = timing.timed(readiness.launchable, config.engine, decision, ready)
         locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
         ready, refused = timing.timed(focus_budget.place, doc, ready, lane, cap, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
     ranked = timing.timed(_ranked, slug, store, queue, dispatched)
-    focus = focus_budget.ranks(doc)
-    return sorted(ranked, key=lambda entry: focus[entry[1]["id"]]), waits
+    focus = timing.timed(focus_budget.ranks, doc)
+    return timing.timed(focus_budget.ordered, ranked, focus), waits
 
 
 def _ranked(slug, store, queue, dispatched):
