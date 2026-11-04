@@ -233,3 +233,7 @@ def test_cache_due_needs_a_known_activity_time():
     wait = {"until": BASE + 3 * CACHE_LIMIT, "reason": "checks on the pull request"}
     assert not stale_nudge.cache_due(wait, 0, BASE)
     assert stale_nudge.cache_due(wait, BASE - CACHE_LIMIT - 1, BASE)
+
+
+def test_the_cache_warm_id_hashes_the_forty_minute_window_since_the_last_activity():
+    assert stale_nudge.cache_item_id("sw", NAME, BASE, BASE + 2 * CACHE_LIMIT + MINUTE) == "375da1eac1bd"
