@@ -880,7 +880,8 @@ over the local spool opened on its first append, and `local_host`.
 declares its effects and its feature map id on the `Step` protocol (`effects`, `feature`); `CallStep` and `WriteStep`
 take them as keywords and default to `frozenset()` and `""`. A step that calls a write operation on a port it did not
 declare raises `UndeclaredEffect`, and the engine records the step failed with
-`scripts.tick.ports.contracts.UndeclaredEffect` as its error; the step's other writes are not applied.
+`scripts.tick.ports.contracts.UndeclaredEffect` as its error. The writes the step would have returned in its `Result`
+are not applied; calls it already made through declared ports stay made.
 
 Every registered step declares `effects=frozenset()` today and still reaches outside systems through the tick module.
 A step moves onto ports in its own sweep, naming the ports it writes in `effects` in the same pull request.
