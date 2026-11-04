@@ -7,7 +7,7 @@ import shlex
 import tomllib
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from scripts.codex_session.binding import TransportRecord
 from scripts.swarm import session_model
@@ -172,17 +172,15 @@ def launched(agent: AgentRecord) -> dict[str, Any]:
     """The record's validation, with the home its launch report validated while the record still holds it pending."""
     from scripts.profiles import binding
 
-    validation = cast(dict[str, Any], agent.profile_decision.get("validation", {}))
+    validation = dict[str, Any](agent.profile_decision.get("validation", {}))
     if validation.get("home") or not validation.get("report"):
         return validation
+    account = str(validation.get("account") or "")
     try:
-        confirmed = cast(
-            "dict[str, Any]",
-            binding.confirm(Path(validation["report"]), agent.profile, agent.harness, validation.get("account", "")),
-        )
+        confirmed = dict[str, Any](binding.confirm(Path(validation["report"]), agent.profile, agent.harness, account))
     except (OSError, ValueError, TypeError, KeyError):
         return validation
-    return {**validation, "home": confirmed.get("home", "")}
+    return {**validation, "home": confirmed["home"]}
 
 
 def assignment(agent: AgentRecord) -> dict:
