@@ -73,18 +73,78 @@ def test_tags_asks_origin_for_tag_refs_with_a_bounded_wait(monkeypatch):
     assert release_wait.tags("/repo") == ["v1.0.0", "v1.0.1"]
     assert calls == [
         (
-            ["git", "-C", "/repo", "ls-remote", "--tags", "--refs", "origin"],
-            {"capture_output": True, "text": True, "timeout": 30},
+            ["git", "-C", "/repo", *release_wait.HTTPS, "ls-remote", "--tags", "--refs", "origin"],
+            {"capture_output": True, "text": True, "timeout": 15},
         )
     ]
 
 
-def test_tags_is_empty_when_the_lookup_times_out(monkeypatch):
+@pytest.mark.parametrize("remote", ["git@github.com:owner/project.git", "ssh://git@github.com/owner/project.git"])
+def test_the_lookup_reads_a_github_ssh_origin_over_https(origin, remote, monkeypatch):
+    git("remote", "set-url", "origin", remote, cwd=origin)
+    real, urls = subprocess.run, []
+
     def run(args, **kwargs):
+        at = args.index("ls-remote")
+        urls.append(real([*args[:at], "ls-remote", "--get-url", "origin"], **kwargs).stdout.strip())
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(release_wait.subprocess, "run", run)
+    assert release_wait.lookup(str(origin)) == ([], "")
+    assert urls == ["https://github.com/owner/project.git"]
+
+
+def test_one_failed_lookup_is_retried_before_it_counts(monkeypatch):
+    answers = [
+        subprocess.CompletedProcess([], 128, "", "Permission denied (publickey)"),
+        subprocess.CompletedProcess([], 0, "abc 1\trefs/tags/v1.0.1\n", ""),
+    ]
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return answers[len(calls) - 1]
+
+    monkeypatch.setattr(release_wait.subprocess, "run", run)
+    assert release_wait.lookup("/repo") == (["v1.0.1"], "")
+    assert len(calls) == 2
+
+
+def test_a_lookup_that_fails_twice_names_the_second_failure(monkeypatch):
+    codes = [128, 2]
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, codes[len(calls) - 1], "", "")
+
+    monkeypatch.setattr(release_wait.subprocess, "run", run)
+    assert release_wait.lookup("/repo") == ([], "git ls-remote exited 2")
+    assert len(calls) == 2
+
+
+def test_a_working_lookup_reads_once(monkeypatch):
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(release_wait.subprocess, "run", run)
+    assert release_wait.lookup("/repo") == ([], "")
+    assert len(calls) == 1
+
+
+def test_a_timed_out_lookup_is_retried_once_and_both_attempts_fit_the_old_thirty_seconds(monkeypatch):
+    waits = []
+
+    def run(args, **kwargs):
+        waits.append(kwargs["timeout"])
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
     monkeypatch.setattr(release_wait.subprocess, "run", run)
     assert release_wait.tags("/repo") == []
+    assert waits == [15, 15]
 
 
 @pytest.mark.parametrize(("error", "why"), [(OSError(), "OSError"), (OSError("no git"), "no git")])

@@ -9,6 +9,8 @@ from scripts.ci_mutation.measured import budget_overrun, plan_shards
 from scripts.ci_mutation.mutant_shards import function_name
 from scripts.ci_mutation.probe import merge_probes, plan_fingerprint
 
+SHARD_WALL_SECONDS = 360.0
+
 
 def survivor_units(plan: dict[str, Any], name: str, memory: KillMemory | None) -> list[float]:
     """Price each unit of a mutant its head left alive by its slice alone, since the shard skips the head."""
@@ -22,7 +24,7 @@ def survivor_units(plan: dict[str, Any], name: str, memory: KillMemory | None) -
 
 
 def probed_plan(plan: dict[str, Any], budget: float, memory: KillMemory | None = None) -> dict[str, Any]:
-    """Size the shards from what the early stage left: whole mutants and the slices of each split survivor."""
+    """Size shards of whole mutants and survivor slices so each plans to finish in six minutes with its setup."""
     results = plan["probe"]["results"]
     survivors = sorted(name for name, status in results.items() if status == "survived")
     killed = sorted(name for name, status in results.items() if status == "killed")
@@ -30,7 +32,7 @@ def probed_plan(plan: dict[str, Any], budget: float, memory: KillMemory | None =
     costs = {name: cost for name, cost in plan["costs"].items() if name not in results}
     costs.update({name: sum(units) for name, units in unit_costs.items()})
     splits = {function_name(name): plan["splits"][function_name(name)] for name in survivors}
-    remaining = budget - plan["probe"]["seconds"]
+    remaining = min(budget - plan["probe"]["seconds"], SHARD_WALL_SECONDS)
     shards = plan_shards(costs, splits=splits, unit_costs=unit_costs, budget=remaining)
     replanned = {
         **plan,

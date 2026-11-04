@@ -26,6 +26,8 @@ class BlockingStep:
     needs: frozenset[str] = frozenset()
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
     release: Event = field(default_factory=Event)
     ended: Event = field(default_factory=Event)
     runs: list[int] = field(default_factory=list)

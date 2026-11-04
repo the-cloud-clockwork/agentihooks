@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scripts.swarm import github_reads
+from scripts.swarm import github_reads, release_wait
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import Unsupported
 from scripts.tick.ports.source_control import (
@@ -238,10 +238,10 @@ class GitHubSourceControl:
         return QueueHealth(entries["totalCount"], tuple(node["state"] for node in entries["nodes"]))
 
     def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
-        """List the remote tags with the commits they name."""
+        """List the remote tags with the commits they name, read over https."""
         timeout = deadline.live()
         result = self.git(
-            ["git", "ls-remote", "--tags", "origin"],
+            ["git", *release_wait.HTTPS, "ls-remote", "--tags", "origin"],
             cwd=self.root,
             timeout=timeout,
             capture_output=True,

@@ -1,10 +1,11 @@
 from collections.abc import Iterable
+from importlib import import_module
 from itertools import combinations
 from math import isfinite
 
 from scripts.tick.step import Step
 
-__all__ = ["Registry", "latest_start", "ordered", "register", "registry", "steps", "validate", "waves"]
+__all__ = ["Registry", "latest_start", "ordered", "register", "registry", "require", "steps", "validate", "waves"]
 
 
 def _validate_timing(steps: list[Step]) -> None:
@@ -65,14 +66,25 @@ def _validate_writers(ordered: tuple[tuple[Step, ...], ...]) -> None:
 class Registry:
     def __init__(self) -> None:
         self._steps: list[Step] = []
+        self._providers: list[str] = []
 
     def register(self, step: Step) -> None:
         self._steps.append(step)
 
+    def require(self, module: str) -> None:
+        """Keep ``module``, whose steps a registered step needs, to load before the registry is next read."""
+        self._providers.append(module)
+
+    def _load_providers(self) -> None:
+        for module in self._providers:
+            import_module(module)
+
     def validate(self) -> None:
+        self._load_providers()
         _validate_writers(_dependency_waves(self._steps))
 
     def waves(self) -> tuple[tuple[Step, ...], ...]:
+        self._load_providers()
         ordered = _dependency_waves(self._steps)
         _validate_writers(ordered)
         return ordered
@@ -88,6 +100,11 @@ registry = Registry()
 
 def register(step: Step) -> None:
     registry.register(step)
+
+
+def require(module: str) -> None:
+    """Load ``module``, whose steps a registered step needs, before the registry is next read."""
+    registry.require(module)
 
 
 def validate() -> None:

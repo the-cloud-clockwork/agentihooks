@@ -3,7 +3,7 @@
 from collections.abc import Callable, Iterable, Mapping
 from functools import partial
 from importlib import import_module
-from typing import Any, cast
+from typing import Any, TypedDict, Unpack, cast
 
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
@@ -13,6 +13,13 @@ PASS = Domain("pass")
 AGENTS = Domain("agents")
 TASKS = Domain("tasks")
 SWARM = Domain("swarm")
+
+
+class Declared(TypedDict, total=False):
+    """What a step declares beyond its graph: the ports it may write through and its feature map id."""
+
+    effects: frozenset[str]
+    feature: str
 
 
 class CallStep:
@@ -29,10 +36,13 @@ class CallStep:
         reads: frozenset[Domain] = frozenset(),
         writes: frozenset[Domain] = frozenset(),
         lane: Lane = lane,
+        **declared: Unpack[Declared],
     ) -> None:
-        """Name the step in tick group ``group`` and its ``lane``, keep its call, its needs and the domains it reads
-        and writes."""
+        """Name the step in tick group ``group`` and its ``lane``, keep its call, its needs, the domains it reads
+        and writes, the ports it may write through and its feature map id."""
         self.lane = lane
+        self.effects = declared.get("effects", frozenset())
+        self.feature = declared.get("feature", "")
         self.name = name
         self.needs = needs
         self.group = group

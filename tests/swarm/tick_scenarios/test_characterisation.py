@@ -300,3 +300,20 @@ def test_a_planted_second_read_without_a_write_is_counted(monkeypatch: pytest.Mo
     reads = ReadCount(monkeypatch, second_read=True)
     replay("running", "run_tick", monkeypatch, tmp_path)
     assert reads.unwritten, reads.counts
+
+
+@pytest.mark.feature("fenced-live-names-listing")
+def test_running_pass_lists_live_names_once_plus_once_per_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    listings: list[int] = []
+    original = FakeRuntime.live_names
+
+    def counted(self: FakeRuntime) -> set[str]:
+        listings.append(1)
+        return original(self)
+
+    monkeypatch.setattr(FakeRuntime, "live_names", counted)
+    record = replay("running", "run_tick", monkeypatch, tmp_path)
+    launches = sum(1 for call in record["runtime_writes"] if call[0] == "spawn")
+    assert (len(listings), launches) == (3, 3), f"LIVE_NAMES_LISTINGS={len(listings)} LAUNCHES={launches}"

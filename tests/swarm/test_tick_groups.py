@@ -13,6 +13,8 @@ from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick import engine, registry
+from scripts.tick.adapters.inbox import StoreInbox
+from scripts.tick.ports import Tools
 from scripts.tick.step import Context, Domain, Lane, Result
 from scripts.tick.steps import PASS, Left, observe, report
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -65,6 +67,8 @@ class _Marker:
     needs: frozenset[str] = frozenset()
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
 
     def run(self, ctx: Context) -> Result:
         self.ran.append(self.group)
@@ -151,6 +155,23 @@ def test_the_tick_wrapper_runs_its_groups_before_and_after_the_tick(
         "after",
         "wrapper status",
     ]
+
+
+@pytest.mark.feature("swarm-tick-declared-effects")
+def test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    seen = _spy(monkeypatch)
+    cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    tools = seen[0][1].tools
+    assert all(ctx.tools is tools for _, ctx in seen)
+    assert isinstance(tools, Tools)
+    assert isinstance(tools.inbox, StoreInbox)
+    cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert seen[-1][1].tools is not tools
 
 
 def test_the_wrapper_hands_metrics_the_action_count_and_after_the_reread_doc(

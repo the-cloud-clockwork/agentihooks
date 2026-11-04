@@ -21,7 +21,7 @@ def _held_for(harness, slug):
 
 def test_capacity_accounts_reserve_the_declared_account_per_harness(monkeypatch):
     claude, codex = _row(), _row(harness="codex")
-    monkeypatch.setattr(capacity, "_claude", lambda environ, now: [claude])
+    monkeypatch.setattr(capacity, "_claude", lambda environ, now, refresh=True: [claude])
     monkeypatch.setattr(capacity, "_codex", lambda environ, now, refresh: [codex])
     monkeypatch.setattr(reservation, "current", _held_for("claude", "main"))
     rows = capacity.accounts({}, 0.0, refresh=False)

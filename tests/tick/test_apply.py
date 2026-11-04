@@ -48,6 +48,8 @@ class SizeStep:
     needs: frozenset[str] = frozenset()
     reads: frozenset[Domain] = frozenset({TASKS})
     writes: frozenset[Domain] = frozenset({TASKS})
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
 
     def run(self, ctx: Context) -> Result:
         found = ctx.view.read(TASKS, "t1")

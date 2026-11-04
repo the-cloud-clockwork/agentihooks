@@ -18,7 +18,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, Left, PassBox, actions, budgets, pass_domains
+from scripts.tick.steps import PASS, CallStep, Left, PassBox, actions, budgets, pass_domains, tasks
 
 __all__ = [
     "DISPATCH",
@@ -74,7 +74,8 @@ class _SiteView:
 def run_site(group: str, found: Mapping[str, Any]) -> list[str]:
     """Run tick group ``group`` against the tick's locals ``found``, raising what a step held, returning actions."""
     box: dict[str, Any] = PassBox()
-    records = engine.run_group(group, Context(_SiteView(found, box), Deadline.after(budgets.SLOW_S)))
+    ctx = Context(_SiteView(found, box), Deadline.after(budgets.SLOW_S))
+    records = engine.run_group(group, ctx, apply=tasks.appliers(dict(found)))
     raise_held(box)
     return actions(records)
 
@@ -128,8 +129,16 @@ def _retire_idle_master(tick: Any, get: Get) -> Any:
 
 
 def _master_stall(tick: Any, get: Get) -> Any:
-    return tick.skip_refused(
-        SEAT.master_stall.run, get("slug"), get("config"), get("store"), get("ledger"), get("runtime"), get("now_ms")
+    return tasks.stall_writes(
+        tick.skip_refused(
+            SEAT.master_stall.stalls,
+            get("slug"),
+            get("config"),
+            get("store"),
+            get("ledger"),
+            get("runtime"),
+            get("now_ms"),
+        )
     )
 
 
@@ -215,7 +224,9 @@ CONFIG = pass_domains("config")
 STEPS = (
     CallStep("master wake", MASTERS, _held(_master_wake), CONFIGURED | LISTED, pass_domains("config", "doc")),
     CallStep("retire idle master", MASTERS, _held(_retire_idle_master), frozenset({"spawn due"}), pass_domains("rows")),
-    CallStep("master stall", MASTERS, _held(_master_stall), CONFIGURED, CONFIG),
+    tasks.WriteStep(
+        "master stall", MASTERS, _held(_master_stall), writes=frozenset({tasks.STALL}), needs=CONFIGURED, reads=CONFIG
+    ),
     CallStep("prompt stall", MASTERS, _held(_prompt_stall), CONFIGURED, CONFIG),
     CallStep("master down", SEATS, _held(_master_down), RESUMED, CONFIG),
     CallStep("tick master", SEATS, _held(_tick_master), RESUMED, pass_domains("config", "doc")),

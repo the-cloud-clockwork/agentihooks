@@ -14,17 +14,10 @@ from hooks.classifier.result import DecisionRequest
 from scripts.tick import ports
 from scripts.tick.adapters import fakes, host, inbox, llm, metrics
 from scripts.tick.deadline import Deadline
+from scripts.tick_pattern import BANNED
 
 ROOT = Path(__file__).resolve().parents[2]
 TICK = ROOT / "scripts" / "tick"
-BANNED = (
-    "scripts.inbox",
-    "hooks.classifier",
-    "scripts.swarm.metrics_outbox",
-    "scripts.swarm.host_budget",
-    "scripts.swarm.refresh_job",
-    "scripts.swarm.snapshot_job",
-)
 
 
 def _open() -> Deadline:

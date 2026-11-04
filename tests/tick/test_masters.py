@@ -20,7 +20,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Result, Write
-from scripts.tick.steps import PASS, actions, actions_of, masters
+from scripts.tick.steps import PASS, actions, actions_of, masters, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -99,7 +99,7 @@ def test_the_steps_sit_at_their_sites_in_todays_order() -> None:
     [
         ("master wake", (master_wake.run, "sw", "store", "runtime", "doc", 7)),
         ("retire idle master", (lifetime.retire_idle_master, "sw", "store", "ledger", "runtime", "rows", 7)),
-        ("master stall", (master_stall.run, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
+        ("master stall", (master_stall.stalls, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
         ("prompt stall", (master_prompt_stall.run, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
         ("master down", ("master down", "sw", "CONFIG", "store", "ledger", "runtime", 7)),
         ("master scale", (master_scale.run, "sw", "CONFIG", "store", "runtime", "doc", 7)),
@@ -197,13 +197,15 @@ def test_the_site_view_reads_the_locals_and_the_box_for_the_pass_domain() -> Non
 def test_a_site_runs_its_group_against_the_locals_under_the_step_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[tuple[str, Context]] = []
 
-    def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
+    def run_group(name: str, ctx: Context, apply: Any) -> tuple[engine.StepRecord, ...]:
         seen.append((name, ctx))
+        assert set(apply) == set(tasks.appliers({"slug": "sw", "ledger": "ledger", "store": "store", "now_ms": 7}))
         result = Result((Write(actions_of("one"), "one", ["ran"]),))
         return (engine.StepRecord("one", 0.0, 1.0, result=result),)
 
     monkeypatch.setattr(engine, "run_group", run_group)
-    assert masters.run_site("master watch", {"slug": "sw"}) == ["ran"]
+    found = {"slug": "sw", "ledger": "ledger", "store": "store", "now_ms": 7}
+    assert masters.run_site("master watch", found) == ["ran"]
     ((name, ctx),) = seen
     assert name == "master watch"
     assert ctx.view.read(PASS, "slug") == "sw"
@@ -212,7 +214,8 @@ def test_a_site_runs_its_group_against_the_locals_under_the_step_budget(monkeypa
 
 
 def test_a_site_raises_what_its_steps_held(monkeypatch: pytest.MonkeyPatch) -> None:
-    def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
+    def run_group(name: str, ctx: Context, apply: Any) -> tuple[engine.StepRecord, ...]:
+        assert apply == {}
         cast(dict[str, Any], ctx.view.read(PASS, "box"))[masters.RAISED] = KeyError("held")
         return ()
 
@@ -232,6 +235,6 @@ def test_a_site_raises_what_its_steps_held(monkeypatch: pytest.MonkeyPatch) -> N
 )
 def test_each_site_names_its_group(site: Any, group: str, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
-    monkeypatch.setattr(engine, "run_group", lambda name, ctx: seen.append(name) or ())
+    monkeypatch.setattr(engine, "run_group", lambda name, ctx, apply: seen.append(name) or ())
     assert site({}) == []
     assert seen == [group]
