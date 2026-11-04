@@ -126,6 +126,19 @@ def test_a_skipped_step_counts_as_ended_for_its_dependents(recording: Any) -> No
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
+def test_a_skipped_step_in_a_parallel_pass_ends_for_its_dependents(recording: Any) -> None:
+    from scripts.tick import pool
+
+    _, _, clock = recording
+    wide = Counted("wide", budgets.WIDE_S)
+    after = Counted("after", budgets.CRITICAL_S, needs=frozenset({"wide"}))
+    with pool.running(workers=2):
+        outcomes = passes((wide, after), clock, 2)
+    assert outcomes == [[engine.OK, engine.OK], [engine.SKIPPED, engine.OK]]
+    assert (len(wide.runs), len(after.runs)) == (1, 2)
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
 def test_a_failed_run_records_its_end_and_a_late_run_does_not(recording: Any) -> None:
     store, _, _ = recording
     token = timing.PASS.set({"pass_id": "p0", "start_ms": BASE_S * 1000})
