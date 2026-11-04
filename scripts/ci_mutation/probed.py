@@ -7,10 +7,9 @@ from typing import Any
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.measured import budget_overrun, plan_shards
 from scripts.ci_mutation.mutant_shards import function_name
-from scripts.ci_mutation.plan import SHARD_SETUP_SECONDS
 from scripts.ci_mutation.probe import merge_probes, plan_fingerprint
 
-SHARD_WORK_SECONDS = 360.0
+SHARD_WALL_SECONDS = 360.0
 
 
 def survivor_units(plan: dict[str, Any], name: str, memory: KillMemory | None) -> list[float]:
@@ -33,7 +32,7 @@ def probed_plan(plan: dict[str, Any], budget: float, memory: KillMemory | None =
     costs = {name: cost for name, cost in plan["costs"].items() if name not in results}
     costs.update({name: sum(units) for name, units in unit_costs.items()})
     splits = {function_name(name): plan["splits"][function_name(name)] for name in survivors}
-    remaining = min(budget - plan["probe"]["seconds"], SHARD_SETUP_SECONDS + SHARD_WORK_SECONDS)
+    remaining = min(budget - plan["probe"]["seconds"], SHARD_WALL_SECONDS)
     shards = plan_shards(
         costs, limit=min(10, len(plan["costs"])), splits=splits, unit_costs=unit_costs, budget=remaining
     )
