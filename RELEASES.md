@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.629 · 2026-11-04
+
+### 2026-11-04 · 42c1e6400516 · #9650 · @nestorcolt
+
+**Rebind the hive daemon hive_id before every test**
+
+This fix closes a flaky, test-order-dependent failure where `tests/hive/test_refresh.py` picked up a stale `hive_id` stub left over from earlier tick characterisation tests that monkeypatched `scripts.swarm.commands.hive_id`, because `scripts.hive.daemon` had bound its own module level reference to that function at import time. A new autouse fixture in `tests/conftest.py` rebinds `daemon.hive_id` back to the real `commands.hive_id` before every test, so each test starts clean regardless of execution order, eliminating the shard 17 failures seen on Python 3.12.
+
 ## v2.17.627 · 2026-11-04
 
 ### 2026-11-04 · 2bf6333b3e29 · #9622 · @nestorcolt
