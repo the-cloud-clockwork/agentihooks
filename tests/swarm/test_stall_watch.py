@@ -644,6 +644,7 @@ def test_the_tick_stall_step_tells_the_front_door_when_the_second_seat_never_lau
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(stall_watch, "ready_lanes", lambda *args: lambda lane: [])
     monkeypatch.setattr(release_wait, "checker", lambda repo: lambda task: True)
+    monkeypatch.setattr(ledger_events, "view", swarm.pulls.get)
     runtime = SimpleNamespace(live_names=lambda: {OWNER, "master@abc-0005"}, retire=lambda agent, homes: True)
     now = [START]
     cli = SimpleNamespace(skip_refused=lambda function, *args: function(*args), now_ms=lambda: now[0])
