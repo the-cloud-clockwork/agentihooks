@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from functools import partial
-from typing import Any, cast
+from typing import Any, Unpack, cast
 
 from scripts.swarm import dev_red, dispatcher, fleet_red, phases, prerequisite_wait, promotion_watch, release_wait
 from scripts.swarm.ledger_client import LedgerRefused
@@ -10,7 +10,7 @@ from scripts.tick import registry, steps, view
 from scripts.tick.engine import SLOW
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Lane, Result, Write
-from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Left, actions_of, pass_domains
+from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Declared, Left, actions_of, pass_domains
 
 __all__ = [
     "CLOSE",
@@ -310,9 +310,12 @@ class WriteStep:
         needs: frozenset[str] = frozenset(),
         reads: frozenset[Domain] = frozenset(),
         lane: Lane = CallStep.lane,
+        **declared: Unpack[Declared],
     ) -> None:
-        """Take the name, group, lane, budgets, needs and domains of the call step running ``call``."""
-        base = CallStep(name, group, call, needs, reads, writes, lane)
+        """Take the name, group, lane, budgets, needs, domains, effects and feature of the call step running ``call``."""
+        base = CallStep(name, group, call, needs, reads, writes, lane, **declared)
+        self.effects = base.effects
+        self.feature = base.feature
         self.name = base.name
         self.group = base.group
         self.call = base.call
