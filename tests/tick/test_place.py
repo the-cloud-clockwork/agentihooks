@@ -1,5 +1,6 @@
 """The placement steps run the tick's hand written acks, ranking, preempt and spawn calls at their sites in today's order."""
 
+import runpy
 from contextlib import contextmanager
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Iterator
@@ -185,6 +186,15 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
         assert step in registered
         lane = engine.SLOW if step.name in {"lost runner", "time left"} else CallStep.lane
         assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
+
+
+def test_placement_requires_the_report_steps_its_spawn_step_needs(monkeypatch: pytest.MonkeyPatch) -> None:
+    required: list[str] = []
+    monkeypatch.setattr(registry, "registry", registry.Registry())
+    monkeypatch.setattr(registry, "require", required.append)
+    runpy.run_module("scripts.tick.steps.place")
+    assert required == ["scripts.tick.steps.report"]
+    assert {"overrun pass", "quiet pass"} <= budgets.SPAWN_NEEDS
 
 
 def test_the_placement_notices_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
