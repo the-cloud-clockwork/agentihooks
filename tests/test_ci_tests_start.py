@@ -1,5 +1,6 @@
 import json
 import subprocess
+from types import ModuleType
 
 import pytest
 
@@ -189,11 +190,11 @@ def test_can_verify_the_push_event_used_by_the_ci_plant(monkeypatch, capsys):
     assert capsys.readouterr().out == "::error::Tests run 11 ended with failure.\n"
 
 
-def _replay(monkeypatch: pytest.MonkeyPatch, replies: list[dict]) -> tuple[object, list[str], list[float]]:
+def _replay(monkeypatch: pytest.MonkeyPatch, replies: list[dict]) -> tuple[ModuleType, list[str], list[float]]:
     from scripts import ci_tests_start
 
-    calls = []
-    sleeps = []
+    calls: list[str] = []
+    sleeps: list[float] = []
     queue = iter(replies)
 
     def api(endpoint: str) -> dict:
