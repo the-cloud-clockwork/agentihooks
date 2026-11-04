@@ -1003,6 +1003,10 @@ def test_a_held_tests_folder_is_read_once_and_each_selection_is_made_once(
     assert held == [tests / "test_first.py", tests / "test_second.py"]
     assert reached == [(first, True), (second, True), (first, False)]
     assert scope.HELD == {}
+    with pytest.raises(SystemExit), scope.held_tests(tmp_path):
+        assert tmp_path in scope.HELD
+        raise SystemExit(1)
+    assert scope.HELD == {}
     (tests / "test_late.py").write_text("from hooks.context import first_sample\n")
     assert select_tests(tmp_path, first) == ["tests/test_first.py", "tests/test_late.py"]
     assert scope.held_text(tests / "test_late.py") == "from hooks.context import first_sample\n"

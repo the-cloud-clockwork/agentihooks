@@ -26,6 +26,7 @@ from scripts.ci_mutation.stats import split_key, write_part
 from scripts.ci_mutation.stats_dependencies import records_within
 
 if TYPE_CHECKING:
+    from libcst import Module
     from libcst.metadata import MetadataWrapper
     from mutmut.mutation.file_mutation import Mutation
 
@@ -34,7 +35,7 @@ GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 IMPORT_GROUPS = {"fakeredis"}
 
 
-def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
+def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple["Module", list["Mutation"]]:
     wrapper, mutations, _ = created_mutations(filename, source)
     return wrapper.module, on_changed_lines(wrapper, mutations, changed)
 
