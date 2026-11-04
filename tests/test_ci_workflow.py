@@ -2576,7 +2576,7 @@ def test_the_inline_statistics_shard_downloads_the_branch_preflight_kill_memory_
     assert download["with"] == {"pattern": "mutation-stats-killers", "path": ".mutation-stats", "merge-multiple": True}
     assert download["if"] == stats[names.index("Mutate the only shard in the statistics job")]["if"]
     assert names.index(download["name"]) < names.index("Mutate the only shard in the statistics job")
-    shard = jobs["mutation"]["steps"]
+    shard = jobs["mutation-shard"]["steps"]
     shared = next(step for step in shard if step.get("name") == "Download the shared mutation stats")
     assert fnmatch.fnmatch("mutation-stats-killers", shared["with"]["pattern"])
     assert shared["with"]["path"] == ".mutation-stats"

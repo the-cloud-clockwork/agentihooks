@@ -7,6 +7,7 @@ import subprocess
 import time
 import zipfile
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import quote
 
 from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
@@ -129,14 +130,17 @@ def unpack(archive: bytes, row: dict) -> None:
 
 def restore_killers(head: str, branch: str, current: int, folder: Path = KILLERS) -> int:
     """Unpack the killing tests the newest preflight of this head kept; return how many records it held."""
-    for row in runs(f"head_sha={head}&branch={quote(branch)}", current):
-        artifacts = api(f"actions/runs/{row['id']}/artifacts?per_page=100")["artifacts"]
+    previous = cast(list[dict[str, Any]], runs(f"head_sha={head}&branch={quote(branch)}", current))
+    for row in previous:
+        listing = cast(dict[str, Any], api(f"actions/runs/{row['id']}/artifacts?per_page=100"))
+        artifacts: list[dict[str, Any]] = listing["artifacts"]
         kept = [found for found in artifacts if found["name"].startswith("mutation-killers-") and not found["expired"]]
         if not kept:
             continue
         folder.mkdir(parents=True, exist_ok=True)
         for artifact in kept:
-            with zipfile.ZipFile(io.BytesIO(api(f"actions/artifacts/{artifact['id']}/zip", binary=True))) as zipped:
+            archive = cast(bytes, api(f"actions/artifacts/{artifact['id']}/zip", binary=True))
+            with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
                 for name in zipped.namelist():
                     if re.fullmatch(r"[0-9a-f]{64}", Path(name).name):
                         (folder / Path(name).name).write_bytes(zipped.read(name))

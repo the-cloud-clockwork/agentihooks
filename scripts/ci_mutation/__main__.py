@@ -11,7 +11,7 @@ from scripts.ci_mutation.stats import SharedStats
 
 def test_units(source: bytes | None) -> dict[str, str]:
     """Map each collectable test function in a test module to the text of its syntax tree."""
-    found = {}
+    found: dict[str, str] = {}
     if source is None:
         return found
 
@@ -30,7 +30,7 @@ def branch_tests(root: Path, base: str, head: str) -> tuple[str, ...]:
     """Name every test function the branch adds or changes since it left base, as pytest node ids."""
     fork = subprocess.check_output(["git", "merge-base", base, head], cwd=root).decode().strip()
     command = ["git", "diff", "--name-only", "--no-renames", "-z", fork, head, "--", "tests"]
-    found = set()
+    found: set[str] = set()
     for name in subprocess.check_output(command, cwd=root).decode().split("\0"):
         if not is_test_file(name):
             continue
@@ -62,7 +62,7 @@ def main() -> int:
     root = Path.cwd()
     if os.environ.get("MUTATION_STATS_CACHE"):
         os.environ["MUTATION_STATS_ROOT"] = str(root)
-    bases = args.bases.split(",") if args.bases is not None else args.base
+    bases: list[str] | str = args.bases.split(",") if args.bases is not None else args.base
     changes = discover_changes(root, bases, args.head)
     print(f"Changed Python files: {len(changes)}", flush=True)
     first = branch_tests(root, bases[0] if isinstance(bases, list) else bases, args.head) if changes else ()

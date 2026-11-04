@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -69,7 +70,7 @@ def test_a_test_new_on_the_branch_runs_before_covering_tests_and_after_the_recor
         "tests/test_a.py::fast",
     ]
     memory.mutant = "scripts.a.x_f__mutmut_1"
-    memory.pytest_runtest_logreport(_report("tests/test_b.py::middle"))
+    memory.pytest_runtest_logreport(_report("tests/test_b.py::middle"))  # pyright: ignore[reportArgumentType]
     assert memory.order("scripts.a.x_f__mutmut_2", TESTS) == [
         "tests/test_b.py::middle",
         "tests/test_c.py::slow",
@@ -78,7 +79,7 @@ def test_a_test_new_on_the_branch_runs_before_covering_tests_and_after_the_recor
 
 
 def test_the_order_is_unchanged_when_no_test_is_new_on_the_branch(tmp_path):
-    direct = {"scripts.a.": ["tests/test_c.py::slow"]}
+    direct: dict[str, Iterable[str]] = {"scripts.a.": ["tests/test_c.py::slow"]}
     plain = killers.KillMemory(tmp_path / "plain", direct)
     empty = killers.KillMemory(tmp_path / "empty", direct, [])
     unrelated = killers.KillMemory(tmp_path / "unrelated", direct, ["tests/test_z.py::elsewhere"])
