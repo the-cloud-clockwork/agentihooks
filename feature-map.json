@@ -162,7 +162,7 @@
       "tests": [
         "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
         "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
-        "tests/tick/test_early_end.py::test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once"
+        "tests/tick/test_early_end.py::test_an_early_end_names_each_left_step_once_and_counts_the_missing_value"
       ]
     },
     {

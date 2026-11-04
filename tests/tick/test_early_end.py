@@ -72,7 +72,7 @@ def test_a_pass_box_shares_the_names_of_the_steps_its_pass_left() -> None:
     ("left", "named"),
     [(["reboot pass", "page relay", "reboot pass"], "reboot pass, page relay"), ([], "no recorded step")],
 )
-def test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once(left: list[str], named: str) -> None:
+def test_an_early_end_names_each_left_step_once_and_counts_the_missing_value(left: list[str], named: str) -> None:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))

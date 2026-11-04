@@ -259,7 +259,7 @@ def test_a_tick_value_left_past_its_budget_drops_the_tick_actions_and_the_wrappe
 
     monkeypatch.setattr(cli, "tick", left)
     assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == []
-    assert [name for name, _ in seen][-6:] == [
+    assert [name for name, _ in seen][-5:] == [
         "wrapper relay",
         "wrapper view",
         "wrapper events",

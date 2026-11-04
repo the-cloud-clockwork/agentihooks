@@ -176,8 +176,8 @@ def running(
     try:
         yield current
     finally:
+        closing = current.closer[0].remaining if current.closer else 0.0
         for thread in current.later:
-            closing = current.closer[0].remaining if current.closer else 0.0
             thread.join(max(current.slow.remaining, closing) + LATER_GRACE_S)
         _ACTIVE.reset(token)
         if beat is not None:
