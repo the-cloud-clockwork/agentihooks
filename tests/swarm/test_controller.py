@@ -137,11 +137,17 @@ def test_a_conflicting_take_and_release_journal_the_current_holder(
     monkeypatch.setattr(controller, "_dead", lambda raw: True)
     conflicting(store, monkeypatch)
     assert controller.take_tick_lock(store, "sw", held, 600_000, "pass") is None
-    controller.release_tick_lock(store, "sw", HOLDER, "pass")
+    controller.release_tick_lock(store, "sw", HOLDER, "rename")
     assert store.redis.get(store.key("sw", "tick-lock")) == HOLDER
-    assert [(line["outcome"], line["holder"]) for line in journal(capsys)] == [
-        ("refused", HOLDER_TEXT),
-        ("found another holder", HOLDER_TEXT),
+    assert journal(capsys) == [
+        {"event": "swarm_tick_lock", "slug": "sw", "caller": "pass", "outcome": "refused", "holder": HOLDER_TEXT},
+        {
+            "event": "swarm_tick_lock",
+            "slug": "sw",
+            "caller": "rename",
+            "outcome": "found another holder",
+            "holder": HOLDER_TEXT,
+        },
     ]
 
 

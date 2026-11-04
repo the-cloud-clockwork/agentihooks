@@ -386,44 +386,42 @@ def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int,
 
     key = store.key(slug, "tick-lock")
     token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex, **_holder()})
-    raw: str | None = None
     with store.redis.pipeline() as pipe:
+        pipe.watch(key)
+        lease.require(store, slug, held)
+        raw = cast(str | None, pipe.get(key))
+        if raw and not _dead(raw):
+            _journal_lock(slug, caller, "refused", raw)
+            return None
+        pipe.multi()
+        pipe.set(key, token, px=ttl_ms)
         try:
-            pipe.watch(key)
-            lease.require(store, slug, held)
-            raw = cast("str | None", pipe.get(key))
-            if raw and not _dead(raw):
-                _journal_lock(slug, caller, "refused", raw)
-                return None
-            pipe.multi()
-            pipe.set(key, token, px=ttl_ms)
             pipe.execute()
-            _journal_lock(slug, caller, "replaced a dead holder" if raw else "taken", raw)
-            return token
         except WatchError:
             _journal_lock(slug, caller, "refused", raw)
             return None
+        _journal_lock(slug, caller, "replaced a dead holder" if raw else "taken", raw)
+        return token
 
 
 def release_tick_lock(store: RedisStore, slug: str, token: str, caller: str = "unnamed") -> None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
-    raw: str | None = None
     with store.redis.pipeline() as pipe:
+        pipe.watch(key)
+        raw = cast(str | None, pipe.get(key))
+        if raw != token:
+            _journal_lock(slug, caller, "found another holder", raw)
+            return
+        pipe.multi()
+        pipe.delete(key)
         try:
-            pipe.watch(key)
-            raw = cast("str | None", pipe.get(key))
-            if raw != token:
-                _journal_lock(slug, caller, "found another holder", raw)
-                return
-            pipe.multi()
-            pipe.delete(key)
             pipe.execute()
-            _journal_lock(slug, caller, "released", raw)
         except WatchError:
             _journal_lock(slug, caller, "found another holder", raw)
             return
+        _journal_lock(slug, caller, "released", raw)
 
 
 def keep_tick(
@@ -437,7 +435,7 @@ def keep_tick(
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(key)
-                raw = cast("str | None", pipe.get(key))
+                raw = cast(str | None, pipe.get(key))
                 if raw != token:
                     raise SwarmError(
                         f"the tick lock is stale: {caller} expected token {_token_prefix(token)}, {_lock_holder(raw)}"
