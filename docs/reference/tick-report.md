@@ -105,9 +105,9 @@ Only steps the tick engine runs write these records; a window without them print
 |---|---|---|---|
 | `tick:passes` | Tick pass | `pass_id`, `start_ms`, `end_ms`, `wall_s` | Newest 50,000 |
 | `tick:steps` | Finished step | `pass_id`, `step`, `wall_s`, `own_cpu_s`, `reaped_child_cpu_s` | Newest 50,000 |
-| `tick:records` | Engine step record | `pass_id`, `step`, `lane`, `outcome`, `wall_s`, `budget_s`, `start_s`, `abandoned`, `held`, `skipped`, `dropped`, `conflicts` | Newest 50,000 |
+| `tick:records` | Engine step record | `pass_id`, `step`, `lane`, `outcome`, `wall_s`, `start_s`, `abandoned`, `held`, `skipped`, `dropped` | Newest 50,000 |
 
-Both streams sit under the swarm's own Redis key prefix. A pass record also carries the active agent count, the
+An engine step record also stores its `budget_s` and its count of compare and set `conflicts`. All three streams sit under the swarm's own Redis key prefix. A pass record also carries the active agent count, the
 steps that failed and its outcome (`success`, `stopped` or `error`). The report takes the newest passes, then only the
 step records whose `pass_id` belongs to one of them. A step record whose pass is outside the window is counted as an
 orphan and left out of every row.
