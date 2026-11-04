@@ -320,6 +320,36 @@ def test_authority_reads_single_records(store: Any) -> None:
     assert not fencing.authority_held(store, "sw", "t3")
 
 
+def test_the_authority_check_reads_only_the_claims_and_journals_sections(
+    store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.adapters.records_redis import RedisRecords
+
+    _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["claims"].update(t1={"a": 1}))
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(x=_row("x", "old", 0)))
+    read: list[tuple[str, ...]] = []
+    original = RedisRecords.sections
+
+    def spy(self: RedisRecords, slug: str, names: Any) -> Any:
+        read.append(tuple(names))
+        return original(self, slug, names)
+
+    monkeypatch.setattr(RedisRecords, "sections", spy)
+    assert fencing.authority_held(store, "sw", "t1")
+    assert not fencing.authority_held(store, "sw", "t3")
+    assert read == [("claims", "journals"), ("claims", "journals")]
+
+
+def test_the_authority_check_holds_on_a_swarm_not_yet_migrated(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    fencing.write(store, "sw", lambda doc: doc["journals"].update(t2=[{"a": 2}]))
+    assert fencing.authority_held(store, "sw", "t2")
+    assert not fencing.authority_held(store, "sw", "t3")
+
+
 def test_scalars_are_put_and_removed_as_meta_records(store: Any) -> None:
     from scripts.swarm import fencing
 
