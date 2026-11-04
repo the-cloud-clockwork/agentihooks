@@ -229,12 +229,12 @@ class Viewer:
         self.tab.evaluate(
             """async () => {
               const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
-              const [state, page] = await Promise.all(["state.js", "render.js"].map((name) => import(new URL(name, main))));
-              window.__redraw = { state, page };
+              const state = await import(new URL("state.js", main));
+              const page = await import(new URL("render.js", main));
+              while (!Object.keys(state.tips).length) await new Promise((done) => setTimeout(done, 50));
+              await page.render();
             }"""
         )
-        self.wait("() => Object.keys(window.__redraw.state.tips).length > 0")
-        self.tab.evaluate("() => window.__redraw.page.render()")
 
     def wait(self, script: str, arg=None) -> None:
         self.tab.wait_for_function(script, arg=arg, timeout=15000)
