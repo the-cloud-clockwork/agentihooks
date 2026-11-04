@@ -221,6 +221,24 @@ def test_a_halted_ledger_is_alerted_but_never_repaired(store, mark):
     assert asked == []
 
 
+def test_a_repair_is_preceded_by_the_stale_heartbeat_evidence_it_acts_on(store, capsys):
+    beat(store, START - LIMIT, quota=START - 3 * LIMIT)
+    evidence = tick_heartbeat.stale(tick_heartbeat.read(store, "sw"), START)
+
+    tick_watch.watch_pass(store, "sw", START, START, lambda slug, now: ["restarted"])
+
+    assert capsys.readouterr().err == f"sw: repairing the stale tick on: {'; '.join(evidence)}\n"
+
+
+def test_a_halted_ledger_prints_no_repair_evidence(store, capsys):
+    beat(store, START - 3 * LIMIT)
+    store.redis.set(store.key("sw", tick_heartbeat.HALTS[0]), 1)
+
+    tick_watch.watch_pass(store, "sw", START, START, lambda slug, now: ["restarted"])
+
+    assert "repairing" not in capsys.readouterr().err
+
+
 def test_a_binned_ledger_marks_the_swarm_halted_and_a_later_read_clears_it(env):  # noqa: F811
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")

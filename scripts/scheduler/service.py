@@ -157,7 +157,8 @@ def _take_over() -> None:
     pid = int(cast(dict[str, int], holder(os.environ) or {}).get("pid") or 0)
     if pid and pid != os.getpid():
         print(f"the scheduler unit takes over from supervisor {pid}, started outside it", file=sys.stderr)
-        drain(pid, os.environ)
+        if not drain(pid, os.environ):
+            print(f"the scheduler supervisor {pid} still held its lock after {DRAIN_S} seconds", file=sys.stderr)
 
 
 def _unit_owns(directory: Path) -> bool:
@@ -280,6 +281,8 @@ def _supervised() -> None:
         for sig in previous:
             signal.signal(sig, stopping)
         supervise(stop)
+    except AlreadyRunning:
+        raise
     except BaseException as exc:
         print(f"the scheduler supervisor {os.getpid()} exits on {type(exc).__name__}: {exc}", file=sys.stderr)
         raise

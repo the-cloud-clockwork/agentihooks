@@ -882,3 +882,31 @@ def test_a_supervisor_that_raises_names_the_exception_it_exits_on(monkeypatch, c
     assert capsys.readouterr().err == (
         f"the scheduler supervisor {os.getpid()} exits on RuntimeError: the runner record is unreadable\n"
     )
+
+
+def test_a_takeover_whose_old_supervisor_will_not_drain_says_so(monkeypatch, tmp_path, capsys):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setenv("AGENTIHOOKS_SCHEDULER_UNIT", "1")
+    monkeypatch.setattr(service, "holder", lambda environ: {"pid": 4242})
+    monkeypatch.setattr(service, "drain", lambda pid, environ: False)
+    stopped = Event()
+    stopped.set()
+    service.supervise(stopped)
+    assert capsys.readouterr().err.splitlines() == [
+        "the scheduler unit takes over from supervisor 4242, started outside it",
+        "the scheduler supervisor 4242 still held its lock after 30 seconds",
+    ]
+
+
+def test_a_supervisor_already_running_prints_one_reason_line(monkeypatch, capsys):
+    from scripts.scheduler import service
+
+    def supervise(stop):
+        raise service.AlreadyRunning("scheduler supervisor is already running")
+
+    monkeypatch.setattr(service, "supervise", supervise)
+    assert service.main(["supervise"]) == 2
+    assert capsys.readouterr().err == "scheduler supervisor is already running\n"
