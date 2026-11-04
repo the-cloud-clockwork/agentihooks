@@ -93,7 +93,8 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
         earlier = _RUNNING.get(key)
         if earlier is not None and earlier.is_alive():
             return StepRecord(step.name, 0.0, step.budget_s, held=True)
-        worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline)), daemon=True)
+        tools = None if ctx.tools is None else ctx.tools.for_effects(step.effects)
+        worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline, tools)), daemon=True)
         _RUNNING[key] = worker
         worker.start()
     worker.join(step.budget_s)
@@ -224,7 +225,7 @@ def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
     """Return ``ctx`` with its deadline capped by the deadline of the step's lane."""
     lane = found.lane(step.lane)
     clock = ctx.deadline.clock
-    return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock))
+    return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock), ctx.tools)
 
 
 def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) -> StepRecord:

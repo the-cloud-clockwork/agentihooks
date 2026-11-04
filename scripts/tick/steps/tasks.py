@@ -259,9 +259,13 @@ class WriteStep:
         group: str,
         call: Callable[[Any, Get], Any],
         writes: frozenset[Domain] = frozenset(),
+        effects: frozenset[str] = frozenset(),
+        feature: str = "",
     ) -> None:
-        """Take the name, group, budgets and domains of the call step running ``call``."""
-        base = CallStep(name, group, call, writes=writes)
+        """Take the name, group, budgets, domains, effects and feature of the call step running ``call``."""
+        base = CallStep(name, group, call, writes=writes, effects=effects, feature=feature)
+        self.effects = base.effects
+        self.feature = base.feature
         self.name = base.name
         self.group = base.group
         self.call = base.call

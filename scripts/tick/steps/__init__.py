@@ -29,10 +29,14 @@ class CallStep:
         reads: frozenset[Domain] = frozenset(),
         writes: frozenset[Domain] = frozenset(),
         lane: Lane = lane,
+        effects: frozenset[str] = frozenset(),
+        feature: str = "",
     ) -> None:
-        """Name the step in tick group ``group`` and its ``lane``, keep its call, its needs and the domains it reads
-        and writes."""
+        """Name the step in tick group ``group`` and its ``lane``, keep its call, its needs, the domains it reads
+        and writes, the ports it may write through and its feature map id."""
         self.lane = lane
+        self.effects = effects
+        self.feature = feature
         self.name = name
         self.needs = needs
         self.group = group

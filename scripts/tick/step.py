@@ -1,7 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NewType, Protocol
 
 from scripts.tick.deadline import Deadline
+from scripts.tick.ports.tools import PASS_TOOLS, Tools
 
 __all__ = ["Context", "Domain", "Lane", "Result", "Step", "View", "Write"]
 
@@ -30,6 +31,7 @@ class Result:
 class Context:
     view: View
     deadline: Deadline
+    tools: Tools | None = field(default_factory=PASS_TOOLS.get)
 
 
 class Step(Protocol):
@@ -56,5 +58,11 @@ class Step(Protocol):
 
     @property
     def writes(self) -> frozenset[Domain]: ...
+
+    @property
+    def effects(self) -> frozenset[str]: ...
+
+    @property
+    def feature(self) -> str: ...
 
     def run(self, ctx: Context) -> Result: ...
