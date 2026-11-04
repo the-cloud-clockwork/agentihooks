@@ -127,7 +127,8 @@ The other report steps (stall watch, overrun pass, quiet pass, inbox wake,
 snapshot job, last tick, heartbeat, status publish) and every step outside the
 report module stay critical. The command runner and quota notice run before
 spawn and stay critical, because a slow step in a group before spawn would hold
-spawn until the slow deadline.
+spawn until the slow deadline. The quota notice step reads cached quota and runs no Claude or Codex quota probe;
+the quota prober service writes those caches once a minute ([Quota prober](quota-prober.md)).
 
 In a parallel pass `run_group` takes the slow lane steps of a group, and every
 step that needs one of them, out of the group. It runs the rest eagerly and
