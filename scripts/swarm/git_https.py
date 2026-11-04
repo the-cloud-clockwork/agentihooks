@@ -3,6 +3,7 @@
 import os
 import subprocess
 from collections.abc import Callable, Mapping
+from typing import TypedDict
 
 REFUSED = "Permission denied (publickey"
 SETTINGS = (
@@ -14,6 +15,14 @@ SETTINGS = (
 )
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+class _Options(TypedDict, total=False):
+    """The keyword settings one git call forwards to its runner."""
+
+    cwd: str | os.PathLike[str]
+    timeout: float
+    env: Mapping[str, str]
 
 
 def environment(base: Mapping[str, str]) -> dict[str, str]:
@@ -38,9 +47,15 @@ def run(
 ) -> subprocess.CompletedProcess[str]:
     """Run argv; a call refused over ssh publickey runs once more over https for that call only."""
     call = runner or subprocess.run
-    options = {key: value for key, value in (("cwd", cwd), ("timeout", timeout)) if value is not None}
-    first = options if env is None else {**options, "env": env}
-    done = call(argv, capture_output=True, text=True, **first)
+    options = _Options()
+    if cwd is not None:
+        options["cwd"] = cwd
+    if timeout is not None:
+        options["timeout"] = timeout
+    if env is not None:
+        options["env"] = env
+    done = call(argv, capture_output=True, text=True, **options)
     if done.returncode == 0 or REFUSED not in done.stderr:
         return done
-    return call(argv, capture_output=True, text=True, env=environment(os.environ if env is None else env), **options)
+    options["env"] = environment(os.environ if env is None else env)
+    return call(argv, capture_output=True, text=True, **options)
