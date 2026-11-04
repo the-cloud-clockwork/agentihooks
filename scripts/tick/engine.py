@@ -214,10 +214,16 @@ def _offset() -> float | None:
     return None if current is None else time.time() - current["start_ms"] / 1000
 
 
+def _critical(step: Step) -> bool:
+    """Return whether ``step`` is on the pass critical chain: outside the slow lane and not handed off by its group."""
+    found = pool.active()
+    return step.lane != SLOW and not (found is not None and found.handed_of((step.name,)))
+
+
 def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord:
     """Append one ``tick:records`` row for ``record`` while a pass is recording, and return the record unchanged.
 
-    A step outside the slow lane moves the pass record's ``critical_end_s`` to its end offset when that is later. An
+    A step on the critical chain moves the pass record's ``critical_end_s`` to its end offset when that is later. An
     abandoned step that started counts every write domain it declares as dropped, since its result never applies.
     """
     store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
@@ -241,7 +247,7 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         "dropped": dropped,
         "conflicts": len(record.conflicts),
     }
-    if step.lane != SLOW and offset is not None:
+    if offset is not None and _critical(step):
         current["critical_end_s"] = max(current.get("critical_end_s", 0.0), offset + record.wall_s)
     timing.append_record(store, slug, "tick:records", row)
     return record
