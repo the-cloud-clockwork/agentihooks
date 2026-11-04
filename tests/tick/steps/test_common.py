@@ -24,6 +24,7 @@ MOVED = (
 )
 
 
+@pytest.mark.feature("swarm-tick-common-helpers")
 @pytest.mark.parametrize("name", MOVED)
 def test_tick_reexports_the_common_helper(name: str) -> None:
     helper = getattr(common, name)
@@ -31,6 +32,7 @@ def test_tick_reexports_the_common_helper(name: str) -> None:
     assert getattr(tick, name) is helper
 
 
+@pytest.mark.feature("swarm-tick-common-helpers")
 def test_common_helpers_reach_tick_seams_through_the_tick_module(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[tuple[object, ...]] = []
     monkeypatch.setattr(tick, "_rebind", lambda *args: seen.append(args))

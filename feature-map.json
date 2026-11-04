@@ -121,6 +121,17 @@
       ]
     },
     {
+      "id": "swarm-tick-common-helpers",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h9",
+      "behaviour": "The helpers the tick steps and the swarm tick module share live in the common step module, the swarm tick module re-exports each one, and a moved helper reaches its siblings through the tick module so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.common, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_common.py::test_tick_reexports_the_common_helper",
+        "tests/tick/steps/test_common.py::test_common_helpers_reach_tick_seams_through_the_tick_module"
+      ]
+    },
+    {
       "id": "swarm-tick-declared-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
