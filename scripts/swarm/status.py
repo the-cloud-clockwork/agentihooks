@@ -46,6 +46,7 @@ from scripts.swarm.health import (
     early_ends,
     merge_stall,
     night_watch,
+    ordering_dependencies,
     prompt_backlog,
     spawn_stall,
     standing,
@@ -146,6 +147,7 @@ def findings(store, slug, config, tasks, events, view=None):
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
+        + ordering_dependencies.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
         + early_ends.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
@@ -351,6 +353,7 @@ def status_report(
         "handoffs": handoff_rows(handed, agents, recovery_cards.rows(store, slug)),
         "peer": store.peer(slug),
         "plan_shape": shape_report(tasks, config.max_eng),
+        "ordering_dependencies": ordering_dependencies.read(store, slug),
         "compact_limit": compact_limit(config),
         "done_today": done_today(tasks, events, local_midnight_ms()),
         "doctor": doctor_report(store, slug),

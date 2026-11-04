@@ -2,10 +2,12 @@ import argparse
 import io
 import json
 import os
+import re
 import subprocess
 import time
 import zipfile
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
@@ -13,6 +15,7 @@ from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
 EVIDENCE = Path(".mutation-gate")
 REPORT = "mutation-preflight-report"
 SCOPE = "scope.json"
+KILLERS = Path(".mutation-killers-restored/killers")
 PRODUCERS = (
     ".github/workflows/mutation-preflight.yml",
     ".github/workflows/test.yml",
@@ -25,12 +28,12 @@ WAIT = 60
 POLL = 30
 
 
-def api(path: str, binary: bool = False):
+def api(path: str, binary: bool = False) -> Any:
     done = subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/{path}"], capture_output=True, check=True)
     return done.stdout if binary else json.loads(done.stdout)
 
 
-def runs(query: str, current: int) -> list[dict]:
+def runs(query: str, current: int) -> list[dict[str, Any]]:
     found = api(f"{PREFLIGHT}?event=push&status=completed&per_page=30&{query}")["workflow_runs"]
     return [row for row in found if row["id"] != current and row["conclusion"] in ("success", "failure")]
 
@@ -125,6 +128,26 @@ def unpack(archive: bytes, row: dict) -> None:
     (EVIDENCE / "reuse.json").write_text(json.dumps({"run": row["id"], "head": row["head_sha"]}) + "\n")
 
 
+def restore_killers(head: str, branch: str, current: int, folder: Path = KILLERS) -> int:
+    """Unpack the killing tests the newest preflight of this head kept; return how many records it held."""
+    previous: list[dict[str, Any]] = runs(f"head_sha={head}&branch={quote(branch)}", current)
+    for row in previous:
+        listing: dict[str, Any] = api(f"actions/runs/{row['id']}/artifacts?per_page=100")
+        artifacts: list[dict[str, Any]] = listing["artifacts"]
+        kept = [found for found in artifacts if found["name"].startswith("mutation-killers-") and not found["expired"]]
+        if not kept:
+            continue
+        folder.mkdir(parents=True, exist_ok=True)
+        for artifact in kept:
+            archive: bytes = api(f"actions/artifacts/{artifact['id']}/zip", binary=True)
+            with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+                for name in zipped.namelist():
+                    if re.fullmatch(r"[0-9a-f]{64}", Path(name).name):
+                        (folder / Path(name).name).write_bytes(zipped.read(name))
+        return len(list(folder.iterdir()))
+    return 0
+
+
 def reuse(head: str, branch: str, current: int, base: str | None = None, grader: str | None = None) -> dict | None:
     try:
         found = exact(head, base, grader, branch, current) if base else source(head, branch, current)
@@ -151,6 +174,12 @@ def main() -> int:
         print(f"Reused the green mutation report of run {row['id']} for {row['head_sha']}")
     else:
         print("No green mutation report covers this head; mutating")
+        if args.head:
+            try:
+                restored = restore_killers(head, args.branch, args.run)
+                print(f"Restored {restored} kill memory records from this head's branch preflight")
+            except (subprocess.CalledProcessError, OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
+                print(f"Kill memory restore failed, mutating without it: {error}")
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
         stream.write(f"reused={'true' if row else 'false'}\n")
     return 0

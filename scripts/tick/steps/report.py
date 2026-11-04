@@ -25,6 +25,8 @@ from scripts.swarm.health import early_ends
 from scripts.swarm.status import findings  # pyright: ignore[reportUnknownVariableType]
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
+from scripts.tick.pool import CLOSING_LANE
+from scripts.tick.step import Lane
 from scripts.tick.steps import CallStep, pass_domains
 from scripts.tick.steps.host import held
 
@@ -203,20 +205,24 @@ def _snapshot_job(cli: Any, get: Get) -> None:
 
 
 def _last_tick(cli: Any, get: Get) -> None:
+    if get("ended") is None:
+        return
     store = get("store")
     store.redis.set(store.key(get("slug"), "last-tick"), cli.now_ms())
 
 
 def _heartbeat(cli: Any, get: Get) -> None:
+    ended = get("ended")
+    if ended is None:
+        return
     tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))  # pyright: ignore[reportUnknownMemberType]
-    early_ends.clear(get("store"), get("slug"))
+    if ended == FULL:
+        early_ends.clear(get("store"), get("slug"))
 
 
-def early_end(store: Any, slug: str, at: int, doc: Any, missing: KeyError, left: list[str]) -> list[str]:
-    """Write last tick and the heartbeat of a pass that ended early because no step stored ``missing``, returning the
-    line naming that value and the ``left`` steps of the pass."""
-    store.redis.set(store.key(slug, "last-tick"), at)
-    tick_heartbeat.write(store, slug, at, doc)  # pyright: ignore[reportUnknownMemberType]
+def early_end(store: Any, slug: str, missing: KeyError, left: list[str]) -> list[str]:
+    """Count a pass that ended early because no step stored ``missing`` and return the line naming that value and the
+    ``left`` steps of the pass; the closing group stamps its last tick and heartbeat."""
     early_ends.note(store, slug, missing.args[0])
     steps = ", ".join(dict.fromkeys(left)) or "no recorded step"
     return [f"pass ended early: no step stored {missing.args[0]}, the pass left {steps}"]
@@ -228,6 +234,10 @@ def _status_publish(cli: Any, get: Get) -> None:
     cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"), found)
 
 
+CLOSING_GROUP = "closing"
+CLOSING = Lane(CLOSING_LANE)
+FULL = "full"
+EARLY = "early"
 VIEWED = frozenset({"tick view"})
 FOUND = frozenset({"health findings"})
 VIEW = pass_domains("view")
@@ -258,9 +268,11 @@ STEPS = (
     CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
     CallStep("inbox wake", "wrapper metrics", held(_inbox_wake), frozenset({"page relay"}), pass_domains("agents")),
     CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), writes=pass_domains("started")),
-    CallStep("last tick", "wrapper metrics", held(_last_tick)),
-    CallStep("heartbeat", "after", held(_heartbeat)),
-    CallStep("status publish", "wrapper status", held(_status_publish), FOUND, pass_domains("found", "view")),
+    CallStep("last tick", CLOSING_GROUP, held(_last_tick), lane=CLOSING),
+    CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), lane=CLOSING),
+    CallStep(
+        "status publish", CLOSING_GROUP, held(_status_publish), FOUND, pass_domains("found", "view"), lane=CLOSING
+    ),
 )
 
 for _step in STEPS:
