@@ -94,7 +94,7 @@ MOVED = {
     ("test.yml", "kind-due"): QUEUED,
     ("test.yml", "lint"): QUEUED,
     ("test.yml", "mutation"): LIGHT,
-    ("test.yml", "mutation-plan"): LIGHT,
+    ("test.yml", "mutation-plan"): QUEUED,
     ("test.yml", "mutation-refine"): LIGHT,
     ("test.yml", "mutation-probe"): BATCH,
     ("test.yml", "mutation-replan"): LIGHT,
