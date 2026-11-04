@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.620 · 2026-11-04
+
+### 2026-11-04 · 792810298be5 · #9606 · @nestorcolt
+
+**Document the source control Semgrep rule over scripts/tick**
+
+This change updates `docs/reference/tick-adapters.md` to document that the `swarm-source-control-port` Semgrep rule now scans `scripts/tick` in addition to `scripts/swarm`, closing out the documentation debt left by PR #9597. It adds concrete failing and passing tick examples using the real `SourceControl.change` port call, explains the finding the scan reports, clarifies that the fixture grades pattern shapes while the repository scan grades the path include list, and updates the troubleshooting table to name both trees, so engineers working in `scripts/tick` understand how the gate applies to their code.
+
 ## v2.17.619 · 2026-11-04
 
 ### 2026-11-04 · c74d183069f4 · #9590 · @nestorcolt
