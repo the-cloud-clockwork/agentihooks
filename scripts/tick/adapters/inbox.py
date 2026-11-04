@@ -8,13 +8,7 @@ from scripts.tick.deadline import Deadline
 if TYPE_CHECKING:
     from scripts.inbox.store import InboxStore
 
-__all__ = ["StoreInbox", "check"]
-
-
-def check(deadline: Deadline) -> None:
-    """Refuse a tool call whose deadline has already passed."""
-    if deadline.expired:
-        raise TimeoutError("tool deadline expired")
+__all__ = ["StoreInbox"]
 
 
 def notify_pass_budget(redis: Any, slug: str, text: str, notice: str) -> None:
@@ -32,14 +26,14 @@ class StoreInbox:
     sender: str
 
     def read(self, address: str, *, deadline: Deadline) -> object:
-        check(deadline)
+        deadline.live()
         return self.store.inbox(address)
 
     def send(self, address: str, body: str, *, deadline: Deadline) -> object:
-        check(deadline)
+        deadline.live()
         return self.store.send(self.sender, address, body)
 
     def close(self, item_id: str, outcome: str, detail: str = "", *, deadline: Deadline) -> object:
         """Close an item with the outcome kind and its detail; the store refuses a bare done on a work item."""
-        check(deadline)
+        deadline.live()
         return self.store.close(item_id, self.sender, outcome, detail)

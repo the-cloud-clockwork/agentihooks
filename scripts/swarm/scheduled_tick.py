@@ -10,6 +10,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -42,20 +43,22 @@ def ensure(scheduler: Scheduler) -> str:
 
     with held(scheduler.state, scheduler.name("swarm-tick-lock"), 30):
         entry_id = scheduler.read("swarm-tick")
-        if entry_id and _live(scheduler, entry_id):
+        found = _state(scheduler, entry_id) if entry_id else "unregistered"
+        if found in LIVE:
             return entry_id
         entry = scheduler.cron(owner=OWNER, payload="swarm tick", expression=EXPRESSION)
         entry.timeout.connect(fire)
         entry.start()
         scheduler.put("swarm-tick", entry.id)
+        print(f"recreated the swarm tick cron entry as {entry.id}: entry {entry_id!r} was {found}", file=sys.stderr)
         return entry.id
 
 
-def _live(scheduler: Scheduler, entry_id: str) -> bool:
+def _state(scheduler: Scheduler, entry_id: str) -> str:
     try:
-        return scheduler.get(entry_id).state in LIVE
+        return scheduler.get(entry_id).state
     except KeyError:
-        return False
+        return "missing"
 
 
 def cancel(scheduler: Scheduler) -> None:
@@ -244,13 +247,18 @@ def restart(
     kill: Callable[[int, int], None] = os.kill,
     schedule: Callable[[], bool] | None = None,
     wait: Callable[[float], None] = time.sleep,
+    stale: Callable[[], str] | None = None,
 ) -> str:
     """The supervisor runs the code it started from, so a restart from the installed watcher replaces stale code.
 
-    A tick in flight proves the scheduler delivers, so the restart leaves it to finish its pass.
+    A tick in flight proves the scheduler delivers, so the restart leaves it to finish its pass. Every restart
+    prints the delivery evidence it acted on.
     """
     if _held(LOCK):
         return "left the scheduler alone: a swarm tick is still running"
+    from scripts.swarm import timer
+
+    print(f"restarting the scheduler: {_evidence(stale or timer.undelivered)}", file=sys.stderr)
     if _held("supervisor"):
         kill(int((runtime_dir() / "supervisor.lock").read_text()), signal.SIGTERM)
         for _ in range(STOP_S):
@@ -258,10 +266,17 @@ def restart(
                 break
             wait(1)
     if schedule is None:
-        from scripts.swarm import timer
-
-        schedule = timer.schedule
+        schedule = partial(timer.schedule, "the scheduler restart")
     return "restarted the scheduler tick" if schedule() else "restarted the scheduler, but the tick did not register"
+
+
+def _evidence(stale: Callable[[], str]) -> str:
+    from scripts.events import state
+
+    try:
+        return stale() or "the swarm tick delivery record is current"
+    except state.unavailable() as exc:
+        return f"the swarm tick delivery record could not be read: {type(exc).__name__}: {exc}"
 
 
 if __name__ == "__main__":

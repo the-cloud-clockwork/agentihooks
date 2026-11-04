@@ -28,6 +28,7 @@ a twentieth observation spans nineteen minutes.
 | Dispatch seat bottleneck trigger | First report naming the current bottleneck | 2 minutes across reports naming the same bottleneck; the latest report must also be no more than 15 minutes old |
 | Autoscale pending raise | First decision requesting the uninterrupted raise | 2 minutes before lifting the hold; subsequent increases remain limited to two seats per pass |
 | Ledger slow probe | First slow pass | Still requires two consecutive slow passes; this change does not replace that streak with a timer |
+| Early end health finding | First pass that ends early on a missing pass value | `AGENTIHOOKS_HEALTH_EARLY_ENDS`, default 3, counts consecutive passes ending early on the same value; a full pass clears it |
 
 The elapsed comparison allows 30 seconds of scheduling slack. A two minute
 limit can therefore be reached after 90 seconds. At exact one minute and three
