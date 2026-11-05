@@ -258,7 +258,6 @@
   "scripts/ci_stats_seed.py": 31,
   "scripts/ci_storage.py": 188,
   "scripts/ci_test_plan.py": 77,
-  "scripts/ci_tests_start.py": 7,
   "scripts/ci_unit_rerun.py": 33,
   "scripts/ci_wall_clock.py": 184,
   "scripts/ci_watcher_drops.py": 17,
