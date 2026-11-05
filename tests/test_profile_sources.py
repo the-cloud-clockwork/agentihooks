@@ -68,7 +68,7 @@ def test_codex_render_writes_the_same_rows(bundle):
     root = render.rendered_root()
     claude = json.loads(sources.path("rb-role", "claude", root).read_text())
     codex = json.loads(sources.path("rb-role", "codex", root).read_text())
-    assert codex == claude and len(codex) == 12
+    assert codex == claude and len(codex) == 13
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
