@@ -164,6 +164,13 @@ def tick_launches(engine: str, task: Mapping[str, Any]) -> bool:
     return engine != EVENTS_ENGINE or bool(task.get("workstation"))
 
 
+def launchable(engine: str, decision: Mapping[str, Any], ready: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The ready tasks the tick launches under ``engine``, narrowed to the capacity decision's tasks when it names
+    any."""
+    ready = [task for task in ready if tick_launches(engine, task)]
+    return [task for task in ready if task["id"] in decision["tasks"]] if "tasks" in decision else ready
+
+
 def tick_places(engine: str, rows: Mapping[str, Mapping[str, Any]]) -> bool:
     return engine != EVENTS_ENGINE or any(
         row.get("state") == "open" and tick_launches(engine, row) for row in rows.values()
