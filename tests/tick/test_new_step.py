@@ -171,11 +171,45 @@ def test_a_step_feature_already_mapped_gains_the_new_test(tree: Path) -> None:
 def test_the_scaffold_refuses_an_existing_name(tree: Path) -> None:
     assert scaffold(tree, STEP) == 0
     before = (tree / "scripts/tick/steps/budgets.py").read_text()
-    with pytest.raises(SystemExit, match="probe widgets already has"):
+    with pytest.raises(SystemExit) as refused:
         scaffold(tree, STEP)
+    assert str(refused.value) == "probe widgets already has step, budget row, test, index row, feature entry"
     assert (tree / "scripts/tick/steps/budgets.py").read_text() == before
     with pytest.raises(SystemExit, match="spawn already has"):
         scaffold(tree, "spawn")
+
+
+def test_the_scaffold_writes_its_test_expectations_and_the_index_in_their_canonical_form(tree: Path) -> None:
+    assert scaffold(tree, STEP) == 0
+    written = ast.parse((tree / "tests/tick/steps/test_probe_widgets.py").read_text())
+    (compare,) = [node for node in ast.walk(written) if isinstance(node, ast.Compare)]
+    (expected,) = compare.comparators
+    assert isinstance(expected, ast.Tuple)
+    assert [ast.literal_eval(each) for each in expected.elts[:3]] == ["widgets", "tick", "tick-step-widgets"]
+    index = (tree / "tests/swarm/tick_scenarios/steps.json").read_text()
+    assert index == json.dumps(json.loads(index), indent=1) + "\n"
+    assert json.loads(index)["scenarios"][STEP] == ["running"]
+
+
+def test_the_scaffold_runs_in_the_current_tree_with_no_ports(
+    tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tree)
+    argv = [OTHER, "--group", "widgets", "--lane", "slow", "--interval", "600", "--feature", "f", "--module", "widgets"]
+    assert new_step().main(argv) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "scripts/tick/steps/widgets.py"
+    fresh = registered(tree, monkeypatch)
+    (step,) = fresh.steps()
+    assert (step.lane, step.effects, step.interval_s) == ("slow", frozenset(), 600.0)
+
+
+def test_the_scaffold_needs_a_lane_and_an_interval(tree: Path) -> None:
+    argv = [STEP, "--group", "g", "--feature", "f", "--module", "widgets", "--root", str(tree)]
+    with pytest.raises(SystemExit):
+        new_step().main([*argv, "--interval", "60"])
+    with pytest.raises(SystemExit):
+        new_step().main([*argv, "--lane", "tick"])
+    assert not (tree / "scripts/tick/steps/widgets.py").exists()
 
 
 def test_the_scaffold_refuses_an_unknown_port(tree: Path) -> None:

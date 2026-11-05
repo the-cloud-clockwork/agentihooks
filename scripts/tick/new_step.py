@@ -14,7 +14,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from scripts import tick_pattern
 from scripts.tick import catalogue
@@ -163,10 +163,10 @@ def _with_imports(source: str) -> str:
     tree = ast.parse(source)
     missing = [line + "\n" for name, line in IMPORTS if name not in _bound(tree)]
     anchors = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))] or tree.body[:1]
-    at = max((node.end_lineno or 0 for node in anchors), default=0)
+    at = max((cast(int, node.end_lineno) for node in anchors), default=0)
     lines = source.splitlines(keepends=True)
     inserted = ["\n", *missing] if missing else []
-    return "".join([*lines[:at], *inserted, *lines[at:]]).rstrip("\n") + "\n"
+    return "".join([*lines[:at], *inserted, *lines[at:]])
 
 
 def _step_text(root: Path, spec: Spec) -> tuple[Path, str]:
@@ -186,7 +186,7 @@ def _table_end(source: str) -> int:
         else:
             continue
         if node.value and any(isinstance(target, ast.Name) and target.id == "MEASURED" for target in targets):
-            return node.value.end_lineno or 0
+            return cast(int, node.value.end_lineno)
     raise SystemExit(f"{BUDGETS} holds no MEASURED table")
 
 
@@ -307,10 +307,10 @@ def _parser() -> argparse.ArgumentParser:
     """The command line of the scaffold."""
     parser = argparse.ArgumentParser(prog="python -m scripts.tick.new_step")
     parser.add_argument("name", nargs="?")
-    parser.add_argument("--check", metavar="NAME")
+    parser.add_argument("--check")
     parser.add_argument("--group")
-    parser.add_argument("--lane", choices=LANES, default="tick")
-    parser.add_argument("--interval", type=int, choices=sorted(INTERVALS), default=60)
+    parser.add_argument("--lane", choices=LANES)
+    parser.add_argument("--interval", type=int, choices=sorted(INTERVALS))
     parser.add_argument("--effects", default="")
     parser.add_argument("--feature")
     parser.add_argument("--module")
@@ -327,8 +327,8 @@ def main(argv: list[str] | None = None) -> int:
         found = check(args.root, args.check)
         print(json.dumps(found, indent=1))
         return 0 if all(found.values()) else 1
-    if not (args.name and args.group and args.feature and args.module):
-        parser.error("a step needs a name, --group, --feature and --module")
+    if not all((args.name, args.group, args.lane, args.interval, args.feature, args.module)):
+        parser.error("a step needs a name, --group, --lane, --interval, --feature and --module")
     effects = frozenset(port.strip() for port in args.effects.split(",") if port.strip())
     spec = Spec(args.name, args.group, args.lane, args.interval, effects, args.feature, args.module, args.scenario)
     for path in scaffold(args.root, spec):
