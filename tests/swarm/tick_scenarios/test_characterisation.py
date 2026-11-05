@@ -175,7 +175,9 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
         monkeypatch.setenv("AGENTIHOOKS_TICK_CADENCE", cadence)
     appended = Mock()
     monkeypatch.setattr(timing, "append_record", appended)
-    monkeypatch.setattr(timing, "append_step", lambda store, slug, record: appended(store, slug, "tick:steps", record))
+    monkeypatch.setattr(
+        timing, "append_step", lambda store, slug, record: appended(store, slug, "tick:steps", record), raising=False
+    )
     store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
