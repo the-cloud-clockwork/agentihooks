@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.647 · 2026-11-05
+
+### 2026-11-05 · 954838087aa8 · #9770 · @nestorcolt
+
+**Hive launches name the hive's own account slot**
+
+This fix resolves a naming mismatch between the hosted controller, which identifies accounts by hyphenated Secret keys, and a hive's launcher, which only recognizes underscore-based `AH_CC_TOKEN_` slugs. Previously, `Consumer.launch` passed the controller's slot name directly to the launcher, causing every hive launch to fail with an "account suffix not found" error. Now the consumer maps the order's slot through `placement.account_key` to the hive's own registry slot for that harness, launching with the correct name and checking placement consistently.
+
 ## v2.17.646 · 2026-11-05
 
 ### 2026-11-05 · 165bf9da7c30 · #9767 · @nestorcolt
