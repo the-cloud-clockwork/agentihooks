@@ -131,13 +131,15 @@ def write(tree: Path) -> None:
     (tree / ALLOWLIST).write_text(json.dumps(measure(tree), indent=1, sort_keys=True) + "\n")
 
 
-def grade(base: Measured, head: Measured, recorded: Measured | None, tree: Path | None = None) -> list[str]:
+def grade(
+    base: Measured, head: Measured, recorded: Measured | None, trees: tuple[Path, Path] | None = None
+) -> list[str]:
     """Return every head unit over a limit beyond its base allowance, a moved unit keeping the allowance it had."""
     errors: list[str] = []
     claimed: set[str] = set()
     for unit, rules in sorted(head.items()):
         source = unit
-        if unit not in base and (moved := moved_from(unit, base, head, tree)) and moved not in claimed:
+        if unit not in base and (moved := moved_from(unit, base, head, trees)) and moved not in claimed:
             claimed.add(moved)
             source = moved
         for rule, value in sorted(rules.items()):
@@ -151,26 +153,45 @@ def grade(base: Measured, head: Measured, recorded: Measured | None, tree: Path 
     return errors
 
 
-def moved_from(unit: str, base: Measured, head: Measured, tree: Path | None) -> str:
-    """Return the one base allowlist key with the unit's name in another file that no longer holds it, else ''."""
+def moved_from(unit: str, base: Measured, head: Measured, trees: tuple[Path, Path] | None) -> str:
+    """Return the one base allowlist key the head moved to ``unit``, else ''.
+
+    The key names the same unit in another file, the head no longer holds it there, and the base unit takes the
+    same parameters as the head unit, so a deleted unit recreated elsewhere under its name inherits nothing.
+    """
     path, _, name = unit.partition("::")
-    if tree is None or not name:
+    if trees is None or not name:
         return ""
+    base_tree, head_tree = trees
+    wanted = _parameters(head_tree, unit)
     found = [
         key
         for key in base
         if key not in head and key.partition("::")[2] == name and key.partition("::")[0] != path
-        if not _holds(tree, key)
+        if _parameters(head_tree, key) is None and wanted is not None and _parameters(base_tree, key) == wanted
     ]
     return found[0] if len(found) == 1 else ""
 
 
-def _holds(tree: Path, key: str) -> bool:
+def _parameters(tree: Path, key: str) -> tuple[str, ...] | None:
+    """Return the parameter names of the unit ``key`` names in ``tree``, or None when the tree does not hold it."""
     path, _, name = key.partition("::")
-    source = tree / path
-    if not source.is_file():
-        return False
-    return name in {unit for unit, _ in functions(source.read_text()).values()}
+    try:
+        source = (tree / path).read_text()
+        lines = {unit: line for line, (unit, _) in functions(source).items()}
+        module = ast.parse(source)
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+        return None
+    if name not in lines:
+        return None
+    node = next(
+        node
+        for node in ast.walk(module)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno == lines[name]
+    )
+    args = node.args
+    listed = [*args.posonlyargs, *args.args, args.vararg, *args.kwonlyargs, args.kwarg]
+    return tuple(arg.arg if arg else "" for arg in listed)
 
 
 def _base(args: argparse.Namespace) -> Measured:
@@ -201,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     except (GradeError, SyntaxError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    errors = grade(base, head, recorded, args.head)
+    errors = grade(base, head, recorded, (Path(args.base), args.head))
     print(f"{len(head)} units over a limit, {len(base)} on the base allowlist, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")

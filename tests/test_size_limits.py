@@ -219,8 +219,54 @@ def test_a_moved_unit_needs_one_matching_base_entry(tmp_path: Path, capsys: pyte
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert "new.py::planted breaks PLR0913 at 8; it is not on the base allowlist" in out
-    assert size_limits.moved_from("new.py::planted", {"old.py::planted": {}}, {}, None) == ""
-    assert size_limits.moved_from("new.py", {"old.py::planted": {}}, {}, head) == ""
+
+
+def test_a_move_needs_both_trees_and_a_unit_name(tmp_path: Path) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
+    head = _recorded(tmp_path / "head", {"old.py": "VALUE = 1\n", "new.py": EIGHT_PARAMETERS})
+    allowed = {"old.py::planted": {"PLR0913": 8}}
+    assert size_limits.moved_from("new.py::planted", allowed, {}, (base, head)) == "old.py::planted"
+    assert size_limits.moved_from("new.py::planted", allowed, {}, None) == ""
+    assert size_limits.moved_from("new.py", allowed, {}, (base, head)) == ""
+
+
+def test_a_unit_moved_out_of_a_deleted_file_keeps_its_allowance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
+    head = _recorded(tmp_path / "head", {"new.py": EIGHT_PARAMETERS})
+    code, out = _grade(base, head, capsys)
+    assert code == 0, out
+
+
+def test_a_deleted_unit_recreated_with_other_parameters_is_a_new_unit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
+    recreated = "def planted(s, t, u, v, w, x, y, z):\n    return s\n"
+    head = _recorded(tmp_path / "head", {"old.py": "VALUE = 1\n", "new.py": recreated})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "new.py::planted breaks PLR0913 at 8; it is not on the base allowlist" in out
+
+
+def test_a_copy_beside_an_original_still_over_the_limit_is_a_new_unit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
+    head = _recorded(tmp_path / "head", {"old.py": EIGHT_PARAMETERS, "new.py": EIGHT_PARAMETERS})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "new.py::planted breaks PLR0913 at 8; it is not on the base allowlist" in out
+    assert "old.py::planted" not in out
+
+
+def test_an_unreadable_old_file_counts_as_no_longer_holding_the_unit(tmp_path: Path) -> None:
+    head = tmp_path / "head"
+    head.mkdir()
+    (head / "broken.py").write_bytes(b"def planted(:\n\xff\n")
+    assert size_limits._parameters(head, "broken.py::planted") is None
+    assert size_limits._parameters(head, "missing.py::planted") is None
 
 
 def test_a_base_without_an_allowlist_is_red(tmp_path, capsys):

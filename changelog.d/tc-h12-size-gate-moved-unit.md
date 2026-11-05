@@ -1,1 +1,1 @@
-The size gate keeps a unit's allowance when a pull request moves it to another file: a head unit missing from the base allowlist takes the allowance of the one base entry with its name in another file that no longer holds that unit. Growth past that allowance stays red, and one base entry covers one moved unit.
+The size gate keeps a unit's allowance when a pull request moves it to another file with the same parameters; growth past that allowance stays red.
