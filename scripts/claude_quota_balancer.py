@@ -718,7 +718,7 @@ def account_cap(
     weeks = [result.seven_day, *([result.fable] if include_fable else [])]
     left = [session_bands.left(window.used, window.resets_at, timestamp) for window in weeks]
     five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, timestamp)
-    week = None if None in left else min(left)
+    week: float | None = None if None in left else min(left)
     from scripts.routing import reservation
 
     if reservation.primary_reserved(result.account, week, os.environ):

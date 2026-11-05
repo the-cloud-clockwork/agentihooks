@@ -55,7 +55,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str,
     candidates = _candidates(openbao_kv.from_env(environ))
     if not candidates:
         raise login.LoginRefused(EMPTY)
-    now, reasons = time.time(), []
+    now, reasons = time.time(), list[str]()
     for number, found, copy in candidates:
         week_left = master_logins.week_left(found, now)
         if reservation.primary_reserved(found, week_left, environ):

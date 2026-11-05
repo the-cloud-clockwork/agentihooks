@@ -488,7 +488,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     if not offered:
         raise LoginRefused(NO_LOGIN)
     named = {number: login_account(number, copy) for number, copy in offered.items()}
-    now, held = time.time(), []
+    now, held = time.time(), list[str]()
     order = list(offered)
     if len(offered) > 1:
         ranks = _preferred()
