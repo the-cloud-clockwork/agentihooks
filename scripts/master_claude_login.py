@@ -465,7 +465,7 @@ def _offered(bao: openbao_kv.OpenBao | None) -> dict[int, dict[str, str]]:
     return {number: copy for number, copy in copies.items() if _private(home(number)) or copy.get("grant")}
 
 
-def _preferred() -> dict[str, int]:
+def preferred() -> dict[str, int]:
     ranks: dict[str, int] = {}
     for name in os.environ.get(ORDER_ENV, "").split(","):
         try:
@@ -491,7 +491,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     now, held = time.time(), list[str]()
     order = list(offered)
     if len(offered) > 1:
-        ranks = _preferred()
+        ranks = preferred()
         order.sort(
             key=lambda number: (
                 master_logins.usage(named[number], now)[1] >= reservation.MASTER_LEAVES,

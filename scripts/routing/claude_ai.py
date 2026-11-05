@@ -25,7 +25,7 @@ RESERVED = "{account} is the primary login reserve at {left:.0f}% of the week le
 def _candidates(bao: openbao_kv.OpenBao | None) -> list[tuple[int, str, Mapping[str, str]]]:
     offered = login._offered(bao)
     named = [(number, login.login_account(number, copy), copy) for number, copy in offered.items()]
-    ranks = login._preferred()
+    ranks = login.preferred()
     return sorted(named, key=lambda found: (ranks.get(found[1], len(ranks)), found[0]))
 
 

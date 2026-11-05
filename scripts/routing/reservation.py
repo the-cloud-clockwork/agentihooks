@@ -25,14 +25,14 @@ def primary_login() -> str:
     """The operator's first claude ai login: rank zero of AGENTIHOOKS_MASTER_LOGIN_ORDER."""
     from scripts import master_claude_login as login
 
-    ranks = login._preferred()
+    ranks = login.preferred()
     return next((name for name, rank in ranks.items() if rank == 0), "")
 
 
 def primary_reserve_pct(environ: Mapping[str, str]) -> float:
     try:
-        return float(environ.get(PRIMARY_RESERVE_ENV, PRIMARY_RESERVE_DEFAULT))
-    except (TypeError, ValueError):
+        return float(environ[PRIMARY_RESERVE_ENV])
+    except (KeyError, ValueError):
         return PRIMARY_RESERVE_DEFAULT
 
 

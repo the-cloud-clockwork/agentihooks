@@ -705,13 +705,15 @@ def test_prepare_without_a_stored_epoch_takes_epoch_one(ah, rendered, tmp_path, 
     assert json.loads((login.root() / login.OWNER).read_text())["epoch"] == 1
 
 
-def test_prepare_skips_the_primary_login_at_its_reserve(ah, rendered, tmp_path, monkeypatch):
+def test_prepare_skips_the_primary_login_at_its_reserve(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts import master_logins
 
     _seed(rendered)
     monkeypatch.setenv(login.ORDER_ENV, "master@example.com")
     monkeypatch.setattr(master_logins, "week_left", lambda account, now: 20.0)
-    with pytest.raises(login.LoginRefused, match="reserved at 20% of the week left"):
+    with pytest.raises(login.LoginRefused, match="masteratexample_com reserved at 20% of the week left"):
         login.prepare(_environ(rendered), tmp_path)
 
 

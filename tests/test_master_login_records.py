@@ -344,6 +344,12 @@ def test_room_reads_the_newest_snapshot_and_drops_a_window_that_reset(monkeypatc
     assert master_logins.left("two", 300.0) == 69.5
 
 
+def test_week_left_uses_the_week_independently_of_the_five_hour_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    _readings(monkeypatch, [(100.0, _probe("two", (95.0, 900), (80.0, 900)))], None)
+    assert master_logins.week_left("two", 300.0) == 20.0
+    assert master_logins.week_left("two", 900.0) == 100.0
+
+
 def test_room_reads_the_cache_when_it_is_newer(monkeypatch):
     _readings(
         monkeypatch, [(300.0, _probe("two", (10.5, 900), (20.5, 299.5)))], (200.0, _limits((30.5, 900), (5, 900)))
