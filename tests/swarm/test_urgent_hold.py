@@ -289,7 +289,7 @@ def test_an_urgent_task_waiting_on_a_release_is_reported(store, monkeypatch):
     from scripts.swarm.health import urgent_hold
 
     tags = {"/repo": ["v1.2.3"]}
-    monkeypatch.setattr(release_wait, "tags", lambda repo: tags[repo])
+    monkeypatch.setattr(release_wait, "tags", lambda config: tags[config.repo])
     found = doc([task("a", rank="urgent", after_release="v1.2.3"), task("b", rank="urgent", after_release="v1.2.2")])
     urgent_hold.observe(store, SLUG, found, 0)
     urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
