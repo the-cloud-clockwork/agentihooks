@@ -4363,8 +4363,16 @@ decisions until recovery (see [Outage holds and recovery](#outage-holds-and-reco
 | Step record | Every step run ends as `ok`, `late` (it ran past its budget, or was left running), `failed` (it raised) or `held` (its previous run is still alive, so no new thread starts). A late or failed step never stops the next one. |
 
 A value a held or late writer never stored raises `Left` when a later step reads it from the pass box, and the tick
-raises the held error at the group's site, so a pass never continues on a value no step produced. Adding a step,
-the pass state and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+raises the held error at the group's site, so a pass never continues on a value no step produced. The pass state
+and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+
+Every step follows one pattern, and `python -m scripts.tick.new_step` writes a new step with its budget row, feature
+test, scenario index row and feature map entry in one command (see
+[Adding a step](../reference/tick-engine-steps.md#adding-a-step)). The
+[tick pattern gate](../reference/tick-pattern-gate.md) refuses a pull request that adds a step outside the pattern,
+and the [tick step catalogue](../reference/tick-step-catalogue.md), rendered from the registry by
+`python -m scripts.tick.catalogue render`, lists every step with its group, lane, budget, interval, needs, effects and
+feature.
 
 ### Two lanes and fan out
 
@@ -4423,7 +4431,8 @@ fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed num
 Each step's budget is its measured p95 from a tick report over 60 passes with fifty percent headroom, rounded up to
 a whole second, and at least one second. Its declared interval is 60 seconds for a step that belongs in every pass,
 120 seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
-`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built.
+`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built. The
+[tick step catalogue](../reference/tick-step-catalogue.md) shows each step's budget and interval.
 Intervals are declared and validated; no step is skipped because its interval has not elapsed, and the engine runs
 every registered step on every pass. Timing changes, overlap limits and the
 forty second spawn bound are covered in
@@ -4454,7 +4463,8 @@ under `scripts/tick` outside the adapters that imports an adapted implementation
 [The import check](../reference/tick-adapters.md#the-import-check)). Most registered steps still run a call of the tick module, which reaches those systems
 itself; every pass already scans processes through the processes adapter and holds one lease heartbeat. Each pass
 builds the real adapters once. A step that reads `ctx.tools` gets write access only to the ports its declared effects
-name, and a write through another port fails it; call steps only record their effects until they move into step
+name, and a write through another port fails it; the [tick step catalogue](../reference/tick-step-catalogue.md)
+lists each step's effects. Call steps only record their effects until they move into step
 classes (see
 [Effects in a tick pass](../reference/tick-adapters.md#effects-in-a-tick-pass)). See
 [Tick adapters](../reference/tick-adapters.md) and [Fencing records](../reference/fencing-records.md).
