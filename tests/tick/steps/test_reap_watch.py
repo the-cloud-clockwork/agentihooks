@@ -140,6 +140,8 @@ def test_an_agent_is_stuck_on_its_provider_when_recovery_is_spent_or_the_idle_ou
     store, agent = _store(calls), _agent(lane=lane)
     observed = PaneObservation("waiting", provider_error=error)
     assert agents._stuck_on_provider("sw", store, agent, observed, exhausted, NOW) is stuck
+    asked = [("at_pane", ("sw", store, agent, observed, NOW))] if lane != MASTER and error else []
+    assert [call for call in calls if call[0] == "at_pane"] == asked
     judged = lane != MASTER and bool(error) and not at_pane and not exhausted
     if judged:
         expected: list[tuple[Any, ...]] = [
@@ -479,3 +481,131 @@ def test_an_agent_idle_past_the_kill_count_is_retired_and_its_task_dropped(
     assert (("retire", (idle,), {"homes": ("sw", "t1", "homes")}) in calls) is (ticks >= 3)
     assert (("drop", ("sw", store, "ledger", ROWS, idle), {"refund": True}) in calls) is (ticks >= 3 and retired)
     assert (("blocker", (store, "sw", agent)) in calls) is (ticks >= 3 and retired and pending)
+
+
+OPEN_ROW: dict[str, Any] = {
+    "state": "open",
+    "claimed_by": "old@1-2",
+    "claim_generation": 4,
+    "awaiting": "checks",
+    "pr_url": "https://example.invalid/pull/1",
+}
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+@pytest.mark.parametrize(
+    ("ended", "current", "claimed"),
+    [(True, True, True), (False, False, True), (False, True, False), (False, True, True)],
+)
+def test_an_owner_is_restored_only_for_a_live_current_agent_that_holds_its_claim(
+    monkeypatch: pytest.MonkeyPatch, ended: bool, current: bool, claimed: bool
+) -> None:
+    calls = Calls()
+    monkeypatch.setattr(tick, "_ended", calls.fn("ended", ended))
+    monkeypatch.setattr(tick, "_current_owner", calls.fn("current", current))
+    store = SimpleNamespace(ensure_claim=calls.fn("ensure_claim", claimed))
+    ledger = SimpleNamespace(update_task=calls.fn("update", {"state": "pr"}))
+    row = dict(OPEN_ROW)
+    rows: dict[str, Any] = {"t1": row}
+    agent = _agent()
+    agents._restore_owner("sw", store, ledger, rows, agent)
+    expected: list[tuple[Any, ...]] = [("ended", (agent, rows))]
+    if not ended:
+        expected.append(("current", (agent, row)))
+    if not ended and current:
+        expected.append(("ensure_claim", ("sw", agent, tick.LEASE_MS)))
+    restored = not ended and current and claimed
+    if restored:
+        match = {"claimed_by": "old@1-2", "claim_generation": 4, "awaiting": "checks"}
+        fields = {"claimed_by": "eng@1-1", "state": "pr"}
+        expected.append(("update", ("sw", "t1", fields), {"if_state": ("open",), "if_match": match}))
+    assert calls == expected
+    assert rows["t1"] == ({"state": "pr"} if restored else OPEN_ROW)
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_a_refused_retire_is_recorded_with_its_refusal_and_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = Calls()
+    monkeypatch.setattr(tick, "master_retire", SimpleNamespace(forget=calls.fn("forget")))
+    reports = SimpleNamespace(removed=calls.fn("removed", False))
+    monkeypatch.setattr(tick, "reports", SimpleNamespace(Reports=lambda redis: reports))
+    monkeypatch.setattr(tick, "reaper", SimpleNamespace(scratch_homes=lambda slug, task: (slug, task, "homes")))
+    monkeypatch.setattr(tick, "retire_watch", SimpleNamespace(failed=calls.fn("failed")))
+    runtime = SimpleNamespace(retire=calls.fn("retire", False), refusal=calls.fn("refusal", "pane busy"))
+    store, agent = _store(calls), _agent()
+    actions = agents._retire_ended("sw", store, "ledger", runtime, {}, agent, NOW)
+    assert actions == ["could not retire eng@1-1, retrying next tick"]
+    assert calls[-2:] == [("refusal", (agent,)), ("failed", (store, "sw", "eng@1-1", "pane busy", NOW))]
+
+
+def _reaping(monkeypatch: pytest.MonkeyPatch, calls: Calls, live: set[str], **answers: Any) -> Any:
+    """Patch the seams one reap judgement reads and return the pass it judges against."""
+    monkeypatch.setattr(tick, "_acknowledging", calls.fn("acknowledging", answers.get("acknowledging", False)))
+    monkeypatch.setattr(tick, "_remote_gone_reason", calls.fn("gone", ""))
+    monkeypatch.setattr(tick, "_ended", calls.fn("ended", False))
+    monkeypatch.setattr(tick, "_elsewhere", calls.fn("elsewhere", False))
+    monkeypatch.setattr(tick, "reports", SimpleNamespace(host=calls.fn("host", "")))
+    monkeypatch.setattr(tick, "_restore_owner", calls.fn("restore_owner"))
+    monkeypatch.setattr(tick, "_watch_agent", calls.fn("watch_agent", ["watched"]))
+    monkeypatch.setattr(tick, "resume", SimpleNamespace(recovery_pending=calls.fn("pending", answers.get("pending"))))
+    store = SimpleNamespace(refresh=calls.fn("refresh"))
+    return agents._Reaping("sw", store, "ledger", "runtime", {}, live, NOW)  # pyright: ignore[reportArgumentType]
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+@pytest.mark.parametrize(
+    ("state", "lane", "skipped"),
+    [
+        ("awaiting-decision", "eng", True),
+        ("starting", MASTER, True),
+        ("starting", "eng", False),
+        ("working", MASTER, False),
+    ],
+)
+def test_an_agent_awaiting_a_decision_or_a_starting_master_is_not_judged(
+    monkeypatch: pytest.MonkeyPatch, state: str, lane: str, skipped: bool
+) -> None:
+    calls = Calls()
+    judging = _reaping(monkeypatch, calls, set(), acknowledging=True)
+    agent = _agent(state=state, lane=lane)
+    assert agents._reap_agent(judging, agent) == []
+    assert calls == ([] if skipped else [("acknowledging", ("sw", judging.store, agent))])
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_a_live_local_agent_has_its_owner_restored_then_is_watched(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = Calls()
+    judging = _reaping(monkeypatch, calls, {"eng@1-1"})
+    agent = _agent()
+    assert agents._reap_agent(judging, agent) == ["watched"]
+    restore = ("restore_owner", ("sw", judging.store, "ledger", judging.rows, agent))
+    watch = ("watch_agent", ("sw", judging.store, "ledger", "runtime", judging.rows, agent, NOW))
+    assert calls[-3:] == [restore, ("ended", (agent, judging.rows)), watch]
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_a_missing_agent_with_a_pending_recovery_keeps_its_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = Calls()
+    judging = _reaping(monkeypatch, calls, set(), pending=True)
+    agent = _agent()
+    assert agents._reap_agent(judging, agent) == []
+    assert calls[-2:] == [
+        ("pending", (judging.store, "sw", agent)),
+        ("refresh", ("sw", "t1", "eng@1-1", tick.LEASE_MS)),
+    ]
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_a_suspect_remote_agent_that_answers_again_is_watched_as_working(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = Calls()
+    monkeypatch.setattr(tick, "_watch_agent", calls.fn("watch_agent", ["watched"]))
+    store = SimpleNamespace(refresh=calls.fn("refresh"), put_agent=calls.fn("put_agent"))
+    runtime = SimpleNamespace(observe=lambda agent: PaneObservation("idle"))
+    agent = _agent(state=tick.SUSPECT)
+    working = replace(agent, state="working")
+    assert agents._watch_remote("sw", store, "ledger", runtime, {}, agent, NOW) == ["watched"]
+    assert calls == [
+        ("refresh", ("sw", "t1", "eng@1-1", tick.LEASE_MS)),
+        ("put_agent", ("sw", working)),
+        ("watch_agent", ("sw", store, "ledger", runtime, {}, working, NOW)),
+    ]
