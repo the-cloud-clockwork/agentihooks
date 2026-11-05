@@ -4428,8 +4428,8 @@ A step whose interval is above one minute rests on a pass that starts within its
 of its last `ok` or `failed` run: a 120 second step runs every other pass and a 600 second step about one pass in
 ten. A resting step starts no thread, ends at once for the steps that need it, and leaves a `skipped` record with
 `rested` true. The end of each run is kept in the swarm's `tick:step-ran` hash; a late or held run stores no end, so the
-step stays due on the next pass, and a step with no stored end or an unreadable hash is due. A step that writes the pass state must be declared at 60 seconds, and
-the registry refuses one above that. Timing changes, overlap limits and the forty second spawn bound are covered in
+step stays due on the next pass, and a step with no stored end or an unreadable hash is due. A step that writes the
+pass state must be declared at 60 seconds, and the registry refuses one above that. Timing changes, overlap limits and the forty second spawn bound are covered in
 [Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals), and the rest rule in
 [Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement).
 
