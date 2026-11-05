@@ -57,6 +57,11 @@ class CallStep:
         """Return the step's budget this pass: its live budget, never under its floor."""
         return budgets.floored(self.name, self.floor_s)
 
+    @budget_s.setter
+    def budget_s(self, value: float) -> None:
+        """Pin the step's floor to ``value``, its budget until a live budget rises above it."""
+        self.floor_s = value
+
     def run(self, ctx: Context) -> Result:
         """Run the call with the tick module and a reader of the pass state, writing its actions."""
         found = self.call(import_module("scripts.swarm.tick"), partial(ctx.view.read, PASS))
