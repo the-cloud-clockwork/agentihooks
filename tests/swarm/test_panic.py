@@ -347,6 +347,7 @@ def test_cancel_runs_spares_release_tag_runs() -> None:
                 _row(2, "v2.17.653", event="push"),
                 _row(3, "v2-feature"),
                 _row(4, "release", event="push"),
+                _row(5, "main", event="release"),
             ],
         },
     )

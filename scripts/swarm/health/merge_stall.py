@@ -9,6 +9,7 @@ from datetime import datetime
 from scripts.swarm import github_reads, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
+from scripts.tick.adapters import github as _github
 
 DEADLINE = ContextVar("merge_observation_deadline", default=None)
 HOUR_MS = 3_600_000
@@ -47,7 +48,9 @@ def request(repo: str, args: list[str]) -> dict:
                 text=True,
                 timeout=min(20, remaining),
             )
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
+            if exc.filename != _github.command([])[0]:
+                raise
             result = None
     if result is None:
         raise SwarmError(NO_GH)
