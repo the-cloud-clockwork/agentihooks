@@ -72,6 +72,30 @@ def append_record(store: Any, slug: str, stream: str, record: dict[str, Any]) ->
         emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": stream}))
 
 
+STEP_RAN = "tick:step-ran"
+
+
+def step_ends(store: Any, slug: str) -> dict[str, float]:
+    """Return the end time of each step's last ok or failed run for swarm ``slug``, empty when Redis fails."""
+    from redis.exceptions import RedisError
+
+    try:
+        found = store.redis.hgetall(store.key(slug, STEP_RAN))
+    except RedisError:
+        return {}
+    return {name: float(ended) for name, ended in found.items()}
+
+
+def step_ended(store: Any, slug: str, name: str, ended: float) -> None:
+    """Record ``ended`` as the end time of step ``name``'s last run for swarm ``slug``."""
+    from redis.exceptions import RedisError
+
+    try:
+        store.redis.hset(store.key(slug, STEP_RAN), name, repr(ended))
+    except RedisError:
+        emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": STEP_RAN}))
+
+
 @contextmanager
 def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     if store is None:
