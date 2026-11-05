@@ -1890,3 +1890,7 @@ def _end_awaiting_seats(
     for agent in agents:
         if agent.state == resume.AWAITING:
             _drop(slug, store, ledger, rows, agent)
+
+
+def _planted_pattern_offence() -> None:
+    """Planted top level def outside the tick pattern allowlist."""
