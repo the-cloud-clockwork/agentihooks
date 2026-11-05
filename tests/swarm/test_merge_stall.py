@@ -1,6 +1,7 @@
 import json
 import subprocess
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
@@ -494,13 +495,15 @@ def test_merge_observation_records_github_read_wall_time(rig, capsys):
     assert all(row["step"] == "scripts.swarm.health.merge_stall.github_read" and row["wall_s"] >= 0 for row in finished)
 
 
-def test_a_host_without_gh_skips_the_merge_read_and_fails_no_step(rig, monkeypatch, capsys):
+def test_a_host_without_gh_skips_the_merge_read_and_fails_no_step(
+    rig: tuple[Any, Any, dict[str, Any]], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.swarm import timing
     from scripts.swarm.health import merge_stall
 
     store, _, _ = rig
 
-    def missing(command, **kwargs):
+    def missing(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         raise FileNotFoundError(2, "No such file or directory", "gh")
 
     monkeypatch.setattr(subprocess, "run", missing)
