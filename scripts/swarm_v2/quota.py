@@ -7,7 +7,7 @@ import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import session_bands
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
@@ -125,6 +125,51 @@ def _report(report: object, now: int) -> dict:
     return {field: report.get(field) for field in REPORT_FIELDS}
 
 
+def _hive_reading(account: str, harness: str, reading: Any, now_ms: int) -> Observation | None:
+    """One hive quota entry as an observation, or None when it fails the fleet report checks."""
+    try:
+        five, week = reading["five_hour"], reading["seven_day"]
+        observed = Observation(
+            account,
+            harness,
+            "",
+            0,
+            int(reading["observed_at"] * 1000),
+            "allowed",
+            five["used"],
+            week["used"],
+            five["resets_at"],
+            week["resets_at"],
+        )
+        _report({field: getattr(observed, field) for field in REPORT_FIELDS}, now_ms)
+    except (KeyError, TypeError, ValueError, SwarmError):
+        return None
+    return observed
+
+
+def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) -> Observation | None:
+    """The newest valid reading a live hive published for the account, matched whatever its name separators."""
+    from scripts.hive import registry
+    from scripts.routing.slots import account_key
+
+    wanted, found = account_key(f"{harness}:{account}"), list[Observation]()
+    for hive in registry.hives(redis):  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        live = registry.live(hive, now_ms)  # pyright: ignore[reportUnknownArgumentType]
+        raw = redis.get(f"{registry.key(hive['id'])}:quota") if live else None  # pyright: ignore[reportUnknownArgumentType]
+        if not isinstance(raw, str):
+            continue
+        try:
+            readings: dict[str, Any] = dict(json.loads(raw))
+        except (ValueError, TypeError):
+            continue
+        found += [
+            observed
+            for slot, reading in readings.items()
+            if account_key(slot) == wanted and (observed := _hive_reading(account, harness, reading, now_ms))
+        ]
+    return max(found, key=lambda observed: observed.observed_ms, default=None)
+
+
 class QuotaObservations:
     """The authorization callback must validate a scoped launch grant on every publish; the account comes from it."""
 
@@ -189,8 +234,13 @@ class QuotaObservations:
         return kept
 
     def latest(self, account: str, harness: str) -> Observation | None:
+        """The newer of the published fleet observation and the newest live hive reading for the account."""
         raw = self.store.redis.hget(latest_key(harness), account)
-        return decode(raw) if raw else None
+        published = decode(raw) if raw else None
+        hive = hive_observation(self.store.redis, account, harness, self.clock())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        if published is None or (hive is not None and hive.observed_ms > published.observed_ms):
+            return hive
+        return published
 
     def history(self, account: str, harness: str) -> list[Observation]:
         return [decode(raw) for raw in self.store.redis.lrange(history_key(account, harness), 0, -1)]
