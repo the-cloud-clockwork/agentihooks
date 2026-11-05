@@ -1,6 +1,6 @@
 """The flat pass graph: barrier edges from the group site table and one schedule for every step of a pass."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from threading import Event, Lock
 from time import monotonic
@@ -73,6 +73,22 @@ def test_site_edges_drop_a_need_on_a_step_of_a_later_site_and_keep_one_outside_t
     )
     edged = registry.site_edges(steps, ("a", "b"))
     assert _needs(edged) == {"a1": frozenset({"x1"}), "b1": frozenset({"a1", "x1"}), "x1": frozenset()}
+
+
+def test_a_handed_off_step_runs_when_the_gate_given_it_and_the_records_opens_it_and_it_does_not_rest() -> None:
+    step, records = Step("a1", "a"), {"x1": engine.StepRecord("x1", 0.0, 1.0)}
+    asked: list[tuple[object, object]] = []
+
+    def gate(found: Stepping, seen: Mapping[str, engine.StepRecord]) -> bool:
+        asked.append((found, seen))
+        return found.name != "shut"
+
+    assert engine._opened(frozenset(), gate, step, records) is True
+    assert asked == [(step, records)]
+    assert engine._opened(frozenset({"a1"}), gate, step, records) is False
+    assert engine._opened(frozenset(), gate, Step("shut", "a"), records) is False
+    assert engine._opened(frozenset(), None, step, records) is True
+    assert engine._opened(frozenset({"a1"}), None, step, records) is False
 
 
 def test_site_edges_keep_order_name_group_lane_and_run_of_each_step() -> None:
