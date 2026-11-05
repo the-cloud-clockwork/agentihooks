@@ -494,6 +494,32 @@ checks, refusals and troubleshooting: [Profile launch home](profile-launch-home.
 
 ---
 
+## `agentihooks headless run`
+
+Run one full rendered profile unattended on Claude Code or codex-cli and print
+one JSON object with `status`, `output`, `session`, `exit_code`, `transcript`
+and `run_dir`. Exits 0 only when `status` is `ok`.
+
+```bash
+agentihooks headless run engineer --input 'Reply with JSON whose answer is the word pong.'
+agentihooks headless run engineer --input prompt.md --schema schema.json --harness codex --tier low --timeout 600 --out runs/codex
+```
+
+| Flag | Meaning |
+|---|---|
+| `PROFILE` | Profile to run |
+| `--input TEXT\|FILE` | Prompt text, or a file holding it (required) |
+| `--schema FILE` | JSON schema file the output must match |
+| `--harness auto\|claude\|codex` | Harness (default `auto`: `AGENTIHOOKS_TARGET`, else `claude`) |
+| `--out DIR` | Run folder (default `<AGENTIHOOKS_HOME>/headless/<UTC stamp>-<8 hex>`) |
+| `--tier high\|low`, `--effort` | Model tier (default `high`) and effort (default `medium`) |
+| `--timeout SECONDS` | Kill the run after this many seconds (default `1800`) |
+
+Statuses, run folder, tiers, worker mode and troubleshooting:
+[Headless profile runs](headless-run.md).
+
+---
+
 ## `agentihooks terminate-agent`
 
 List live Claude Code and Codex sessions, end one by exact name, session UUID or
