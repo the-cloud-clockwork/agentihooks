@@ -886,3 +886,23 @@ def test_pod_liveness_key_lives_under_the_hive(setup):
     from scripts.hive import registry
 
     assert setup.orders.pod("host", "abc") == f"{registry.key('host')}:pod:abc"
+
+
+def test_launch_names_the_hive_slot_for_a_secret_key_account(setup, monkeypatch):
+    from scripts.hive import orders
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    slot = "nestor_coltatgmail_com"
+    monkeypatch.setattr(
+        orders.registry,
+        "show",
+        lambda client, hive: {"slots": [{"harness": "codex", "account": slot, "kind": "subscription"}]},
+    )
+    agent = replace(setup.agent, account="nestor-coltatgmail-com")
+    setup.store.execution_registry.update("fixture", agent)
+    order = replace(setup.order, slot="nestor-coltatgmail-com")
+    placed = replace(setup.runtime.spawn.return_value.value, account=slot)
+    setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    ack = setup.consumer.launch(order, agent, {"id": order.task})
+    assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["account"] == slot
+    assert ack.status == "live"
