@@ -6,7 +6,8 @@ declaration, and each import of an adapted implementation from a module outside 
 whose text or measurement the head changes against the base grade, as a budgets table change does, so a
 stale entry for an untouched file never fails. A changed file may hold only offences its base allowlist or its base
 measurement holds for it, and its head record must match its measurement; an unchanged file's head record
-may hold only what those hold.
+may hold only what those hold. The promotion tier runs --tree on each dev push: the whole tree's measurement must
+equal its recorded allowlist, so drift two green pull requests merge between them turns promotion red.
 """
 
 import argparse
@@ -196,18 +197,44 @@ def grade(
     return errors
 
 
+def drift(recorded: dict[str, list[str]] | None, head: dict[str, list[str]]) -> list[str]:
+    """Each offence the whole tree measurement head and its recorded allowlist disagree on, file by file."""
+    if recorded is None:
+        return [f"{ALLOWLIST} is missing; run python -m scripts.tick_pattern --write"]
+    errors: list[str] = []
+    for name in sorted(set(recorded) | set(head)):
+        measured_here, recorded_here = set(head.get(name, [])), set(recorded.get(name, []))
+        errors += [
+            f"{name} measures {offence}; {ALLOWLIST} does not record it"
+            for offence in sorted(measured_here - recorded_here)
+        ] + [
+            f"{name} no longer measures {offence}; {ALLOWLIST} still records it"
+            for offence in sorted(recorded_here - measured_here)
+        ]
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Grade the files the head changes against the base, or record the head's allowlist with --write."""
+    """Grade the files the head changes against the base, compare the whole head tree with its allowlist with
+    --tree, or record the head's allowlist with --write."""
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--base")
     mode.add_argument("--write", action="store_true")
+    mode.add_argument("--tree", action="store_true")
     parser.add_argument("--head", type=Path, default=Path("."))
     args = parser.parse_args(argv)
     try:
         if args.write:
             write(args.head)
             return 0
+        if args.tree:
+            head, recorded = measure(args.head), load(args.head)
+            errors = drift(recorded, head)
+            print(f"{sum(map(len, head.values()))} tick pattern offences in {len(head)} files, {len(errors)} drifts")
+            for error in errors:
+                print(f"::error::{error}")
+            return 1 if errors else 0
         texts, prior = scoped(args.head), scoped(Path(args.base))
         head, held = measured(texts), measured(prior)
         recorded, base = load(args.head), load(Path(args.base))

@@ -49,6 +49,7 @@ from scripts.swarm import (
     fleet_red,
     freeze,
     grouping,  # noqa: F401
+    held_elsewhere,
     input_wait,
     launch_check,
     ledger_events,
@@ -353,12 +354,15 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
     return [f"master down, told the operator about {len(told)} waiting lines"]
 
 
-def _verify(slug, store, ledger, runtime, rows, now_ms):
+def _verify(
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int
+) -> list[str]:
     from scripts.hub.reconciler import legacy_agents
 
     judged = launch_check.judged(store, slug)
     agents, actions = [a for a in legacy_agents(store, slug) if a.name not in judged], []
     facts, live_names = runtime.bindings(agents), runtime.live_names()
+    holders = held_elsewhere.holders(store)
     for agent in agents:
         if (
             agent.state == "awaiting-decision"
@@ -369,7 +373,9 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
             continue
-        if dead_resume.skip_binding(agent, facts, live_names):
+        if held_elsewhere.keep(slug, store, agent, holders, now_ms) or dead_resume.skip_binding(
+            agent, facts, live_names
+        ):
             continue
         agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
         actions.extend(followed)

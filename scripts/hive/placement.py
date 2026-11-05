@@ -3,6 +3,7 @@
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
@@ -106,22 +107,34 @@ def _refused(reason: str, hives: list[dict], role: str) -> str:
     return f"{reason}: {held}" if held else reason
 
 
+def account_key(account: str) -> str:
+    """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
+    return account.replace("_", "-")
+
+
+def _holds(logins: dict[str, Any], harness: str, key: str) -> bool:
+    return harness in logins and account_key(logins[harness]) == key
+
+
 def _checks(
     role: str, harness: str, slot: str, route_kind: str, repo: str, kind: str = HIVE
-) -> list[tuple[Callable[[dict], bool], str]]:
+) -> list[tuple[Callable[[dict[str, Any]], bool], str]]:
+    key = account_key(slot)
     return [
         (lambda hive: role == MASTER or _room(hive, role) > 0, f"no {kind} for {role} {HAS_ROOM}"),
         (
-            lambda hive: any(item["harness"] == harness and item["account"] == slot for item in hive["slots"]),
+            lambda hive: any(
+                item["harness"] == harness and account_key(item["account"]) == key for item in hive["slots"]
+            ),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
         ),
         (lambda hive: repo in hive["repos"], f"no {kind} for {role} lists the repo {repo}"),
         (
-            lambda hive: route_kind != INTERACTIVE or hive["interactive"].get(harness) == slot,
+            lambda hive: route_kind != INTERACTIVE or _holds(hive["interactive"], harness, key),
             f"no {kind} for {role} holds the {harness} login for {slot}",
         ),
         (
-            lambda hive: route_kind != MASTER_LOGIN or hive["master_login"].get(harness) == slot,
+            lambda hive: route_kind != MASTER_LOGIN or _holds(hive["master_login"], harness, key),
             f"no {kind} for {role} holds the {harness} master login for {slot}",
         ),
     ]
