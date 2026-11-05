@@ -492,3 +492,27 @@ def test_merge_observation_records_github_read_wall_time(rig, capsys):
     finished = [row for row in events if row.get("phase") == "finished"]
     assert len(finished) == 6
     assert all(row["step"] == "scripts.swarm.health.merge_stall.github_read" and row["wall_s"] >= 0 for row in finished)
+
+
+def test_a_host_without_gh_skips_the_merge_read_and_fails_no_step(rig, monkeypatch, capsys):
+    from scripts.swarm import timing
+    from scripts.swarm.health import merge_stall
+
+    store, _, _ = rig
+
+    def missing(command, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "gh")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    current = {"pass_id": "p", "failed_steps": []}
+    swarm, run = timing.SWARM.set("proof"), timing.PASS.set(current)
+    try:
+        assert merge_stall.findings(store, "proof", "/repo", AT) == []
+    finally:
+        timing.PASS.reset(run)
+        timing.SWARM.reset(swarm)
+    assert current["failed_steps"] == []
+    state = json.loads(store.redis.get(store.key("proof", "merge-stall")))
+    assert state == {"error": merge_stall.NO_GH, "tried": AT}
+    finished = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert [row["outcome"] for row in finished if row.get("phase") == "finished"] == ["success"]
