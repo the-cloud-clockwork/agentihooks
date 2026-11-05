@@ -235,6 +235,35 @@ def test_a_seat_whose_occupant_left_it_is_not_live(swarm):
     assert live_masters(swarm.redis, SLUG) == [FRONT, SECOND, THIRD]
 
 
+def _second(swarm, **fields):
+    swarm.put_agent(SLUG, AgentRecord("sw-master-2", "master", "master-2", seat=SECOND, started_at=1, **fields))
+    swarm.seats.occupy(SECOND, "sw-master-2", at=1)
+
+
+def test_a_master_that_never_launched_holds_no_live_seat_and_its_items_reach_the_front_door(swarm, inbox):
+    _masters(swarm, 1)
+    _second(swarm, state="starting")
+    assert pool.unlaunched(next(a for a in swarm.agents(SLUG) if a.name == "sw-master-2")) is True
+    assert live_masters(swarm.redis, SLUG) == [FRONT]
+    assert inbox.pool.empty(SLUG, SECOND) is True
+    item = inbox.send("swarm", SECOND, "a stall alert")
+    assert inbox.get(item.id).address == FRONT
+    assert [i.id for i in inbox.pending_mail("sw-master-1")] == [item.id]
+    assert inbox.inbox(SECOND) == []
+
+
+@pytest.mark.parametrize(
+    "fields", [{"state": "working"}, {"state": "starting", "pane_id": "p2"}, {"state": "starting", "launched_at": 5}]
+)
+def test_a_master_that_launched_or_reported_keeps_its_live_seat(swarm, inbox, fields):
+    _masters(swarm, 1)
+    _second(swarm, **fields)
+    assert pool.unlaunched(next(a for a in swarm.agents(SLUG) if a.name == "sw-master-2")) is False
+    assert live_masters(swarm.redis, SLUG) == [FRONT, SECOND]
+    assert inbox.pool.empty(SLUG, SECOND) is False
+    assert inbox.send("swarm", SECOND, "a stall alert").address == SECOND
+
+
 def test_turn_follows_seat_order_and_passes_over_the_last_holder():
     seats = [FRONT, SECOND, "master-10@sw"]
     assert turn(seats, "", "") == FRONT
@@ -816,6 +845,34 @@ def test_an_item_for_a_backend_seat_whose_master_is_retiring_goes_to_the_front_d
     item = inbox.send("ledger", SECOND, "alert al-6 (sync)")
     assert inbox.get(item.id).address == FRONT
     assert inbox.open_items(SECOND) == []
+
+
+def test_an_item_for_a_backend_seat_whose_working_master_was_asked_to_retire_goes_to_the_front_door(swarm, inbox):
+    _masters(swarm, 2)
+    swarm.redis.hset(swarm.key(SLUG, "master-retire-requests"), "sw-master-2", json.dumps({"reason": "scale down"}))
+    assert live_masters(swarm.redis, SLUG) == [FRONT]
+    assert inbox.pool.empty(SLUG, SECOND) is True
+    item = inbox.send("ledger", SECOND, "alert al-8 (sync)")
+    assert inbox.get(item.id).address == FRONT
+    assert inbox.open_items(SECOND) == []
+
+
+def test_a_retire_request_on_another_master_keeps_a_working_backend_seat(swarm, inbox):
+    _masters(swarm, 3)
+    swarm.redis.hset(swarm.key(SLUG, "master-retire-requests"), "sw-master-3", json.dumps({"reason": "scale down"}))
+    assert inbox.pool.empty(SLUG, SECOND) is False
+    assert inbox.pool.empty(SLUG, THIRD) is True
+
+
+def test_a_seat_with_no_occupant_is_empty_once_every_master_naming_it_was_asked_to_retire(swarm, inbox):
+    _masters(swarm, 1)
+    swarm.put_agent(SLUG, AgentRecord("sw-master-2", "master", "master-2", seat=SECOND))
+    swarm.put_agent(SLUG, AgentRecord("sw-master-2b", "master", "master-2", seat=SECOND))
+    requests = swarm.key(SLUG, "master-retire-requests")
+    swarm.redis.hset(requests, "sw-master-2", json.dumps({"reason": "scale down"}))
+    assert inbox.pool.empty(SLUG, SECOND) is False
+    swarm.redis.hset(requests, "sw-master-2b", json.dumps({"reason": "scale down"}))
+    assert inbox.pool.empty(SLUG, SECOND) is True
 
 
 def test_an_item_for_a_retired_backend_seat_goes_to_the_front_door_while_its_occupant_lingers(swarm, inbox):

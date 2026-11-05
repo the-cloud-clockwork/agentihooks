@@ -1900,7 +1900,6 @@ jobs:
           name: early-collected-${{ matrix.python-version }}
 
       - name: Fetch the protected grader's dev head
-        if: steps.collection.outcome == 'success'
         run: git fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev
 
       # Grader code decides and grades the reuse, but head code shares this runner, so a hostile head can still forge it.
