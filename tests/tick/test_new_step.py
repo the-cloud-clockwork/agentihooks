@@ -75,14 +75,58 @@ def test_a_scaffolded_step_passes_the_pattern_catalogue_and_feature_map_gates(
         name: (tree / name).read_text() for name in ("scripts/tick/steps/budgets.py", "scripts/tick/steps/widgets.py")
     }
     assert pattern.measured(texts) == {}
-    catalogue = import_module("scripts.tick.catalogue")
-    loaded = catalogue.load(tree)
     fresh = registered(tree, monkeypatch)
-    fresh.validate(import_module("scripts.tick.registry").Catalogue(loaded.features, loaded.scenarios))
     (step,) = fresh.steps()
     assert (step.name, step.group, step.lane, step.feature) == (STEP, "widgets", "tick", "tick-step-widgets")
     assert (step.effects, step.interval_s) == (frozenset({"ledger", "inbox"}), 120.0)
     assert import_module("scripts.feature_map").validate(tree, tree / "feature-map.json") == 1
+
+
+def test_a_scaffolded_step_passes_the_catalogue_check_beside_every_registered_step(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = import_module("scripts.tick.registry").steps()
+    assert scaffold(tree, STEP) == 0
+    fresh = registered(tree, monkeypatch)
+    for each in real:
+        fresh.register(each)
+    mapped = json.loads((tree / "feature-map.json").read_text())
+    mapped["features"] += json.loads((ROOT / "feature-map.json").read_text())["features"]
+    (tree / "feature-map.json").write_text(json.dumps(mapped))
+    assert import_module("scripts.tick.catalogue").check(tree) == []
+    assert STEP in {each.name for each in fresh.steps()}
+    (tree / "tests/swarm/tick_scenarios/steps.json").write_text(
+        (ROOT / "tests/swarm/tick_scenarios/steps.json").read_text()
+    )
+    assert import_module("scripts.tick.catalogue").check(tree) == [f"Step {STEP}: no scenario lists it"]
+
+
+def plant(tree: Path, artefact: str) -> None:
+    """Remove one artefact of the scaffolded step from ``tree``."""
+    copied = {
+        "budget row": "scripts/tick/steps/budgets.py",
+        "index row": "tests/swarm/tick_scenarios/steps.json",
+    }
+    if artefact in copied:
+        (tree / copied[artefact]).write_text((ROOT / copied[artefact]).read_text())
+    elif artefact == "step":
+        (tree / "scripts/tick/steps/widgets.py").write_text('"""The widgets steps of the tick."""\n')
+    elif artefact == "test":
+        (tree / "tests/tick/steps/test_probe_widgets.py").unlink()
+    else:
+        (tree / "feature-map.json").write_text(json.dumps({"features": []}, indent=2) + "\n")
+
+
+@pytest.mark.parametrize("artefact", ["step", "budget row", "test", "index row", "feature entry"])
+def test_check_goes_red_on_each_planted_missing_artefact(
+    tree: Path, artefact: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert scaffold(tree, STEP) == 0
+    plant(tree, artefact)
+    capsys.readouterr()
+    assert new_step().main(["--check", STEP, "--root", str(tree)]) == 1
+    found = json.loads(capsys.readouterr().out)
+    assert [name for name, present in found.items() if not present] == [artefact]
 
 
 def test_a_new_module_joins_the_modules_the_registry_loads(tree: Path) -> None:
