@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
@@ -1188,10 +1189,50 @@ def test_a_swarm_tick_on_a_workstation_refuses_a_swarm_served_in_anton_and_ticks
     monkeypatch.setattr(cli, "connect", lambda: found)
     monkeypatch.setattr(cli, "refusal", lambda name, who: "")
     monkeypatch.setattr(cli.signal, "signal", lambda *args: None)
-    monkeypatch.setattr(cli, "run_tick", lambda store, slug: ticked.append(slug) or ["spawned engineer"])
+    monkeypatch.setattr(cli, "run_tick", lambda store, slug: ticked.append((store, slug)) or ["spawned engineer"])
     assert cli.dispatch(["live", "tick"]) == 1
     assert capsys.readouterr().err == "swarm: the swarm live is served in Anton, so only its controller ticks it\n"
     assert ticked == []
     assert cli.dispatch(["proof", "tick"]) == 0
     assert capsys.readouterr().out == "spawned engineer\n"
-    assert ticked == ["proof"]
+    assert ticked == [(found, "proof")]
+
+
+def test_anton_only_disables_and_reloads_the_swarm_work_units_without_checking_systemctl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    monkeypatch.setattr(timer, "unschedule", lambda: None)
+    (unit_dir / "agentihooks-tick-watch.service").write_text("")
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    assert timer._anton_only(unit_dir, _systemctl(calls)) is True
+    assert calls == [
+        (["systemctl", "--user", "disable", "--now", "agentihooks-tick-watch.service"], timer.UNCHECKED),
+        (["systemctl", "--user", "daemon-reload"], timer.UNCHECKED),
+    ]
+    assert list(unit_dir.iterdir()) == []
+
+
+def test_anton_only_reloads_after_retiring_the_tick_units_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    monkeypatch.setattr(timer, "unschedule", lambda: None)
+    monkeypatch.setattr(timer, "_retire", lambda unit_dir, run: True)
+    (unit_dir / "agentihooks-swarm.timer").write_text("")
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    assert timer._anton_only(unit_dir, _systemctl(calls)) is True
+    assert calls == [(["systemctl", "--user", "daemon-reload"], timer.UNCHECKED)]
+
+
+def test_anton_only_skips_the_reload_while_the_tick_units_stay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    monkeypatch.setattr(timer, "unschedule", lambda: None)
+    monkeypatch.setattr(timer, "_retire", lambda unit_dir, run: False)
+    (unit_dir / "agentihooks-swarm.timer").write_text("")
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    assert timer._anton_only(unit_dir, _systemctl(calls)) is False
+    assert calls == []

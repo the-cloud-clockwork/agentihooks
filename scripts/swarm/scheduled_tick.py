@@ -12,14 +12,14 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 from scripts.scheduler.core import Scheduler
 from scripts.scheduler.service import AlreadyRunning, machine_lock, runtime_dir
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
-    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.store import SwarmConfig
 
 OWNER = "agentihooks swarm tick"
 EXPRESSION = "* * * * *"
@@ -116,9 +116,17 @@ def served(config: "SwarmConfig") -> bool:
     return bool(config.api_url)
 
 
-def hosts(store: "RedisStore") -> bool:
+class Swarms(Protocol):
+    """The swarm store reads hosts needs: every swarm slug and one swarm's config."""
+
+    def slugs(self) -> list[str]: ...
+
+    def config(self, slug: str) -> "SwarmConfig": ...
+
+
+def hosts(store: Swarms) -> bool:
     """True while a swarm in the store is neither served in Anton nor stopped, so this workstation still ticks it."""
-    configs = [store.config(slug) for slug in cast("list[str]", store.slugs())]
+    configs = [store.config(slug) for slug in store.slugs()]
     return any(not served(config) and config.state != "stopped" for config in configs)
 
 
