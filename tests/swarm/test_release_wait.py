@@ -131,6 +131,35 @@ def test_a_working_lookup_reads_once(api: Callable[..., Api]) -> None:
     assert len(fake.calls) == 1
 
 
+def test_an_attempt_reads_the_named_repository_from_the_current_folder_on_dev(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[tuple[str, Path, str]] = []
+
+    class Recorder:
+        def __init__(self, repository: str, root: Path, base: str) -> None:
+            built.append((repository, root, base))
+
+        def tags(self, *, deadline: object) -> tuple[github.Tag, ...]:
+            return (github.Tag("v1.0.0", "sha"),)
+
+    monkeypatch.setattr(github, "GitHubSourceControl", Recorder)
+    assert release_wait._attempt("owner/project") == (["v1.0.0"], "")
+    assert built == [("owner/project", Path.cwd(), "dev")]
+
+
+def test_the_retry_reads_the_same_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    names: list[str] = []
+
+    def attempt(name: str) -> tuple[list[str], str]:
+        names.append(name)
+        return ([], "down") if len(names) == 1 else (["v1.0.0"], "")
+
+    monkeypatch.setattr(release_wait, "_attempt", attempt)
+    assert release_wait.lookup(config()) == (["v1.0.0"], "")
+    assert names == ["owner/project", "owner/project"]
+
+
 def test_each_attempt_gets_its_own_bounded_wait(api: Callable[..., Api]) -> None:
     fake = api(TimeoutError("tool deadline expired"))
     assert release_wait.tags(config()) == []
