@@ -82,9 +82,10 @@ def test_a_delivery_guard_of_exactly_two_cadences_holds(guards: pytest.MonkeyPat
     assert "delivery guard" in engine.cadence_breaches(301.0)
 
 
-def test_a_lease_ttl_of_exactly_two_cron_minutes_holds(guards: pytest.MonkeyPatch) -> None:
+def test_a_lease_ttl_of_exactly_two_controller_ticks_holds(guards: pytest.MonkeyPatch) -> None:
     from scripts.swarm import lease
 
+    guards.setattr(lease, "tick_ms", lambda: 60_000)
     assert "lease TTL" not in engine.cadence_breaches(60.0)
     guards.setattr(lease, "ttl_ms", lambda: 119_000)
     assert engine.cadence_breaches(60.0) == ["lease TTL"]
