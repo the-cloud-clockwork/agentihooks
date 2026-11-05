@@ -1224,7 +1224,7 @@ class HerdrRuntime:
             return False
         return proc.returncode == 0
 
-    def retire(self, agent: AgentRecord, homes: tuple = ()) -> bool:
+    def retire(self, agent: AgentRecord, homes: tuple[str, ...] = ()) -> bool:
         """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
         then close the pane; the agent's name alone never selects a process. An agent whose record names no host
         and that only another hive lists is reaped by that hive."""

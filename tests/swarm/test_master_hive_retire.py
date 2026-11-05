@@ -29,13 +29,20 @@ class ControllerRuntime(AffinityRuntime):
     def __init__(self, home: Path, redis: object) -> None:
         super().__init__()
         self.orders: list[tuple[str, str, str]] = []
+        self.delegated: list[str] = []
         self.herdr = HerdrRuntime(home=home)
+        self.reap = self.herdr.reap_name
+        self.herdr.reap_name = self.reap_name
         self.herdr.end = self.end
         self.herdr._order = self.order
         self.herdr.hive = SimpleNamespace(holder=self.holder, redis=redis)
 
     def holder(self, name: str) -> str:
         return WORKSTATION if name in self.live else ""
+
+    def reap_name(self, name: str) -> bool:
+        self.delegated.append(name)
+        return self.reap(name)
 
     def end(self, name: str, pid: int | None, homes: list[str], start: int = 0) -> Outcome:
         return Outcome(refusal=NO_PROCESS)
@@ -66,6 +73,7 @@ def test_controller_retires_a_handed_off_workstation_master_and_launches_its_suc
     tick("sw", store, tasks(), controller, 7)
     tick("sw", store, tasks(), controller, 8)
     assert controller.orders == [(WORKSTATION, "reap", boss.name)]
+    assert controller.delegated == [boss.name]
     assert [a.name for a in masters(store)] == ["master@a1b2c3-0002"]
     assert controller.live == {"master@a1b2c3-0002"}
 
@@ -75,7 +83,7 @@ def test_a_master_no_hive_lists_keeps_the_local_retire(store: RedisStore, contro
     (boss,) = masters(store)
     controller.live.discard(boss.name)
     assert controller.retire(boss) is False
-    assert controller.orders == []
+    assert controller.delegated == []
     assert controller.herdr.refusal(boss) == {"process": 0, "refusal": NO_PROCESS}
 
 
@@ -86,7 +94,7 @@ def test_a_name_the_own_hive_lists_keeps_the_local_retire(
     (boss,) = masters(store)
     monkeypatch.setattr(commands, "hive_id", lambda: WORKSTATION)
     assert controller.retire(boss) is False
-    assert controller.orders == []
+    assert controller.delegated == []
 
 
 def test_a_name_a_local_session_holds_keeps_the_local_retire(
@@ -97,7 +105,7 @@ def test_a_name_a_local_session_holds_keeps_the_local_retire(
     held = SimpleNamespace(name=boss.name, process=SimpleNamespace(pid=7))
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [held])
     assert controller.retire(boss) is False
-    assert controller.orders == []
+    assert controller.delegated == []
 
 
 def test_a_runtime_without_hive_reports_keeps_the_local_retire(
@@ -107,4 +115,4 @@ def test_a_runtime_without_hive_reports_keeps_the_local_retire(
     (boss,) = masters(store)
     controller.herdr.hive = None
     assert controller.retire(boss) is False
-    assert controller.orders == []
+    assert controller.delegated == []
