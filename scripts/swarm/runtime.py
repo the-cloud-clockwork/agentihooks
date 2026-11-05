@@ -1351,13 +1351,14 @@ class HerdrRuntime:
     def refusal(self, agent):
         return self.refusals.get(agent.name, {"process": 0, "refusal": "unknown"})
 
-    def reap_name(self, name):
+    def reap_name(self, name: str) -> bool:
         from scripts.hive.orders import CommandOrder, Orders
+        from scripts.swarm.commands import hive_id
         from scripts.terminate_agent import sessions
 
         held = [s.process.pid for s in sessions() if s.name == name]
         host = "" if held or self.hive is None else self.hive.holder(name)
-        if not host:
+        if host in ("", hive_id()):
             carrying = [pid for pid in held if _carries(pid, name)]
             return not self.reap(carrying).refusal and len(carrying) == len(held)
         order = CommandOrder(f"reap:{name}", "reap", name=name)

@@ -114,6 +114,17 @@ def test_a_name_the_own_hive_lists_keeps_the_local_retire(
     assert controller.delegated == []
 
 
+def test_a_reap_on_the_hive_that_lists_the_name_ends_it_locally(
+    controller: ControllerRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ended: list[list[int]] = []
+    controller.live.add("master@sw-gone")
+    controller.herdr.reap = lambda pids: ended.append(pids) or Outcome()
+    monkeypatch.setattr(commands, "hive_id", lambda: WORKSTATION)
+    assert controller.reap("master@sw-gone") is True
+    assert (ended, controller.orders) == ([[]], [])
+
+
 def test_a_name_a_local_session_holds_keeps_the_local_retire(
     store: RedisStore, controller: ControllerRuntime, monkeypatch: pytest.MonkeyPatch
 ) -> None:
