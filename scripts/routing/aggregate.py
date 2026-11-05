@@ -55,6 +55,25 @@ def current(now: float) -> dict[str, dict]:
     return {} if redis is None else read(redis, now)
 
 
+def advertised(redis: "Redis", harness: str, now: float) -> dict[str, dict]:
+    """Per account, the newest fresh quota a live hive reports, keyed with - for _ so a controller Secret key finds it."""
+    from scripts import session_bands
+    from scripts.hive.placement import account_key
+
+    found: dict[str, dict] = {}
+    for hive in registry.hives(redis):
+        if not registry.live(hive, int(now * 1000)):
+            continue
+        for name, quota in json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}").items():
+            kind, _, account = name.partition(":")
+            if kind != harness or not session_bands.fresh(quota["observed_at"], now):
+                continue
+            key = account_key(account)
+            if key not in found or quota["observed_at"] > found[key]["observed_at"]:
+                found[key] = quota
+    return found
+
+
 def counts(harness: str, now: float) -> dict[str, int]:
     return {row["account"]: row["sessions"] for row in current(now).values() if row["harness"] == harness}
 

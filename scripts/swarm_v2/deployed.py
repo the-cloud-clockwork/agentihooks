@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING
 
+from scripts.routing import aggregate
 from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmError
@@ -225,7 +226,13 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     )
     api = pod_api(environ, workers.policy["namespace"])
     keys = SecretKeys(api)
-    route = AccountRoute(keys, QuotaObservations(controller.store, slug, verify), partial(_held, capacity), HARNESS)
+    route = AccountRoute(
+        keys,
+        QuotaObservations(controller.store, slug, verify),
+        partial(_held, capacity),
+        HARNESS,
+        partial(aggregate.advertised, controller.store.redis, HARNESS),
+    )
     launcher.accounts = route.choose
     prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
     kubernetes = KubernetesRuntime(controller.execute, workers.launch, prompts)

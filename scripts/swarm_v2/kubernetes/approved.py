@@ -1,8 +1,10 @@
 import os
 from collections.abc import Callable, Collection, Mapping
+from typing import Any
 
 from scripts import session_bands
 from scripts.account_names import CODEX_TOKEN_PREFIX, codex_token_env
+from scripts.hive.placement import account_key
 from scripts.swarm import quota_handoff
 from scripts.swarm.capacity import Account, offered
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
@@ -48,13 +50,38 @@ class AccountRoute:
         quota: QuotaObservations,
         held: Callable[[], Mapping[str, int]],
         harness: str,
+        advertised: Callable[[float], Mapping[str, Mapping[str, Any]]],
     ) -> None:
         self.keys, self.quota, self.held, self.harness = keys, quota, held, harness
+        self.advertised = advertised
 
-    def _row(self, key: str, cap: int, sessions: int, now: float) -> Account:
+    def _hive_row(self, key: str, cap: int, sessions: int, now: float, quota: Mapping[str, Any] | None) -> Account:
+        """A key no fleet reading covers takes the open or closed state its hives advertise for its token slot."""
+        if quota is None:
+            return Account(self.harness, key, OPEN, sessions, None, None, cap)
+        five_hour, seven_day = quota["five_hour"], quota["seven_day"]
+        five = session_bands.left(five_hour["used"], five_hour["resets_at"], now)
+        week = session_bands.left(seven_day["used"], seven_day["resets_at"], now)
+        band = session_bands.week_cap(week) if self.harness == "codex" else session_bands.cap(five, week)
+        banded = cap if band is None else min(cap, band)
+        return Account(
+            self.harness,
+            key,
+            OPEN if banded else CLOSED,
+            sessions,
+            five,
+            week,
+            banded,
+            session_bands.upcoming(seven_day["resets_at"], now),
+            five_resets_at=session_bands.upcoming(five_hour["resets_at"], now),
+        )
+
+    def _row(
+        self, key: str, cap: int, sessions: int, now: float, advertised: Mapping[str, Mapping[str, Any]]
+    ) -> Account:
         reading = self.quota.reading(key, self.harness)
         if reading.state == UNKNOWN:
-            return Account(self.harness, key, OPEN, sessions, None, None, cap)
+            return self._hive_row(key, cap, sessions, now, advertised.get(account_key(key)))
         banded = min(cap, self.quota.cap(key, self.harness))
         latest = self.quota.latest(key, self.harness)
         return Account(
@@ -70,8 +97,8 @@ class AccountRoute:
         )
 
     def rows(self, cap: int, now: float) -> list[Account]:
-        held = self.held()
-        return [self._row(key, cap, held.get(key, 0), now) for key in sorted(self.keys())]
+        held, advertised = self.held(), self.advertised(now)
+        return [self._row(key, cap, held.get(key, 0), now, advertised) for key in sorted(self.keys())]
 
     def seats(self, cap: int, predecessor: tuple[str, str] | None = None) -> list[session_bands.Seat]:
         rows = self.rows(cap, self.quota.clock() / 1000)
