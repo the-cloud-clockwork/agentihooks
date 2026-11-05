@@ -665,7 +665,7 @@ def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
     "failure",
     [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout", "incomplete-read", "read-reset", "wrapped-reset"],
 )
-@pytest.mark.parametrize("failures", [1, 4, 9, 10])
+@pytest.mark.parametrize("failures", [1, 4, 39, 40])
 def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action, failure, failures):
     path, lock, payloads = locked
     herdr = lock["tools"]["herdr"]
@@ -703,7 +703,7 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
         argv.extend(["--tool", "herdr"])
     monkeypatch.setattr("sys.argv", argv)
     selected = {"herdr": herdr} if action == "install" else lock["tools"]
-    if failures == 10:
+    if failures == 40:
         with pytest.raises(type(error)) as caught:
             worker_image.main()
         assert caught.value is error
@@ -718,8 +718,8 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
     expected_attempts, delays = {
         1: (2, [1]),
         4: (5, [1, 2, 4, 8]),
-        9: (10, [1, 2, 4, 8, 16, 30, 30, 30, 30]),
-        10: (10, [1, 2, 4, 8, 16, 30, 30, 30, 30]),
+        39: (40, [1, 2, 4, 8, 16] + [30] * 34),
+        40: (40, [1, 2, 4, 8, 16] + [30] * 34),
     }[failures]
     assert {url: attempts.count(url) for url in attempts} == {
         tool["url"]: expected_attempts for tool in selected.values()
@@ -838,6 +838,57 @@ def test_tool_download_retries_only_while_the_backoff_fits_its_total_budget(
             worker_image.fetch("herdr", tool, tmp_path)
         assert caught.value is error
         assert sleeps == []
+
+
+def test_tool_download_rides_out_a_ten_minute_gateway_outage(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, lock, payloads = locked
+    tool = lock["tools"]["herdr"]
+    now = [0.0]
+    sleeps: list[float] = []
+
+    def opened(url: str, timeout: int) -> io.BytesIO:
+        if now[0] < 600:
+            raise urllib.error.HTTPError(url, 504, "Gateway Time-out", http.client.HTTPMessage(), None)
+        return io.BytesIO(payloads[url])
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    assert worker_image.fetch("herdr", tool, tmp_path) == payloads[tool["url"]]
+    assert sleeps == [1, 2, 4, 8, 16] + [30] * 19
+
+
+def test_tool_download_gives_up_on_a_persistent_outage_at_its_total_budget(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, lock, _ = locked
+    tool = lock["tools"]["herdr"]
+    now = [0.0]
+    sleeps: list[float] = []
+    attempts: list[str] = []
+
+    def opened(url: str, timeout: int) -> io.BytesIO:
+        attempts.append(url)
+        raise urllib.error.HTTPError(url, 504, "Gateway Time-out", http.client.HTTPMessage(), None)
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    with pytest.raises(urllib.error.HTTPError):
+        worker_image.fetch("herdr", tool, tmp_path)
+    assert sleeps == [1, 2, 4, 8, 16] + [30] * 28
+    assert len(attempts) == len(sleeps) + 1
+    assert not (tmp_path / tool["sha256"]).exists()
 
 
 @pytest.mark.parametrize("action", ["install", "download"])
