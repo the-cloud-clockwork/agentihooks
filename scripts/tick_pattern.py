@@ -20,6 +20,7 @@ from scripts.size_limits import GradeError, files
 SCOPE = ("scripts/tick/", "scripts/swarm/tick.py")
 TICK = "scripts/swarm/tick.py"
 BUDGETS = "scripts/tick/steps/budgets.py"
+TABLES = ("FLOORS", "MEASURED")
 STEPS = "scripts/tick/"
 ADAPTERS = "scripts/tick/adapters/"
 ALLOWLIST = Path("tests/TICK_PATTERN_ALLOWLIST.json")
@@ -57,7 +58,7 @@ def floors(source: str) -> dict[str, str]:
             target, table = node.targets[0], node.value
         else:
             continue
-        if not (isinstance(target, ast.Name) and target.id == "FLOORS" and isinstance(table, ast.Dict)):
+        if not (isinstance(target, ast.Name) and target.id in TABLES and isinstance(table, ast.Dict)):
             continue
         for key, value in zip(table.keys, table.values):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):

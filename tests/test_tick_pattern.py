@@ -235,6 +235,11 @@ def test_floors_reads_only_the_measured_table() -> None:
     assert tick_pattern.floors(source) == {"a": "SLOW_S", "b": ""}
 
 
+def test_floors_reads_the_floors_table() -> None:
+    source = 'OTHER = {"x": Timing(1, WIDE_S)}\nFLOORS = {"a": Timing(2.0, CRITICAL_S)}\n'
+    assert tick_pattern.floors(source) == {"a": "CRITICAL_S"}
+
+
 def test_an_untouched_file_whose_record_is_stale_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     lost = FULL.replace('"beat"', '"lost"')
     base = _recorded(tmp_path / "base", {tick_pattern.TICK: TICK, STEP: lost})
