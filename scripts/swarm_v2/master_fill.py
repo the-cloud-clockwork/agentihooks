@@ -69,10 +69,10 @@ def retire_stuck(slug: str, store: RedisStore, runtime: Any, now_ms: int) -> lis
         if agent.name in live and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             actions.append(f"could not retire stuck master {agent.name}, retrying next tick")
             continue
-        store.drop_agent(slug, agent.name)
         for item in inbox.inbox(agent.seat):
             if item.state not in CLOSED:
                 inbox.redirect(item.id, SWARM, front, f"master {agent.name} never started")
+        store.drop_agent(slug, agent.name)
         actions.append(f"retired stuck master {agent.name} in seat {agent.seat}")
     return actions
 
