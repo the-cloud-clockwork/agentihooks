@@ -4363,8 +4363,16 @@ decisions until recovery (see [Outage holds and recovery](#outage-holds-and-reco
 | Step record | Every step run ends as `ok`, `late` (it ran past its budget, or was left running), `failed` (it raised) or `held` (its previous run is still alive, so no new thread starts). A late or failed step never stops the next one. |
 
 A value a held or late writer never stored raises `Left` when a later step reads it from the pass box, and the tick
-raises the held error at the group's site, so a pass never continues on a value no step produced. Adding a step,
-the pass state and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+raises the held error at the group's site, so a pass never continues on a value no step produced. The pass state
+and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+
+Every step follows one pattern, and `python -m scripts.tick.new_step` writes a new step with its budget row, feature
+test, scenario index row and feature map entry in one command (see
+[Adding a step](../reference/tick-engine-steps.md#adding-a-step)). The
+[tick pattern gate](../reference/tick-pattern-gate.md) refuses a pull request that adds a step outside the pattern,
+and the [tick step catalogue](../reference/tick-step-catalogue.md), rendered from the registry by
+`python -m scripts.tick.catalogue render`, lists every step with its group, lane, budget, interval, needs, effects and
+feature.
 
 ### Two lanes and fan out
 
@@ -4430,7 +4438,8 @@ its last `ok` or `failed` run: a 120 second step runs every other pass and a 600
 resting step starts no thread, ends at once for the steps that need it, and leaves a `skipped` record with `rested`
 true. The end of each run is kept in the swarm's `tick:step-ran` hash; a late or held run stores no end, so the step
 stays due on the next pass, and a step with no stored end or an unreadable hash is due. A step that writes the pass
-state must be declared at 60 seconds, and the registry refuses one above that. Timing changes, overlap limits and the
+state must be declared at 60 seconds, and the registry refuses one above that. The
+[tick step catalogue](../reference/tick-step-catalogue.md) shows each step's floor and interval. Timing changes, overlap limits and the
 forty second spawn bound are covered in
 [Tick engine steps](../reference/tick-engine-steps.md#live-budgets-floors-and-declared-intervals), and the rest rule in
 [Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement).
@@ -4460,7 +4469,8 @@ under `scripts/tick` outside the adapters that imports an adapted implementation
 [The import check](../reference/tick-adapters.md#the-import-check)). Most registered steps still run a call of the tick module, which reaches those systems
 itself; every pass already scans processes through the processes adapter and holds one lease heartbeat. Each pass
 builds the real adapters once. A step that reads `ctx.tools` gets write access only to the ports its declared effects
-name, and a write through another port fails it; call steps only record their effects until they move into step
+name, and a write through another port fails it; the [tick step catalogue](../reference/tick-step-catalogue.md)
+lists each step's effects. Call steps only record their effects until they move into step
 classes (see
 [Effects in a tick pass](../reference/tick-adapters.md#effects-in-a-tick-pass)). See
 [Tick adapters](../reference/tick-adapters.md) and [Fencing records](../reference/fencing-records.md).
@@ -4473,7 +4483,10 @@ registers it and starts the scheduler runner; each tick pass re-registers it if 
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks once per
+minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Each pass considers every step the
+[tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those whose declared interval has passed
+([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
+[Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
 pass in its own thread; a swarm whose tick runs long never makes another swarm tick again within the same pass.
 
 `AGENTIHOOKS_TICK_CADENCE` sets the slow lane cadence in whole minutes, one to five, one when unset; the cron stays

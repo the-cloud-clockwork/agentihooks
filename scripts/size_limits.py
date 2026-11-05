@@ -19,6 +19,7 @@ _SETTINGS = (
     f"lint.pylint.max-statements={RULES['PLR0915']}",
     f"target-version='py{sys.version_info.major}{sys.version_info.minor}'",
 )
+Measured = dict[str, dict[str, int]]
 _MEASURED = re.compile(r"\((\d+) > \d+\)")
 # -I keeps a ruff module in the graded tree from shadowing the real one.
 _RUFF = (sys.executable, "-I", "-m", "ruff")
@@ -130,13 +131,15 @@ def write(tree: Path) -> None:
     (tree / ALLOWLIST).write_text(json.dumps(measure(tree), indent=1, sort_keys=True) + "\n")
 
 
-def grade(base: dict, head: dict, recorded: dict | None, tree: Path | None = None) -> list[str]:
+def grade(
+    base: Measured, head: Measured, recorded: Measured | None, trees: tuple[Path, Path] | None = None
+) -> list[str]:
     """Return every head unit over a limit beyond its base allowance, a moved unit keeping the allowance it had."""
-    errors = []
+    errors: list[str] = []
     claimed: set[str] = set()
     for unit, rules in sorted(head.items()):
         source = unit
-        if unit not in base and (moved := moved_from(unit, base, head, tree)) and moved not in claimed:
+        if unit not in base and (moved := moved_from(unit, base, head, trees)) and moved not in claimed:
             claimed.add(moved)
             source = moved
         for rule, value in sorted(rules.items()):
@@ -150,29 +153,48 @@ def grade(base: dict, head: dict, recorded: dict | None, tree: Path | None = Non
     return errors
 
 
-def moved_from(unit: str, base: dict, head: dict, tree: Path | None) -> str:
-    """Return the one base allowlist key with the unit's name in another file that no longer holds it, else ''."""
-    path, _, name = unit.partition("::")
-    if tree is None or not name:
+def moved_from(unit: str, base: Measured, head: Measured, trees: tuple[Path, Path] | None) -> str:
+    """Return the one base allowlist key the head moved to ``unit``, else ''.
+
+    The key names the same unit in another file, the head no longer holds it there, and the base unit takes the
+    same parameters as the head unit, so a deleted unit recreated elsewhere under its name inherits nothing.
+    """
+    _, separator, name = unit.rpartition("::")
+    if trees is None or not separator:
         return ""
+    base_tree, head_tree = trees
+    wanted = _parameters(head_tree, unit)
     found = [
         key
         for key in base
-        if key not in head and key.partition("::")[2] == name and key.partition("::")[0] != path
-        if not _holds(tree, key)
+        if key not in head and key.rpartition("::")[2] == name
+        if wanted is not None and _parameters(head_tree, key) is None and _parameters(base_tree, key) == wanted
     ]
     return found[0] if len(found) == 1 else ""
 
 
-def _holds(tree: Path, key: str) -> bool:
-    path, _, name = key.partition("::")
-    source = tree / path
-    if not source.is_file():
-        return False
-    return name in {unit for unit, _ in functions(source.read_text()).values()}
+def _parameters(tree: Path, key: str) -> tuple[str, ...] | None:
+    """Return the parameter names of the unit ``key`` names in ``tree``, or None when the tree does not hold it."""
+    path, _, name = key.rpartition("::")
+    try:
+        source = (tree / path).read_text()
+        lines_by_unit = {unit: line for line, (unit, _) in functions(source).items()}
+        module = ast.parse(source)
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+        return None
+    if name not in lines_by_unit:
+        return None
+    node = next(
+        candidate
+        for candidate in ast.walk(module)
+        if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef)) and candidate.lineno == lines_by_unit[name]
+    )
+    args = node.args
+    listed = [*args.posonlyargs, *args.args, args.vararg, *args.kwonlyargs, args.kwarg]
+    return tuple(arg.arg if arg else "" for arg in listed)
 
 
-def _base(args) -> dict:
+def _base(args: argparse.Namespace) -> Measured:
     base = load(args.base)
     if base is None:
         raise GradeError(f"the base has no {ALLOWLIST}, so the head cannot be graded")
@@ -200,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     except (GradeError, SyntaxError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    errors = grade(base, head, recorded, args.head)
+    errors = grade(base, head, recorded, (Path(args.base), args.head))
     print(f"{len(head)} units over a limit, {len(base)} on the base allowlist, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
