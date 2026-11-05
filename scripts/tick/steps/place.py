@@ -12,10 +12,19 @@ from types import MappingProxyType
 from typing import Any
 
 from scripts.swarm import ack_pass, lost_runner, quota_notice, time_left
+from scripts.swarm.profile_choice import ProfileUnresolved
+from scripts.swarm.store import SwarmError
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_domains
 from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
+
+transfers: Any = import_module("scripts.handoff.transfers")
+dispatcher: Any = import_module("scripts.swarm.dispatcher")
+launch_check: Any = import_module("scripts.swarm.launch_check")
+ledger_events: Any = import_module("scripts.swarm.ledger_events")
+profile_first: Any = import_module("scripts.swarm.profile_first")
+seat_spawn: Any = import_module("scripts.swarm.seat_spawn")
 
 __all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
 
@@ -113,19 +122,19 @@ def _started(
     record, task, placed = started.record, started.task, started.placed
     store.count_claim(slug, task["id"])
     after = store.take_restart(slug, task["id"]) or tick._master_set(doc, task["id"])
-    head = (tick.ledger_events.head(task["pr_url"]) or None) if task.get("pr_url") else ""
+    head = (ledger_events.head(task["pr_url"]) or None) if task.get("pr_url") else ""
     store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after, head=head)
     store.put_agent(slug, started.launched)
-    tick.launch_check.begin(store, slug, record, now_ms)
+    launch_check.begin(store, slug, record, now_ms)
     store.count_spawn(slug, placed.harness)
     tick._spend_local(store, started.launched, now_ms)
     store.clear_handoff(slug, task["id"])
     store.clear_failed_harness(slug, task["id"])
     store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
-    tick.profile_first.spawned(slug, store, task["id"])
+    profile_first.spawned(slug, store, task["id"])
     return [
         f"spawned {record.name} for {task['id']}",
-        *tick.dispatcher.chain_claimed(slug, config, ledger, doc, task, record.lane, now_ms),
+        *dispatcher.chain_claimed(slug, config, ledger, doc, task, record.lane, now_ms),
     ]
 
 
@@ -156,7 +165,7 @@ def _spawn_failed(
         }
         actions.append(f"spawn capacity for {task['id']}: {json.dumps(snapshot)}")
     actions.append(f"spawn failed for {task['id']}{tick._drop(slug, store, ledger, rows, record)}: {exc}")
-    if isinstance(exc, tick.ProfileUnresolved):
+    if isinstance(exc, ProfileUnresolved):
         actions.append(tick._unresolved(slug, ledger, rows, task["id"], str(exc)))
     return actions
 
@@ -181,7 +190,7 @@ def _failed_room_wait(runtime: Any, lane: str, task: dict[str, Any]) -> str | bo
 
 
 def _refused_reservation(task: dict[str, Any], exc: Exception) -> str:
-    return f"task {task['id']} waits: {exc}" if tick.seat_spawn.room_refused(exc) else ""
+    return f"task {task['id']} waits: {exc}" if seat_spawn.room_refused(exc) else ""
 
 
 def _room_refused(
@@ -190,7 +199,7 @@ def _room_refused(
     record, task = failed.record, failed.task
     tick._release_admission(slug, runtime, task)
     tick._release_hive_launch(slug, store, record)
-    tick.transfers.detach(store, slug, record)
+    transfers.detach(store, slug, record)
     store.record_launch(slug, record, "waiting", str(failed.error))
     tick._drop(slug, store, ledger, rows, record)
     return refused
@@ -198,8 +207,8 @@ def _room_refused(
 
 def _room_wait(runtime: Any, lane: str, task: dict[str, Any]) -> str:
     try:
-        refused = tick.seat_spawn.placed_elsewhere(runtime, lane, task)
-    except tick.ProfileUnresolved:
+        refused = seat_spawn.placed_elsewhere(runtime, lane, task)
+    except ProfileUnresolved:
         return ""
     return f"task {task['id']} waits: {refused}" if refused else ""
 
@@ -219,7 +228,7 @@ def _held_back(slug: str, ledger: Any, rows: dict[str, Any], runtime: Any, task:
         return ""
     try:
         decision = gate.admit(slug, [task], now_ms)[0]
-    except tick.SwarmError as exc:
+    except SwarmError as exc:
         return f"task {task['id']} waits: {exc}"
     if decision.outcome == IMPOSSIBLE:
         return tick._unresolved(slug, ledger, rows, task["id"], decision.reason)

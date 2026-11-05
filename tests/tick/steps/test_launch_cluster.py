@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import tick
-from scripts.swarm.store import AgentRecord
+from scripts.swarm import dispatcher, launch_check, ledger_events, profile_first, seat_spawn, tick
+from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm_v2.admission import ADMITTED, DEFERRED, IMPOSSIBLE, REPLAYED
 from scripts.tick.steps import observe, place
 
@@ -68,8 +68,7 @@ def test_moved_launch_code_reaches_tick_seams_through_the_tick_module(monkeypatc
 
 @pytest.mark.feature("swarm-tick-launch-cluster")
 def test_an_acknowledging_check_reads_the_launch_through_the_tick_master_lane(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tick, "MASTER", "eng")
-    agent = SimpleNamespace(lane="eng", name="engineer@1-1")
+    agent = SimpleNamespace(lane=MASTER, name="master@1-1")
     assert observe._acknowledging("slug", "store", agent) is False
 
 
@@ -98,10 +97,10 @@ def _start(
     fake = _Recorder(calls, {"_master_set": "master-after", "head": head, "chain_claimed": ["chained"]})
     for name in ("_master_set", "_spend_local"):
         monkeypatch.setattr(tick, name, getattr(fake, name))
-    monkeypatch.setattr(tick, "ledger_events", SimpleNamespace(head=fake.head))
-    monkeypatch.setattr(tick, "launch_check", SimpleNamespace(begin=fake.begin))
-    monkeypatch.setattr(tick, "profile_first", SimpleNamespace(spawned=fake.spawned))
-    monkeypatch.setattr(tick, "dispatcher", SimpleNamespace(chain_claimed=fake.chain_claimed))
+    monkeypatch.setattr(ledger_events, "head", fake.head)
+    monkeypatch.setattr(launch_check, "begin", fake.begin)
+    monkeypatch.setattr(profile_first, "spawned", fake.spawned)
+    monkeypatch.setattr(dispatcher, "chain_claimed", fake.chain_claimed)
     record, launched = AgentRecord("engineer@1-1", "eng", "t1"), AgentRecord("engineer@1-1", "eng", "t1", pane_id="%9")
     task = {"id": "t1", "pr_url": pr_url} if pr_url else {"id": "t1"}
     started = place.Started(record, task, SimpleNamespace(pane_id="%9", harness="claude"), launched)
@@ -202,7 +201,7 @@ def test_a_room_wait_names_the_placement_refusal(
             raise tick.ProfileUnresolved("no profile")
         return placed
 
-    monkeypatch.setattr(tick, "seat_spawn", SimpleNamespace(placed_elsewhere=placed_elsewhere))
+    monkeypatch.setattr(seat_spawn, "placed_elsewhere", placed_elsewhere)
     task = {"id": "t1"}
     assert place._room_wait("runtime", "eng", task) == said
     assert seen == [("runtime", "eng", task)]
