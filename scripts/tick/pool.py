@@ -2,7 +2,7 @@
 
 import fcntl
 from collections.abc import Callable, Generator, Iterable
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
@@ -57,6 +57,8 @@ class Pass:
     critical: Deadline
     slow: Deadline
     slots: BoundedSemaphore
+    steps: ThreadPoolExecutor
+    fans: ThreadPoolExecutor
     closing_s: float = CLOSING_S
     closer: list[Deadline] = field(default_factory=list[Deadline], compare=False)
     later: list[Thread] = field(default_factory=list[Thread], compare=False)
@@ -78,6 +80,11 @@ class Pass:
         """Return the steps in ``names`` that a group of this pass handed off."""
         with self.guard:
             return frozenset(name for name in names if name in self.handed)
+
+    def settled(self, names: Iterable[str]) -> bool:
+        """Return whether every handed off step in ``names`` was marked ended, dropped or not."""
+        with self.guard:
+            return all(self.handed[name].is_set() for name in names)
 
     def end(self, name: str, dropped: bool) -> None:
         """Mark handed off step ``name`` ended, ``dropped`` when it never ran or ran past its lane; ignore others."""
@@ -170,7 +177,15 @@ def running(
     if workers < 1:
         raise ValueError("a pass needs at least one worker")
     lanes = (Deadline.after(critical_s), Deadline.after(slow_s))
-    current = Pass(mode, workers, *lanes, BoundedSemaphore(workers), closing_s)
+    current = Pass(
+        mode,
+        workers,
+        *lanes,
+        BoundedSemaphore(workers),
+        ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-step"),
+        ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-fan-out"),
+        closing_s,
+    )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
     try:
@@ -179,6 +194,8 @@ def running(
         closing = current.closer[0].remaining if current.closer else 0.0
         for thread in current.later:
             thread.join(max(current.slow.remaining, closing) + LATER_GRACE_S)
+        current.steps.shutdown(wait=False, cancel_futures=True)
+        current.fans.shutdown(wait=False, cancel_futures=True)
         _ACTIVE.reset(token)
         if beat is not None:
             beat.close()
@@ -192,13 +209,15 @@ def fan_out(action: Callable[[Item], Found], items: Iterable[Item]) -> list[Foun
     found, values = active(), list(items)
     if found is None or not found.parallel or len(values) < 2 or getattr(_FANNED, "inside", False):
         return [action(value) for value in values]
-    executor = ThreadPoolExecutor(max_workers=min(found.workers, len(values)), thread_name_prefix="tick-fan-out")
+    futures: list[Future[Found]] = []
     try:
-        futures = [executor.submit(copy_context().run, _slotted, found.slots, action, value) for value in values]
+        for value in values:
+            futures.append(found.fans.submit(copy_context().run, _slotted, found.slots, action, value))
         wait(futures)
         return [future.result() for future in futures]
     finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+        for future in futures:
+            future.cancel()
 
 
 _FANNED = local()

@@ -73,7 +73,7 @@ def _restore_owner(slug: Any, store: Any, ledger: Any, rows: Any, agent: Any) ->
     if (
         tick._ended(agent, rows)
         or not tick._current_owner(agent, row)
-        or not store.ensure_claim(slug, agent, tick.LEASE_MS)
+        or not tick.timing.timed(store.ensure_claim, slug, agent, tick.LEASE_MS)
     ):
         return
     if row.get("out_of_scope") or row.get("state") not in ("open", "claimed", "pr"):
@@ -89,7 +89,9 @@ def _restore_owner(slug: Any, store: Any, ledger: Any, rows: Any, agent: Any) ->
     fields = {"claimed_by": agent.name}
     if row["state"] == "open":
         fields["state"] = "pr" if row.get("pr_url") else "claimed"
-    rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=(row["state"],), if_match=expected)
+    rows[agent.task] = tick.timing.timed(
+        ledger.update_task, slug, agent.task, fields, if_state=(row["state"],), if_match=expected
+    )
 
 
 def _drop_remote(slug: Any, store: Any, ledger: Any, rows: Any, agent: Any, reason: Any) -> str:
@@ -221,16 +223,16 @@ def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: An
 def _watch_remote(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
     """A remote agent is judged by its own runtime, never by this host's process table: no answer keeps it suspect,
     holding its claim, neither retired nor dropped."""
-    store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
+    tick.timing.timed(store.refresh, slug, agent.task, agent.name, tick.LEASE_MS)
     if runtime.observe(agent).state == "unknown":
         if agent.state == tick.SUSPECT:
             return []
-        store.put_agent(slug, tick.replace(agent, state=tick.SUSPECT))
+        tick.timing.timed(store.put_agent, slug, tick.replace(agent, state=tick.SUSPECT))
         return [f"suspect {agent.name}: its runtime did not answer"]
     if agent.state == tick.SUSPECT:
         agent = tick.replace(agent, state="working")
-        store.put_agent(slug, agent)
-    return tick._watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
+        tick.timing.timed(store.put_agent, slug, agent)
+    return tick.timing.timed(tick._watch_agent, slug, store, ledger, runtime, rows, agent, now_ms)
 
 
 def _refusal_due(slug: Any, store: Any, rows: Any, agent: Any, observed: Any, now_ms: Any) -> bool:
@@ -267,8 +269,8 @@ def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
 
 
 def _watch_agent(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
-    if tick.revoked_seats.on_revoked(agent):
-        return tick._free_revoked(slug, store, ledger, runtime, rows, agent, now_ms)
+    if tick.timing.timed(tick.revoked_seats.on_revoked, agent):
+        return tick.timing.timed(tick._free_revoked, slug, store, ledger, runtime, rows, agent, now_ms)
     return tick._watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
@@ -285,7 +287,7 @@ def _watch_idle(
 
     observed = tick.timing.timed(tick._observe, runtime, agent)
     if tick.timing.timed(tick._refusal_due, slug, store, rows, agent, observed, now_ms):
-        return tick._free_refused(slug, store, ledger, runtime, rows, agent, now_ms)
+        return tick.timing.timed(tick._free_refused, slug, store, ledger, runtime, rows, agent, now_ms)
     tick.timing.timed(
         store.redis.set, store.key(slug, "pane-state", agent.name), observed.state, ex=tick.idle_state.BEAT_TTL_S
     )
@@ -315,7 +317,7 @@ def _watch_idle(
     exhausted = tick.timing.timed(tick.resume.recovery_exhausted, store, slug, agent)
     pending = tick.timing.timed(tick.resume.recovery_pending, store, slug, agent)
     if tick.timing.timed(tick._stuck_on_provider, slug, store, agent, observed, exhausted, now_ms):
-        return tick._free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
+        return tick.timing.timed(tick._free_stuck, slug, store, ledger, runtime, rows, agent, now_ms)
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
     nudged: list[str] = tick._stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == tick.MASTER or (held and not exhausted):
@@ -356,11 +358,12 @@ def _watch_idle(
         idle, homes=tick.reaper.scratch_homes(slug, idle.task)
     ):
         why = (
-            f"; outage recovery could not proceed: {tick.resume.recovery_blocker(store, slug, agent)}"
+            f"; outage recovery could not proceed: {tick.timing.timed(tick.resume.recovery_blocker, store, slug, agent)}"
             if pending
             else ""
         )
-        return nudged + [f"stalled {agent.name}" + tick._drop(slug, store, ledger, rows, idle, refund=True) + why]
+        dropped = tick.timing.timed(tick._drop, slug, store, ledger, rows, idle, refund=True)
+        return nudged + [f"stalled {agent.name}" + dropped + why]
     return nudged
 
 
@@ -368,9 +371,13 @@ def _stale_nudge(slug: str, store: Any, agent: AgentRecord, observed: Any, pendi
     """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
     if agent.lane == tick.MASTER or not agent.task or pending or tick.timing.timed(tick.outage.open_records, slug):
         return []
-    if tick.elapsed.due(store, slug, tick.elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks, tick.IDLE_KILL_MS):
+    if tick.timing.timed(
+        tick.elapsed.due, store, slug, tick.elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks, tick.IDLE_KILL_MS
+    ):
         return []
-    if tick._operator_at_pane(slug, store, agent, observed, now_ms) or tick.ledger_probe.holding(store, slug):
+    if tick.timing.timed(tick._operator_at_pane, slug, store, agent, observed, now_ms) or tick.timing.timed(
+        tick.ledger_probe.holding, store, slug
+    ):
         return []
     return tick.stale_nudge.nudge(tick.InboxStore(store.redis), slug, agent, observed.provider_error, now_ms)
 

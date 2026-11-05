@@ -7,6 +7,7 @@ from typing import Any
 
 from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
+from scripts.routing.slots import account_key
 
 MASTER = "master"
 INTERACTIVE = "interactive"
@@ -127,11 +128,6 @@ def refusal(hive: dict, role: str) -> str | None:
 def _refused(reason: str, hives: list[dict], role: str) -> str:
     held = "; ".join(f"{hive['id']} {refusal(hive, role)}" for hive in hives if refusal(hive, role))
     return f"{reason}: {held}" if held else reason
-
-
-def account_key(account: str) -> str:
-    """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
-    return account.replace("_", "-")
 
 
 def _holds(logins: dict[str, Any], harness: str, key: str) -> bool:

@@ -26,6 +26,7 @@ WORKER_KEYS = (
     "swarm:*:executions",
     "swarm:*:lease-cache",
     "swarm:state:fencing:*",
+    "swarm:*:fence:*",
     "swarm:state:counters:*",
     "swarm:*:execution-publishing",
     "swarm:*:codex-transport",
