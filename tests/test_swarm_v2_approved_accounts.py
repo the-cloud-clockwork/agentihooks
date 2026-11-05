@@ -293,6 +293,12 @@ def test_a_closed_account_a_hive_advertises_gets_no_placement() -> None:
     assert route.choose(1, planned=account_key(CLOSED_SLOT)) == OPEN_KEY
 
 
+def test_a_quota_successor_never_lands_on_a_closed_account_a_hive_advertises() -> None:
+    store, route = _route({"akey", account_key(CLOSED_SLOT)}, advertised=_hives(_reading(97.0))[0])
+    _observe(store, "akey")
+    assert route.choose(2, planned=account_key(CLOSED_SLOT), predecessor=("claude", "akey")) is None
+
+
 def test_an_open_account_a_hive_advertises_keeps_its_band_under_the_launch_cap_with_its_windows() -> None:
     reading = _reading(30.0, five_used=50.0, five_reset=NOW_MS // 1000 + HOUR)
     _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(reading)[0])
