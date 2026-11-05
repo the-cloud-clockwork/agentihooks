@@ -131,7 +131,9 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
+        slow = {"hive ledger", "host pressure", "ledger watchdog", "ledger probe", "prompt backlog"}
+        lane = engine.SLOW if step.name in slow else CallStep.lane
+        assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
 
 
 def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatch: pytest.MonkeyPatch) -> None:
