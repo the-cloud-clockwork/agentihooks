@@ -101,7 +101,6 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import masters as master_steps  # noqa: F401
 from scripts.tick.steps import observe as observe_steps
-from scripts.tick.steps import place as place_steps  # noqa: F401
 from scripts.tick.steps import tasks as task_steps
 
 from scripts.tick import sites as tick_sites  # isort: skip

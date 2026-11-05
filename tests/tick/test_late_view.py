@@ -26,6 +26,8 @@ def test_the_view_budget_covers_the_measured_ledger_read() -> None:
     assert step.budget_s >= SLOWEST_OBSERVED_VIEW_S
 
 
+@pytest.mark.feature("swarm-tick-late-view")
+@pytest.mark.parametrize("outcome", [engine.LATE, engine.HELD, engine.OK])
 def test_a_late_view_keeps_events_metrics_and_heartbeat_running(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
