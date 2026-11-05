@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.646 · 2026-11-05
+
+### 2026-11-05 · 165bf9da7c30 · #9767 · @nestorcolt
+
+**The controller keeps a hive reported master live by its heartbeat**
+
+This fixes a bug where a master reported by a different hive, but with no execution target of its own, was wrongly judged dead on this hive because its local pane and process checks failed, triggering a refused retire and then a blocked relaunch. The controller now recognizes such masters via `held_elsewhere.keep`: if another hive lists them and their heartbeat is still fresh, they're kept live without local binding judgement, and any stuck `retiring` state reverts to `working`, avoiding false retirement loops.
+
 ## v2.17.645 · 2026-11-05
 
 ### 2026-11-05 · ef6820fceeb2 · #9766 · @nestorcolt
