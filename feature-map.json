@@ -233,6 +233,26 @@
       ]
     },
     {
+      "id": "swarm-tick-claims-and-masters",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13",
+      "behaviour": "The claim order, territory, settle and close code, agent status and the launch records live in the claims step module and the master operations and group runner in the masters step module; the swarm tick module re-exports each one and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.claims and scripts.tick.steps.masters, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_claims_and_masters.py::test_tick_reexports_the_moved_name",
+        "tests/tick/steps/test_claims_and_masters.py::test_the_tick_module_holds_no_moved_definition",
+        "tests/tick/steps/test_claims_and_masters.py::test_moved_claim_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_claims_and_masters.py::test_moved_master_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_claims_and_masters.py::test_shared_names_the_narrower_of_two_nested_areas",
+        "tests/tick/steps/test_claims_and_masters.py::test_agent_status_reads_state_prompt_and_idle_ticks",
+        "tests/tick/steps/test_claims_and_masters.py::test_the_store_projects_agent_status_from_the_claims_module",
+        "tests/tick/steps/test_claims_and_masters.py::test_a_parked_task_waits_until_every_parked_dependency_is_done",
+        "tests/tick/steps/test_claims_and_masters.py::test_a_stacked_dependency_names_its_repo_only_when_it_lives_elsewhere",
+        "tests/tick/steps/test_claims_and_masters.py::test_master_set_reads_the_state_stamp_author_lane",
+        "tests/tick/steps/test_claims_and_masters.py::test_close_space_closes_only_an_empty_swarm"
+      ]
+    },
+    {
       "id": "swarm-tick-declared-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
