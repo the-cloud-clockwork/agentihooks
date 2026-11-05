@@ -409,7 +409,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
     judged = launch_check.judged(store, slug)
     agents, actions = [a for a in legacy_agents(store, slug) if a.name not in judged], []
     facts, live_names = runtime.bindings(agents), runtime.live_names()
-    holders = {name: hive for hive, report in reports.Reports(store.redis).live().items() for name in report["names"]}
+    holders = _holders(store)
     for agent in agents:
         if (
             agent.state == "awaiting-decision"
@@ -420,11 +420,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
             continue
-        if _held_elsewhere(slug, store, agent, holders, now_ms):
-            if agent.state == "retiring":
-                store.put_agent(slug, replace(agent, state="working"))
-            continue
-        if dead_resume.skip_binding(agent, facts, live_names):
+        if _kept_elsewhere(slug, store, agent, holders, now_ms) or dead_resume.skip_binding(agent, facts, live_names):
             continue
         agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
         actions.extend(followed)
@@ -682,14 +678,22 @@ def _elsewhere(agent: AgentRecord) -> bool:
     return not agent.runtime_target and bool(agent.hive) and agent.hive != hive_id()
 
 
-def _held_elsewhere(slug: str, store: Any, agent: AgentRecord, holders: dict[str, str], now_ms: int) -> bool:
-    """Another hive reports ``agent`` running and its own heartbeat is fresh, so this host cannot judge its process."""
+def _holders(store: Any) -> dict[str, str]:
+    return {name: hive for hive, report in reports.Reports(store.redis).live().items() for name in report["names"]}
+
+
+def _kept_elsewhere(slug: str, store: Any, agent: AgentRecord, holders: dict[str, str], now_ms: int) -> bool:
+    """Another hive reports ``agent`` running and its own heartbeat is fresh, so this host keeps it live unjudged."""
     from scripts.swarm.commands import hive_id
 
     if reports.host(agent) or holders.get(agent.name, hive_id()) == hive_id():
         return False
     beat = idle_state.heartbeat(store.redis, slug, agent.name)
-    return beat is not None and now_ms - beat["at"] <= reports.LOST_MS
+    if beat is None or now_ms - beat["at"] > reports.LOST_MS:
+        return False
+    if agent.state == "retiring":
+        store.put_agent(slug, replace(agent, state="working"))
+    return True
 
 
 @dataclass(frozen=True)

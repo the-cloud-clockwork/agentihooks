@@ -1360,8 +1360,9 @@ def test_retiring_unbound_master_without_a_live_process_is_checked(ticking):
     assert report["differences"] == {"process": {"expected": True, "actual": False}}
 
 
+@pytest.mark.parametrize(("age", "kept"), [(0, True), (600_000, True), (600_001, False)])
 def test_a_master_another_hive_reports_with_a_fresh_heartbeat_stays_live_when_its_pane_lookup_fails(
-    ticking: tuple, monkeypatch: pytest.MonkeyPatch
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, age: int, kept: bool
 ) -> None:
     from scripts.hive import reports
     from scripts.swarm import commands, idle
@@ -1374,15 +1375,37 @@ def test_a_master_another_hive_reports_with_a_fresh_heartbeat_stays_live_when_it
     monkeypatch.setattr(commands, "hive_id", lambda: "controller")
     monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["root"])
     store.redis.set(reports.key("root"), json.dumps({"names": [master.name], "executions": {}, "panes": {}}))
-    idle.beat(store.redis, "sw", master.name, idle.WORKING, 150)
+    now = 10_000_000
+    idle.beat(store.redis, "sw", master.name, idle.WORKING, now - age)
     runtime.bindings = lambda agents: {
         a.name: {"process": False} if a.name == master.name else {**live_binding.assignment(a), "hooks": True}
         for a in agents
     }
-    tick("sw", store, ledger, runtime, 200)
-    masters = [a for a in store.agents("sw") if a.lane == "master"]
-    assert [(a.name, a.state) for a in masters] == [(master.name, "working")]
-    assert master.name not in runtime.killed
+    tick("sw", store, ledger, runtime, now)
+    report = store.redis.hget(store.key("sw", "live-bindings"), master.name)
+    if kept:
+        masters = [a for a in store.agents("sw") if a.lane == "master"]
+        assert [(a.name, a.state) for a in masters] == [(master.name, "working")]
+        assert master.name not in runtime.killed
+        assert report is None
+    else:
+        assert json.loads(report)["differences"] == {"process": {"expected": True, "actual": False}}
+
+
+def test_an_agent_with_a_host_target_is_judged_even_when_another_hive_lists_it(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import reports
+    from scripts.swarm import commands, idle
+    from scripts.swarm.tick import _kept_elsewhere
+
+    store, _, _ = ticking
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
+    agent = AgentRecord("worker@zz", "eng", "two", runtime_target={"host_id": "stable"})
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, 100)
+    assert reports.host(agent) == "stable"
+    assert _kept_elsewhere("sw", store, agent, {agent.name: "stable"}, 100) is False
+    assert _kept_elsewhere("sw", store, replace(agent, runtime_target={}), {agent.name: "stable"}, 100) is True
 
 
 def test_a_kept_master_does_not_skip_later_agents(ticking):
