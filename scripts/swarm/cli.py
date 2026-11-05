@@ -593,8 +593,10 @@ def run_tick(
         finally:
             wrapper.watching.close()
         doc, view = box.get("doc", doc), box.get("view")
-        host_steps.raise_held(wrapper.judging)
-        host_steps.raise_held(box)
+        try:
+            host_steps.raise_held(box)
+        finally:
+            host_steps.raise_held(wrapper.judging)
         if "stop" in box or wrapper.ended is not None:
             return box.get("stop") or wrapper.ended or []
         doc = timing.call(ledger_client.pass_state, ledger, slug)

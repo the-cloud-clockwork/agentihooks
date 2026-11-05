@@ -16,10 +16,12 @@ from tests.swarm.tick_scenarios.test_characterisation import SCENARIOS, replay
 
 tick_module = import_module("scripts.swarm.tick")
 tick_sites = import_module("scripts.tick.sites")
+cli_module = import_module("scripts.swarm.cli")
 STEP: ContextVar[str | None] = ContextVar("pass edge step", default=None)
 ENTRIES = ("tick", "run_tick")
 HELD = "raised"
 KEYS = frozenset({"config", "finished", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found", "stop"})
+WRAPPER = ""
 WRITTEN = frozenset({"config", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found"})
 
 
@@ -41,7 +43,8 @@ class Recorder:
         step = STEP.get()
         if step is not None and key != HELD:
             self.writes.append((id(box), key, value, step))
-            self.written.add((step, key))
+            if step != WRAPPER:
+                self.written.add((step, key))
 
     def writer(self, key: str, value: object, box: object | None) -> str | None:
         return next(
@@ -55,14 +58,19 @@ class Recorder:
 
     def boxed(self, box: dict[str, Any], key: str) -> None:
         step = STEP.get()
-        if step is not None and key in KEYS | {key for _, key in self.written}:
+        if step not in (None, WRAPPER) and key in KEYS | {key for _, key in self.written}:
             present = dict.__contains__(box, key)
-            value = dict.get(box, key) if present else None
-            self.reads.add(Seen(step, key, self.writer(key, value, None) if present else None))
+            writer = self.writer(key, dict.get(box, key), None) if present else None
+            if writer != WRAPPER:
+                self.reads.add(Seen(step, key, writer))
 
     def viewed(self, box: object, key: str, value: object) -> None:
         step = STEP.get()
-        if step is not None and key in KEYS and (writer := self.writer(key, value, box)) is not None:
+        if (
+            step not in (None, WRAPPER)
+            and key in KEYS
+            and (writer := self.writer(key, value, box)) not in (None, WRAPPER)
+        ):
             self.reads.add(Seen(step, key, writer))
 
 
@@ -127,7 +135,27 @@ def record(monkeypatch: pytest.MonkeyPatch) -> Recorder:
 
     monkeypatch.setattr(tick_module._PassView, "read", read_pass)
     monkeypatch.setattr(tick_sites._GraphView, "read", read_graph)
+    supply_wrapper_hooks(monkeypatch)
     return rec
+
+
+def supply_wrapper_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    hooks = cli_module._Wrapper.hooks
+
+    def supplied(hook: Callable[[], bool]) -> Callable[[], bool]:
+        def run() -> bool:
+            token = STEP.set(WRAPPER)
+            try:
+                return hook()
+            finally:
+                STEP.reset(token)
+
+        return run
+
+    def wrapper_hooks(wrapper: Any) -> dict[str, Callable[[], bool]]:
+        return {site: supplied(hook) for site, hook in hooks(wrapper).items()}
+
+    monkeypatch.setattr(cli_module._Wrapper, "hooks", wrapper_hooks)
 
 
 def ancestors(steps: tuple[Step, ...]) -> dict[str, set[str]]:

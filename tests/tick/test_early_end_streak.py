@@ -16,15 +16,12 @@ pytestmark = pytest.mark.unit
 
 
 def _ending_early(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    """Make every pass end early at the relay group because no step stored ``value``."""
-    real = cli.run_group
+    """Make every pass end early at the relay site because no step stored ``value``."""
 
-    def group(name: str, **state: Any) -> list[str]:
-        if name == "wrapper relay":
-            raise Left(value)
-        return real(name, **state)
+    def judged(wrapper: Any) -> bool:
+        raise Left(value)
 
-    monkeypatch.setattr(cli, "run_group", group)
+    monkeypatch.setattr(cli._Wrapper, "_judged", judged)
 
 
 def _passes(swarm: Any, ledger: Any, runtime: Any, count: int) -> list[list[str]]:
@@ -69,12 +66,12 @@ def test_a_full_pass_clears_the_finding(
 ) -> None:
     swarm, ledger, runtime = env
     run("sw", "create", "--repo", "/repo")
-    real = cli.run_group
+    real = cli._Wrapper._judged
     _ending_early(monkeypatch, "agents")
     early = _passes(swarm, ledger, runtime, 3)
     assert all(actions[-1].startswith("pass ended early: no step stored agents") for actions in early)
     assert len(_early_ends(swarm, ledger)) == 1
-    monkeypatch.setattr(cli, "run_group", real)
+    monkeypatch.setattr(cli._Wrapper, "_judged", real)
     [full] = _passes(swarm, ledger, runtime, 1)
     assert not any(action.startswith("pass ended early") for action in full)
     assert swarm.redis.get(swarm.key("sw", "early-end-streak")) is None

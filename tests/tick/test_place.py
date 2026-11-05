@@ -1,7 +1,7 @@
 """The placement steps run the tick's hand written acks, ranking, preempt and spawn calls at their sites in today's order."""
 
 import runpy
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Iterator
 
@@ -103,12 +103,6 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         yield
         log.append(("leave pass", runtime))
 
-    @contextmanager
-    def placing() -> Iterator[None]:
-        log.append("enter placing")
-        yield
-        log.append("leave placing")
-
     class _Seats:
         def __init__(self, *args: Any) -> None:
             self.args = args
@@ -118,7 +112,7 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
 
     return SimpleNamespace(
         skip_refused=skip_refused,
-        PLACING=placing(),
+        PLACING=nullcontext(),
         EVENTS_ENGINE="events",
         _placement_pass=placement_pass,
         _spawn="spawn",
@@ -216,7 +210,9 @@ def test_the_placement_notices_run_their_calls_with_the_pass_state(monkeypatch: 
         "now_ms": 7,
         "box": {},
     }
-    assert _run(place.NOTICES, SimpleNamespace(skip_refused=skip_refused), state, monkeypatch) == [
+    assert _run(
+        place.NOTICES, SimpleNamespace(skip_refused=skip_refused, PLACING=nullcontext()), state, monkeypatch
+    ) == [
         "ran 1",
         "ran 2",
         "ran 3",
