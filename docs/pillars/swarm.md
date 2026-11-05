@@ -4427,8 +4427,8 @@ a whole second, and at least one second. Its declared interval is 60 seconds for
 A step whose interval is above one minute rests on a pass that starts within its interval less one minute of the end
 of its last `ok` or `failed` run: a 120 second step runs every other pass and a 600 second step about one pass in
 ten. A resting step starts no thread, ends at once for the steps that need it, and leaves a `skipped` record with
-`rested` true. The end of each run is kept in the swarm's `tick:step-ran` hash; a step with no stored end, a late or
-held last run, or an unreadable hash is due. A step that writes the pass state must be declared at 60 seconds, and
+`rested` true. The end of each run is kept in the swarm's `tick:step-ran` hash; a late or held run stores no end, so the
+step stays due on the next pass, and a step with no stored end or an unreadable hash is due. A step that writes the pass state must be declared at 60 seconds, and
 the registry refuses one above that. Timing changes, overlap limits and the forty second spawn bound are covered in
 [Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals), and the rest rule in
 [Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement).
@@ -4482,7 +4482,7 @@ heartbeat limit, when the lease TTL is below two cron minutes, or when the stale
 longer fit inside the heartbeat limit less the cadence. Six minutes breaks the delivery guard and the heartbeat
 limit. At a cadence of three minutes a slow lane step declared at 60 seconds runs one pass in three and rests on the
 other two; at the default of one it runs every pass, and a slow step declared at 600 seconds keeps its own interval
-at any cadence up to five.
+at every cadence the setting accepts.
 
 Check a cadence before setting it, from the repository root with the workspace Python:
 

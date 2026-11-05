@@ -122,7 +122,7 @@ rather than one pass later.
 
 A resting step starts no thread and calls nothing. It ends at once, so steps
 that `need` it start as if it had run. Its `tick:records` row has outcome
-`skipped`, `skipped` and `rested` true, `abandoned` false, a wall time of zero
+`skipped`, its `skipped` and `rested` fields true, `abandoned` false, a wall time of zero
 and its budget; see
 [Tick report](tick-report.md#outcome-columns). This holds in the sequential
 runner, in the parallel eager runner and for slow lane steps handed off to run
@@ -138,8 +138,8 @@ written when the step's record is journalled, as epoch seconds, into the hash
 | --- | --- | --- |
 | `ok` | yes | rests inside the interval |
 | `failed` | yes | rests inside the interval |
-| `late` (abandoned at its budget or lane deadline) | no | due |
-| `held` (earlier run still alive) | no | due |
+| `late` (abandoned at its budget or lane deadline, or finished past its budget) | no | due, since the stored end is the one that let it run |
+| `held` (earlier run still alive) | no | due, since the stored end is the one that let it run |
 | Dropped before it started, or rested | no | keeps the earlier end |
 
 A step with no stored end is due. Nothing rests when the pass has no
@@ -177,8 +177,8 @@ rested in the latest passes with the report:
 agentihooks swarm rig-grade-swarm tick-report --passes 60
 ```
 
-A wide step shows about half its records in the `Skipped` column; a critical
-step shows none.
+A 120 second step shows about half its records in the `Skipped` column, a 600
+second step about nine in ten, and a critical step none.
 
 ### When a step exceeds its budget
 
