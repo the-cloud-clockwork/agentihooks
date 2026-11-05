@@ -162,6 +162,11 @@ class SpawnError(RuntimeError):
         """The message and status a failed tick step records for this launch."""
         return {"detail": str(self), "status": str(self.status)}
 
+    def waiting(self) -> bool:
+        """Whether this launch only waits: its hive acknowledgement is pending or its account reservation is full."""
+        full = self.status == "unavailable" and str(self).startswith("account reservation is full")
+        return self.status == "pending" or full
+
 
 @dataclass(frozen=True)
 class Placed:

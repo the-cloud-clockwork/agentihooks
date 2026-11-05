@@ -141,10 +141,11 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
         outcome = "stopped"
         raise
     except BaseException as exc:
-        outcome = "error"
+        waits = getattr(exc, "waiting", None)
+        outcome = "waiting" if callable(waits) and waits() else "error"
         record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
         record.update(getattr(exc, "step_fields", dict)())
-        if report and (record_failure := ON_FAILURE.get()):
+        if outcome == "error" and report and (record_failure := ON_FAILURE.get()):
             record_failure(name, exc)
         raise
     finally:
@@ -160,7 +161,7 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
         )
         emit(sys.stderr, json.dumps(record))
         tick_metrics.step_finished(slug, record)
-        if outcome != "success" and (current := PASS.get()) is not None:
+        if outcome not in ("success", "waiting") and (current := PASS.get()) is not None:
             current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:
             append_record(store, slug, "tick:steps", record)
