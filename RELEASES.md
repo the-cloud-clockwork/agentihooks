@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.653 · 2026-11-05
+
+### 2026-11-05 · 02015917fb1c · #9791 · @nestorcolt
+
+**Resolve dashed controller account keys to the hive's underscore token slot**
+
+This fix resolves the "account suffix not found" errors that were causing 59 SpawnError failures per hour during the fleet panic. Controller account keys use dashes (from Kubernetes Secret naming) while hive routing slots use underscores (AH_CC_TOKEN slugs), so exact-match lookups in `credential_for_slug` failed whenever a dashed controller key reached `init-agent --route`. The suffix lookup now normalizes dashes and underscores before matching, letting dashed controller keys resolve correctly to the hive's underscore token slots and allowing hive launches to proceed without manual intervention.
+
+### 2026-11-05 · 16101d22a427 · #9778 · @nestorcolt
+
+**Return the snapshot job line as its action instead of a pass box value**
+
+This change fixes a race where a slow-running snapshot job thread could write `box["started"]` after `run_tick` had already read it, causing passes to end early with a spurious `Left` result. The snapshot step now returns its `started automatic snapshot` line as its own action with `writes=frozenset()`, so `run_tick` never reads a started value from it. This stops the early-end-on-started streak regardless of job timing, closing out the root cause identified from the tick journal and confirmed by the included red/green test proofs.
+
+### 2026-11-05 · a369280d3a29 · #9708 · @nestorcolt
+
+**Move the shared tick helpers into the common step module**
+
+This PR moves eleven helpers shared across tick steps (skip_refused, skip_dropped, _drop, _rebind, _ended, _current_owner, and others) out of scripts.swarm.tick into a new scripts.tick.steps.common module, with the old module re-exporting each name so every existing caller keeps working unchanged. It is part of the tc-h sweep standardizing how tick steps are structured. Beyond cleanup, it shrinks basedpyright's unknown-type surface in tick.py and three downstream callers, since two of the moved helpers now return typed bool instead of unknown, and it trims the tick pattern allowlist from 130 to 119 names.
+
 ## v2.17.652 · 2026-11-05
 
 ### 2026-11-05 · 0640a9ceda29 · #9784 · @nestorcolt
