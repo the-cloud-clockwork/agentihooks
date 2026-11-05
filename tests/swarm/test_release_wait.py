@@ -36,7 +36,7 @@ class Api:
 
     def __init__(self, *answers: list[str] | Exception) -> None:
         self.answers = list(answers)
-        self.calls: list[tuple[str, list[str], float]] = []
+        self.calls: list[tuple[str, list[str], object]] = []
 
     def __call__(self, caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         self.calls.append((caller, args, options["timeout"]))

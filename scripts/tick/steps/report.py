@@ -105,7 +105,7 @@ def _stall_watch(cli: Any, get: Get) -> Any:
             lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
             stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms()),
             cli.now_ms(),
-            released=release_wait.checker(get("config").repo),  # pyright: ignore[reportUnknownMemberType]
+            released=release_wait.checker(get("config")),  # pyright: ignore[reportUnknownMemberType]
             reread=ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
         ),
         get("doc"),

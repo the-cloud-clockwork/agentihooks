@@ -703,7 +703,7 @@ def test_github_defaults() -> None:
     provider = github.GitHubSourceControl("owner/project", Path("."), "main")
 
     assert provider.base == "main"
-    assert provider.git is subprocess.run
+    assert provider.gh is None
     assert github.CALLER == "tick.source_control"
 
 
