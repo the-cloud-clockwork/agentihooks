@@ -777,11 +777,9 @@ by the engine and does not leave the pass.
 3. Import the module in `scripts.swarm.tick` so it registers before the first
    pass, delete the hand written line, and add `tasks.raise_held(box)` after the
    group site if the site is new.
-4. Give the step a `feature` that is an `id` in `feature-map.json` and add a
-   row for its name to `scenarios` in `tests/swarm/tick_scenarios/steps.json`,
-   as described in [The feature and scenario catalogue](#the-feature-and-scenario-catalogue).
-   The example's `swarm-tick-example` stands for that id; the catalogue check
-   refuses a feature the map does not hold.
+4. Map the step to a feature and its scenarios as described in
+   [The feature and scenario catalogue](#the-feature-and-scenario-catalogue);
+   `swarm-tick-example` stands for a real feature map id.
 
 ```python
 from collections.abc import Callable
@@ -825,11 +823,10 @@ registry refuses:
 `python -m scripts.tick.catalogue shrink --base <base tree> --head <head tree>` refuses an unmapped step the base
 index does not hold, so the unmapped list only shrinks. Production calls `validate()` without a catalogue and skips
 these checks. The `Tick equivalence` workflow runs `check` on the head and `shrink` from the base tree's copy of the
-module, so a head cannot loosen the ratchet, before the scenario replay. A new step gets a feature map entry and an index row in the pull request that registers it; a
-sweep that maps an existing step removes it from `unmapped` in the same change.
+module, so a head cannot loosen the ratchet, before the scenario replay.
 
 The index holds two keys. `scenarios` maps a step name to the scenario names it runs in; `unmapped` lists the
-registered steps that have no mapping yet, and today holds every registered step:
+registered steps that have no mapping yet. An abridged example:
 
 ```json
 {
@@ -842,19 +839,21 @@ registered steps that have no mapping yet, and today holds every registered step
 
 A scenario name is a key of `tests/swarm/tick_scenarios/goldens.json` with its `run_tick/` or `tick/` prefix removed,
 so `run_tick/dependency` and `tick/dependency` are both `dependency`. `load` refuses an index that names a scenario
-with no golden, and a step with an empty scenario list counts as unlisted. To map an unmapped step:
+with no golden, and a step with an empty scenario list counts as unlisted. A new step is mapped in the pull request
+that registers it. To map an unmapped step, in one change:
 
 1. Set its `feature` to a feature map id, adding the entry to `feature-map.json` if none fits.
 2. Add its name and its scenario names to `scenarios`.
 3. Remove its name from `unmapped`; `check` refuses a mapped step left there.
 4. Run `python -m scripts.tick.catalogue check` from the repository root. `--root <tree>` checks another tree.
 
-Both commands print `<n> tick catalogue errors`, then one `::error::` line per error, and exit 1 when there is any
+`check` and `shrink` print `<n> tick catalogue errors`, then one `::error::` line per error, and exit 1 when there is any
 error, 0 otherwise. A ratchet run against a base tree without an index allows the head's unmapped list, so the first
 change that adds the index passes. A head without the index passes `shrink` with an empty unmapped list, and `check`
-then stops with a traceback on the missing file, so the gate stays red. The registry's own refusals, such as
-`Duplicate step name` or `Unordered writers`, run first: `check` reports that one line alone, and the catalogue errors
-appear, all at once, after it is fixed.
+then stops with a traceback on the missing file, so the gate stays red. `check` reports one stage at a time: an index
+naming an unknown scenario is refused first, before the registry runs; then the registry's own refusals, such as
+`Duplicate step name` or `Unordered writers`, each reported as that one line alone; the catalogue errors appear, all
+at once, after both are fixed.
 
 ## Tests
 
