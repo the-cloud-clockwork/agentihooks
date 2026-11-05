@@ -7,7 +7,7 @@ import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from scripts import session_bands
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
@@ -129,18 +129,22 @@ def _hive_reading(account: str, harness: str, reading: Any, now_ms: int) -> Obse
     """One hive quota entry as an observation, or None when it fails the fleet report checks."""
     try:
         five, week = reading["five_hour"], reading["seven_day"]
-        report = {
-            "observed_ms": int(reading["observed_at"] * 1000),
-            "provider_status": "allowed",
-            "five_used": five["used"],
-            "week_used": week["used"],
-            "five_reset": five["resets_at"],
-            "week_reset": week["resets_at"],
-        }
-        fields = cast("dict[str, Any]", _report(report, now_ms))
+        observed = Observation(
+            account,
+            harness,
+            "",
+            0,
+            int(reading["observed_at"] * 1000),
+            "allowed",
+            five["used"],
+            week["used"],
+            five["resets_at"],
+            week["resets_at"],
+        )
+        _report({field: getattr(observed, field) for field in REPORT_FIELDS}, now_ms)
     except (KeyError, TypeError, ValueError, SwarmError):
         return None
-    return Observation(account, harness, "", 0, **fields)
+    return observed
 
 
 def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) -> Observation | None:
@@ -149,12 +153,10 @@ def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) ->
     from scripts.routing.slots import account_key
 
     wanted, found = account_key(f"{harness}:{account}"), list[Observation]()
-    hives = cast("list[dict[str, Any]]", registry.hives(redis))  # pyright: ignore[reportUnknownMemberType]
-    for hive in hives:
-        raw = (
-            cast("str | None", redis.get(f"{registry.key(hive['id'])}:quota")) if registry.live(hive, now_ms) else None
-        )
-        if raw is None:
+    for hive in registry.hives(redis):  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        live = registry.live(hive, now_ms)  # pyright: ignore[reportUnknownArgumentType]
+        raw = redis.get(f"{registry.key(hive['id'])}:quota") if live else None  # pyright: ignore[reportUnknownArgumentType]
+        if not isinstance(raw, str):
             continue
         try:
             readings: dict[str, Any] = dict(json.loads(raw))
@@ -233,10 +235,9 @@ class QuotaObservations:
 
     def latest(self, account: str, harness: str) -> Observation | None:
         """The newer of the published fleet observation and the newest live hive reading for the account."""
-        redis = cast("Redis", self.store.redis)
-        raw = cast("str | None", redis.hget(latest_key(harness), account))
+        raw = self.store.redis.hget(latest_key(harness), account)
         published = decode(raw) if raw else None
-        hive = hive_observation(redis, account, harness, self.clock())
+        hive = hive_observation(self.store.redis, account, harness, self.clock())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         if published is None or (hive is not None and hive.observed_ms > published.observed_ms):
             return hive
         return published

@@ -335,6 +335,16 @@ def test_a_dead_hive_reading_is_skipped_for_a_live_one() -> None:
     assert _hive_lookup(store) == _hive_observed(20.0, NOW_MS - 1000)
 
 
+def test_an_unreadable_hive_report_is_skipped_for_the_next_hive() -> None:
+    from scripts.hive import registry
+
+    store, _ = _route(set())
+    _hive_reading(store, "nestor_coltatgmail_com", hive="hive-a")
+    store.redis.set(f"{registry.key('hive-a')}:quota", "not json")
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, hive="hive-b")
+    assert _hive_lookup(store) == _hive_observed(20.0)
+
+
 @pytest.mark.parametrize("newer", ["hive-a", "hive-b"])
 def test_the_newest_live_hive_reading_wins(newer: str) -> None:
     store, _ = _route(set())
