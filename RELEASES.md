@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.649 · 2026-11-05
+
+### 2026-11-05 · 28b6c43890eb · #9711 · @nestorcolt
+
+**Refuse tick steps without a feature entry and a scenario**
+
+This change adds catalogue-aware validation so the tick step registry now refuses any step whose feature isn't mapped or whose name no scenario covers, unless it's explicitly on an unmapped list; it also rejects unmapped entries that are actually mapped or unregistered. A new `catalogue` module provides `check` (validates the live registry against feature-map and scenario files) and `shrink` (keeps the unmapped list from growing, enforced against a base checkout so a head change can't loosen it). This closes the gap where steps could silently exist without a feature or scenario, keeping the tick development pattern consistent and gated.
+
 ## v2.17.648 · 2026-11-05
 
 ### 2026-11-05 · bb5b3dd5edbd · #9739 · @nestorcolt
