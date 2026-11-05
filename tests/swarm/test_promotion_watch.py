@@ -1669,3 +1669,24 @@ def test_multiple_matching_coverage_consumers_are_named_as_consequences(store):
         "; consequences: sonar: Wait for the coverage merge; Missing coverage for shard 1; sonar (3.12): Wait for the coverage merge; Missing coverage for shard 1."
         in ledger.added[0][1]["description"]
     )
+
+
+def test_a_controller_without_the_workstation_checkout_still_files_fixer_tasks(store, tmp_path):
+    import os
+
+    missing = str(tmp_path / "workstation" / "agentihooks")
+    config = SimpleNamespace(repo=missing, repo_origin="github.com/o/r")
+    recorded, kwargs_seen = gh([RED], JOBS), []
+
+    def run(argv, **kwargs):
+        kwargs_seen.append(kwargs)
+        if "cwd" in kwargs and not os.path.isdir(kwargs["cwd"]):
+            raise FileNotFoundError(2, "No such file or directory", kwargs["cwd"])
+        return recorded(argv, **kwargs)
+
+    ledger = Ledger()
+    actions = promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), NOW, run)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-900-1"]
+    assert "filed promo-900-0 for the failed dev job helm-kind" in actions
+    assert kwargs_seen and all("cwd" not in kwargs for kwargs in kwargs_seen)
+    assert {kwargs["env"]["GH_REPO"] for kwargs in kwargs_seen} == {"o/r"}
