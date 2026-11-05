@@ -790,7 +790,7 @@ def claim_view(
     store: RedisStore,
     rows: dict[str, dict[str, Any]],
     doc: dict[str, Any],
-    dispatched: Callable[[dict[str, Any]], Any] | None = None,
+    dispatched: Callable[[dict[str, Any]], tuple[Any, ...]] | None = None,
 ) -> Claims:
     awaiting = _owned_tasks(slug, store)
     claimed = store.claimed(slug, [task_id for task_id, t in rows.items() if t.get("state") == "open"])

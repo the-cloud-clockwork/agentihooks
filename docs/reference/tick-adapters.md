@@ -988,9 +988,9 @@ once, `scripts.swarm.focus_budget.ranks` reads each task's focus rank and `scrip
 the queue by that rank. Every call in spawn order that reads the store, the runtime or the ledger document has a row;
 only the local queue and wait list bookkeeping between them is untimed.
 
-The code fixes the counts: `_running`, `ready_in_order` and `focus_budget.place` each run once per lane per spawn
-order, and `placeable` twice, so over a window recorded entirely after pull request 9673 merged the first three have
-equal counts and `placeable` has twice that.
+The code fixes the counts: `_running`, `ready_in_order`, `scripts.swarm.readiness.launchable` and
+`focus_budget.place` each run once per lane per spawn order, and `placeable` twice, so over a window recorded entirely
+after this change merged the first four have equal counts and `placeable` has twice that.
 
 Read the rows with:
 
