@@ -19,8 +19,11 @@ Every tick step reads the ledger document through
 `scripts.swarm.ledger_client.pass_state`, which answers from the held view,
 and a lint gate refuses any new whole ledger state read in the swarm and tick
 packages (see [The whole ledger state gate](#the-whole-ledger-state-gate)).
-A running pass reads its ledger once, plus once after each ledger write (see
-[One ledger read per pass](#one-ledger-read-per-pass)).
+A running pass reads its ledger once, plus at most once after each ledger
+write (see
+[One ledger read per pass](#one-ledger-read-per-pass)). Each of those reads
+is one delta read, or a delta read and a full read when the delta does not
+apply (see [One refresh](#one-refresh)).
 
 The view lives in `scripts.tick.view`; the export parts live in the ledger
 API's `export` route. The feature map entry is `swarm-tick-delta-reads`.
@@ -82,13 +85,15 @@ with a held view and fails on any `state` call.
 
 ## One ledger read per pass
 
-A running pass reads its ledger once when it starts the view, then once more
-only after each ledger write. Every whole document read in between, the
-capacity step's included, is served from the held view.
+A running pass reads its ledger once when it starts the view, then at most
+once more after each ledger write, and only when a later step reads the
+document. A write followed by no read costs nothing. Every other whole
+document read, the capacity step's included, is served from the held view.
 
 ### The held view and its stale mark
 
-`view.start` holds the view twice: in `view.CURRENT`, and in the context
+`view.start` holds the view in `view.CURRENT`, records the slug and refresh
+function in `view.REFRESH`, and holds it in the context
 variable `view.HELD` as a `view.Held` record with the view, the function that
 reads it again (`renew`) and a `stale` flag that starts false.
 
@@ -109,18 +114,19 @@ pass, such as a command handler's, changes nothing here.
 | Step | Reads |
 | --- | --- |
 | Planning and phase pass (`cli._phase_steps`) | Hands `phases.phase_changes` the pass document. `phases.phase_changes(doc)` takes only the document and projects each phase's tasks from it with `scripts.swarm.phase_projection.projected_phase_tasks`; it makes no ledger hierarchy call |
-| Promotion refresh (`promotion_watch.refresh`) | Uses the `doc` the pass hands it for the owning swarm. It no longer calls `pass_state` again |
+| Promotion refresh (`promotion_watch.refresh`) | Uses the `doc` the pass hands it for the owning swarm instead of calling `pass_state` again. Earlier promotion owners are other ledgers, so their red and recovery checks still read them whole through `pass_state` |
 | Capacity | Calls `pass_state`, which the clean held view answers with no read |
 
-When the planning pass writes before the phase pass, the write marks the view
-stale and `_phase_steps` calls `pass_state` once, so the phase pass sees the
-planning writes.
+When the planning pass returns any action, `_phase_steps` calls `pass_state`
+once before the phase pass. A planning write has marked the view stale, so
+that call reads the changes and the phase pass sees the planning writes; with
+no write, the clean view answers it with no read.
 
 ### The phase projection
 
 `projected_phase_tasks(doc)` returns a map of phase id to a list of
-`(task id, state)` pairs, the same answer the ledger's hierarchy route gives,
-computed from the document alone:
+`(task id, state)` pairs, computed from the document alone with the same node
+projection the ledger's hierarchy repository stores:
 
 1. `scripts.swarm_ledger.repository.hierarchy.project(doc)` builds the nodes
    of `plans`, `phases`, `slices` and `tasks`. A task's parent is its `slice`,
@@ -401,8 +407,8 @@ advances with ledger writes.
   reading again only after a write.
 - `tests/swarm/test_phase_projection.py`: each phase's tasks listed through
   slices with tasks outside any phase skipped, a document without tasks
-  listing each phase empty, and the walk stopping at a slice that names itself
-  as its phase.
+  listing each phase empty, and the walk stopping on a cycle of two slices that
+  name each other in their `phase` field.
 - `tests/swarm/tick_scenarios/test_characterisation.py`: a running pass reads
   the ledger once plus once per write, and a planted second read is counted.
 - `tests/swarm_ledger/test_export_parts.py`: `parts` on full and change
