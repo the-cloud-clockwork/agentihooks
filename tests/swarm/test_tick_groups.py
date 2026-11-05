@@ -10,16 +10,15 @@ from typing import Any
 import pytest
 
 from scripts.inbox import wake
-from scripts.swarm import cli, command_runner, controller, reaper, reboot, snapshot_job
+from scripts.swarm import cli, command_runner, controller, reboot, snapshot_job
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import tick
-from scripts.tick import engine, registry
+from scripts.tick import engine, registry, sites
 from scripts.tick.adapters.inbox import StoreInbox
 from scripts.tick.ports import Tools
 from scripts.tick.step import Context, Domain, Lane, Result, Step, Write
-from scripts.tick.steps import PASS, actions, actions_of, observe, report
-from scripts.tick.steps import masters as master_steps
+from scripts.tick.steps import PASS, actions_of, observe, report
 from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -147,7 +146,7 @@ def test_a_tick_pass_runs_its_sites_in_order(store: RedisStore, monkeypatch: pyt
     seen = _graphs(monkeypatch)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     [graph] = seen
-    assert tick_module.TICK_SITES == tuple(TICK_GROUPS)
+    assert sites.TICK_SITES == tuple(TICK_GROUPS)
     assert _ran(graph) == _present(graph, TICK_GROUPS)
 
 
@@ -187,123 +186,6 @@ def test_the_tick_graph_reads_its_pass_state_under_the_group_budget(
     assert tick_module.GROUP_BUDGET_S == 600.0
 
 
-def test_a_graph_view_reads_its_box_then_the_pass_state_for_the_pass_domain_only() -> None:
-    box = {"slug": "boxed", "count": 0, "sleeping": False}
-    view = tick_module._GraphView({"slug": "sw", "now_ms": 5, "count": 3}, box)
-    assert view.read(PASS, "box") is box
-    assert view.read(PASS, "slug") == "boxed"
-    assert view.read(PASS, "count") == 0
-    assert view.read(PASS, "now_ms") == 5
-    assert view.read(PASS, "missing") is None
-    assert view.read(PASS, "sleeping") is False
-    assert tick_module._GraphView({"sleeping": False}, {}).read(PASS, "sleeping") is True
-    assert view.read(Domain("tasks"), "slug") is None
-    assert view.read(Domain("tasks"), "box") is None
-
-
-def _tick_sites(box: dict[str, Any], **state: Any) -> tick_module.TickSites:
-    return tick_module.TickSites(state, box, {}, lambda: 7)
-
-
-def test_tick_sites_shut_every_step_once_a_step_held_an_exception() -> None:
-    sites = _tick_sites({task_steps.RAISED: RuntimeError("held")})
-    for group in ("start", "observe", "wrapper relay"):
-        assert sites.shut(_Marker("m", group))
-
-
-def test_tick_sites_shut_tick_sites_past_the_start_when_finished_or_left() -> None:
-    box: dict[str, Any] = {"sleeping": False}
-    sites = _tick_sites(box)
-    assert not sites.shut(_Marker("m", "observe"))
-    box["finished"] = True
-    assert sites.shut(_Marker("m", "observe"))
-    assert not sites.shut(_Marker("m", "start"))
-    assert not sites.shut(_Marker("m", "wrapper relay"))
-    del box["finished"]
-    sites.left = True
-    assert sites.shut(_Marker("m", "close"))
-    assert not sites.shut(_Marker("m", "wrapper view"))
-
-
-def test_tick_sites_shut_the_placement_sites_while_the_swarm_sleeps() -> None:
-    box: dict[str, Any] = {"sleeping": True}
-    sites = _tick_sites(box)
-    assert sites.shut(_Marker("m", master_steps.SEATS))
-    assert sites.shut(_Marker("m", "placement"))
-    assert not sites.shut(_Marker("m", "dispatch seat"))
-    box["sleeping"] = False
-    assert not sites.shut(_Marker("m", master_steps.SEATS))
-    assert not sites.shut(_Marker("m", "placement"))
-
-
-def test_tick_sites_leave_the_tick_out_when_a_value_it_reads_is_missing() -> None:
-    box: dict[str, Any] = {"config": 1, "doc": 2}
-    sites = _tick_sites(box)
-    hooks = sites.hooks()
-    assert set(hooks) == {"start", "agents", "tasks"}
-    assert hooks["agents"]() is False
-    assert sites.left
-    box["rows"] = 3
-    assert hooks["agents"]() is True
-    assert not sites.left
-    del box["config"]
-    assert hooks["tasks"]() is False
-    assert sites.left
-    box["config"] = 1
-    assert hooks["tasks"]() is True
-    assert not sites.left
-
-
-def test_the_start_check_reads_the_clock_adds_the_appliers_and_scans_once(store: RedisStore) -> None:  # noqa: F811
-    state: dict[str, Any] = {"store": store, "slug": "sw"}
-    sites = tick_module.TickSites(state, {}, {}, lambda: 7, scanning=True)
-    before = reaper.PASS.get()
-    assert sites.hooks()["start"]() is True
-    assert state["now_ms"] == 7
-    assert state["due"] == store.key("sw", tick_module.SPAWN_DUE)
-    assert set(sites.apply) == set(task_steps.appliers(state))
-    assert sites.scan is not None
-    assert reaper.PASS.get() is not before
-    sites.close()
-    assert sites.scan is None
-    assert reaper.PASS.get() is before
-    sites.close()
-    assert reaper.PASS.get() is before
-
-
-def test_the_start_check_starts_no_scan_unless_asked(store: RedisStore) -> None:  # noqa: F811
-    sites = tick_module.TickSites({"store": store, "slug": "sw"}, {}, {}, lambda: 7)
-    before = reaper.PASS.get()
-    assert sites.hooks()["start"]() is True
-    assert sites.scan is None
-    assert reaper.PASS.get() is before
-
-
-def test_run_sites_runs_the_registered_steps_of_its_sites_in_site_order_through_the_gate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ran: list[str] = []
-    found = [
-        _Marker(name, group, _recorder(ran, lambda get, name=name: name, [name]))
-        for name, group in (("c1", "c"), ("b1", "b"), ("a1", "a"), ("a2", "a"), ("x1", "x"))
-    ]
-    _with(monkeypatch, *found, real=False)
-    seen = _graphs(monkeypatch)
-    gate = engine.SiteGate({"b": lambda: True}, lambda step: step.name == "a2")
-    box: dict[str, Any] = {}
-    records = tick_module.run_sites(("a", "b", "c"), {"slug": "sw"}, box, gate, {}, {"a": "c"})
-    assert [record.name for record in records] == ["a1", "a2", "b1", "c1"]
-    assert [record.rested for record in records] == [False, True, False, False]
-    assert ran == ["a1", "b1", "c1"]
-    assert actions(records) == ["a1", "b1", "c1"]
-    [(steps, ctx, _)] = seen
-    needs = {step.name: step.needs for step in steps}
-    assert needs == {"a1": frozenset(), "a2": frozenset(), "b1": frozenset(), "c1": frozenset({"a1", "a2", "b1"})}
-    assert ctx.view.read(PASS, "slug") == "sw"
-    assert ctx.view.read(PASS, "box") is box
-    assert ctx.deadline.expires_at - monotonic() == pytest.approx(tick_module.GROUP_BUDGET_S, abs=5.0)
-
-
 def test_a_stopped_swarm_runs_only_the_start_site(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     store.update("sw", state="stopped")
     seen = _graphs(monkeypatch)
@@ -325,7 +207,7 @@ def test_the_tick_drops_its_actions_when_a_value_it_reads_was_left(
 ) -> None:
     ran: list[str] = []
     _with(monkeypatch, _Marker("marker", "start", _recorder(ran, lambda get: "start", ["acted"])))
-    monkeypatch.setattr(tick_module, "TICK_KEYS", frozenset({"config", "doc", "rows", "never stored"}))
+    monkeypatch.setattr(sites, "TICK_KEYS", frozenset({"config", "doc", "rows", "never stored"}))
     assert tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000) == []
     assert ran == ["start"]
 
@@ -515,7 +397,7 @@ def test_a_tick_value_left_drops_the_tick_actions_and_the_wrapper_goes_on(
         ),
     )
     groups = _groups(monkeypatch)
-    monkeypatch.setattr(tick_module, "TICK_KEYS", frozenset({"config", "doc", "rows", "never stored"}))
+    monkeypatch.setattr(sites, "TICK_KEYS", frozenset({"config", "doc", "rows", "never stored"}))
     assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == []
     assert later == ["wrapper relay", "wrapper view", "wrapper events", "wrapper metrics"]
     assert [name for name, _ in groups][-1] == "closing"

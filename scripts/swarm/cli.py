@@ -178,17 +178,7 @@ from scripts.swarm.store import (
     Unreachable,
     connect,
 )
-from scripts.swarm.tick import (
-    TICK_SITES,
-    TickSites,
-    agent_status,
-    primed,
-    run_group,
-    run_sites,
-    skip_refused,
-    spawn_holds,
-    tick,
-)
+from scripts.swarm.tick import agent_status, primed, run_group, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import (
     ledger_creator,
     ledger_kinds,
@@ -216,6 +206,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
+from scripts.tick.sites import TICK_SITES, TickSites, run_sites
 from scripts.tick.steps import Left, PassBox, budgets, note_left
 from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps

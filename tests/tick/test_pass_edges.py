@@ -15,6 +15,7 @@ from scripts.tick.steps import PassBox, pass_domain
 from tests.swarm.tick_scenarios.test_characterisation import SCENARIOS, replay
 
 tick_module = import_module("scripts.swarm.tick")
+tick_sites = import_module("scripts.tick.sites")
 STEP: ContextVar[str | None] = ContextVar("pass edge step", default=None)
 ENTRIES = ("tick", "run_tick")
 HELD = "raised"
@@ -112,7 +113,7 @@ def record(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     ):
         monkeypatch.setattr(PassBox, name, method)
     pass_read = tick_module._PassView.read
-    graph_read = tick_module._GraphView.read
+    graph_read = tick_sites._GraphView.read
 
     def read_pass(view: Any, domain: Domain, key: str) -> object | None:
         value = pass_read(view, domain, key)
@@ -125,7 +126,7 @@ def record(monkeypatch: pytest.MonkeyPatch) -> Recorder:
         return value
 
     monkeypatch.setattr(tick_module._PassView, "read", read_pass)
-    monkeypatch.setattr(tick_module._GraphView, "read", read_graph)
+    monkeypatch.setattr(tick_sites._GraphView, "read", read_graph)
     return rec
 
 

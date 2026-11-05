@@ -10,6 +10,7 @@ import pytest
 from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result, Write
+from scripts.tick.step import Step as Stepping
 
 pytestmark = pytest.mark.unit
 
@@ -43,7 +44,7 @@ def _ctx() -> Context:
     return Context(View(), Deadline.after(10.0))
 
 
-def _needs(steps: tuple[object, ...]) -> dict[str, frozenset[str]]:
+def _needs(steps: tuple[Stepping, ...]) -> dict[str, frozenset[str]]:
     return {step.name: step.needs for step in steps}
 
 
