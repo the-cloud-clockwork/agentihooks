@@ -1360,6 +1360,31 @@ def test_retiring_unbound_master_without_a_live_process_is_checked(ticking):
     assert report["differences"] == {"process": {"expected": True, "actual": False}}
 
 
+def test_a_master_another_hive_reports_with_a_fresh_heartbeat_stays_live_when_its_pane_lookup_fails(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import reports
+    from scripts.swarm import commands, idle
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    store.put_agent("sw", replace(master, state="retiring", hive="", runtime_target={}))
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["root"])
+    store.redis.set(reports.key("root"), json.dumps({"names": [master.name], "executions": {}, "panes": {}}))
+    idle.beat(store.redis, "sw", master.name, idle.WORKING, 150)
+    runtime.bindings = lambda agents: {
+        a.name: {"process": False} if a.name == master.name else {**live_binding.assignment(a), "hooks": True}
+        for a in agents
+    }
+    tick("sw", store, ledger, runtime, 200)
+    masters = [a for a in store.agents("sw") if a.lane == "master"]
+    assert [(a.name, a.state) for a in masters] == [(master.name, "working")]
+    assert master.name not in runtime.killed
+
+
 def test_a_kept_master_does_not_skip_later_agents(ticking):
     from scripts.swarm.tick import tick
 
