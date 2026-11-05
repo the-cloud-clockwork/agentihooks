@@ -864,6 +864,33 @@ def test_tool_download_rides_out_a_ten_minute_gateway_outage(
     assert sleeps == [1, 2, 4, 8, 16] + [30] * 19
 
 
+def test_tool_download_gives_up_on_a_persistent_outage_at_its_total_budget(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, lock, _ = locked
+    tool = lock["tools"]["herdr"]
+    now = [0.0]
+    sleeps: list[float] = []
+    attempts: list[str] = []
+
+    def opened(url: str, timeout: int) -> io.BytesIO:
+        attempts.append(url)
+        raise urllib.error.HTTPError(url, 504, "Gateway Time-out", http.client.HTTPMessage(), None)
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    with pytest.raises(urllib.error.HTTPError):
+        worker_image.fetch("herdr", tool, tmp_path)
+    assert sleeps == [1, 2, 4, 8, 16] + [30] * 28
+    assert len(attempts) == len(sleeps) + 1
+    assert not (tmp_path / tool["sha256"]).exists()
+
+
 @pytest.mark.parametrize("action", ["install", "download"])
 def test_image_tool_commands_reject_bad_checksums_without_retry(locked, tmp_path, monkeypatch, action):
     path, lock, payloads = locked
