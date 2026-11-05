@@ -205,7 +205,7 @@ def _scheduled(
         gone = _gone(later, frozenset(record.name for record in records if record.abandoned))
         for each in gone:
             found.end(each, True)
-        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished, rest, gate))
+        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished, partial(_opened, rest, gate)))
     return records
 
 
@@ -275,16 +275,21 @@ def _run_later(
     found: pool.Pass,
     apply: Appliers,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
-    rest: frozenset[str],
-    gate: Gate | None = None,
+    gate: Gate,
 ) -> None:
-    """Run the handed off steps on the pass workers, dropping each in ``gone`` and skipping each in ``rest`` or shut
-    by ``gate``, then hand their records in group order to ``finished``."""
+    """Run the handed off steps on the pass workers, dropping each in ``gone`` and resting each ``gate`` shuts, then
+    hand their records in group order to ``finished``."""
     kept = tuple(s for s in later if s.name not in gone)
-    ran = {record.name: record for record in _eager(kept, ctx, found, apply, rest, gate)}
+    ran = {record.name: record for record in _eager(kept, ctx, found, apply, frozenset(), gate)}
     records = tuple(ran.get(step.name) or _skipped(step, _offset()) for step in later)
     if finished is not None:
         finished(records)
+
+
+def _opened(rest: frozenset[str], gate: Gate | None, step: Step, records: Mapping[str, StepRecord]) -> bool:
+    """Return whether ``step`` runs: ``gate`` opens it, asked first, and its interval has elapsed."""
+    opened = gate is None or gate(step, records)
+    return opened and step.name not in rest
 
 
 def _sequential(step: Step, ctx: Context, apply: Appliers, rest: frozenset[str]) -> StepRecord:
