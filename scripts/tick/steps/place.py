@@ -251,7 +251,7 @@ def _release_admission(slug: str, runtime: Any, task: dict[str, Any]) -> None:
 
 
 STEPS = (
-    CallStep("quota notice", NOTICES, held(_quota_notice), RESUMED, CONFIG_DOC),
+    CallStep("quota notice", NOTICES, held(placing(_quota_notice)), RESUMED, CONFIG_DOC),
     CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config"), lane=SLOW),
     CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC, lane=SLOW),
     CallStep("collect acks", ACKS, held(placing(_collect_acks)), RESUMED, CONFIG_DOC),
