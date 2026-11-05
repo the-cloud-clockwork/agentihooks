@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.659 · 2026-11-05
+
+### 2026-11-05 · e4f4b5c7fd90 · #9840 · @nestorcolt
+
+**Retry apt-get fetch on the worker image's Debian snapshot mirror**
+
+This change adds `-o Acquire::Retries=5` to the `apt-get update` and `apt-get install` commands in the `worker` stage of `docker/swarm-node/Dockerfile`. Two separate promotion runs failed the worker-image build with transient 503 errors from `snapshot.debian.org`, each time on a different package, pointing to a flaky upstream mirror rather than a bad pin. Retrying fetches lets the build tolerate those transient backend hiccups instead of failing the whole promotion, improving CI reliability without touching the unrelated `worker_image.py` download-timeout issue.
+
 ## v2.17.658 · 2026-11-05
 
 ### 2026-11-05 · ea2e4f6cc602 · #9788 · @nestorcolt
