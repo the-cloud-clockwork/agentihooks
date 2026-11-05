@@ -159,23 +159,23 @@ def moved_from(unit: str, base: Measured, head: Measured, trees: tuple[Path, Pat
     The key names the same unit in another file, the head no longer holds it there, and the base unit takes the
     same parameters as the head unit, so a deleted unit recreated elsewhere under its name inherits nothing.
     """
-    path, _, name = unit.partition("::")
-    if trees is None or not name:
+    _, separator, name = unit.rpartition("::")
+    if trees is None or not separator:
         return ""
     base_tree, head_tree = trees
     wanted = _parameters(head_tree, unit)
     found = [
         key
         for key in base
-        if key not in head and key.partition("::")[2] == name and key.partition("::")[0] != path
-        if _parameters(head_tree, key) is None and wanted is not None and _parameters(base_tree, key) == wanted
+        if key not in head and key.rpartition("::")[2] == name
+        if wanted is not None and _parameters(head_tree, key) is None and _parameters(base_tree, key) == wanted
     ]
     return found[0] if len(found) == 1 else ""
 
 
 def _parameters(tree: Path, key: str) -> tuple[str, ...] | None:
     """Return the parameter names of the unit ``key`` names in ``tree``, or None when the tree does not hold it."""
-    path, _, name = key.partition("::")
+    path, _, name = key.rpartition("::")
     try:
         source = (tree / path).read_text()
         lines_by_unit = {unit: line for line, (unit, _) in functions(source).items()}

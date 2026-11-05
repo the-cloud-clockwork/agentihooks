@@ -232,6 +232,37 @@ def test_a_move_needs_both_trees_and_a_unit_name(tmp_path: Path) -> None:
     assert size_limits.moved_from("new.py::planted", allowed, {}, (base, head)) == "old.py::planted"
     assert size_limits.moved_from("new.py::planted", allowed, {}, None) == ""
     assert size_limits.moved_from("new.py", allowed, {}, (base, head)) == ""
+    twice = {**allowed, "older.py::planted": {"PLR0913": 8}}
+    (base / "older.py").write_text(EIGHT_PARAMETERS)
+    assert size_limits.moved_from("new.py::planted", twice, {}, (base, head)) == ""
+
+
+def test_the_parameters_of_a_unit_list_every_slot_in_order(tmp_path: Path) -> None:
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "mod.py").write_text("def planted(a, /, b, *rest, c, **more):\n    return a\n" + EIGHT_PARAMETERS)
+    assert size_limits._parameters(tree, "mod.py::planted") == ("a", "b", "rest", "c", "more")
+    assert size_limits._parameters(tree, "mod.py::planted#2") == ("a", "b", "c", "d", "e", "f", "g", "h", "", "")
+
+
+def test_a_unit_moved_out_of_a_path_holding_the_separator_keeps_its_allowance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _recorded(tmp_path / "base", {"odd::old.py": EIGHT_PARAMETERS})
+    assert size_limits.load(base) == {"odd::old.py::planted": {"PLR0913": 8}}
+    head = _recorded(tmp_path / "head", {"new.py": EIGHT_PARAMETERS})
+    code, out = _grade(base, head, capsys)
+    assert code == 0, out
+
+
+def test_a_deleted_unit_of_another_name_is_no_source_of_a_move(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    other = EIGHT_PARAMETERS.replace("planted", "other")
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS, "other.py": other})
+    head = _recorded(tmp_path / "head", {"new.py": EIGHT_PARAMETERS})
+    code, out = _grade(base, head, capsys)
+    assert code == 0, out
 
 
 def test_a_unit_moved_out_of_a_deleted_file_keeps_its_allowance(
