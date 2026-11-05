@@ -318,7 +318,7 @@ def test_an_unreachable_classifier_gives_the_claim_its_lane_profile_and_records_
     decision = profile_choice.choose("sw", "eng", {}, TASK, {})
     assert decision == profile_choice.ProfileDecision(
         "engineer",
-        "lane default",
+        "classifier unavailable",
         "eng lane default: profile classification is unavailable (no decision backend answered)",
         anchors=("task:t9", "phase:p1", "territory:scripts/swarm/tick.py", "territory:scripts/swarm_ledger/static"),
     )

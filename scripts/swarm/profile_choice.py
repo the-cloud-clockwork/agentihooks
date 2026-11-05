@@ -104,7 +104,7 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
     except ClassifierUnavailable as exc:
         return ProfileDecision(
             DEFAULT_PROFILES[CLASSIFIED_LANE],
-            "lane default",
+            "classifier unavailable",
             f"{CLASSIFIED_LANE} lane default: profile classification is unavailable ({exc})",
             anchors=anchors(task),
         )
