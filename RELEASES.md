@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.648 · 2026-11-05
+
+### 2026-11-05 · bb5b3dd5edbd · #9739 · @nestorcolt
+
+**Send stall alerts for a never launched backend master seat to the front door**
+
+This change fixes stall alerts repeatedly naming a second master seat that had started but never actually launched: it had an empty pane, zero launch time, and no process, yet the pool logic still counted it as a live, non-empty seat. Now a master record in that state is treated as unlaunched, its seat is excluded from live masters and counted empty, so mail addressed there reroutes to the front door instead of a dead seat, and the stall alert's action line correctly reports the address it was actually delivered to.
+
 ## v2.17.647 · 2026-11-05
 
 ### 2026-11-05 · 954838087aa8 · #9770 · @nestorcolt
