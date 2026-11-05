@@ -39,6 +39,7 @@ def test_claude_render_writes_a_row_per_rule_and_doctrine_file(bundle):
         ("rule", "delivery-tiers.md"),
         ("rule", "read-docs.md"),
         ("rule", "swarm-maker.md"),
+        ("rule", "tick-pattern.md"),
         ("rule", "worktrees.md"),
     ]
     assert {source: row["layer"] for source, row in found.items()} == {
