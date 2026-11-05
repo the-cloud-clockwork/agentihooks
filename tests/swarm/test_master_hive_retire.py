@@ -3,6 +3,7 @@
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -26,16 +27,17 @@ NO_PROCESS = "no such process in the controller pod"
 class ControllerRuntime(AffinityRuntime):
     """The controller pod: no local sessions, while the workstation hive reports the master it holds."""
 
-    def __init__(self, home: Path, redis: object) -> None:
+    def __init__(self, home: Path, store: RedisStore) -> None:
         super().__init__()
+        self.store: Any = store
         self.orders: list[tuple[str, str, str]] = []
         self.delegated: list[str] = []
-        self.herdr = HerdrRuntime(home=home)
+        self.herdr: Any = HerdrRuntime(home=home)
         self.reap = self.herdr.reap_name
         self.herdr.reap_name = self.reap_name
         self.herdr.end = self.end
         self.herdr._order = self.order
-        self.herdr.hive = SimpleNamespace(holder=self.holder, redis=redis)
+        self.herdr.hive = SimpleNamespace(holder=self.holder, redis=store.redis)
 
     def holder(self, name: str) -> str:
         return WORKSTATION if name in self.live else ""
@@ -62,9 +64,7 @@ class ControllerRuntime(AffinityRuntime):
 @pytest.fixture
 def controller(store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ControllerRuntime:
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
-    runtime = ControllerRuntime(tmp_path, store.redis)
-    runtime.store = store
-    return runtime
+    return ControllerRuntime(tmp_path, store)
 
 
 def test_controller_retires_a_handed_off_workstation_master_and_launches_its_successor(
