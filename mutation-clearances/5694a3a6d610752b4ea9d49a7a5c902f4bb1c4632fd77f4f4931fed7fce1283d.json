@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/timing.py:scripts.swarm.timing.x_append_step:294e12407479a0a701a9c9c9323d93f769b3d6d8866f29504f054b420dfdd024": {
+    "reader": "standards_reader",
+    "reason": "redis-py checks approximate for truthiness, so None trims exactly, identical to approximate=False."
+  }
+}
