@@ -396,7 +396,12 @@ def test_a_hive_advertising_the_token_slug_takes_a_route_named_by_the_secret_key
 
 
 @pytest.mark.parametrize(
-    "repo", ["/home/iamroot/dev/tcc-ecosystem/agentihooks", "github.com/the-cloud-clockwork/agentihooks"]
+    "repo",
+    [
+        "/home/iamroot/dev/tcc-ecosystem/agentihooks",
+        "github.com/the-cloud-clockwork/agentihooks",
+        "github.com/the-cloud-clockwork/agentihooks.git",
+    ],
 )
 def test_placement_matches_the_repository_under_another_home(repo: str) -> None:
     hives = [hive("pods", repos=["/home/worker/dev/agentihooks"])]
