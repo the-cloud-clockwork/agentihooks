@@ -18,10 +18,8 @@ tick_module = import_module("scripts.swarm.tick")
 STEP: ContextVar[str | None] = ContextVar("pass edge step", default=None)
 ENTRIES = ("tick", "run_tick")
 HELD = "raised"
-KEYS = frozenset(
-    {"config", "finished", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found", "started", "stop"}
-)
-WRITTEN = frozenset({"config", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found", "started"})
+KEYS = frozenset({"config", "finished", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found", "stop"})
+WRITTEN = frozenset({"config", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found"})
 
 
 @dataclass(frozen=True)
@@ -175,7 +173,7 @@ def test_every_pass_box_read_is_declared_with_a_need_on_its_writer(
         f"{len(broken)} broken of {len(rec.reads)} pass box reads and {len(rec.written)} writes:\n" + "\n".join(broken)
     )
     assert {key for _, key in rec.written} >= WRITTEN
-    assert {seen.key for seen in rec.reads} >= WRITTEN - {"started", "judged"}
+    assert {seen.key for seen in rec.reads} >= WRITTEN - {"judged"}
     skipped = sorted({step.name for step in registry.steps()} - rec.ran)
     assert not skipped, f"{len(skipped)} registered steps never ran: {skipped}"
 

@@ -23,9 +23,28 @@ ABANDONED = "swarm_tick_step_abandoned"
 class Redis:
     def __init__(self) -> None:
         self.rows: list[tuple[str, dict[str, Any]]] = []
+        self.hashes: dict[str, dict[str, str]] = {}
 
     def xadd(self, key: str, fields: dict[str, str], **kwargs: Any) -> None:
         self.rows.append((key, json.loads(fields["record"])))
+
+    def hset(self, key: str, field: str, value: str) -> None:
+        self.hashes.setdefault(key, {})[field] = value
+
+    def hgetall(self, key: str) -> dict[str, str]:
+        return dict(self.hashes.get(key, {}))
+
+    def pipeline(self, transaction: bool = True) -> "Redis":
+        return self
+
+    def lpush(self, key: str, *values: str) -> None:
+        return None
+
+    def ltrim(self, key: str, start: int, end: int) -> None:
+        return None
+
+    def execute(self) -> list[Any]:
+        return []
 
 
 class Store:
@@ -84,7 +103,7 @@ def test_a_write_step_left_at_its_budget_journals_its_returned_write_domains(
 ) -> None:
     store, release = Store(), Event()
     step = WriteStep("rank pass", "planted", waiting(release), writes=frozenset({Domain("tasks"), Domain("ranks")}))
-    step.budget_s = 1.0
+    step.floor_s = 1.0
     try:
         with recording(store):
             engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])
@@ -103,7 +122,7 @@ def test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domain
 ) -> None:
     store, release = Store(), Event()
     step = WriteStep("grouping release", "planted", waiting(release), writes=frozenset({Domain("tasks")}))
-    step.budget_s = 30.0
+    step.floor_s = 30.0
     try:
         with recording(store), pool.running(critical_s=0.3):
             engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])
@@ -119,7 +138,7 @@ def test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domain
 def test_a_step_left_with_only_its_actions_domain_journals_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     store, release = Store(), Event()
     step = CallStep("release alert", "planted", waiting(release))
-    step.budget_s = 0.05
+    step.floor_s = 0.05
     try:
         with recording(store):
             engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])

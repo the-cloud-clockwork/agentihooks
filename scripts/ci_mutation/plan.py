@@ -589,7 +589,7 @@ def file_text(path: Path) -> str:
 
 
 def defined_tests(path: Path) -> set[str]:
-    return {name for name in module_facts(path.read_text())[1] if name.rpartition(".")[2].startswith("test")}
+    return {name for name in module_facts(scope.held_text(path))[1] if name.rpartition(".")[2].startswith("test")}
 
 
 def narrow(
@@ -642,7 +642,7 @@ def validate_tests(root: Path, tests: list[str]) -> None:
         path = root / test
         if loads_heavy(test.removesuffix(".py").replace("/", "."), clean):
             raise SystemExit(f"{test}: loads the MCP SDK while collecting")
-        source = path.read_text()
+        source = scope.held_text(path)
         walked = set(clean)
         if not loads_sdk_when_run(source, walked):
             clean = walked
@@ -660,9 +660,16 @@ def main() -> int:
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
+    with scope.held_tests(root):
+        planned(args, root)
+    print(f"Mutation plan CPU seconds: {time.process_time():.1f}")
+    return 0
+
+
+def planned(args: argparse.Namespace, root: Path) -> None:
+    """Size the mutation shards and stats parts for the change from base to head and write them to the outputs."""
     manifest, failure = None, ""
     with ThreadPoolExecutor() as pool:
-        # The record downloads while the bases, changes and test imports are worked out.
         if args.repository and touches_code(root, args.base, args.head):
             record = pool.submit(read_record, args.repository)
         bases = own_bases(root, args.base, args.head, graded_green)
@@ -705,7 +712,6 @@ def main() -> int:
             stream.write(f"bases={','.join(bases)}\n")
             stream.write(f"changed={len(changes)}\n")
             stream.write(f"browser={browser}\n")
-    return 0
 
 
 if __name__ == "__main__":

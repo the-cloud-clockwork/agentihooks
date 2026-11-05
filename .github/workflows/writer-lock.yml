@@ -65,6 +65,8 @@ jobs:
             tests/swarm/test_tick.py tests/swarm/test_delivery.py
             tests/swarm/tick_scenarios/* tests/swarm/tick_equivalence.sh tests/swarm/test_tick_load.py
             .github/workflows/tick-equivalence.yml .github/workflows/writer-lock.yml
+            scripts/tick_pattern.py scripts/size_limits.py tests/TICK_PATTERN_ALLOWLIST.json tests/tick/*
+            profiles/package/skills/tick-step/* profiles/package/rules/tick-pattern.md docs/reference/tick-step-catalogue.md
         run: |
           base=$(git merge-base "$PR_BASE" "$PR_HEAD")
           git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/tick-changed"

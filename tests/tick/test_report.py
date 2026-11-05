@@ -30,7 +30,7 @@ from scripts.swarm.status import findings
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, budgets, host, report
+from scripts.tick.steps import PASS, CallStep, actions, actions_of, budgets, host, report
 
 pytestmark = pytest.mark.unit
 
@@ -199,7 +199,7 @@ def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest
     assert name == "stall watch"
     assert args[:5] == (STORE, "sw", "ledger", "view", frozenset({"a", "b"}))
     assert args[6:] == (("lanes", "sw", STORE, "ledger", DOC, 7), 7)
-    assert kwargs == {"released": ("checker", "/repo"), "reread": ledger_events.view}
+    assert kwargs == {"released": ("checker", CONFIG), "reread": ledger_events.view}
     assert (overrun_call[0], overrun_call[1], overrun_call[3]) == ("skip", overrun.overrun_pass, DOC)
     watch = overrun_call[2]
     assert watch[:5] == ("overrun watch", STORE, "sw", "ledger", frozenset({"a", "b"}))
@@ -216,14 +216,26 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
     redis = SimpleNamespace(set=lambda key, value: calls.append(("set", key, value)))
     store = SimpleNamespace(redis=redis, key=lambda slug, mark: f"{slug}/{mark}")
     found = _run("wrapper metrics", calls, _pass(box, store=store, count=5), monkeypatch)
-    assert found == ["ran 1", "ran 2", "ran 3"]
+    assert found == ["ran 1", "ran 2", "ran 3", "started automatic snapshot"]
     assert calls == [
         ("call", metrics.record_pass, "sw", 7, 5, os.environ, ("input", store, DOC, ["f"], "view", "ledger")),
         ("skip", bottleneck_status.refresh, "sw", store, 7),
         ("skip", wake.maintenance, "inbox", "sw", AGENTS, 7, ("window", True)),
         ("call", snapshot_job.start, store, "sw", 7, os.environ),
     ]
-    assert box == {"found": ["f"], "started": ["ran 4"]}
+    assert box == {"found": ["f"]}
+
+
+def test_the_snapshot_step_returns_no_line_when_no_job_started(monkeypatch: pytest.MonkeyPatch) -> None:
+    step = next(step for step in report.STEPS if step.name == "snapshot job")
+    store = SimpleNamespace()
+    box: dict[str, Any] = {}
+    cli = SimpleNamespace(now_ms=lambda: 7, snapshot_job=snapshot_job)
+    monkeypatch.setattr(host, "import_module", lambda name: cli)
+    monkeypatch.setattr(timing, "call", lambda function, *args: False)
+    assert step.writes == {actions_of("snapshot job")}
+    assert step.call(None, {"box": box, "store": store, "slug": "sw"}.get) == []
+    assert box == {}
 
 
 def test_the_watches_and_findings_declare_the_steps_they_need() -> None:

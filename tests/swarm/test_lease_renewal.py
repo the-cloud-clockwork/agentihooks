@@ -647,3 +647,9 @@ def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tm
     assert entry.record["due"] > due
     assert scheduler.run_due(now=due) == 0
     callback.assert_called_once()
+
+
+@pytest.mark.parametrize("seconds", ["1", "5", "60"])
+def test_the_lease_ttl_outlasts_two_controller_ticks(seconds: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", seconds)
+    assert lease.ttl_ms() >= 2 * lease.tick_ms()
