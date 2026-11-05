@@ -972,13 +972,14 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick-watch` | The stale tick watcher, run by its own user service: one inbox alert per stale tick episode to the front door master seat and every live agent seat, a resolved notice when a fresh pass lands, on a workstation a scheduler tick restart and a respawn of an empty front door master while the tick is stale, and in a cluster a placement of an empty front door master (see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). |
 | `agentihooks swarm spoke` | The workstation spoke, run by the `agentihooks-spoke` user service when `AGENTIHOOKS_DEPLOYMENT=distributed`: a master lane spoke per swarm takes master work from the bus as this hive and launches it in a herdr pane, beside an eng, ci and plan spoke per `events` swarm that launches what the hub admits. Refused in any other mode. |
-| `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). |
+| `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). On a workstation where every swarm in the store is served in Anton or stopped, the pass also cancels the scheduled tick cron and removes the `agentihooks-swarm-waits`, `agentihooks-tick-watch` and `agentihooks-inbox-waker` units; see [Retire the workstation tick](../reference/deployment-modes.md#retire-the-workstation-tick). |
+| `agentihooks swarm <id> tick` | One tick pass for that swarm alone, printing each action. A swarm whose stored `api_url` names its controller is served in Anton: the command prints `swarm: the swarm <id> is served in Anton, so only its controller ticks it` and exits 1 without ticking. It never installs or removes units. |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
 | `agentihooks controller run [--once]` | Reconcile every registered swarm each minute; `--once` runs one pass. `AGENTIHOOKS_DEPLOYMENT=local` permits spawning; `compose` reconciles without spawning; `distributed` spawns only engineer and CI work its Kubernetes runtime places, and leaves master, planner, dispatcher and frontend work to the workstation hive. |
 | `agentihooks swarm templates` | One line per swarm template, built-in or user: per lane its cap, agent, model, effort and default kind, then the compact limit. |
 | `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N] [--max-plan-agents N]` | The step `swarm init` runs to register a swarm, paused. Typed, it is refused and names `swarm init`, except for proof and demo swarms named by code. Defaults: 2 eng, 1 ci, 1 planner. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. Ends with the `Ledger page: <link>` line. |
-| `agentihooks swarm <id> start` | Run: enable the timer and scale up at once. Ends with the `Ledger page: <link>` line. |
+| `agentihooks swarm <id> start` | Run: enable the timer and scale up at once. Starting a swarm not served in Anton brings back the scheduled tick and the waits, tick watch and inbox waker units on a workstation that had retired them. Ends with the `Ledger page: <link>` line. |
 | `agentihooks swarm <id> url` | Print the `Ledger page: <link>` line, built from `LEDGER_HOST` and `LEDGER_PORT`; when the ledger server is not answering, the line names `agentihooks ledger serve --ensure`; when the server on that port serves another ledger folder, it prints no link and names both folders. |
 | `agentihooks swarm <id> pause` | Stop new spawns; running agents continue. |
 | `agentihooks swarm <id> proof-control --request FILE` | The creating engineer pauses, drains, sets or starts its scratch proof fixture using a JSON request. `{"control":"pause"}` pauses new spawns and `{"control":"start"}` starts the swarm. `{"control":"set","fields":{...}}` queues `swarm set` for allowlisted keys only: `codex-inbox-transport`, `max-eng-agents`, `max-ci-agents`, `max-plan-agents` and each lane's `agent`, `model`, `effort` and `profile`; each value starts with a letter or digit and holds at most 64 letters, digits, dots, colons, underscores or dashes; caps take a whole number below 1000 and the transport `legacy` or `app_server`, and each lane agent `auto`, `claude` or `codex`. Drain carries `control: "drain"`, the exact `agent`, `op`, `incarnation`, `generation` and `task_revision` from the lifecycle view. The command authenticates the engineer on its parent swarm, obtains the fixture credential internally and prints only the control result. The credential permits no other action or swarm, and set and start need a scratch swarm; drain preserves caps and fences replacement workers. |
@@ -4468,7 +4469,8 @@ classes (see
 ### Cadence
 
 An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
-registers it and starts the scheduler runner; each tick pass re-registers it if it is gone. The
+registers it and starts the scheduler runner; each tick pass re-registers it if it is gone, unless no swarm needs the
+workstation's tick (see [Workstation tick retirement](#workstation-tick-retirement)). The
 `agentihooks-swarm` systemd timer and service an older install left are deleted only after a scheduler running the
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
@@ -4500,6 +4502,43 @@ per key.
 | `AGENTIHOOKS_TICK_CADENCE must be whole minutes, got 'abc'` | The value is not an integer; minutes only, no unit. |
 | `AGENTIHOOKS_TICK_CADENCE must be at least 1 minute, got 0` | Zero or a negative number. |
 | `AGENTIHOOKS_TICK_CADENCE of 6 minutes breaks the delivery guard, heartbeat limit` | Two missed passes of that cadence last longer than the named guards allow; five minutes is the largest accepted value. |
+
+#### Workstation tick retirement
+
+A swarm whose stored `api_url` names its controller is served in Anton, and only that controller ticks it. The
+workstation hosts swarm work only while its store holds a swarm that is neither served in Anton nor stopped; a
+paused or stopping local swarm still counts. While no such swarm exists, the install that every machine wide
+`agentihooks swarm tick` reconcile and every `swarm <id> start` runs does the following instead of installing the
+tick units:
+
+1. Cancels the scheduled tick cron.
+2. Retires an `agentihooks-swarm` timer and service an older install left.
+3. Disables and deletes `agentihooks-swarm-waits.timer`, `agentihooks-swarm-waits.service`,
+   `agentihooks-tick-watch.service` and `agentihooks-inbox-waker.service`, then reloads the user systemd manager.
+
+The `agentihooks-scheduler` and `agentihooks-quota-prober` services stay, and the workstation keeps the herdr client,
+its master and the agents it hosts as a hive. The [delivery guard](#scheduled-tick-delivery-guard) reports nothing
+undelivered while no swarm needs the tick. A store that cannot be read counts as hosting work, so an outage never
+removes the units. Starting a swarm not served in Anton installs and enables them again on the next install.
+
+Check the state of a workstation:
+
+```bash
+agentihooks swarm list
+systemctl --user list-unit-files 'agentihooks-*'
+agentihooks swarm my-swarm tick
+# swarm: the swarm my-swarm is served in Anton, so only its controller ticks it
+```
+
+On a workstation whose swarms are all served in Anton, `list-unit-files` lists `agentihooks-scheduler.service` and
+`agentihooks-quota-prober.service` and none of the four retired units. `agentihooks swarm <id> tick` exits 1 for a served swarm and runs
+one pass for a local one. More on the controller side: [Retire the workstation tick](../reference/deployment-modes.md#retire-the-workstation-tick).
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The waits, tick watch and inbox waker units vanished from a workstation | Every swarm in its store is served in Anton or stopped | Expected. Start a local swarm to bring them back |
+| The units stay although every swarm is served in Anton | The swarm store could not be read, or no machine wide tick has run since the last swarm moved | Check `agentihooks swarm list` answers; the next `agentihooks swarm tick` reconcile retires them |
+| `swarm <id> tick` exits 1 naming Anton | The swarm is served in Anton | Expected. Its controller ticks it; read its passes with `swarm <id> tick-report` |
 
 Both tick settings are listed under [Swarm Tick](../reference/configuration.md#swarm-tick) in the configuration
 reference.
@@ -5156,7 +5195,9 @@ never runs a tick pass, checks every running, paused, stopping or drained swarm 
 
 A swarm whose ledger is gone, binned or in an open ledger outage is alerted but never repaired, since neither a
 restart nor a respawn can end that. The watcher runs as the `agentihooks-tick-watch` user service, installed and
-enabled with the other swarm services and restarted by systemd if it exits. The controller lease keeps one tick
+enabled with the other swarm services and restarted by systemd if it exits. A workstation whose swarms are all
+served in Anton or stopped removes it with the waits and waker units; see
+[Workstation tick retirement](#workstation-tick-retirement). The controller lease keeps one tick
 per swarm: while another hive holds a swarm's lease, a workstation tick of that swarm returns `the swarm belongs
 to another hive`.
 
@@ -7178,7 +7219,7 @@ agentihooks hive list
 | An idle Codex agent on a hive has unread work and no `woken` event | Its heartbeat says `working` and is less than 20 minutes old, or no heartbeat exists | Expected: the item escalates to the master after the retry window. Check the agent's hooks are installed on the hive if it never writes a heartbeat |
 | No `woken` event and the agent's heartbeat is idle | The hive stopped reporting, so no order was sent | Check `agentihooks hive list`; on the hive, `systemctl --user restart agentihooks-hive`. The tick retries on every pass |
 | A `woken` event exists but the pane shows no wake text | The hive refused the order: the agent was replaced and the order named the old generation, or its runtime could not type into the pane. The wake still counts toward the item's three | Check `agentihooks-hive` is running on the hive; a replaced agent's successor gets its own wake, and the item escalates after its wakes run out |
-| Wakes arrive only on the minute, never when mail lands | `agentihooks-inbox-waker` is not running on the tick's machine | `systemctl --user status agentihooks-inbox-waker`, then start it |
+| Wakes arrive only on the minute, never when mail lands | `agentihooks-inbox-waker` is not running on the tick's machine | `systemctl --user status agentihooks-inbox-waker`, then start it. A workstation whose swarms are all served in Anton has no waker by design; see [Workstation tick retirement](#workstation-tick-retirement) |
 | An `app_server` Codex agent on a hive gets no wake | Expected: its push pump delivers the item | See [Codex inbox transport](../reference/codex-inbox-transport.md) |
 
 The tick does not escalate an item while it keeps choosing a wake for it: if a
