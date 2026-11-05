@@ -899,7 +899,7 @@ def test_launch_names_the_hive_slot_for_a_secret_key_account(setup, monkeypatch)
         lambda client, hive: {
             "slots": [
                 {"harness": "codex", "account": "other_account", "kind": "subscription"},
-                {"harness": "claude", "account": slot, "kind": "subscription"},
+                {"harness": "claude", "account": "nestor-coltatgmail-com", "kind": "subscription"},
                 {"harness": "codex", "account": slot, "kind": "subscription"},
             ]
         },
