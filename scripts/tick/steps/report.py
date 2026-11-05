@@ -200,8 +200,9 @@ def _inbox_wake(cli: Any, get: Get) -> Any:
     return cli.skip_refused(cli.wake.maintenance, get("inbox"), get("slug"), get("agents"), cli.now_ms(), window)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _snapshot_job(cli: Any, get: Get) -> None:
-    get("box")["started"] = timing.call(cli.snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
+def _snapshot_job(cli: Any, get: Get) -> list[str]:
+    started = timing.call(cli.snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
+    return ["started automatic snapshot"] if started else []
 
 
 def _last_tick(cli: Any, get: Get) -> None:
@@ -267,7 +268,7 @@ STEPS = (
     CallStep("metrics record", "wrapper metrics", held(_metrics), FOUND, pass_domains("found", "view"), lane=SLOW),
     CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
     CallStep("inbox wake", "wrapper metrics", held(_inbox_wake), frozenset({"page relay"}), pass_domains("agents")),
-    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), writes=pass_domains("started")),
+    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job)),
     CallStep("last tick", CLOSING_GROUP, held(_last_tick), lane=CLOSING),
     CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), lane=CLOSING),
     CallStep(
