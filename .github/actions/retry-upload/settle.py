@@ -1,10 +1,11 @@
-"""Wait until an earlier upload attempt no longer holds its artifact name.
+"""Free the artifact name an earlier upload attempt still holds.
 
-An attempt ended while the artifact service still finalizes it leaves the name held:
-every create of that name answers 409 until the service finishes. Before the next
-attempt this asks the service, with the runtime token the runner gives actions, until
-the name is free or the earlier artifact is listed as finalized, so the retry can create
-or overwrite it. It never fails the step; the next attempt decides the outcome.
+An attempt cut while its finalize request is in flight leaves the name held for good:
+every create of that name answers 409 and the artifact is never listed. Before the next
+attempt this asks the service, with the runtime token the runner gives actions, whether
+the name is finalized or free; a held name is finalized as empty and deleted, so the
+retry can create it again. It asks again until the name is usable or the seconds run out,
+and never fails the step; the next attempt decides the outcome.
 """
 
 import base64
@@ -21,8 +22,11 @@ INTERVAL = 10
 TIMEOUT = 10
 FREE = "free"
 FINALIZED = "finalized"
+CLEARED = "cleared"
 HELD = "held"
 UNKNOWN = "unknown"
+USABLE = (FREE, FINALIZED, CLEARED)
+CALLS = 4
 
 
 def backend_ids(token: str) -> dict[str, str]:
@@ -52,13 +56,17 @@ def call(base: str, token: str, method: str, body: dict[str, object]) -> tuple[i
 
 
 def state(base: str, token: str, name: str) -> str:
-    """Say whether the name is finalized, free to create, held, or unknown."""
+    """Say whether the name is finalized, free to create, cleared of a held artifact, held, or unknown."""
     ids = backend_ids(token)
     status, listed = call(base, token, "ListArtifacts", {**ids, "name_filter": name})
     if status == 200 and listed.get("artifacts"):
         return FINALIZED
     status, _ = call(base, token, "CreateArtifact", {**ids, "name": name, "version": 4})
-    return {200: FREE, 409: HELD}.get(status, UNKNOWN)
+    if status != 409:
+        return FREE if status == 200 else UNKNOWN
+    finalized, _ = call(base, token, "FinalizeArtifact", {**ids, "name": name, "size": "0"})
+    deleted, _ = call(base, token, "DeleteArtifact", {**ids, "name": name})
+    return CLEARED if finalized == deleted == 200 else HELD
 
 
 def settle(base: str, token: str, name: str, seconds: float) -> str:
@@ -66,7 +74,7 @@ def settle(base: str, token: str, name: str, seconds: float) -> str:
     deadline = time.monotonic() + seconds
     while True:
         found = state(base, token, name)
-        if found in (FREE, FINALIZED) or time.monotonic() + INTERVAL + 2 * TIMEOUT > deadline:
+        if found in USABLE or time.monotonic() + INTERVAL + CALLS * TIMEOUT > deadline:
             return found
         print(f"{name} is {found} at the artifact service; asking again in {INTERVAL}s.", flush=True)
         time.sleep(INTERVAL)
@@ -81,7 +89,7 @@ def main() -> int:
         print(f"::warning title=Retried upload::No artifact service token; {name} is retried without settling.")
         return 0
     found = settle(base, token, name, float(os.environ["SETTLE_SECONDS"]))
-    if found in (FREE, FINALIZED):
+    if found in USABLE:
         print(f"{name} is {found}; the next attempt can upload it.", flush=True)
     else:
         print(f"::warning title=Retried upload::{name} is still {found} after {os.environ['SETTLE_SECONDS']}s.")

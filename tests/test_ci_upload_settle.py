@@ -41,10 +41,24 @@ def _scripted(answers, calls):
     [
         ([(200, {"artifacts": [{"name": "a"}]})], "finalized", ["ListArtifacts"]),
         ([(200, {"artifacts": []}), (200, {})], "free", ["ListArtifacts", "CreateArtifact"]),
-        ([(200, {}), (409, {})], "held", ["ListArtifacts", "CreateArtifact"]),
+        (
+            [(200, {}), (409, {}), (200, {}), (200, {})],
+            "cleared",
+            ["ListArtifacts", "CreateArtifact", "FinalizeArtifact", "DeleteArtifact"],
+        ),
+        (
+            [(200, {}), (409, {}), (0, {}), (412, {})],
+            "held",
+            ["ListArtifacts", "CreateArtifact", "FinalizeArtifact", "DeleteArtifact"],
+        ),
+        (
+            [(200, {}), (409, {}), (200, {}), (412, {})],
+            "held",
+            ["ListArtifacts", "CreateArtifact", "FinalizeArtifact", "DeleteArtifact"],
+        ),
         ([(0, {}), (0, {})], "unknown", ["ListArtifacts", "CreateArtifact"]),
     ],
-    ids=["finalized", "free", "held", "unreachable"],
+    ids=["finalized", "free", "cleared", "finalize-lost", "delete-refused", "unreachable"],
 )
 def test_the_state_lists_first_then_probes_a_create(monkeypatch, answers, found, methods):
     calls = []
@@ -54,6 +68,9 @@ def test_the_state_lists_first_then_probes_a_create(monkeypatch, answers, found,
     assert calls[0][1] == {**_IDS, "name_filter": "a"}
     if len(calls) > 1:
         assert calls[1][1] == {**_IDS, "name": "a", "version": 4}
+    if len(calls) > 2:
+        assert calls[2][1] == {**_IDS, "name": "a", "size": "0"}
+        assert calls[3][1] == {**_IDS, "name": "a"}
 
 
 def test_a_held_name_is_asked_again_until_it_is_finalized(monkeypatch, capsys):
@@ -72,7 +89,7 @@ def test_a_name_still_held_at_the_bound_ends_the_wait(monkeypatch):
     monkeypatch.setattr(settle.time, "sleep", slept.append)
     clock = iter(range(0, 1000, 10))
     monkeypatch.setattr(settle.time, "monotonic", lambda: next(clock))
-    assert settle.settle("https://r/", "t", "a", 55) == "held"
+    assert settle.settle("https://r/", "t", "a", 75) == "held"
     assert slept == [10, 10]
 
 
@@ -81,9 +98,10 @@ def test_a_name_still_held_at_the_bound_ends_the_wait(monkeypatch):
     [
         ("free", "a is free; the next attempt can upload it."),
         ("finalized", "a is finalized; the next attempt can upload it."),
+        ("cleared", "a is cleared; the next attempt can upload it."),
         ("held", "::warning title=Retried upload::a is still held after 120s."),
     ],
-    ids=["free", "finalized", "held"],
+    ids=["free", "finalized", "cleared", "held"],
 )
 def test_main_reports_the_outcome_and_never_fails(monkeypatch, capsys, found, said):
     monkeypatch.setenv("ARTIFACT", "a")

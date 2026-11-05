@@ -1,5 +1,5 @@
 name: Retried artifact upload
-description: Upload an artifact of this run, retried in place up to two more times. A path that matches no files is never attempted, and a watchdog ends any attempt that outlives its bound. Before a retry it waits, within settle-seconds, until an attempt ended mid finalize no longer holds the name, and every attempt overwrites the name, so a retry replaces a copy an earlier attempt finalized.
+description: Upload an artifact of this run, retried in place up to two more times. A path that matches no files is never attempted, and a watchdog ends any attempt that outlives its bound. Before a retry it frees, within settle-seconds, a name an attempt cut mid finalize still holds by finalizing it as empty and deleting it, and every attempt overwrites the name, so a retry replaces a copy an earlier attempt finalized.
 inputs:
   name:
     description: Artifact name
@@ -23,7 +23,7 @@ inputs:
     required: false
     default: "120"
   settle-seconds:
-    description: Seconds a retry may wait for an earlier attempt's artifact to finish finalizing
+    description: Seconds a retry may spend freeing a name an earlier attempt still holds
     required: false
     default: "120"
   after-cancel:
