@@ -36,36 +36,44 @@ in the step module that owns its step (`agents`, `masters`, `tasks`), and a test
 patches it there; the moved body still reaches tick seams through the imported
 tick module.
 
-## Measured budgets and declared intervals
+## Live budgets, floors and declared intervals
 
-The timing table `scripts.tick.steps.budgets.MEASURED` records each step's
-p95 from a tick report over sixty passes and its interval from the plan table.
-The budget is `max(1, ceil(p95_s * 1.5))` seconds: fifty percent headroom,
-rounded up to a whole second. These are checked in declarations, not settings
-that update automatically when new reports arrive.
+The table `scripts.tick.steps.budgets.FLOORS` declares each step's floor and its
+interval. Each pass, `run_tick` calls `budgets.resolve(store, slug)` before the
+first group. It reads every step's window of its last sixty walls, the Redis list
+`tick:walls:<step>`, and stores the live budgets for the pass. `budget_of(name)`,
+read through `CallStep.budget_s`, returns `max(floor, ceil(p95 * 1.5))` once a
+step has sixty walls, and the floor until then. `scripts.swarm.timing.append_step`
+pushes each budgeted step's wall to its window in the same pipeline as its
+`tick:steps` record and trims the window to sixty. When a window is missing,
+`resolve` rebuilds it from the `tick:steps` stream, at most once every ten
+minutes. The stream stays the record.
 
-| Step example | Measured p95 | Budget | Declared interval |
-| --- | --- | --- | --- |
-| `reap` | 14.511 s | 22 s | 60 s |
-| `preempt` | 11.749 s | 18 s | 60 s |
-| `spawn` | 21.812 s | 33 s | 60 s |
-| `pane evidence` | 1.047 s | 2 s | 120 s |
-| `metrics record` | 18.905 s | 29 s | 600 s |
-| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 19.981 s | 30 s | 60 s |
+| Step example | Floor | Declared interval |
+| --- | --- | --- |
+| `reap` | 22 s | 60 s |
+| `preempt` | 18 s | 60 s |
+| `spawn` | 33 s | 60 s |
+| `night watch` | 22 s | 120 s |
+| `metrics record` | 29 s | 600 s |
+| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 30 s | 60 s |
+
+The six heavy rows keep their earlier measured budgets as floors. Every row that
+measured under one second, and every row that was never measured, has a two
+second floor. `scripts.tick.registry.latest_start` adds floors, so the spawn
+start bound does not move with live budgets.
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
-seconds. The group runner runs each group at its site on every pass and does
-not skip a step because its interval has not elapsed.
-`scripts.tick.engine.interval_s(step, cadence)` gives a step in lane `slow`
-the larger of its declared interval and the slow lane cadence from
-`AGENTIHOOKS_TICK_CADENCE`, and leaves every other step at its own interval;
-no pass reads it yet. See
+seconds. `scripts.tick.engine.interval_s(step, cadence)` gives a step in lane
+`slow` the larger of its declared interval and the slow lane cadence from
+`AGENTIHOOKS_TICK_CADENCE`, and leaves every other step at its own interval.
+The group runner skips a step whose interval has not elapsed; see
+[Interval enforcement](#interval-enforcement) and
 [Cadence](../pillars/swarm.md#cadence).
 
-A step with no report row uses `UNMEASURED_S`, a ten second p95, giving a
-fifteen second budget. It still needs an explicit timing table entry. An
-unknown name raises `ValueError: Undeclared step timing: <name>` when
-`CallStep` is constructed, before registration.
+Every step needs an explicit `FLOORS` entry. An unknown name raises
+`ValueError: Undeclared step timing: <name>` when `CallStep` is constructed,
+before registration.
 
 ### Inspect and change timing
 
@@ -87,19 +95,96 @@ Inspect the checked in declaration from the repository root:
 python -c 'from scripts.tick.steps.budgets import timing_of; print(timing_of("reap"))'
 ```
 
-The result is `(22.0, 60.0)`: budget first, interval second. To change a step's
-timing, update its `Timing(p95_s, interval_s)` entry in `MEASURED` through the
-normal code review and CI workflow. For a newly registered `example` step
-without a report row, declare it in that table before constructing it:
+Outside a pass the result is the floor, `(22.0, 60.0)`: budget first,
+interval second. To change a floor or interval, update the step's
+`Timing(floor_s, interval_s)` entry in `FLOORS` through the normal code review
+and CI workflow. Declare a newly registered `example` step before constructing it:
 
 ```python
-"example": Timing(UNMEASURED_S, CRITICAL_S),
+"example": Timing(2.0, CRITICAL_S),
 ```
 
-That is a dictionary entry using the table's existing imports and constants.
-Once measured, replace `UNMEASURED_S` with its observed p95, keeping the
-interval required by the plan. There is no CLI or environment override for
-this table in this delivery.
+Its live budget then follows its walls once sixty runs are recorded.
+
+### Interval enforcement
+
+At the start of each group, `scripts.tick.engine.resting(ordered, cadence)`
+names the steps of that group that rest this pass. A step can rest only when
+its interval from `interval_s(step, cadence)` is above one cron minute
+(`CRON_S`, 60 seconds). It rests while the pass start is no more than its
+interval less one cron minute after the end of its last ended run. Outside a
+recording pass the clock stands in for the pass start.
+
+| Interval | Rests while the last end is at most | Runs |
+| --- | --- | --- |
+| 60 s (`CRITICAL_S`) | never rests | every pass |
+| 120 s (`WIDE_S`) | 60 s before the pass start | every other pass |
+| 600 s (`SLOW_S`) | 540 s before the pass start | about one pass in ten |
+| Slow lane step declared at 60 s, `AGENTIHOOKS_TICK_CADENCE=3` | 120 s before the pass start | one pass in three |
+
+Subtracting one cron minute means a step whose run ended a few seconds into a
+pass is due again on the pass that starts one interval after the earlier one,
+rather than one pass later.
+
+A resting step starts no thread and calls nothing. It ends at once, so steps
+that `need` it start as if it had run. Its `tick:records` row has outcome
+`skipped`, its `skipped` and `rested` fields true, `abandoned` false, a wall time of zero
+and its budget; see
+[Tick report](tick-report.md#outcome-columns). This holds in the sequential
+runner, in the parallel eager runner and for slow lane steps handed off to run
+after the critical lane.
+
+The end of a run is stored only while the pass is recording, and only for a
+step with an interval above one cron minute or a step in lane `slow`. It is
+written when the step's record is journalled, as epoch seconds, into the hash
+`tick:step-ran` under the swarm's Redis key prefix, one field per step name
+(`scripts.swarm.timing.step_ended` and `step_ends`).
+
+| Outcome of the run | Records an end | Next pass |
+| --- | --- | --- |
+| `ok` | yes | rests inside the interval |
+| `failed` | yes | rests inside the interval |
+| `late` (abandoned at its budget or lane deadline, or finished past its budget) | no | due, since the stored end is the one that let it run |
+| `held` (earlier run still alive) | no | due, since the stored end is the one that let it run |
+| Dropped before it started, or rested | no | keeps the earlier end |
+
+A step with no stored end is due. Nothing rests when the pass has no
+recording store or swarm, and a Redis failure reading the hash makes every
+step due. A failed write prints
+`{"event": "swarm_tick_record_failed", "slug": "<swarm>", "stream": "tick:step-ran"}`
+on stderr and leaves the earlier end in place. A group of steps all at one
+cron minute does not read the hash.
+
+A step that writes the pass state must run every pass, because the steps
+after it read that state from the same pass. The registry refuses a step
+whose interval is above 60 seconds (`registry.PASS_BOX_INTERVAL_S`) and that
+writes a `pass:` domain:
+
+```text
+ValueError: Interval of <step> above 60s writes pass:<key>
+```
+
+The fix is to declare that step at `CRITICAL_S` in `MEASURED`. `ledger health`,
+which writes `pass:stop`, is declared at `CRITICAL_S` for that reason, and
+`snapshot job` moved to `CRITICAL_S` in the same delivery.
+
+Read the stored ends of a swarm from the repository root:
+
+```bash
+~/dev/tcc-ecosystem/.venv/bin/python -c 'from scripts.swarm import store, timing; print(timing.step_ends(store.connect(), "rig-grade-swarm"))'
+```
+
+The result maps each step name to the epoch seconds its last ended run
+finished, for example `{"pane evidence": 1793870400.12, "metrics record": 1793870160.5}`.
+Deleting a field makes that step due on the next pass. Count how often a step
+rested in the latest passes with the report:
+
+```bash
+agentihooks swarm rig-grade-swarm tick-report --passes 60
+```
+
+A 120 second step shows about half its records in the `Skipped` column, a 600
+second step about nine in ten, and a critical step none.
 
 ### When a step exceeds its budget
 
@@ -172,7 +257,7 @@ for (slug, step, writes), n in c.most_common(): print(n, slug, step, ", ".join(w
 A step that appears on most passes loses its writes every time, as the fleet
 red notice did before its budget was measured. Compare its wall time in
 `agentihooks swarm <slug> tick-report --passes 10` with its budget and raise
-its measured p95 in `budgets.MEASURED` through a pull request. Nothing reads
+its floor in `budgets.FLOORS` through a pull request. Nothing reads
 the line back; it is evidence for an operator or an agent, not an input to
 the next pass.
 
@@ -766,8 +851,8 @@ by the engine and does not leave the pass.
 
 1. Write the call as a function `(tick, get) -> actions` in a module under
    `scripts/tick/steps/`, reading its arguments with `get`.
-2. Add the step name to `budgets.MEASURED` with its measured p95 (or
-   `UNMEASURED_S`) and plan interval, then register `CallStep` with every
+2. Add the step name to `budgets.FLOORS` with its floor (two seconds unless
+   measured heavier) and plan interval, then register `CallStep` with every
    field, even at its default, because the
    [tick pattern gate](tick-pattern-gate.md) refuses a step missing any of
    them, as in the example below. Steps run in dependency waves
@@ -777,6 +862,9 @@ by the engine and does not leave the pass.
 3. Import the module in `scripts.swarm.tick` so it registers before the first
    pass, delete the hand written line, and add `tasks.raise_held(box)` after the
    group site if the site is new.
+4. Map the step to a feature and its scenarios as described in
+   [The feature and scenario catalogue](#the-feature-and-scenario-catalogue);
+   `swarm-tick-example` stands for a real feature map id.
 
 ```python
 from collections.abc import Callable
@@ -820,8 +908,38 @@ registry refuses:
 `python -m scripts.tick.catalogue shrink --base <base tree> --head <head tree>` refuses an unmapped step the base
 index does not hold, so the unmapped list only shrinks. Production calls `validate()` without a catalogue and skips
 these checks. The `Tick equivalence` workflow runs `check` on the head and `shrink` from the base tree's copy of the
-module, so a head cannot loosen the ratchet, before the scenario replay. A new step gets a feature map entry and an index row in the pull request that registers it; a
-sweep that maps an existing step removes it from `unmapped` in the same change.
+module, so a head cannot loosen the ratchet, then the tick pattern grader the same way (see [The tick equivalence
+run](tick-pattern-gate.md#the-tick-equivalence-run)), before the scenario replay.
+
+The index holds two keys. `scenarios` maps a step name to the scenario names it runs in; `unmapped` lists the
+registered steps that have no mapping yet. An abridged example:
+
+```json
+{
+  "scenarios": {
+    "example": ["dependency", "running"]
+  },
+  "unmapped": ["automated cleanup", "bottleneck remedy"]
+}
+```
+
+A scenario name is a key of `tests/swarm/tick_scenarios/goldens.json` with its `run_tick/` or `tick/` prefix removed,
+so `run_tick/dependency` and `tick/dependency` are both `dependency`. `load` refuses an index that names a scenario
+with no golden, and a step with an empty scenario list counts as unlisted. A new step is mapped in the pull request
+that registers it. To map an unmapped step, in one change:
+
+1. Set its `feature` to a feature map id, adding the entry to `feature-map.json` if none fits.
+2. Add its name and its scenario names to `scenarios`.
+3. Remove its name from `unmapped`; `check` refuses a mapped step left there.
+4. Run `python -m scripts.tick.catalogue check` from the repository root. `--root <tree>` checks another tree.
+
+`check` and `shrink` print `<n> tick catalogue errors`, then one `::error::` line per error, and exit 1 when there is any
+error, 0 otherwise. A ratchet run against a base tree without an index allows the head's unmapped list, so the first
+change that adds the index passes. A head without the index passes `shrink` with an empty unmapped list, and `check`
+then stops with a traceback on the missing file, so the gate stays red. `check` reports one stage at a time: an index
+naming an unknown scenario is refused first, before the registry runs; then the registry's own refusals, such as
+`Duplicate step name` or `Unordered writers`, each reported as that one line alone; the catalogue errors appear, all
+at once, after both are fixed.
 
 ## Tests
 
@@ -856,10 +974,12 @@ The delivered proof and limitations are recorded in
 
 | Symptom | Check |
 | --- | --- |
-| `Undeclared step timing` at import | Declare that exact step name in `MEASURED` before constructing its `CallStep` |
+| `Undeclared step timing` at import | Declare that exact step name in `FLOORS` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
-| Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
+| Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Only intervals above 60 seconds rest a step, and only while the pass records to the swarm store. Read the stored ends with `timing.step_ends`; a step that ends `late` or `held` stores no end and stays due every pass. See [Interval enforcement](#interval-enforcement) |
+| `Interval of <step> above 60s writes pass:<key>` at registration | The step writes the pass state, which every later step of the pass reads; declare it at `CRITICAL_S` |
+| A wide or slow step runs on every pass | Its last run never ended `ok` or `failed`, the store or swarm is missing from the pass, or reading `tick:step-ran` fails. Read `timing.step_ends` for the swarm and the step's outcome rows in `tick-report` |
 | `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
 | `Unordered reader and writer ... for pass:<key>` on the first pass | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
@@ -876,4 +996,10 @@ The delivered proof and limitations are recorded in
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
 | A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
 | A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
+| `Step <name>: feature '<id>' is not a feature map id` from `catalogue check` | The step's `feature` names no `id` in `feature-map.json`; use an existing id or add the entry |
+| `Step <name>: no scenario lists it` from `catalogue check` | The step has no row, or an empty list, under `scenarios` in `tests/swarm/tick_scenarios/steps.json`; add the scenario names it runs in |
+| `Step <name> is mapped; drop it from the unmapped steps` | The step now has a feature map id and a scenario; remove its name from `unmapped` |
+| `Unmapped step <name> is not registered; drop it` | The step was renamed or removed; remove the old name from `unmapped` |
+| `tests/swarm/tick_scenarios/steps.json names unknown scenarios: <names>` | The index lists a scenario with no golden in `goldens.json`; use a golden key without its `run_tick/` or `tick/` prefix |
+| `Unmapped step <name> is new; map it to a feature and a scenario instead` from `catalogue shrink` | The head added a name to `unmapped` that the base does not hold. Map the step instead; the base copy of the ratchet runs in CI, so editing the head's `catalogue.py` does not clear it |
 | A tick pass raised and later steps of the same group did not run | Expected: the first moved step that raised holds the exception and the rest of the group's moved steps skip until it is raised at the site |

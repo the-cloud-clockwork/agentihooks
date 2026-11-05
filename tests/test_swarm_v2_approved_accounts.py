@@ -1,14 +1,7 @@
-import json
-from collections.abc import Callable, Collection, Mapping
-from typing import Any
-
 import pytest
 
 from hooks.context import account_sessions
 from scripts import session_bands
-from scripts.hive import launch, registry
-from scripts.hive.placement import account_key
-from scripts.routing import aggregate
 from scripts.swarm import capacity
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmConfig
@@ -117,16 +110,9 @@ def _observe(store, account, five_used=10.0, week_used=10.0, week_reset=NOW_MS /
     store.redis.hset(quota.latest_key("claude"), account, quota.encode(observation))
 
 
-def _route(
-    keys: Collection[str],
-    held: Mapping[str, int] | None = None,
-    advertised: Callable[[float], Mapping[str, Mapping[str, Any]]] | None = None,
-    harness: str = "claude",
-) -> tuple[RedisStore, approved.AccountRoute]:
+def _route(keys, held=None):
     store, observations = _quota()
-    route = approved.AccountRoute(
-        lambda: frozenset(keys), observations, lambda: dict(held or {}), harness, advertised or (lambda now: {})
-    )
+    route = approved.AccountRoute(lambda: frozenset(keys), observations, lambda: dict(held or {}), "claude")
     return store, route
 
 
@@ -250,169 +236,133 @@ def test_an_exhausted_key_is_a_closed_row():
     assert (row.state, row.cap) == ("CLOSED", 0)
 
 
-CLOSED_SLOT, OPEN_KEY = "nestorcolt_smatgmail_com", "thecloudclockworkatgmail-com"
-WEEK_RESET = NOW_MS // 1000 + 5 * HOUR
+def _hive_reading(
+    store: RedisStore,
+    slot: str,
+    five_used: object = 10.0,
+    hive: str = "hive-a",
+    observed_ms: int = NOW_MS,
+    heartbeat_ms: int = NOW_MS,
+    others: tuple[str, ...] = (),
+) -> None:
+    import json
 
+    from scripts.hive import registry
 
-def _reading(
-    week_used: float | None,
-    five_used: float | None = None,
-    observed_at: float | None = NOW_MS / 1000,
-    five_reset: int | None = None,
-    week_reset: int = WEEK_RESET,
-) -> dict[str, Any]:
-    return {
-        "five_hour": {"used": five_used, "resets_at": five_reset},
-        "seven_day": {"used": week_used, "resets_at": week_reset},
-        "observed_at": observed_at,
+    registry.update(store.redis, hive, ["max-agents=8"])
+    registry.beat(
+        store.redis,
+        hive,
+        {
+            "heartbeat_at": heartbeat_ms,
+            "slots": [{"harness": "claude", "account": slot, "kind": "subscription", "cap": 6}],
+        },
+    )
+    reading = {
+        "five_hour": {"used": five_used, "resets_at": NOW_MS // 1000 + HOUR},
+        "seven_day": {"used": 40.0, "resets_at": NOW_MS // 1000 + 48 * HOUR},
+        "observed_at": observed_ms / 1000,
     }
+    other = {**reading, "five_hour": {"used": 99.0, "resets_at": NOW_MS // 1000 + HOUR}}
+    readings = {**{name: other for name in others}, f"claude:{slot}": reading}
+    store.redis.set(f"{registry.key(hive)}:quota", json.dumps(readings))
 
 
-def _hives(
-    reading: Mapping[str, Any], slot: str = CLOSED_SLOT
-) -> tuple[Callable[[float], dict[str, Mapping[str, Any]]], list[float]]:
-    seen: list[float] = []
-
-    def advertised(now: float) -> dict[str, Mapping[str, Any]]:
-        seen.append(now)
-        return {account_key(slot): reading}
-
-    return advertised, seen
-
-
-def test_a_closed_account_a_hive_advertises_gets_no_placement() -> None:
-    advertised, seen = _hives(_reading(97.0))
-    _, route = _route({account_key(CLOSED_SLOT), OPEN_KEY}, advertised=advertised)
-    rows = approved.FleetAccounts(route, 1)({}, NOW_MS / 1000, refresh=False)
-    assert rows == [
-        capacity.Account("claude", account_key(CLOSED_SLOT), "CLOSED", 0, None, 3.0, 0, WEEK_RESET),
-        capacity.Account("claude", OPEN_KEY, "OPEN", 0, None, None, 1),
-    ]
-    assert seen == [NOW_MS / 1000]
-    assert [row.name for row in launch._open_rows(rows)] == [OPEN_KEY]
-    assert route.choose(1, planned=account_key(CLOSED_SLOT)) == OPEN_KEY
-
-
-def test_a_quota_successor_never_lands_on_a_closed_account_a_hive_advertises() -> None:
-    store, route = _route({"akey", account_key(CLOSED_SLOT)}, advertised=_hives(_reading(97.0))[0])
-    _observe(store, "akey")
-    assert route.choose(2, planned=account_key(CLOSED_SLOT), predecessor=("claude", "akey")) is None
-
-
-def test_an_open_account_a_hive_advertises_keeps_its_band_under_the_launch_cap_with_its_windows() -> None:
-    reading = _reading(30.0, five_used=50.0, five_reset=NOW_MS // 1000 + HOUR)
-    _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(reading)[0])
-    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+def test_a_secret_key_reads_the_quota_a_live_hive_published_under_its_token_slug() -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=93.0)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
     assert row == capacity.Account(
         "claude",
-        account_key(CLOSED_SLOT),
+        "nestor-coltatgmail-com",
         "OPEN",
         0,
-        50.0,
-        70.0,
-        4,
-        WEEK_RESET,
+        7.0,
+        60.0,
+        2,
+        NOW_MS // 1000 + 48 * HOUR,
         five_resets_at=NOW_MS // 1000 + HOUR,
     )
 
 
-def test_a_codex_account_a_hive_advertises_is_banded_by_its_week_alone() -> None:
-    _, route = _route({"codexkey"}, advertised=_hives(_reading(30.0, five_used=99.0), "codexkey")[0], harness="codex")
-    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
-    assert (row.harness, row.state, row.cap) == ("codex", "OPEN", 6)
+def test_a_hive_reading_for_another_account_leaves_the_key_unread() -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "thecloudclockworkatgmail_com")
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert (row.five_left, row.week_left) == (None, None)
 
 
-def test_an_advertised_reading_without_a_week_keeps_the_launch_cap() -> None:
-    _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(_reading(None))[0])
-    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
-    assert (row.state, row.cap, row.week_left) == ("OPEN", 2, None)
+@pytest.mark.parametrize("five_used", [None, -20.0, "high"])
+def test_a_malformed_hive_reading_leaves_the_key_unread(five_used: object) -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=five_used)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert (row.five_left, row.week_left) == (None, None)
 
 
-def test_a_stale_advertised_reading_keeps_the_launch_cap() -> None:
-    stale = NOW_MS / 1000 - session_bands.FRESH_SECONDS - 1
-    _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(_reading(97.0, observed_at=stale))[0])
-    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
-    assert row == capacity.Account("claude", account_key(CLOSED_SLOT), "OPEN", 0, None, None, 2)
-
-
-DRAINING = {
-    "claude five hour at five": ("claude", 5.0, 50.0, True),
-    "claude five hour above five": ("claude", 5.1, 50.0, False),
-    "claude week at ten": ("claude", None, 10.0, True),
-    "claude week above ten": ("claude", None, 10.1, False),
-    "codex five hour spent": ("codex", 1.0, 50.0, False),
-    "codex week at ten": ("codex", None, 10.0, True),
-    "nothing read": ("claude", None, None, False),
-}
-
-
-@pytest.mark.parametrize(("harness", "five", "week", "expected"), DRAINING.values(), ids=DRAINING.keys())
-def test_a_swarm_account_drains_at_ten_percent_of_its_week_or_five_of_its_five_hours(
-    harness: str, five: float | None, week: float | None, expected: bool
-) -> None:
-    assert approved.draining(harness, five, week) is expected
-
-
-def test_a_draining_account_a_hive_advertises_takes_no_hive_agent() -> None:
-    _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(_reading(92.0))[0])
-    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
-    assert (row.state, row.cap, row.week_left) == ("CLOSED", 0, 8.0)
-
-
-def test_a_draining_fleet_reading_takes_no_hive_agent() -> None:
-    store, route = _route({"akey", "bkey"})
-    _observe(store, "akey", week_used=92.0)
-    [row, _] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
-    assert (row.state, row.cap, row.week_left) == ("CLOSED", 0, 8.0)
-    assert route.choose(6, planned="akey") == "bkey"
-
-
-def test_a_fleet_reading_outranks_what_the_hives_advertise() -> None:
-    store, route = _route({"akey"}, advertised=_hives(_reading(97.0), "akey")[0])
-    _observe(store, "akey")
-    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
-    assert (row.state, row.cap) == ("OPEN", 2)
-
-
-def _hive(store: RedisStore, hive_id: str, heartbeat_ms: int, quotas: Mapping[str, Mapping[str, Any]]) -> None:
-    record = {**registry._default(hive_id), "heartbeat_at": heartbeat_ms}
-    store.redis.hset(
-        registry.key(hive_id), mapping={key: registry._encode(key, value) for key, value in record.items()}
+def _hive_observed(five_used: float, observed_ms: int = NOW_MS) -> quota.Observation:
+    return quota.Observation(
+        "nestor-coltatgmail-com",
+        "claude",
+        "",
+        0,
+        observed_ms,
+        "allowed",
+        five_used,
+        40.0,
+        NOW_MS // 1000 + HOUR,
+        NOW_MS // 1000 + 48 * HOUR,
     )
-    store.redis.sadd(registry.INDEX, hive_id)
-    store.redis.set(f"{registry.key(hive_id)}:quota", json.dumps(quotas))
 
 
-def test_hives_advertise_each_account_by_its_controller_key_with_the_newest_fresh_reading() -> None:
-    store, _ = _quota()
-    now = NOW_MS / 1000
-    stale = now - session_bands.FRESH_SECONDS - 1
-    _hive(
-        store,
-        "one",
-        NOW_MS,
-        {
-            f"claude:{CLOSED_SLOT}": _reading(97.0, observed_at=now - 60),
-            f"codex:{CLOSED_SLOT}": _reading(10.0),
-            "claude:stale_slot": _reading(50.0, observed_at=stale),
-            "claude:unread_slot": _reading(None, observed_at=None),
-        },
+def _hive_lookup(store: RedisStore) -> quota.Observation | None:
+    return quota.hive_observation(store.redis, "nestor-coltatgmail-com", "claude", NOW_MS)
+
+
+def test_the_hive_observation_carries_the_hive_windows_under_the_secret_key_with_no_grant() -> None:
+    store, _ = _route(set())
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=30.0, others=("claude:thecloudclockworkatgmail_com",))
+    assert _hive_lookup(store) == _hive_observed(30.0)
+    assert quota.hive_observation(store.redis, "nestor-coltatgmail-com", "codex", NOW_MS) is None
+
+
+def test_a_dead_hive_reading_is_skipped_for_a_live_one() -> None:
+    store, _ = _route(set())
+    _hive_reading(
+        store, "nestor_coltatgmail_com", five_used=70.0, hive="hive-a", heartbeat_ms=NOW_MS - 10 * HOUR * 1000
     )
-    _hive(store, "two", NOW_MS, {f"claude:{CLOSED_SLOT}": _reading(40.0, observed_at=now - 120)})
-    _hive(store, "three", NOW_MS, {f"claude:{CLOSED_SLOT}": _reading(90.0, observed_at=now - 90)})
-    _hive(store, "gone", NOW_MS - registry.LIVE_MS - 1, {"claude:gone_slot": _reading(10.0)})
-    assert aggregate.advertised(store.redis, "claude", now) == {
-        account_key(CLOSED_SLOT): _reading(97.0, observed_at=now - 60)
-    }
-    assert aggregate.advertised(store.redis, "codex", now) == {account_key(CLOSED_SLOT): _reading(10.0)}
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, hive="hive-b", observed_ms=NOW_MS - 1000)
+    assert _hive_lookup(store) == _hive_observed(20.0, NOW_MS - 1000)
 
 
-def test_of_equally_new_hive_readings_the_lowest_hive_id_wins() -> None:
-    store, _ = _quota()
-    now = NOW_MS / 1000
-    for hive_id, week_used in (("hive-c", 10.0), ("hive-a", 97.0), ("hive-b", 40.0)):
-        _hive(store, hive_id, NOW_MS, {f"claude:{CLOSED_SLOT}": _reading(week_used)})
-    assert aggregate.advertised(store.redis, "claude", now) == {account_key(CLOSED_SLOT): _reading(97.0)}
+def test_an_unreadable_hive_report_is_skipped_for_the_next_hive() -> None:
+    from scripts.hive import registry
+
+    store, _ = _route(set())
+    _hive_reading(store, "nestor_coltatgmail_com", hive="hive-a")
+    store.redis.set(f"{registry.key('hive-a')}:quota", "not json")
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, hive="hive-b")
+    assert _hive_lookup(store) == _hive_observed(20.0)
+
+
+@pytest.mark.parametrize("newer", ["hive-a", "hive-b"])
+def test_the_newest_live_hive_reading_wins(newer: str) -> None:
+    store, _ = _route(set())
+    for hive in ("hive-a", "hive-b"):
+        observed = NOW_MS if hive == newer else NOW_MS - 1000
+        _hive_reading(
+            store, "nestor_coltatgmail_com", five_used=20.0 if hive == newer else 70.0, hive=hive, observed_ms=observed
+        )
+    assert _hive_lookup(store) == _hive_observed(20.0)
+
+
+def test_a_published_observation_holds_against_a_hive_reading_no_newer_than_it() -> None:
+    store, route = _route(set())
+    _observe(store, "nestor-coltatgmail-com", five_used=50.0)
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0)
+    assert getattr(route.quota.latest("nestor-coltatgmail-com", "claude"), "five_used", None) == 50.0
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, observed_ms=NOW_MS + 1000)
+    assert getattr(route.quota.latest("nestor-coltatgmail-com", "claude"), "five_used", None) == 20.0
 
 
 def _sizing(runtime):
@@ -459,9 +409,7 @@ def test_a_runtime_with_a_fleet_source_sees_a_slot_a_launch_took_after_its_sizin
     monkeypatch.setattr(capacity, "accounts", local)
     held = {"akey": 1}
     _, observations = _quota()
-    route = approved.AccountRoute(
-        lambda: frozenset({"akey"}), observations, lambda: dict(held), "claude", lambda now: {}
-    )
+    route = approved.AccountRoute(lambda: frozenset({"akey"}), observations, lambda: dict(held), "claude")
     herdr = HerdrRuntime(choose=local)
     herdr.quota_accounts = approved.FleetAccounts(route, 2)
     _sizing(herdr)

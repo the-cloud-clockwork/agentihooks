@@ -3,9 +3,8 @@ import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from scripts import session_bands
 from scripts.hive import registry
-from scripts.hive.placement import account_key
+from scripts.routing.slots import account_key
 from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 
 if TYPE_CHECKING:
@@ -14,6 +13,12 @@ if TYPE_CHECKING:
 
 def enabled(environ: Mapping[str, str] | None = None) -> bool:
     return RuntimeRouter.from_environ((), os.environ if environ is None else environ).spawn_backend() != LOCAL
+
+
+def name(slot: str) -> str:
+    """The row key of a ``harness:account`` slot, one key for its AH_CC_TOKEN_ slug and its Secret key spelling."""
+    harness, account = slot.split(":", 1)
+    return f"{harness}:{account_key(account)}"
 
 
 def read(redis: "Redis", now: float) -> dict[str, dict]:
@@ -32,19 +37,20 @@ def read(redis: "Redis", now: float) -> dict[str, dict]:
         seen.update(execution for ids in counts.get("_executions", {}).values() for execution in ids)
         quotas = json.loads(redis.get(f"{key}:quota") or "{}")
         for slot in hive["slots"]:
-            name = f"{slot['harness']}:{slot['account']}"
-            row = rows.setdefault(name, {**slot, "sessions": 0, "quota": None})
-            row["sessions"] += counts.get(name, 0)
-            row["masters"] = row.get("masters", 0) + counts.get(f"interactive:{name}", 0)
-            quota = quotas.get(name)
+            reported = f"{slot['harness']}:{slot['account']}"
+            row = rows.setdefault(name(reported), {**slot, "sessions": 0, "quota": None})
+            row["sessions"] += counts.get(reported, 0)
+            row["masters"] = row.get("masters", 0) + counts.get(f"interactive:{reported}", 0)
+            quota = quotas.get(reported)
             if quota is not None and quota["observed_at"] is not None:
                 previous = row["quota"]
                 if previous is None or quota["observed_at"] > previous["observed_at"]:
                     row.update(slot, quota=quota)
-    for name, count in LaunchSlots(redis).counts(seen).items():
-        harness, account = name.split(":", 1)
+    for slot, count in LaunchSlots(redis).counts(seen).items():
+        harness, account = slot.split(":", 1)
         row = rows.setdefault(
-            name, {"harness": harness, "account": account, "kind": "subscription", "quota": None, "sessions": 0}
+            name(slot),
+            {"harness": harness, "account": account, "kind": "subscription", "quota": None, "sessions": 0},
         )
         row["sessions"] += count
     return rows
@@ -57,25 +63,13 @@ def current(now: float) -> dict[str, dict]:
     return {} if redis is None else read(redis, now)
 
 
-def advertised(redis: "Redis", harness: str, now: float) -> dict[str, dict]:
-    """Per account, the newest fresh quota a live hive reports, keyed with - for _ so a controller Secret key finds it;
-    of equally new readings the hive with the lowest id wins."""
-    found: dict[str, dict] = {}
-    for hive in sorted(registry.hives(redis), key=lambda hive: hive["id"]):
-        if not registry.live(hive, int(now * 1000)):
-            continue
-        for name, quota in json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}").items():
-            kind, _, account = name.partition(":")
-            if kind != harness or not session_bands.fresh(quota["observed_at"], now):
-                continue
-            key = account_key(account)
-            if key not in found or quota["observed_at"] > found[key]["observed_at"]:
-                found[key] = quota
-    return found
-
-
 def counts(harness: str, now: float) -> dict[str, int]:
-    return {row["account"]: row["sessions"] for row in current(now).values() if row["harness"] == harness}
+    """Sessions per account under its AH_CC_TOKEN_ slug spelling, the name session and quota readers look up."""
+    return {
+        key.split(":", 1)[1].replace("-", "_"): row["sessions"]
+        for key, row in current(now).items()
+        if key.startswith(f"{harness}:")
+    }
 
 
 def elsewhere(redis: "Redis", harness: str, now: float, own: str) -> dict[str, int]:
@@ -90,13 +84,13 @@ def elsewhere(redis: "Redis", harness: str, now: float, own: str) -> dict[str, i
         report = json.loads(redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         seen.update(execution for ids in report.get("_executions", {}).values() for execution in ids)
         if hive["id"] != own:
-            for name, count in report.items():
-                if name.startswith(f"{harness}:"):
-                    slots[name] = slots.get(name, 0) + count
-    for name, count in LaunchSlots(redis).counts(seen).items():
-        if name.startswith(f"{harness}:"):
-            slots[name] = slots.get(name, 0) + count
-    return {name.split(":", 1)[1]: count for name, count in slots.items()}
+            for slot, count in report.items():
+                if slot.startswith(f"{harness}:"):
+                    slots[slot] = slots.get(slot, 0) + count
+    for slot, count in LaunchSlots(redis).counts(seen).items():
+        if slot.startswith(f"{harness}:"):
+            slots[slot] = slots.get(slot, 0) + count
+    return {slot.split(":", 1)[1]: count for slot, count in slots.items()}
 
 
 def held_elsewhere(harness: str, now: float, own: str) -> dict[str, int]:

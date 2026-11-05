@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scripts.swarm import github_reads, release_wait
+from scripts.swarm import github_reads
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import Unsupported
 from scripts.tick.ports.source_control import (
@@ -124,7 +124,6 @@ class GitHubSourceControl:
     repository: str
     root: Path
     base: str
-    git: Git = subprocess.run
     gh: Git | None = None
 
     def _call(self, args: list[str], deadline: Deadline) -> str:
@@ -238,18 +237,10 @@ class GitHubSourceControl:
         return QueueHealth(entries["totalCount"], tuple(node["state"] for node in entries["nodes"]))
 
     def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
-        """List the remote tags with the commits they name, read over https."""
-        timeout = deadline.live()
-        result = self.git(
-            ["git", *release_wait.HTTPS, "ls-remote", "--tags", "origin"],
-            cwd=self.root,
-            timeout=timeout,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        rows = [line.partition("\t") for line in result.stdout.splitlines() if line]
-        return tuple(Tag(ref.removeprefix("refs/tags/"), sha) for sha, _, ref in rows if not ref.endswith("^{}"))
+        """List the repository's tags with the objects they name, read through the GitHub API."""
+        deadline.live()
+        rows = self._api([f"repos/{self.repository}/git/matching-refs/tags"], deadline)
+        return tuple(Tag(row["ref"].removeprefix("refs/tags/"), row["object"]["sha"]) for row in rows)
 
     def comment(self, reference: ChangeRef, body: str, *, deadline: Deadline) -> Comment:
         """Post a comment on the change."""

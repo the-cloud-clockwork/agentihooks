@@ -56,6 +56,14 @@ jobs:
           fi
           cd "$grader"
           python -m scripts.tick.catalogue shrink --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"
+      - name: Hold the tick step pattern from the base grader copy
+        run: |
+          grader=head
+          if [[ -f base/scripts/tick_pattern.py ]]; then
+            grader=base
+          fi
+          cd "$grader"
+          python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"
       - name: Replay tick scenarios on base and head concurrently and check the dropped action
         env:
           TICK_EQUIVALENCE_PLANT: ${{ inputs.tick_plant && '1' || '0' }}

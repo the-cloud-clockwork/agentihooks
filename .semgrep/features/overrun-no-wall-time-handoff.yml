@@ -1,0 +1,35 @@
+rules:
+  - id: feature-overrun-no-wall-time-handoff
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-04, the only deadline is the context window: wall time on a claimed task never asks an agent
+      to hand off and never retires or reopens it. A branch gated on a *_MINUTES threshold other than REPORT_MINUTES
+      must not call retire, and no message may combine "minute(s)" wording with "hand off"/"handoff" wording.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  def $FUNC(...):
+                    ...
+              - pattern-either:
+                  - pattern: $X.retire($AGENT)
+                  - pattern: $X.retire($AGENT, ...)
+              - pattern-inside: |
+                  def $FUNC(...):
+                    ...
+                    if $MIN >= $THRESH:
+                      ...
+              - metavariable-regex:
+                  metavariable: $THRESH
+                  regex: (?i)^(?!REPORT_MINUTES$).*MINUTES?$
+          - patterns:
+              - pattern: $NAME = $STR
+              - metavariable-regex:
+                  metavariable: $STR
+                  regex: (?is)^['"](?=[^'"]*\bminutes?\b)(?=[^'"]*(hand[ -]?off|handoff))[^'"]*['"]$
+    paths:
+      include:
+        - /scripts/swarm/
+        - /scripts/tick/
+        - '*.test.py'

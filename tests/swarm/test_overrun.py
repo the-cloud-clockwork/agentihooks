@@ -205,6 +205,7 @@ def test_a_mark_left_from_another_task_starts_over() -> None:
     assert len(swarm.tick(REPORT + MINUTE)) == 1 and len(swarm.master()) == 2
 
 
+@pytest.mark.feature("overrun-no-wall-time-handoff")
 def test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end() -> None:
     swarm = Swarm()
     actions = [action for at in range(START, START + 201 * MINUTE, MINUTE) for action in swarm.tick(at)]
