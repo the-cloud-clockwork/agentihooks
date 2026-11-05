@@ -23,9 +23,16 @@ ABANDONED = "swarm_tick_step_abandoned"
 class Redis:
     def __init__(self) -> None:
         self.rows: list[tuple[str, dict[str, Any]]] = []
+        self.hashes: dict[str, dict[str, str]] = {}
 
     def xadd(self, key: str, fields: dict[str, str], **kwargs: Any) -> None:
         self.rows.append((key, json.loads(fields["record"])))
+
+    def hset(self, key: str, field: str, value: str) -> None:
+        self.hashes.setdefault(key, {})[field] = value
+
+    def hgetall(self, key: str) -> dict[str, str]:
+        return dict(self.hashes.get(key, {}))
 
 
 class Store:

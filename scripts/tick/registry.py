@@ -48,12 +48,19 @@ def _catalogue_errors(steps: list[Step], catalogue: Catalogue) -> list[str]:
     return errors + [f"Unmapped step {name} is not registered; drop it" for name in sorted(stale)]
 
 
+PASS_BOX = "pass:"
+PASS_BOX_INTERVAL_S = 60.0
+
+
 def _validate_timing(steps: list[Step]) -> None:
     for step in steps:
         if not isfinite(step.budget_s) or step.budget_s <= 0:
             raise ValueError(f"Invalid budget for {step.name}: expected finite positive seconds")
         if not isfinite(step.interval_s) or step.interval_s < 0:
             raise ValueError(f"Invalid interval for {step.name}: expected finite nonnegative seconds")
+        boxes = sorted(domain for domain in step.writes if domain.startswith(PASS_BOX))
+        if step.interval_s > PASS_BOX_INTERVAL_S and boxes:
+            raise ValueError(f"Interval of {step.name} above {PASS_BOX_INTERVAL_S:g}s writes {', '.join(boxes)}")
 
 
 def _dependency_waves(steps: list[Step]) -> tuple[tuple[Step, ...], ...]:
