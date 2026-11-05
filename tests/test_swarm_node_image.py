@@ -665,7 +665,7 @@ def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
     "failure",
     [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout", "incomplete-read", "read-reset", "wrapped-reset"],
 )
-@pytest.mark.parametrize("failures", [1, 4, 5])
+@pytest.mark.parametrize("failures", [1, 4, 9, 10])
 def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action, failure, failures):
     path, lock, payloads = locked
     herdr = lock["tools"]["herdr"]
@@ -703,7 +703,7 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
         argv.extend(["--tool", "herdr"])
     monkeypatch.setattr("sys.argv", argv)
     selected = {"herdr": herdr} if action == "install" else lock["tools"]
-    if failures == 5:
+    if failures == 10:
         with pytest.raises(type(error)) as caught:
             worker_image.main()
         assert caught.value is error
@@ -718,7 +718,8 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
     expected_attempts, delays = {
         1: (2, [1]),
         4: (5, [1, 2, 4, 8]),
-        5: (5, [1, 2, 4, 8]),
+        9: (10, [1, 2, 4, 8, 16, 30, 30, 30, 30]),
+        10: (10, [1, 2, 4, 8, 16, 30, 30, 30, 30]),
     }[failures]
     assert {url: attempts.count(url) for url in attempts} == {
         tool["url"]: expected_attempts for tool in selected.values()
@@ -745,6 +746,21 @@ def test_tool_download_does_not_retry_permanent_errors(locked, tmp_path, monkeyp
     opened.assert_called_once_with(tool["url"], timeout=120)
     sleeps.assert_not_called()
     assert not (tmp_path / tool["sha256"]).exists()
+
+
+def test_tool_download_retries_an_attempt_that_overruns_its_deadline(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    tool = lock["tools"]["herdr"]
+    clock = [0, worker_image.ATTEMPT_SECONDS + 1]
+    monkeypatch.setattr("time.monotonic", lambda: clock.pop(0) if clock else 1000)
+    sleeps = Mock()
+    monkeypatch.setattr("time.sleep", sleeps)
+    opened = Mock(side_effect=lambda url, timeout: io.BytesIO(payloads[url]))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    assert worker_image.fetch("herdr", tool, tmp_path) == payloads[tool["url"]]
+    assert opened.call_count == 2
+    sleeps.assert_called_once_with(1)
+    assert (tmp_path / tool["sha256"]).read_bytes() == payloads[tool["url"]]
 
 
 @pytest.mark.parametrize("action", ["install", "download"])
