@@ -229,10 +229,20 @@ def test_cache_due_is_false_once_the_wait_itself_ends(inbox):
     assert cache_items(inbox) == []
 
 
-def test_cache_due_needs_a_known_activity_time():
-    wait = {"until": BASE + 3 * CACHE_LIMIT, "reason": "checks on the pull request"}
-    assert not stale_nudge.cache_due(wait, 0, BASE)
-    assert stale_nudge.cache_due(wait, BASE - CACHE_LIMIT - 1, BASE)
+def test_cache_due_needs_a_known_activity_time() -> None:
+    assert not stale_nudge.cache_due(0, BASE)
+    assert stale_nudge.cache_due(BASE - CACHE_LIMIT - 1, BASE)
+
+
+def test_cache_due_starts_only_past_forty_whole_minutes() -> None:
+    assert not stale_nudge.cache_due(BASE, BASE + CACHE_LIMIT)
+    assert stale_nudge.cache_due(BASE, BASE + CACHE_LIMIT + 1)
+
+
+def test_a_silent_agent_without_a_wait_gets_the_stale_nudge_and_no_cache_warm_item(inbox: InboxStore) -> None:
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + 3 * CACHE_LIMIT, "", BASE)
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT + MINUTE) != []
+    assert cache_items(inbox) == [] and len(nudges(inbox)) == 1
 
 
 def test_the_cache_warm_id_hashes_the_forty_minute_window_since_the_last_activity():

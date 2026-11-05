@@ -40,14 +40,9 @@ def stale(beat: dict | None, last_ms: int, wait: dict | None, provider_error: st
     return silent
 
 
-def cache_due(wait: dict[str, object] | None, last_ms: int, now_ms: int) -> bool:
-    if not wait:
-        return False
-    until = wait.get("until", 0)
-    reason = wait.get("reason", "")
-    named = bool(wait.get("on")) or bool(str(reason).strip())
-    open_wait = isinstance(until, int) and until > now_ms
-    return bool(last_ms) and open_wait and named and now_ms - last_ms > CACHE_LIMIT_MS
+def cache_due(last_ms: int, now_ms: int) -> bool:
+    """Called only once stale has ruled out a nudge, so past the ten minute limit the agent sits in a named open wait."""
+    return bool(last_ms) and now_ms - last_ms > CACHE_LIMIT_MS
 
 
 def window(last_ms: int, now_ms: int) -> int:
@@ -89,7 +84,7 @@ def nudge(inbox: InboxStore, slug: str, agent: AgentRecord, provider_error: str,
     last_ms = last_activity(beat, agent)
     wait = idle.wait(redis, slug, agent.name)
     if not stale(beat, last_ms, wait, provider_error, now_ms):
-        if cache_due(wait, last_ms, now_ms):
+        if cache_due(last_ms, now_ms):
             return _send_cache_warm(inbox, slug, agent, last_ms, now_ms)
         return []
     reason = ERROR_REASON if provider_error else IDLE_REASON
