@@ -236,7 +236,7 @@ def test_an_exhausted_key_is_a_closed_row():
     assert (row.state, row.cap) == ("CLOSED", 0)
 
 
-def _hive_reading(store, slot, five_used=10.0, week_used=40.0):
+def _hive_reading(store: RedisStore, slot: str, five_used: object = 10.0, week_used: float = 40.0) -> None:
     import json
 
     from scripts.hive import registry
@@ -255,7 +255,7 @@ def _hive_reading(store, slot, five_used=10.0, week_used=40.0):
     store.redis.set(f"{registry.key('hive-a')}:quota", json.dumps({f"claude:{slot}": reading}))
 
 
-def test_a_secret_key_reads_the_quota_a_live_hive_published_under_its_token_slug():
+def test_a_secret_key_reads_the_quota_a_live_hive_published_under_its_token_slug() -> None:
     store, route = _route({"nestor-coltatgmail-com"})
     _hive_reading(store, "nestor_coltatgmail_com", five_used=93.0)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
@@ -272,9 +272,17 @@ def test_a_secret_key_reads_the_quota_a_live_hive_published_under_its_token_slug
     )
 
 
-def test_a_hive_reading_for_another_account_leaves_the_key_unread():
+def test_a_hive_reading_for_another_account_leaves_the_key_unread() -> None:
     store, route = _route({"nestor-coltatgmail-com"})
     _hive_reading(store, "thecloudclockworkatgmail_com")
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert (row.five_left, row.week_left) == (None, None)
+
+
+@pytest.mark.parametrize("five_used", [None, -20.0, "high"])
+def test_a_malformed_hive_reading_leaves_the_key_unread(five_used: object) -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=five_used)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
     assert (row.five_left, row.week_left) == (None, None)
 

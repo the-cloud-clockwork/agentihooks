@@ -126,7 +126,7 @@ def _report(report: object, now: int) -> dict:
 
 
 def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) -> Observation | None:
-    """The newest reading a live hive published for the account, matched whatever its name separators."""
+    """The newest valid reading a live hive published for the account, matched whatever its name separators."""
     from scripts.hive import registry
     from scripts.routing.slots import account_key
 
@@ -134,25 +134,29 @@ def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) ->
     for hive in registry.hives(redis):
         if not registry.live(hive, now_ms):
             continue
-        for slot, reading in json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}").items():
-            named, _, name = slot.partition(":")
-            at = reading.get("observed_at")
-            if named != harness or account_key(name) != wanted or at is None:
+        try:
+            readings = dict(json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}"))
+        except (ValueError, TypeError):
+            continue
+        for slot, reading in readings.items():
+            named, _, name = str(slot).partition(":")
+            if named != harness or account_key(name) != wanted:
                 continue
-            if newest is None or int(at * 1000) > newest.observed_ms:
+            try:
                 five, week = reading["five_hour"], reading["seven_day"]
-                newest = Observation(
-                    account,
-                    harness,
-                    "",
-                    0,
-                    int(at * 1000),
-                    "allowed",
-                    five["used"],
-                    week["used"],
-                    five["resets_at"],
-                    week["resets_at"],
-                )
+                report = {
+                    "observed_ms": int(reading["observed_at"] * 1000),
+                    "provider_status": "allowed",
+                    "five_used": five["used"],
+                    "week_used": week["used"],
+                    "five_reset": five["resets_at"],
+                    "week_reset": week["resets_at"],
+                }
+                fields = _report(report, now_ms)
+            except (KeyError, TypeError, ValueError, SwarmError):
+                continue
+            if newest is None or fields["observed_ms"] > newest.observed_ms:
+                newest = Observation(account, harness, "", 0, **fields)
     return newest
 
 
