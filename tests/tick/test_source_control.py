@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import release_wait
 from scripts.tick.adapters import fakes, github
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Unsupported
@@ -686,42 +685,18 @@ def test_fake_issue_and_rate_limit_tools_record_and_answer(
     assert provider.calls == [fakes.Call(operation, args, deadline)]
 
 
-def test_github_tags_read_the_git_remote(tmp_path: Path) -> None:
-    seen: list[tuple[list[str], dict[str, object]]] = []
-
-    def git(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        seen.append((command, options))
-        output = "a1\trefs/tags/v1.0.0\nb2\trefs/tags/v1.0.0^{}\n\nc3\trefs/tags/v1.1.0\n"
-        return subprocess.CompletedProcess(command, 0, output, "")
-
-    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=git)
+def test_github_tags_read_the_matching_refs_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    refs = [{"ref": "refs/tags/v1.0.0", "object": {"sha": "a1"}}, {"ref": "refs/tags/v1.1.0", "object": {"sha": "c3"}}]
+    provider, recorder = _provider(monkeypatch, tmp_path, [refs])
 
     assert provider.tags(deadline=_deadline()) == (port.Tag("v1.0.0", "a1"), port.Tag("v1.1.0", "c3"))
-    command = ["git", *release_wait.HTTPS, "ls-remote", "--tags", "origin"]
-    assert seen == [(command, {"cwd": tmp_path, "timeout": 9, **OPTIONS})]
-
-
-def test_github_tags_read_a_github_ssh_origin_over_https(tmp_path: Path) -> None:
-    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "remote", "add", "origin", "git@github.com:owner/project.git"],
-        check=True,
-        capture_output=True,
-    )
-    urls: list[str] = []
-
-    def git(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        at = command.index("ls-remote")
-        shown = subprocess.run(
-            [*command[:at], "ls-remote", "--get-url", "origin"], cwd=tmp_path, capture_output=True, text=True
+    assert recorder.calls == [
+        (
+            github.CALLER,
+            ["api", "repos/owner/project/git/matching-refs/tags"],
+            {"cwd": tmp_path, "timeout": 9, **REST},
         )
-        urls.append(shown.stdout.strip())
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=git)
-
-    assert provider.tags(deadline=_deadline()) == ()
-    assert urls == ["https://github.com/owner/project.git"]
+    ]
 
 
 def test_github_defaults() -> None:
@@ -761,7 +736,7 @@ def test_github_expired_deadline_prevents_external_reads(
         pytest.fail("expired deadline reached the provider")
 
     monkeypatch.setattr(github.github_reads, "rest", refuse)
-    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=refuse)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
 
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         getattr(provider, operation)(*args, deadline=Deadline(0, clock=lambda: 0.0))
