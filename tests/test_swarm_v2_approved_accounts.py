@@ -292,12 +292,19 @@ def test_a_hive_reading_for_another_account_leaves_the_key_unread() -> None:
     assert (row.five_left, row.week_left) == (None, None)
 
 
-@pytest.mark.parametrize("five_used", [None, -20.0, "high"])
+@pytest.mark.parametrize("five_used", [-20.0, "high"])
 def test_a_malformed_hive_reading_leaves_the_key_unread(five_used: object) -> None:
     store, route = _route({"nestor-coltatgmail-com"})
     _hive_reading(store, "nestor_coltatgmail_com", five_used=five_used)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
     assert (row.five_left, row.week_left) == (None, None)
+
+
+def test_a_hive_reading_with_no_five_hour_window_opens_the_key_by_its_week() -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=None)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 60.0, 4)
 
 
 def _hive_observed(five_used: float, observed_ms: int = NOW_MS) -> quota.Observation:

@@ -179,8 +179,8 @@ def test_an_undecodable_record_hides_no_other_account(world, monkeypatch):
     [
         None,
         {"provider_status": "error", "observed_ms": 240000},
-        {**STALE_FULL, "five_used": None},
         {**STALE_FULL, "week_used": None},
+        {**STALE_FULL, "five_used": None, "five_reset": None, "week_used": None},
         {**STALE_FULL, "provider_status": "error"},
     ],
 )
@@ -191,6 +191,19 @@ def test_missing_or_failed_quota_data_is_unknown_never_full(world, report):
     assert world.quota.reading(ACCOUNT, HARNESS) == quota.Reading(ACCOUNT, HARNESS, quota.UNKNOWN, age)
     assert world.quota.cap(ACCOUNT, HARNESS) == 0
     assert world.quota.admit(ACCOUNT, HARNESS).action == quota.WAIT
+
+
+def test_a_claude_reading_with_no_five_hour_window_routes_by_its_week(world):
+    world.publish({**STALE_FULL, "five_used": None, "five_reset": None, "week_used": 8.0})
+    reading = world.quota.reading(ACCOUNT, HARNESS)
+    assert (reading.state, reading.routing_left, reading.five_left, reading.week_left) == (
+        quota.OBSERVED,
+        92.0,
+        None,
+        92.0,
+    )
+    assert world.quota.cap(ACCOUNT, HARNESS) == 6
+    assert world.quota.admit(ACCOUNT, HARNESS).action == quota.ADMIT
 
 
 def test_an_aged_reading_is_unknown(world):
