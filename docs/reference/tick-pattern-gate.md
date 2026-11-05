@@ -359,6 +359,9 @@ the base allowlist does not hold it. Reach the inbox, classifier, metrics
 spool and host jobs through the port tools in `ctx.tools` instead. The
 general steps for adding a step are in
 [Tick engine steps](tick-engine-steps.md#adding-a-step-to-a-group).
+`python -m scripts.tick.new_step` writes a step that passes, with its budget
+row, test, index row and feature entry; see
+[Tick step skill and rule](tick-step-skill.md#the-scaffold).
 
 ## Removing offences
 
