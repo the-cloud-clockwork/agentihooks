@@ -6,7 +6,8 @@ declaration, and each import of an adapted implementation from a module outside 
 whose text or measurement the head changes against the base grade, as a budgets table change does, so a
 stale entry for an untouched file never fails. A changed file may hold only offences its base allowlist or its base
 measurement holds for it, and its head record must match its measurement; an unchanged file's head record
-may hold only what those hold.
+may hold only what those hold. The promotion tier runs --tree on each dev push: the whole tree's measurement must
+equal its recorded allowlist, so drift two green pull requests merge between them turns promotion red.
 """
 
 import argparse
@@ -19,6 +20,7 @@ from scripts.size_limits import GradeError, files
 SCOPE = ("scripts/tick/", "scripts/swarm/tick.py")
 TICK = "scripts/swarm/tick.py"
 BUDGETS = "scripts/tick/steps/budgets.py"
+TABLES = ("FLOORS", "MEASURED")
 STEPS = "scripts/tick/"
 ADAPTERS = "scripts/tick/adapters/"
 ALLOWLIST = Path("tests/TICK_PATTERN_ALLOWLIST.json")
@@ -56,7 +58,7 @@ def floors(source: str) -> dict[str, str]:
             target, table = node.targets[0], node.value
         else:
             continue
-        if not (isinstance(target, ast.Name) and target.id == "MEASURED" and isinstance(table, ast.Dict)):
+        if not (isinstance(target, ast.Name) and target.id in TABLES and isinstance(table, ast.Dict)):
             continue
         for key, value in zip(table.keys, table.values):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
@@ -178,35 +180,62 @@ def grade(
     changed: set[str],
     held: dict[str, list[str]],
 ) -> list[str]:
-    """Reject offences in a changed file and records of an unchanged one that neither the base allowlist nor the
-    base measurement held holds, and a changed file whose head record differs from its measurement; a base without
-    an allowlist allows what the head records."""
-    allowed = (recorded or {}) if base is None else base
+    """Reject a missing base allowlist, offences in a changed file and records of an unchanged one that neither
+    the base allowlist nor the base measurement held holds, and a missing head allowlist or a changed file whose
+    head record differs from its measurement."""
+    if base is None:
+        return [f"{ALLOWLIST} is missing from the base"]
     graded = {name: head.get(name, []) for name in changed}
     graded |= {name: offences for name, offences in (recorded or {}).items() if name not in changed}
     errors = [
         f"{name} adds {offence}; the base allowlist does not hold it"
         for name, offences in sorted(graded.items())
         for offence in offences
-        if offence not in allowed.get(name, []) and offence not in held.get(name, [])
+        if offence not in base.get(name, []) and offence not in held.get(name, [])
     ]
     if recorded is None or any(recorded.get(name) != head.get(name) for name in changed):
         errors.append(f"{ALLOWLIST} differs from the head's measurement; run python -m scripts.tick_pattern --write")
     return errors
 
 
+def drift(recorded: dict[str, list[str]] | None, head: dict[str, list[str]]) -> list[str]:
+    """Each offence the whole tree measurement head and its recorded allowlist disagree on, file by file."""
+    if recorded is None:
+        return [f"{ALLOWLIST} is missing; run python -m scripts.tick_pattern --write"]
+    errors: list[str] = []
+    for name in sorted(set(recorded) | set(head)):
+        measured_here, recorded_here = set(head.get(name, [])), set(recorded.get(name, []))
+        errors += [
+            f"{name} measures {offence}; {ALLOWLIST} does not record it"
+            for offence in sorted(measured_here - recorded_here)
+        ] + [
+            f"{name} no longer measures {offence}; {ALLOWLIST} still records it"
+            for offence in sorted(recorded_here - measured_here)
+        ]
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Grade the files the head changes against the base, or record the head's allowlist with --write."""
+    """Grade the files the head changes against the base, compare the whole head tree with its allowlist with
+    --tree, or record the head's allowlist with --write."""
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--base")
     mode.add_argument("--write", action="store_true")
+    mode.add_argument("--tree", action="store_true")
     parser.add_argument("--head", type=Path, default=Path("."))
     args = parser.parse_args(argv)
     try:
         if args.write:
             write(args.head)
             return 0
+        if args.tree:
+            head, recorded = measure(args.head), load(args.head)
+            errors = drift(recorded, head)
+            print(f"{sum(map(len, head.values()))} tick pattern offences in {len(head)} files, {len(errors)} drifts")
+            for error in errors:
+                print(f"::error::{error}")
+            return 1 if errors else 0
         texts, prior = scoped(args.head), scoped(Path(args.base))
         head, held = measured(texts), measured(prior)
         recorded, base = load(args.head), load(Path(args.base))

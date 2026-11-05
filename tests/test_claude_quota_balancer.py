@@ -112,6 +112,16 @@ def test_an_email_named_account_is_discovered_routed_and_shown():
     assert " 2/" in row and "80%" in row
 
 
+def test_a_dashed_controller_key_routes_to_the_hive_underscore_slot() -> None:
+    environ = {"AH_CC_TOKEN_nestorcoltathotmail_com": "tok-a", "AH_CC_TOKEN_other": "tok-b"}
+
+    decision = balancer.forced(environ, "nestorcoltathotmail-com")
+
+    assert decision.credential is not None
+    assert decision.credential.env_name == "AH_CC_TOKEN_nestorcoltathotmail_com"
+    assert decision.credential.account == "nestorcoltathotmail_com"
+
+
 def test_probe_passes_only_selected_oauth_token(monkeypatch):
     observed = {}
 

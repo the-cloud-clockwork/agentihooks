@@ -11,7 +11,7 @@ from scripts import tick_pattern
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[1]
-BUDGETS = 'MEASURED = {\n    "beat": Timing(1.0, CRITICAL_S),\n    "odd": Timing(1.0, 30.0),\n}\n'
+BUDGETS = 'FLOORS = {\n    "beat": Timing(1.0, CRITICAL_S),\n    "odd": Timing(1.0, 30.0),\n}\n'
 FULL = 'CallStep("beat", "g", call, needs=n, reads=r, writes=w, lane=l, effects=e, feature="f")\n'
 STEP = "scripts/tick/steps/one.py"
 TICK = "def run_tick():\n    return 1\n"
@@ -151,12 +151,24 @@ def test_an_allowlisted_offence_kept_or_removed_is_green(tmp_path: Path, capsys:
     assert _grade(base, gone, capsys) == (0, "0 tick pattern offences in 0 files, 2 on the base allowlist, 0 errors\n")
 
 
-def test_a_base_without_an_allowlist_allows_what_the_head_records(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_base_without_an_allowlist_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {tick_pattern.TICK: TICK})
     head = _recorded(tmp_path / "head", {tick_pattern.TICK: TICK})
-    assert _grade(base, head, capsys) == (0, "1 tick pattern offences in 1 files, 0 on the base allowlist, 0 errors\n")
+    assert _grade(base, head, capsys) == (
+        1,
+        "1 tick pattern offences in 1 files, 0 on the base allowlist, 1 errors\n"
+        f"::error::{tick_pattern.ALLOWLIST} is missing from the base\n",
+    )
+
+
+def test_a_clean_head_on_a_base_without_an_allowlist_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _tree(tmp_path / "base", {tick_pattern.TICK: "X = 1\n"})
+    head = _recorded(tmp_path / "head", {tick_pattern.TICK: "X = 1\n"})
+    assert _grade(base, head, capsys) == (
+        1,
+        "0 tick pattern offences in 0 files, 0 on the base allowlist, 1 errors\n"
+        f"::error::{tick_pattern.ALLOWLIST} is missing from the base\n",
+    )
 
 
 def test_files_outside_the_scope_are_not_graded(tmp_path: Path) -> None:
@@ -189,7 +201,7 @@ def test_a_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.C
 
 def test_a_budgets_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _recorded(tmp_path / "base", {STEP: FULL})
-    head = _tree(tmp_path / "head", {tick_pattern.BUDGETS: "MEASURED = {\n", STEP: FULL})
+    head = _tree(tmp_path / "head", {tick_pattern.BUDGETS: "FLOORS = {\n", STEP: FULL})
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert out.startswith(f"::error::cannot parse {tick_pattern.BUDGETS}: ")
@@ -199,7 +211,11 @@ def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         tick_pattern.main([])
     assert raised.value.code == 2
-    assert capsys.readouterr().err.splitlines()[-1].endswith(": error: one of the arguments --base --write is required")
+    assert (
+        capsys.readouterr()
+        .err.splitlines()[-1]
+        .endswith(": error: one of the arguments --base --write --tree is required")
+    )
 
 
 def test_grading_defaults_the_head_to_the_working_folder(
@@ -214,9 +230,14 @@ def test_grading_defaults_the_head_to_the_working_folder(
 
 def test_floors_reads_only_the_measured_table() -> None:
     source = (
-        'OTHER = {"x": Timing(1, WIDE_S)}\nMEASURED: dict = {**OTHER, 3: 4, "a": Timing(1, SLOW_S), "b": Timing(1)}\n'
+        'OTHER = {"x": Timing(1, WIDE_S)}\nFLOORS: dict = {**OTHER, 3: 4, "a": Timing(1, SLOW_S), "b": Timing(1)}\n'
     )
     assert tick_pattern.floors(source) == {"a": "SLOW_S", "b": ""}
+
+
+def test_floors_reads_the_floors_table() -> None:
+    source = 'OTHER = {"x": Timing(1, WIDE_S)}\nFLOORS = {"a": Timing(2.0, CRITICAL_S)}\n'
+    assert tick_pattern.floors(source) == {"a": "CRITICAL_S"}
 
 
 def test_an_untouched_file_whose_record_is_stale_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -301,3 +322,54 @@ def test_an_offence_only_the_base_allowlist_holds_is_allowed() -> None:
 def test_the_allowlist_is_sorted_json() -> None:
     text = (_ROOT / tick_pattern.ALLOWLIST).read_text()
     assert text == json.dumps(json.loads(text), indent=1, sort_keys=True) + "\n"
+
+
+def test_the_whole_tree_matching_its_allowlist_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    files = {STEP: FULL.replace('"beat"', '"lost"'), "scripts/tick/steps/two.py": 'steps.CallStep("beat", "g", call)\n'}
+    tree = _recorded(tmp_path, files)
+    assert tick_pattern.main(["--tree", "--head", str(tree)]) == 0
+    assert capsys.readouterr().out == "7 tick pattern offences in 2 files, 0 drifts\n"
+
+
+def test_whole_tree_drift_in_an_untouched_file_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tree = _recorded(tmp_path, {STEP: FULL})
+    (tree / STEP).write_text(FULL + FULL.replace('"beat"', '"lost"'))
+    assert tick_pattern.main(["--tree", "--head", str(tree)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "1 tick pattern offences in 1 files, 1 drifts",
+        f"::error::{STEP} measures step lost: no budget row; {tick_pattern.ALLOWLIST} does not record it",
+    ]
+
+
+def test_drift_names_stale_records_padded_records_and_a_missing_allowlist() -> None:
+    held = {"a.py": ["def one"], "b.py": ["def two", "def zero"]}
+    allowlist = tick_pattern.ALLOWLIST
+    assert tick_pattern.drift(held, held) == []
+    assert tick_pattern.drift(held, {"a.py": ["def one"], "b.py": ["def zero"]}) == [
+        f"b.py no longer measures def two; {allowlist} still records it"
+    ]
+    assert tick_pattern.drift({}, {"a.py": ["def one", "def two"]}) == [
+        f"a.py measures def one; {allowlist} does not record it",
+        f"a.py measures def two; {allowlist} does not record it",
+    ]
+    assert tick_pattern.drift({"a.py": ["def one"]}, {"a.py": ["def two"]}) == [
+        f"a.py measures def two; {allowlist} does not record it",
+        f"a.py no longer measures def one; {allowlist} still records it",
+    ]
+    assert tick_pattern.drift({"b.py": ["def two"]}, {"a.py": ["def one"]}) == [
+        f"a.py measures def one; {allowlist} does not record it",
+        f"b.py no longer measures def two; {allowlist} still records it",
+    ]
+    assert tick_pattern.drift({"gone.py": ["def x"]}, {}) == [
+        f"gone.py no longer measures def x; {allowlist} still records it"
+    ]
+    assert tick_pattern.drift(None, {}) == [
+        f"{tick_pattern.ALLOWLIST} is missing; run python -m scripts.tick_pattern --write"
+    ]
+
+
+def test_the_tree_mode_reports_a_file_that_does_not_parse(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tree = _recorded(tmp_path, {STEP: FULL})
+    (tree / STEP).write_text("def (\n")
+    assert tick_pattern.main(["--tree", "--head", str(tree)]) == 1
+    assert capsys.readouterr().out.startswith(f"::error::cannot parse {STEP}")

@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -1012,7 +1013,13 @@ def test_two_shards_of_one_statistics_part_measure_without_a_measured_plan(
     names = [f"scripts.sample.x_f__mutmut_{index}" for index in (1, 2, 3, 4)]
 
     def mutate(
-        root: Path, work: Path, files: dict, deadline: float, shard: tuple[int, int], group: object
+        root: Path,
+        work: Path,
+        files: dict,
+        deadline: float,
+        shard: tuple[int, int],
+        group: object,
+        first: tuple[str, ...] = (),
     ) -> tuple[dict, str]:
         owned = sorted(names)[shard[0] :: shard[1]]
         meta = work / "mutants/scripts/sample.py.meta"
@@ -1375,6 +1382,8 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     assert "Mutation bases: earlier merged\nChanged line mutants: 40\n" in text
     assert "Estimated mutation seconds: 1601, slowest stats bucket: 121\n" in text
     assert "Mutation shards: 4\nStats parts: 3\n" in text
+    assert re.search(r"^Mutation plan CPU seconds: \d+\.\d$", text, re.MULTILINE)
+    assert plan.scope.HELD == {}
 
 
 @pytest.mark.parametrize("changed", [{}, {"scripts/sample.py": {2}}])

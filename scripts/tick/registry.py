@@ -1,11 +1,55 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from importlib import import_module
 from itertools import combinations
 from math import isfinite
 
 from scripts.tick.step import Step
 
-__all__ = ["Registry", "latest_start", "ordered", "register", "registry", "require", "steps", "validate", "waves"]
+__all__ = [
+    "Catalogue",
+    "Registry",
+    "latest_start",
+    "ordered",
+    "register",
+    "registry",
+    "require",
+    "steps",
+    "validate",
+    "waves",
+]
+
+
+@dataclass(frozen=True)
+class Catalogue:
+    """The feature map ids, the scenario names listing each step by name and the steps allowed to lack either."""
+
+    features: frozenset[str]
+    scenarios: Mapping[str, frozenset[str]]
+    unmapped: frozenset[str] = frozenset()
+
+
+def _catalogue_gaps(step: Step, catalogue: Catalogue) -> list[str]:
+    """Each way ``step`` lacks a feature map entry or a scenario in ``catalogue``."""
+    reasons = [f"feature {step.feature!r} is not a feature map id"] if step.feature not in catalogue.features else []
+    return reasons + ([] if catalogue.scenarios.get(step.name) else ["no scenario lists it"])
+
+
+def _catalogue_errors(steps: list[Step], catalogue: Catalogue) -> list[str]:
+    """Refuse each step lacking a feature map entry or a scenario unless unmapped, and each stale unmapped entry."""
+    errors: list[str] = []
+    for step in steps:
+        reasons = _catalogue_gaps(step, catalogue)
+        if reasons and step.name not in catalogue.unmapped:
+            errors.append(f"Step {step.name}: {'; '.join(reasons)}")
+        elif not reasons and step.name in catalogue.unmapped:
+            errors.append(f"Step {step.name} is mapped; drop it from the unmapped steps")
+    stale = catalogue.unmapped - {step.name for step in steps}
+    return errors + [f"Unmapped step {name} is not registered; drop it" for name in sorted(stale)]
+
+
+PASS_BOX = "pass:"
+PASS_BOX_INTERVAL_S = 60.0
 
 
 def _validate_timing(steps: list[Step]) -> None:
@@ -14,6 +58,9 @@ def _validate_timing(steps: list[Step]) -> None:
             raise ValueError(f"Invalid budget for {step.name}: expected finite positive seconds")
         if not isfinite(step.interval_s) or step.interval_s < 0:
             raise ValueError(f"Invalid interval for {step.name}: expected finite nonnegative seconds")
+        boxes = sorted(domain for domain in step.writes if domain.startswith(PASS_BOX))
+        if step.interval_s > PASS_BOX_INTERVAL_S and boxes:
+            raise ValueError(f"Interval of {step.name} above {PASS_BOX_INTERVAL_S:g}s writes {', '.join(boxes)}")
 
 
 def _dependency_waves(steps: list[Step]) -> tuple[tuple[Step, ...], ...]:
@@ -79,9 +126,13 @@ class Registry:
         for module in self._providers:
             import_module(module)
 
-    def validate(self) -> None:
+    def validate(self, catalogue: Catalogue | None = None) -> None:
+        """Validate the needs, reads and writes of the steps, and with a ``catalogue`` their feature and scenario."""
         self._load_providers()
         _validate_writers(_dependency_waves(self._steps))
+        errors = [] if catalogue is None else _catalogue_errors(self._steps, catalogue)
+        if errors:
+            raise ValueError("\n".join(errors))
 
     def waves(self) -> tuple[tuple[Step, ...], ...]:
         self._load_providers()
@@ -107,8 +158,9 @@ def require(module: str) -> None:
     registry.require(module)
 
 
-def validate() -> None:
-    registry.validate()
+def validate(catalogue: Catalogue | None = None) -> None:
+    """Validate the registered steps, against ``catalogue`` when given."""
+    registry.validate(catalogue)
 
 
 def waves() -> tuple[tuple[Step, ...], ...]:
@@ -137,10 +189,11 @@ def ordered(steps: Iterable[Step]) -> tuple[Step, ...]:
 
 
 def latest_start(name: str, steps: list[Step]) -> float:
-    """Return the latest start of step ``name`` in seconds when every step it needs ends by its budget."""
-    by_name = {step.name: step for step in steps}
+    """Return the latest start of step ``name`` in seconds when every step it needs ends by its floor, or by its
+    budget when it declares no floor."""
+    floors = {step.name: getattr(step, "floor_s", step.budget_s) for step in steps}
     starts: dict[str, float] = {}
     for wave in _dependency_waves(steps):
         for step in wave:
-            starts[step.name] = max((starts[need] + by_name[need].budget_s for need in step.needs), default=0.0)
+            starts[step.name] = max((starts[need] + floors[need] for need in step.needs), default=0.0)
     return starts[name]

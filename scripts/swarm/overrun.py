@@ -1,13 +1,16 @@
-"""Wall time per claimed task: past REPORT_MINUTES the master hears one inbox report. Only the context limit
-triggers a handoff; wall time on a task never asks an agent to hand off and never retires or reopens anything."""
+"""Wall time per claimed task: past one limit the master hears of it once. Wall time never ends or hands off an agent;
+only its context limit hands it off."""
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, outage
 from scripts.swarm.health.findings import MINUTE_MS
 from scripts.swarm.ledger_events import Mail
+from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger import ledger_workspace
 
 REPORT_MINUTES = 90
@@ -17,7 +20,7 @@ FINISHED = "finished"
 NO_STEPS = "no steps recorded in progress.md"
 REPORT = (
     "Overrun on swarm {slug}: {agent} has run {minutes} minutes on task {task} without finishing it. Last steps: "
-    "{steps}. Close this item once you have looked."
+    "{steps}. Only its context limit hands it off. Close this item once you have looked."
 )
 
 
@@ -25,11 +28,13 @@ REPORT = (
 class Watch:
     store: object
     slug: str
+    ledger: object
     live: frozenset
+    retire: Callable
     now_ms: int
 
 
-def overrun_pass(watch: "Watch", doc: dict) -> list[str]:
+def overrun_pass(watch, doc):
     key = watch.store.key(watch.slug, KEY)
     marks = watch.store.redis.hgetall(key)
     rows = {task["id"]: task for task in doc.get("tasks") or []}
@@ -53,11 +58,11 @@ def overrun_pass(watch: "Watch", doc: dict) -> list[str]:
     return actions
 
 
-def _minutes(watch: "Watch", since: int) -> int:
+def _minutes(watch, since):
     return (watch.now_ms - since - outage.paused_ms(watch.slug, since, watch.now_ms)) // MINUTE_MS
 
 
-def _holding(watch: "Watch", agent: object, rows: dict) -> bool:
+def _holding(watch, agent, rows):
     row = rows.get(agent.task) or {}
     return (
         agent.lane in capacity.LANES
@@ -68,23 +73,27 @@ def _holding(watch: "Watch", agent: object, rows: dict) -> bool:
     )
 
 
-def _step(watch: "Watch", mail: Mail, agent: object, mark: dict) -> list[str]:
+def _step(watch: Watch, mail: Mail, agent: AgentRecord, mark: dict[str, Any]) -> list[str]:
     minutes = _minutes(watch, agent.started_at)
-    if minutes >= REPORT_MINUTES and not mark.get("reported"):
-        mark["reported"] = watch.now_ms
-        return [_report(watch, mail, agent, minutes)]
-    return []
+    if minutes < REPORT_MINUTES or mark.get("reported"):
+        return []
+    mark["reported"] = watch.now_ms
+    return [_report(watch, mail, agent, minutes)]
 
 
-def _steps(slug: str, task: str) -> str:
+def _steps(slug, task):
     lines = ledger_workspace.tails(slug, task).get("latest_progress", "").splitlines()
     return "; ".join(line.strip() for line in lines if line.strip()) or NO_STEPS
 
 
-def _report(watch: "Watch", mail: Mail, agent: object, minutes: int) -> str:
+def _report(watch: Watch, mail: Mail, agent: AgentRecord, minutes: int) -> str:
     address = mail.owner(f"tasks/{agent.task}")
     text = REPORT.format(
-        slug=watch.slug, agent=agent.name, minutes=minutes, task=agent.task, steps=_steps(watch.slug, agent.task)
+        slug=watch.slug,
+        agent=agent.name,
+        minutes=minutes,
+        task=agent.task,
+        steps=_steps(watch.slug, agent.task),
     )
     mail.inbox.send(SENDER, address, text, ref=f"{watch.slug}:{KEY}:{agent.task}", task=agent.task)
     return f"overrun: told {address} that {agent.name} has run {minutes} minutes on task {agent.task}"

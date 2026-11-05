@@ -21,7 +21,7 @@ from scripts.swarm import (
     refresh_job,
     timing,
 )
-from scripts.swarm.health import prompt_backlog, urgent_hold
+from scripts.swarm.health import ordering_dependencies, prompt_backlog, urgent_hold
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -118,6 +118,7 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("prompt backlog", "wrapper health"),
         ("command runner", "wrapper commands"),
         ("urgent hold", "wrapper phases"),
+        ("dependency audit", "wrapper phases"),
         ("planning and phase pass", "wrapper phases"),
         ("planning after phase", "wrapper phases"),
         ("refresh job", "wrapper refresh"),
@@ -209,7 +210,7 @@ def test_a_ledger_that_is_no_client_skips_the_health_probe(monkeypatch: pytest.M
     assert box == {}
 
 
-def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase_passes(
+def test_the_phase_steps_observe_the_urgent_hold_and_dependency_audit_then_run_the_planning_and_phase_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[Any, ...]] = []
@@ -218,6 +219,7 @@ def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase
     assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked", "planned again"]
     assert calls == [
         ("call", urgent_hold.observe, STORE, "sw", "doc", 7),
+        ("call", ordering_dependencies.observe, STORE, "sw", "doc"),
         ("phases", "inbox", STORE, "sw", "doc", "ledger"),
         ("after", "inbox", STORE, "sw", "ledger", box),
     ]
@@ -226,7 +228,7 @@ def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase
 def test_no_host_step_wraps_the_tick_and_the_reboot_site_holds_only_the_reboot_pass() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     assert "tick call" not in {step.name for step in registered}
-    assert "tick call" not in budgets.MEASURED
+    assert "tick call" not in budgets.FLOORS
     assert [step.name for step in engine.group_steps("wrapper reboot")] == ["reboot pass"]
 
 

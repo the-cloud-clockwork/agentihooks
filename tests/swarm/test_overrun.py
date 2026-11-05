@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,34 +14,61 @@ MINUTE = 60_000
 START = 10_000_000
 REPORT_MS = overrun.REPORT_MINUTES * MINUTE
 REPORT = START + REPORT_MS
-FAR_PAST = REPORT + 100_000 * MINUTE
 
 
 class Ledger:
     def __init__(self, task):
         self.rows = {"t1": {"id": "t1", "state": "claimed", "claimed_by": OWNER, "branch": "b1", **task}}
+        self.comments, self.updates = [], []
+
+    def state(self, slug):
+        return {"tasks": list(self.rows.values()), "phases": [], "_meta": {"events": []}}
+
+    def task(self, slug, task_id):
+        assert slug == SLUG
+        return self.rows.get(task_id)
+
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+        assert slug == SLUG
+        self.updates.append((task_id, fields, if_state))
+        row = self.rows[task_id]
+        if not if_state or row["state"] in if_state:
+            row.update(fields)
+        return dict(row)
+
+    def comment(self, slug, task, text, by):
+        assert slug == SLUG
+        self.comments.append((task, text, by))
 
 
 class Swarm:
-    def __init__(self, task=None, live=True, agent=None):
+    def __init__(self, task=None, live=True, retires=True, agent=None):
         import fakeredis
 
         self.store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
         self.store.create(SwarmConfig(SLUG, "/repo", 1, 1))
         self.ledger = Ledger(task or {})
+        self.retired, self.retires = [], retires
         self.live = {OWNER} if live else set()
         self.store.put_agent(SLUG, agent or AgentRecord(OWNER, "eng", "t1", seat=SEAT, started_at=START))
         self.store.redis.set(self.store.key(SLUG, "claim", "t1"), OWNER)
 
+    def retire(self, agent):
+        self.retired.append(agent.name)
+        return self.retires
+
     def tick(self, at):
-        watch = overrun.Watch(self.store, SLUG, frozenset(self.live), at)
-        return overrun.overrun_pass(watch, {"tasks": list(self.ledger.rows.values())})
+        watch = overrun.Watch(self.store, SLUG, self.ledger, frozenset(self.live), self.retire, at)
+        return overrun.overrun_pass(watch, self.ledger.state(SLUG))
 
     def master(self):
         return InboxStore(self.store.redis).inbox("master@sw")
 
     def agent_inbox(self):
         return InboxStore(self.store.redis).inbox(OWNER)
+
+    def working(self):
+        return [a.name for a in self.store.agents(SLUG) if a.state != "finished"]
 
 
 def _progress(lines):
@@ -49,7 +77,7 @@ def _progress(lines):
     (folder / "progress.md").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
 
 
-def test_the_report_limit_is_set_in_code():
+def test_the_limits_are_set_in_code() -> None:
     assert overrun.REPORT_MINUTES == 90
 
 
@@ -59,14 +87,14 @@ def test_an_agent_under_the_report_limit_is_left_alone():
     assert swarm.master() == [] and swarm.agent_inbox() == []
 
 
-def test_past_the_report_limit_the_master_hears_the_task_its_age_and_last_steps_once():
+def test_past_the_report_limit_the_master_hears_the_task_its_age_and_last_steps_once() -> None:
     _progress(["opened the issue", "pushed the red test", "fixed the push guard", "waiting on the queue"])
     swarm = Swarm()
     actions = swarm.tick(REPORT)
     [item] = swarm.master()
     assert "t1" in item.text and OWNER in item.text and " 90 minutes " in item.text
     assert "Last steps: pushed the red test; fixed the push guard; waiting on the queue. " in item.text
-    assert item.text.startswith("Overrun on swarm sw: ") and item.text.endswith("Close this item once you have looked.")
+    assert item.text.startswith("Overrun on swarm sw: ") and " Only its context limit hands it off. " in item.text
     assert (item.ref, item.task) == ("sw:overrun:t1", "t1")
     assert actions == [f"overrun: told master@sw that {OWNER} has run 90 minutes on task t1"]
     assert swarm.agent_inbox() == []
@@ -81,20 +109,9 @@ def test_a_report_without_progress_lines_says_none_were_recorded():
     assert overrun.NO_STEPS in item.text
 
 
-@pytest.mark.feature("overrun-no-wall-time-handoff")
-def test_an_agent_far_past_the_report_limit_is_only_ever_reported_never_asked_or_retired():
-    swarm = Swarm()
-    actions = swarm.tick(FAR_PAST)
-    assert actions == [
-        f"overrun: told master@sw that {OWNER} has run {(FAR_PAST - START) // MINUTE} minutes on task t1"
-    ]
-    [item] = swarm.master()
-    assert "hand off" not in item.text.lower() and "handoff" not in item.text.lower()
-    assert "ended" not in item.text.lower() and "retire" not in item.text.lower()
-    assert swarm.agent_inbox() == []
-    assert swarm.ledger.rows["t1"]["state"] == "claimed" and swarm.ledger.rows["t1"]["claimed_by"] == OWNER
-    assert swarm.tick(FAR_PAST + 10 * MINUTE) == []
-    assert len(swarm.master()) == 1
+def test_a_pull_request_task_counts_as_claimed() -> None:
+    swarm = Swarm(task={"state": "pr"})
+    assert len(swarm.tick(REPORT)) == 1 and len(swarm.master()) == 1
 
 
 def test_outage_time_does_not_count_toward_the_age(monkeypatch):
@@ -108,66 +125,29 @@ def test_outage_time_does_not_count_toward_the_age(monkeypatch):
     assert len(swarm.tick(REPORT + 30 * MINUTE)) == 1
 
 
-def test_an_outage_holds_every_step(monkeypatch):
+def test_an_outage_holds_every_step(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         overrun.outage, "held", lambda store, slug, name: "probe failed" if (slug, name) == (SLUG, OWNER) else ""
     )
     swarm = Swarm()
-    assert swarm.tick(FAR_PAST) == []
-    assert swarm.master() == []
+    assert swarm.tick(REPORT + 60 * MINUTE) == []
+    assert swarm.master() == [] and swarm.retired == []
 
 
-@pytest.mark.parametrize(
-    "setup",
-    [
-        {"agent": AgentRecord(OWNER, MASTER, "t1", started_at=START)},
-        {"task": {"claimed_by": "engineer@abc-0002"}},
-        {"task": {"state": "open"}},
-        {"live": False},
-        {"agent": AgentRecord(OWNER, "eng", "t1", seat=SEAT)},
-        {"agent": AgentRecord(OWNER, "eng", "", seat=SEAT, started_at=START)},
-    ],
-    ids=["a-master", "off-its-claim", "task-open", "dead-pane", "no-seat", "no-task"],
-)
-def test_a_master_an_agent_off_its_claim_or_a_dead_pane_is_skipped(setup):
-    swarm = Swarm(**setup)
-    assert swarm.tick(FAR_PAST) == []
-    assert swarm.master() == []
+def test_a_master_an_agent_off_its_claim_or_a_dead_pane_is_skipped() -> None:
+    for swarm in (
+        Swarm(agent=AgentRecord(OWNER, MASTER, "t1", started_at=START)),
+        Swarm(task={"claimed_by": "engineer@abc-0002"}),
+        Swarm(task={"state": "open"}),
+        Swarm(live=False),
+        Swarm(agent=AgentRecord(OWNER, "eng", "t1", seat=SEAT)),
+        Swarm(agent=AgentRecord(OWNER, "eng", "", seat=SEAT, started_at=START)),
+    ):
+        assert swarm.tick(REPORT + 60 * MINUTE) == []
+        assert swarm.master() == [] and swarm.retired == []
 
 
-def test_a_report_names_whichever_task_and_agent_is_overrunning():
-    swarm = Swarm(agent=AgentRecord("engineer@abc-0005", "eng", "t5", seat=SEAT, started_at=START))
-    swarm.ledger.rows["t5"] = {"id": "t5", "state": "claimed", "claimed_by": "engineer@abc-0005"}
-    swarm.live = {"engineer@abc-0005"}
-    [action] = swarm.tick(FAR_PAST)
-    assert "t5" in action and "engineer@abc-0005" in action
-
-
-def test_a_claim_closed_between_ticks_stops_further_watching():
-    swarm = Swarm()
-    swarm.tick(REPORT)
-    swarm.ledger.rows["t1"]["state"] = "done"
-    assert swarm.tick(FAR_PAST) == []
-    assert len(swarm.master()) == 1
-
-
-def test_the_report_item_carries_its_task_id():
-    swarm = Swarm()
-    swarm.tick(REPORT)
-    [item] = swarm.master()
-    assert item.task == "t1" and item.ref == "sw:overrun:t1"
-
-
-def test_the_park_and_grace_minutes_constants_are_gone():
-    assert not hasattr(overrun, "PARK_MINUTES")
-    assert not hasattr(overrun, "GRACE_MINUTES")
-    assert not hasattr(overrun, "ASK")
-    assert not hasattr(overrun, "ENDED")
-    assert not hasattr(overrun, "COMMENT")
-    assert not hasattr(overrun, "ASK_CLOSED")
-
-
-def test_a_new_life_on_the_same_task_starts_its_own_clock():
+def test_a_new_life_on_the_same_task_starts_its_own_clock() -> None:
     swarm = Swarm()
     swarm.tick(REPORT)
     swarm.store.drop_agent(SLUG, OWNER)
@@ -176,7 +156,7 @@ def test_a_new_life_on_the_same_task_starts_its_own_clock():
     swarm.ledger.rows["t1"]["claimed_by"] = successor
     swarm.live = {successor}
     assert swarm.tick(REPORT + MINUTE) == []
-    assert len(swarm.tick(REPORT + REPORT_MS + MINUTE)) == 1
+    assert swarm.store.redis.hgetall(swarm.store.key(SLUG, overrun.KEY)) == {}
 
 
 def test_one_tick_reports_every_overrunning_agent_past_a_finished_one():
@@ -201,32 +181,46 @@ def test_the_report_routes_through_the_ledger_document(monkeypatch):
     )
     swarm = Swarm()
     swarm.tick(REPORT)
-    assert seen == [{"tasks": list(swarm.ledger.rows.values())}]
+    assert seen == [swarm.ledger.state(SLUG)]
 
 
-def test_a_planner_is_watched_like_an_engineer():
+def test_a_planner_is_watched_like_an_engineer() -> None:
     swarm = Swarm(agent=AgentRecord(OWNER, "plan", "t1", seat=SEAT, started_at=START))
-    assert len(swarm.tick(FAR_PAST)) == 1
-    assert swarm.tick(FAR_PAST + 10 * MINUTE) == []
+    assert len(swarm.tick(REPORT)) == 1 and len(swarm.master()) == 1
 
 
-def test_an_agent_released_through_ready_is_still_reported():
+def test_an_agent_released_through_ready_is_never_reported() -> None:
     swarm = Swarm(task={"state": "pr", "awaiting": "merge"})
-    assert len(swarm.tick(REPORT)) == 1
+    [agent] = swarm.store.agents(SLUG)
+    swarm.store.put_agent(SLUG, replace(agent, state="finished"))
+    assert swarm.tick(REPORT) == [] and swarm.master() == []
 
 
-def test_a_pull_request_task_counts_as_claimed_and_is_still_reported():
-    swarm = Swarm(task={"state": "pr"})
-    assert swarm.tick(REPORT) == [f"overrun: told master@sw that {OWNER} has run 90 minutes on task t1"]
-    assert swarm.tick(REPORT + MINUTE) == []
-
-
-def test_a_mark_left_from_another_task_starts_over():
+def test_a_mark_left_from_another_task_starts_over() -> None:
     swarm = Swarm()
     swarm.tick(REPORT)
     [agent] = swarm.store.agents(SLUG)
-    swarm.store.put_agent(SLUG, AgentRecord(agent.name, agent.lane, "t2", seat=agent.seat, started_at=agent.started_at))
+    swarm.store.put_agent(SLUG, replace(agent, task="t2"))
     swarm.ledger.rows["t2"] = {**swarm.ledger.rows["t1"], "id": "t2"}
-    actions = swarm.tick(FAR_PAST)
-    assert len(actions) == 1
-    assert len(swarm.master()) == 2
+    assert len(swarm.tick(REPORT + MINUTE)) == 1 and len(swarm.master()) == 2
+
+
+@pytest.mark.feature("overrun-no-wall-time-handoff")
+def test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end() -> None:
+    swarm = Swarm()
+    actions = [action for at in range(START, START + 201 * MINUTE, MINUTE) for action in swarm.tick(at)]
+    assert actions == [f"overrun: told master@sw that {OWNER} has run 90 minutes on task t1"]
+    assert len(swarm.master()) == 1 and swarm.agent_inbox() == []
+    assert swarm.retired == [] and swarm.working() == [OWNER]
+    assert swarm.ledger.rows["t1"]["claimed_by"] == OWNER and swarm.ledger.comments == []
+
+
+@pytest.mark.parametrize("state", ["claimed", "pr"])
+@pytest.mark.parametrize("minutes", [150, 165, 200, 300, 600, 1440, 4320])
+def test_no_wall_time_age_asks_or_ends_a_live_agent(state: str, minutes: int) -> None:
+    swarm = Swarm(task={"state": state})
+    at = START + minutes * MINUTE
+    actions = swarm.tick(at) + swarm.tick(at + overrun.REPORT_MINUTES * MINUTE)
+    assert actions == [f"overrun: told master@sw that {OWNER} has run {minutes} minutes on task t1"]
+    assert swarm.agent_inbox() == [] and swarm.retired == [] and swarm.working() == [OWNER]
+    assert swarm.ledger.rows["t1"]["claimed_by"] == OWNER and swarm.ledger.updates == []

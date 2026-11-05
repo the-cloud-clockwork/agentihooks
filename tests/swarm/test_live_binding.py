@@ -80,6 +80,23 @@ def test_each_field_mismatch_is_named(mounted, field):
     assert differences[field]["actual"] == facts[field]
 
 
+@pytest.mark.parametrize(
+    ("recorded", "observed", "differs"),
+    [
+        ("nestor-colt", "nestor_colt", False),
+        ("nestor_colt", "nestor-colt", False),
+        ("nestor-colt", "other_account", True),
+    ],
+)
+def test_account_spellings_differing_only_in_separator_match(
+    mounted: tuple, recorded: str, observed: str, differs: bool
+) -> None:
+    agent, proc, _ = mounted
+    facts = {**live_binding.read(agent, 42, proc), "account": observed}
+    differences = live_binding.compare(replace(agent, account=recorded), facts)
+    assert differences == ({"account": {"expected": recorded, "actual": observed}} if differs else {})
+
+
 @pytest.mark.parametrize("event", EVENTS)
 def test_missing_lifecycle_hook_is_refused(mounted, event):
     agent, proc, home = mounted
@@ -1358,6 +1375,78 @@ def test_retiring_unbound_master_without_a_live_process_is_checked(ticking):
     tick("sw", store, ledger, runtime, 200)
     report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))
     assert report["differences"] == {"process": {"expected": True, "actual": False}}
+
+
+@pytest.mark.parametrize(("age", "kept"), [(0, True), (600_000, True), (600_001, False)])
+def test_a_master_another_hive_reports_with_a_fresh_heartbeat_stays_live_when_its_pane_lookup_fails(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, age: int, kept: bool
+) -> None:
+    from scripts.hive import reports
+    from scripts.swarm import commands, idle
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    store.put_agent("sw", replace(master, state="retiring", hive="", runtime_target={}))
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["root"])
+    store.redis.set(reports.key("root"), json.dumps({"names": [master.name], "executions": {}, "panes": {}}))
+    now = 10_000_000
+    idle.beat(store.redis, "sw", master.name, idle.WORKING, now - age)
+    runtime.bindings = lambda agents: {
+        a.name: {"process": False} if a.name == master.name else {**live_binding.assignment(a), "hooks": True}
+        for a in agents
+    }
+    tick("sw", store, ledger, runtime, now)
+    report = store.redis.hget(store.key("sw", "live-bindings"), master.name)
+    if kept:
+        masters = [a for a in store.agents("sw") if a.lane == "master"]
+        assert [(a.name, a.state) for a in masters] == [(master.name, "working")]
+        assert master.name not in runtime.killed
+        assert report is None
+    else:
+        assert json.loads(report)["differences"] == {"process": {"expected": True, "actual": False}}
+
+
+@pytest.mark.parametrize(
+    ("lane", "target", "holders", "kept"),
+    [
+        ("master", {}, {"root"}, True),
+        ("master", {}, {"root", "controller"}, True),
+        ("master", {}, {"controller"}, False),
+        ("master", {}, set(), False),
+        ("master", {"host_id": "stable"}, {"stable"}, False),
+        ("master", {"host_id": "controller"}, {"root"}, False),
+        ("eng", {}, {"root"}, False),
+    ],
+)
+def test_only_an_untargeted_master_another_hive_lists_is_kept_unjudged(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, lane: str, target: dict, holders: set, kept: bool
+) -> None:
+    from scripts.swarm import commands, held_elsewhere, idle
+
+    store, _, _ = ticking
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
+    agent = AgentRecord("held@zz", lane, "two", state="working", runtime_target=target)
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, 100)
+    listed = {agent.name: holders} if holders else {}
+    assert held_elsewhere.keep("sw", store, agent, listed, 100) is kept
+    assert agent.name not in {a.name for a in store.agents("sw")}
+
+
+def test_holders_maps_each_listed_name_to_every_hive_and_skips_a_report_without_names(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import reports
+    from scripts.swarm import held_elsewhere
+
+    store, _, _ = ticking
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["root", "stable", "bare"])
+    store.redis.set(reports.key("root"), json.dumps({"names": ["master@a", "eng@b"]}))
+    store.redis.set(reports.key("stable"), json.dumps({"names": ["eng@b"]}))
+    store.redis.set(reports.key("bare"), json.dumps({"executions": {}}))
+    assert held_elsewhere.holders(store) == {"master@a": {"root"}, "eng@b": {"root", "stable"}}
 
 
 def test_a_kept_master_does_not_skip_later_agents(ticking):

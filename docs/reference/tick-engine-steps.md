@@ -36,36 +36,44 @@ in the step module that owns its step (`agents`, `masters`, `tasks`), and a test
 patches it there; the moved body still reaches tick seams through the imported
 tick module.
 
-## Measured budgets and declared intervals
+## Live budgets, floors and declared intervals
 
-The timing table `scripts.tick.steps.budgets.MEASURED` records each step's
-p95 from a tick report over sixty passes and its interval from the plan table.
-The budget is `max(1, ceil(p95_s * 1.5))` seconds: fifty percent headroom,
-rounded up to a whole second. These are checked in declarations, not settings
-that update automatically when new reports arrive.
+The table `scripts.tick.steps.budgets.FLOORS` declares each step's floor and its
+interval. Each pass, `run_tick` calls `budgets.resolve(store, slug)` before the
+first group. It reads every step's window of its last sixty walls, the Redis list
+`tick:walls:<step>`, and stores the live budgets for the pass. `budget_of(name)`,
+read through `CallStep.budget_s`, returns `max(floor, ceil(p95 * 1.5))` once a
+step has sixty walls, and the floor until then. `scripts.swarm.timing.append_step`
+pushes each budgeted step's wall to its window in the same pipeline as its
+`tick:steps` record and trims the window to sixty. When a window is missing,
+`resolve` rebuilds it from the `tick:steps` stream, at most once every ten
+minutes. The stream stays the record.
 
-| Step example | Measured p95 | Budget | Declared interval |
-| --- | --- | --- | --- |
-| `reap` | 14.511 s | 22 s | 60 s |
-| `preempt` | 11.749 s | 18 s | 60 s |
-| `spawn` | 21.812 s | 33 s | 60 s |
-| `pane evidence` | 1.047 s | 2 s | 120 s |
-| `metrics record` | 18.905 s | 29 s | 600 s |
-| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 19.981 s | 30 s | 60 s |
+| Step example | Floor | Declared interval |
+| --- | --- | --- |
+| `reap` | 22 s | 60 s |
+| `preempt` | 18 s | 60 s |
+| `spawn` | 33 s | 60 s |
+| `night watch` | 22 s | 120 s |
+| `metrics record` | 29 s | 600 s |
+| [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 30 s | 60 s |
+
+The six heavy rows keep their earlier measured budgets as floors. Every row that
+measured under one second, and every row that was never measured, has a two
+second floor. `scripts.tick.registry.latest_start` adds floors, so the spawn
+start bound does not move with live budgets.
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
-seconds. The group runner runs each group at its site on every pass and does
-not skip a step because its interval has not elapsed.
-`scripts.tick.engine.interval_s(step, cadence)` gives a step in lane `slow`
-the larger of its declared interval and the slow lane cadence from
-`AGENTIHOOKS_TICK_CADENCE`, and leaves every other step at its own interval;
-no pass reads it yet. See
+seconds. `scripts.tick.engine.interval_s(step, cadence)` gives a step in lane
+`slow` the larger of its declared interval and the slow lane cadence from
+`AGENTIHOOKS_TICK_CADENCE`, and leaves every other step at its own interval.
+The group runner skips a step whose interval has not elapsed; see
+[Interval enforcement](#interval-enforcement) and
 [Cadence](../pillars/swarm.md#cadence).
 
-A step with no report row uses `UNMEASURED_S`, a ten second p95, giving a
-fifteen second budget. It still needs an explicit timing table entry. An
-unknown name raises `ValueError: Undeclared step timing: <name>` when
-`CallStep` is constructed, before registration.
+Every step needs an explicit `FLOORS` entry. An unknown name raises
+`ValueError: Undeclared step timing: <name>` when `CallStep` is constructed,
+before registration.
 
 ### Inspect and change timing
 
@@ -87,19 +95,96 @@ Inspect the checked in declaration from the repository root:
 python -c 'from scripts.tick.steps.budgets import timing_of; print(timing_of("reap"))'
 ```
 
-The result is `(22.0, 60.0)`: budget first, interval second. To change a step's
-timing, update its `Timing(p95_s, interval_s)` entry in `MEASURED` through the
-normal code review and CI workflow. For a newly registered `example` step
-without a report row, declare it in that table before constructing it:
+Outside a pass the result is the floor, `(22.0, 60.0)`: budget first,
+interval second. To change a floor or interval, update the step's
+`Timing(floor_s, interval_s)` entry in `FLOORS` through the normal code review
+and CI workflow. Declare a newly registered `example` step before constructing it:
 
 ```python
-"example": Timing(UNMEASURED_S, CRITICAL_S),
+"example": Timing(2.0, CRITICAL_S),
 ```
 
-That is a dictionary entry using the table's existing imports and constants.
-Once measured, replace `UNMEASURED_S` with its observed p95, keeping the
-interval required by the plan. There is no CLI or environment override for
-this table in this delivery.
+Its live budget then follows its walls once sixty runs are recorded.
+
+### Interval enforcement
+
+At the start of each group, `scripts.tick.engine.resting(ordered, cadence)`
+names the steps of that group that rest this pass. A step can rest only when
+its interval from `interval_s(step, cadence)` is above one cron minute
+(`CRON_S`, 60 seconds). It rests while the pass start is no more than its
+interval less one cron minute after the end of its last ended run. Outside a
+recording pass the clock stands in for the pass start.
+
+| Interval | Rests while the last end is at most | Runs |
+| --- | --- | --- |
+| 60 s (`CRITICAL_S`) | never rests | every pass |
+| 120 s (`WIDE_S`) | 60 s before the pass start | every other pass |
+| 600 s (`SLOW_S`) | 540 s before the pass start | about one pass in ten |
+| Slow lane step declared at 60 s, `AGENTIHOOKS_TICK_CADENCE=3` | 120 s before the pass start | one pass in three |
+
+Subtracting one cron minute means a step whose run ended a few seconds into a
+pass is due again on the pass that starts one interval after the earlier one,
+rather than one pass later.
+
+A resting step starts no thread and calls nothing. It ends at once, so steps
+that `need` it start as if it had run. Its `tick:records` row has outcome
+`skipped`, its `skipped` and `rested` fields true, `abandoned` false, a wall time of zero
+and its budget; see
+[Tick report](tick-report.md#outcome-columns). This holds in the sequential
+runner, in the parallel eager runner and for slow lane steps handed off to run
+after the critical lane.
+
+The end of a run is stored only while the pass is recording, and only for a
+step with an interval above one cron minute or a step in lane `slow`. It is
+written when the step's record is journalled, as epoch seconds, into the hash
+`tick:step-ran` under the swarm's Redis key prefix, one field per step name
+(`scripts.swarm.timing.step_ended` and `step_ends`).
+
+| Outcome of the run | Records an end | Next pass |
+| --- | --- | --- |
+| `ok` | yes | rests inside the interval |
+| `failed` | yes | rests inside the interval |
+| `late` (abandoned at its budget or lane deadline, or finished past its budget) | no | due, since the stored end is the one that let it run |
+| `held` (earlier run still alive) | no | due, since the stored end is the one that let it run |
+| Dropped before it started, or rested | no | keeps the earlier end |
+
+A step with no stored end is due. Nothing rests when the pass has no
+recording store or swarm, and a Redis failure reading the hash makes every
+step due. A failed write prints
+`{"event": "swarm_tick_record_failed", "slug": "<swarm>", "stream": "tick:step-ran"}`
+on stderr and leaves the earlier end in place. A group of steps all at one
+cron minute does not read the hash.
+
+A step that writes the pass state must run every pass, because the steps
+after it read that state from the same pass. The registry refuses a step
+whose interval is above 60 seconds (`registry.PASS_BOX_INTERVAL_S`) and that
+writes a `pass:` domain:
+
+```text
+ValueError: Interval of <step> above 60s writes pass:<key>
+```
+
+The fix is to declare that step at `CRITICAL_S` in `MEASURED`. `ledger health`,
+which writes `pass:stop`, is declared at `CRITICAL_S` for that reason, and
+`snapshot job` moved to `CRITICAL_S` in the same delivery.
+
+Read the stored ends of a swarm from the repository root:
+
+```bash
+~/dev/tcc-ecosystem/.venv/bin/python -c 'from scripts.swarm import store, timing; print(timing.step_ends(store.connect(), "rig-grade-swarm"))'
+```
+
+The result maps each step name to the epoch seconds its last ended run
+finished, for example `{"pane evidence": 1793870400.12, "metrics record": 1793870160.5}`.
+Deleting a field makes that step due on the next pass. Count how often a step
+rested in the latest passes with the report:
+
+```bash
+agentihooks swarm rig-grade-swarm tick-report --passes 60
+```
+
+A 120 second step shows about half its records in the `Skipped` column, a 600
+second step about nine in ten, and a critical step none.
 
 ### When a step exceeds its budget
 
@@ -172,7 +257,7 @@ for (slug, step, writes), n in c.most_common(): print(n, slug, step, ", ".join(w
 A step that appears on most passes loses its writes every time, as the fleet
 red notice did before its budget was measured. Compare its wall time in
 `agentihooks swarm <slug> tick-report --passes 10` with its budget and raise
-its measured p95 in `budgets.MEASURED` through a pull request. Nothing reads
+its floor in `budgets.FLOORS` through a pull request. Nothing reads
 the line back; it is evidence for an operator or an agent, not an input to
 the next pass.
 
@@ -182,9 +267,11 @@ The tick report counts these runs per step in its Late share, Abandoned, Held an
 ### Lanes
 
 A parallel pass gives each lane its own deadline: 110 seconds for the critical
-lane, which holds every step whose lane is not `slow`, and 400 seconds for the
-slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`). These steps declare
-the slow lane:
+lane, which holds every step whose lane is neither `slow` nor `closing`, and
+400 seconds for the slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`),
+both counted from the start of the pass. The closing lane's 30 seconds count
+from the start of the pass `finally`; see [The closing lane](#the-closing-lane).
+These steps declare the slow lane:
 
 | Module | Group | Slow lane steps |
 | --- | --- | --- |
@@ -193,12 +280,12 @@ the slow lane:
 | `scripts.tick.steps.tasks` | `reopen passes` | [fleet red notice](fleet-red-notice.md#the-slow-lane) |
 | `scripts.tick.steps.place` | `placement notices` | lost runner, time left |
 
-The other report steps (stall watch, overrun pass, quiet pass, inbox wake,
-snapshot job, last tick, heartbeat, status publish) and every other step stay
-critical. The command runner and the quota notice run before spawn and stay
-critical. The quota notice step reads cached quota and runs no Claude or Codex
-quota probe; the quota prober service writes those caches once a minute
-([Quota prober](quota-prober.md)).
+Last tick, heartbeat and status publish declare the closing lane. The other
+report steps (stall watch, overrun pass, quiet pass, inbox wake, snapshot job)
+and every other step stay critical. The command runner and the quota notice run
+before spawn and stay critical. The quota notice step reads cached quota and
+runs no Claude or Codex quota probe; the quota prober service writes those
+caches once a minute ([Quota prober](quota-prober.md)).
 
 Before spawn, the slow lane steps are the ones no placement step waits on, or
 whose wait is bounded by their own budget. `lost runner` and `time left` have
@@ -220,7 +307,7 @@ on the pass is not recorded in this document; read it with
 `agentihooks swarm <slug> tick-report --passes 10`.
 
 The `health findings` step stores the findings it computes in the pass box
-under `found`. The `status publish` step, in the `wrapper status` group, passes
+under `found`. The `status publish` step, in the `closing` group, passes
 `box.get("found")` to `cli._publish_tick_status`, and `status.status_report`
 publishes those findings instead of calling `findings` again with the same
 inputs. When the box holds no `found`, for example because the handed off
@@ -304,6 +391,65 @@ different lanes, and one lane when they share it, as in
 `agentihooks swarm <slug> tick-report` prints each lane's share of step CPU
 (see [Lane lines](tick-report.md#lane-lines)).
 
+### The closing lane
+
+`last tick`, `heartbeat` and `status publish` run in the `closing` group,
+which `run_tick` calls from the `finally` of the pass, after every other group
+and whether the pass completed, ended early or raised. The three steps declare
+lane `closing` (`scripts.tick.steps.report.CLOSING`), so in a parallel pass
+they run against a deadline of their own instead of the critical deadline that
+may already have expired:
+
+| Value | Meaning |
+| --- | --- |
+| `scripts.tick.pool.CLOSING_LANE` | The lane name, `closing`. |
+| `scripts.tick.pool.CLOSING_S` | 30 seconds, the closing lane deadline. `pool.running(closing_s=...)` sets it for one pass; no setting or environment variable changes it. |
+| `Pass.close()` | Starts the closing deadline on its first call and returns that same deadline on every later call. `Pass.lane("closing")` calls it, so the deadline starts when the first closing step looks up its lane, at the start of the `finally`. |
+
+A closing step is not a slow step: the group runs it eagerly and returns its
+record before the pass ends. Its context deadline is the smaller of the group
+budget and the closing deadline, and its own step budget still applies. When
+the pass ends, `pool.running` joins each handed off slow lane thread for the
+larger of the slow lane time left and the closing lane time left, plus
+`LATER_GRACE_S`. A sequential pass looks up no lane deadline, so the closing
+lane changes nothing there; the three steps run in group order with their
+budgets.
+
+`run_tick` hands the group an `ended` value that says how the pass ended:
+
+| How the pass ended | `ended` | `last tick` | `heartbeat` | `status publish` |
+| --- | --- | --- | --- | --- |
+| Completed its groups | `full` (`report.FULL`) | Writes the current time to `<slug>/last-tick` | Writes the [tick heartbeat](../pillars/swarm.md#tick-heartbeat-and-stale-watcher) and clears the early end streak | Publishes the tick status |
+| No step stored a value a later step needed (`Left`) | `early` (`report.EARLY`) | Writes the current time | Writes the tick heartbeat; the streak keeps the count `early_end` added | Publishes the tick status |
+| Returned before the end (stopped, binned, refused) or raised | none | Writes nothing | Writes nothing | Publishes the tick status, with the exception as `failure` when one was raised |
+
+`report_steps.early_end` no longer stamps the pass itself. It counts the
+missing value in the early end streak and returns the
+`pass ended early: no step stored <value>, the pass left <steps>` line; the
+closing group stamps last tick and the heartbeat afterwards.
+
+The closing lane exists for a pass whose critical lane ran out. Before it, the
+three steps sat in the `wrapper metrics`, `after` and `wrapper status` groups
+on the critical lane, so a pass that spent its 110 critical seconds dropped
+them and wrote no heartbeat, and the stale watcher then judged a live tick
+stale. Now a pass with a hung step still stamps and publishes: in
+`tests/tick/test_closing_lane.py` a reboot pass planted to hang for 300
+seconds under a 1 second critical lane ends early, and the closing group
+records `heartbeat`, `last tick` and `status publish` as `ok` with last tick
+and the heartbeat written.
+
+A new step joins the closing lane only when it must run on every pass ending,
+after the other groups:
+
+```python
+from scripts.tick.steps.report import CLOSING, CLOSING_GROUP
+
+CallStep("example", CLOSING_GROUP, held(_example), lane=CLOSING)
+```
+
+Read `get("ended")` in its action to tell the endings apart; it is `None` when
+the pass raised or returned before its end.
+
 ### Spawn prerequisites and the forty second bound
 
 Spawn declares only these prerequisites:
@@ -376,7 +522,7 @@ The delivered writers of each key:
 | `view` | `tick view` | The slow lane event steps, `health findings`, `metrics record`, `status publish` |
 | `live` | `stall watch` | `overrun pass` |
 | `found` | `health findings` | `findings pass`, `metrics record`, `status publish` |
-| `judged`, `stop`, `started` | `intent check`, `ledger health`, `snapshot job` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
+| `judged`, `stop` | `intent check`, `ledger health` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
 
 Because the readers of `config` need `drained resume`, that step carries
 `DRAINED_RESUME_NEEDS` (`scripts.tick.steps.tasks`) plus `sleeping`: every step
@@ -404,7 +550,10 @@ registry.register(
 ```
 
 The positional order is name, group, call, `needs`, `reads`, `writes`.
-`WriteStep` takes the same `needs` and `reads` as keywords.
+`WriteStep` takes the same `needs` and `reads` as keywords. Both also take
+`effects`, the ports the step may write through, and `feature`, its feature map
+id, as keywords; see
+[Declaring effects on a step](tick-adapters.md#declaring-effects-on-a-step).
 
 `tests/tick/test_pass_edges.py` replays the twelve tick scenarios through
 `scripts.swarm.tick.tick` and `scripts.swarm.cli.run_tick` with a recording
@@ -702,13 +851,20 @@ by the engine and does not leave the pass.
 
 1. Write the call as a function `(tick, get) -> actions` in a module under
    `scripts/tick/steps/`, reading its arguments with `get`.
-2. Add the step name to `budgets.MEASURED` with its measured p95 (or
-   `UNMEASURED_S`) and plan interval, then register `CallStep("<name>", <group>, <order>, held(<call>))`, choosing an
-   order that puts it where its hand written line stood. Use `held` when an
-   exception from the call must still leave the pass.
+2. Add the step name to `budgets.FLOORS` with its floor (two seconds unless
+   measured heavier) and plan interval, then register `CallStep` with every
+   field, even at its default, because the
+   [tick pattern gate](tick-pattern-gate.md) refuses a step missing any of
+   them, as in the example below. Steps run in dependency waves
+   (`Registry.waves`); `Registry.steps` keeps registration order, so register
+   the step where its hand written line stood. Use `held` when an exception
+   from the call must still leave the pass.
 3. Import the module in `scripts.swarm.tick` so it registers before the first
    pass, delete the hand written line, and add `tasks.raise_held(box)` after the
    group site if the site is new.
+4. Map the step to a feature and its scenarios as described in
+   [The feature and scenario catalogue](#the-feature-and-scenario-catalogue);
+   `swarm-tick-example` stands for a real feature map id.
 
 ```python
 from collections.abc import Callable
@@ -723,8 +879,67 @@ def _example(tick: Any, get: Callable[[str], Any]) -> Any:
     return tick.skip_refused(tick.example.run, get("slug"), get("store"), get("doc"))
 
 
-registry.register(CallStep("example", TASK_PASSES, 60, held(_example)))
+registry.register(
+    CallStep(
+        "example",
+        TASK_PASSES,
+        held(_example),
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=CallStep.lane,
+        effects=frozenset(),
+        feature="swarm-tick-example",
+    )
+)
 ```
+
+### The feature and scenario catalogue
+
+`python -m scripts.tick.catalogue check` imports every step module and calls
+`registry.validate(catalogue)` with the catalogue `scripts.tick.catalogue.load` builds from `feature-map.json` and
+`tests/swarm/tick_scenarios/steps.json`. That index maps each step name to the tick scenario names it runs in (a
+golden key without its `run_tick/` or `tick/` prefix) and lists the steps still unmapped. With a catalogue the
+registry refuses:
+
+- a step whose `feature` is not a feature map id or whose name no scenario lists, unless it is unmapped;
+- an unmapped entry naming a step that is now mapped or no registered step.
+
+`python -m scripts.tick.catalogue shrink --base <base tree> --head <head tree>` refuses an unmapped step the base
+index does not hold, so the unmapped list only shrinks. Production calls `validate()` without a catalogue and skips
+these checks. The `Tick equivalence` workflow runs `check` on the head and `shrink` from the base tree's copy of the
+module, so a head cannot loosen the ratchet, then the tick pattern grader the same way (see [The tick equivalence
+run](tick-pattern-gate.md#the-tick-equivalence-run)), before the scenario replay.
+
+The index holds two keys. `scenarios` maps a step name to the scenario names it runs in; `unmapped` lists the
+registered steps that have no mapping yet. An abridged example:
+
+```json
+{
+  "scenarios": {
+    "example": ["dependency", "running"]
+  },
+  "unmapped": ["automated cleanup", "bottleneck remedy"]
+}
+```
+
+A scenario name is a key of `tests/swarm/tick_scenarios/goldens.json` with its `run_tick/` or `tick/` prefix removed,
+so `run_tick/dependency` and `tick/dependency` are both `dependency`. `load` refuses an index that names a scenario
+with no golden, and a step with an empty scenario list counts as unlisted. A new step is mapped in the pull request
+that registers it. To map an unmapped step, in one change:
+
+1. Set its `feature` to a feature map id, adding the entry to `feature-map.json` if none fits.
+2. Add its name and its scenario names to `scenarios`.
+3. Remove its name from `unmapped`; `check` refuses a mapped step left there.
+4. Run `python -m scripts.tick.catalogue check` from the repository root. `--root <tree>` checks another tree.
+
+`check` and `shrink` print `<n> tick catalogue errors`, then one `::error::` line per error, and exit 1 when there is any
+error, 0 otherwise. A ratchet run against a base tree without an index allows the head's unmapped list, so the first
+change that adds the index passes. A head without the index passes `shrink` with an empty unmapped list, and `check`
+then stops with a traceback on the missing file, so the gate stays red. `check` reports one stage at a time: an index
+naming an unknown scenario is refused first, before the registry runs; then the registry's own refusals, such as
+`Duplicate step name` or `Unordered writers`, each reported as that one line alone; the catalogue errors appear, all
+at once, after both are fixed.
 
 ## Tests
 
@@ -748,18 +963,23 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
 | `tests/tick/test_pass_edges.py` | Every pass box read over the twelve tick scenarios is declared with a need on its writer and every pass box write is declared; a planted undeclared read and a planted missing need are named |
+| `tests/tick/test_catalogue.py` | A step with no feature, an unknown feature or no scenario refused, an unmapped step passing, stale unmapped entries refused, a planted index drop red, a grown unmapped list red from `shrink`, and the recorded catalogue holding every registered step |
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
 | `tests/tick/test_report.py` | The slow lane report steps and a `CallStep` keeping the lane it is given |
+| `tests/tick/test_closing_lane.py` | The closing deadline starting once at `Pass.close` and outliving an expired critical lane, a closing step running while a critical step in the same group is dropped, the three closing steps in the `closing` group and lane, and a 300 second hung step under a 1 second critical lane still stamping last tick, the heartbeat and the status |
+| `tests/tick/test_early_end.py` | An early end names each left step once and counts the missing value without writing last tick or the heartbeat itself |
 | `tests/tick/test_pool.py` | A parallel group returning its critical records while its slow step runs, a handed off step starting after the critical step it needs and dropped when that step was dropped, a handed off step applying its writes through the group appliers on a daemon thread named `tick-slow-lane`, the pass waiting for a hung slow step only until the slow deadline plus the grace second, and a sequential pass running slow steps in the group |
 
 ## Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
-| `Undeclared step timing` at import | Declare that exact step name in `MEASURED` before constructing its `CallStep` |
+| `Undeclared step timing` at import | Declare that exact step name in `FLOORS` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
-| Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
+| Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Only intervals above 60 seconds rest a step, and only while the pass records to the swarm store. Read the stored ends with `timing.step_ends`; a step that ends `late` or `held` stores no end and stays due every pass. See [Interval enforcement](#interval-enforcement) |
+| `Interval of <step> above 60s writes pass:<key>` at registration | The step writes the pass state, which every later step of the pass reads; declare it at `CRITICAL_S` |
+| A wide or slow step runs on every pass | Its last run never ended `ok` or `failed`, the store or swarm is missing from the pass, or reading `tick:step-ran` fails. Read `timing.step_ends` for the swarm and the step's outcome rows in `tick-report` |
 | `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
 | `Unordered reader and writer ... for pass:<key>` on the first pass | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
@@ -767,6 +987,8 @@ The delivered proof and limitations are recorded in
 | `swarm_tick_step_abandoned` in the tick journal | That step was still running at its budget or its lane deadline and the writes it names were dropped. Its worker may still finish its external calls. One line now and then is a slow call; the same step on most passes means its budget is below its real wall time, see [The abandoned write journal line](#the-abandoned-write-journal-line) |
 | A step is late in `tick-report` but no `swarm_tick_step_abandoned` line exists | The step declares no write beyond its own `actions:<name>` domain, or it was dropped before it started because a step it needs was dropped or its lane had expired. Neither loses writes |
 | Preempt and spawn are late in a pass with no critical lane overrun | `fleet red notice` ran past its 30 second budget; both wait for it and are dropped when it is abandoned. Look for its `swarm_tick_step_abandoned` line in the same pass |
+| No heartbeat or last tick after a pass that printed actions | The pass raised or returned before its end, so `ended` was none and the closing group stamped nothing; read the tick log for the exception or the early return line. A pass that ended with `pass ended early` does stamp both |
+| `closing` steps recorded late | The step's own budget or the 30 second closing deadline ran out. The deadline starts at the pass `finally`, not at the start of the pass, so a long critical lane does not shorten it |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
@@ -774,4 +996,10 @@ The delivered proof and limitations are recorded in
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
 | A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
 | A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
+| `Step <name>: feature '<id>' is not a feature map id` from `catalogue check` | The step's `feature` names no `id` in `feature-map.json`; use an existing id or add the entry |
+| `Step <name>: no scenario lists it` from `catalogue check` | The step has no row, or an empty list, under `scenarios` in `tests/swarm/tick_scenarios/steps.json`; add the scenario names it runs in |
+| `Step <name> is mapped; drop it from the unmapped steps` | The step now has a feature map id and a scenario; remove its name from `unmapped` |
+| `Unmapped step <name> is not registered; drop it` | The step was renamed or removed; remove the old name from `unmapped` |
+| `tests/swarm/tick_scenarios/steps.json names unknown scenarios: <names>` | The index lists a scenario with no golden in `goldens.json`; use a golden key without its `run_tick/` or `tick/` prefix |
+| `Unmapped step <name> is new; map it to a feature and a scenario instead` from `catalogue shrink` | The head added a name to `unmapped` that the base does not hold. Map the step instead; the base copy of the ratchet runs in CI, so editing the head's `catalogue.py` does not clear it |
 | A tick pass raised and later steps of the same group did not run | Expected: the first moved step that raised holds the exception and the rest of the group's moved steps skip until it is raised at the site |

@@ -70,6 +70,7 @@
         "tests/swarm/test_tick_load.py::test_simulated_load_pass_fits_the_budget",
         "tests/swarm/test_tick_load.py::test_a_step_made_300_seconds_slower_breaks_the_budget",
         "tests/swarm/test_tick_load.py::test_the_budget_only_shrinks_against_its_base",
+        "tests/swarm/test_tick_load.py::test_the_base_budget_fetches_dev_when_origin_dev_is_missing",
         "tests/swarm/test_tick_load.py::test_a_raised_budget_is_refused",
         "tests/swarm/test_tick_load.py::test_an_equal_or_lower_budget_is_accepted"
       ],
@@ -98,7 +99,52 @@
         "tests/tick/test_step_isolation.py::test_every_registered_call_step_declares_its_measured_timing",
         "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
         "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
-        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path"
+        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path",
+        "tests/tick/test_intervals.py::test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass",
+        "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_three_runs_once_in_three_passes",
+        "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_one_runs_every_pass",
+        "tests/tick/test_intervals.py::test_a_skipped_step_counts_as_ended_for_its_dependents",
+        "tests/tick/test_intervals.py::test_a_skipped_step_in_a_parallel_pass_ends_for_its_dependents",
+        "tests/tick/test_intervals.py::test_a_handed_off_slow_lane_step_in_a_parallel_pass_rests_inside_its_interval",
+        "tests/tick/test_intervals.py::test_a_failed_run_records_its_end_and_a_late_run_does_not",
+        "tests/tick/test_intervals.py::test_nothing_rests_without_a_recording_store",
+        "tests/tick/test_intervals.py::test_a_step_never_recorded_is_due",
+        "tests/tick/test_intervals.py::test_nothing_rests_with_a_swarm_but_no_store",
+        "tests/tick/test_intervals.py::test_a_pass_of_critical_steps_reads_no_step_ends",
+        "tests/tick/test_intervals.py::test_a_step_at_one_cron_minute_never_rests",
+        "tests/tick/test_intervals.py::test_a_step_end_storage_failure_is_reported",
+        "tests/tick/test_intervals.py::test_a_step_above_sixty_seconds_writing_a_pass_box_is_refused",
+        "tests/tick/test_intervals.py::test_every_registered_step_writing_the_pass_state_runs_every_pass",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_interval_scenario_runs_each_wide_step_once_and_rests_it_once",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_interval_slow_scenario_runs_a_slow_step_once_in_three_passes",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_engine_ignoring_the_last_run_hash_breaks_the_interval_scenarios"
+      ]
+    },
+    {
+      "id": "swarm-tick-live-budgets",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g5",
+      "behaviour": "Each tick pass resolves every step's budget from the last sixty walls the tick recorded for it: the p95 with fifty percent headroom in whole seconds, never under the step's floor, and the floor alone until sixty walls exist; spawn's latest start is computed on floors.",
+      "seam": "scripts.tick.steps.budgets.resolve and budget_of, read through CallStep.budget_s, with walls pushed by scripts.swarm.timing.append_step",
+      "tests": [
+        "tests/tick/test_budgets.py::test_sixty_walls_give_the_p95_with_headroom_above_the_floor",
+        "tests/tick/test_budgets.py::test_a_live_p95_under_the_floor_keeps_the_floor",
+        "tests/tick/test_budgets.py::test_fifty_nine_walls_give_the_floor",
+        "tests/tick/test_budgets.py::test_the_window_keeps_the_last_sixty_walls",
+        "tests/tick/test_budgets.py::test_a_planted_floor_only_budget_goes_red",
+        "tests/tick/test_budgets.py::test_a_missing_window_is_rebuilt_from_the_steps_stream",
+        "tests/tick/test_budgets.py::test_a_step_budget_reads_the_live_budget_of_its_pass",
+        "tests/tick/test_budgets.py::test_a_write_step_budget_follows_its_live_budget",
+        "tests/tick/test_budgets.py::test_floors_keep_the_six_heavy_rows_and_two_seconds_elsewhere",
+        "tests/tick/test_budgets.py::test_spawn_starts_on_floors_by_forty_seconds_whatever_the_live_budgets",
+        "tests/tick/test_budgets.py::test_an_unknown_step_still_has_no_budget",
+        "tests/tick/test_budgets.py::test_a_budgeted_step_lands_on_the_steps_stream_trimmed_to_its_history",
+        "tests/tick/test_budgets.py::test_a_failed_steps_pipeline_reports_the_steps_stream",
+        "tests/tick/test_budgets.py::test_the_rebuild_marker_holds_one_rebuild_per_slow_interval",
+        "tests/tick/test_budgets.py::test_full_windows_leave_no_rebuild_marker",
+        "tests/tick/test_budgets.py::test_a_rebuild_keeps_only_the_newest_window_of_budgeted_walls_of_missing_steps",
+        "tests/tick/test_budgets.py::test_every_walls_pipeline_runs_without_a_transaction",
+        "tests/tick/test_budgets.py::test_a_window_caught_between_its_push_and_trim_still_reads_sixty_walls"
       ]
     },
     {
@@ -118,6 +164,29 @@
         "tests/tick/test_effects.py::test_the_pass_spool_opens_once_and_appends_every_batch",
         "tests/tick/test_effects.py::test_the_pass_tools_wire_every_real_adapter_for_the_swarm",
         "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
+      ]
+    },
+    {
+      "id": "swarm-tick-common-helpers",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h9",
+      "behaviour": "The helpers the tick steps and the swarm tick module share live in the common step module, the swarm tick module re-exports each one, and a moved helper reaches its siblings through the tick module so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.common, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_common.py::test_tick_reexports_the_common_helper",
+        "tests/tick/steps/test_common.py::test_common_helpers_reach_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_common.py::test_still_held_needs_active_state_owner_and_generation",
+        "tests/tick/steps/test_common.py::test_current_owner_accepts_an_unclaimed_row_or_its_own_claim",
+        "tests/tick/steps/test_common.py::test_ended_reads_the_task_row_except_for_masters",
+        "tests/tick/steps/test_common.py::test_operator_line_skips_operator_control_notices",
+        "tests/tick/steps/test_common.py::test_reopen_guards_on_active_state_and_reports_the_live_state",
+        "tests/tick/steps/test_common.py::test_rebind_takes_the_one_pane_holding_the_conversation",
+        "tests/tick/steps/test_common.py::test_follow_keeps_an_agent_without_a_pid_and_reports_a_rebind",
+        "tests/tick/steps/test_common.py::test_skip_refused_turns_a_refusal_or_redis_timeout_into_a_skip_line",
+        "tests/tick/steps/test_common.py::test_skip_dropped_retries_once_then_skips",
+        "tests/tick/steps/test_common.py::test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task",
+        "tests/tick/steps/test_common.py::test_collected_records_a_masters_retired_tasks_then_drops_the_agent",
+        "tests/tick/steps/test_common.py::test_drop_releases_an_agent_whose_task_has_no_row"
       ]
     },
     {
@@ -199,7 +268,7 @@
       "tests": [
         "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
         "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
-        "tests/tick/test_early_end.py::test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once"
+        "tests/tick/test_early_end.py::test_an_early_end_names_each_left_step_once_and_counts_the_missing_value"
       ]
     },
     {
@@ -335,6 +404,18 @@
       "tests": [
         "tests/swarm/test_claim_order.py::test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth",
         "tests/swarm/test_claim_order.py::test_within_a_rank_the_longer_chain_goes_first_and_ledger_order_breaks_ties"
+      ]
+    },
+    {
+      "id": "swarm-ordering-dependency-audit",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2382",
+      "behaviour": "Each tick pass records every open task dependency whose tasks share no territory and whose dependent never names the other task's code, and swarm status lists them with one health finding each.",
+      "seam": "the tick dependency audit step and agentihooks swarm status ordering_dependencies",
+      "tests": [
+        "tests/swarm_ledger/test_dependency_audit.py::test_a_dependency_with_disjoint_territories_and_no_named_code_is_reported",
+        "tests/swarm/test_ordering_dependencies.py::test_the_tick_records_each_ordering_only_dependency",
+        "tests/swarm/test_ordering_dependencies.py::test_status_prints_the_list"
       ]
     },
     {
@@ -1374,7 +1455,10 @@
         "tests/tick/test_view.py::test_the_view_holds_every_top_level_part_the_pass_reads",
         "tests/tick/test_view.py::test_a_pass_holding_a_view_reads_each_document_through_one_delta_read",
         "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
-        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
+        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view",
+        "tests/tick/test_view.py::test_document_serves_the_held_view_and_reads_again_only_after_a_write",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_running_pass_reads_the_ledger_once_plus_once_per_write",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_planted_second_read_without_a_write_is_counted"
       ]
     },
     {
@@ -1423,7 +1507,7 @@
       "seam": "The overrun step of the swarm tick",
       "semgrep_rule": "feature-overrun-no-wall-time-handoff",
       "tests": [
-        "tests/swarm/test_overrun.py::test_an_agent_far_past_the_report_limit_is_only_ever_reported_never_asked_or_retired"
+        "tests/swarm/test_overrun.py::test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end"
       ]
     },
     {

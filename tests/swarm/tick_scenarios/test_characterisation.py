@@ -18,6 +18,7 @@ import pytest
 
 from scripts.swarm import cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.tick import engine, registry
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -38,7 +39,11 @@ SCENARIOS = (
     "failed-spawn",
     "full-capacity",
     "dependency",
+    "interval",
+    "interval-slow",
 )
+PASSES = {"second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 60_000)}
+CADENCES = {"interval-slow": "3"}
 LEDGER_WRITES = ("update_task", "notify", "mark_swarm", "rank_task", "comment", "join", "notice")
 RUNTIME_WRITES = ("spawn", "retire", "reap_name", "nudge", "name_pane", "close_space", "close_pane")
 
@@ -97,6 +102,17 @@ def calls_of(calls: Mock) -> list[Any]:
     return [[call[0], copy.deepcopy(call[1]), copy.deepcopy(call[2])] for call in calls.mock_calls]
 
 
+def step_rows(appended: Mock) -> list[dict[str, list[Any]]]:
+    """Return each pass's step outcome and rested flag, a finished step over its wall clock budget read as ok."""
+    passes: dict[str, dict[str, list[Any]]] = {}
+    for call in appended.call_args_list:
+        if call.args[2] == "tick:records":
+            row = call.args[3]
+            late = row["outcome"] == engine.LATE and not row["abandoned"]
+            passes.setdefault(row["pass_id"], {})[row["step"]] = [engine.OK if late else row["outcome"], row["rested"]]
+    return list(passes.values())
+
+
 def prepare(scenario: str, store: RedisStore, ledger: FakeLedger, runtime: FakeRuntime) -> None:
     if scenario in {"paused", "stopping", "stopped", "drained"}:
         store.update("sw", state=scenario)
@@ -149,16 +165,19 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     monkeypatch.setattr(time, "time", lambda: BASE_MS / 1000)
     monkeypatch.setattr(cli, "now_ms", lambda: BASE_MS)
-    monkeypatch.setattr(
-        timing,
-        "time",
-        Mock(
-            monotonic=Mock(return_value=0.0),
-            perf_counter=Mock(return_value=0.0),
-            time_ns=Mock(return_value=BASE_MS * 1000000),
-        ),
+    clock = Mock(
+        monotonic=Mock(return_value=0.0),
+        perf_counter=Mock(return_value=0.0),
+        time_ns=Mock(return_value=BASE_MS * 1000000),
     )
-    monkeypatch.setattr(timing, "append_record", Mock())
+    monkeypatch.setattr(timing, "time", clock)
+    if cadence := CADENCES.get(scenario):
+        monkeypatch.setenv("AGENTIHOOKS_TICK_CADENCE", cadence)
+    appended = Mock()
+    monkeypatch.setattr(timing, "append_record", appended)
+    monkeypatch.setattr(
+        timing, "append_step", lambda store, slug, record: appended(store, slug, "tick:steps", record), raising=False
+    )
     store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
@@ -167,9 +186,13 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     ledger_calls = spy(ledger, LEDGER_WRITES, monkeypatch)
     runtime_calls = spy(runtime, RUNTIME_WRITES, monkeypatch)
     actions = []
-    for offset in range(2 if scenario == "second-pass" else 1):
-        now = BASE_MS + offset * 1000
+    passes, gap_ms = PASSES.get(scenario, (1, 1000))
+    for offset in range(passes):
+        now = BASE_MS + offset * gap_ms
         monkeypatch.setattr(cli, "now_ms", lambda: now)
+        if scenario in CADENCES or scenario == "interval":
+            monkeypatch.setattr(time, "time", lambda: now / 1000)
+            clock.time_ns.return_value = now * 1000000
         if entry == "tick":
             actions.append(tick_module.tick("sw", store, ledger, runtime, now_ms=now))
         else:
@@ -182,6 +205,8 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
         "runtime_writes": calls_of(runtime_calls),
         "messenger_prompts": messenger.prompts,
     }
+    if scenario.startswith("interval"):
+        result["step_rows"] = step_rows(appended)
     return canonical(result, (str(tmp_path), str(Path.home()), str(Path.cwd())))
 
 
@@ -225,6 +250,83 @@ def test_dropped_reap_action_breaks_golden(entry: str, monkeypatch: pytest.Monke
             compare(record, "finished", entry)
 
 
+class ReadCount:
+    """Ledger reads of one run_tick pass held through a counted view: whole reads, delta reads and hierarchy reads."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, second_read: bool = False) -> None:
+        """Count the fake ledger's reads and serve the pass a held view whose delta reads are counted."""
+        from scripts.tick import view
+
+        self.counts: dict[str, int] = {"state": 0, "changes": 0, "hierarchy": 0, "writes": 0}
+        self.unwritten: list[int] = []
+        self.written = True
+        whole, tree = FakeLedger.state, FakeLedger.hierarchy
+
+        def state(ledger: FakeLedger, slug: str) -> dict[str, Any]:
+            self.counts["state"] += 1
+            return whole(ledger, slug)
+
+        def hierarchy(ledger: FakeLedger, slug: str) -> list[dict[str, Any]]:
+            self.counts["hierarchy"] += 1
+            return tree(ledger, slug)
+
+        monkeypatch.setattr(FakeLedger, "state", state)
+        monkeypatch.setattr(FakeLedger, "hierarchy", hierarchy)
+        for name in LEDGER_WRITES:
+            monkeypatch.setattr(FakeLedger, name, self.writing(getattr(FakeLedger, name), view.wrote))
+
+        def hold(beating: Any, slug: str, ledger: FakeLedger) -> None:
+            beating.enter_context(view.holding())
+
+            def renew() -> view.LedgerView:
+                if not self.written:
+                    self.unwritten.append(self.counts["changes"])
+                self.counts["changes"] += 1
+                self.written = False
+                return view.LedgerView(self.counts["changes"], copy.deepcopy(whole(ledger, slug)))
+
+            held = renew()
+            view.CURRENT.set(held)
+            view.HELD.set(view.Held(held, renew))
+            view.REFRESH.set((slug, renew))
+            if second_read:
+                view.wrote()
+
+        monkeypatch.setattr(cli, "_hold_view", hold)
+
+    def writing(self, method: Any, wrote: Any) -> Any:
+        """``method`` counted as a ledger write that leaves the held view stale, as the ledger client does."""
+
+        def write(ledger: FakeLedger, *args: Any, **kwargs: Any) -> Any:
+            found = method(ledger, *args, **kwargs)
+            self.counts["writes"] += 1
+            self.written = True
+            wrote()
+            return found
+
+        write.__name__ = write.__qualname__ = method.__name__
+        return write
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_running_pass_reads_the_ledger_once_plus_once_per_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    reads = ReadCount(monkeypatch)
+    replay("running", "run_tick", monkeypatch, tmp_path)
+    assert reads.counts["hierarchy"] == 0, reads.counts
+    assert reads.counts["state"] == 0, reads.counts
+    assert 1 <= reads.counts["changes"] <= 1 + reads.counts["writes"], reads.counts
+    assert reads.unwritten == [], reads.counts
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_planted_second_read_without_a_write_is_counted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    reads = ReadCount(monkeypatch, second_read=True)
+    replay("running", "run_tick", monkeypatch, tmp_path)
+    assert reads.unwritten, reads.counts
+
+
 @pytest.mark.feature("fenced-live-names-listing")
 def test_running_pass_lists_live_names_once_plus_once_per_launch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -240,3 +342,54 @@ def test_running_pass_lists_live_names_once_plus_once_per_launch(
     record = replay("running", "run_tick", monkeypatch, tmp_path)
     launches = sum(1 for call in record["runtime_writes"] if call[0] == "spawn")
     assert (len(listings), launches) == (3, 3), f"LIVE_NAMES_LISTINGS={len(listings)} LAUNCHES={launches}"
+
+
+def assert_rests(record: dict[str, Any], gap_s: float, lane: str | None) -> set[str]:
+    cadence = engine.cadence_s()
+    wide = {
+        step.name: engine.interval_s(step, cadence)
+        for step in registry.steps()
+        if engine.interval_s(step, cadence) > engine.CRON_S and (lane is None or step.lane == lane)
+    }
+    first, *later = record["step_rows"]
+    ran = {name for name, (outcome, rested) in first.items() if name in wide and not rested}
+    ran &= {name for name, (outcome, _) in first.items() if outcome in (engine.OK, engine.FAILED)}
+    assert ran == set(wide), f"the first pass left {sorted(set(wide) - ran)} unrun"
+    always = set(ran)
+    for index, rows in enumerate(later, start=1):
+        expected = {name for name in ran if index * gap_s <= wide[name] - engine.CRON_S}
+        rested = {name for name in ran if rows.get(name, ["", False])[1]}
+        assert rested == expected, f"pass {index + 1} rested {sorted(rested)}, expected {sorted(expected)}"
+        always &= rested
+    return always
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_interval_scenario_runs_each_wide_step_once_and_rests_it_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    record = replay("interval", "run_tick", monkeypatch, tmp_path)
+    assert len(record["step_rows"]) == 2
+    assert assert_rests(record, 60.0, None)
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_interval_slow_scenario_runs_a_slow_step_once_in_three_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    record = replay("interval-slow", "run_tick", monkeypatch, tmp_path)
+    assert len(record["step_rows"]) == 3
+    assert assert_rests(record, 60.0, engine.SLOW)
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+@pytest.mark.parametrize(("scenario", "gap_s", "lane"), [("interval", 60.0, None), ("interval-slow", 60.0, "slow")])
+def test_engine_ignoring_the_last_run_hash_breaks_the_interval_scenarios(
+    scenario: str, gap_s: float, lane: str | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import timing
+
+    monkeypatch.setattr(timing, "step_ends", lambda store, slug: {})
+    record = replay(scenario, "run_tick", monkeypatch, tmp_path)
+    with pytest.raises(AssertionError, match="rested"):
+        assert_rests(record, gap_s, lane)
