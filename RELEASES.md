@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.651 · 2026-11-05
+
+### 2026-11-05 · 34baf8499588 · #9780 · @nestorcolt
+
+**Match hive repositories across host checkout paths**
+
+This change fixes a bug where a hosted controller would reject tasks simply because the workstation's repository path didn't match the hive's checkout path, even though they referred to the same repository. Placement logic now identifies repository identity across differing host paths and passes the correctly matched hive checkout through to the launch step and payload, while still rejecting genuinely conflicting remotes and ignoring unrelated repository advertisements. This matters because it unblocks legitimate tasks that were previously failing due to path mismatches alone, improving reliability for teams whose local checkout locations differ from the hive's recorded path.
+
 ## v2.17.650 · 2026-11-05
 
 ### 2026-11-05 · 139f184f2ae6 · #9754 · @nestorcolt
