@@ -629,3 +629,19 @@ def test_a_real_launch_failure_still_fails_its_step(
             raise SpawnError("herdr refused the pane", "refused")
     assert seen == [False]
     assert panic.errors_since(store, 0) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "waits"),
+    [
+        ("pending", "hive launch ordered, waiting for its acknowledgement", True),
+        ("unavailable", "account reservation is full: account=claude:a sessions=1 cap=1", True),
+        ("unavailable", "no hive has room for the lane", False),
+        ("refused", "account reservation is full: account=claude:a sessions=1 cap=1", False),
+        ("refused", "herdr refused the pane", False),
+    ],
+)
+def test_only_a_pending_launch_or_a_full_reservation_waits(status: str, detail: str, waits: bool) -> None:
+    from scripts.swarm.tick import SpawnError
+
+    assert SpawnError(detail, status).waiting() is waits
