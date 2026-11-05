@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.644 · 2026-11-05
+
+### 2026-11-05 · dbe60ff9538d · #9763 · @nestorcolt
+
+**Hive placement matches account slots in either separator form**
+
+This fix resolves a placement bug where hive routing rejected valid matches because account identifiers used underscores while hive-advertised slugs used hyphens (e.g. `nestorcolt-smatgmail-com` vs `nestorcolt_smatgmail_com`), causing every task to fail with "no hive" errors. The fix centralizes normalization in `scripts.hive.placement.account_key`, now shared across slot, interactive login, and master login checks, and updates `scripts.hive.launch` to use this same key rather than its own private implementation, ensuring consistent matching regardless of separator style.
+
+### 2026-11-05 · 336672cf7e12 · #9762 · @nestorcolt
+
+**Ledger readiness accepts a master launched after staging without an execution identity**
+
+This fix resolves a false negative in ledger cutover readiness: previously, a master launched after the tick move to the Anton controller had no execution_id and generation 0, which made the freshness check fail and blocked the hosted ledger activation even though the launch was valid. Now readiness logic accepts a master lacking execution identity if its launch timestamp is positive and no earlier than the ledger staging time, using that timestamp instead of generation for the receipt, and acknowledge additionally checks the agents hash and re-verifies the row's launch timestamp before confirming, preventing stale or mismatched receipts.
+
+### 2026-11-04 · cb75dc987a3d · #9731 · @nestorcolt
+
+**Run the whole tree tick pattern comparison at promotion**
+
+This change closes a gap where the tick pattern gate only checked files touched by a pull request, letting two individually clean merges combine into undetected drift on dev. A new `scripts.tick_pattern --tree` mode now compares the entire tree against the allowlist and names any differing files; a `tick-pattern-tree` job runs it on every dev push, feeding `promotion-ready` and `promote` so drift turns promotion red and triggers the usual fixer task automatically, rather than silently accumulating. It runs only on dev pushes, not pull requests or the queue, with a 60s budget and light runner.
+
+### 2026-11-04 · c75424f66e2e · #9749 · @nestorcolt
+
+**Document the tick closing lane for heartbeat, last tick and status publish**
+
+This change documents the closing lane already shipped in #9720, which runs the heartbeat, last tick, and status publish from the pass finally rather than inline in the tick. The new section in tick-engine-steps.md covers the CLOSING_LANE, the 30-second CLOSING_S deadline, the closing group, how ended values (full, early, none) are stamped, sequential mode, and the hang-proof test, while swarm.md and tick-adapters.md are updated to match. This gives operators a clear, accurate reference for how tick closure now behaves so they can troubleshoot heartbeat and status issues confidently.
+
 ## v2.17.643 · 2026-11-04
 
 ### 2026-11-04 · 216a351fdbee · #9751 · @nestorcolt
