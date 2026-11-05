@@ -242,6 +242,13 @@ def test_a_run_that_never_lists_jobs_is_red_after_the_wait_bound(monkeypatch: py
     assert sleeps == [3, 3]
 
 
+def test_zero_polls_report_the_missing_run_without_calling_the_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    module, calls, sleeps = _replay(monkeypatch, [])
+    assert module.verify("owner/repo", "head", attempts=0, interval=3, waits=0) == "Tests run is missing for this head."
+    assert calls == []
+    assert sleeps == []
+
+
 def test_default_wait_for_a_started_run_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     running = {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "queued", "conclusion": None}]}
     module, calls, sleeps = _replay(monkeypatch, [running, {"total_count": 0}] * 36)
