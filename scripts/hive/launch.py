@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
@@ -173,7 +174,7 @@ def _by_mode(config: SwarmConfig, hives: list[dict], role: str, now: int) -> lis
     return placement.round_robin(hives, config.placement_nodes, config.repo, now)
 
 
-def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.Wait:
+def _matched_origin(hives: list[dict[str, Any]], hive: str, repo: str) -> str | placement.Wait:
     from scripts.hive.daemon import origin
 
     found = next((found for found in hives if found["id"] == hive), None)

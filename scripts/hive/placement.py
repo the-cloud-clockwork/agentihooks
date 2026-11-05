@@ -104,7 +104,7 @@ def for_swarm(hives: list[dict], slug: str) -> list[dict]:
     ]
 
 
-def round_robin(hives: list[dict], nodes: int, repo: str, now: int) -> list[dict]:
+def round_robin(hives: list[dict[str, Any]], nodes: int, repo: str, now: int) -> list[dict[str, Any]]:
     chosen = sorted((hive for hive in hives if live(hive, now) and repository(hive, repo)), key=lambda hive: hive["id"])
     return [{**hive, SPREAD: hive["agents"] + hive.get(PLACED, 0)} for hive in chosen[: nodes or None]]
 
@@ -258,7 +258,7 @@ def _private_master(hive: dict, harness: str, front: bool) -> bool:
 
 
 def place_master(
-    harness: str, login: str, repo: str, hives: list[dict], now: int, front: bool = False
+    harness: str, login: str, repo: str, hives: list[dict[str, Any]], now: int, front: bool = False
 ) -> MasterPlacement | Wait:
     hosting = [hive for hive in hives if live(hive, now) and hosts(MASTER, hive)]
     if not hosting:
