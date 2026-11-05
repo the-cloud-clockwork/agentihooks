@@ -1061,3 +1061,128 @@ def test_ensure_writes_and_enables_the_scheduler_unit(tmp_path, monkeypatch):
         "agentihooks-scheduler.service"
     ]
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-scheduler.service"] in calls
+
+
+ANTON = "http://agentihooks-swarm-controller.agentihooks-swarm.svc:8780"
+SWARM_WORK = (
+    "agentihooks-swarm-waits.service",
+    "agentihooks-swarm-waits.timer",
+    "agentihooks-tick-watch.service",
+    "agentihooks-inbox-waker.service",
+)
+
+
+def _swarm_store(*rows: tuple[str, str, str]) -> object:
+    """A fake swarm store holding one swarm per row of slug, state and stored ledger address."""
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    for slug, state, api_url in rows:
+        found.create(SwarmConfig(slug, "/repo", 2, 1, state=state))
+        found.redis.hset(found.key(slug, "config"), "api_url", api_url)
+    return found
+
+
+def test_a_swarm_with_a_stored_controller_address_is_served_in_anton():
+    from scripts.swarm import scheduled_tick
+
+    found = _swarm_store(("live", "running", ANTON), ("proof", "running", ""))
+    assert scheduled_tick.served(found.config("live")) is True
+    assert scheduled_tick.served(found.config("proof")) is False
+
+
+@pytest.mark.parametrize(
+    ("rows", "hosts"),
+    [
+        ((("live", "running", ANTON), ("doctor", "stopped", "")), False),
+        ((("live", "running", ANTON), ("proof", "running", "")), True),
+        ((("live", "running", ANTON), ("proof", "paused", "")), True),
+        ((("live", "running", ANTON), ("proof", "stopping", "")), True),
+        ((("live", "stopped", ANTON),), False),
+        ((), False),
+    ],
+    ids=["served-and-stopped", "local-running", "local-paused", "local-stopping", "served-stopped", "empty"],
+)
+def test_the_workstation_hosts_swarm_work_only_for_a_live_swarm_not_served_in_anton(rows, hosts):
+    from scripts.swarm import scheduled_tick
+
+    assert scheduled_tick.hosts(_swarm_store(*rows)) is hosts
+
+
+def test_hosts_work_reads_the_swarm_store_and_keeps_the_units_when_it_cannot(monkeypatch):
+    from scripts.swarm import store as swarm_store
+
+    served = _swarm_store(("live", "running", ANTON))
+    monkeypatch.setattr(swarm_store, "connect", lambda: served)
+    assert timer.hosts_work() is False
+    local = _swarm_store(("proof", "running", ""))
+    monkeypatch.setattr(swarm_store, "connect", lambda: local)
+    assert timer.hosts_work() is True
+    local.redis.sadd(f"{swarm_store.PREFIX}:index", "gone")
+    assert timer.hosts_work() is True
+
+    def down():
+        raise swarm_store.Unreachable("Redis is unreachable")
+
+    monkeypatch.setattr(swarm_store, "connect", down)
+    assert timer.hosts_work() is True
+
+
+def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(tmp_path, monkeypatch):
+    cancelled = []
+    monkeypatch.setattr(timer, "unschedule", lambda: cancelled.append(True))
+    monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the tick was scheduled"))
+    calls = []
+    for name, text in {**timer.units("/installed/bin/agentihooks"), **timer.tick_units()}.items():
+        (tmp_path / name).write_text(text)
+    monkeypatch.setattr(timer, "hosts_work", lambda: False)
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is True
+    assert cancelled == [True]
+    assert [argv for argv, _ in calls if argv[2] in ("disable", "enable", "daemon-reload")] == [
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm-waits.timer"],
+        ["systemctl", "--user", "disable", "--now", "agentihooks-tick-watch.service"],
+        ["systemctl", "--user", "disable", "--now", "agentihooks-inbox-waker.service"],
+        ["systemctl", "--user", "daemon-reload"],
+    ]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "agentihooks-quota-prober.service",
+        "agentihooks-scheduler.service",
+    ]
+    calls.clear()
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is True
+    assert [argv for argv, _ in calls] == []
+    assert cancelled == [True, True]
+
+
+def test_reconcile_retires_current_units_once_no_swarm_needs_the_workstation(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    monkeypatch.setattr(timer, "unschedule", lambda: None)
+    monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the tick was scheduled"))
+    monkeypatch.setattr(timer, "hosts_work", lambda: False)
+    assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert not any((tmp_path / name).exists() for name in SWARM_WORK)
+    monkeypatch.setattr(timer, "hosts_work", lambda: True)
+    monkeypatch.setattr(timer, "schedule", lambda caller: True)
+    calls = []
+    assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is True
+    assert all((tmp_path / name).exists() for name in SWARM_WORK)
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"] in [argv for argv, _ in calls]
+
+
+def test_a_swarm_tick_on_a_workstation_refuses_a_swarm_served_in_anton_and_ticks_a_local_one(monkeypatch, capsys):
+    found = _swarm_store(("live", "running", ANTON), ("proof", "running", ""))
+    ticked = []
+    monkeypatch.setattr(cli, "connect", lambda: found)
+    monkeypatch.setattr(cli, "refusal", lambda name, who: "")
+    monkeypatch.setattr(cli.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(cli, "run_tick", lambda store, slug: ticked.append(slug) or ["spawned engineer"])
+    assert cli.dispatch(["live", "tick"]) == 1
+    assert capsys.readouterr().err == "swarm: the swarm live is served in Anton, so only its controller ticks it\n"
+    assert ticked == []
+    assert cli.dispatch(["proof", "tick"]) == 0
+    assert capsys.readouterr().out == "spawned engineer\n"
+    assert ticked == ["proof"]
