@@ -186,12 +186,16 @@ def test_a_unit_moved_to_another_file_keeps_its_allowance(tmp_path: Path, capsys
 
 
 def test_a_moved_unit_that_grows_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
-    grown = EIGHT_PARAMETERS.replace("h)", "h, i)")
-    head = _recorded(tmp_path / "head", {"old.py": "VALUE = 1\n", "new.py": grown})
+    def branching(count: int) -> str:
+        checks = "".join(f"    if a == {n}:\n        return {n}\n" for n in range(count))
+        return f"def planted(a, b, c, d, e, f, g, h):\n{checks}    return b\n"
+
+    base = _recorded(tmp_path / "base", {"old.py": branching(13)})
+    head = _recorded(tmp_path / "head", {"old.py": "VALUE = 1\n", "new.py": branching(14)})
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "new.py::planted grew on PLR0913 from 8 to 9" in out
+    assert "new.py::planted grew on PLR0912 from 13 to 14" in out
+    assert "not on the base allowlist" not in out
 
 
 def test_a_unit_the_old_file_still_holds_is_a_new_unit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
