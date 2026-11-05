@@ -423,8 +423,10 @@ def _verify(
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
             continue
-        if held_elsewhere.keep(slug, store, agent, holders, now_ms) or dead_resume.skip_binding(
-            agent, facts, live_names
+        if (
+            held_elsewhere.keep(slug, store, agent, holders, now_ms)
+            or held_elsewhere.unseen(slug, store, agent, facts.get(agent.name, {}), now_ms)
+            or dead_resume.skip_binding(agent, facts, live_names)
         ):
             continue
         agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
@@ -707,6 +709,9 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
     ):
         return []
     if reason := timing.timed(_remote_gone_reason, slug, store, runtime, agent, now_ms):
+        if not _ended(agent, rows) and held_elsewhere.placed(slug, store, agent, now_ms):
+            store.refresh(slug, agent.task, agent.name, LEASE_MS)
+            return []
         return [timing.timed(_drop_remote, slug, store, ledger, rows, agent, reason)]
     ended = _ended(agent, rows)
     if agent.state == "retiring" and not ended:
