@@ -30,11 +30,14 @@ python -m scripts.tick.new_step --check <name>
 
 ## 2. Fill the body
 
-- Act only through `ctx.tools`, the view of the ports the step declares in
-  `effects`; a write on an undeclared port raises `UndeclaredEffect`.
-- Read the pass view with `ctx.view.read(domain, key)`, never `ledger.state`.
-- Finish under `ctx.deadline` and return `Result(writes)` with its appliers in the
-  same module.
+- The stub is a `CallStep`: a function of the tick module and a pass state
+  reader, `(tick, get)`, returning the step's action lines. Fill its `needs`,
+  `reads` and `writes` with what the body uses.
+- A step written as a `WriteStep` or a `Step` dataclass acts only through
+  `ctx.tools`, the view of the ports it declares in `effects`, reads the pass
+  view with `ctx.view.read(domain, key)`, never `ledger.state`, finishes under
+  `ctx.deadline` and returns `Result(writes)` with its appliers in the same module.
+  A write on an undeclared port raises `UndeclaredEffect`.
 - Add no function to `scripts/swarm/tick.py`. A body that needs one of its
   functions moves that function into the step module in the same pull request.
 - Fill the scaffolded test with the behaviour the feature entry names, keeping its
@@ -52,9 +55,9 @@ python -m scripts.feature_map
 wt.sh done "$BASE"
 ```
 
-`wt.sh` is the worktree skill's script. The plan writes the first command as
-`python -m scripts.tick_pattern --base origin/dev`; `--base` takes the path of an
-`origin/dev` checkout, never the ref. Each must end with 0 errors. Then run
+`wt.sh` is the worktree skill's script. `--base` takes the path of an
+`origin/dev` checkout, never the ref. The pattern and catalogue checks must report
+0 errors and the feature map check must report that every link exists. Then run
 `python -m scripts.ci_prepush`.
 
 ## 4. Pull request
@@ -66,5 +69,5 @@ wt.sh done "$BASE"
   statements.
 - Paste the scaffold output and the three check outputs in the pull request body.
 
-Done when `--check` reports five `true`, the three checks report 0 errors, and the
+Done when `--check` reports five `true`, the three checks pass, and the
 pull request body carries the equivalence and planted fault run ids where it moves code.

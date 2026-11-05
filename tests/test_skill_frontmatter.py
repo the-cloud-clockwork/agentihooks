@@ -19,7 +19,8 @@ MASTER = PACKAGE / "roles" / "master" / ".claude" / "skills" / "swarm-master" / 
 ROLES = ("master", "engineer", "cicd", "planner", "qa")
 COMMANDS = (
     "python -m scripts.tick.new_step",
-    "python -m scripts.tick_pattern --base origin/dev",
+    'python -m scripts.tick_pattern --base "$BASE"',
+    "BASE=$(wt.sh tmp --from origin/dev",
     "python -m scripts.tick.catalogue check",
     "python -m scripts.feature_map",
 )
@@ -91,6 +92,13 @@ def test_tick_pattern_rule_carries_package_rule_frontmatter() -> None:
     assert "python -m scripts.tick.new_step" in body
     assert "python -m scripts.tick_pattern" in body
     assert "tick-step" in body
+    points = re.findall(r"^(\d)\. (.+)$", body, re.MULTILINE)
+    assert [number for number, _ in points] == ["1", "2", "3", "4", "5"]
+    assert all(word in points[0][1] for word in ("group", "lane", "effects", "feature", "budgets.FLOORS"))
+    assert "effects" in points[1][1] and "scripts/swarm/tick.py" in points[1][1]
+    assert "steps.json" in points[2][1] and "feature-map.json" in points[2][1]
+    assert "python -m scripts.tick.catalogue check" in points[3][1]
+    assert "equivalence" in points[4][1] and "planted fault" in points[4][1]
     assert not re.search(r"manifesto|§|~/\.claude/skills", RULE.read_text(), re.IGNORECASE)
 
 
@@ -110,7 +118,7 @@ def test_swarm_engineer_loads_tick_step_first_for_a_tick_task() -> None:
     assert "tick-step" in work
 
 
-@pytest.mark.parametrize("field", ["step", "group", "lane", "effects", "feature"])
+@pytest.mark.parametrize("field", ["names the step", "its group", "lane (", "effects", "feature map id"])
 def test_swarm_master_tick_task_spec_names_each_field(field: str) -> None:
     tasks = MASTER.read_text().split("## Tasks and proof contracts", 1)[1].split("\n## ", 1)[0]
     bullet = next(item for item in tasks.split("\n- ") if "tick task" in item.lower())
