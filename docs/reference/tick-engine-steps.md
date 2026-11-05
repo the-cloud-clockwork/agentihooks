@@ -777,6 +777,9 @@ by the engine and does not leave the pass.
 3. Import the module in `scripts.swarm.tick` so it registers before the first
    pass, delete the hand written line, and add `tasks.raise_held(box)` after the
    group site if the site is new.
+4. Map the step to a feature and its scenarios as described in
+   [The feature and scenario catalogue](#the-feature-and-scenario-catalogue);
+   `swarm-tick-example` stands for a real feature map id.
 
 ```python
 from collections.abc import Callable
@@ -820,8 +823,37 @@ registry refuses:
 `python -m scripts.tick.catalogue shrink --base <base tree> --head <head tree>` refuses an unmapped step the base
 index does not hold, so the unmapped list only shrinks. Production calls `validate()` without a catalogue and skips
 these checks. The `Tick equivalence` workflow runs `check` on the head and `shrink` from the base tree's copy of the
-module, so a head cannot loosen the ratchet, before the scenario replay. A new step gets a feature map entry and an index row in the pull request that registers it; a
-sweep that maps an existing step removes it from `unmapped` in the same change.
+module, so a head cannot loosen the ratchet, before the scenario replay.
+
+The index holds two keys. `scenarios` maps a step name to the scenario names it runs in; `unmapped` lists the
+registered steps that have no mapping yet. An abridged example:
+
+```json
+{
+  "scenarios": {
+    "example": ["dependency", "running"]
+  },
+  "unmapped": ["automated cleanup", "bottleneck remedy"]
+}
+```
+
+A scenario name is a key of `tests/swarm/tick_scenarios/goldens.json` with its `run_tick/` or `tick/` prefix removed,
+so `run_tick/dependency` and `tick/dependency` are both `dependency`. `load` refuses an index that names a scenario
+with no golden, and a step with an empty scenario list counts as unlisted. A new step is mapped in the pull request
+that registers it. To map an unmapped step, in one change:
+
+1. Set its `feature` to a feature map id, adding the entry to `feature-map.json` if none fits.
+2. Add its name and its scenario names to `scenarios`.
+3. Remove its name from `unmapped`; `check` refuses a mapped step left there.
+4. Run `python -m scripts.tick.catalogue check` from the repository root. `--root <tree>` checks another tree.
+
+`check` and `shrink` print `<n> tick catalogue errors`, then one `::error::` line per error, and exit 1 when there is any
+error, 0 otherwise. A ratchet run against a base tree without an index allows the head's unmapped list, so the first
+change that adds the index passes. A head without the index passes `shrink` with an empty unmapped list, and `check`
+then stops with a traceback on the missing file, so the gate stays red. `check` reports one stage at a time: an index
+naming an unknown scenario is refused first, before the registry runs; then the registry's own refusals, such as
+`Duplicate step name` or `Unordered writers`, each reported as that one line alone; the catalogue errors appear, all
+at once, after both are fixed.
 
 ## Tests
 
@@ -876,4 +908,10 @@ The delivered proof and limitations are recorded in
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
 | A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
 | A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
+| `Step <name>: feature '<id>' is not a feature map id` from `catalogue check` | The step's `feature` names no `id` in `feature-map.json`; use an existing id or add the entry |
+| `Step <name>: no scenario lists it` from `catalogue check` | The step has no row, or an empty list, under `scenarios` in `tests/swarm/tick_scenarios/steps.json`; add the scenario names it runs in |
+| `Step <name> is mapped; drop it from the unmapped steps` | The step now has a feature map id and a scenario; remove its name from `unmapped` |
+| `Unmapped step <name> is not registered; drop it` | The step was renamed or removed; remove the old name from `unmapped` |
+| `tests/swarm/tick_scenarios/steps.json names unknown scenarios: <names>` | The index lists a scenario with no golden in `goldens.json`; use a golden key without its `run_tick/` or `tick/` prefix |
+| `Unmapped step <name> is new; map it to a feature and a scenario instead` from `catalogue shrink` | The head added a name to `unmapped` that the base does not hold. Map the step instead; the base copy of the ratchet runs in CI, so editing the head's `catalogue.py` does not clear it |
 | A tick pass raised and later steps of the same group did not run | Expected: the first moved step that raised holds the exception and the rest of the group's moved steps skip until it is raised at the site |
