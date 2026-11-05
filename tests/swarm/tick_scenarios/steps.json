@@ -10,6 +10,7 @@
   "command runner",
   "config load",
   "conversations",
+  "dependency audit",
   "dev red reopen",
   "dispatch seat",
   "dispatcher group",

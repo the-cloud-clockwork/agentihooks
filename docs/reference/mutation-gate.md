@@ -17,7 +17,7 @@ gh workflow run proofs.yml \
   -f base=origin/dev
 ```
 
-For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
+For a stacked branch, set `base` to its dependency branch. Open the draft pull request at the first push; never wait for Mutation preflight before opening it. A branch push with no open pull request still runs the preflight. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
 ## Required gate proof
 
@@ -601,7 +601,7 @@ turn an empty or failed collection into a passing run.
 
 ### Inspect a branch run
 
-Push the branch before opening its pull request, then inspect its preflight:
+A branch push with no open pull request runs its preflight; inspect it:
 
 ```bash
 gh run list --workflow mutation-preflight.yml --branch <branch> --limit 5
@@ -1541,7 +1541,7 @@ A preflight plan with split mutants runs two stages. In the early stage (`probe`
 |---|---|---|
 | `probe` | `probe_shards` in `plan.json`: the split mutants' head cost, `5.6 + 1.25 * head_seconds` each, divided by the planned workers times 120 seconds, rounded up. It is at least 1 and at most 40 (the batch runner pool) or the number of split mutants | One head run per split mutant |
 | `replan` | One job on the light pool, after every `probe` job succeeds | Merges the early results into the plan, replans the shards and uploads `mutation-plan-probed` |
-| `mutation-shard` | `shards` in the probed plan, sized against the shard budget less the longest early job | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
+| `mutation-shard` | `shards` in the probed plan, sized for the lowest planned stage wall. A stage costs one job setup of 180 seconds plus its slowest shard's work per worker for each wave of 40 batch runners. The planner takes the fewest shards whose stage plans within six minutes (360 seconds, or the shard budget less the longest early job when that is smaller); when no count does, it takes the count with the lowest planned stage wall whose slowest shard fits the remaining budget, so a large remainder runs one wave of longer shards before two waves of short ones. A shard is graded against the remaining budget | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
 
 On the e2 proof, [run 41605474823](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41605474823) sized both stages at 49 jobs from 130220 estimated worker seconds. Its early stage killed 451 of 493 split mutants. The 356 surviving units then took 16849 observed worker seconds; their head plus slice estimate was 69876.
 

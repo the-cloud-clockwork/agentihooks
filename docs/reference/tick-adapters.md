@@ -65,6 +65,10 @@ These are reached call sites. Calling `tick` directly on a stopped swarm reaches
 return before the normal wrapper return also skips `after`; it is not a cleanup hook in `finally`. The `close` group
 precedes settlement, so reaching it does not prove that the whole wrapper completed.
 
+[Pull request 9720](https://github.com/the-cloud-clockwork/agentihooks/pull/9720) later removed the `after` site and
+the `wrapper status` group. Last tick, heartbeat and status publish now run in the `closing` group, which `run_tick`
+calls from its `finally` on every ending; see [The closing lane](tick-engine-steps.md#the-closing-lane).
+
 ### Usage and configuration
 
 No operator flag, environment variable or swarm setting enables these call sites. In the original delivery,
@@ -783,9 +787,12 @@ fresh = shared.rescan(deadline=Deadline.after(10.0))
 |---|---|
 | `scan()` | Reads the process table on the first call and returns that same dictionary on every later call. |
 | `rescan()` | Drops the held table and reads a fresh one, which later `scan` calls then return. |
+| `live_names(listing)` | Calls `listing()` on the first read, keeps that set and returns a new copy of it on every later read. |
+| `forget_names()` | Drops the held live names set, so the next `live_names` call lists again. |
 
-`table is again` holds. Build a new `PassProcesses` for each pass; one instance never refreshes by itself. Both
-operations refuse an expired deadline before reading `/proc`.
+`table is again` holds. Build a new `PassProcesses` for each pass; one instance never refreshes by itself. `scan`
+and `rescan` refuse an expired deadline before reading `/proc`; `live_names` and `forget_names` take no deadline and
+read no process table.
 
 ## One process scan per tick pass
 
@@ -821,6 +828,72 @@ from scripts.swarm import reaper
 def retire_all(names_and_pids):
     return [reaper.retire(name, pid, []) for name, pid in names_and_pids]
 ```
+
+## One live names listing per tick pass
+
+`controller.FencedRuntime.live_names` returns the names of the swarm's live agents. On the herdr runtime that listing
+walks `/proc` through `terminate_agent.sessions`, checks each managed agent's server, and adds the hive's names, and
+many tick steps read it: the agent checks in `scripts.swarm.tick`, resume, master launch and wake, master stall,
+lifetime and status. Inside a
+tick pass the fenced runtime lists once and every later read in the pass gets the same names.
+
+| Read | Inside a tick pass | Outside a tick pass |
+|---|---|---|
+| `FencedRuntime.live_names()` | `PassProcesses.live_names(runtime.live_names)` on the pass's process model: the first read lists, later reads get a copy of that set | The wrapped runtime's `live_names()` on every call |
+| The wrapped runtime's own `live_names()` | Lists on every call | The same |
+
+- The listing is held on the `PassProcesses` in the `processes` port of `PASS_TOOLS`, which `run_tick` sets after
+  `lease.held_pass` and resets when the pass ends, even when it raises; see
+  [Effects in a tick pass](#effects-in-a-tick-pass). Every `FencedRuntime` built in that pass shares the one listing,
+  and a change through one of them drops it for all.
+- Each read returns a new `set`, so a caller that adds or removes a name does not change what the next read returns.
+- A pass is any code running while `PASS_TOOLS` holds a `Tools` whose `processes` is a `PassProcesses`. With no pass
+  tools, or with a `processes` port of another type such as a test fake, every call lists.
+
+These fenced operations drop the listing when they return, and also when they raise, so the next read lists again
+and sees the agent the call started or stopped:
+
+| Operation | Where it is wrapped |
+|---|---|
+| `spawn` | Around the placed launch, after the lease epoch check; a lease refusal raises before the launch and keeps the listing |
+| `collect`, `expire` | Around the hive launch's `collect` or `expire`, after the lease epoch check |
+| `retire`, `reap_name`, `close_space`, `close_pane`, `resume` | Named in `controller.AGENT_CHANGES`; `__getattr__` forwards them to the wrapped runtime through `_changing` |
+
+Any other forwarded attribute, such as `retire_pane`, `retire_process`, `original_runtime` or `herdr_runtime`, keeps
+the listing. A call made on one of those, or on the wrapped runtime directly, is not seen until the pass ends or one of
+the operations above runs.
+
+```python
+from scripts.swarm import controller, lease
+from scripts.swarm.commands import hive_id
+from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import connect
+
+store, slug = connect(), "rig-grade-swarm"
+held = lease.acquire(store, slug, hive_id())
+if held is not None:
+    deployment = controller.deployment_for(store.config(slug), {})
+    fenced = controller.FencedRuntime(store, slug, held, HerdrRuntime(), deployment)
+    first = fenced.live_names()
+    second = fenced.live_names()
+```
+
+Outside a pass, as in this example run from a shell, `first` and `second` each come from their own listing. Inside a
+pass they come from one listing; a `fenced.retire(agent)` between them would make `second` list again.
+
+A new step that stops or starts agents through a new runtime method drops the listing by adding the method name to
+`AGENT_CHANGES`, or by calling the operation through `FencedRuntime._changing`, as `spawn`, `collect` and `expire` do:
+
+```python
+AGENT_CHANGES = frozenset(["retire", "reap_name", "close_space", "close_pane", "resume", "retire_pane"])
+```
+
+`tests/swarm/test_controller_live_names.py` holds the contract under the `fenced-live-names-listing` feature: one
+listing per pass with copies served, a new pass lists again, every call lists outside a pass, each agent change drops
+the listing, a spawn drops it whether it succeeds or fails, and a change through one fenced runtime drops the listing of
+another. `test_running_pass_lists_live_names_once_plus_once_per_launch` in
+`tests/swarm/tick_scenarios/test_characterisation.py` replays the running scenario through `run_tick` and expects three
+listings for its three launches.
 
 ## One placement scan per placement pass
 
@@ -890,6 +963,69 @@ agentihooks swarm <swarm slug> tick-report --passes 60 | grep -E 'spawn|FencedRu
 When `runtime_spawn` takes most of a slow `spawn` row, the wrapped runtime is the slow part; when `_refusal` does,
 look at the placement reads in the table above.
 
+### Timed rows inside spawn order
+
+`_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
+`scripts.swarm.tick._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
+while `_spawn_order` runs. Once per spawn order it times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`,
+`scripts.swarm.dispatcher.claim_key`, `scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for
+each lane in the caps, it times three parts in this order:
+
+| Step row | Runs | Times |
+|---|---|---|
+| `scripts.swarm.tick._running` | Once per lane | The running agent filter: the task rows of the lane's agents that have not ended and still own their task. Its length is the lane's busy count, which offsets the rank of every task queued for the lane |
+| `scripts.swarm.tick.ready_in_order` | Once per lane | The lane's ready tasks in ledger or dispatched order |
+| `scripts.swarm.focus_budget.place` | Once per lane | Focus budget placement: which ready tasks fit the lane cap after the running ones, and which wait. It includes its two `profile_first.placeable` rows |
+
+`focus_budget.place` locates tasks through `scripts.swarm.profile_first.placeable` twice per lane: once for the ready
+tasks outside the focus queue, once for the focused ones. Each `placeable` row in turn holds one
+`scripts.swarm.profile_first.decided` row and one `scripts.swarm.seat_spawn.placed_elsewhere` row for every task it
+checks, until the lane's free room is filled. After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue once.
+
+The code fixes the counts: `_running`, `ready_in_order` and `focus_budget.place` each run once per lane per spawn
+order, and `placeable` twice, so over a window recorded entirely after pull request 9673 merged the first three have
+equal counts and `placeable` has twice that.
+
+Read the rows with:
+
+```bash
+agentihooks swarm <swarm slug> tick-report --passes 60 \
+  | grep -E 'capacity|claim_key|yielding|claim_view|_spawn_order|_running|ready_in_order|focus_budget|profile_first|placed_elsewhere|_ranked'
+```
+
+A snapshot of the spawn order rows from the workstation tick of `rig-grade-swarm`, read at 15:04 UTC on 4 November
+2026 over a window that began before pull request 9673 merged, with three lanes:
+
+```text
+scripts.swarm.focus_budget.place  138  0.054s  1.585s  0.18%
+scripts.swarm.profile_first.placeable  426  0.000s  0.311s  0.29%
+scripts.swarm.tick._ranked  71  0.002s  0.009s  0.00%
+scripts.swarm.tick._running  138  0.000s  0.001s  0.00%
+scripts.swarm.tick._spawn_order  71  3.336s  17.861s  2.26%
+scripts.swarm.tick.claim_view  71  0.050s  0.196s  0.02%
+scripts.swarm.tick.ready_in_order  213  0.111s  2.357s  0.80%
+```
+
+The columns are count, median, p95 and CPU share; see [Tick report](tick-report.md#output). The window began before
+the merge: its 71 spawn orders over three lanes gave 213 `ready_in_order` and 426 `placeable` rows, while `_running`
+and `focus_budget.place`, which the merge added, have rows only from the passes after it. Rows nest, so a part's time
+also counts in `_spawn_order`, and `placeable` time also counts in `focus_budget.place`.
+
+The report prints no sum per row, so estimate each row's total as count times median, all from the same window;
+percentiles do not add, and the estimate runs low for a row with a long tail, so check its p95 too.
+
+| What the report shows | Where the time goes |
+|---|---|
+| The `_spawn_order` estimate well above the summed estimates of its directly timed parts | Time in untimed code: the runtime's `begin_placement_pass`, the `readiness.tick_launches` and capacity decision task filters on each ready list, `focus_budget.ranks` and the final focus sort |
+| The `focus_budget.place` estimate close to the `_spawn_order` estimate | Placement is the slow part; compare it with the `placeable` estimate. When `placeable` is small, the time is in focus placement itself |
+| `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter makes no store or network call, so it grows only with those |
+| The `ready_in_order` or `claim_view` estimate close to the `_spawn_order` estimate | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
+
+`tests/swarm/test_spawn_timing.py` holds the contract. A spawn pass records a row for each part before the spawn step
+row ends. Spawn order records one `_running` and one `focus_budget.place` row per lane, each starting and ending
+inside the `_spawn_order` row. The running filter keeps only the lane's agents that have not ended and still own their
+task, with a placeholder row for an agent whose task row is missing.
+
 ## One lease heartbeat per tick pass
 
 `scripts.swarm.lease.held_pass(store, slug, held)` holds the controller lease for one tick pass. `run_tick` enters it
@@ -904,6 +1040,7 @@ before each step are in [Controller lease during long steps](../pillars/swarm.md
 | `FencedRuntime.spawn`, `collect`, `expire` | Call `lease.require_epoch`, one lease read with no renewal, and raise `SwarmError("the controller lease is stale")` when another controller now holds the lease. |
 | `FencedRuntime.has_capacity` | Applies the deployment mode refusal, then asks the wrapped runtime's `has_capacity` for a local deployment; it does not touch the lease. |
 | `FencedRuntime.launch_room` | Reads the room left for launches; it does not touch the lease. |
+| `FencedRuntime.live_names` and the agent changes | Read and drop the pass's shared live names listing, described under [One live names listing per tick pass](#one-live-names-listing-per-tick-pass); they do not touch the lease. |
 | Every other `FencedRuntime` attribute | Forwarded to the wrapped runtime, such as `herdr_runtime`, `original_runtime` and `hive_launch`, with no renewal, fencing or thread. |
 | The ledger client | Used as given; no wrapper renews the lease on ledger calls. |
 
@@ -1003,6 +1140,116 @@ are not applied; calls it already made through declared ports stay made.
 
 Every registered step declares `effects=frozenset()` today and still reaches outside systems through the tick module.
 A step moves onto ports in its own sweep, naming the ports it writes in `effects` in the same pull request.
+
+#### Declaring effects on a step
+
+`effects` holds port names from the table under [Declared effects](#declared-effects): `ledger`, `coordination`,
+`source_control`, `runtime`, `processes`, `inbox`, `llm`, `metrics` and `host`. Read operations need no declaration;
+declare a port only when the step calls one of its write operations. `feature` is the id of the step's entry in
+`feature-map.json`.
+
+The ports reach a step only through `ctx.tools` in its `run(ctx)`. A step class that implements the `Step` protocol
+carries `effects` and `feature` as attributes and calls the ports with the deadline of its context:
+
+```python
+from dataclasses import dataclass
+
+from scripts.tick import registry
+from scripts.tick.step import Context, Domain, Lane, Result
+from scripts.tick.steps.tasks import TASK_PASSES
+
+
+@dataclass(frozen=True)
+class WakeStep:
+    """Send one wake to the first engineer seat of the example swarm `rig-grade-swarm` through the inbox port."""
+
+    name: str = "example wake"
+    group: str = TASK_PASSES
+    lane: Lane = Lane("tick")
+    budget_s: float = 5.0
+    interval_s: float = 60.0
+    needs: frozenset[str] = frozenset()
+    reads: frozenset[Domain] = frozenset()
+    writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset({"inbox"})
+    feature: str = "swarm-example-wake"
+
+    def run(self, ctx: Context) -> Result:
+        """Send the wake and return no writes."""
+        ctx.tools.inbox.send("eng-1@rig-grade-swarm", "wake", deadline=ctx.deadline)
+        return Result()
+
+
+registry.register(WakeStep())
+```
+
+`CallStep` and `WriteStep` take the same two declarations as keywords after the positional name, group and call and
+their domain arguments:
+
+```python
+from scripts.tick.steps import CallStep
+from scripts.tick.steps.tasks import WriteStep, held
+
+CallStep("example", TASK_PASSES, held(_example), effects=frozenset({"inbox"}), feature="swarm-example")
+WriteStep("example sizes", TASK_PASSES, _sizes, effects=frozenset({"metrics"}), feature="swarm-example-sizes")
+```
+
+Their call receives the tick module and a pass state reader, never the `Context`, so a call step cannot reach
+`ctx.tools`; until it moves into a step class its declared effects only record intent. A step that leaves out both
+declarations has `effects=frozenset()` and `feature=""`: it may read through every port and write through none. A
+name in `effects` that is not a port name opens nothing: `for_effects` checks each port by its own name, so a
+misspelt `"source-control"` leaves `source_control` closed. Registration does not check effect names; a misspelt name
+surfaces as `UndeclaredEffect` at the step's first write through that port.
+
+#### Testing a step's effects
+
+`fake_tools()` builds unrestricted fakes, and `engine.run_step` narrows them by the step's `effects` exactly as a pass
+does. A test asserts the record's outcome and the calls each fake saw:
+
+```python
+from scripts.tick import engine
+from scripts.tick.adapters import fakes
+from scripts.tick.deadline import Deadline
+from scripts.tick.step import Context
+
+tools = fakes.fake_tools()
+step = WakeStep()
+record = engine.run_step(step, Context(view, Deadline.after(60.0), tools))
+assert (record.outcome, record.error) == (engine.OK, "")
+assert [call.operation for call in tools.inbox.calls] == ["send"]
+```
+
+For a step that writes outside its effects the record reads `engine.FAILED` with
+`"scripts.tick.ports.contracts.UndeclaredEffect"` as its error, and the fake of the undeclared port has no call. A test
+that builds a `Context` without `tools` and needs the pass value sets `PASS_TOOLS` and resets it with the token:
+
+```python
+from scripts.tick.ports.tools import PASS_TOOLS
+
+token = PASS_TOOLS.set(fakes.fake_tools())
+try:
+    assert Context(view, Deadline.after(1.0)).tools is PASS_TOOLS.get()
+finally:
+    PASS_TOOLS.reset(token)
+```
+
+The feature map entry `swarm-tick-declared-effects` links this behavior to `tests/tick/test_effects.py` and
+`tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group`; the
+delivered change is [pull request 9632](https://github.com/the-cloud-clockwork/agentihooks/pull/9632).
+
+#### Seeing a refused write
+
+The refusal is raised before the deadline check and before the adapter is called, so the outside system is untouched.
+Inside a swarm tick pass run by `run_tick` against the swarm's Redis store, the step's timing wrapper writes a finished
+`swarm_tick_step` journal line with `"outcome": "error"` and `"error": "scripts.tick.ports.contracts.UndeclaredEffect"`,
+stores the same fields in `tick:steps`, adds the step to the pass's failed steps, and `tick:records` stores the step
+with outcome `failed` (see [Tick report](tick-report.md)). A slow lane step that ends after its group returned also
+prints `slow lane step <name> failed: scripts.tick.ports.contracts.UndeclaredEffect`. Find refusals on the workstation
+tick with:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "1 hour ago" | grep UndeclaredEffect
+```
 
 ## Fakes for tests
 
@@ -1115,6 +1362,9 @@ and call the port from the step.
 | `test_the_records_adapter_takes_no_deadline` fails | A function or method in `records_redis.py` gained a keyword-only `deadline` argument. | Remove the argument: the test expects the module to take no deadline, and its writes rely on the fence's lease and revision checks. |
 | A fleet red listing ends before 60 seconds | `fleet_red.read` was given a caller deadline with less time left, and `child` kept the earlier expiry. | Give the calling step a larger budget; the listing never runs past `SECONDS`. |
 | `UndeclaredEffect: <port> is not a declared effect` | A step called a write operation on a port missing from its effects. | Declare the port in the step's effects. |
+| A step fails with `UndeclaredEffect` although its effects name the port | The name in `effects` is misspelt, such as `"source-control"` for `source_control`, so no port opened. | Use the port names from the table under [Declared effects](#declared-effects). |
+| `AttributeError: 'NoneType' object has no attribute '<port>'` inside a step | `ctx.tools` is `None`: the `Context` was built outside a tick pass, for example by calling `scripts.swarm.tick.tick` or `run_group` directly instead of through `run_tick`. | Run the pass through `scripts.swarm.cli.run_tick`, or in a test pass `tools` to `Context` or set `PASS_TOOLS`. |
+| `test_every_registered_step_declares_no_effects_yet` fails naming a step | A registered step now declares effects. | Update that test in the same pull request that moves the step onto ports. |
 | `TypeError: tools require a Deadline keyword argument` | A restricted port was called without `deadline=`. | Pass the step's `Deadline` by keyword. |
 | `KeyError: 'unknown metrics table: <name>'` | `emit` named a table the adapter was not built with. | Add the `Table` to the `tables` mapping. |
 | `BackendFailure: <model>: timeout` from `classify` | The decisions API did not answer within `deadline.remaining`. | Raise the deadline, or build `ApiLlm` with a model that answers faster. |
@@ -1126,6 +1376,9 @@ and call the port from the step.
 | The `spawn` step row is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
 | Two launches in one pass are refused as local full although a session ended during the pass | The pass reads the live session scan once, so the ended session still counts until the pass ends. | No action; the next pass scans again. |
 | A reaped or retired process was not found in a tick pass | The process exited before selection, so its `/proc` entry was gone and the snapshot was kept. | No action; the process is already gone. |
+| A step in a tick pass sees an agent as live after it was stopped, or misses one that started | The change went through the wrapped runtime, such as `original_runtime` or `herdr_runtime`, or through a forwarded method outside `AGENT_CHANGES`, so the pass listing was kept. | Make the change through the `FencedRuntime` with one of the listed operations, or add the operation to `AGENT_CHANGES`, as under [One live names listing per tick pass](#one-live-names-listing-per-tick-pass). |
+| The live names listing runs on every read in a tick pass | The caller holds the raw runtime given to `run_tick`, not the `FencedRuntime`, or reads before `PASS_TOOLS` is set or after it is reset. | Read through the pass's `FencedRuntime`; the wrapper probes group runs before it exists and lists on each call. |
+| `test_running_pass_lists_live_names_once_plus_once_per_launch` fails with `LIVE_NAMES_LISTINGS=<n> LAUNCHES=<m>` | The running scenario's listing count moved: a change dropped the listing too often, stopped dropping it, or changed the number of launches. | Compare the counts with the change; a new listing read after the last launch or a new agent change adds one listing. |
 | HTTP 409 `stale_controller`, `the controller lease is stale`, on `ledger.mutate` or a `LedgerClient` write | The operation carried a `controller_epoch` that is no longer the live lease of that ledger: another controller took over. | No action in the step. The pass stops at its next step boundary, where `keep_tick` raises, and a later pass acquires the lease again once no other controller holds it. |
 | `SwarmError: the controller lease is stale` at the start of a pass or before a launch | `held_pass` renewal or `require_epoch` found another controller's lease. | Check which hive holds the swarm's lease; a pass on this controller resumes only once it acquires the lease. |
 | `coordination.lease` returns `None` | Another owner holds a live lease, or the swarm's controller host names another owner. | Run the step on the controller that holds the lease. |

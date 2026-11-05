@@ -1,4 +1,5 @@
 import ast
+import fnmatch
 import hashlib
 import json
 import os
@@ -1681,17 +1682,18 @@ def test_selected_legs_size_workers_by_the_container_cpu_quota():
     assert "-n auto" not in run
 
 
-def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
+def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_on_every_leg() -> None:
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
     assert [checkout["with"] for checkout in checkouts] == [{"ref": "${{ github.sha }}", "fetch-depth": 1}]
     fetch = _selected_step("Fetch the protected grader's dev head")
-    assert fetch["if"] == "steps.collection.outcome == 'success'"
+    assert "if" not in fetch
     names = [step.get("name") for step in steps]
     assert (
         names.index("Wait for the early collection")
         < names.index(fetch["name"])
         < names.index("Adopt the reused tests from the protected grader")
+        < names.index("Run the selected tests")
     )
 
 
@@ -2564,6 +2566,23 @@ def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
     assert names.index(mutate["name"]) < names.index(report["name"])
 
 
+def test_the_inline_statistics_shard_downloads_the_branch_preflight_kill_memory_before_it_mutates() -> None:
+    jobs = _mutation_workflow()["jobs"]
+    plan = jobs["mutation-plan"]["steps"]
+    upload = next(step for step in plan if step.get("with", {}).get("name") == "mutation-stats-killers")
+    assert upload["with"]["path"] == ".mutation-killers-restored/"
+    stats = jobs["mutation-stats"]["steps"]
+    names = [step.get("name") for step in stats]
+    download = stats[names.index("Download the branch preflight kill memory")]
+    assert download["with"] == {"pattern": "mutation-stats-killers", "path": ".mutation-stats", "merge-multiple": True}
+    assert download["if"] == stats[names.index("Mutate the only shard in the statistics job")]["if"]
+    assert names.index(download["name"]) < names.index("Mutate the only shard in the statistics job")
+    shard = jobs["mutation-shard"]["steps"]
+    shared = next(step for step in shard if step.get("name") == "Download the shared mutation stats")
+    assert fnmatch.fnmatch("mutation-stats-killers", shared["with"]["pattern"])
+    assert shared["with"]["path"] == ".mutation-stats"
+
+
 def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
     jobs = _mutation_workflow()["jobs"]
     skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
@@ -2679,7 +2698,9 @@ def _planner_imports(path: Path) -> set[str]:
                     and node.level == 0
                     and node.module.split(".")[0] in ("scripts", "tests")
                 }
-            else:
+            elif not (
+                isinstance(child, ast.If) and isinstance(child.test, ast.Name) and child.test.id == "TYPE_CHECKING"
+            ):
                 pending.append(child)
     return found
 

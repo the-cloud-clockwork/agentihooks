@@ -2,8 +2,12 @@
 
 Per graded file it records: each top level def and class name in the tick module, each registered step
 missing a budget row, an interval from the set, a lane or a needs, reads, writes, effects or feature
-declaration, and each import of an adapted implementation from a module outside the adapters. A head may
-hold only offences its base allowlist records for that file.
+declaration, and each import of an adapted implementation from a module outside the adapters. Only files
+whose text or measurement the head changes against the base grade, as a budgets table change does, so a
+stale entry for an untouched file never fails. A changed file may hold only offences its base allowlist or its base
+measurement holds for it, and its head record must match its measurement; an unchanged file's head record
+may hold only what those hold. The promotion tier runs --tree on each dev push: the whole tree's measurement must
+equal its recorded allowlist, so drift two green pull requests merge between them turns promotion red.
 """
 
 import argparse
@@ -121,25 +125,40 @@ def names(tree: ast.Module) -> list[str]:
     return [f"def {node.name}" for node in tree.body if isinstance(node, kinds)]
 
 
-def measure(tree: Path) -> dict[str, list[str]]:
-    """Sorted offences per graded file of tree, only files holding any."""
-    tree = tree.resolve()
-    budgets = tree / BUDGETS
-    rows = floors(budgets.read_text()) if budgets.is_file() else {}
-    measured: dict[str, list[str]] = {}
-    for path in files(tree):
-        name = path.relative_to(tree).as_posix()
-        if not name.startswith(SCOPE):
-            continue
-        parsed = _parse(name, path.read_text())
+def scoped(tree: Path) -> dict[str, str]:
+    """Text of each tracked graded file of tree, keyed by its path name."""
+    named = ((path.relative_to(tree).as_posix(), path) for path in files(tree))
+    return {name: path.read_text() for name, path in named if name.startswith(SCOPE)}
+
+
+def measured(texts: dict[str, str]) -> dict[str, list[str]]:
+    """Sorted offences per graded file of texts keyed by path name, only files holding any."""
+    rows = floors(texts[BUDGETS]) if BUDGETS in texts else {}
+    found_by_name: dict[str, list[str]] = {}
+    for name, text in sorted(texts.items()):
+        parsed = _parse(name, text)
         found = steps(parsed, rows)
         if name == TICK:
             found += names(parsed)
         if name.startswith(STEPS) and not name.startswith(ADAPTERS):
             found += banned(parsed, name)
         if found:
-            measured[name] = sorted(set(found))
-    return measured
+            found_by_name[name] = sorted(set(found))
+    return found_by_name
+
+
+def measure(tree: Path) -> dict[str, list[str]]:
+    """Sorted offences per graded file of tree, only files holding any."""
+    return measured(scoped(tree))
+
+
+def touched(
+    base: dict[str, str], head: dict[str, str], held: dict[str, list[str]], found: dict[str, list[str]]
+) -> set[str]:
+    """Path names whose text or measurement differs between the base texts and measurement held and the head
+    texts and measurement found."""
+    every = set(base) | set(head)
+    return {name for name in every if base.get(name) != head.get(name) or held.get(name) != found.get(name)}
 
 
 def load(tree: Path) -> dict[str, list[str]] | None:
@@ -154,42 +173,78 @@ def write(tree: Path) -> None:
 
 
 def grade(
-    base: dict[str, list[str]] | None, head: dict[str, list[str]], recorded: dict[str, list[str]] | None
+    base: dict[str, list[str]] | None,
+    head: dict[str, list[str]],
+    recorded: dict[str, list[str]] | None,
+    changed: set[str],
+    held: dict[str, list[str]],
 ) -> list[str]:
-    """Reject offences the base allowlist does not hold and a head record that differs from its measurement;
-    a base without an allowlist allows what the head records."""
-    allowed = (recorded or {}) if base is None else base
+    """Reject a missing base allowlist, offences in a changed file and records of an unchanged one that neither
+    the base allowlist nor the base measurement held holds, and a missing head allowlist or a changed file whose
+    head record differs from its measurement."""
+    if base is None:
+        return [f"{ALLOWLIST} is missing from the base"]
+    graded = {name: head.get(name, []) for name in changed}
+    graded |= {name: offences for name, offences in (recorded or {}).items() if name not in changed}
     errors = [
         f"{name} adds {offence}; the base allowlist does not hold it"
-        for name, offences in sorted(head.items())
+        for name, offences in sorted(graded.items())
         for offence in offences
-        if offence not in allowed.get(name, [])
+        if offence not in base.get(name, []) and offence not in held.get(name, [])
     ]
-    if recorded != head:
+    if recorded is None or any(recorded.get(name) != head.get(name) for name in changed):
         errors.append(f"{ALLOWLIST} differs from the head's measurement; run python -m scripts.tick_pattern --write")
     return errors
 
 
+def drift(recorded: dict[str, list[str]] | None, head: dict[str, list[str]]) -> list[str]:
+    """Each offence the whole tree measurement head and its recorded allowlist disagree on, file by file."""
+    if recorded is None:
+        return [f"{ALLOWLIST} is missing; run python -m scripts.tick_pattern --write"]
+    errors: list[str] = []
+    for name in sorted(set(recorded) | set(head)):
+        measured_here, recorded_here = set(head.get(name, [])), set(recorded.get(name, []))
+        errors += [
+            f"{name} measures {offence}; {ALLOWLIST} does not record it"
+            for offence in sorted(measured_here - recorded_here)
+        ] + [
+            f"{name} no longer measures {offence}; {ALLOWLIST} still records it"
+            for offence in sorted(recorded_here - measured_here)
+        ]
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Grade the head against the base, or record the head's allowlist with --write."""
+    """Grade the files the head changes against the base, compare the whole head tree with its allowlist with
+    --tree, or record the head's allowlist with --write."""
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--base")
     mode.add_argument("--write", action="store_true")
+    mode.add_argument("--tree", action="store_true")
     parser.add_argument("--head", type=Path, default=Path("."))
     args = parser.parse_args(argv)
     try:
         if args.write:
             write(args.head)
             return 0
-        head, recorded, base = measure(args.head), load(args.head), load(Path(args.base))
+        if args.tree:
+            head, recorded = measure(args.head), load(args.head)
+            errors = drift(recorded, head)
+            print(f"{sum(map(len, head.values()))} tick pattern offences in {len(head)} files, {len(errors)} drifts")
+            for error in errors:
+                print(f"::error::{error}")
+            return 1 if errors else 0
+        texts, prior = scoped(args.head), scoped(Path(args.base))
+        head, held = measured(texts), measured(prior)
+        recorded, base = load(args.head), load(Path(args.base))
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    errors = grade(base, head, recorded)
-    held = sum(map(len, head.values()))
+    errors = grade(base, head, recorded, touched(prior, texts, held, head), held)
+    total = sum(map(len, head.values()))
     allowed = sum(map(len, (base or {}).values()))
-    print(f"{held} tick pattern offences in {len(head)} files, {allowed} on the base allowlist, {len(errors)} errors")
+    print(f"{total} tick pattern offences in {len(head)} files, {allowed} on the base allowlist, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
     return 1 if errors else 0

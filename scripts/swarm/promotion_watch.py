@@ -437,8 +437,6 @@ def refresh(
         seen = max(int(store.redis.hget(record, "seen") or 0), int(store.redis.get(key(slug, "seen")) or 0))
         if seen:
             store.redis.set(key(slug, "seen"), seen)
-        if slug in store.slugs():
-            doc = pass_state(ledger, slug)
         actions = _refresh(slug, config, store, ledger, doc, now_ms, run)
         if handled := store.redis.get(key(slug, "seen")):
             store.redis.hset(record, "seen", handled)

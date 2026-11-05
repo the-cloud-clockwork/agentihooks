@@ -19,8 +19,10 @@ steps that moved out of the hand written pass.
 | --- | --- | --- |
 | Registry | `scripts.tick.registry` | Holds every registered step. `waves()` orders them by `order` and `needs` and refuses duplicate names, unknown dependencies, dependency cycles, a budget that is not a finite positive number, a negative interval, and two steps that write the same domain, or where one reads a domain the other writes, with no dependency between them, in one lane or across lanes |
 | Group run | `scripts.tick.engine.run_group` | Runs the steps of one group sorted by `order`. Each step runs in a daemon thread under a copied context and a child deadline of its own budget; the engine waits at most that budget. A step that raises is recorded `failed`, one that runs past its budget is recorded `late`, and neither stops the next step |
-| Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments and returns the actions the steps wrote, in step order. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
+| Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments, hands the engine the task appliers (`tasks.appliers(state)`) and returns, per step in order, its own actions, then the action lines its appliers returned, then a line for each of its writes the engine dropped. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
+| Write applier | `run_group(..., apply=...)` | A map of domain to a function that applies one `Write`. As each step ends, the engine passes every write of a mapped domain to its applier; an applier that raises `RevisionConflict` drops that write. See [Steps that return writes](#steps-that-return-writes) |
 | Call step | `scripts.tick.steps.CallStep` | A step that runs one call of the tick module. It reads the pass state through the view and writes the actions it returned to its own domain, `actions:<step name>` |
+| Write step | `scripts.tick.steps.tasks.WriteStep` | A call step whose call returns action lines mixed with `Write` objects. It keeps every attribute of the `CallStep` it builds and splits the returned list: the strings go to `actions:<step name>`, the writes go to the engine |
 
 Every `CallStep` runs in lane `tick` unless it is given `lane=SLOW`
 (`scripts.tick.engine.SLOW`), with a declared budget and interval from
@@ -180,9 +182,11 @@ The tick report counts these runs per step in its Late share, Abandoned, Held an
 ### Lanes
 
 A parallel pass gives each lane its own deadline: 110 seconds for the critical
-lane, which holds every step whose lane is not `slow`, and 400 seconds for the
-slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`). These steps declare
-the slow lane:
+lane, which holds every step whose lane is neither `slow` nor `closing`, and
+400 seconds for the slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`),
+both counted from the start of the pass. The closing lane's 30 seconds count
+from the start of the pass `finally`; see [The closing lane](#the-closing-lane).
+These steps declare the slow lane:
 
 | Module | Group | Slow lane steps |
 | --- | --- | --- |
@@ -191,10 +195,12 @@ the slow lane:
 | `scripts.tick.steps.tasks` | `reopen passes` | [fleet red notice](fleet-red-notice.md#the-slow-lane) |
 | `scripts.tick.steps.place` | `placement notices` | lost runner, time left |
 
-The other report steps (stall watch, overrun pass, quiet pass, inbox wake,
-snapshot job, last tick, heartbeat, status publish) and every other step stay
-critical. The command runner and the quota notice run before spawn and stay
-critical.
+Last tick, heartbeat and status publish declare the closing lane. The other
+report steps (stall watch, overrun pass, quiet pass, inbox wake, snapshot job)
+and every other step stay critical. The command runner and the quota notice run
+before spawn and stay critical. The quota notice step reads cached quota and
+runs no Claude or Codex quota probe; the quota prober service writes those
+caches once a minute ([Quota prober](quota-prober.md)).
 
 Before spawn, the slow lane steps are the ones no placement step waits on, or
 whose wait is bounded by their own budget. `lost runner` and `time left` have
@@ -216,7 +222,7 @@ on the pass is not recorded in this document; read it with
 `agentihooks swarm <slug> tick-report --passes 10`.
 
 The `health findings` step stores the findings it computes in the pass box
-under `found`. The `status publish` step, in the `wrapper status` group, passes
+under `found`. The `status publish` step, in the `closing` group, passes
 `box.get("found")` to `cli._publish_tick_status`, and `status.status_report`
 publishes those findings instead of calling `findings` again with the same
 inputs. When the box holds no `found`, for example because the handed off
@@ -300,6 +306,65 @@ different lanes, and one lane when they share it, as in
 `agentihooks swarm <slug> tick-report` prints each lane's share of step CPU
 (see [Lane lines](tick-report.md#lane-lines)).
 
+### The closing lane
+
+`last tick`, `heartbeat` and `status publish` run in the `closing` group,
+which `run_tick` calls from the `finally` of the pass, after every other group
+and whether the pass completed, ended early or raised. The three steps declare
+lane `closing` (`scripts.tick.steps.report.CLOSING`), so in a parallel pass
+they run against a deadline of their own instead of the critical deadline that
+may already have expired:
+
+| Value | Meaning |
+| --- | --- |
+| `scripts.tick.pool.CLOSING_LANE` | The lane name, `closing`. |
+| `scripts.tick.pool.CLOSING_S` | 30 seconds, the closing lane deadline. `pool.running(closing_s=...)` sets it for one pass; no setting or environment variable changes it. |
+| `Pass.close()` | Starts the closing deadline on its first call and returns that same deadline on every later call. `Pass.lane("closing")` calls it, so the deadline starts when the first closing step looks up its lane, at the start of the `finally`. |
+
+A closing step is not a slow step: the group runs it eagerly and returns its
+record before the pass ends. Its context deadline is the smaller of the group
+budget and the closing deadline, and its own step budget still applies. When
+the pass ends, `pool.running` joins each handed off slow lane thread for the
+larger of the slow lane time left and the closing lane time left, plus
+`LATER_GRACE_S`. A sequential pass looks up no lane deadline, so the closing
+lane changes nothing there; the three steps run in group order with their
+budgets.
+
+`run_tick` hands the group an `ended` value that says how the pass ended:
+
+| How the pass ended | `ended` | `last tick` | `heartbeat` | `status publish` |
+| --- | --- | --- | --- | --- |
+| Completed its groups | `full` (`report.FULL`) | Writes the current time to `<slug>/last-tick` | Writes the [tick heartbeat](../pillars/swarm.md#tick-heartbeat-and-stale-watcher) and clears the early end streak | Publishes the tick status |
+| No step stored a value a later step needed (`Left`) | `early` (`report.EARLY`) | Writes the current time | Writes the tick heartbeat; the streak keeps the count `early_end` added | Publishes the tick status |
+| Returned before the end (stopped, binned, refused) or raised | none | Writes nothing | Writes nothing | Publishes the tick status, with the exception as `failure` when one was raised |
+
+`report_steps.early_end` no longer stamps the pass itself. It counts the
+missing value in the early end streak and returns the
+`pass ended early: no step stored <value>, the pass left <steps>` line; the
+closing group stamps last tick and the heartbeat afterwards.
+
+The closing lane exists for a pass whose critical lane ran out. Before it, the
+three steps sat in the `wrapper metrics`, `after` and `wrapper status` groups
+on the critical lane, so a pass that spent its 110 critical seconds dropped
+them and wrote no heartbeat, and the stale watcher then judged a live tick
+stale. Now a pass with a hung step still stamps and publishes: in
+`tests/tick/test_closing_lane.py` a reboot pass planted to hang for 300
+seconds under a 1 second critical lane ends early, and the closing group
+records `heartbeat`, `last tick` and `status publish` as `ok` with last tick
+and the heartbeat written.
+
+A new step joins the closing lane only when it must run on every pass ending,
+after the other groups:
+
+```python
+from scripts.tick.steps.report import CLOSING, CLOSING_GROUP
+
+CallStep("example", CLOSING_GROUP, held(_example), lane=CLOSING)
+```
+
+Read `get("ended")` in its action to tell the endings apart; it is `None` when
+the pass raised or returned before its end.
+
 ### Spawn prerequisites and the forty second bound
 
 Spawn declares only these prerequisites:
@@ -372,7 +437,7 @@ The delivered writers of each key:
 | `view` | `tick view` | The slow lane event steps, `health findings`, `metrics record`, `status publish` |
 | `live` | `stall watch` | `overrun pass` |
 | `found` | `health findings` | `findings pass`, `metrics record`, `status publish` |
-| `judged`, `stop`, `started` | `intent check`, `ledger health`, `snapshot job` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
+| `judged`, `stop` | `intent check`, `ledger health` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
 
 Because the readers of `config` need `drained resume`, that step carries
 `DRAINED_RESUME_NEEDS` (`scripts.tick.steps.tasks`) plus `sleeping`: every step
@@ -400,7 +465,10 @@ registry.register(
 ```
 
 The positional order is name, group, call, `needs`, `reads`, `writes`.
-`WriteStep` takes the same `needs` and `reads` as keywords.
+`WriteStep` takes the same `needs` and `reads` as keywords. Both also take
+`effects`, the ports the step may write through, and `feature`, its feature map
+id, as keywords; see
+[Declaring effects on a step](tick-adapters.md#declaring-effects-on-a-step).
 
 `tests/tick/test_pass_edges.py` replays the twelve tick scenarios through
 `scripts.swarm.tick.tick` and `scripts.swarm.cli.run_tick` with a recording
@@ -494,6 +562,185 @@ that is not woken ends the pass in the `stopped branch` step of the `start`
 group, which makes its own `_close_space` call, and never reaches the `close`
 group.
 
+## Steps that return writes
+
+Under the parallel engine two steps of one group can run at the same time, so a
+step that writes the ledger itself can overwrite what a concurrent step wrote
+from the same read. A write step instead computes its change from the pass
+state and returns it. The engine applies it with compare and set: the write
+lands only while what the step read still holds the value it saw.
+
+### The write
+
+`scripts.tick.step.Write` carries four fields:
+
+| Field | Meaning |
+| --- | --- |
+| `domain` | What the write changes; selects the applier |
+| `key` | The record: a task id, a phase id, the swarm or the master name |
+| `value` | The change to make |
+| `expected` | The guard: what the step read. Defaults to `None`, which the size applier reads as no fields to compare and the group applier as an expected empty member list |
+
+These steps return writes. Every domain constant except `fleet_red.LISTINGS`
+lives in `scripts.tick.steps.tasks`.
+
+| Step (group) | Domain | Key | Guard (`expected`) | Applier and what it does on a match |
+| --- | --- | --- | --- | --- |
+| size pass (`task passes`) | `sizes` | task id | `{"difficulty": ""}`: the task is still unsized | `task_writer`: `ledger.update_task` with the guard as `if_match` |
+| grouping release (`task passes`) | `groups` | lead task id | `{"group_members": [...]}`: the lead still holds the members the step read | `group_writer`: `ledger.ungroup_tasks` with the guard as `if_match` |
+| fleet red notice (`reopen passes`, slow lane) | `fleet red` | task id | `{"state": "open", "pr_url": url, "claimed_by": ""}` | `fleet_red_writer`: posts the hold notice only while no seat claimed the task |
+| fleet red notice | `fleet red lifted` | swarm | none | `lifted_writer`: deletes the hold marks the write names, one per line |
+| fleet red notice | `fleet red listings` | listing key | no listing saved under the key (Redis `nx`) | `fleet_red.saver`: saves the open pull request listing for ten minutes; a Redis timeout also drops it |
+| rank pass (`placement`) | `rank` | swarm | the saved claim queue heads the pass read | `rank_writer`: `dispatcher.apply_ranking`; a pass that lands no heads only proposes ranks and takes no guard |
+| planning and phase pass (`wrapper phases`) | `phases` | phase id | `not change.done`: the done state the step read | `phase_writer`: marks the pass box and sets the checkbox through `phases.apply_change` |
+| master stall (`masters`) | `master stall` | master name | the master name the step read | `stall_writer`: `master_stall.apply_stall` while that master is still the live master |
+
+Each step reads the pass state and leaves it as read. `difficulty.sizes(doc)`
+yields each unsized open task's fields (at most `PER_TICK`, five, per pass);
+`grouping.releases(slug, store, doc)` returns each stopped lead with the reason
+and its members; `fleet_red.holds` returns new holds, lifted marks and listing
+saves; `dispatcher.rank_decision` returns one `Ranking`;
+`phases.phase_changes` returns `PhaseChange` items, or one skip line when the
+hierarchy read fails; `master_stall.stalls` returns `Stall` items.
+
+### How the engine applies writes
+
+1. The step ends. In a parallel pass the engine applies its writes on the
+   scheduling thread before any step that needs it starts; outside one, after
+   the step and before the next. A slow lane step's writes are applied through
+   the group's appliers on the slow lane thread.
+2. For each write whose domain has an applier, the applier compares its guard.
+   The task, group, fleet red and phase appliers read the record from the
+   pass's held ledger view (`scripts.tick.view.current()`) as it stands after
+   the pass's latest write. The rank applier reads the saved heads from Redis;
+   the stall applier reads the live master name.
+3. A match makes the call. The size and group appliers also send the guard to
+   the ledger server as `if_match`, which compares the same fields in the same
+   apply: the server refuses an ungroup whose members moved, and leaves a task
+   update unapplied when a guarded field moved. The size applier then checks
+   the task the server returned and treats a guarded field the update also
+   writes, which does not hold the written value, as moved.
+4. Each of these raises `RevisionConflict`: a guarded value that moved, a
+   ledger call the task, group or phase applier finds refused
+   (`LedgerRefused`), a fleet red task a seat claimed since the read
+   (`_post_hold`), a failed fleet red notice, a listing another pass already
+   saved, or a write whose value is not the expected type. The rank and stall
+   appliers do not catch `LedgerRefused`. A failed fleet red notice first
+   deletes its hold mark, so the next pass posts it again.
+5. The engine catches `RevisionConflict`, adds the write to the step record's
+   `dropped` and the reason to `conflicts`, and goes on with the next write.
+   Any other exception from an applier is not caught. Action lines an applier
+   returns (rank, phase, stall) are kept on the record as `applied`.
+
+`tasks.appliers(state)` builds the map for a group site. With no `ledger` or no
+`slug` in the pass state it returns nothing. With both it maps `sizes` and
+`groups`; with a `store` also `fleet red`, `fleet red lifted`,
+`fleet red listings` and `rank`; with `now_ms` as well, `master stall`; with an
+`inbox` and a `box` as well, `phases`. `swarm.tick.run_group`, the masters
+group run and the `wrapper` group runs of the swarm command all pass this map.
+
+### Dropped writes and the recompute
+
+A dropped write is not retried in the same pass. `steps.actions(records)`
+returns, per step in order, its own actions, then the action lines its appliers
+returned, then one line per write that step dropped:
+
+```text
+dropped write sizes t7 of step size pass: task t7 changed difficulty since the step read it; the next pass recomputes it
+dropped write groups t3 of step grouping release: task t3 changed group_members since the step read it; the next pass recomputes it
+dropped write sizes t7 of step size pass: the ledger refused the write of task t7; the next pass recomputes it
+dropped write rank s1 of step rank pass: the claim queue heads of swarm s1 changed since the rank pass read them; the next pass recomputes it
+dropped write phases p2 of step planning and phase pass: phase p2 changed its checkbox since the phase pass read it; the next pass recomputes it
+dropped write master stall master@s1-2 of step master stall: master master@s1-2 is no longer the live master of swarm s1; the next pass recomputes it
+```
+
+The line joins the pass actions in the tick journal. Each step record also
+lands in the `tick:records` stream with its `dropped` and `conflicts` counts,
+and `swarm <id> tick-report` sums them in its Dropped column (see
+[Outcome columns](tick-report.md#outcome-columns)). The step's own action
+line, such as `sized task t7 M by rule`, is still reported for that pass even
+though its write was dropped, so read both lines together.
+
+The next pass reads the ledger again and runs the step on the new state. A task
+another writer sized is no longer unsized, so the size pass skips it; a task
+still unsized gets a fresh size. A lead whose members changed is judged on its
+new members. A rank pass, phase checkbox, fleet red hold or stall decision is
+decided again from the new state. No queue of dropped writes is kept.
+
+### Conflict scenario
+
+`tests/tick/test_apply.py` holds the scenario both sequentially and on a
+parallel pass, with a test step named `size` that writes a test domain `tasks`
+guarded on a revision number:
+
+1. Task `t1` is at revision 1. The step reads it and returns a write expecting
+   revision 1; a concurrent writer moves `t1` to revision 2 before the write is
+   applied.
+2. The applier raises `RevisionConflict`. The record's `dropped` holds the write,
+   the store keeps the concurrent value, and the actions read
+   `sized from revision 1` followed by
+   `dropped write tasks t1 of step size: tasks/t1 moved from revision 1 to 2; the next pass recomputes it`.
+3. The next pass reads revision 2, returns a write expecting it, and the write
+   lands: `t1` is at revision 3 with `M from revision 2` and nothing is dropped.
+
+`tests/tick/test_apply_rank.py`, `tests/tick/test_apply_phases.py`,
+`tests/tick/test_apply_fleet_red.py` and `tests/tick/test_apply_stall.py` run
+the same drop and recompute for a rank pass whose heads another pass moved, a
+phase checkbox another writer moved, a hold a seat claimed mid pass and a
+stall of a master another master replaced.
+
+### Writing a step that returns writes
+
+Return action strings and `Write` objects from the call and register it as a
+`WriteStep` that declares its write domain, so `waves()` can order it against
+other writers of that domain. `waves()` refuses two writers of one domain with
+no dependency between them, so the example, which writes `SIZES` beside the
+size pass, needs it:
+
+```python
+from collections.abc import Callable
+from typing import Any
+
+from scripts.tick import registry
+from scripts.tick.step import Write
+from scripts.tick.steps.tasks import SIZES, TASK_PASSES, WriteStep, held
+
+
+def _example(tick: Any, get: Callable[[str], Any]) -> list[str | Write]:
+    return [
+        Write(SIZES, "t7", {"difficulty": "S", "difficulty_source": "rule"}, expected={"difficulty": ""}),
+        "sized task t7 S by rule",
+    ]
+
+
+registry.register(
+    WriteStep("example", TASK_PASSES, held(_example), writes=frozenset({SIZES}), needs=frozenset({"size pass"}))
+)
+```
+
+A write to a domain with no applier at the site is neither applied nor dropped:
+it stays on the record's result and changes nothing. A new domain needs its
+applier added to `tasks.appliers`. The step name still needs its timing entry,
+as described above.
+
+### Limits
+
+- The held view compare sees only changes up to the view's latest refresh.
+  Without a held view the task, group, fleet red and phase appliers skip that
+  compare; a task the view lacks compares as empty, and a phase it lacks as
+  not done. The size and group writes are still compared on the server
+  through `if_match`; the fleet red, phase, rank and stall writes are not.
+- A dropped write waits a whole pass for its recompute.
+- `LedgerRefused` in the task, group or phase applier is a dropped write with
+  a `dropped write` line, where the old in-step calls produced a
+  `skipped ...: the ledger refused its write` line through `skip_refused`.
+- `LedgerRefused` in the rank or stall applier is not caught by the engine and
+  leaves the group run, like any other applier exception.
+- An `Exception` from posting the hold notice, `LedgerRefused` included, is a
+  dropped write whose line names the failed hold notice. A Redis error before
+  the post, and any error from the lifted marks or listing applier other than
+  a Redis timeout, is not caught and leaves the group run.
+
 ## Exceptions
 
 The engine records a step that raises and goes on to the next one. The hand
@@ -520,9 +767,13 @@ by the engine and does not leave the pass.
 1. Write the call as a function `(tick, get) -> actions` in a module under
    `scripts/tick/steps/`, reading its arguments with `get`.
 2. Add the step name to `budgets.MEASURED` with its measured p95 (or
-   `UNMEASURED_S`) and plan interval, then register `CallStep("<name>", <group>, <order>, held(<call>))`, choosing an
-   order that puts it where its hand written line stood. Use `held` when an
-   exception from the call must still leave the pass.
+   `UNMEASURED_S`) and plan interval, then register `CallStep` with every
+   field, even at its default, because the
+   [tick pattern gate](tick-pattern-gate.md) refuses a step missing any of
+   them, as in the example below. Steps run in dependency waves
+   (`Registry.waves`); `Registry.steps` keeps registration order, so register
+   the step where its hand written line stood. Use `held` when an exception
+   from the call must still leave the pass.
 3. Import the module in `scripts.swarm.tick` so it registers before the first
    pass, delete the hand written line, and add `tasks.raise_held(box)` after the
    group site if the site is new.
@@ -540,7 +791,19 @@ def _example(tick: Any, get: Callable[[str], Any]) -> Any:
     return tick.skip_refused(tick.example.run, get("slug"), get("store"), get("doc"))
 
 
-registry.register(CallStep("example", TASK_PASSES, 60, held(_example)))
+registry.register(
+    CallStep(
+        "example",
+        TASK_PASSES,
+        held(_example),
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=CallStep.lane,
+        effects=frozenset(),
+        feature="swarm-tick-example",
+    )
+)
 ```
 
 ### The feature and scenario catalogue
@@ -573,6 +836,11 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_tasks.py` | The task passes and close steps make the old calls in order, a held exception skips the rest and is raised at the site, `fleet red notice` sits in lane `slow` with every other task step in lane `tick`, and a `WriteStep` keeps the lane it is given |
 | `tests/tick/test_place.py` | Group membership and orders; `lost runner` and `time left` in lane `slow` and every other placement step in lane `tick`; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
 | `tests/tick/test_abandoned_writes.py` | A write step abandoned at its budget, and one abandoned when its lane expired, each journal one `swarm_tick_step_abandoned` line with the swarm, step, budget and sorted write domains; a call step abandoned with only its actions domain journals nothing |
+| `tests/tick/test_apply.py` | The dropped write and its recompute, sequential and parallel; writes without an applier pass through; both appliers write while their guard holds, drop a moved guard and turn a refused ledger call into a conflict; appliers need a ledger and a swarm; the size pass and grouping release return guarded writes and leave the document as read; a write step keeps every attribute of its call step |
+| `tests/tick/test_apply_rank.py` | The rank pass returns one write guarded on the heads it read; the applier takes it while the saved heads hold, takes a proposing pass whatever the heads, drops moved heads, and the engine keeps applied actions after the step actions and beside a later dropped write |
+| `tests/tick/test_apply_phases.py` | A write per checkbox guarded on the done state read; the applier marks the box and sets the checkbox, writes through without a held view, and drops a moved, lost or refused checkbox |
+| `tests/tick/test_apply_fleet_red.py` | Guarded hold writes, lifted and listing writes; the applier posts while the task stays open and unclaimed, drops a moved or claimed task, and forgets a failed notice so the next pass posts it again |
+| `tests/tick/test_apply_stall.py` | The stall pass decides and writes nothing; the applier drops a stall once another master holds the seat, recomputed on the next pass |
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
 | `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
@@ -580,6 +848,8 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_catalogue.py` | A step with no feature, an unknown feature or no scenario refused, an unmapped step passing, stale unmapped entries refused, a planted index drop red, a grown unmapped list red from `shrink`, and the recorded catalogue holding every registered step |
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
 | `tests/tick/test_report.py` | The slow lane report steps and a `CallStep` keeping the lane it is given |
+| `tests/tick/test_closing_lane.py` | The closing deadline starting once at `Pass.close` and outliving an expired critical lane, a closing step running while a critical step in the same group is dropped, the three closing steps in the `closing` group and lane, and a 300 second hung step under a 1 second critical lane still stamping last tick, the heartbeat and the status |
+| `tests/tick/test_early_end.py` | An early end names each left step once and counts the missing value without writing last tick or the heartbeat itself |
 | `tests/tick/test_pool.py` | A parallel group returning its critical records while its slow step runs, a handed off step starting after the critical step it needs and dropped when that step was dropped, a handed off step applying its writes through the group appliers on a daemon thread named `tick-slow-lane`, the pass waiting for a hung slow step only until the slow deadline plus the grace second, and a sequential pass running slow steps in the group |
 
 ## Troubleshooting
@@ -597,9 +867,13 @@ The delivered proof and limitations are recorded in
 | `swarm_tick_step_abandoned` in the tick journal | That step was still running at its budget or its lane deadline and the writes it names were dropped. Its worker may still finish its external calls. One line now and then is a slow call; the same step on most passes means its budget is below its real wall time, see [The abandoned write journal line](#the-abandoned-write-journal-line) |
 | A step is late in `tick-report` but no `swarm_tick_step_abandoned` line exists | The step declares no write beyond its own `actions:<name>` domain, or it was dropped before it started because a step it needs was dropped or its lane had expired. Neither loses writes |
 | Preempt and spawn are late in a pass with no critical lane overrun | `fleet red notice` ran past its 30 second budget; both wait for it and are dropped when it is abandoned. Look for its `swarm_tick_step_abandoned` line in the same pass |
+| No heartbeat or last tick after a pass that printed actions | The pass raised or returned before its end, so `ended` was none and the closing group stamped nothing; read the tick log for the exception or the early return line. A pass that ended with `pass ended early` does stamp both |
+| `closing` steps recorded late | The step's own budget or the 30 second closing deadline ran out. The deadline starts at the pass `finally`, not at the start of the pass, so a long critical lane does not shorten it |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
+| A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
+| A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
 | A tick pass raised and later steps of the same group did not run | Expected: the first moved step that raised holds the exception and the rest of the group's moved steps skip until it is raised at the site |

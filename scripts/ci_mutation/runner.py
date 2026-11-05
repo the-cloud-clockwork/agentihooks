@@ -330,6 +330,7 @@ def mutate_files(
     deadline: float,
     shard: tuple[int, int],
     stats: SharedStats | None,
+    first: tuple[str, ...] = (),
 ) -> tuple[dict[str, list[dict]], str]:
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
     prepare_workspace(root, work, list(selected), tests)
@@ -339,7 +340,12 @@ def mutate_files(
     selection.write_text(
         json.dumps(
             {
-                path: {"lines": sorted(lines), "tests": chosen, "direct": direct.get(path, [])}
+                path: {
+                    "lines": sorted(lines),
+                    "tests": chosen,
+                    "direct": direct.get(path, []),
+                    "first": list(first),
+                }
                 for path, (lines, chosen) in selected.items()
             }
         )
@@ -454,6 +460,7 @@ def run_gate(
     budget: float,
     shard: tuple[int, int] = (0, 1),
     stats: SharedStats | None = None,
+    first: tuple[str, ...] = (),
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic() - probe_elapsed(stats)
@@ -484,7 +491,13 @@ def run_gate(
             continue
         work = Path(tempfile.mkdtemp(prefix=f"{index}-", dir=output))
         results, reason = mutate_files(
-            root, work, {path: selected[path] for path in group}, deadline, shard, stats and stats.group(index)
+            root,
+            work,
+            {path: selected[path] for path in group},
+            deadline,
+            shard,
+            stats and stats.group(index),
+            first,
         )
         if reason:
             reasons.update(dict.fromkeys(group, reason))

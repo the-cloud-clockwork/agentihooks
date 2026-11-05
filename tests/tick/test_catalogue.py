@@ -176,7 +176,7 @@ def test_check_reports_a_step_the_index_drops(tmp_path: Path) -> None:
     root = tree(tmp_path, {"scenarios": {}, "unmapped": []})
     found = catalogue().check(root)
     assert found
-    assert all(line.endswith("feature '' is not a feature map id; no scenario lists it") for line in found)
+    assert all(line.endswith("' is not a feature map id; no scenario lists it") for line in found)
 
 
 def test_shrink_refuses_a_grown_unmapped_list(tmp_path: Path) -> None:

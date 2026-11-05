@@ -43,6 +43,24 @@
       ]
     },
     {
+      "id": "fenced-live-names-listing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g6",
+      "behaviour": "The fenced runtime lists live agent names once per tick pass, keeps that listing on the pass's process model shared by every fenced runtime of the pass, lists again after a fenced spawn, collect, expire, retire, reap, close or resume, and lists on every call outside a pass.",
+      "seam": "scripts.swarm.controller.FencedRuntime.live_names and scripts.swarm.cli.run_tick with the running scenario",
+      "tests": [
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_once_per_pass_and_serves_copies",
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_again_in_a_new_pass",
+        "tests/swarm/test_controller_live_names.py::test_live_names_outside_a_pass_lists_every_call",
+        "tests/swarm/test_controller_live_names.py::test_agent_changes_drop_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing_when_it_fails",
+        "tests/swarm/test_controller_live_names.py::test_a_change_through_one_fenced_runtime_drops_the_listing_of_another",
+        "tests/swarm/test_controller_live_names.py::test_collect_and_expire_drop_the_pass_listing",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_running_pass_lists_live_names_once_plus_once_per_launch"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-budget",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a4",
@@ -52,6 +70,7 @@
         "tests/swarm/test_tick_load.py::test_simulated_load_pass_fits_the_budget",
         "tests/swarm/test_tick_load.py::test_a_step_made_300_seconds_slower_breaks_the_budget",
         "tests/swarm/test_tick_load.py::test_the_budget_only_shrinks_against_its_base",
+        "tests/swarm/test_tick_load.py::test_the_base_budget_fetches_dev_when_origin_dev_is_missing",
         "tests/swarm/test_tick_load.py::test_a_raised_budget_is_refused",
         "tests/swarm/test_tick_load.py::test_an_equal_or_lower_budget_is_accepted"
       ],
@@ -100,6 +119,29 @@
         "tests/tick/test_effects.py::test_the_pass_spool_opens_once_and_appends_every_batch",
         "tests/tick/test_effects.py::test_the_pass_tools_wire_every_real_adapter_for_the_swarm",
         "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
+      ]
+    },
+    {
+      "id": "swarm-tick-common-helpers",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h9",
+      "behaviour": "The helpers the tick steps and the swarm tick module share live in the common step module, the swarm tick module re-exports each one, and a moved helper reaches its siblings through the tick module so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.common, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_common.py::test_tick_reexports_the_common_helper",
+        "tests/tick/steps/test_common.py::test_common_helpers_reach_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_common.py::test_still_held_needs_active_state_owner_and_generation",
+        "tests/tick/steps/test_common.py::test_current_owner_accepts_an_unclaimed_row_or_its_own_claim",
+        "tests/tick/steps/test_common.py::test_ended_reads_the_task_row_except_for_masters",
+        "tests/tick/steps/test_common.py::test_operator_line_skips_operator_control_notices",
+        "tests/tick/steps/test_common.py::test_reopen_guards_on_active_state_and_reports_the_live_state",
+        "tests/tick/steps/test_common.py::test_rebind_takes_the_one_pane_holding_the_conversation",
+        "tests/tick/steps/test_common.py::test_follow_keeps_an_agent_without_a_pid_and_reports_a_rebind",
+        "tests/tick/steps/test_common.py::test_skip_refused_turns_a_refusal_or_redis_timeout_into_a_skip_line",
+        "tests/tick/steps/test_common.py::test_skip_dropped_retries_once_then_skips",
+        "tests/tick/steps/test_common.py::test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task",
+        "tests/tick/steps/test_common.py::test_collected_records_a_masters_retired_tasks_then_drops_the_agent",
+        "tests/tick/steps/test_common.py::test_drop_releases_an_agent_whose_task_has_no_row"
       ]
     },
     {
@@ -181,7 +223,7 @@
       "tests": [
         "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
         "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
-        "tests/tick/test_early_end.py::test_an_early_end_stamps_the_pass_at_its_time_and_names_each_left_step_once"
+        "tests/tick/test_early_end.py::test_an_early_end_names_each_left_step_once_and_counts_the_missing_value"
       ]
     },
     {
@@ -230,7 +272,8 @@
         "tests/tick/test_abandoned_writes.py::test_a_step_left_with_only_its_actions_domain_journals_nothing",
         "tests/tick/test_engine_records.py::test_abandoned_write_step_reads_abandoned_with_its_writes_dropped",
         "tests/tick/test_engine_records.py::test_steps_dropped_at_an_expired_lane_read_skipped",
-        "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95"
+        "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95",
+        "tests/tick/test_engine_records.py::test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain"
       ]
     },
     {
@@ -316,6 +359,18 @@
       "tests": [
         "tests/swarm/test_claim_order.py::test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth",
         "tests/swarm/test_claim_order.py::test_within_a_rank_the_longer_chain_goes_first_and_ledger_order_breaks_ties"
+      ]
+    },
+    {
+      "id": "swarm-ordering-dependency-audit",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2382",
+      "behaviour": "Each tick pass records every open task dependency whose tasks share no territory and whose dependent never names the other task's code, and swarm status lists them with one health finding each.",
+      "seam": "the tick dependency audit step and agentihooks swarm status ordering_dependencies",
+      "tests": [
+        "tests/swarm_ledger/test_dependency_audit.py::test_a_dependency_with_disjoint_territories_and_no_named_code_is_reported",
+        "tests/swarm/test_ordering_dependencies.py::test_the_tick_records_each_ordering_only_dependency",
+        "tests/swarm/test_ordering_dependencies.py::test_status_prints_the_list"
       ]
     },
     {
@@ -1355,7 +1410,47 @@
         "tests/tick/test_view.py::test_the_view_holds_every_top_level_part_the_pass_reads",
         "tests/tick/test_view.py::test_a_pass_holding_a_view_reads_each_document_through_one_delta_read",
         "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
-        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
+        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view",
+        "tests/tick/test_view.py::test_document_serves_the_held_view_and_reads_again_only_after_a_write",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_running_pass_reads_the_ledger_once_plus_once_per_write",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_planted_second_read_without_a_write_is_counted"
+      ]
+    },
+    {
+      "id": "claude-settings-additive-merge",
+      "origin": "inventory",
+      "behaviour": "agentihooks init merges its rendered settings into the existing ~/.claude/settings.json additively instead of replacing it: every operator key, including one added between runs, survives; a dict merges recursively; a list unions existing order first then the rendered entries with no duplicates; a key agentihooks stops rendering is removed on the next run. agentihooks uninstall removes only the leaf paths, list entries, hook groups, enabledPlugins entries and managed-by marker it recorded writing, leaving every operator key untouched.",
+      "seam": "scripts.targets.claude_target.ClaudeAdapter.write_settings and scripts.targets.claude_target.remove_managed_keys through scripts.install.uninstall_global",
+      "tests": [
+        "tests/test_claude_target.py::test_write_settings_keeps_unmanaged_user_keys_on_first_init",
+        "tests/test_claude_target.py::test_write_settings_second_run_keeps_a_key_added_between_runs",
+        "tests/test_claude_target.py::test_write_settings_merges_siblings_without_dropping_either_side",
+        "tests/test_claude_target.py::test_write_settings_removes_a_key_no_longer_rendered",
+        "tests/test_claude_target.py::test_additive_merge_removes_a_three_level_leaf_no_longer_rendered",
+        "tests/test_claude_target.py::test_additive_merge_removal_of_an_already_absent_leaf_is_a_no_op",
+        "tests/test_claude_target.py::test_additive_merge_prunes_a_container_left_empty_by_a_removed_leaf",
+        "tests/test_claude_target.py::test_additive_merge_keeps_a_container_that_still_holds_an_operator_key",
+        "tests/test_claude_target.py::test_additive_merge_prunes_every_ancestor_left_empty_by_a_four_level_leaf",
+        "tests/test_claude_target.py::test_additive_merge_processes_every_rendered_key_after_a_list_value",
+        "tests/test_claude_target.py::test_additive_merge_drops_a_stale_rendered_list_item_using_the_prior_record",
+        "tests/test_claude_target.py::test_additive_merge_discards_a_stale_list_entry_when_the_list_stops_rendering",
+        "tests/test_claude_target.py::test_remove_recorded_settings_tolerates_a_record_without_leaves_or_lists",
+        "tests/test_claude_target.py::test_remove_recorded_settings_skips_a_list_entry_whose_doc_value_is_not_a_list",
+        "tests/test_claude_target.py::test_remove_recorded_settings_removes_listed_entries_from_a_three_level_list",
+        "tests/test_claude_target.py::test_remove_owned_hooks_tolerates_a_group_without_a_hooks_list",
+        "tests/test_claude_target.py::test_remove_owned_hooks_drops_the_hooks_key_when_every_group_was_ours",
+        "tests/test_claude_target.py::test_remove_owned_hooks_keeps_checking_events_after_a_malformed_one",
+        "tests/test_claude_target.py::test_remove_owned_plugins_tolerates_a_name_the_operator_already_removed",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_false_for_a_missing_or_unmanaged_or_invalid_file",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_true_when_operator_content_remains",
+        "tests/test_claude_target.py::test_remove_managed_keys_tolerates_state_with_no_recorded_keys_at_all",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_false_and_deletes_the_file_when_nothing_operator_owned_remains",
+        "tests/test_claude_target.py::test_remove_managed_keys_tolerates_a_marker_the_recorded_leaves_already_removed",
+        "tests/test_claude_target.py::test_enabled_plugins_reads_bundle_user_and_shared_separately",
+        "tests/test_claude_target.py::test_enabled_plugins_records_the_union_of_owned_and_layered_names",
+        "tests/test_claude_target.py::test_write_settings_keeps_hooks_and_enabled_plugins_out_of_the_generic_merge",
+        "tests/test_ownership_scope.py::TestSettingsRestore::test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins",
+        "tests/test_ownership_scope.py::TestSettingsRestore::test_install_then_uninstall_returns_user_settings_unchanged"
       ]
     }
   ],
