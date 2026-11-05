@@ -299,3 +299,39 @@ def test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task(
         )
     assert ledger.calls == ledger_calls
     assert settled == [(("inbox", "redis"), "a", "eng-1@slug" if reopened else "", "stopped")]
+
+
+class _CollectRedis:
+    """Redis fake that records every set the collect helper makes."""
+
+    def __init__(self) -> None:
+        self.sets: list[tuple[object, str]] = []
+
+    def set(self, key: object, value: str) -> None:
+        self.sets.append((key, value))
+
+
+class _CollectStore:
+    """Store fake whose keys name the slug and the suffix they were built from."""
+
+    def __init__(self) -> None:
+        self.redis = _CollectRedis()
+
+    def key(self, slug: str, suffix: str) -> tuple[str, str]:
+        return (slug, suffix)
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+@pytest.mark.parametrize(("lane", "recorded"), [(tick.MASTER, True), ("eng", False)])
+def test_collected_records_a_masters_retired_tasks_then_drops_the_agent(
+    monkeypatch: pytest.MonkeyPatch, lane: str, recorded: bool
+) -> None:
+    dropped: list[tuple[object, ...]] = []
+    monkeypatch.setattr(tick, "_drop", lambda *args: dropped.append(args) or ", dropped")
+    store, ledger = _CollectStore(), object()
+    rows: dict[str, Any] = {"t1": {"state": "claimed"}, "t2": {"state": "open"}}
+    agent = SimpleNamespace(name="a", task="t1", lane=lane)
+    assert common._collected("slug", store, ledger, rows, agent) == ", dropped"
+    assert dropped == [("slug", store, ledger, rows, agent)]
+    expected = [(("slug", "master-retired-tasks"), '["t1", "t2"]')] if recorded else []
+    assert store.redis.sets == expected
