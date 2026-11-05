@@ -69,7 +69,9 @@ class AccountRoute:
         five = session_bands.left(five_hour["used"], five_hour["resets_at"], now)
         week = session_bands.left(seven_day["used"], seven_day["resets_at"], now)
         band = session_bands.week_cap(week) if self.harness == "codex" else session_bands.cap(five, week)
-        banded = 0 if draining(self.harness, five, week) else cap if band is None else min(cap, band)
+        banded = cap if band is None else min(cap, band)
+        if draining(self.harness, five, week):
+            banded = 0
         return Account(
             self.harness,
             key,
@@ -88,8 +90,8 @@ class AccountRoute:
         reading = self.quota.reading(key, self.harness)
         if reading.state == UNKNOWN:
             return self._hive_row(key, cap, sessions, now, advertised.get(account_key(key)))
-        held = draining(self.harness, reading.five_left, reading.week_left)
-        banded = 0 if held else min(cap, self.quota.cap(key, self.harness))
+        drained = draining(self.harness, reading.five_left, reading.week_left)
+        banded = 0 if drained else min(cap, self.quota.cap(key, self.harness))
         latest = self.quota.latest(key, self.harness)
         return Account(
             self.harness,
