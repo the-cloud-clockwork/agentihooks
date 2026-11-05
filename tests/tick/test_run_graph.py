@@ -65,6 +65,16 @@ def test_site_edges_skip_an_empty_site_and_leave_steps_outside_the_table_alone()
     assert _needs(edged) == {"a1": frozenset(), "b1": frozenset({"a1"}), "x1": frozenset({"a1"})}
 
 
+def test_site_edges_drop_a_need_on_a_step_of_a_later_site_and_keep_one_outside_the_table() -> None:
+    steps = (
+        Step("a1", "a", needs=frozenset({"b1", "x1"})),
+        Step("b1", "b", needs=frozenset({"x1"})),
+        Step("x1", "x"),
+    )
+    edged = registry.site_edges(steps, ("a", "b"))
+    assert _needs(edged) == {"a1": frozenset({"x1"}), "b1": frozenset({"a1", "x1"}), "x1": frozenset()}
+
+
 def test_site_edges_keep_order_name_group_lane_and_run_of_each_step() -> None:
     ran: list[str] = []
     first = Step("a1", "a", lambda ctx: ran.append("a1") or Result(), lane=Lane("slow"), budget_s=2.0)
