@@ -16,7 +16,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | failed panes | agents | tick | 1 | 120 | none | none | none |
 | reap | agents | tick | 22 | 60 | spawn due | none | none |
 | recover outages | agents | tick | 1 | 60 | spawn due | none | none |
-| strays | agents | tick | 9 | 120 | stopped branch | none | none |
+| strays | agents | tick | 1 | 120 | stopped branch | none | none |
 | close space | close | tick | 1 | 60 | drained resume | none | none |
 | conversations | close | tick | 1 | 120 | none | none | none |
 | handoff transfers | close | tick | 2 | 60 | none | none | none |
