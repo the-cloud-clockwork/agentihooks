@@ -49,6 +49,9 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 
 ## Work
 
+A tick task (one that adds, moves or changes a tick step) loads the
+tick-step skill first and follows it for the step's artefacts and checks.
+
 1. A spec naming the seams: a GitHub issue where the repo has issues, recorded
    with `agentihooks swarm <slug> issue <url>`; otherwise the ledger task is the spec.
 2. Your own worktree off the base branch (the worktree skill). Commit the
