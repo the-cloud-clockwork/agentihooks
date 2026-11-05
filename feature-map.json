@@ -190,6 +190,49 @@
       ]
     },
     {
+      "id": "swarm-tick-launch-cluster",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h11",
+      "behaviour": "The launch check and acknowledgement helpers live in the observe step module and the spawn outcome and admission helpers in the place step module; the swarm tick module re-exports each one and the moved code reaches names the tick module defines through the tick module, so a patched tick seam still applies, and imports the modules it calls directly.",
+      "seam": "scripts.tick.steps.observe and scripts.tick.steps.place, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_launch_cluster.py::test_tick_reexports_the_moved_launch_name",
+        "tests/tick/steps/test_launch_cluster.py::test_the_tick_module_holds_no_launch_definition",
+        "tests/tick/steps/test_launch_cluster.py::test_moved_launch_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_launch_cluster.py::test_an_acknowledging_check_reads_the_launch_through_the_tick_master_lane",
+        "tests/tick/steps/test_launch_cluster.py::test_a_started_launch_records_its_claim_launch_spend_and_chain",
+        "tests/tick/steps/test_launch_cluster.py::test_a_held_back_task_follows_its_admission_decision",
+        "tests/tick/steps/test_launch_cluster.py::test_a_task_without_an_admission_gate_or_with_a_refusing_gate_is_held_or_passed",
+        "tests/tick/steps/test_launch_cluster.py::test_a_room_wait_names_the_placement_refusal",
+        "tests/tick/steps/test_collect_acks.py::test_collected_acknowledgements_start_finish_fail_or_wait_each_launch",
+        "tests/tick/steps/test_collect_acks.py::test_the_events_engine_collects_no_hive_pass_and_reads_a_missing_task_by_its_id",
+        "tests/tick/steps/test_place_outcomes.py::test_a_failed_spawn_releases_its_launch_and_reports_the_drop",
+        "tests/tick/steps/test_place_outcomes.py::test_an_unresolved_profile_spawn_also_blocks_its_task",
+        "tests/tick/steps/test_place_outcomes.py::test_a_full_account_reservation_reports_the_accounts_with_room",
+        "tests/tick/steps/test_place_outcomes.py::test_a_pending_launch_waits_for_its_hive_acknowledgement",
+        "tests/tick/steps/test_place_outcomes.py::test_a_refused_launch_waits_for_room_or_fails",
+        "tests/tick/steps/test_verify_checks.py::test_verification_skips_judged_acknowledging_and_ended_agents_and_retires_a_drifted_one",
+        "tests/tick/steps/test_verify_checks.py::test_launch_checks_pass_fail_or_wait_each_pending_agent",
+        "tests/tick/steps/test_verify_checks.py::test_launch_checks_with_nothing_pending_do_nothing",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_hive_launch_retires_reports_and_drops_its_agent",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_launch_check_on_a_working_agent_is_only_reported",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_failing_an_enforced_check_hands_over_to_the_hive_failure",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_late_on_a_report_only_check_settles_its_admission",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_relaunched_launch_saves_its_assignment_and_drops_the_agent",
+        "tests/tick/steps/test_launch_outcomes.py::test_an_expired_launch_reads_the_hive_answer",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_launch_finished_before_collection_is_recorded_as_started",
+        "tests/tick/steps/test_launch_outcomes.py::test_retiring_a_launch_holds_the_seat_of_an_agent_that_exited_first",
+        "tests/tick/steps/test_launch_outcomes.py::test_an_acknowledging_launch_is_read_from_the_launch_record",
+        "tests/tick/steps/test_place_waits.py::test_a_room_refused_launch_releases_its_holds_and_waits",
+        "tests/tick/steps/test_place_waits.py::test_a_failed_room_wait_reads_a_spawn_error_as_no_wait",
+        "tests/tick/steps/test_place_waits.py::test_a_settled_launch_activates_its_held_reservation",
+        "tests/tick/steps/test_place_waits.py::test_a_full_reservation_read_without_accounts_reports_none",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_hive_launch_that_cannot_retire_retries_next_tick",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_after_its_relaunch_is_spent_is_only_reported",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_that_cannot_retire_retries_next_tick"
+      ]
+    },
+    {
       "id": "swarm-tick-declared-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
@@ -1496,6 +1539,29 @@
         "tests/test_claude_target.py::test_write_settings_keeps_hooks_and_enabled_plugins_out_of_the_generic_merge",
         "tests/test_ownership_scope.py::TestSettingsRestore::test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins",
         "tests/test_ownership_scope.py::TestSettingsRestore::test_install_then_uninstall_returns_user_settings_unchanged"
+      ]
+    },
+    {
+      "id": "overrun-no-wall-time-handoff",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "Wall time on a claimed task only reports the agent to the master once; it never asks the agent to hand off, never retires it and never reopens its task. Only the context limit triggers a handoff.",
+      "seam": "The overrun step of the swarm tick",
+      "semgrep_rule": "feature-overrun-no-wall-time-handoff",
+      "tests": [
+        "tests/swarm/test_overrun.py::test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end"
+      ]
+    },
+    {
+      "id": "stale-nudge-cache-warm",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "The swarm tick sends a claimed agent that sits silent inside a declared named wait one short cache warm inbox item per forty minutes, asking for a one line reply so its prompt cache stays warm; it never asks for a handoff.",
+      "seam": "The idle watch of the swarm tick through the stale nudge",
+      "tests": [
+        "tests/swarm/test_tick_cache_warm.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
       ]
     }
   ],
