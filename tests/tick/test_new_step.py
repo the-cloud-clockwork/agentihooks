@@ -59,7 +59,9 @@ def registered(tree: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     budgets = import_module("scripts.tick.steps.budgets")
     fresh = registry.Registry()
     monkeypatch.setattr(registry, "registry", fresh)
-    monkeypatch.setattr(budgets, "MEASURED", load(tree / "scripts/tick/steps/budgets.py", "scaffolded_budgets").MEASURED)
+    monkeypatch.setattr(
+        budgets, "MEASURED", load(tree / "scripts/tick/steps/budgets.py", "scaffolded_budgets").MEASURED
+    )
     load(tree / "scripts/tick/steps/widgets.py", "scaffolded_widgets")
     return fresh
 
