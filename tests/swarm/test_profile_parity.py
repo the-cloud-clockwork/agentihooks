@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
+from hooks.classifier import Answer, DecisionResult
 from scripts.swarm import capacity, profile_choice, runtime
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm.tick import SpawnError
@@ -102,8 +102,8 @@ def test_a_pinned_profile_wins_on_both_paths_without_the_classifier(tmp_path, mo
 
 
 def test_a_pod_launch_the_classifier_cannot_place_is_unresolved_before_admission(monkeypatch):
-    def down(*args, **kwargs):
-        raise ClassifierUnavailable("down")
+    def down(*args: object, **kwargs: object) -> DecisionResult:
+        return DecisionResult({"responsibility": Answer("choice", choice="split", confidence=1.0)}, "unit-test")
 
     monkeypatch.setattr(profile_choice, "decide", down)
     world = World(monkeypatch)
@@ -111,14 +111,15 @@ def test_a_pod_launch_the_classifier_cannot_place_is_unresolved_before_admission
     with pytest.raises(profile_choice.ProfileUnresolved) as unresolved:
         pod(world, TASK, {})
 
-    assert str(unresolved.value) == f"task t1 profile classification is unavailable (down): {REMEDY}"
+    assert str(unresolved.value).startswith("task t1 profile is unresolved: unit-test answered split")
+    assert str(unresolved.value).endswith(REMEDY)
     assert world.runtime.requests == []
     assert world.rows() == {}
 
 
 def test_the_tick_runtime_hands_the_tick_an_unresolved_pod_profile(monkeypatch):
-    def down(*args, **kwargs):
-        raise ClassifierUnavailable("down")
+    def down(*args: object, **kwargs: object) -> DecisionResult:
+        return DecisionResult({"responsibility": Answer("choice", choice="split", confidence=1.0)}, "unit-test")
 
     monkeypatch.setattr(profile_choice, "decide", down)
     world = World(monkeypatch)
@@ -133,7 +134,8 @@ def test_the_tick_runtime_hands_the_tick_an_unresolved_pod_profile(monkeypatch):
     with pytest.raises(profile_choice.ProfileUnresolved) as unresolved:
         tick_runtime.spawn(config, "eng", world.store.next_name(SLUG, "eng"), {**TASK, "seat": FIRST})
 
-    assert str(unresolved.value) == f"task t1 profile classification is unavailable (down): {REMEDY}"
+    assert str(unresolved.value).startswith("task t1 profile is unresolved: unit-test answered split")
+    assert str(unresolved.value).endswith(REMEDY)
     assert world.runtime.requests == []
 
 
