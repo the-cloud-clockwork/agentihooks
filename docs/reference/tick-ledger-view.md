@@ -19,6 +19,8 @@ Every tick step reads the ledger document through
 `scripts.swarm.ledger_client.pass_state`, which answers from the held view,
 and a lint gate refuses any new whole ledger state read in the swarm and tick
 packages (see [The whole ledger state gate](#the-whole-ledger-state-gate)).
+A running pass reads its ledger once, plus once after each ledger write (see
+[One ledger read per pass](#one-ledger-read-per-pass)).
 
 The view lives in `scripts.tick.view`; the export parts live in the ledger
 API's `export` route. The feature map entry is `swarm-tick-delta-reads`.
@@ -58,13 +60,15 @@ document:
 
 | Caller | `pass_state` returns |
 | --- | --- |
-| A pass holding a view of `slug` | `view.document(slug)`: the held view patched with one delta read, which also replaces `view.CURRENT` |
+| A pass holding a clean view of `slug` | `view.document(slug)`: the held view's document, with no ledger read |
+| A pass holding a view of `slug` that a ledger write left stale | `view.document(slug)`: the held view patched with one delta read, which replaces `view.CURRENT` and the held view and clears the stale mark |
 | A pass holding a view of another ledger, such as the peer a freeze watches or an earlier promotion owner | `ledger.state(slug)`, the whole read |
 | A pass holding no view (stand-in ledger, a server that refused named parts) | `ledger.state(slug)` |
 | A command outside a pass, such as `swarm park`, `swarm restack` or a plan review decision | `ledger.state(slug)` |
 
-Each call during a pass is one delta read, so a step that writes the ledger
-and then calls `pass_state` again sees its own write. The pass's own reads
+A call on a clean view costs no ledger read. A step that writes the ledger and
+then calls `pass_state` again sees its own write, because the write marks the
+held view stale and the next call reads the changes. The pass's own reads
 (the document before the steps, after wrapper refresh, relay and metrics, and
 in the stopped branch) and the steps that read the document go through
 `pass_state`: ledger state, exits sweep, stopped swarm collection, launch
@@ -75,6 +79,83 @@ sweep (`run_waits`).
 A pass holding a view makes no whole ledger state call:
 `test_a_pass_holding_a_view_makes_no_whole_ledger_read` runs a whole tick pass
 with a held view and fails on any `state` call.
+
+## One ledger read per pass
+
+A running pass reads its ledger once when it starts the view, then once more
+only after each ledger write. Every whole document read in between, the
+capacity step's included, is served from the held view.
+
+### The held view and its stale mark
+
+`view.start` holds the view twice: in `view.CURRENT`, and in the context
+variable `view.HELD` as a `view.Held` record with the view, the function that
+reads it again (`renew`) and a `stale` flag that starts false.
+
+| Event | Effect |
+| --- | --- |
+| A ledger write through `LedgerClient` succeeds | `LedgerClient._call` calls `view.wrote()` after any call carrying operations, which sets `stale` on the held record. A refused or failed write raises before the mark, so it leaves the view clean |
+| `pass_state(ledger, slug)` or `view.document(slug)` on a clean view | Returns the held view's document. No ledger read |
+| `pass_state(ledger, slug)` or `view.document(slug)` on a stale view | One delta read through `renew`; the result replaces the held view and `view.CURRENT`, and `stale` returns to false |
+| `view.current()` on a stale view | The same delta read, returning the renewed `LedgerView` |
+| `view.document(slug)` for a ledger other than the held one | `None`, so `pass_state` falls back to `ledger.state(slug)` |
+| The pass ends | `view.holding()` drops `CURRENT`, `REFRESH` and `HELD` |
+
+`view.wrote()` does nothing when the pass holds no view, so a write outside a
+pass, such as a command handler's, changes nothing here.
+
+### What reads no ledger
+
+| Step | Reads |
+| --- | --- |
+| Planning and phase pass (`cli._phase_steps`) | Hands `phases.phase_changes` the pass document. `phases.phase_changes(doc)` takes only the document and projects each phase's tasks from it with `scripts.swarm.phase_projection.projected_phase_tasks`; it makes no ledger hierarchy call |
+| Promotion refresh (`promotion_watch.refresh`) | Uses the `doc` the pass hands it for the owning swarm. It no longer calls `pass_state` again |
+| Capacity | Calls `pass_state`, which the clean held view answers with no read |
+
+When the planning pass writes before the phase pass, the write marks the view
+stale and `_phase_steps` calls `pass_state` once, so the phase pass sees the
+planning writes.
+
+### The phase projection
+
+`projected_phase_tasks(doc)` returns a map of phase id to a list of
+`(task id, state)` pairs, the same answer the ledger's hierarchy route gives,
+computed from the document alone:
+
+1. `scripts.swarm_ledger.repository.hierarchy.project(doc)` builds the nodes
+   of `plans`, `phases`, `slices` and `tasks`. A task's parent is its `slice`,
+   else `phases/<phase>` from its `phase` field; a slice's parent is its
+   `phase`. Rows without a string `id` are skipped.
+2. Each phase node starts with an empty list, so a phase with no tasks is
+   listed.
+3. For each task row the projection walks up from its parent to the first
+   `phase` node. The walk stops after as many steps as the hierarchy has
+   nodes, so a parent cycle or a parent that is not a node leaves the task
+   under no phase.
+4. The task's state is `out_of_scope` when the row sets `out_of_scope`, else
+   its `state`, else `done` when `done` is true, else `open`.
+
+`phases.phase_changes` then ignores `out_of_scope` tasks, as before: a phase
+with every remaining task `done` and an unticked checkbox gets a tick, and a
+ticked phase holding a task that is not `done` gets a reopen. Because nothing
+is read, the old skip line `phase pass skipped, the hierarchy read failed:
+<error>` no longer appears.
+
+### Counting the reads
+
+`tests/swarm/tick_scenarios/test_characterisation.py` replays the recorded
+`running` scenario through `run_tick` with a counted view:
+
+- `test_a_running_pass_reads_the_ledger_once_plus_once_per_write` asserts no
+  `state` call, no `hierarchy` call, at least one delta read and at most one
+  plus the number of ledger writes, and no delta read that follows another
+  with no write between them.
+- `test_a_planted_second_read_without_a_write_is_counted` marks the view stale
+  with no write and asserts the counter reports that read, so the first test
+  cannot pass by counting nothing.
+
+The writes counted are the fake ledger's `update_task`, `notify`,
+`mark_swarm`, `rank_task`, `comment`, `join` and `notice`.
 
 ## The stored view
 
@@ -304,6 +385,8 @@ advances with ledger writes.
 | Every pass reads the parts in full | More than 256 generations pass between ticks, or the server records no row changes for some writes. Compare the stored generation with the ledger's current one |
 | A pass fails before its first step with an HTTP or connection error from `export` | The ledger server is unreachable or refused the credentials; the error is not the 400 the view skips |
 | A view looks stale | Delete its file. The next pass reads the parts in full and stores them |
+| A step does not see a write it made earlier in the pass | The write did not go through `LedgerClient` with operations, so `view.wrote()` never marked the view stale. Route the write through the ledger client, or call `view.wrote()` after it |
+| The phase pass misses a task, or ticks a phase early | The projection reads the pass document: check the task's `slice` or `phase` field leads to a phase row. A task whose parent chain loops or names a missing node sits under no phase |
 | A step's `pass_state` result lacks a top level part | The part is not in `view.PARTS`. Add it there and to the export route's `parts` enum |
 | Lint fails with `reads the whole ledger state N times` | The change added a whole ledger read in the swarm or tick package. Read through `pass_state` instead |
 | Lint fails with `differs from the head's measurement` | The allowlist was not rerecorded after removing or moving a read. Run `python -m scripts.no_whole_ledger --write` and commit the file |
@@ -313,8 +396,15 @@ advances with ledger writes.
 - `tests/tick/test_view.py`: first full read, one delta call patching the
   stored view, an exceeded change window, a patch that does not fit, an
   unchanged generation, `start` reading through the ledger client, the view
-  holding every top level part the pass reads, and `pass_state` reading each
-  document through one delta read.
+  holding every top level part the pass reads, `pass_state` reading each
+  document through one delta read, and `document` serving the held view and
+  reading again only after a write.
+- `tests/swarm/test_phase_projection.py`: each phase's tasks listed through
+  slices with tasks outside any phase skipped, a document without tasks
+  listing each phase empty, and the walk stopping at a slice that names itself
+  as its phase.
+- `tests/swarm/tick_scenarios/test_characterisation.py`: a running pass reads
+  the ledger once plus once per write, and a planted second read is counted.
 - `tests/swarm_ledger/test_export_parts.py`: `parts` on full and change
   exports, events only with `_meta`, a changed root, one cached export per part
   set, request validation, and the client's `changes` call.

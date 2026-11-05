@@ -600,8 +600,10 @@ yields each unsized open task's fields (at most `PER_TICK`, five, per pass);
 `grouping.releases(slug, store, doc)` returns each stopped lead with the reason
 and its members; `fleet_red.holds` returns new holds, lifted marks and listing
 saves; `dispatcher.rank_decision` returns one `Ranking`;
-`phases.phase_changes` returns `PhaseChange` items, or one skip line when the
-hierarchy read fails; `master_stall.stalls` returns `Stall` items.
+`phases.phase_changes(doc)` returns `PhaseChange` items projected from the pass
+document with no ledger read (see
+[One ledger read per pass](tick-ledger-view.md#one-ledger-read-per-pass));
+`master_stall.stalls` returns `Stall` items.
 
 ### How the engine applies writes
 
