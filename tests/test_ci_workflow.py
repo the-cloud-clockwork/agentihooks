@@ -1682,17 +1682,18 @@ def test_selected_legs_size_workers_by_the_container_cpu_quota():
     assert "-n auto" not in run
 
 
-def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
+def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_on_every_leg() -> None:
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
     assert [checkout["with"] for checkout in checkouts] == [{"ref": "${{ github.sha }}", "fetch-depth": 1}]
     fetch = _selected_step("Fetch the protected grader's dev head")
-    assert fetch["if"] == "steps.collection.outcome == 'success'"
+    assert "if" not in fetch
     names = [step.get("name") for step in steps]
     assert (
         names.index("Wait for the early collection")
         < names.index(fetch["name"])
         < names.index("Adopt the reused tests from the protected grader")
+        < names.index("Run the selected tests")
     )
 
 
@@ -2697,7 +2698,9 @@ def _planner_imports(path: Path) -> set[str]:
                     and node.level == 0
                     and node.module.split(".")[0] in ("scripts", "tests")
                 }
-            else:
+            elif not (
+                isinstance(child, ast.If) and isinstance(child.test, ast.Name) and child.test.id == "TYPE_CHECKING"
+            ):
                 pending.append(child)
     return found
 
