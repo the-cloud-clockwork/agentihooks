@@ -308,15 +308,19 @@ def test_confidence_at_floor_is_accepted(asked):
     assert (decision.profile, decision.source) == ("engineer", "classifier")
 
 
-def test_unavailable_classifier_never_falls_back_to_engineer(monkeypatch):
-    def unavailable(*args, **kwargs):
+def test_an_unreachable_classifier_gives_the_claim_its_lane_profile_and_records_the_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(*args: object, **kwargs: object) -> DecisionResult:
         raise ClassifierUnavailable("no decision backend answered")
 
     monkeypatch.setattr(profile_choice, "decide", unavailable)
-    with pytest.raises(profile_choice.ProfileUnresolved) as raised:
-        profile_choice.choose("sw", "eng", {}, TASK, {})
-    assert (
-        str(raised.value) == f"task t9 profile classification is unavailable (no decision backend answered): {REMEDY}"
+    decision = profile_choice.choose("sw", "eng", {}, TASK, {})
+    assert decision == profile_choice.ProfileDecision(
+        "engineer",
+        "lane default",
+        "eng lane default: profile classification is unavailable (no decision backend answered)",
+        anchors=("task:t9", "phase:p1", "territory:scripts/swarm/tick.py", "territory:scripts/swarm_ledger/static"),
     )
 
 
