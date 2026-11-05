@@ -444,7 +444,7 @@ def test_the_push_gets_the_time_left_plus_the_reserve_less_the_floor(monkeypatch
 def test_a_retained_branch_deleted_from_origin_is_not_recreated(rig):
     rig.commit("before")
     git(rig.tree, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
-    git(rig.seed, "push", str(rig.origin), "--delete", PREDECESSOR)
+    git(rig.origin, "update-ref", "-d", f"refs/heads/{PREDECESSOR}")
     continuing(rig)
     rig.commit()
     assert rig.stop().reason == TEMPLATE
