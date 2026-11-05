@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from scripts import serena_router_daemon
-from scripts.hive import registry
+from scripts.hive import placement, registry
 from scripts.swarm import launch_check, lease, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
@@ -366,6 +366,15 @@ class Consumer:
             return ""
         return master_claude_login.unusable()
 
+    def slot_account(self, order: LaunchOrder) -> str:
+        """The hive's own advertised name for the order's account, which the agent launcher looks up."""
+        key = placement.account_key(order.slot)
+        hive: dict[str, list[dict[str, str]]] = registry.show(self.orders.redis, self.hive) or {}  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        for slot in hive.get("slots", []):
+            if slot["harness"] == order.harness and placement.account_key(slot["account"]) == key:
+                return slot["account"]
+        return order.slot
+
     def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict) -> Ack:
         if refused := self.front_door_refusal(order, agent):
             return Ack("failed", {}, refused)
@@ -382,7 +391,7 @@ class Consumer:
         task["launch_assignment"] = {
             "profile": order.profile,
             "harness": order.harness,
-            "account": order.slot,
+            "account": self.slot_account(order),
             "model": agent.model or config.lanes[order.lane].get("model") or getattr(config, f"{order.harness}_model"),
             "effort": agent.effort or config.effort_min,
         }
@@ -409,7 +418,7 @@ class Consumer:
             return self._stop(live, "expired")
         resolved = resolved_master_login(order, placed.account, placed.placement, placed.profile_decision)
         if (placed.harness, placed.profile) != (order.harness, order.profile) or (
-            placed.account != order.slot and not resolved
+            placement.account_key(placed.account) != placement.account_key(order.slot) and not resolved
         ):
             return self._stop(live, "identity")
         try:
