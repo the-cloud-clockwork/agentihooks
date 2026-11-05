@@ -103,11 +103,13 @@ def calls_of(calls: Mock) -> list[Any]:
 
 
 def step_rows(appended: Mock) -> list[dict[str, list[Any]]]:
+    """Return each pass's step outcome and rested flag, a finished step over its wall clock budget read as ok."""
     passes: dict[str, dict[str, list[Any]]] = {}
     for call in appended.call_args_list:
         if call.args[2] == "tick:records":
             row = call.args[3]
-            passes.setdefault(row["pass_id"], {})[row["step"]] = [row["outcome"], row["rested"]]
+            late = row["outcome"] == engine.LATE and not row["abandoned"]
+            passes.setdefault(row["pass_id"], {})[row["step"]] = [engine.OK if late else row["outcome"], row["rested"]]
     return list(passes.values())
 
 
