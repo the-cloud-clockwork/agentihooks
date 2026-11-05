@@ -245,12 +245,13 @@ def test_the_parameters_of_a_unit_list_every_slot_in_order(tmp_path: Path) -> No
     assert size_limits._parameters(tree, "mod.py::planted#2") == ("a", "b", "c", "d", "e", "f", "g", "h", "", "")
 
 
-def test_a_unit_moved_out_of_a_path_holding_the_separator_keeps_its_allowance(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(("old", "new"), [("odd::old.py", "new.py"), ("old.py", "odd::new.py")])
+def test_a_unit_moved_across_a_path_holding_the_separator_keeps_its_allowance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], old: str, new: str
 ) -> None:
-    base = _recorded(tmp_path / "base", {"odd::old.py": EIGHT_PARAMETERS})
-    assert size_limits.load(base) == {"odd::old.py::planted": {"PLR0913": 8}}
-    head = _recorded(tmp_path / "head", {"new.py": EIGHT_PARAMETERS})
+    base = _recorded(tmp_path / "base", {old: EIGHT_PARAMETERS})
+    assert size_limits.load(base) == {f"{old}::planted": {"PLR0913": 8}}
+    head = _recorded(tmp_path / "head", {new: EIGHT_PARAMETERS})
     code, out = _grade(base, head, capsys)
     assert code == 0, out
 
