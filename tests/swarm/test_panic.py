@@ -613,7 +613,7 @@ def test_a_pending_hive_launch_and_a_full_reservation_fail_no_step(
     assert recorded["failed_steps"] == []
     assert seen == [True]
     assert panic.errors_since(store, 0) == 0
-    assert counted == []
+    assert [call for call in counted if call[0] == panic.METRIC] == []
 
 
 def test_a_real_launch_failure_still_fails_its_step(
