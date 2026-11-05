@@ -202,6 +202,16 @@ def test_a_master_without_an_execution_launched_at_the_first_millisecond_acknowl
     }
 
 
+def test_a_master_without_an_execution_or_a_launch_time_never_acknowledges(
+    pending: tuple[RedisStore, list[AgentRecord], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = pending[0]
+    store.redis.hset(store.key(SLUG, "config"), "ledger_staged_at", 0)
+    legacy = _seat_legacy_master(store, launched_at=0)
+    _acknowledge_as(pending, monkeypatch, legacy.name)
+    assert store.redis.hget(store.key(SLUG, "ledger-ready"), legacy.name) is None
+
+
 @pytest.mark.parametrize("command", ["ledger", "swarm"])
 def test_normal_local_commands_acknowledge_the_staged_successor(pending, monkeypatch, capsys, command):
     from scripts.swarm_ledger import ledger
