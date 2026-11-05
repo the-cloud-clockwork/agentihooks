@@ -59,13 +59,14 @@ def stuck(slug: str, agent: AgentRecord, now_ms: int) -> bool:
 
 def retire_stuck(slug: str, store: RedisStore, runtime: Any, now_ms: int) -> list[str]:
     """Drop each stuck seat master so its seat is filled again, and move the seat's pending items to the front door."""
+    found = [agent for agent in store.agents(slug) if stuck(slug, agent, now_ms)]
+    if not found:
+        return []
     live: set[str] = runtime.live_names()
     actions: list[str] = []
     inbox = InboxStore(store.redis)
     front = seat_address(slug, MASTER)
-    for agent in store.agents(slug):
-        if not stuck(slug, agent, now_ms):
-            continue
+    for agent in found:
         if agent.name in live and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             actions.append(f"could not retire stuck master {agent.name}, retrying next tick")
             continue
