@@ -5,7 +5,7 @@ from time import monotonic
 import pytest
 
 import scripts.swarm.cli  # noqa: F401
-from scripts.tick import engine, registry
+from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result, Step
 from scripts.tick.steps import CallStep, agents, budgets, host, masters, observe, place, report, tasks
@@ -145,3 +145,123 @@ def test_latest_start_follows_the_longest_needs_path() -> None:
     last = TimedStep("d", 1.0, needs=frozenset({"b", "c"}))
     steps: list[Step] = [first, second, side, last]
     assert [registry.latest_start(name, steps) for name in "abcd"] == [0.0, 3.0, 0.0, 7.0]
+
+
+SLOW_STEPS = frozenset(
+    {
+        "lost runner",
+        "time left",
+        "release alert",
+        "promotion refresh",
+        "fleet red notice",
+        "night watch",
+        "master alarm",
+        "master stall",
+        "prompt stall",
+        "retire idle master",
+        "ledger watchdog",
+        "ledger probe",
+        "prompt backlog",
+        "host pressure",
+        "hive ledger",
+        "pane evidence",
+        "strays",
+        "failed panes",
+        "conversations",
+        "session models",
+        "doc report",
+        "priorities sweep",
+        "health findings",
+        "findings pass",
+        "metrics record",
+        "bottleneck status",
+        "inbox wake",
+    }
+)
+CRITICAL_STEPS = frozenset(
+    {
+        "config load",
+        "ledger state",
+        "exits sweep",
+        "launch checks",
+        "track outages",
+        "verify",
+        "reap",
+        "orphans",
+        "recover outages",
+        "sleeping",
+        "drained resume",
+        "run window",
+        "size pass",
+        "grouping release",
+        "dispatcher group",
+        "rank pass",
+        "bottleneck remedy",
+        "preempt",
+        "spawn",
+        "collect acks",
+        "master down",
+        "tick master",
+        "master scale",
+        "seat alarm",
+        "dispatch seat",
+        "settle",
+        "close space",
+        "stall watch",
+        "overrun pass",
+        "quiet pass",
+    }
+)
+
+
+def _upstream(name: str, by_name: dict[str, Step]) -> set[str]:
+    found: set[str] = set()
+    pending = list(by_name[name].needs)
+    while pending:
+        need = pending.pop()
+        if need not in found:
+            found.add(need)
+            pending.extend(by_name[need].needs)
+    return found
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_notice_and_watch_steps_declare_the_slow_lane() -> None:
+    lanes = {step.name: step.lane for step in registry.steps()}
+    off = sorted(name for name in SLOW_STEPS if lanes[name] != engine.SLOW)
+    assert off == [], f"{len(off)} of {len(SLOW_STEPS)} notice and watch steps off the slow lane: {off}"
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_critical_path_steps_stay_off_the_slow_lane_and_need_no_slow_step() -> None:
+    by_name = {step.name: step for step in registry.steps()}
+    slow = {name for name, step in by_name.items() if step.lane == engine.SLOW}
+    broken = sorted(
+        f"{name} needs {sorted(_upstream(name, by_name) & slow)}"
+        for name in CRITICAL_STEPS
+        if by_name[name].lane == engine.SLOW or _upstream(name, by_name) & slow
+    )
+    assert broken == [], f"{len(broken)} of {len(CRITICAL_STEPS)} critical steps wait on the slow lane: {broken}"
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_pass_lanes_are_sized_for_the_minute() -> None:
+    assert pool.CRITICAL_S == 60.0
+    assert pool.SLOW_S == 59.0
+    assert engine.cadence_breaches(pool.SLOW_S) == []
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_site_edges_keep_only_barriers_whose_reads_and_writes_cross() -> None:
+    rows, doc = Domain("pass:rows"), Domain("pass:doc")
+    writer = TimedStep("writer", 1.0, group="a", writes=frozenset({rows}))
+    reader = TimedStep("reader", 1.0, group="a", reads=frozenset({doc}))
+    after = TimedStep("after", 1.0, group="b", reads=frozenset({rows}), writes=frozenset({doc}))
+    free = TimedStep("free", 1.0, group="b")
+    edged = registry.site_edges((writer, reader, after, free), ("a", "b"))
+    assert {step.name: step.needs for step in edged} == {
+        "writer": frozenset(),
+        "reader": frozenset(),
+        "after": frozenset({"writer", "reader"}),
+        "free": frozenset(),
+    }
