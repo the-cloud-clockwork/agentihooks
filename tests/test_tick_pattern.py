@@ -11,7 +11,7 @@ from scripts import tick_pattern
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[1]
-BUDGETS = 'MEASURED = {\n    "beat": Timing(1.0, CRITICAL_S),\n    "odd": Timing(1.0, 30.0),\n}\n'
+BUDGETS = 'FLOORS = {\n    "beat": Timing(1.0, CRITICAL_S),\n    "odd": Timing(1.0, 30.0),\n}\n'
 FULL = 'CallStep("beat", "g", call, needs=n, reads=r, writes=w, lane=l, effects=e, feature="f")\n'
 STEP = "scripts/tick/steps/one.py"
 TICK = "def run_tick():\n    return 1\n"
@@ -201,7 +201,7 @@ def test_a_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.C
 
 def test_a_budgets_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _recorded(tmp_path / "base", {STEP: FULL})
-    head = _tree(tmp_path / "head", {tick_pattern.BUDGETS: "MEASURED = {\n", STEP: FULL})
+    head = _tree(tmp_path / "head", {tick_pattern.BUDGETS: "FLOORS = {\n", STEP: FULL})
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert out.startswith(f"::error::cannot parse {tick_pattern.BUDGETS}: ")
@@ -230,9 +230,14 @@ def test_grading_defaults_the_head_to_the_working_folder(
 
 def test_floors_reads_only_the_measured_table() -> None:
     source = (
-        'OTHER = {"x": Timing(1, WIDE_S)}\nMEASURED: dict = {**OTHER, 3: 4, "a": Timing(1, SLOW_S), "b": Timing(1)}\n'
+        'OTHER = {"x": Timing(1, WIDE_S)}\nFLOORS: dict = {**OTHER, 3: 4, "a": Timing(1, SLOW_S), "b": Timing(1)}\n'
     )
     assert tick_pattern.floors(source) == {"a": "SLOW_S", "b": ""}
+
+
+def test_floors_reads_the_floors_table() -> None:
+    source = 'OTHER = {"x": Timing(1, WIDE_S)}\nFLOORS = {"a": Timing(2.0, CRITICAL_S)}\n'
+    assert tick_pattern.floors(source) == {"a": "CRITICAL_S"}
 
 
 def test_an_untouched_file_whose_record_is_stale_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

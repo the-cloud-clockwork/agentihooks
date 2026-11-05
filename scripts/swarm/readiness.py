@@ -64,7 +64,7 @@ class Source:
         doc = self.state(slug)
         rows = {task["id"]: task for task in doc["tasks"]}
         owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
-        released = release_wait.checker(config.repo)
+        released = release_wait.checker(config)
         applied = apply_wait.checker(config, rows)
         unshared = fleet_red.checker()
         return Snapshot(

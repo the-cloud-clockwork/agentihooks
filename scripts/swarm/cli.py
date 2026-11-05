@@ -205,7 +205,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
-from scripts.tick.steps import Left, PassBox
+from scripts.tick.steps import Left, PassBox, budgets
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
 from scripts.tick.steps import tasks as task_steps
@@ -443,6 +443,7 @@ def run_tick(
             )
         )
         timing.keep()
+        budgets.resolve(store, slug)
         run_group("before")
         if store.config(slug).state == "stopped":
             _hold_view(beating, slug, ledger)
@@ -512,9 +513,8 @@ def run_tick(
             actions += run_group("wrapper metrics", **passing, count=len(actions))
             host_steps.raise_held(box)
             doc = timing.call(ledger_client.pass_state, ledger, slug)
-            started = box["started"]
             ended = report_steps.FULL
-            return probed + controls + actions + (["started automatic snapshot"] if started else [])
+            return probed + controls + actions
     except Left as missing:
         ended = report_steps.EARLY
         return report_steps.early_end(store, slug, missing, box.left)

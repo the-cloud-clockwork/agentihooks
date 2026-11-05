@@ -55,16 +55,28 @@ def load_lock(path: Path, architecture: str) -> dict:
     return lock
 
 
+DOWNLOAD_ATTEMPTS = 40
+ATTEMPT_SECONDS = 120
+FETCH_SECONDS = 900
+
+
 def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
     cached = cache / artifact["sha256"] if cache else None
     if cached and cached.is_file():
         payload = cached.read_bytes()
         if hashlib.sha256(payload).hexdigest() == artifact["sha256"]:
             return payload
-    for attempt in range(5):
+    give_up = time.monotonic() + FETCH_SECONDS
+    for attempt in range(DOWNLOAD_ATTEMPTS):
         try:
+            deadline = min(time.monotonic() + ATTEMPT_SECONDS, give_up)
             with urllib.request.urlopen(artifact["url"], timeout=120) as response:
-                payload = response.read()
+                chunks: list[bytes] = []
+                while chunk := response.read1():
+                    chunks.append(chunk)
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"download attempt passed its deadline: {name}")
+                payload = b"".join(chunks)
             break
         except (urllib.error.URLError, TimeoutError, http.client.IncompleteRead, ConnectionResetError) as error:
             if isinstance(error, urllib.error.HTTPError):
@@ -73,9 +85,10 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
                 transient = isinstance(error.reason, (TimeoutError, ConnectionResetError))
             else:
                 transient = True
-            if not transient or attempt == 4:
+            delay = min(2**attempt, 30)
+            if not transient or attempt == DOWNLOAD_ATTEMPTS - 1 or time.monotonic() + delay > give_up:
                 raise
-            time.sleep(2**attempt)
+            time.sleep(delay)
     if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:
         raise ValueError(f"artifact checksum mismatch: {name}")
     if cached:

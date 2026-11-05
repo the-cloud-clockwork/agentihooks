@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/timing.py:scripts.swarm.timing.x_append_step:1d4f5a1d8774ccf5900548292bdd8a7f6eb0d00c9e878ca89aaeb779bd9ba548": {
+    "reader": "standards_reader",
+    "reason": "redis-py tests the transaction flag for truthiness, so None runs the pipeline non-transactionally, identical to transaction=False."
+  }
+}

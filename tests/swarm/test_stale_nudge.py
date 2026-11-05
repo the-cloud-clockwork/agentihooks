@@ -7,6 +7,7 @@ from scripts.swarm import idle, stale_nudge
 from scripts.swarm.store import AgentRecord
 
 LIMIT = stale_nudge.LIMIT_MS
+MINUTE = 60_000
 NAME = "engineer@a1b2c3-0001"
 BASE = 1_000 * LIMIT
 WAIT = {"until": BASE + 3 * LIMIT, "reason": "checks on the pull request"}
@@ -173,3 +174,76 @@ def test_a_provider_error_under_a_working_heartbeat_waits_for_the_silence_limit(
 )
 def test_only_a_swarm_stale_item_counts_as_a_nudge(inbox, sender, ref, expected):
     assert stale_nudge.is_nudge(inbox.send(sender, NAME, "text", ref=ref)) is expected
+
+
+CACHE_LIMIT = stale_nudge.CACHE_LIMIT_MS
+
+
+def cache_items(inbox):
+    return [item for item in inbox.inbox(NAME) if item.ref.startswith(f"{stale_nudge.CACHE_REF}:")]
+
+
+def test_a_named_wait_under_forty_minutes_of_silence_gets_no_cache_warm_item(inbox):
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + 3 * CACHE_LIMIT, "checks on the pull request", BASE)
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT - MINUTE) == []
+    assert cache_items(inbox) == []
+
+
+def test_a_named_wait_past_forty_minutes_of_silence_gets_one_cache_warm_item(inbox):
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + 3 * CACHE_LIMIT, "checks on the pull request", BASE)
+    now = BASE + CACHE_LIMIT + MINUTE
+    actions = stale_nudge.nudge(inbox, "sw", agent(), "", now)
+    cache_id = stale_nudge.cache_item_id("sw", NAME, BASE, now)
+    assert actions == [f"sent {NAME} a cache warm check through its inbox as message {cache_id}"]
+    [item] = cache_items(inbox)
+    assert item.id == cache_id and item.ref == f"{stale_nudge.CACHE_REF}:{cache_id}"
+    assert "Cache warm check on swarm sw" in item.text and "keep your wait on t1" in item.text
+    assert not [word for word in ("hand off", "handoff", "ended", "retire", "reopen") if word in item.text.lower()]
+
+
+def test_a_second_cache_warm_item_waits_for_the_next_forty_minute_window(inbox):
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + 10 * CACHE_LIMIT, "checks on the pull request", BASE)
+    stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT + MINUTE)
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + 2 * CACHE_LIMIT - MINUTE) == []
+    assert len(cache_items(inbox)) == 1
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + 2 * CACHE_LIMIT) != []
+    assert len(cache_items(inbox)) == 2
+
+
+def test_a_non_waiting_agent_keeps_the_ten_minute_stale_nudge_unchanged(inbox):
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT) != []
+    assert cache_items(inbox) == []
+    assert len(nudges(inbox)) == 1
+
+
+def test_a_wait_named_only_by_on_still_gets_a_cache_warm_item(inbox):
+    on = {"kind": "checks", "target": "https://github.com/o/r/pull/7"}
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + 3 * CACHE_LIMIT, "", BASE, on=on)
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT + MINUTE) != []
+    assert len(cache_items(inbox)) == 1
+
+
+def test_cache_due_is_false_once_the_wait_itself_ends(inbox):
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + CACHE_LIMIT - MINUTE, "checks on the pull request", BASE)
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT + MINUTE) != []
+    assert cache_items(inbox) == []
+
+
+def test_cache_due_needs_a_known_activity_time() -> None:
+    assert not stale_nudge.cache_due(0, BASE)
+    assert stale_nudge.cache_due(BASE - CACHE_LIMIT - 1, BASE)
+
+
+def test_cache_due_starts_only_past_forty_whole_minutes() -> None:
+    assert not stale_nudge.cache_due(BASE, BASE + CACHE_LIMIT)
+    assert stale_nudge.cache_due(BASE, BASE + CACHE_LIMIT + 1)
+
+
+def test_a_silent_agent_without_a_wait_gets_the_stale_nudge_and_no_cache_warm_item(inbox: InboxStore) -> None:
+    idle.declare_wait(inbox.redis, "sw", NAME, BASE + 3 * CACHE_LIMIT, "", BASE)
+    assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + CACHE_LIMIT + MINUTE) != []
+    assert cache_items(inbox) == [] and len(nudges(inbox)) == 1
+
+
+def test_the_cache_warm_id_hashes_the_forty_minute_window_since_the_last_activity():
+    assert stale_nudge.cache_item_id("sw", NAME, BASE, BASE + 2 * CACHE_LIMIT + MINUTE) == "375da1eac1bd"

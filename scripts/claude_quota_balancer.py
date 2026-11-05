@@ -128,7 +128,8 @@ def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
 
 
 def credential_for_slug(credentials: list[Credential], slug: str) -> Credential:
-    target = f"{TOKEN_PREFIX}{slug}"
+    """The credential for a slug, read with - as _ so a controller Secret key finds the hive's token slot."""
+    target = f"{TOKEN_PREFIX}{slug.replace('-', '_')}"
     for credential in credentials:
         if credential.env_name == target:
             return credential
