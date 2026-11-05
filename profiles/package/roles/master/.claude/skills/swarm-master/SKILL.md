@@ -142,6 +142,9 @@ takes the claude ai login and Remote Control.
 
 - A code task names its seams and its done condition:
   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng --phase <phase> --kind code --description "<seams and done when>" --depends-on <ids> --territory <areas>`.
+- A tick task spec names the step, its group, lane (`tick` or `slow`), effects
+  (the `Tools` ports it writes through) and feature map id, so the engineer can
+  run the tick-step scaffold from the spec alone.
 - Work beyond code carries what must be true, how it is checked and who judges:
   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng --phase <phase> --kind troubleshoot --description "<scope>" --must "<what must be true>" --check "<how it is checked>" --judge "<who judges>"`.
 - The proof each kind closes with: code and ci a merged pull request; ops a
