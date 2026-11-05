@@ -328,6 +328,45 @@ def test_an_advertised_reading_without_a_week_keeps_the_launch_cap() -> None:
     assert (row.state, row.cap, row.week_left) == ("OPEN", 2, None)
 
 
+def test_a_stale_advertised_reading_keeps_the_launch_cap() -> None:
+    stale = NOW_MS / 1000 - session_bands.FRESH_SECONDS - 1
+    _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(_reading(97.0, observed_at=stale))[0])
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    assert row == capacity.Account("claude", account_key(CLOSED_SLOT), "OPEN", 0, None, None, 2)
+
+
+DRAINING = {
+    "claude five hour at five": ("claude", 5.0, 50.0, True),
+    "claude five hour above five": ("claude", 5.1, 50.0, False),
+    "claude week at ten": ("claude", None, 10.0, True),
+    "claude week above ten": ("claude", None, 10.1, False),
+    "codex five hour spent": ("codex", 1.0, 50.0, False),
+    "codex week at ten": ("codex", None, 10.0, True),
+    "nothing read": ("claude", None, None, False),
+}
+
+
+@pytest.mark.parametrize(("harness", "five", "week", "expected"), DRAINING.values(), ids=DRAINING.keys())
+def test_a_swarm_account_drains_at_ten_percent_of_its_week_or_five_of_its_five_hours(
+    harness: str, five: float | None, week: float | None, expected: bool
+) -> None:
+    assert approved.draining(harness, five, week) is expected
+
+
+def test_a_draining_account_a_hive_advertises_takes_no_hive_agent() -> None:
+    _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(_reading(92.0))[0])
+    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap, row.week_left) == ("CLOSED", 0, 8.0)
+
+
+def test_a_draining_fleet_reading_takes_no_hive_agent() -> None:
+    store, route = _route({"akey", "bkey"})
+    _observe(store, "akey", week_used=92.0)
+    [row, _] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap, row.week_left) == ("CLOSED", 0, 8.0)
+    assert route.choose(6, planned="akey") == "bkey"
+
+
 def test_a_fleet_reading_outranks_what_the_hives_advertise() -> None:
     store, route = _route({"akey"}, advertised=_hives(_reading(97.0), "akey")[0])
     _observe(store, "akey")
