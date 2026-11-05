@@ -19,6 +19,8 @@ steps that moved out of the hand written pass.
 | --- | --- | --- |
 | Registry | `scripts.tick.registry` | Holds every registered step. `waves()` orders them by `order` and `needs` and refuses duplicate names, unknown dependencies, dependency cycles, a budget that is not a finite positive number, a negative interval, and two steps that write the same domain, or where one reads a domain the other writes, with no dependency between them, in one lane or across lanes |
 | Group run | `scripts.tick.engine.run_group` | Runs the steps of one group sorted by `order`. Each step runs in a daemon thread under a copied context and a child deadline of its own budget; the engine waits at most that budget. A step that raises is recorded `failed`, one that runs past its budget is recorded `late`, and neither stops the next step |
+| Graph run | `scripts.tick.engine.run_graph` | Runs a whole step list, across groups, in the schedule `run_group` uses for one group. Steps are ordered by `registry.ordered`: each after the steps among them it needs, otherwise in the order given. See [The flat pass graph](#the-flat-pass-graph) |
+| Site edges | `scripts.tick.registry.site_edges` | Returns the steps with each step of a group site also needing every step of the nearest earlier site that holds steps, so a graph run keeps the group order |
 | Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments, hands the engine the task appliers (`tasks.appliers(state)`) and returns, per step in order, its own actions, then the action lines its appliers returned, then a line for each of its writes the engine dropped. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
 | Write applier | `run_group(..., apply=...)` | A map of domain to a function that applies one `Write`. As each step ends, the engine passes every write of a mapped domain to its applier; an applier that raises `RevisionConflict` drops that write. See [Steps that return writes](#steps-that-return-writes) |
 | Call step | `scripts.tick.steps.CallStep` | A step that runs one call of the tick module. It reads the pass state through the view and writes the actions it returned to its own domain, `actions:<step name>` |
@@ -321,7 +323,7 @@ In a parallel pass `run_group` takes the slow lane steps of a group, and every
 step that needs one of them, out of the group. It runs the rest eagerly and
 returns their records at once; the handed off steps start afterwards on a
 daemon thread the pass owns (`Pass.detach`) and run eagerly on up to 8
-workers. A handed off step that needs a step recorded late or dropped is
+workers of the pass step executor; see [Pass executors](#pass-executors). A handed off step that needs a step recorded late or dropped is
 dropped and recorded late. Their records go to the `finished` callback; the
 tick site passes one that prints their actions, then
 `slow lane step <name> failed: <error>` for each failed step and
@@ -470,6 +472,70 @@ Unrelated earlier groups can still add waiting time, so forty seconds is a
 prerequisite graph bound, not a measured wall time guarantee for the legacy
 pass. The eager executor is required to realize that bound across groups.
 The existing spawn conditions and placing lock continue to apply.
+
+### The flat pass graph
+
+`engine.run_graph(steps, ctx, apply=None, finished=None)` runs every step of
+`steps` as one graph. It takes the same `apply` and `finished` arguments as
+`run_group` and returns one `StepRecord` per step in graph order:
+
+- Outside a parallel pass, and in sequential mode, the steps run one at a time
+  in graph order, each in its own daemon thread the caller waits on up to its
+  budget.
+- In a parallel pass each step is submitted the moment every step it needs
+  among them has ended. Slow lane steps, and every step that needs one of them,
+  are handed off as `run_group` hands them off and their records go to
+  `finished`.
+
+Graph order comes from `registry.ordered(steps)`: each step after the steps
+among them it needs, otherwise in the order given. A need on a step outside
+the list is ignored for ordering. A cycle raises
+`ValueError: Dependency cycle: <names>`.
+
+A group site in the pass is a barrier: no step of a group starts before every
+step of the previous group ended. `registry.site_edges(steps, sites)` turns
+that order into edges. `sites` is the group names in pass order. Each step of a
+site gains a need on every step of the nearest earlier site that holds steps;
+an empty site is skipped, and a step whose group is not in `sites` keeps its
+own needs. The returned steps keep their order, name, group, lane, budget and
+action; only `needs` grows.
+
+```python
+from scripts.tick import engine, registry
+
+edged = registry.site_edges(steps, ("start", "pass setup", "observe"))
+records = engine.run_graph(edged, ctx, apply=appliers, finished=print_later)
+```
+
+With steps `a1` and `a2` in group `a`, `b1` in `b` needing `a1`, and `c1` in
+`c`, `site_edges(steps, ("a", "b", "c"))` gives `b1` the needs `a1` and `a2`
+and `c1` the need `b1`. With sites `("a", "empty", "b")`, `b1` needs `a1`.
+
+The tick site still runs the groups one after another through
+`scripts.swarm.tick.run_group`; the
+[table of groups](#groups-and-their-sites) is the order it follows.
+
+### Pass executors
+
+`pool.running` builds two thread pools for the pass and shuts both down,
+cancelling queued work, when the pass ends:
+
+| Executor | `Pass` field | Threads | Runs |
+| --- | --- | --- | --- |
+| Step executor | `steps` | `workers` (default `pool.WORKERS`, 8), named `tick-step` | Every step the eager scheduler submits, in every group and graph run of the pass, handed off steps included |
+| Fan out executor | `fans` | `workers`, named `tick-fan-out` | Every item of every `pool.fan_out` call of the pass, each item holding one of the pass's `workers` slots |
+
+Each `run_group` or `run_graph` call that hands steps off starts one daemon
+thread, named `tick-slow-lane`, which schedules them on the step executor. A `fan_out` started inside a fanned out action runs inline on
+the calling thread. Calling `submit` on either executor after the pass ended
+raises `RuntimeError`.
+
+A step that needs a step an earlier group handed off, and that is still
+running, is not submitted while it waits. The scheduler polls every
+`engine.SETTLE_S` (0.05 seconds) and submits it once that step ended
+(`Pass.settled`), so a waiting step holds no step executor thread. It is
+dropped and recorded late, without running, when its own lane expires first or
+the step it waits on was dropped.
 
 ## Pass state
 
