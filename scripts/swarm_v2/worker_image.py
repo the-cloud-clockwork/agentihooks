@@ -55,7 +55,7 @@ def load_lock(path: Path, architecture: str) -> dict:
     return lock
 
 
-DOWNLOAD_ATTEMPTS = 10
+DOWNLOAD_ATTEMPTS = 40
 ATTEMPT_SECONDS = 120
 FETCH_SECONDS = 900
 
