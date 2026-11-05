@@ -238,7 +238,6 @@ class GitHubSourceControl:
 
     def tags(self, *, deadline: Deadline) -> tuple[Tag, ...]:
         """List the repository's tags with the objects they name, read through the GitHub API."""
-        deadline.live()
         rows = self._api([f"repos/{self.repository}/git/matching-refs/tags"], deadline)
         return tuple(Tag(row["ref"].removeprefix("refs/tags/"), row["object"]["sha"]) for row in rows)
 

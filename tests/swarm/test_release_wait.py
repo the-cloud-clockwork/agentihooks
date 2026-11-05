@@ -1,5 +1,6 @@
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -36,10 +37,12 @@ class Api:
 
     def __init__(self, *answers: list[str] | Exception) -> None:
         self.answers = list(answers)
-        self.calls: list[tuple[str, list[str], object]] = []
+        self.calls: list[tuple[str, list[str], float]] = []
 
-    def __call__(self, caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        self.calls.append((caller, args, options["timeout"]))
+    def __call__(
+        self, caller: str, args: list[str], *, timeout: float, **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append((caller, args, timeout))
         answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
         if isinstance(answer, Exception):
             raise answer
@@ -48,7 +51,7 @@ class Api:
 
 
 @pytest.fixture
-def api(monkeypatch):
+def api(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Api]:
     def install(*answers: list[str] | Exception) -> Api:
         fake = Api(*answers)
         monkeypatch.setattr(github.github_reads, "rest", fake)
@@ -58,7 +61,7 @@ def api(monkeypatch):
 
 
 @pytest.fixture
-def store():
+def store() -> RedisStore:
     import fakeredis
 
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -70,7 +73,9 @@ def claimable(store, rows):
     return [t["id"] for t in _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")]
 
 
-def test_a_task_waiting_on_a_release_is_unclaimable_until_a_newer_tag_exists(store, api):
+def test_a_task_waiting_on_a_release_is_unclaimable_until_a_newer_tag_exists(
+    store: RedisStore, api: Callable[..., Api]
+) -> None:
     rows = {t["id"]: t for t in [task("proof", after_release="v2.17.1"), task("plain")]}
     api(["v2.17.1"])
     assert claimable(store, rows) == ["plain"]
@@ -78,7 +83,9 @@ def test_a_task_waiting_on_a_release_is_unclaimable_until_a_newer_tag_exists(sto
     assert claimable(store, rows) == ["proof", "plain"]
 
 
-def test_the_lookup_reads_tags_from_the_github_api_with_git_absent(api, monkeypatch, tmp_path):
+def test_the_lookup_reads_tags_from_the_github_api_with_git_absent(
+    api: Callable[..., Api], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))
     fake = api(["v1.0.0", "v1.0.2", "v1.0.1"])
     assert release_wait.lookup(config()) == (["v1.0.0", "v1.0.2", "v1.0.1"], "")
@@ -90,7 +97,7 @@ def test_the_lookup_reads_tags_from_the_github_api_with_git_absent(api, monkeypa
     assert released({"id": "b", "after_release": "v1.0.2"}) is False
 
 
-def test_the_repository_falls_back_to_the_origin_in_the_checkout_git_config(tmp_path):
+def test_the_repository_falls_back_to_the_origin_in_the_checkout_git_config(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "config").write_text('[remote "origin"]\n\turl = git@github.com:Owner/Project.git\n')
     assert release_wait.repository(config(str(tmp_path), "")) == "owner/project"
@@ -98,31 +105,33 @@ def test_the_repository_falls_back_to_the_origin_in_the_checkout_git_config(tmp_
     assert release_wait.repository(config(str(tmp_path), "gitlab.com/owner/project")) == ""
 
 
-def test_a_swarm_without_a_github_repository_fails_the_lookup_without_a_read(api, tmp_path):
+def test_a_swarm_without_a_github_repository_fails_the_lookup_without_a_read(
+    api: Callable[..., Api], tmp_path: Path
+) -> None:
     fake = api([])
     assert release_wait.lookup(config(str(tmp_path), "")) == ([], f"{tmp_path} names no GitHub repository")
     assert fake.calls == []
 
 
-def test_one_failed_lookup_is_retried_before_it_counts(api):
+def test_one_failed_lookup_is_retried_before_it_counts(api: Callable[..., Api]) -> None:
     fake = api(subprocess.CalledProcessError(1, ["gh"]), ["v1.0.1"])
     assert release_wait.lookup(config()) == (["v1.0.1"], "")
     assert len(fake.calls) == 2
 
 
-def test_a_lookup_that_fails_twice_names_the_second_failure(api):
+def test_a_lookup_that_fails_twice_names_the_second_failure(api: Callable[..., Api]) -> None:
     fake = api(OSError("first"), OSError("second"))
     assert release_wait.lookup(config()) == ([], "second")
     assert len(fake.calls) == 2
 
 
-def test_a_working_lookup_reads_once(api):
+def test_a_working_lookup_reads_once(api: Callable[..., Api]) -> None:
     fake = api([])
     assert release_wait.lookup(config()) == ([], "")
     assert len(fake.calls) == 1
 
 
-def test_each_attempt_gets_its_own_bounded_wait(api):
+def test_each_attempt_gets_its_own_bounded_wait(api: Callable[..., Api]) -> None:
     fake = api(TimeoutError("tool deadline expired"))
     assert release_wait.tags(config()) == []
     assert [14 < timeout <= release_wait.SECONDS for _, _, timeout in fake.calls] == [True, True]
@@ -132,7 +141,7 @@ def test_each_attempt_gets_its_own_bounded_wait(api):
     ("error", "why"),
     [(OSError(), "OSError"), (OSError("no gh"), "no gh"), (ValueError("bad json"), "bad json")],
 )
-def test_lookup_names_why_it_failed(api, error, why):
+def test_lookup_names_why_it_failed(api: Callable[..., Api], error: Exception, why: str) -> None:
     api(error)
     assert release_wait.lookup(config()) == ([], why)
 
@@ -161,7 +170,7 @@ def test_version_parses_three_numbers():
     assert release_wait.version("v1.2.3\n") is None
 
 
-def test_checker_reads_tags_once_and_passes_tasks_without_the_field(monkeypatch):
+def test_checker_reads_tags_once_and_passes_tasks_without_the_field(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     swarm = config()
     monkeypatch.setattr(release_wait, "tags", lambda found: calls.append(found) or ["v1.0.1"])
@@ -181,7 +190,9 @@ class Ledger:
         self.alerts.append((slug, source, text))
 
 
-def test_a_failed_lookup_raises_one_release_alert_while_a_task_waits_on_a_release(monkeypatch):
+def test_a_failed_lookup_raises_one_release_alert_while_a_task_waits_on_a_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(release_wait, "lookup", lambda found: ([], "no gh"))
     ledger, swarm = Ledger(), SwarmConfig("sw", "/repo", max_eng=1, max_ci=0)
     held = [task("proof", after_release="v2.17.1"), task("late", after_release="v2.17.1")]
@@ -201,12 +212,14 @@ def test_a_failed_lookup_raises_one_release_alert_while_a_task_waits_on_a_releas
     assert len(ledger.alerts) == 2
 
 
-def test_a_working_lookup_raises_no_release_alert(api, monkeypatch, tmp_path):
+def test_a_working_lookup_raises_no_release_alert(
+    api: Callable[..., Api], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))
     api(["v2.17.1"])
     ledger = Ledger()
     held = {"tasks": [task("proof", after_release="v2.17.1")]}
-    assert release_wait.alert_pass("sw", config(str(Path(tmp_path) / "gone")), ledger, held) == []
+    assert release_wait.alert_pass("sw", config(str(tmp_path / "gone")), ledger, held) == []
     assert ledger.alerts == []
 
 
