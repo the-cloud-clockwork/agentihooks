@@ -864,8 +864,8 @@ and its declarations as below.
    (`Registry.waves`); `Registry.steps` keeps registration order, so register
    the step where its hand written line stood. Use `held` when an exception
    from the call must still leave the pass.
-3. Import the module in `scripts.swarm.tick` so it registers before the first
-   pass, delete the hand written line, and add `tasks.raise_held(box)` after the
+3. List the module in `scripts.tick.steps.MODULES` so it registers before the
+   registry is next read, delete the hand written line, and add `tasks.raise_held(box)` after the
    group site if the site is new.
 4. Map the step to a feature and its scenarios as described in
    [The feature and scenario catalogue](#the-feature-and-scenario-catalogue);

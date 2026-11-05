@@ -19,13 +19,13 @@ a step already has. The scaffold shipped in
 | Artefact | Where | What the scaffold writes |
 | --- | --- | --- |
 | Step | `scripts/tick/steps/<module>.py` | A step function `_<slug>(tick, get) -> list[str]` returning no actions, and its `registry.register(CallStep(...))` with every field the tick pattern gate requires |
-| Budget row | `MEASURED` in `scripts/tick/steps/budgets.py` | `"<name>": Timing(UNMEASURED_S, <interval>)` as the last row of the table |
+| Budget row | `FLOORS` in `scripts/tick/steps/budgets.py` | `"<name>": Timing(LIGHT_S, <interval>)`, the two second light floor, as the last row of the table |
 | Test | `tests/tick/steps/test_<slug>.py` | `test_<slug>`, marked `@pytest.mark.feature("<feature>")`, asserting the step's group, lane, feature and effects |
 | Index row | `scenarios` in `tests/swarm/tick_scenarios/steps.json` | `"<name>": ["<scenario>"]`, the scenarios sorted by step name |
 | Feature entry | `feature-map.json` | The test node id added to the entry with the feature id, or a new `inventory` entry when no entry has that id |
 
-`<slug>` is the step name lower cased with every run of characters other than
-letters, digits and underscores turned into one underscore: step
+`<slug>` is the step name lower cased, its runs of letters and digits joined
+by single underscores; spaces, punctuation and underscores all separate: step
 `probe widgets` gets `_probe_widgets`, `tests/tick/steps/test_probe_widgets.py`
 and the test node
 `tests/tick/steps/test_probe_widgets.py::test_probe_widgets`.
@@ -46,10 +46,11 @@ last top level import.
 
 Every Python file the scaffold writes is sorted for imports and formatted with
 `ruff check --select I --fix` then `ruff format`, run through the same Python
-interpreter as the scaffold, so ruff must be installed in it. JSON files are
-written as the gates read them: the scenario index with a one space indent,
-the feature map with a two space indent and non ASCII characters kept, each
-with a trailing newline.
+interpreter as the scaffold, so ruff must be installed in it. Each file is
+passed on standard input under its own path, so ruff applies the settings that
+govern that path. JSON files are written as the gates read them: the scenario
+index with a one space indent, the feature map with a two space indent and non
+ASCII characters escaped, each with a trailing newline.
 
 ## Usage
 
@@ -133,7 +134,7 @@ registry.register(
 The budget row, `MODULES` entry and index row it added:
 
 ```python
-    "probe widgets": Timing(UNMEASURED_S, WIDE_S),
+    "probe widgets": Timing(LIGHT_S, WIDE_S),
 ```
 
 ```python
@@ -197,8 +198,9 @@ The stub returns no actions and declares empty `needs`, `reads` and `writes`.
 Write the step's behaviour in the function, read the pass state with `get`,
 and declare the keys it needs, reads and writes, following
 [Adding a step to a group](tick-engine-steps.md#adding-a-step-to-a-group).
-Replace `UNMEASURED_S` with the step's measured p95 once the
-[tick report](tick-report.md) has timed it. Rewrite the generated `inventory`
+The `LIGHT_S` floor stays unless the step is measured heavier: the live
+budget grows from the step's recorded walls, as described in
+[Live budgets, floors and declared intervals](tick-engine-steps.md#live-budgets-floors-and-declared-intervals). Rewrite the generated `inventory`
 behaviour and seam lines of a new feature entry into the behaviour the step
 delivers, and extend the test to prove it. Commit every file the scaffold
 printed.
@@ -225,7 +227,7 @@ artefact holds prints all five `false`. Each artefact counts as present when:
 | Artefact | Present when |
 | --- | --- |
 | `step` | A file `scripts/tick/steps/*.py` calls `CallStep`, `WriteStep` or `register` with the name as its first, literal argument |
-| `budget row` | `MEASURED` in the budgets file holds the name |
+| `budget row` | `FLOORS` in the budgets file holds the name |
 | `test` | `tests/tick/steps/test_<slug>.py` exists |
 | `index row` | The scenario index lists the name under `scenarios` or `unmapped` |
 | `feature entry` | Some feature map entry lists the test node id `tests/tick/steps/test_<slug>.py::test_<slug>` |
@@ -242,12 +244,12 @@ which argparse reports with usage and exit 2.
 | --- | --- |
 | `<name> already has step, budget row, test, index row, feature entry` | The name holds at least one artefact; the line lists the ones found. Pick another name, or finish the missing artefacts by hand after reading `--check` |
 | `unknown port disk; ports are coordination, host, inbox, ledger, llm, metrics, processes, runtime, source_control` | `--effects` names a port that is not a field of `Tools` |
-| `a step needs a name, a group and a feature id` | The name has no letter, digit or underscore, so its slug is empty |
+| `a step needs a name, a group and a feature id` | The name has no letter or digit, so its slug is empty, or `--group` or `--feature` is empty |
 | `<module> is not a steps module name` | `--module` is not a lower case Python identifier, or is `budgets` |
 | `unknown scenario <scenario>` | `--scenario` names no recorded golden scenario |
 | `error: a step needs a name, --group, --lane, --interval, --feature and --module` | A required option is missing (exit 2) |
 | `argument --lane: invalid choice` or `argument --interval: invalid choice` | The lane is not `tick` or `slow`, or the interval is not 60, 120 or 600 (exit 2) |
-| `scripts/tick/steps/budgets.py holds no MEASURED table` | The budgets file has no `MEASURED` assignment to append to |
+| `scripts/tick/steps/budgets.py holds no FLOORS table` | The budgets file has no `FLOORS` assignment to append to |
 
 ## Limits
 
@@ -257,7 +259,7 @@ which argparse reports with usage and exit 2.
 - The interval is one of the three declared intervals; the tick pattern gate
   refuses any other.
 - The step lands at the end of its module and the row at the end of
-  `MEASURED`. `Registry.steps` keeps registration order, so move the
+  `FLOORS`. `Registry.steps` keeps registration order, so move the
   registration when the step must run at a particular place in its group.
 - A name that already holds some artefacts is refused whole; the scaffold
   never completes a partial step.
@@ -272,8 +274,12 @@ each planted missing artefact; a new module joins `MODULES` once; every
 listed module loads into the registry; a second step appends to the existing
 module and a mapped feature gains the new test; an existing name, an unknown
 port and missing lane or interval are refused; the test expectations and the
-index are written in their canonical form; and the scaffold runs in the
-current folder with no ports.
+index are written in their canonical form; the scaffold runs in the
+current folder with no ports; it formats each written file under the ruff
+settings of its own path and refuses source ruff cannot parse; it lists the
+step under the scenario given; it refuses a module or scenario it cannot
+write, naming every unknown port and every known one; a step name becomes its
+identifier; and a budgets module without its `FLOORS` table is refused.
 
 ## Troubleshooting
 
