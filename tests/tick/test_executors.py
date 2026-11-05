@@ -95,6 +95,30 @@ def test_a_pass_shuts_both_executors_down_when_it_ends() -> None:
         found.fans.submit(lambda: 2)
 
 
+def test_a_pass_keeps_its_worker_bound_and_names_its_step_threads() -> None:
+    with pool.running(workers=WORKERS) as found:
+        assert found.workers == WORKERS
+        name = found.steps.submit(lambda: current_thread().name).result()
+    assert name.startswith("tick-step_")
+
+
+def test_a_pass_cancels_fan_outs_still_queued_when_it_ends() -> None:
+    gate, started = Event(), Event()
+
+    def blocker() -> None:
+        started.set()
+        gate.wait(5)
+
+    try:
+        with pool.running(workers=1) as found:
+            found.fans.submit(blocker)
+            assert started.wait(5)
+            queued = found.fans.submit(lambda: None)
+        assert queued.cancelled()
+    finally:
+        gate.set()
+
+
 def test_a_fan_out_inside_a_fanned_out_action_runs_inline() -> None:
     outer: list[str] = []
     inner: list[str] = []
