@@ -142,7 +142,9 @@
         "tests/tick/test_budgets.py::test_a_failed_steps_pipeline_reports_the_steps_stream",
         "tests/tick/test_budgets.py::test_the_rebuild_marker_holds_one_rebuild_per_slow_interval",
         "tests/tick/test_budgets.py::test_full_windows_leave_no_rebuild_marker",
-        "tests/tick/test_budgets.py::test_a_rebuild_keeps_only_the_newest_window_of_budgeted_walls_of_missing_steps"
+        "tests/tick/test_budgets.py::test_a_rebuild_keeps_only_the_newest_window_of_budgeted_walls_of_missing_steps",
+        "tests/tick/test_budgets.py::test_every_walls_pipeline_runs_without_a_transaction",
+        "tests/tick/test_budgets.py::test_a_window_caught_between_its_push_and_trim_still_reads_sixty_walls"
       ]
     },
     {

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/timing.py:scripts.swarm.timing.x_append_step:4eff8ed7714354bb0cec5cf523dc12f5e343283b03584d2840934eb9b6d53250": {
+    "reader": "standards_reader",
+    "reason": "The redis-py default approximate=True only retains extra stream entries, and every reader (tick_report.history and _rebuild) reads at most the HISTORY_LIMIT newest entries, so no output changes."
+  }
+}

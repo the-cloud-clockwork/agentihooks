@@ -232,3 +232,37 @@ def test_a_rebuild_keeps_only_the_newest_window_of_budgeted_walls_of_missing_ste
     _resolved(store, "reap")
     assert store.redis.lrange(store.key("sw", "tick:walls:reap"), 0, -1) == ["12.0"] * 60
     assert store.redis.lrange(store.key("sw", "tick:walls:spawn"), 0, -1) == ["7.0"]
+
+
+@pytest.mark.feature("swarm-tick-live-budgets")
+def test_every_walls_pipeline_runs_without_a_transaction() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    flags: list[object] = []
+
+    class Spy:
+        def __init__(self, redis: Any) -> None:
+            self.redis = redis
+
+        def pipeline(self, transaction: object = True) -> Any:
+            flags.append(transaction)
+            return self.redis.pipeline(transaction=transaction)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.redis, name)
+
+    store = RedisStore(Spy(fakeredis.FakeRedis(decode_responses=True)))
+    record = {"step": "spawn", "budget_s": 33.0, "wall_s": 5.0}
+    store.redis.xadd(store.key("sw", "tick:steps"), {"record": json.dumps(record)})
+    timing.append_step(store, "sw", {"step": "reap", "budget_s": 22.0, "wall_s": 1.0})
+    _resolved(store, "reap")
+    assert flags == [False, False, False]
+
+
+@pytest.mark.feature("swarm-tick-live-budgets")
+def test_a_window_caught_between_its_push_and_trim_still_reads_sixty_walls() -> None:
+    store = _store()
+    store.redis.lpush(store.key("sw", "tick:walls:reap"), *["1.0"] * 61)
+    assert len(budgets._walls(store, "sw")["reap"]) == budgets.WINDOW
