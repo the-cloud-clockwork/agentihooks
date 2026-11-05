@@ -409,6 +409,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
     judged = launch_check.judged(store, slug)
     agents, actions = [a for a in legacy_agents(store, slug) if a.name not in judged], []
     facts, live_names = runtime.bindings(agents), runtime.live_names()
+    holders = {name: hive for hive, report in reports.Reports(store.redis).live().items() for name in report["names"]}
     for agent in agents:
         if (
             agent.state == "awaiting-decision"
@@ -418,6 +419,10 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             continue
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
+            continue
+        if _held_elsewhere(slug, store, agent, holders, now_ms):
+            if agent.state == "retiring":
+                store.put_agent(slug, replace(agent, state="working"))
             continue
         if dead_resume.skip_binding(agent, facts, live_names):
             continue
@@ -675,6 +680,16 @@ def _elsewhere(agent: AgentRecord) -> bool:
     from scripts.swarm.commands import hive_id
 
     return not agent.runtime_target and bool(agent.hive) and agent.hive != hive_id()
+
+
+def _held_elsewhere(slug: str, store: Any, agent: AgentRecord, holders: dict[str, str], now_ms: int) -> bool:
+    """Another hive reports ``agent`` running and its own heartbeat is fresh, so this host cannot judge its process."""
+    from scripts.swarm.commands import hive_id
+
+    if reports.host(agent) or holders.get(agent.name, hive_id()) == hive_id():
+        return False
+    beat = idle_state.heartbeat(store.redis, slug, agent.name)
+    return beat is not None and now_ms - beat["at"] <= reports.LOST_MS
 
 
 @dataclass(frozen=True)
