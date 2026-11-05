@@ -54,27 +54,31 @@ def _miss(agent: AgentRecord, found: dict[str, Any], relaunch: bool) -> SimpleNa
 
 
 @pytest.mark.feature("swarm-tick-launch-cluster")
-@pytest.mark.parametrize(("lane", "retired"), [("eng", True), (MASTER, True), ("eng", False)])
-def test_a_failed_hive_launch_retires_reports_and_drops_its_agent(
-    monkeypatch: pytest.MonkeyPatch, lane: str, retired: bool
-) -> None:
+@pytest.mark.parametrize("lane", ["eng", MASTER])
+def test_a_failed_hive_launch_retires_reports_and_drops_its_agent(monkeypatch: pytest.MonkeyPatch, lane: str) -> None:
     calls: list[tuple[Any, ...]] = []
-    _seams(monkeypatch, calls, retired)
+    _seams(monkeypatch, calls)
     store, ledger = _store(calls), _Recorder(calls, {}, "ledger.")
     agent, rows = AgentRecord("engineer@1-1", lane, "t1"), {"t1": {}}
     said = observe._failed_hive_launch("sw", store, ledger, "runtime", rows, _miss(agent, {"pane": 1}, True), 5_000)
-    assert calls[0] == ("retire", ("sw", store, "runtime", agent, 5_000))
-    if not retired:
-        assert said == "could not retire engineer@1-1 after its hive join failed, retrying next tick"
-        assert calls[1:] == []
-        return
     assert said == "retired engineer@1-1 after its hive join failed and dropped"
-    assert calls[1:] == [
+    assert calls == [
+        ("retire", ("sw", store, "runtime", agent, 5_000)),
         ("record", (store, "sw", agent, {"pane": 1}, 5_000, 4_000), {}),
         ("forget", (store, "sw", "engineer@1-1")),
         *([("ledger.notify", ("sw", "told ['pane'] retired"), {})] if lane == MASTER else []),
         ("drop", ("sw", store, ledger, rows, agent)),
     ]
+
+
+@pytest.mark.feature("swarm-tick-launch-cluster")
+def test_a_failed_hive_launch_that_cannot_retire_retries_next_tick(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    _seams(monkeypatch, calls, retired=False)
+    store, agent = _store(calls), AgentRecord("engineer@1-1", "eng", "t1")
+    said = observe._failed_hive_launch("sw", store, "ledger", "runtime", {}, _miss(agent, {"pane": 1}, True), 5_000)
+    assert said == "could not retire engineer@1-1 after its hive join failed, retrying next tick"
+    assert calls == [("retire", ("sw", store, "runtime", agent, 5_000))]
 
 
 def _launch_seams(
@@ -143,20 +147,27 @@ def test_a_hive_agent_late_on_a_report_only_check_settles_its_admission(monkeypa
 
 
 @pytest.mark.feature("swarm-tick-launch-cluster")
-@pytest.mark.parametrize(("retired", "said"), [(True, "spent"), (False, "retry")])
-def test_a_local_launch_failure_spends_or_retries_its_relaunch(
-    monkeypatch: pytest.MonkeyPatch, retired: bool, said: str
-) -> None:
+def test_a_local_launch_failure_after_its_relaunch_is_spent_is_only_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    _launch_seams(monkeypatch, calls, working=False, relaunched=said == "spent")
-    monkeypatch.setattr(tick, "_retire_launch", lambda *args: calls.append(("retire", args)) or retired)
+    _launch_seams(monkeypatch, calls, working=False, relaunched=True)
     store, agent = _store(calls), AgentRecord("engineer@1-1", "eng", "t1")
     runtime = SimpleNamespace(live_names=lambda: set())
     result = observe._failed_launch("sw", store, "ledger", runtime, {}, _miss(agent, {"pane": 1}, True), 5_000)
-    if said == "spent":
-        assert result == "engineer@1-1 failed its launch check on pane; its one relaunch is spent"
-        assert calls[0] == ("record", (store, "sw", agent, {"pane": 1}, 5_000, 4_000), {"held": True})
-        return
+    assert result == "engineer@1-1 failed its launch check on pane; its one relaunch is spent"
+    assert calls == [
+        ("record", (store, "sw", agent, {"pane": 1}, 5_000, 4_000), {"held": True}),
+        ("forget", (store, "sw", "engineer@1-1")),
+    ]
+
+
+@pytest.mark.feature("swarm-tick-launch-cluster")
+def test_a_local_launch_failure_that_cannot_retire_retries_next_tick(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    _launch_seams(monkeypatch, calls, working=False, relaunched=False)
+    monkeypatch.setattr(tick, "_retire_launch", lambda *args: calls.append(("retire", args)) or False)
+    store, agent = _store(calls), AgentRecord("engineer@1-1", "eng", "t1")
+    runtime = SimpleNamespace(live_names=lambda: set())
+    result = observe._failed_launch("sw", store, "ledger", runtime, {}, _miss(agent, {"pane": 1}, True), 5_000)
     assert result == "could not retire engineer@1-1 after its launch check failed on pane, retrying next tick"
     assert calls == [("retire", ("sw", store, runtime, agent, 5_000))]
 
