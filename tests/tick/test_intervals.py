@@ -92,8 +92,8 @@ def test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass(record
     assert (len(wide.runs), len(critical.runs)) == (2, 4)
     assert store.redis.hgetall(store.key("sw", timing.STEP_RAN)) == {"wide": repr(BASE_S + 125.0)}
     skipped = [row for row in rows if row["step"] == "wide" and row["outcome"] == engine.SKIPPED]
-    assert [(row["skipped"], row["rested"], row["abandoned"], row["wall_s"]) for row in skipped] == [
-        (True, True, False, 0.0)
+    assert [(row["skipped"], row["rested"], row["abandoned"], row["wall_s"], row["budget_s"]) for row in skipped] == [
+        (True, True, False, 0.0, 5.0)
     ] * 2
 
 
@@ -136,6 +136,31 @@ def test_a_skipped_step_in_a_parallel_pass_ends_for_its_dependents(recording: An
         outcomes = passes((wide, after), clock, 2)
     assert outcomes == [[engine.OK, engine.OK], [engine.SKIPPED, engine.OK]]
     assert (len(wide.runs), len(after.runs)) == (1, 2)
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_a_handed_off_slow_lane_step_in_a_parallel_pass_rests_inside_its_interval(recording: Any) -> None:
+    from scripts.tick import pool
+
+    _, _, clock = recording
+    slow = Counted("slow", budgets.WIDE_S, lane=engine.SLOW)
+    handed: list[list[str]] = []
+    for index in range(2):
+        start = BASE_S + index * 60.0
+        clock[0] = start + 5.0
+        token = timing.PASS.set({"pass_id": f"p{index}", "start_ms": start * 1000})
+        try:
+            with pool.running(workers=2):
+                engine.run_group(
+                    "place",
+                    Context(View(), Deadline.after(60.0)),
+                    (slow,),
+                    finished=lambda records: handed.append([record.outcome for record in records]),
+                )
+        finally:
+            timing.PASS.reset(token)
+    assert handed == [[engine.OK], [engine.SKIPPED]]
+    assert len(slow.runs) == 1
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
