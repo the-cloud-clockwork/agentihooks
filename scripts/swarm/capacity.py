@@ -192,7 +192,7 @@ def _global(environ: dict, now: float) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
-        if (row["harness"], account_key(row["account"])) in refused:
+        if (row["harness"], account_key(f"{row['account']}")) in refused:
             cap = 0
         rows.append(
             Account(

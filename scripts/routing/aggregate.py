@@ -15,8 +15,9 @@ def enabled(environ: Mapping[str, str] | None = None) -> bool:
     return RuntimeRouter.from_environ((), os.environ if environ is None else environ).spawn_backend() != LOCAL
 
 
-def name(harness: str, account: str) -> str:
-    """The row key of an account, one key for its AH_CC_TOKEN_ slug and its Secret key spelling."""
+def name(slot: str) -> str:
+    """The row key of a ``harness:account`` slot, one key for its AH_CC_TOKEN_ slug and its Secret key spelling."""
+    harness, account = slot.split(":", 1)
     return f"{harness}:{account_key(account)}"
 
 
@@ -37,7 +38,7 @@ def read(redis: "Redis", now: float) -> dict[str, dict]:
         quotas = json.loads(redis.get(f"{key}:quota") or "{}")
         for slot in hive["slots"]:
             reported = f"{slot['harness']}:{slot['account']}"
-            row = rows.setdefault(name(slot["harness"], slot["account"]), {**slot, "sessions": 0, "quota": None})
+            row = rows.setdefault(name(reported), {**slot, "sessions": 0, "quota": None})
             row["sessions"] += counts.get(reported, 0)
             row["masters"] = row.get("masters", 0) + counts.get(f"interactive:{reported}", 0)
             quota = quotas.get(reported)
@@ -48,7 +49,7 @@ def read(redis: "Redis", now: float) -> dict[str, dict]:
     for slot, count in LaunchSlots(redis).counts(seen).items():
         harness, account = slot.split(":", 1)
         row = rows.setdefault(
-            name(harness, account),
+            name(slot),
             {"harness": harness, "account": account, "kind": "subscription", "quota": None, "sessions": 0},
         )
         row["sessions"] += count
@@ -65,7 +66,9 @@ def current(now: float) -> dict[str, dict]:
 def counts(harness: str, now: float) -> dict[str, int]:
     """Sessions per account under its AH_CC_TOKEN_ slug spelling, the name session and quota readers look up."""
     return {
-        row["account"].replace("-", "_"): row["sessions"] for row in current(now).values() if row["harness"] == harness
+        key.split(":", 1)[1].replace("-", "_"): row["sessions"]
+        for key, row in current(now).items()
+        if key.startswith(f"{harness}:")
     }
 
 

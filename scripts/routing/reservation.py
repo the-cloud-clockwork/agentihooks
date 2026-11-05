@@ -125,7 +125,7 @@ def current(
         if aggregate.enabled(environ):
             import time
 
-            row = aggregate.current(time.time()).get(aggregate.name(harness, declared.slug), {})
+            row = aggregate.current(time.time()).get(aggregate.name(f"{harness}:{declared.slug}"), {})
             masters = row.get("masters", 0) + master_agents(store, harness, declared.slug)
         else:
             masters = masters_live(harness, declared.slug, store, proc)
