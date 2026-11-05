@@ -198,7 +198,24 @@
       "tests": [
         "tests/tick/test_agents.py::test_the_reap_cluster_lives_in_the_agents_step_module_and_tick_reexports_it",
         "tests/tick/test_agents.py::test_the_reap_step_declares_its_ports_feature_and_lane",
-        "tests/tick/test_agents.py::test_a_moved_reap_helper_reaches_a_patched_tick_seam"
+        "tests/tick/test_agents.py::test_a_moved_reap_helper_reaches_a_patched_tick_seam",
+        "tests/tick/steps/test_reap_watch.py::test_the_operator_holds_the_pane_while_typing_or_inside_the_quiet_window",
+        "tests/tick/steps/test_reap_watch.py::test_a_content_refusal_is_due_only_for_the_claimant_away_from_the_operator",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_is_stuck_on_its_provider_when_recovery_is_spent_or_the_idle_outage_ran_past_its_limit",
+        "tests/tick/steps/test_reap_watch.py::test_a_stale_claimant_is_nudged_only_outside_outages_retirement_and_the_operator",
+        "tests/tick/steps/test_reap_watch.py::test_a_due_refusal_frees_the_agent_before_the_pane_is_recorded",
+        "tests/tick/steps/test_reap_watch.py::test_a_waiting_pane_records_its_prompt_and_input_wait",
+        "tests/tick/steps/test_reap_watch.py::test_a_waiting_master_dismisses_its_questions",
+        "tests/tick/steps/test_reap_watch.py::test_a_provider_error_reads_an_untouched_pane_as_idle",
+        "tests/tick/steps/test_reap_watch.py::test_a_pane_that_stopped_waiting_clears_the_input_wait",
+        "tests/tick/steps/test_reap_watch.py::test_a_pane_never_waiting_keeps_its_input_wait_untouched",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_stuck_on_its_provider_is_freed",
+        "tests/tick/steps/test_reap_watch.py::test_a_master_or_an_outage_held_agent_keeps_its_idle_count",
+        "tests/tick/steps/test_reap_watch.py::test_only_the_claimant_is_nudged",
+        "tests/tick/steps/test_reap_watch.py::test_a_working_or_waiting_verdict_resets_the_idle_count",
+        "tests/tick/steps/test_reap_watch.py::test_the_operator_a_ledger_probe_or_gc_holds_the_idle_count",
+        "tests/tick/steps/test_reap_watch.py::test_an_idle_agent_counts_its_idle_ticks_and_logs_each_one",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_idle_past_the_kill_count_is_retired_and_its_task_dropped"
       ]
     },
     {
