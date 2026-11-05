@@ -212,3 +212,14 @@ def test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end()
     assert len(swarm.master()) == 1 and swarm.agent_inbox() == []
     assert swarm.retired == [] and swarm.working() == [OWNER]
     assert swarm.ledger.rows["t1"]["claimed_by"] == OWNER and swarm.ledger.comments == []
+
+
+@pytest.mark.parametrize("state", ["claimed", "pr"])
+@pytest.mark.parametrize("minutes", [150, 165, 200, 300, 600, 1440, 4320])
+def test_no_wall_time_age_asks_or_ends_a_live_agent(state: str, minutes: int) -> None:
+    swarm = Swarm(task={"state": state})
+    at = START + minutes * MINUTE
+    actions = swarm.tick(at) + swarm.tick(at + overrun.REPORT_MINUTES * MINUTE)
+    assert actions == [f"overrun: told master@sw that {OWNER} has run {minutes} minutes on task t1"]
+    assert swarm.agent_inbox() == [] and swarm.retired == [] and swarm.working() == [OWNER]
+    assert swarm.ledger.rows["t1"]["claimed_by"] == OWNER and swarm.ledger.updates == []
