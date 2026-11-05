@@ -125,6 +125,37 @@ def _report(report: object, now: int) -> dict:
     return {field: report.get(field) for field in REPORT_FIELDS}
 
 
+def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) -> Observation | None:
+    """The newest reading a live hive published for the account, matched whatever its name separators."""
+    from scripts.hive import registry
+    from scripts.routing.slots import account_key
+
+    wanted, newest = account_key(account), None
+    for hive in registry.hives(redis):
+        if not registry.live(hive, now_ms):
+            continue
+        for slot, reading in json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}").items():
+            named, _, name = slot.partition(":")
+            at = reading.get("observed_at")
+            if named != harness or account_key(name) != wanted or at is None:
+                continue
+            if newest is None or int(at * 1000) > newest.observed_ms:
+                five, week = reading["five_hour"], reading["seven_day"]
+                newest = Observation(
+                    account,
+                    harness,
+                    "",
+                    0,
+                    int(at * 1000),
+                    "allowed",
+                    five["used"],
+                    week["used"],
+                    five["resets_at"],
+                    week["resets_at"],
+                )
+    return newest
+
+
 class QuotaObservations:
     """The authorization callback must validate a scoped launch grant on every publish; the account comes from it."""
 
@@ -189,8 +220,13 @@ class QuotaObservations:
         return kept
 
     def latest(self, account: str, harness: str) -> Observation | None:
+        """The newer of the published fleet observation and the newest live hive reading for the account."""
         raw = self.store.redis.hget(latest_key(harness), account)
-        return decode(raw) if raw else None
+        published = decode(raw) if raw else None
+        hive = hive_observation(self.store.redis, account, harness, self.clock())
+        if published is None or (hive is not None and hive.observed_ms > published.observed_ms):
+            return hive
+        return published
 
     def history(self, account: str, harness: str) -> list[Observation]:
         return [decode(raw) for raw in self.store.redis.lrange(history_key(account, harness), 0, -1)]
