@@ -249,13 +249,13 @@ so any error from the grader fails the job.
 
 It differs from the lint job in two ways:
 
-| | Lint job, `Hold the tick step pattern` | Tick equivalence, `Hold the tick step pattern from the base grader copy` |
+| Aspect | Lint job, `Hold the tick step pattern` | Tick equivalence, `Hold the tick step pattern from the base grader copy` |
 | --- | --- | --- |
 | Base tree | Merge base of the head with the event base | Tip of the event base |
 | Base without the grader | Fails with `dev carries no scripts/tick_pattern.py` | The head copy grades |
 | Runs on | Every pull request | Pull requests touching a tick input, and manual dispatch |
 
-The head fallback does not open a hole: the lint job still refuses a base
+The head fallback does not weaken the gate: the lint job still refuses a base
 without the grader, and both jobs feed `Gate — Required`.
 
 #### When it runs
@@ -265,7 +265,8 @@ job, selects the run. Its `inputs` job diffs the pull request head against its
 merge base with the base branch and sets `tick` to `true` when any changed
 path matches one entry of `TICK_INPUTS`. Its `tick` job then calls
 `Tick equivalence`. `Gate — Required` needs `writer-lock`, so a red tick
-equivalence run blocks the pull request. The `tick` job runs only on the `pull_request` event, so a merge group run does not repeat it.
+equivalence run blocks the pull request. The `tick` job runs only on the
+`pull_request` event, so a merge group run does not repeat it.
 
 The entries the pattern gate added to `TICK_INPUTS`:
 
