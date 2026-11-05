@@ -178,16 +178,16 @@ def _parameters(tree: Path, key: str) -> tuple[str, ...] | None:
     path, _, name = key.partition("::")
     try:
         source = (tree / path).read_text()
-        lines = {unit: line for line, (unit, _) in functions(source).items()}
+        lines_by_unit = {unit: line for line, (unit, _) in functions(source).items()}
         module = ast.parse(source)
     except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
         return None
-    if name not in lines:
+    if name not in lines_by_unit:
         return None
     node = next(
-        node
-        for node in ast.walk(module)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno == lines[name]
+        candidate
+        for candidate in ast.walk(module)
+        if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef)) and candidate.lineno == lines_by_unit[name]
     )
     args = node.args
     listed = [*args.posonlyargs, *args.args, args.vararg, *args.kwonlyargs, args.kwarg]
