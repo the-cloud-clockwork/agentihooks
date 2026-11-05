@@ -184,6 +184,7 @@ def test_a_refused_early_probe_prints_each_ungraded_mutant(tmp_path, monkeypatch
         {"name": "scripts.a.x_g__mutmut_1", "status": "timeout"},
         {"name": "scripts.a.x_f__mutmut_1", "status": "killed"},
         {"name": "scripts.a.x_f__mutmut_2", "status": "no tests"},
+        {"name": "scripts.a.x_f__mutmut_3", "status": "survived"},
     ]
     monkeypatch.setattr(runner, "mutate_files", lambda *args: ({"scripts/a.py": rows}, ""))
     with pytest.raises(ValueError):

@@ -213,7 +213,21 @@
         "tests/tick/steps/test_place_outcomes.py::test_a_refused_launch_waits_for_room_or_fails",
         "tests/tick/steps/test_verify_checks.py::test_verification_skips_judged_acknowledging_and_ended_agents_and_retires_a_drifted_one",
         "tests/tick/steps/test_verify_checks.py::test_launch_checks_pass_fail_or_wait_each_pending_agent",
-        "tests/tick/steps/test_verify_checks.py::test_launch_checks_with_nothing_pending_do_nothing"
+        "tests/tick/steps/test_verify_checks.py::test_launch_checks_with_nothing_pending_do_nothing",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_hive_launch_retires_reports_and_drops_its_agent",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_launch_check_on_a_working_agent_is_only_reported",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_failing_an_enforced_check_hands_over_to_the_hive_failure",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_late_on_a_report_only_check_settles_its_admission",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_spends_or_retries_its_relaunch",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_relaunched_launch_saves_its_assignment_and_drops_the_agent",
+        "tests/tick/steps/test_launch_outcomes.py::test_an_expired_launch_reads_the_hive_answer",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_launch_finished_before_collection_is_recorded_as_started",
+        "tests/tick/steps/test_launch_outcomes.py::test_retiring_a_launch_holds_the_seat_of_an_agent_that_exited_first",
+        "tests/tick/steps/test_launch_outcomes.py::test_an_acknowledging_launch_is_read_from_the_launch_record",
+        "tests/tick/steps/test_place_waits.py::test_a_room_refused_launch_releases_its_holds_and_waits",
+        "tests/tick/steps/test_place_waits.py::test_a_failed_room_wait_reads_a_spawn_error_as_no_wait",
+        "tests/tick/steps/test_place_waits.py::test_a_settled_launch_activates_its_held_reservation",
+        "tests/tick/steps/test_place_waits.py::test_a_full_reservation_read_without_accounts_reports_none"
       ]
     },
     {
