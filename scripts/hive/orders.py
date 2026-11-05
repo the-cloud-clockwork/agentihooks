@@ -3,7 +3,7 @@ import json
 import time
 import uuid
 from dataclasses import asdict, dataclass, field, replace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from scripts import serena_router_daemon
 from scripts.hive import placement, registry
@@ -369,12 +369,10 @@ class Consumer:
     def slot_account(self, order: LaunchOrder) -> str:
         """The hive's own advertised name for the order's account, which the agent launcher looks up."""
         key = placement.account_key(order.slot)
-        shown = registry.show(self.orders.redis, self.hive)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        hive = cast("dict[str, list[dict[str, str]]]", shown or {})
+        hive: dict[str, list[dict[str, str]]] = registry.show(self.orders.redis, self.hive) or {}  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         for slot in hive.get("slots", []):
-            account = slot.get("account", "")
-            if slot.get("harness") == order.harness and placement.account_key(account) == key:
-                return account
+            if slot["harness"] == order.harness and placement.account_key(slot["account"]) == key:
+                return slot["account"]
         return order.slot
 
     def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict) -> Ack:

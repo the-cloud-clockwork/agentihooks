@@ -896,7 +896,13 @@ def test_launch_names_the_hive_slot_for_a_secret_key_account(setup, monkeypatch)
     monkeypatch.setattr(
         orders.registry,
         "show",
-        lambda client, hive: {"slots": [{"harness": "codex", "account": slot, "kind": "subscription"}]},
+        lambda client, hive: {
+            "slots": [
+                {"harness": "codex", "account": "other_account", "kind": "subscription"},
+                {"harness": "claude", "account": slot, "kind": "subscription"},
+                {"harness": "codex", "account": slot, "kind": "subscription"},
+            ]
+        },
     )
     agent = replace(setup.agent, account="nestor-coltatgmail-com")
     setup.store.execution_registry.update("fixture", agent)
