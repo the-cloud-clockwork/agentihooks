@@ -1,11 +1,10 @@
 """The rendered tick step catalogue page equals the registry."""
 
-import os
-import subprocess
-import sys
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
+
+import pytest
 
 from scripts.tick import catalogue, registry
 from scripts.tick.step import Context, Domain, Lane, Result
@@ -60,16 +59,27 @@ def test_the_page_orders_rows_by_group_then_name() -> None:
     assert catalogue.page(steps) == catalogue.HEADER + rows
 
 
-def test_render_writes_the_registry_page_under_the_working_directory(tmp_path: Path) -> None:
+@dataclass(frozen=True)
+class FloorStep(FakeStep):
+    floor_s: float = 0.5
+
+
+def test_a_row_shows_the_step_floor_over_its_budget() -> None:
+    assert catalogue.row(FloorStep("floored")) == "| floored | observe | tick | 0.5 | 60 | none | none | none |"
+
+
+def test_render_writes_the_registry_page_under_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     (tmp_path / catalogue.PAGE).parent.mkdir(parents=True)
-    env = {**os.environ, "PYTHONPATH": str(ROOT)}
-    done = subprocess.run(
-        [sys.executable, "-m", "scripts.tick.catalogue", "render"],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert done.stdout == f"wrote {catalogue.PAGE}\n"
+    monkeypatch.chdir(tmp_path)
+    assert catalogue.main(["render"]) == 0
+    assert capsys.readouterr().out == f"wrote {catalogue.PAGE}\n"
+    assert (tmp_path / catalogue.PAGE).read_text() == registered()
+
+
+def test_render_writes_the_page_under_the_given_root(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / catalogue.PAGE).parent.mkdir(parents=True)
+    assert catalogue.main(["render", "--root", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == f"wrote {tmp_path / catalogue.PAGE}\n"
     assert (tmp_path / catalogue.PAGE).read_text() == registered()
