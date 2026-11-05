@@ -132,7 +132,7 @@ def test_a_ready_successor_authenticates_once_and_records_its_receipt(store, wor
     watched = spy(store, monkeypatch)
     assert ledger_cutover.acknowledge(store, SLUG, who(worker), TOKEN) is True
     assert probe.calls == [(DEST, {"X-Ledger-Token": "token-1", "X-Ledger-Agent": worker.name}, SLUG, "metadata")]
-    assert watched[-1] == (store.key(SLUG, "config"),)
+    assert watched[-1] == (store.key(SLUG, "config"), store.key(SLUG, "agents"))
     stamp = {"url": DEST, "staged_at": NOW, "execution_id": worker.execution_id, "generation": worker.generation}
     assert {name: json.loads(value) for name, value in receipts(store).items()} == {worker.name: stamp}
     probe.error = AssertionError("authenticated twice")
