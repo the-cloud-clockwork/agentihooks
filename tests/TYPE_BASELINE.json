@@ -958,7 +958,7 @@
   "scripts/swarm_v2/operator_auth.py": 1,
   "scripts/swarm_v2/outcomes.py": 163,
   "scripts/swarm_v2/proof_swarm.py": 62,
-  "scripts/swarm_v2/quota.py": 91,
+  "scripts/swarm_v2/quota.py": 90,
   "scripts/swarm_v2/reconciliation/accounts.py": 29,
   "scripts/swarm_v2/records.py": 14,
   "scripts/swarm_v2/registry.py": 59,
