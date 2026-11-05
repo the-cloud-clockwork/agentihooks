@@ -190,7 +190,8 @@ Activation refuses, and changes nothing, with:
 ### Retire the workstation tick
 
 A swarm whose stored `api_url` names its controller is served in Anton. While every swarm in the workstation's store
-is served in Anton or stopped, the next `swarm tick` reconcile cancels the scheduled tick cron and removes the
+is served in Anton or stopped, the next machine wide `agentihooks swarm tick` reconcile cancels the scheduled tick
+cron and removes the
 `agentihooks-swarm-waits`, `agentihooks-tick-watch` and `agentihooks-inbox-waker` units, with any leftover
 `agentihooks-swarm` timer. The scheduler, quota prober, hive heartbeat and herdr client stay, and the workstation keeps
 its master and the agents it hosts as a hive. Starting a local swarm brings the units back.
@@ -201,6 +202,7 @@ agentihooks swarm my-swarm tick
 ```
 
 `agentihooks swarm <id> tick` runs one pass for a local swarm and exits 1 with that line for a swarm served in Anton.
+It never reconciles the units; only the machine wide tick and `swarm start` do.
 
 ### Configure the controller
 
