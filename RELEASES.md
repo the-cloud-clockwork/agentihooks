@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.658 · 2026-11-05
+
+### 2026-11-05 · ea2e4f6cc602 · #9788 · @nestorcolt
+
+**Scaffold a tick step and its artefacts in one command**
+
+Adding a new tick step used to mean touching five places by hand: the step stub, its budgets row, a test file, the scenario index, and the feature map entry, each easy to get wrong or forget. This change adds `python -m scripts.tick.new_step`, which computes and writes all five artefacts together, refusing duplicate names and unknown ports up front, plus a `--check` flag that reports which artefacts exist. Step modules are now listed in `scripts.tick.steps.MODULES` and loaded automatically, so a scaffolded module needs no manual import. Catalogue rendering is deferred to a follow-up slice.
+
 ## v2.17.653 · 2026-11-05
 
 ### 2026-11-05 · 02015917fb1c · #9791 · @nestorcolt
