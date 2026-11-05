@@ -22,6 +22,7 @@ __all__ = [
     "budget_of",
     "budget_s",
     "floor_of",
+    "floored",
     "resolve",
     "timing_of",
 ]
@@ -165,7 +166,12 @@ def floor_of(name: str) -> float:
 
 def budget_of(name: str) -> float:
     """Return step ``name``'s budget this pass: its live budget when that is above its floor, else the floor."""
-    return max(floor_of(name), LIVE.get().get(name, 0.0))
+    return floored(name, floor_of(name))
+
+
+def floored(name: str, floor_s: float) -> float:
+    """Return step ``name``'s live budget this pass when that is above ``floor_s``, else ``floor_s``."""
+    return max(floor_s, LIVE.get().get(name, 0.0))
 
 
 def timing_of(name: str) -> tuple[float, float]:

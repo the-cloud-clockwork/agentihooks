@@ -1,1 +1,1 @@
-Tick step budgets now follow each step's last sixty recorded walls, the p95 with fifty percent headroom, and never fall under the step's declared floor.
+Tick step budgets now follow each step's last sixty recorded walls, the p95 with fifty percent headroom, and never fall under the step's declared floor. Light and formerly unmeasured steps, including config load and hive ledger, floor at two seconds until they have sixty walls.
