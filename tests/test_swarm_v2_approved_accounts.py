@@ -236,6 +236,49 @@ def test_an_exhausted_key_is_a_closed_row():
     assert (row.state, row.cap) == ("CLOSED", 0)
 
 
+def _hive_reading(store, slot, five_used=10.0, week_used=40.0):
+    import json
+
+    from scripts.hive import registry
+
+    registry.update(store.redis, "hive-a", ["max-agents=8"])
+    registry.beat(
+        store.redis,
+        "hive-a",
+        {"heartbeat_at": NOW_MS, "slots": [{"harness": "claude", "account": slot, "kind": "subscription", "cap": 6}]},
+    )
+    reading = {
+        "five_hour": {"used": five_used, "resets_at": NOW_MS // 1000 + HOUR},
+        "seven_day": {"used": week_used, "resets_at": NOW_MS // 1000 + 48 * HOUR},
+        "observed_at": NOW_MS / 1000,
+    }
+    store.redis.set(f"{registry.key('hive-a')}:quota", json.dumps({f"claude:{slot}": reading}))
+
+
+def test_a_secret_key_reads_the_quota_a_live_hive_published_under_its_token_slug():
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=93.0)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert row == capacity.Account(
+        "claude",
+        "nestor-coltatgmail-com",
+        "OPEN",
+        0,
+        7.0,
+        60.0,
+        2,
+        NOW_MS // 1000 + 48 * HOUR,
+        five_resets_at=NOW_MS // 1000 + HOUR,
+    )
+
+
+def test_a_hive_reading_for_another_account_leaves_the_key_unread():
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "thecloudclockworkatgmail_com")
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert (row.five_left, row.week_left) == (None, None)
+
+
 def _sizing(runtime):
     runtime.host = lambda: None
     config = SwarmConfig(SLUG, "agentihooks", max_eng=2, max_ci=1)
