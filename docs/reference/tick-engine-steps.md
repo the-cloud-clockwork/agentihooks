@@ -565,8 +565,9 @@ group.
 ## Shared helpers (`scripts.tick.steps.common`)
 
 The helpers that the step modules and the tick module both call live in
-`scripts.tick.steps.common`. They moved there unchanged from
-`scripts.swarm.tick` in
+`scripts.tick.steps.common`. They moved there from `scripts.swarm.tick`
+with the same behavior, their references to tick module names turned into
+`tick.<name>` lookups, in
 [pull request 9708](https://github.com/the-cloud-clockwork/agentihooks/pull/9708),
 the first sweep of top level definitions out of the tick module. The tick
 module imports each one back, so `scripts.swarm.tick.<name>` and
@@ -579,14 +580,14 @@ working with no import change.
 | `skip_refused(function, *args)` | Calls `function` through `timing.call`. A `LedgerRefused` or a Redis read timeout prints the reason to stderr and returns the single action `skipped <module>.<name>: the ledger refused its write` or `skipped <module>.<name>: its Redis read timed out` instead of raising |
 | `skip_dropped(function, *args)` | Calls `function` through `timing.call` up to twice on a Redis connection drop or timeout, returning its actions or `[]`. Two failures return `skipped <module>.<name>: its Redis connection dropped or timed out twice` |
 | `_operator_line(item)` | True for an inbox item from `operator` that is not an fyi control notice (a ref starting with `control_notifications.CONTROL_REF`); the tick wakes a swarm on such a line |
-| `_drop(slug, store, ledger, rows, agent, refund=False)` | Releases the agent's claim and drops the agent. While the agent still holds an active task that is not awaiting merge, it reopens the task guarded on the claimant and claim generation it read, and with `refund=True` gives back the held life when the ledger row still matches. Settles the agent's inbox as `stopped`, moving its items to the seat only when the task reopened. Returns `, task <id> reopened` or an empty string |
+| `_drop(slug, store, ledger, rows, agent, refund=False)` | Releases the agent's claim and drops the agent. While the agent still holds an active task that is not awaiting merge, it reopens the task guarded on the claimant and claim generation it read, and with `refund=True` gives back the held life when the task has a claim to refund and the ledger row still matches. Settles the agent's inbox as `stopped`, moving its items to the seat only when the task reopened. Returns `, task <id> reopened` or an empty string |
 | `_collected(slug, store, ledger, rows, agent)` | For a master, saves the task ids of `rows` under the swarm's `master-retired-tasks` key, then calls `_drop` |
 | `_still_held(row, expected)` | True when the row is active and its `claimed_by` and `claim_generation` (missing counts as 0) match `expected`; a missing row is not held |
-| `_follow(slug, store, runtime, agent, pid)` | With no process id, keeps the agent as it is. Otherwise rebinds it through `_rebind` and returns the action `rebound <agent> to its resumed process <pid> in pane <pane>`, or `None` with `held <agent> until one pane holds its resumed process <pid>` |
-| `_rebind(slug, store, runtime, agent, pid)` | Finds the panes whose conversation is the agent's, ignoring pane ids holding `/`. With exactly one, stores the agent on that pane with `pid` in its profile validation and returns it; otherwise returns `None` |
+| `_follow(slug, store, runtime, agent, pid)` | Returns an `(agent, actions)` tuple. With no process id: `(agent, [])`. Otherwise it calls `_rebind`: when that finds the pane, `(rebound agent, ["rebound <agent> to its resumed process <pid> in pane <pane>"])`; when it does not, `(None, ["held <agent> until one pane holds its resumed process <pid>"])` |
+| `_rebind(slug, store, runtime, agent, pid)` | Finds the panes whose conversation is the agent's, ignoring pane ids that contain a slash. With exactly one, stores the agent on that pane with `pid` in its profile validation and returns it; otherwise returns `None` |
 | `_ended(agent, rows)` | True for an agent in state `finished`, or for a non master agent whose task row has `done` set, is in state `done`, `blocked` or `handoff`, or awaits verify with no claimant |
 | `_current_owner(agent, row)` | True when the row is unclaimed or claimed by this agent |
-| `_reopen(slug, ledger, rows, task_id, expected=None)` | Sets the task `open` and unclaimed only while it is active, and, with `expected`, only while its claimant and generation still match. Updates `rows` with the live row the ledger returns and reports whether it is now `open` |
+| `_reopen(slug, ledger, rows, task_id, expected=None)` | Sets the task `open` and unclaimed only while it is active, and, with `expected`, only while its claimant and generation still match. Updates `rows[task_id]` with the live row the ledger returns, so `task_id` must be a key of `rows`, and reports whether it is now `open` |
 
 ### How the helpers reach the tick module
 
@@ -606,11 +607,13 @@ moved helpers:
 ```python
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.swarm import tick
 from scripts.tick.steps import common
 
 
-def test_follow_holds_when_no_pane_rebinds(monkeypatch):
+def test_follow_holds_when_no_pane_rebinds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tick, "_rebind", lambda *args: None)
     agent = SimpleNamespace(name="engineer@1-1")
     assert common._follow("slug", "store", "runtime", agent, 7) == (
@@ -625,8 +628,8 @@ that runs in a pass.
 
 ### Adding or moving a shared helper
 
-1. Move the function body unchanged into `scripts/tick/steps/common.py`, with
-   full type annotations, and replace every bare reference to a tick module
+1. Move the function into `scripts/tick/steps/common.py` with the same
+   behavior, add full type annotations, and replace every bare reference to a tick module
    name with `tick.<name>`, including sibling helpers.
 2. Add the name to the `from scripts.tick.steps.common import (...)` block in
    `scripts/swarm/tick.py`. Mark a name the tick module no longer calls itself
@@ -635,8 +638,8 @@ that runs in a pass.
 3. Run `python -m scripts.tick_pattern --write` and commit the shrunk
    `tests/TICK_PATTERN_ALLOWLIST.json` with the move. The
    [tick pattern gate](tick-pattern-gate.md) records each top level `def` in
-   the tick module, so every moved helper removes its `def <name>` line;
-   pull request 9708 took the tick module's list from 129 to 118 names.
+   the tick module, so every moved helper removes its `def <name>` line
+   from the tick module's list; pull request 9708 removed eleven.
 4. Add a test to `tests/tick/steps/test_common.py` under the
    `swarm-tick-common-helpers` feature and list it in that entry of
    `feature-map.json`.
