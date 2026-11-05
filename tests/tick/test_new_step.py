@@ -266,7 +266,7 @@ def test_the_scaffold_formats_under_the_ruff_settings_of_its_tree(tree: Path) ->
 
 def test_the_formatter_refuses_source_ruff_cannot_parse(tree: Path) -> None:
     with pytest.raises(subprocess.CalledProcessError):
-        new_step()._formatted(tree, tree / "x.py", "def (\n")
+        new_step()._formatted(tree / "x.py", "def (\n")
 
 
 def test_the_scaffold_applies_the_per_file_ruff_settings_of_each_written_file(tree: Path) -> None:
@@ -289,11 +289,11 @@ def test_the_scaffold_lists_the_step_under_the_scenario_given(tree: Path) -> Non
 
 
 def test_a_mapped_feature_without_tests_gains_the_new_test_and_keeps_its_text(tree: Path) -> None:
-    entry = {"id": "tick-step-widgets", "behaviour": "Widgets counted at the café"}
+    entry = {"id": "tick-step-widgets", "behaviour": "Widgets counted"}
     (tree / "feature-map.json").write_text(json.dumps({"features": [entry]}))
     assert scaffold(tree, STEP) == 0
     mapped = {"features": [{**entry, "tests": ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]}]}
-    assert (tree / "feature-map.json").read_text() == json.dumps(mapped, indent=2, ensure_ascii=False) + "\n"
+    assert (tree / "feature-map.json").read_text() == json.dumps(mapped, indent=2) + "\n"
 
 
 def test_the_command_names_itself_and_what_a_step_needs(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -351,6 +351,7 @@ def test_the_scaffold_names_every_unknown_port_and_every_known_one(tree: Path) -
 
 def test_a_step_name_becomes_its_identifier() -> None:
     assert new_step().slug("(Probe  Widgets!)") == "probe_widgets"
+    assert new_step().slug("_probe__widgets_") == "probe_widgets"
 
 
 def test_registered_names_reads_literal_names_of_plain_and_attribute_calls() -> None:

@@ -54,7 +54,7 @@ class Spec:
 
 def slug(name: str) -> str:
     """The identifier form of step ``name``."""
-    return re.sub(r"\W+", "_", name.lower()).strip("_")
+    return "_".join(re.findall(r"[^\W_]+", name.lower()))
 
 
 def test_path(name: str) -> Path:
@@ -245,7 +245,7 @@ def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
         )
     else:
         entry["tests"] = [*entry.get("tests", []), test_node(spec.name)]
-    return path, json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    return path, json.dumps(data, indent=2) + "\n"
 
 
 def _join_modules(root: Path, module: str) -> tuple[Path, str]:
@@ -265,13 +265,13 @@ def _join_modules(root: Path, module: str) -> tuple[Path, str]:
     return path, "".join(lines)
 
 
-def _formatted(root: Path, path: Path, text: str) -> str:
-    """``text`` of the Python file at ``path`` with its imports sorted and formatted under the ruff settings of
-    ``root``, read and returned on stdin and stdout so nothing is written."""
-    named = ["--stdin-filename", str(path), "-"]
+def _formatted(path: Path, text: str) -> str:
+    """``text`` of the Python file at ``path`` with its imports sorted and formatted under the ruff settings that
+    apply to ``path``, read and returned on stdin and stdout so nothing is written."""
+    named = ["--stdin-filename", str(path)]
     for command in (["check", "--select", "I", "--fix", *named], ["format", *named]):
         text = subprocess.run(
-            [sys.executable, "-m", "ruff", *command], cwd=root, input=text, capture_output=True, text=True, check=True
+            [sys.executable, "-m", "ruff", *command], input=text, capture_output=True, text=True, check=True
         ).stdout
     return text
 
@@ -289,7 +289,7 @@ def scaffold(root: Path, spec: Spec) -> list[Path]:
     ]
     if new:
         texts.append(_join_modules(root, spec.module))
-    final = [(path, _formatted(root, path, text) if path.suffix == ".py" else text) for path, text in texts]
+    final = [(path, _formatted(path, text) if path.suffix == ".py" else text) for path, text in texts]
     for path, text in final:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
