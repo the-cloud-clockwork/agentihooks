@@ -145,7 +145,7 @@ def test_a_new_module_joins_the_modules_the_registry_loads(tree: Path) -> None:
 def test_the_registry_loads_every_listed_step_module() -> None:
     steps = import_module("scripts.tick.steps")
     catalogue = import_module("scripts.tick.catalogue")
-    assert sorted(steps.MODULES) == [name for name in catalogue.step_modules() if not name.endswith(".budgets")]
+    assert sorted(steps.MODULES) == [name for name in catalogue.step_modules() if name.rsplit(".", 1)[-1] not in {"budgets", "common"}]
     names = {step.name for step in import_module("scripts.tick.registry").steps()}
     assert {"inbox relay", "snapshot job", "spawn"} <= names
 
