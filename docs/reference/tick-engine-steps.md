@@ -820,7 +820,8 @@ registry refuses:
 `python -m scripts.tick.catalogue shrink --base <base tree> --head <head tree>` refuses an unmapped step the base
 index does not hold, so the unmapped list only shrinks. Production calls `validate()` without a catalogue and skips
 these checks. The `Tick equivalence` workflow runs `check` on the head and `shrink` from the base tree's copy of the
-module, so a head cannot loosen the ratchet, before the scenario replay. A new step gets a feature map entry and an index row in the pull request that registers it; a
+module, so a head cannot loosen the ratchet, then the tick pattern grader the same way (see
+[The tick equivalence run](tick-pattern-gate.md#the-tick-equivalence-run)), before the scenario replay. A new step gets a feature map entry and an index row in the pull request that registers it; a
 sweep that maps an existing step removes it from `unmapped` in the same change.
 
 ## Tests
