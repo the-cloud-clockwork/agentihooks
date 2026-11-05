@@ -65,7 +65,7 @@ class AccountRoute:
             return Account(self.harness, key, OPEN, sessions, None, None, cap)
         reset = None if latest.week_reset is None else int(latest.week_reset)
         week = session_bands.left(latest.week_used, reset, now)
-        if not draining(self.harness, None, week):
+        if not quota_state.draining(week):
             return Account(self.harness, key, OPEN, sessions, None, None, cap)
         return Account(self.harness, key, CLOSED, sessions, None, week, 0, reset)
 

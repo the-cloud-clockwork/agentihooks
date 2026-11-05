@@ -368,7 +368,9 @@ def test_a_published_observation_holds_against_a_hive_reading_no_newer_than_it()
 CLOSED_KEY, OPEN_KEY = "nestorcolt-smatgmail-com", "thecloudclockworkatgmail-com"
 
 
-def _spent_week(store: RedisStore, week_used: float, observed_ms: int = NOW_MS) -> None:
+def _spent_week(
+    store: RedisStore, week_used: float, observed_ms: int = NOW_MS, week_reset: int = NOW_MS // 1000 + 48 * HOUR
+) -> None:
     """The live shape of a spent account: a hive slot reading with a week and no five hour window."""
     import json
 
@@ -377,7 +379,7 @@ def _spent_week(store: RedisStore, week_used: float, observed_ms: int = NOW_MS) 
     _hive_reading(store, "nestorcolt_smatgmail_com", five_used=None, observed_ms=observed_ms)
     key = f"{registry.key('hive-a')}:quota"
     readings = json.loads(store.redis.get(key))
-    readings["claude:nestorcolt_smatgmail_com"]["seven_day"]["used"] = week_used
+    readings["claude:nestorcolt_smatgmail_com"]["seven_day"] = {"used": week_used, "resets_at": week_reset}
     store.redis.set(key, json.dumps(readings))
 
 
@@ -443,6 +445,40 @@ def test_a_draining_fleet_reading_takes_no_hive_agent() -> None:
     [row, _] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
     assert (row.state, row.cap, row.week_left) == ("CLOSED", 0, 8.0)
     assert route.choose(6, planned="akey") == "bkey"
+
+
+def test_a_spent_week_whose_reset_has_passed_keeps_the_launch_cap() -> None:
+    store, route = _route({CLOSED_KEY})
+    _spent_week(store, 97.0, week_reset=NOW_MS // 1000 - HOUR)
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap) == ("OPEN", 2)
+
+
+def test_a_claude_fleet_reading_at_five_percent_of_its_five_hours_takes_no_hive_agent() -> None:
+    store, route = _route({"akey"})
+    _observe(store, "akey", five_used=95.0)
+    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap, row.five_left) == ("CLOSED", 0, 5.0)
+
+
+def test_a_codex_fleet_reading_with_a_spent_five_hours_keeps_its_week_band() -> None:
+    store, observations = _quota()
+    route = approved.AccountRoute(lambda: frozenset({"ckey"}), observations, dict, "codex")
+    observation = quota.Observation(
+        "ckey",
+        "codex",
+        "exe-" + "0" * 32,
+        1,
+        NOW_MS,
+        "allowed",
+        99.0,
+        10.0,
+        NOW_MS // 1000 + HOUR,
+        NOW_MS // 1000 + HOUR,
+    )
+    store.redis.hset(quota.latest_key("codex"), "ckey", quota.encode(observation))
+    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.harness, row.state, row.cap) == ("codex", "OPEN", 6)
 
 
 def _sizing(runtime):
