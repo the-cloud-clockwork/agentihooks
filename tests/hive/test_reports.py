@@ -359,7 +359,7 @@ def test_tick_retires_only_hive_workers_proven_gone(remote, panes, namespace, re
     remote.store.claim("fixture", "task", remote.agent.name, 60000)
     rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
     now = remote.agent.started_at + 10**9
-    idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, now)
+    idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, now - remote.reports.LOST_MS - 1)
     ledger = Mock()
     ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
     remote.runtime.retire = Mock(side_effect=AssertionError("a gone pane needs no remote process command"))
@@ -386,6 +386,83 @@ def test_tick_retires_only_hive_workers_proven_gone(remote, panes, namespace, re
     else:
         assert [agent.name for agent in remote.store.agents("fixture")] == [remote.agent.name]
         assert remote.store.claimant("fixture", "task") == remote.agent.name
+
+
+@pytest.mark.parametrize("age", [0, 600_000])
+def test_a_hive_placed_engineer_with_a_fresh_heartbeat_keeps_its_record_and_claim_without_a_reported_pane(
+    remote: SimpleNamespace, age: int
+) -> None:
+    from scripts.swarm import idle
+    from scripts.tick.steps import agents as agent_steps
+
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report.update(pane_ids=[], process_namespace="theirs")
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
+    now = remote.agent.started_at + 10**9
+    idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, now - age)
+    ledger = Mock()
+    remote.runtime.retire = Mock(side_effect=AssertionError("a live hive worker is never retired"))
+
+    actions = agent_steps._reap("fixture", remote.store, ledger, remote.runtime, rows, now)
+
+    assert actions == []
+    assert [agent.name for agent in remote.store.agents("fixture")] == [remote.agent.name]
+    assert remote.store.claimant("fixture", "task") == remote.agent.name
+    assert remote.redis.pttl(remote.store.key("fixture", "claim", "task")) > 60000
+    ledger.update_task.assert_not_called()
+
+
+def test_a_hive_placed_engineer_on_an_ended_task_is_retired_even_with_a_fresh_heartbeat(
+    remote: SimpleNamespace,
+) -> None:
+    from scripts.swarm import idle
+    from scripts.tick.steps import agents as agent_steps
+
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report.update(pane_ids=[], process_namespace="theirs")
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
+    now = remote.agent.started_at + 10**9
+    idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, now)
+    rows = {"task": {"state": "done", "done": True}}
+
+    actions = agent_steps._reap("fixture", remote.store, Mock(), remote.runtime, rows, now)
+
+    assert actions == [f"retired {remote.agent.name}: its hive pane is gone"]
+    assert remote.store.agents("fixture") == []
+
+
+@pytest.mark.parametrize(("age", "kept"), [(0, True), (600_000, True), (600_001, False)])
+def test_verify_keeps_a_hive_placed_engineer_whose_heartbeat_is_fresh_when_its_binding_reads_no_process(
+    remote: SimpleNamespace, age: int, kept: bool
+) -> None:
+    from scripts.swarm import idle
+    from scripts.swarm import tick as tick_module
+
+    remote.store.put_agent("fixture", replace(remote.agent, state="retiring"))
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
+    now = remote.agent.started_at + 10**9
+    idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, now - age)
+    runtime = SimpleNamespace(
+        bindings=lambda agents: {agent.name: {"process": False} for agent in agents},
+        live_names=lambda: set(),
+        retire=Mock(return_value=False),
+    )
+
+    actions = tick_module._verify("fixture", remote.store, Mock(), runtime, rows, now)
+
+    if kept:
+        assert actions == []
+        runtime.retire.assert_not_called()
+        assert [(a.name, a.state) for a in remote.store.agents("fixture")] == [(remote.agent.name, "working")]
+    else:
+        runtime.retire.assert_called_once()
+        assert actions == [f"could not retire {remote.agent.name} after mismatched process, retrying next tick"]
+    assert remote.store.claimant("fixture", "task") == remote.agent.name
 
 
 def test_one_tick_releases_every_missing_hive_worker_and_keeps_each_action(remote):
