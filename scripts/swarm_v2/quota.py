@@ -125,41 +125,47 @@ def _report(report: object, now: int) -> dict:
     return {field: report.get(field) for field in REPORT_FIELDS}
 
 
+def _hive_reading(account: str, harness: str, reading: Any, now_ms: int) -> Observation | None:
+    """One hive quota entry as an observation, or None when it fails the fleet report checks."""
+    try:
+        five, week = reading["five_hour"], reading["seven_day"]
+        report = {
+            "observed_ms": int(reading["observed_at"] * 1000),
+            "provider_status": "allowed",
+            "five_used": five["used"],
+            "week_used": week["used"],
+            "five_reset": five["resets_at"],
+            "week_reset": week["resets_at"],
+        }
+        fields = cast("dict[str, Any]", _report(report, now_ms))
+    except (KeyError, TypeError, ValueError, SwarmError):
+        return None
+    return Observation(account, harness, "", 0, **fields)
+
+
 def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) -> Observation | None:
     """The newest valid reading a live hive published for the account, matched whatever its name separators."""
     from scripts.hive import registry
     from scripts.routing.slots import account_key
 
-    wanted, newest = account_key(account), None
+    wanted, found = account_key(f"{harness}:{account}"), list[Observation]()
     hives = cast("list[dict[str, Any]]", registry.hives(redis))  # pyright: ignore[reportUnknownMemberType]
     for hive in hives:
-        if not registry.live(hive, now_ms):
+        raw = (
+            cast("str | None", redis.get(f"{registry.key(hive['id'])}:quota")) if registry.live(hive, now_ms) else None
+        )
+        if raw is None:
             continue
-        raw = cast("str | None", redis.get(f"{registry.key(hive['id'])}:quota"))
         try:
-            readings: dict[str, Any] = dict(json.loads(raw or "{}"))
+            readings: dict[str, Any] = dict(json.loads(raw))
         except (ValueError, TypeError):
             continue
-        for slot, reading in readings.items():
-            named, _, name = slot.partition(":")
-            if named != harness or account_key(name) != wanted:
-                continue
-            try:
-                five, week = reading["five_hour"], reading["seven_day"]
-                report = {
-                    "observed_ms": int(reading["observed_at"] * 1000),
-                    "provider_status": "allowed",
-                    "five_used": five["used"],
-                    "week_used": week["used"],
-                    "five_reset": five["resets_at"],
-                    "week_reset": week["resets_at"],
-                }
-                fields = cast("dict[str, Any]", _report(report, now_ms))
-            except (KeyError, TypeError, ValueError, SwarmError):
-                continue
-            if newest is None or fields["observed_ms"] > newest.observed_ms:
-                newest = Observation(account, harness, "", 0, **fields)
-    return newest
+        found += [
+            observed
+            for slot, reading in readings.items()
+            if account_key(slot) == wanted and (observed := _hive_reading(account, harness, reading, now_ms))
+        ]
+    return max(found, key=lambda observed: observed.observed_ms, default=None)
 
 
 class QuotaObservations:

@@ -236,23 +236,37 @@ def test_an_exhausted_key_is_a_closed_row():
     assert (row.state, row.cap) == ("CLOSED", 0)
 
 
-def _hive_reading(store: RedisStore, slot: str, five_used: object = 10.0, week_used: float = 40.0) -> None:
+def _hive_reading(
+    store: RedisStore,
+    slot: str,
+    five_used: object = 10.0,
+    week_used: float = 40.0,
+    hive: str = "hive-a",
+    observed_ms: int = NOW_MS,
+    heartbeat_ms: int = NOW_MS,
+    others: tuple[str, ...] = (),
+) -> None:
     import json
 
     from scripts.hive import registry
 
-    registry.update(store.redis, "hive-a", ["max-agents=8"])
+    registry.update(store.redis, hive, ["max-agents=8"])
     registry.beat(
         store.redis,
-        "hive-a",
-        {"heartbeat_at": NOW_MS, "slots": [{"harness": "claude", "account": slot, "kind": "subscription", "cap": 6}]},
+        hive,
+        {
+            "heartbeat_at": heartbeat_ms,
+            "slots": [{"harness": "claude", "account": slot, "kind": "subscription", "cap": 6}],
+        },
     )
     reading = {
         "five_hour": {"used": five_used, "resets_at": NOW_MS // 1000 + HOUR},
         "seven_day": {"used": week_used, "resets_at": NOW_MS // 1000 + 48 * HOUR},
-        "observed_at": NOW_MS / 1000,
+        "observed_at": observed_ms / 1000,
     }
-    store.redis.set(f"{registry.key('hive-a')}:quota", json.dumps({f"claude:{slot}": reading}))
+    other = {**reading, "five_hour": {"used": 99.0, "resets_at": NOW_MS // 1000 + HOUR}}
+    readings = {**{name: other for name in others}, f"claude:{slot}": reading}
+    store.redis.set(f"{registry.key(hive)}:quota", json.dumps(readings))
 
 
 def test_a_secret_key_reads_the_quota_a_live_hive_published_under_its_token_slug() -> None:
@@ -285,6 +299,61 @@ def test_a_malformed_hive_reading_leaves_the_key_unread(five_used: object) -> No
     _hive_reading(store, "nestor_coltatgmail_com", five_used=five_used)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
     assert (row.five_left, row.week_left) == (None, None)
+
+
+def _hive_observed(five_used: float, observed_ms: int = NOW_MS) -> quota.Observation:
+    return quota.Observation(
+        "nestor-coltatgmail-com",
+        "claude",
+        "",
+        0,
+        observed_ms,
+        "allowed",
+        five_used,
+        40.0,
+        NOW_MS // 1000 + HOUR,
+        NOW_MS // 1000 + 48 * HOUR,
+    )
+
+
+def _hive_lookup(store: RedisStore) -> quota.Observation | None:
+    return quota.hive_observation(store.redis, "nestor-coltatgmail-com", "claude", NOW_MS)
+
+
+def test_the_hive_observation_carries_the_hive_windows_under_the_secret_key_with_no_grant() -> None:
+    store, _ = _route(set())
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=30.0, others=("claude:thecloudclockworkatgmail_com",))
+    assert _hive_lookup(store) == _hive_observed(30.0)
+    assert quota.hive_observation(store.redis, "nestor-coltatgmail-com", "codex", NOW_MS) is None
+
+
+def test_a_dead_hive_reading_is_skipped_for_a_live_one() -> None:
+    store, _ = _route(set())
+    _hive_reading(
+        store, "nestor_coltatgmail_com", five_used=70.0, hive="hive-a", heartbeat_ms=NOW_MS - 10 * HOUR * 1000
+    )
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, hive="hive-b", observed_ms=NOW_MS - 1000)
+    assert _hive_lookup(store) == _hive_observed(20.0, NOW_MS - 1000)
+
+
+@pytest.mark.parametrize("newer", ["hive-a", "hive-b"])
+def test_the_newest_live_hive_reading_wins(newer: str) -> None:
+    store, _ = _route(set())
+    for hive in ("hive-a", "hive-b"):
+        observed = NOW_MS if hive == newer else NOW_MS - 1000
+        _hive_reading(
+            store, "nestor_coltatgmail_com", five_used=20.0 if hive == newer else 70.0, hive=hive, observed_ms=observed
+        )
+    assert _hive_lookup(store) == _hive_observed(20.0)
+
+
+def test_a_published_observation_holds_against_a_hive_reading_no_newer_than_it() -> None:
+    store, route = _route(set())
+    _observe(store, "nestor-coltatgmail-com", five_used=50.0)
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0)
+    assert getattr(route.quota.latest("nestor-coltatgmail-com", "claude"), "five_used", None) == 50.0
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, observed_ms=NOW_MS + 1000)
+    assert getattr(route.quota.latest("nestor-coltatgmail-com", "claude"), "five_used", None) == 20.0
 
 
 def _sizing(runtime):
