@@ -234,9 +234,6 @@
   "C901": 22,
   "PLR0912": 26
  },
- "scripts/swarm/tick.py::_spawn": {
-  "PLR0913": 8
- },
  "scripts/swarm_ledger/ledger_core.py::apply_op": {
   "C901": 18,
   "PLR0912": 18
@@ -276,6 +273,9 @@
  "scripts/targets/copilot_target.py::CopilotAdapter.teardown": {
   "C901": 25,
   "PLR0912": 27
+ },
+ "scripts/tick/steps/place.py::_spawn": {
+  "PLR0913": 8
  },
  "tests/swarm/test_drain_watch.py::_drain_swarm": {
   "PLR0913": 9

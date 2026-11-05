@@ -6,13 +6,9 @@ Each swarm keeps one lead master, the agent the operator talks to, which works n
 further master seats its count holds.
 """
 
-import json
 import os
-import time
+import time  # noqa: F401
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
-from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
 from importlib import import_module
@@ -21,11 +17,10 @@ from typing import Any, Protocol
 import scripts.tick.steps.agents  # noqa: F401
 from hooks.context import context_recycle  # noqa: F401
 from scripts.doctor import priming
-from scripts.gates import Who, modes
-from scripts.gates import claims as claim_cap
+from scripts.gates import Who
 from scripts.gates import log as gate_log
 from scripts.handoff import transfers
-from scripts.handoff.envelope import reclaim, remote_heads
+from scripts.handoff.envelope import reclaim, remote_heads  # noqa: F401
 from scripts.hive import registry, reports
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
@@ -37,14 +32,13 @@ from scripts.swarm import (
     claim_hold,  # noqa: F401
     claim_order,
     content_refusal,
-    continuation,
     control_notifications,  # noqa: F401
     dead_resume,
     deliberate_exit,
     difficulty,  # noqa: F401
-    dispatcher,
+    dispatcher,  # noqa: F401
     elapsed,
-    failed_panes,
+    failed_panes,  # noqa: F401
     fleet_red,
     freeze,
     grouping,  # noqa: F401
@@ -64,24 +58,22 @@ from scripts.swarm import (
     pane_evidence,  # noqa: F401
     panic,  # noqa: F401
     preempt,
-    profile_first,
     readiness,
     reaper,
     release_wait,
     resume,
     retire_watch,
     revoked_seats,
-    run_window,
+    run_window,  # noqa: F401
     seat_spawn,
     session_model,  # noqa: F401
     stack,
     stale_nudge,
-    successor_retry,
     timing,
 )
 from scripts.swarm import idle as idle_state
 from scripts.swarm.ledger_client import LedgerRefused, pass_state  # noqa: F401
-from scripts.swarm.naming import lane_of, parse, seat_label
+from scripts.swarm.naming import lane_of, parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved  # noqa: F401
 from scripts.swarm.ready import awaiting as awaiting_merge
@@ -94,7 +86,7 @@ from scripts.swarm.store import (  # noqa: F401
     SwarmConfig,
     SwarmError,
 )
-from scripts.swarm_ledger import ledger_rank, ledger_workspace
+from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, pool, steps
@@ -130,18 +122,52 @@ from scripts.tick.steps.observe import (  # noqa: F401
 )
 from scripts.tick.steps.place import (  # noqa: F401
     Failed,
+    Launch,
     Started,
     _admission,
+    _block_unresolved,
+    _claim_cap,
     _failed_room_wait,
+    _free_seat,
     _held_back,
+    _held_for_master,
+    _hold,
+    _host_full,
+    _launch,
+    _launch_all,
+    _launch_room,
+    _LaunchClock,
+    _lives_spent,
     _not_launched,
+    _owner_hold,
+    _Pass,
+    _pass_reclaim,
+    _placement_pass,
+    _prepare,
+    _ranked,
+    _record_spawn_failure,
     _refused_reservation,
     _release_admission,
+    _release_hive_launch,
+    _reported,
+    _retry_successor,
     _room_refused,
     _room_wait,
     _settle_admission,
+    _spawn,
     _spawn_failed,
+    _spawn_order,
+    _spawn_stop,
+    _spend_host,
+    _spend_local,
     _started,
+    _steer,
+    _steered_off,
+    _unresolved,
+    host_spent,
+    placed_record,
+    primed,
+    spawn_holds,
 )
 
 LEASE_MS = 10 * 60 * 1000
@@ -889,337 +915,6 @@ def _nested(outer, inner):
     return inner == outer or inner.startswith(outer + "/")
 
 
-def _held_for_master(slug, store, now_ms):
-    waiting = store.redis.hgetall(MASTER_WAITING)
-    others = sorted(s for s, at in waiting.items() if s != slug and now_ms - int(at) < MASTER_WAIT_MS)
-    return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
-
-
-def _host_full(slug, store, now_ms, in_flight=0):
-    from scripts.swarm import capacity
-
-    host = capacity.read(store, slug).get("host") or {}
-    if host.get("room") is None:
-        return ""
-    recent = host_spent(store, host["granted_at"], now_ms) + in_flight
-    if recent < host["room"]:
-        return ""
-    return f"host {host['limit']} room {host['room']}, {recent} spawned since it was granted: {host['reason']}"
-
-
-def host_spent(store, since_ms: int, now_ms: int) -> int:
-    return store.redis.zcount(HOST_SPENDS, since_ms - HOST_START_LAG_MS, now_ms)
-
-
-def _spend_host(store, name, now_ms):
-    store.redis.zadd(HOST_SPENDS, {name: now_ms})
-    store.redis.zremrangebyrank(HOST_SPENDS, 0, -HOST_SPENDS_KEPT - 1)
-
-
-def _spend_local(store, agent, now_ms):
-    from scripts.swarm.commands import hive_id
-
-    if not agent.hive or agent.hive == hive_id():
-        _spend_host(store, agent.name, now_ms)
-
-
-def _release_hive_launch(slug, store, record):
-    from scripts.hive import launch
-
-    launch.release(store, slug, next((a for a in store.agents(slug) if a.name == record.name), record))
-
-
-def _hold(slug, store, text):
-    store.redis.set(store.key(slug, SPAWN_HOLD), text)
-    return text
-
-
-def spawn_holds(store: Any, slug: str) -> list[str]:
-    held = store.redis.get(store.key(slug, SPAWN_HOLD))
-    return [hold for hold in (held, engine.pass_budget_hold(store, slug)) if hold]
-
-
-def _spawn_stop(slug: str, config: SwarmConfig, store: Any, runtime: Any, now_ms: int, in_flight: int = 0) -> str:
-    if held := engine.pass_budget_hold(store, slug):
-        return held
-    if stopped := run_window.claims_stopped(store, slug, config, now_ms):
-        return stopped
-    if not runtime.has_capacity(config):
-        return "every agent is at its session cap, waiting"
-    if host := _host_full(slug, store, now_ms, in_flight):
-        return _hold(slug, store, f"holding spawns: {host}")
-    return ""
-
-
-class _LaunchClock:
-    def __init__(self) -> None:
-        self.begun, self.tried, self.forgiven, self.free, self.failing = time.monotonic(), 0, 0, 0.0, ""
-        self.preparations, self.preparing = 0, 0.0
-
-    def spent(self, task: dict, batch: list) -> str | None:
-        if not self.preparations:
-            return None
-        charged = self.tried - self.forgiven
-        spent = time.monotonic() - self.begun - self.free if charged else self.preparing
-        cost = spent / charged if charged and not batch else self.preparing / self.preparations
-        if spent + cost >= SPAWN_BUDGET_S:
-            return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
-        return None
-
-    def prepared(self, at: float) -> None:
-        self.preparations, self.preparing = self.preparations + 1, self.preparing + time.monotonic() - at
-
-    def charge(self, at, errors, launches):
-        self.tried += 1
-        if len(errors) == launches and not self.forgiven:
-            self.free, self.forgiven = time.monotonic() - at, 1
-        for error in errors:
-            self.failing = _steered_off(error) or self.failing
-
-
-def _launch_room(runtime, config):
-    room = getattr(runtime, "launch_room", None)
-    return max(1, min(SPAWN_POOL, room(config) if room else 1))
-
-
-def _steer(slug, store, task, failing):
-    avoid = store.failed_harness(slug, task["id"]) or failing
-    return {"avoid_harness": avoid} if avoid else {}
-
-
-def _steered_off(error):
-    if isinstance(error, SpawnError) and error.status != "unavailable":
-        return error.harness
-    return ""
-
-
-def _record_spawn_failure(slug, store, record, error, now_ms):
-    if record_failure := timing.ON_FAILURE.get():
-        record_failure(f"{__name__}._spawn", error)
-    waiting = isinstance(error, SpawnError) and error.status == "unavailable"
-    if waiting:
-        transfers.detach(store, slug, record)
-    else:
-        transfers.failed(store, slug, record)
-        store.note_launch_failure(slug, record.task, str(error), _steered_off(error))
-    record = replace(record, pane_id=getattr(error, "pane_id", ""))
-    store.record_launch(slug, record, "waiting" if waiting else "failed", str(error))
-    if not waiting:
-        failed_panes.hold(store, slug, record, now_ms)
-
-
-def _owner_hold(slug, store, runtime, task):
-    if task["id"] not in _owned_tasks(slug, store):
-        return ""
-    _release_admission(slug, runtime, task)
-    return f"task {task['id']} retains its live owner"
-
-
-@contextmanager
-def _placement_pass(runtime):
-    try:
-        yield
-    finally:
-        if end := getattr(runtime, "end_placement_pass", None):
-            end()
-
-
-def _spawn(
-    slug: str,
-    config: SwarmConfig,
-    store: object,
-    ledger: object,
-    runtime: object,
-    rows: dict,
-    doc: dict,
-    now_ms: int,
-) -> list:
-    agents = store.agents(slug)
-    taken = {a.seat for a in agents}
-    held = timing.timed(_held_for_master, slug, store, now_ms)
-    order, actions = timing.timed(_spawn_order, slug, config, store, agents, rows, doc, runtime)
-    actions += timing.timed(_block_unresolved, slug, ledger, rows, order)
-    order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
-    run = _Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
-    clock, batch = _LaunchClock(), []
-    for lane, task in order:
-        stop = held or [
-            timing.timed(_spawn_stop, slug, config, store, runtime, now_ms, len(batch)) or clock.spent(task, batch)
-        ]
-        if any(stop):
-            return actions + _launch_all(run, clock, batch) + stop
-        at = time.monotonic()
-        launch, prepared = _prepare(run, lane, task, taken, clock.failing, {peer.record.name for peer in batch})
-        clock.prepared(at)
-        actions += prepared
-        batch += [launch] if launch else []
-        if batch and len(batch) >= _launch_room(runtime, config):
-            actions += _launch_all(run, clock, batch)
-            batch = []
-    return actions + _launch_all(run, clock, batch)
-
-
-@dataclass(frozen=True)
-class _Pass:
-    slug: str
-    config: SwarmConfig
-    store: object
-    ledger: object
-    runtime: object
-    rows: dict
-    doc: dict
-    now_ms: int
-    memo: dict = field(default_factory=dict)
-
-
-def _pass_reclaim(run):
-    if "heads" not in run.memo:
-        run.memo["heads"] = timing.call(remote_heads, run.config.repo)
-    return partial(reclaim, heads=run.memo["heads"])
-
-
-@dataclass(frozen=True)
-class Launch:
-    record: AgentRecord
-    task: dict
-    primed: dict
-
-
-def _prepare(run, lane, task, taken, failing, peers):
-    slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
-    rows, doc, now_ms = run.rows, run.doc, run.now_ms
-    task = rows[task["id"]] = dict(task)
-    expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
-    blocked = (
-        timing.timed(_lives_spent, slug, store, ledger, rows, task)
-        or timing.timed(_room_wait, runtime, lane, task)
-        or timing.timed(_held_back, slug, ledger, rows, runtime, task, now_ms)
-        or timing.timed(_owner_hold, slug, store, runtime, task)
-    )
-    if blocked:
-        return None, [blocked]
-    name = store.next_name(slug, lane, now_ms)
-    if not timing.timed(store.claim, slug, task["id"], name, LEASE_MS):
-        _release_admission(slug, runtime, task)
-        return None, []
-    handoff = store.handoff(slug, task["id"])
-    lives = store.earlier_lives(slug, task["id"])
-    if handoff:
-        task["handoff"] = handoff
-        task["handoff_envelope"] = timing.timed(
-            continuation.resolve,
-            config.repo,
-            task,
-            rows,
-            lives,
-            store.handoff_envelope(slug, task["id"]) or {},
-            _pass_reclaim(run),
-        )
-    elif lives or task.get("branch"):
-        task["reclaim"] = timing.timed(continuation.resolve, config.repo, task, rows, lives, {}, _pass_reclaim(run))
-        store.put_reclaim(slug, name, task["reclaim"])
-    task["stack_base"] = _stack_base(task, rows, config.repo)
-    task["overlaps"] = timing.timed(_sharing, task, rows, timing.timed(_reported, slug, store, runtime, peers))
-    task["group"] = [
-        {key: rows[m][key] for key in ("id", "title", "description")}
-        for m in task.get("group_members") or []
-        if m in rows
-    ]
-    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
-    preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
-    seat = _free_seat(slug, lane, taken, preferred)
-    taken.add(seat)
-    record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
-    store.put_agent(slug, record)
-    try:
-        state = "pr" if task.get("pr_url") else "claimed"
-        fields = {
-            "state": state,
-            "claimed_by": name,
-            "workspace": str(timing.timed(ledger_workspace.scaffold, slug, task, doc)),
-        }
-        kind = config.lanes.get(lane, {}).get("kind", "")
-        if kind not in ("", "auto") and not task.get("kind"):
-            fields["kind"] = kind
-        live = timing.timed(ledger.update_task, slug, task["id"], fields, if_state=("open",), if_match=expected)
-        task.update(live)
-        if live["claimed_by"] != name:
-            _release_admission(slug, runtime, task)
-            store.release(slug, task["id"], name)
-            store.drop_agent(slug, name)
-            return None, [f"task {task['id']} is {live['state']} on the ledger, not claimed"]
-        task.update(fields)
-        timing.timed(store.record_launch, slug, record, "pending")
-        store.seats.occupy(seat, name, now_ms)
-        task["transfer"] = timing.timed(transfers.attach, store, slug, record)
-        primed_task = {
-            **timing.timed(primed, store, slug, seat, task),
-            ACK_LATER: True,
-            "detached_launch": True,
-            **_steer(slug, store, task, failing),
-        }
-    except Exception as exc:
-        failed = Failed(record, task, exc)
-        return None, timing.timed(_not_launched, slug, store, ledger, runtime, rows, failed, now_ms)
-    return Launch(record, task, primed_task), []
-
-
-def _launch(run, launch):
-    from scripts.swarm_v2.runtime import codex
-
-    record = launch.record
-    try:
-        placed = timing.timed(run.runtime.spawn, run.config, record.lane, record.name, launch.primed)
-        if placed.launch_job:
-            return placed, None
-        launched = timing.timed(codex.admit_legacy, run.store, run.slug, placed_record(record, placed), run.runtime)
-        return placed, launched
-    except Exception as exc:
-        return None, exc
-
-
-def _launch_all(run, clock, batch):
-    from scripts.swarm import launch_job
-
-    if not batch:
-        return []
-    at, contexts = time.monotonic(), [copy_context() for _ in batch]
-    with ThreadPoolExecutor(max_workers=len(batch)) as pool:
-        outcomes = list(pool.map(lambda context, launch: context.run(_launch, run, launch), contexts, batch))
-    clock.charge(at, [error for _, error in outcomes if isinstance(error, Exception)], len(batch))
-    actions = []
-    for launch, outcome in zip(batch, outcomes):
-        launch, (placed, launched), retried = _retry_successor(run, launch, outcome)
-        actions += retried
-        if placed and placed.launch_job:
-            launched = launch_job.dispatch(run, launch, placed)
-            if isinstance(launched, str):
-                actions.append(launched)
-                continue
-        if isinstance(launched, Exception):
-            failed = Failed(launch.record, launch.task, launched)
-            actions += timing.timed(
-                _not_launched, run.slug, run.store, run.ledger, run.runtime, run.rows, failed, run.now_ms
-            )
-        else:
-            started = Started(launch.record, launch.task, placed, launched)
-            actions += timing.timed(_started, run.slug, run.config, run.store, run.ledger, run.doc, started, run.now_ms)
-    return actions
-
-
-def _retry_successor(run, launch, outcome):
-    harness = successor_retry.due(launch.task, launch.primed, outcome[1])
-    if not harness:
-        return launch, outcome, []
-    said = successor_retry.note(run.slug, run.store, run.runtime, launch.record, outcome[1], run.now_ms)
-    launch = replace(launch, primed=successor_retry.steered(launch.primed, harness))
-    return launch, _launch(run, launch), [said]
-
-
-def _reported(slug, store, runtime, peers=()):
-    return [a for a in store.agents(slug) if runtime.reported(a) or a.name in peers]
-
-
 def _acknowledging_error(exc):
     from scripts.swarm_v2.runtime.base import Status
 
@@ -1233,161 +928,6 @@ def _running(agents: list[AgentRecord], rows: dict[str, Any], lane: str) -> list
         for a in agents
         if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
     ]
-
-
-def _spawn_order(
-    slug: str,
-    config: SwarmConfig,
-    store: RedisStore,
-    agents: list[AgentRecord],
-    rows: dict[str, Any],
-    doc: dict[str, Any],
-    runtime: Any,
-) -> tuple[list[Any], list[Any]]:
-    from scripts.swarm import capacity, focus_budget
-
-    if begin := getattr(runtime, "begin_placement_pass", None):
-        timing.timed(begin)
-
-    decision = timing.timed(capacity.read, store, slug)
-    caps = timing.timed(capacity.caps, decision, config)
-    dispatched = timing.timed(preempt.yielding, store, slug, doc, timing.timed(dispatcher.claim_key, config, doc))
-    claims = timing.timed(claim_view, slug, store, rows, doc, dispatched)
-    queue, waits = [], []
-    for lane, cap in caps.items():
-        running = timing.timed(_running, agents, rows, lane)
-        busy = len(running)
-        ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
-        ready = timing.timed(readiness.launchable, config.engine, decision, ready)
-        locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
-        ready, refused = timing.timed(focus_budget.place, doc, ready, lane, cap, running, locate)
-        queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
-        waits += refused
-    ranked = timing.timed(_ranked, slug, store, queue, dispatched)
-    focus = timing.timed(focus_budget.ranks, doc)
-    return timing.timed(focus_budget.ordered, ranked, focus), waits
-
-
-def _ranked(
-    slug: str,
-    store: RedisStore,
-    queue: list[tuple[int, str, dict[str, Any]]],
-    dispatched: Callable[[dict[str, Any]], tuple[Any, ...]] | None,
-) -> list[tuple[str, dict[str, Any]]]:
-    demoted = _demoted(slug, store, [entry[2]["id"] for entry in queue])
-    queue.sort(
-        key=lambda entry: (
-            dispatched(entry[2])[0] if dispatched else ledger_rank.order(entry[2]),
-            entry[2]["id"] in demoted,
-            entry[0],
-        )
-    )
-    return [(lane, task) for _, lane, task in queue]
-
-
-def _block_unresolved(slug, ledger, rows, order):
-    blocked = []
-    for _, task in order:
-        if profile_first.UNRESOLVED in task:
-            blocked.append(_unresolved(slug, ledger, rows, task["id"], task[profile_first.UNRESOLVED]))
-    return blocked
-
-
-def _unresolved(slug, ledger, rows, task_id, reason):
-    live = ledger.update_task(slug, task_id, {"state": "blocked"}, if_state=("open",))
-    rows[task_id].update(live)
-    if live["state"] != "blocked":
-        return f"task {task_id} is {live['state']} on the ledger, its profile stays unresolved"
-    ledger.comment(slug, task_id, reason, by="swarm")
-    return f"blocked {task_id}: {reason}"
-
-
-def _lives_spent(slug, store, ledger, rows, task):
-    try:
-        return _claim_cap(slug, store, ledger, rows, task)
-    except Exception as exc:  # a crashed gate lets the claim through, counted in the gate log
-        who = Who(name="swarm", task=task["id"])
-        gate_log.append(
-            slug, gate_log.Row.of(claim_cap.GATE.name, "fail-open", who, reason=f"{type(exc).__name__}: {exc}")
-        )
-        return ""
-
-
-def _claim_cap(slug, store, ledger, rows, task):
-    lives, mode = store.claims(slug, task["id"]), modes.configured(claim_cap.GATE, store.config(slug).gates)
-    if lives < claim_cap.CAP or mode == "off":
-        return ""
-    last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
-    failure = claim_cap.launch_failure(lives, store.launches(slug), task["id"])
-    reason = claim_cap.refusal(lives, last, failure, slug, task["id"])
-    kind = "observe" if mode == "observe" else "deny"
-    gate_log.append(slug, gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason))
-    if kind == "observe":
-        return ""
-    live = ledger.update_task(slug, task["id"], {"state": "blocked"}, if_state=("open",))
-    rows[task["id"]].update(live)
-    if live["state"] != "blocked":
-        return ""
-    store.reset_claims(slug, task["id"])
-    ledger.comment(slug, task["id"], reason, by="swarm")
-    return f"blocked {task['id']}: {reason}"
-
-
-def primed(store, slug, seat, task):
-    from scripts.swarm import priming_trace
-
-    memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
-    envelope = task.get("handoff_envelope", store.handoff_envelope(slug, task["id"]))
-    previous = store.execution_occupants(slug).get(seat)
-    task = {
-        **task,
-        "seat": seat,
-        "previous_execution_id": previous.execution_id if previous else "",
-        "culture": store.culture.get(slug),
-        "handoff_envelope": envelope,
-        **memory,
-    }
-    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
-    if saved:
-        task["launch_assignment"] = json.loads(saved)
-    return priming_trace.withhold(slug, task)
-
-
-def _free_seat(slug, lane, taken, preferred):
-    if preferred and preferred not in taken:
-        return preferred
-    return next(
-        seat for k in range(1, len(taken) + 2) if (seat := seat_address(slug, seat_label(lane, k))) not in taken
-    )
-
-
-def placed_record(record, placed):
-    record = placed.execution or record
-    return replace(
-        record,
-        pane_id=placed.pane_id,
-        conversation_id=placed.conversation_id or record.conversation_id,
-        harness=placed.harness,
-        account=placed.account,
-        model=placed.model,
-        effort=placed.effort,
-        placement=placed.placement,
-        profile=placed.profile,
-        model_source=placed.model_source,
-        model_confidence=placed.model_confidence,
-        profile_decision=placed.profile_decision,
-        choice=placed.choice,
-        launched_at=placed.launched_at or record.started_at,
-        overlays=placed.overlays,
-        launch_timings=placed.launch_timings,
-        route_kind=placed.route_kind,
-        transport=placed.transport or record.transport,
-        remote_control=placed.remote_control or record.remote_control,
-        desired_route_kind=record.desired_route_kind
-        if placed.desired_route_kind is None
-        else placed.desired_route_kind,
-        state="working",
-    )
 
 
 def _recover_master(slug, config, store, runtime, now_ms):

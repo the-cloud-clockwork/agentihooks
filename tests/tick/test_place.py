@@ -317,3 +317,94 @@ def test_a_held_exception_skips_every_placement_step(calm: list[Any], monkeypatc
     state = _pass(calm, box={tasks.RAISED: RuntimeError("earlier")})
     assert _run(place.PLACEMENT, _tick(calm), state, monkeypatch) == []
     assert calm == []
+
+
+SPAWN_CLUSTER = (
+    "_spawn",
+    "_Pass",
+    "_pass_reclaim",
+    "Launch",
+    "_prepare",
+    "_launch",
+    "_launch_all",
+    "_retry_successor",
+    "_reported",
+    "_spawn_order",
+    "_ranked",
+    "_block_unresolved",
+    "_unresolved",
+    "_lives_spent",
+    "_claim_cap",
+    "_free_seat",
+    "primed",
+    "placed_record",
+    "_LaunchClock",
+    "_launch_room",
+    "_steer",
+    "_steered_off",
+    "_record_spawn_failure",
+    "_owner_hold",
+    "_placement_pass",
+    "_spawn_stop",
+    "_host_full",
+    "host_spent",
+    "_spend_host",
+    "_spend_local",
+    "_release_hive_launch",
+    "_hold",
+    "spawn_holds",
+    "_held_for_master",
+)
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+@pytest.mark.parametrize("name", SPAWN_CLUSTER)
+def test_tick_reexports_the_moved_spawn_name(name: str) -> None:
+    from scripts.swarm import tick
+
+    moved = getattr(place, name)
+    assert moved.__module__ == "scripts.tick.steps.place"
+    assert getattr(tick, name) is moved
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_the_tick_module_holds_no_spawn_definition() -> None:
+    from pathlib import Path
+
+    from scripts.swarm import tick
+
+    text = Path(str(tick.__file__)).read_text(encoding="utf-8")
+    defined = [name for name in SPAWN_CLUSTER if f"\ndef {name}(" in text or f"\nclass {name}" in text]
+    assert defined == []
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_the_spawn_step_declares_its_ports_feature_and_lane() -> None:
+    spawn = next(step for step in place.STEPS if step.name == "spawn")
+    assert spawn.effects == frozenset({"ledger", "runtime", "coordination", "inbox"})
+    assert (spawn.feature, spawn.lane, spawn.group) == ("swarm-tick-spawn", CallStep.lane, place.PLACEMENT)
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+@pytest.mark.parametrize(("owned", "expected"), [({"t1"}, "task t1 retains its live owner"), ({"t2"}, "")])
+def test_moved_spawn_code_reaches_tick_seams_through_the_tick_module(
+    monkeypatch: pytest.MonkeyPatch, owned: set[str], expected: str
+) -> None:
+    from scripts.swarm import tick
+
+    released: list[tuple[str, str, dict[str, str]]] = []
+    monkeypatch.setattr(tick, "_owned_tasks", lambda slug, store: owned if (slug, store) == ("sw", "store") else set())
+    monkeypatch.setattr(tick, "_release_admission", lambda slug, runtime, task: released.append((slug, runtime, task)))
+    task = {"id": "t1"}
+    assert place._owner_hold("sw", "store", "runtime", task) == expected
+    assert released == ([("sw", "runtime", task)] if expected else [])
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_a_free_seat_comes_from_the_tick_seat_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+
+    monkeypatch.setattr(tick, "seat_address", lambda slug, label: f"{label}@{slug}")
+    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "") == "eng-2@sw"
+    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "eng-1@sw") == "eng-2@sw"
+    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "eng-7@sw") == "eng-7@sw"
