@@ -1407,15 +1407,14 @@ def test_a_master_another_hive_reports_with_a_fresh_heartbeat_stays_live_when_it
 def test_only_an_untargeted_master_another_hive_lists_is_kept_unjudged(
     ticking: tuple, monkeypatch: pytest.MonkeyPatch, lane: str, target: dict, holders: set, kept: bool
 ) -> None:
-    from scripts.swarm import commands, idle
-    from scripts.swarm.tick import _keep_elsewhere
+    from scripts.swarm import commands, held_elsewhere, idle
 
     store, _, _ = ticking
     monkeypatch.setattr(commands, "hive_id", lambda: "controller")
     agent = AgentRecord("held@zz", lane, "two", state="working", runtime_target=target)
     idle.beat(store.redis, "sw", agent.name, idle.WORKING, 100)
     listed = {agent.name: holders} if holders else {}
-    assert _keep_elsewhere("sw", store, agent, listed, 100) is kept
+    assert held_elsewhere.keep("sw", store, agent, listed, 100) is kept
     assert agent.name not in {a.name for a in store.agents("sw")}
 
 
