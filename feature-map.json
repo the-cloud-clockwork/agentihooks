@@ -1497,6 +1497,29 @@
         "tests/test_ownership_scope.py::TestSettingsRestore::test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins",
         "tests/test_ownership_scope.py::TestSettingsRestore::test_install_then_uninstall_returns_user_settings_unchanged"
       ]
+    },
+    {
+      "id": "overrun-no-wall-time-handoff",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "Wall time on a claimed task only reports the agent to the master once; it never asks the agent to hand off, never retires it and never reopens its task. Only the context limit triggers a handoff.",
+      "seam": "The overrun step of the swarm tick",
+      "semgrep_rule": "feature-overrun-no-wall-time-handoff",
+      "tests": [
+        "tests/swarm/test_overrun.py::test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end"
+      ]
+    },
+    {
+      "id": "stale-nudge-cache-warm",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "The swarm tick sends a claimed agent that sits silent inside a declared named wait one short cache warm inbox item per forty minutes, asking for a one line reply so its prompt cache stays warm; it never asks for a handoff.",
+      "seam": "The idle watch of the swarm tick through the stale nudge",
+      "tests": [
+        "tests/swarm/test_tick_cache_warm.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
+      ]
     }
   ],
   "unmapped_rules": [
