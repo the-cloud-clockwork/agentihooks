@@ -40,6 +40,7 @@ def workflow(name: str) -> dict:
         ("scripts/swarm/cli.py", "false"),
         ("tests/swarm/test_store.py", "false"),
         ("scripts/tick_pattern.py", "true"),
+        ("scripts/size_limits.py", "true"),
         ("tests/TICK_PATTERN_ALLOWLIST.json", "true"),
         ("tests/tick/test_catalogue.py", "true"),
         ("tests/tick/steps/test_common.py", "true"),
