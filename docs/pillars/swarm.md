@@ -4420,14 +4420,20 @@ fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed num
 
 ### Budgets and intervals
 
-Each step's budget is its measured p95 from a tick report over 60 passes with fifty percent headroom, rounded up to
-a whole second, and at least one second. Its declared interval is 60 seconds for a step that belongs in every pass,
-120 seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
-`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built.
-Intervals are declared and validated; no step is skipped because its interval has not elapsed, and the engine runs
-every registered step on every pass. Timing changes, overlap limits and the
+Each step's budget is the p95 of its last 60 recorded walls with fifty percent headroom, rounded up to a whole
+second, and never under the step's declared floor; with fewer than 60 walls it is the floor. Its declared interval is
+60 seconds for a step that belongs in every pass, 120 seconds for a wide sweep and 600 seconds for a slow job. Floors
+and intervals live in the checked in timing table `scripts.tick.steps.budgets.FLOORS`; a step the table does not name
+is refused when the step is built.
+A step whose interval is above one minute rests on a pass that starts within its interval less one minute of the end of
+its last `ok` or `failed` run: a 120 second step runs every other pass and a 600 second step about one pass in ten. A
+resting step starts no thread, ends at once for the steps that need it, and leaves a `skipped` record with `rested`
+true. The end of each run is kept in the swarm's `tick:step-ran` hash; a late or held run stores no end, so the step
+stays due on the next pass, and a step with no stored end or an unreadable hash is due. A step that writes the pass
+state must be declared at 60 seconds, and the registry refuses one above that. Timing changes, overlap limits and the
 forty second spawn bound are covered in
-[Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals).
+[Tick engine steps](../reference/tick-engine-steps.md#live-budgets-floors-and-declared-intervals), and the rest rule in
+[Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement).
 
 ### Records
 
@@ -4474,9 +4480,11 @@ pass in its own thread; a swarm whose tick runs long never makes another swarm t
 every minute. `scripts.tick.engine.interval_s` gives a slow lane step the larger of its declared interval and the
 cadence, and leaves critical lane steps at their own interval. Every guard must outlast one missed slow pass, so
 `scripts.tick.engine.cadence_s` refuses a cadence when twice it exceeds the 690 second delivery guard or the ten minute
-heartbeat limit, when the lease TTL is below two cron minutes, or when the stale watcher's pass and slug window no
+heartbeat limit, when the lease TTL is below two controller ticks, or when the stale watcher's pass and slug window no
 longer fit inside the heartbeat limit less the cadence. Six minutes breaks the delivery guard and the heartbeat
-limit. No step is skipped on its interval yet, so the setting is validated but does not change a pass today.
+limit. At a cadence of three minutes a slow lane step declared at 60 seconds runs one pass in three and rests on the
+other two; at the default of one it runs every pass, and a slow step declared at 600 seconds keeps its own interval
+at every cadence the setting accepts.
 
 Check a cadence before setting it, from the repository root with the workspace Python:
 

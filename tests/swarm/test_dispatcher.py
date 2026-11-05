@@ -447,7 +447,7 @@ def test_the_rank_pass_reads_releases_from_the_swarm_repository(store, home, shi
     repos = []
     monkeypatch.setattr(release_wait, "checker", lambda repo: repos.append(repo) or (lambda task: True))
     rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(ladder()), NOW)
-    assert repos == [store.config(SLUG).repo]
+    assert repos == [store.config(SLUG)]
 
 
 def test_the_rank_pass_holds_tasks_the_applied_check_refuses(store, home, shipped, monkeypatch):

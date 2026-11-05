@@ -555,8 +555,11 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
 
 
 def authority_held(store: Any, slug: str, task: str) -> bool:
-    doc = read(store, slug)
-    return task in doc["claims"] or task in doc["journals"]
+    port = RedisRecords(store.redis)
+    found = (port if port.layout(slug) == RECORDS else WholeDocumentRecords(store)).sections(
+        slug, ("claims", "journals")
+    )
+    return task in found["claims"] or task in found["journals"]
 
 
 def count(store: Any, slug: str, part: str) -> int:
