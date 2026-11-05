@@ -849,6 +849,9 @@ by the engine and does not leave the pass.
 
 ## Adding a step to a group
 
+`python -m scripts.tick.new_step` scaffolds a new step with every artefact below; see
+[Tick step skill and rule](tick-step-skill.md). The manual steps:
+
 1. Write the call as a function `(tick, get) -> actions` in a module under
    `scripts/tick/steps/`, reading its arguments with `get`.
 2. Add the step name to `budgets.FLOORS` with its floor (two seconds unless
