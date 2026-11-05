@@ -199,7 +199,11 @@
         "tests/tick/steps/test_launch_cluster.py::test_tick_reexports_the_moved_launch_name",
         "tests/tick/steps/test_launch_cluster.py::test_the_tick_module_holds_no_launch_definition",
         "tests/tick/steps/test_launch_cluster.py::test_moved_launch_code_reaches_tick_seams_through_the_tick_module",
-        "tests/tick/steps/test_launch_cluster.py::test_an_acknowledging_check_reads_the_launch_through_the_tick_master_lane"
+        "tests/tick/steps/test_launch_cluster.py::test_an_acknowledging_check_reads_the_launch_through_the_tick_master_lane",
+        "tests/tick/steps/test_launch_cluster.py::test_a_started_launch_records_its_claim_launch_spend_and_chain",
+        "tests/tick/steps/test_launch_cluster.py::test_a_held_back_task_follows_its_admission_decision",
+        "tests/tick/steps/test_launch_cluster.py::test_a_task_without_an_admission_gate_or_with_a_refusing_gate_is_held_or_passed",
+        "tests/tick/steps/test_launch_cluster.py::test_a_room_wait_names_the_placement_refusal"
       ]
     },
     {
