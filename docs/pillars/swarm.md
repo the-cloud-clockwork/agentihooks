@@ -4420,10 +4420,11 @@ fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed num
 
 ### Budgets and intervals
 
-Each step's budget is its measured p95 from a tick report over 60 passes with fifty percent headroom, rounded up to
-a whole second, and at least one second. Its declared interval is 60 seconds for a step that belongs in every pass,
-120 seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
-`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built.
+Each step's budget is the p95 of its last 60 recorded walls with fifty percent headroom, rounded up to a whole
+second, and never under the step's declared floor; with fewer than 60 walls it is the floor. Its declared interval is
+60 seconds for a step that belongs in every pass, 120 seconds for a wide sweep and 600 seconds for a slow job. Floors
+and intervals live in the checked in timing table `scripts.tick.steps.budgets.FLOORS`; a step the table does not name
+is refused when the step is built.
 A step whose interval is above one minute rests on a pass that starts within its interval less one minute of the end of
 its last `ok` or `failed` run: a 120 second step runs every other pass and a 600 second step about one pass in ten. A
 resting step starts no thread, ends at once for the steps that need it, and leaves a `skipped` record with `rested`
@@ -4431,7 +4432,7 @@ true. The end of each run is kept in the swarm's `tick:step-ran` hash; a late or
 stays due on the next pass, and a step with no stored end or an unreadable hash is due. A step that writes the pass
 state must be declared at 60 seconds, and the registry refuses one above that. Timing changes, overlap limits and the
 forty second spawn bound are covered in
-[Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals), and the rest rule in
+[Tick engine steps](../reference/tick-engine-steps.md#live-budgets-floors-and-declared-intervals), and the rest rule in
 [Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement).
 
 ### Records

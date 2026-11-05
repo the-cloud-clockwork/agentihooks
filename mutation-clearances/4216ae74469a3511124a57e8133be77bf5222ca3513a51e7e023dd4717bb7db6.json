@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/timing.py:scripts.swarm.timing.x_append_step:773a91b4a2d14185b70aae5379f20d899e11ed2807d2aab9cc5d668e98234f9e": {
+    "reader": "standards_reader",
+    "reason": "Approximate trimming only retains extra stream entries, and every reader caps its read at the HISTORY_LIMIT newest entries, so no output changes."
+  }
+}

@@ -32,6 +32,18 @@ class Redis:
     def hgetall(self, key: str) -> dict[str, str]:
         return dict(self.hashes.get(key, {}))
 
+    def pipeline(self, transaction: bool = True) -> "Redis":
+        return self
+
+    def lpush(self, key: str, *values: str) -> None:
+        return None
+
+    def ltrim(self, key: str, start: int, end: int) -> None:
+        return None
+
+    def execute(self) -> list[Any]:
+        return []
+
 
 class Store:
     def __init__(self) -> None:
@@ -66,7 +78,7 @@ def planted(release: Event) -> WriteStep:
         return []
 
     step = WriteStep("size pass", "planted", call, writes=frozenset({Domain("tasks"), Domain("ranks")}))
-    step.budget_s = 0.05
+    step.floor_s = 0.05
     return step
 
 
