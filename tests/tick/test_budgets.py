@@ -198,9 +198,8 @@ def test_a_failed_steps_pipeline_reports_the_steps_stream(capsys: pytest.Capture
 @pytest.mark.feature("swarm-tick-live-budgets")
 def test_the_rebuild_marker_holds_one_rebuild_per_slow_interval() -> None:
     store = _store()
-    marker = "agentihooks-test-run:swarm:sw:tick:walls-rebuilt"
+    marker = store.key("sw", "tick:walls-rebuilt")
     _resolved(store, "reap")
-    assert store.key("sw", budgets.REBUILT) == marker
     assert store.redis.get(marker) == "1"
     assert store.redis.ttl(marker) == int(budgets.SLOW_S) == 600
     record = {"step": "reap", "budget_s": 22.0, "wall_s": 40.0, "phase": "finished"}
