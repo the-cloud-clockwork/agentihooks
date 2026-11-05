@@ -162,6 +162,9 @@ def run_probe(root: Path, selected: dict, stats: SharedStats, shard: tuple[int, 
     seconds = time.monotonic() - started
     refused = refusals(owned, rows, seconds, budget)
     if refused:
+        for name, status in sorted(rows.items()):
+            if status not in {"killed", "survived"}:
+                print(f"::error::{name} {status}")
         raise ValueError(f"early mutation did not grade its assigned mutants: {refused}")
     return {"plan": plan_fingerprint(plan), "index": shard[0], "total": shard[1], "seconds": seconds, "results": rows}
 

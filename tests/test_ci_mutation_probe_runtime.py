@@ -174,6 +174,25 @@ def test_a_refused_early_probe_names_its_cause(tmp_path, monkeypatch, reason, st
     assert str(raised.value) == message
 
 
+def test_a_refused_early_probe_prints_each_ungraded_mutant(tmp_path, monkeypatch, capsys):
+    plan = _plan()
+    plan["probe_shards"] = 1
+    plan["splits"]["scripts.a.x_g"] = plan["splits"]["scripts.a.x_f"]
+    stats = _shared(tmp_path, plan)
+    monkeypatch.setattr(probe.time, "monotonic", lambda: 100)
+    rows = [
+        {"name": "scripts.a.x_g__mutmut_1", "status": "timeout"},
+        {"name": "scripts.a.x_f__mutmut_1", "status": "killed"},
+        {"name": "scripts.a.x_f__mutmut_2", "status": "no tests"},
+    ]
+    monkeypatch.setattr(runner, "mutate_files", lambda *args: ({"scripts/a.py": rows}, ""))
+    with pytest.raises(ValueError):
+        probe.run_probe(tmp_path, {"scripts/a.py": ({2}, ["tests/a.py"])}, stats, (0, 1), 1080)
+    assert capsys.readouterr().out == (
+        "::error::scripts.a.x_f__mutmut_2 no tests\n::error::scripts.a.x_g__mutmut_1 timeout\n"
+    )
+
+
 def test_shared_early_elapsed_time_is_charged_before_the_remaining_worker_starts(tmp_path, monkeypatch):
     plan = _plan()
     stats = _shared(tmp_path, probe.merge_probes(plan, _records(plan)))
