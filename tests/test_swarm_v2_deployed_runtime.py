@@ -984,6 +984,38 @@ def test_the_tick_runtime_takes_its_disabled_backends_from_the_control_service_s
         service.stop()
 
 
+def test_the_tick_runtime_account_rows_read_the_claude_quota_live_hives_advertise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    from scripts.hive import registry
+
+    store = _store()
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
+    now = time.time()
+    reading = {
+        "five_hour": {"used": None, "resets_at": None},
+        "seven_day": {"used": 97.0, "resets_at": None},
+        "observed_at": now,
+    }
+    record = {**registry._default("quota-hive"), "heartbeat_at": int(now * 1000)}
+    store.redis.hset(
+        registry.key("quota-hive"), mapping={key: registry._encode(key, value) for key, value in record.items()}
+    )
+    store.redis.sadd(registry.INDEX, "quota-hive")
+    store.redis.set(
+        f"{registry.key('quota-hive')}:quota",
+        json.dumps({"claude:spent_slot": reading, "codex:spent_slot": {**reading, "observed_at": now - 1}}),
+    )
+
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        assert service.runtime.herdr_runtime.quota_accounts.route.advertised(now) == {"spent-slot": reading}
+    finally:
+        service.stop()
+
+
 def test_a_missing_worker_setting_refuses_the_start_and_names_each_one(tmp_path):
     store = _store()
     environ = _environ(tmp_path, store, **{deployed.IMAGE_TAG_ENV: None, deployed.BRAIN_ENV: None})

@@ -3,7 +3,9 @@ import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from scripts import session_bands
 from scripts.hive import registry
+from scripts.hive.placement import account_key
 from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 
 if TYPE_CHECKING:
@@ -56,12 +58,10 @@ def current(now: float) -> dict[str, dict]:
 
 
 def advertised(redis: "Redis", harness: str, now: float) -> dict[str, dict]:
-    """Per account, the newest fresh quota a live hive reports, keyed with - for _ so a controller Secret key finds it."""
-    from scripts import session_bands
-    from scripts.hive.placement import account_key
-
+    """Per account, the newest fresh quota a live hive reports, keyed with - for _ so a controller Secret key finds it;
+    of equally new readings the hive with the lowest id wins."""
     found: dict[str, dict] = {}
-    for hive in registry.hives(redis):
+    for hive in sorted(registry.hives(redis), key=lambda hive: hive["id"]):
         if not registry.live(hive, int(now * 1000)):
             continue
         for name, quota in json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}").items():
