@@ -245,13 +245,19 @@ def evaluate(session_id: str) -> Decision | None:
     if windows is None:
         return None
     five_used, week_used, five_reset, week_reset = windows
-    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < min(QUOTA_HANDOFF_WEEK_PCT, reservation.LOWEST):
-        return None
     harness = "codex" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "claude"
     held = reservation.current(harness, os.environ)
     account = session_account(agent_pid())
     master_seat = _master(os.environ)
+    primary_ceiling = (
+        reservation.primary_login_ceiling(account, os.environ) if master_seat and harness == "claude" else None
+    )
+    floors = [QUOTA_HANDOFF_WEEK_PCT, reservation.LOWEST, *([primary_ceiling] if primary_ceiling is not None else [])]
+    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < min(floors):
+        return None
     ceiling = _own_ceiling(held, account, reservation.is_master_session(os.environ), master_seat)
+    if primary_ceiling is not None:
+        ceiling = primary_ceiling if ceiling is None else min(ceiling, primary_ceiling)
     week_pct = QUOTA_HANDOFF_WEEK_PCT if ceiling is None else min(QUOTA_HANDOFF_WEEK_PCT, ceiling)
     if five_used < QUOTA_HANDOFF_5H_PCT and week_used < week_pct:
         return None

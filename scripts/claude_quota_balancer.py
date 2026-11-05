@@ -719,6 +719,10 @@ def account_cap(
     left = [session_bands.left(window.used, window.resets_at, timestamp) for window in weeks]
     five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, timestamp)
     week = None if None in left else min(left)
+    from scripts.routing import reservation
+
+    if reservation.primary_reserved(result.account, week, os.environ):
+        return 0
     return session_bands.cap(five, week) if ceiling is None else session_bands.scaled_cap(five, week, ceiling)
 
 

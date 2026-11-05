@@ -17,6 +17,42 @@ LOWEST = min(limit for _, limit in CEILINGS)
 MASTER_LEAVES = 100.0 - session_bands.WEEK_FLOOR
 MASTER_NAME = "master@"
 AGENT_NAME = "AGENTIHOOKS_AGENT_NAME"
+PRIMARY_RESERVE_ENV = "AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT"
+PRIMARY_RESERVE_DEFAULT = 20.0
+
+
+def primary_login() -> str:
+    """The operator's first claude ai login: rank zero of AGENTIHOOKS_MASTER_LOGIN_ORDER."""
+    from scripts import master_claude_login as login
+
+    ranks = login._preferred()
+    return next((name for name, rank in ranks.items() if rank == 0), "")
+
+
+def primary_reserve_pct(environ: Mapping[str, str]) -> float:
+    try:
+        return float(environ.get(PRIMARY_RESERVE_ENV, PRIMARY_RESERVE_DEFAULT))
+    except (TypeError, ValueError):
+        return PRIMARY_RESERVE_DEFAULT
+
+
+def primary_reserved(slug: str, week_left: float | None, environ: Mapping[str, str]) -> bool:
+    """Whether `slug` is the primary claude ai login with its week at or under the reserve: nothing new places there."""
+    primary = primary_login()
+    return (
+        bool(primary)
+        and week_left is not None
+        and account_key(slug) == account_key(primary)
+        and week_left <= primary_reserve_pct(environ)
+    )
+
+
+def primary_login_ceiling(account: str, environ: Mapping[str, str]) -> float | None:
+    """The week-used percent at which a master on the primary login must hand off, or None off that login."""
+    primary = primary_login()
+    if not primary or account_key(account) != account_key(primary):
+        return None
+    return 100.0 - primary_reserve_pct(environ)
 
 
 def ceiling(masters_live: int) -> float | None:

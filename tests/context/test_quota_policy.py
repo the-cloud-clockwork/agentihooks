@@ -928,6 +928,28 @@ def test_only_masters_are_limited_to_claude_ai_logins():
     assert qp.master_targets([token, login], {}) == [token, login]
 
 
+def test_a_master_on_the_primary_login_hands_off_at_its_reserve(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "main")
+    decision = _master_at(monkeypatch, 80.0, held=None)
+    assert (decision.action, decision.trigger, decision.account, decision.target.account) == (
+        "handoff",
+        "week",
+        "main",
+        "token",
+    )
+    assert (decision.week_used, decision.week_limit) == (80.0, 80.0)
+    assert "agentihooks swarm sw handoff DOC --reason quota" in qp.render(decision, "s", "/repo")
+    assert _master_at(monkeypatch, 79.9, held=None) is None
+
+
+def test_the_primary_login_reserve_setting_changes_the_handoff_threshold(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "main")
+    monkeypatch.setenv("AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT", "35")
+    assert _master_at(monkeypatch, 64.9, held=None) is None
+    decision = _master_at(monkeypatch, 65.0, held=None)
+    assert (decision.action, decision.week_limit) == ("handoff", 65.0)
+
+
 @pytest.mark.parametrize("five_used", [None, 100.0])
 @pytest.mark.parametrize("week_used", [10.0, 98.0])
 def test_codex_handoff_policy_uses_only_current_and_target_weeks(monkeypatch, five_used, week_used):
