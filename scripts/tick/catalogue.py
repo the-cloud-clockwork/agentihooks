@@ -30,8 +30,8 @@ nav_order: 73
 # Tick step catalogue
 
 Every registered tick step, by group and name, with the lane it runs on, its budget floor and interval in seconds, the
-steps it needs, the ports its effects name and its feature map id. `python -m scripts.tick.catalogue render` writes this page
-from `scripts.tick.registry.steps()`, and `tests/test_docs_tick.py` fails when it no longer matches the registry.
+steps it needs, the ports its effects name and its feature map id. `python -m scripts.tick.catalogue render` writes this
+page from `scripts.tick.registry.steps()`, and `tests/test_docs_tick.py` fails when it no longer matches the registry.
 How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step).
 
 | Step | Group | Lane | Floor | Interval | Needs | Effects | Feature |
