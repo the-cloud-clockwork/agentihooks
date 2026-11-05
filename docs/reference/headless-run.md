@@ -34,7 +34,7 @@ agentihooks headless run PROFILE --input TEXT|FILE \
 | `--input` | required | Prompt text, or the path of a file holding it |
 | `--schema FILE` | none | JSON schema file the output must match |
 | `--harness` | `auto` | `claude` or `codex`; `auto` reads `AGENTIHOOKS_TARGET` and falls back to `claude` |
-| `--out DIR` | a new folder under the AgentiHooks home | Run folder for the transcript and harness files; created when missing |
+| `--out DIR` | a new folder under the AgentiHooks home | Run folder for the transcript and harness files; created when missing. A folder from an earlier run is reused and its files overwritten |
 | `--tier` | `high` | Model tier, mapped to a model per harness (see [Model tiers](#model-tiers)) |
 | `--effort` | `medium` | Effort passed to `select-profile --effort` (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`) |
 | `--timeout` | `1800` | Seconds before the run is killed |
@@ -120,7 +120,8 @@ nothing on stdout.
 4. The harness runs with stdin closed, its stdout written to
    `transcript.jsonl` and its stderr to `stderr.txt` in the run folder. The
    environment carries `AGENTIHOOKS_WORKER_RUN=1` and
-   `AGENTIHOOKS_WORKER_RUN_ID=<run folder name>`.
+   `AGENTIHOOKS_WORKER_RUN_ID` set to the run folder's base name, such as
+   `20261105T140312Z-3f9a1c2e`, not its full path.
 5. The final answer and session id are read from the transcript and, with a
    schema, validated.
 
