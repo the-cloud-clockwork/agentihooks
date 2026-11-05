@@ -1,0 +1,177 @@
+"""The observe step's acknowledgement collection settles each waiting hive launch through the tick seams."""
+
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from scripts.swarm import launch_job, readiness, tick
+from scripts.swarm.store import EVENTS_ENGINE, SwarmError
+from scripts.swarm_v2.runtime import codex
+from scripts.tick.steps import observe
+
+pytestmark = pytest.mark.unit
+
+NOW = tick.LEASE_MS + 1_000
+
+
+class _AckError(Exception):
+    """A collect error the fake tick seam reads as a pending hive acknowledgement."""
+
+
+def _agent(name: str, state: str = "working", started_at: int = NOW - 10) -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name, task=f"task-{name}", lane="eng", seat=f"seat-{name}", state=state, started_at=started_at
+    )
+
+
+class _Store:
+    """Answer the agent list and record every claim refresh."""
+
+    def __init__(self, agents: list[SimpleNamespace]) -> None:
+        self.listed, self.refreshed = agents, list[tuple[Any, ...]]()
+
+    def agents(self, slug: str) -> list[SimpleNamespace]:
+        assert slug == "sw"
+        return self.listed
+
+    def refresh(self, *args: Any) -> None:
+        self.refreshed.append(args)
+
+
+class _Runtime:
+    """Answer collect and expire per agent name, recording each call."""
+
+    def __init__(self, outcomes: dict[str, Any], expired: dict[str, Any]) -> None:
+        self.outcomes, self.expired = outcomes, expired
+        self.collected, self.expiring = list[tuple[Any, ...]](), list[tuple[Any, ...]]()
+
+    def collect(self, config: Any, lane: str, name: str, task: dict[str, Any]) -> Any:
+        self.collected.append((config, lane, name, task))
+        outcome = self.outcomes[name]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    def expire(self, config: Any, lane: str, name: str, task: dict[str, Any]) -> Any:
+        self.expiring.append((config, lane, name, task))
+        return self.expired[name]
+
+
+def _seams(monkeypatch: pytest.MonkeyPatch, pending: set[str], waiting: set[str]) -> list[tuple[Any, ...]]:
+    seen: list[tuple[Any, ...]] = []
+
+    def collect(passed: Any) -> tuple[list[str], set[str]]:
+        seen.append(("collect", passed))
+        return ["collected"], set(pending)
+
+    monkeypatch.setattr(launch_job, "collect", collect)
+    monkeypatch.setattr(tick, "_Pass", lambda *args: ("pass", args))
+    monkeypatch.setattr(
+        readiness, "tick_launches", lambda engine, row: seen.append(("ready", engine)) or row.get("ready", True)
+    )
+    monkeypatch.setattr(tick, "_acknowledging", lambda slug, store, agent: agent.name in waiting)
+    monkeypatch.setattr(tick, "_acknowledging_error", lambda exc: isinstance(exc, _AckError))
+    monkeypatch.setattr(tick, "placed_record", lambda agent, placed: ("record", agent.name, placed))
+    monkeypatch.setattr(codex, "admit_legacy", lambda store, slug, record, runtime: ("launched", slug, record))
+    monkeypatch.setattr(tick, "_finished_launch", lambda slug, store, doc, agent: f"finished {slug} {agent.name}")
+    monkeypatch.setattr(
+        tick,
+        "_started",
+        lambda slug, config, store, ledger, doc, started, now_ms: [
+            f"started {slug} {ledger} {started.record.name} {started.task['id']} {started.placed} {started.launched} {now_ms}"
+        ],
+    )
+    monkeypatch.setattr(
+        tick,
+        "_spawn_failed",
+        lambda slug, store, ledger, runtime, rows, failed, now_ms: [
+            f"failed {slug} {ledger} {sorted(rows)} {failed.record.name} {failed.task['id']} {failed.error} {now_ms}"
+        ],
+    )
+    monkeypatch.setattr(
+        tick, "_expire_launch", lambda config, runtime, agent, error: runtime.expire(config, agent.lane, agent.name, {})
+    )
+    return seen
+
+
+@pytest.mark.feature("swarm-tick-launch-cluster")
+def test_collected_acknowledgements_start_finish_fail_or_wait_each_launch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    expired = tick.SpawnError("lease ran out")
+    agents = [
+        _agent("a1"),
+        _agent("a2", state="finished"),
+        _agent("a3"),
+        _agent("a4"),
+        _agent("a5"),
+        _agent("a6"),
+        _agent("a7"),
+        _agent("a8", started_at=NOW - tick.LEASE_MS),
+        _agent("a9", started_at=NOW - tick.LEASE_MS + 1),
+        _agent("a10"),
+        _agent("a11", started_at=0),
+        _agent("a12"),
+    ]
+    seen = _seams(
+        monkeypatch, pending={"a3"}, waiting={name for name in (f"a{n}" for n in range(1, 13)) if name != "a4"}
+    )
+    runtime = _Runtime(
+        {
+            "a1": "placed-a1",
+            "a2": "placed-a2",
+            "a6": _AckError("pending"),
+            "a7": tick.SpawnError("refused"),
+            "a8": ValueError("lost"),
+            "a9": ValueError("flaky"),
+            "a10": SwarmError("conflict"),
+            "a11": _AckError("still pending"),
+            "a12": "placed-a12",
+        },
+        {"a8": expired, "a11": _AckError("kept")},
+    )
+    store = _Store(agents)
+    config: Any = SimpleNamespace(engine="tick")
+    tasks = [{"id": f"task-a{n}"} for n in range(1, 12)] + [{"id": "task-a5", "ready": False}]
+    doc = {"tasks": tasks}
+    actions = observe._collect_acks("sw", config, store, "ledger", runtime, doc, NOW)
+    rows = sorted({task["id"] for task in tasks})
+    assert actions == [
+        "collected",
+        f"started sw ledger a1 task-a1 placed-a1 ('launched', 'sw', ('record', 'a1', 'placed-a1')) {NOW}",
+        "finished sw a2",
+        f"failed sw ledger {rows} a7 task-a7 refused {NOW}",
+        f"failed sw ledger {rows} a8 task-a8 lease ran out {NOW}",
+        f"failed sw ledger {rows} a10 task-a10 conflict {NOW}",
+        f"started sw ledger a12 task-a12 placed-a12 ('launched', 'sw', ('record', 'a12', 'placed-a12')) {NOW}",
+    ]
+    assert seen[0] == (
+        "collect",
+        ("pass", ("sw", config, store, "ledger", runtime, {t["id"]: t for t in tasks}, doc, NOW)),
+    )
+    assert set(seen[1:]) == {("ready", "tick")}
+    assert [call[2] for call in runtime.collected] == ["a1", "a2", "a6", "a7", "a8", "a9", "a10", "a11", "a12"]
+    assert runtime.collected[0] == (config, "eng", "a1", {"id": "task-a1", "seat": "seat-a1", tick.ACK_LATER: True})
+    assert [call[2] for call in runtime.expiring] == ["a8", "a11"]
+    assert store.refreshed == [
+        ("sw", "task-a6", "a6", tick.LEASE_MS),
+        ("sw", "task-a9", "a9", tick.LEASE_MS),
+        ("sw", "task-a11", "a11", tick.LEASE_MS),
+    ]
+    assert capsys.readouterr().err == "a9 collect for task-a9 raised ValueError('flaky'), waiting for the hive\n"
+
+
+@pytest.mark.feature("swarm-tick-launch-cluster")
+def test_the_events_engine_collects_no_hive_pass_and_reads_a_missing_task_by_its_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _seams(monkeypatch, pending={"a1"}, waiting={"a1"})
+    runtime = _Runtime({"a1": "placed-a1"}, {})
+    config: Any = SimpleNamespace(engine=EVENTS_ENGINE)
+    actions = observe._collect_acks("sw", config, _Store([_agent("a1")]), "ledger", runtime, {"tasks": []}, NOW)
+    assert actions == [
+        f"started sw ledger a1 task-a1 placed-a1 ('launched', 'sw', ('record', 'a1', 'placed-a1')) {NOW}"
+    ]
+    assert seen == [("ready", EVENTS_ENGINE)]
+    assert runtime.collected == [(config, "eng", "a1", {"id": "task-a1", "seat": "seat-a1", tick.ACK_LATER: True})]

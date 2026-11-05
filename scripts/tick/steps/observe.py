@@ -12,7 +12,7 @@ from inspect import signature
 from types import MappingProxyType
 from typing import Any
 
-from scripts.swarm.store import MASTER, SwarmConfig, SwarmError
+from scripts.swarm.store import EVENTS_ENGINE, MASTER, SwarmConfig, SwarmError
 from scripts.tick import registry
 from scripts.tick.steps import CallStep, Left, PassBox, pass_domains
 
@@ -422,7 +422,7 @@ def _collect_acks(
     pending: set[str]
     actions, pending = (
         ([], set())
-        if config.engine == tick.EVENTS_ENGINE
+        if config.engine == EVENTS_ENGINE
         else launch_job.collect(tick._Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))  # pyright: ignore[reportUnknownMemberType]
     )
     for agent in [
