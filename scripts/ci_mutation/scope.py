@@ -306,7 +306,7 @@ def held_tests(root: Path) -> Generator[None]:
     try:
         yield
     finally:
-        HELD.pop(root, None)
+        del HELD[root]
 
 
 def held_text(path: Path) -> str:

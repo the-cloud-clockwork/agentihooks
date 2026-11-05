@@ -240,7 +240,7 @@
   "scripts/ci_mutation/reuse.py": 29,
   "scripts/ci_mutation/runner.py": 106,
   "scripts/ci_mutation/scope.py": 22,
-  "scripts/ci_mutation/selection.py": 299,
+  "scripts/ci_mutation/selection.py": 290,
   "scripts/ci_mutation/stats.py": 9,
   "scripts/ci_mutation/stats_cache.py": 242,
   "scripts/ci_mutation/stats_dependencies.py": 127,
