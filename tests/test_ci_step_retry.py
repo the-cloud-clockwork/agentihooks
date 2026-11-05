@@ -266,6 +266,7 @@ def test_every_absorbed_upload_failure_settles_waits_and_warns_before_the_next_a
             "SETTLE_SCRIPT": "${{ github.action_path }}/settle.py",
         }
         assert "process.env.SETTLE_SCRIPT" in settle["with"]["script"]
+        assert settle["with"]["github-token"] == "none"
         assert "::warning title=Retried upload::" in waits["run"]
         assert wait in waits["run"]
         assert "${{" not in waits["run"]

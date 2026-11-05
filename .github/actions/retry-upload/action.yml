@@ -82,6 +82,7 @@ runs:
         SETTLE_SECONDS: ${{ inputs.settle-seconds }}
         SETTLE_SCRIPT: ${{ github.action_path }}/settle.py
       with:
+        github-token: none
         script: |
           require('child_process').execFileSync('python3', [process.env.SETTLE_SCRIPT], {stdio: 'inherit'})
     - name: Wait before attempt 2
@@ -126,6 +127,7 @@ runs:
         SETTLE_SECONDS: ${{ inputs.settle-seconds }}
         SETTLE_SCRIPT: ${{ github.action_path }}/settle.py
       with:
+        github-token: none
         script: |
           require('child_process').execFileSync('python3', [process.env.SETTLE_SCRIPT], {stdio: 'inherit'})
     - name: Wait before attempt 3

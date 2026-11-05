@@ -34,6 +34,7 @@ TOKEN = re.compile(
     re.IGNORECASE,
 )
 APP_TOKEN = "${{ steps.app-token.outputs.token }}"
+NO_TOKEN = "none"
 
 
 def _workflow(name: str) -> dict:
@@ -79,7 +80,7 @@ def _holds_token(step: dict) -> bool:
         or TOKEN.search(step.get("run", ""))
         or (
             step.get("uses", "").startswith("actions/github-script@")
-            and (step.get("with") or {}).get("github-token") != APP_TOKEN
+            and (step.get("with") or {}).get("github-token") not in (APP_TOKEN, NO_TOKEN)
         )
     )
 
@@ -447,7 +448,13 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
 
 @pytest.mark.parametrize(
     ("binding", "offends"),
-    [(APP_TOKEN, False), ("${{ github.token }}", True), ("", True), ("${{ secrets.OTHER_TOKEN }}", True)],
+    [
+        (APP_TOKEN, False),
+        (NO_TOKEN, False),
+        ("${{ github.token }}", True),
+        ("", True),
+        ("${{ secrets.OTHER_TOKEN }}", True),
+    ],
 )
 def test_github_script_requires_the_explicit_app_token(binding, offends):
     step = {"uses": "actions/github-script@v7", "with": {"github-token": binding}}

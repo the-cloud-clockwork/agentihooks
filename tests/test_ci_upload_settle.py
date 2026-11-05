@@ -1,4 +1,5 @@
 import base64
+import email.message
 import importlib.util
 import io
 import json
@@ -11,6 +12,7 @@ pytestmark = pytest.mark.unit
 
 _PATH = Path(__file__).resolve().parents[1] / ".github/actions/retry-upload/settle.py"
 _SPEC = importlib.util.spec_from_file_location("retry_upload_settle", _PATH)
+assert _SPEC is not None and _SPEC.loader is not None
 settle = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(settle)
 
@@ -106,12 +108,6 @@ def test_main_without_a_runtime_token_retries_without_settling(monkeypatch, caps
 class _Response(io.BytesIO):
     status = 200
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
 
 def test_call_posts_json_to_the_service_with_the_bearer_token(monkeypatch):
     seen = []
@@ -134,7 +130,7 @@ def test_call_posts_json_to_the_service_with_the_bearer_token(monkeypatch):
 @pytest.mark.parametrize(
     "error, status",
     [
-        (urllib.error.HTTPError("u", 409, "Conflict", {}, io.BytesIO(b"")), 409),
+        (urllib.error.HTTPError("u", 409, "Conflict", email.message.Message(), io.BytesIO(b"")), 409),
         (urllib.error.URLError("reset"), 0),
         (TimeoutError(), 0),
     ],
