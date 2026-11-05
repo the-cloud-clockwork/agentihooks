@@ -57,22 +57,10 @@ class AccountRoute:
     ) -> None:
         self.keys, self.quota, self.held, self.harness = keys, quota, held, harness
 
-    def _unread_row(self, key: str, cap: int, sessions: int, now: float) -> Account:
-        """An incomplete reading keeps the launch cap unless its fresh week reading shows the account draining."""
-        latest = self.quota.latest(key, self.harness)
-        fresh = latest is not None and session_bands.fresh(latest.observed_ms / 1000, now)
-        if latest is None or not fresh or latest.provider_status == "error":
-            return Account(self.harness, key, OPEN, sessions, None, None, cap)
-        reset = None if latest.week_reset is None else int(latest.week_reset)
-        week = session_bands.left(latest.week_used, reset, now)
-        if not quota_state.draining(week):
-            return Account(self.harness, key, OPEN, sessions, None, None, cap)
-        return Account(self.harness, key, CLOSED, sessions, None, week, 0, reset)
-
     def _row(self, key: str, cap: int, sessions: int, now: float) -> Account:
         reading = self.quota.reading(key, self.harness)
         if reading.state == UNKNOWN:
-            return self._unread_row(key, cap, sessions, now)
+            return Account(self.harness, key, OPEN, sessions, None, None, cap)
         drained = draining(self.harness, reading.five_left, reading.week_left)
         banded = 0 if drained else min(cap, self.quota.cap(key, self.harness))
         latest = self.quota.latest(key, self.harness)
