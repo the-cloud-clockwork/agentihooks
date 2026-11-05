@@ -91,7 +91,7 @@ def store():
 
 
 def refresh(store, ledger, run, now=NOW):
-    config = SimpleNamespace(repo="/repo")
+    config = SimpleNamespace(repo="/repo", repo_origin="")
     return promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), now, run)
 
 
@@ -596,7 +596,7 @@ def test_a_former_owner_closed_alert_for_the_run_holds_it_too(store, monkeypatch
 @pytest.mark.parametrize("slug", ["proof-323133-cxc9-1", "proof-ed3ec8-t12-3"])
 def test_a_proof_swarm_never_reads_promotion_runs_or_files_fixers(store, slug):
     calls, ledger = [], Ledger()
-    config = SimpleNamespace(repo="/repo")
+    config = SimpleNamespace(repo="/repo", repo_origin="")
     actions = promotion_watch.refresh(slug, config, store, ledger, ledger.doc(), NOW, gh([RED], JOBS, calls))
     assert (actions, calls, ledger.added, ledger.raised) == ([], [], [], [])
     assert store.redis.keys("*") == []
@@ -604,7 +604,7 @@ def test_a_proof_swarm_never_reads_promotion_runs_or_files_fixers(store, slug):
 
 def test_a_slug_that_only_resembles_a_proof_swarm_still_files_fixers(store):
     calls, ledger = [], Ledger()
-    config = SimpleNamespace(repo="/repo")
+    config = SimpleNamespace(repo="/repo", repo_origin="")
     promotion_watch.refresh("proof-323133-cxc9", config, store, ledger, ledger.doc(), NOW, gh([RED], JOBS, calls))
     assert calls and ledger.added
 
@@ -752,7 +752,7 @@ def test_the_tick_hands_the_watch_its_ledger_state_and_clock(store, monkeypatch)
 
 
 def test_a_ledger_without_task_or_alert_lists_still_files_and_closes(store):
-    config = SimpleNamespace(repo="/repo")
+    config = SimpleNamespace(repo="/repo", repo_origin="")
     red = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW, gh([RED], JOBS))
     assert red[-2] == "raised the promotion alert for dev push run 900"
     green = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW * 2, gh([GREEN]))
