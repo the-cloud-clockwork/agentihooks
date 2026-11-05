@@ -316,7 +316,7 @@ def test_a_snapshot_job_left_past_its_budget_ends_the_pass_full_without_its_line
     seen = _spy(monkeypatch)
     release = Event()
     step = next(step for step in report.STEPS if step.name == "snapshot job")
-    monkeypatch.setattr(step, "budget_s", 0.05)
+    monkeypatch.setattr(step, "floor_s", 0.05)
 
     called: list[bool] = []
 
