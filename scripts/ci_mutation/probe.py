@@ -135,7 +135,7 @@ def run_probe(root: Path, selected: dict, stats: SharedStats, shard: tuple[int, 
     plan = json.loads((stats.folder / "plan.json").read_text())
     early = probe_plan(plan, shard)
     owned = {name for name, assignment in early["assignments"].items() if holds(assignment, shard[0])}
-    rows = {}
+    rows: dict[str, str] = {}
     if owned:
         output = root / ".mutation-probe" / str(shard[0])
         output.mkdir(parents=True, exist_ok=True)
@@ -162,6 +162,9 @@ def run_probe(root: Path, selected: dict, stats: SharedStats, shard: tuple[int, 
     seconds = time.monotonic() - started
     refused = refusals(owned, rows, seconds, budget)
     if refused:
+        for name, status in sorted(rows.items()):
+            if status not in {"killed", "survived"}:
+                print(f"::error::{name} {status}")
         raise ValueError(f"early mutation did not grade its assigned mutants: {refused}")
     return {"plan": plan_fingerprint(plan), "index": shard[0], "total": shard[1], "seconds": seconds, "results": rows}
 
