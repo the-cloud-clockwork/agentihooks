@@ -14,7 +14,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from scripts import tick_pattern
 from scripts.tick import catalogue
@@ -72,21 +72,15 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text())
 
 
-def _callee(func: ast.expr) -> str:
-    """The plain name a call reaches through ``func``."""
-    if isinstance(func, ast.Name):
-        return func.id
-    return func.attr if isinstance(func, ast.Attribute) else ""
-
-
 def registered_names(source: str) -> set[str]:
     """The literal step names ``source`` registers."""
     found: set[str] = set()
     for node in ast.walk(ast.parse(source)):
-        if not (isinstance(node, ast.Call) and node.args and _callee(node.func) in tick_pattern.POSITIONS):
+        if not (isinstance(node, ast.Call) and node.args):
             continue
+        callee = {getattr(node.func, "id", None), getattr(node.func, "attr", None)}
         first = node.args[0]
-        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        if callee & tick_pattern.POSITIONS.keys() and isinstance(first, ast.Constant) and isinstance(first.value, str):
             found.add(first.value)
     return found
 
@@ -151,7 +145,7 @@ def _stub(spec: Spec) -> str:
 def _bound(tree: ast.Module) -> set[str]:
     """The names the top level imports of ``tree`` bind."""
     return {
-        alias.asname or alias.name.split(".")[0]
+        alias.asname or alias.name
         for node in tree.body
         if isinstance(node, (ast.Import, ast.ImportFrom))
         for alias in node.names
@@ -163,7 +157,7 @@ def _with_imports(source: str) -> str:
     tree = ast.parse(source)
     missing = [line + "\n" for name, line in IMPORTS if name not in _bound(tree)]
     anchors = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))] or tree.body[:1]
-    at = max((cast(int, node.end_lineno) for node in anchors), default=0)
+    at = max((node.end_lineno or node.lineno for node in anchors), default=0)
     lines = source.splitlines(keepends=True)
     inserted = ["\n", *missing] if missing else []
     return "".join([*lines[:at], *inserted, *lines[at:]])
@@ -185,17 +179,17 @@ def _table_end(source: str) -> int:
             targets = node.targets
         else:
             continue
-        if node.value and any(isinstance(target, ast.Name) and target.id == "MEASURED" for target in targets):
-            return cast(int, node.value.end_lineno)
-    raise SystemExit(f"{BUDGETS} holds no MEASURED table")
+        if node.value and any(isinstance(target, ast.Name) and target.id == "FLOORS" for target in targets):
+            return node.value.end_lineno or node.value.lineno
+    raise SystemExit(f"{BUDGETS} holds no FLOORS table")
 
 
 def _row_text(root: Path, spec: Spec) -> tuple[Path, str]:
-    """The budgets module with the step's unmeasured row at the end of its table."""
+    """The budgets module with the step's light floor row at the end of its table."""
     path = root / BUDGETS
     source = path.read_text()
     lines = source.splitlines(keepends=True)
-    row = f"    {json.dumps(spec.name)}: Timing(UNMEASURED_S, {INTERVALS[spec.interval]}),\n"
+    row = f"    {json.dumps(spec.name)}: Timing(LIGHT_S, {INTERVALS[spec.interval]}),\n"
     lines.insert(_table_end(source) - 1, row)
     return path, "".join(lines)
 
@@ -266,19 +260,17 @@ def _join_modules(root: Path, module: str) -> tuple[Path, str]:
     names = [*ast.literal_eval(value), f"{PACKAGE}.{module}"]
     lines = source.splitlines(keepends=True)
     first, last = value.lineno - 1, (value.end_lineno or value.lineno) - 1
-    head, tail = lines[first][: value.col_offset], lines[last][value.end_col_offset or 0 :]
+    head, tail = lines[first][: value.col_offset], lines[last][value.end_col_offset :]
     lines[first : last + 1] = [head + "(" + "".join(f"{json.dumps(name)}, " for name in names) + ")" + tail]
     return path, "".join(lines)
 
 
-def _formatted(root: Path, path: Path, text: str) -> str:
-    """``text`` of the Python file at ``path`` with its imports sorted and formatted, read and returned on stdin and
-    stdout so nothing is written."""
-    ruff = [sys.executable, "-m", "ruff"]
-    named = ["--stdin-filename", str(path)]
-    for command in (["check", "--select", "I", "--fix", "--quiet", *named, "-"], ["format", "--quiet", *named, "-"]):
+def _formatted(root: Path, text: str) -> str:
+    """Python ``text`` with its imports sorted and formatted under the ruff settings of ``root``, read and returned on
+    stdin and stdout so nothing is written."""
+    for command in (["check", "--select", "I", "--fix", "-"], ["format", "-"]):
         text = subprocess.run(
-            [*ruff, *command], cwd=root, input=text, capture_output=True, text=True, check=True
+            [sys.executable, "-m", "ruff", *command], cwd=root, input=text, capture_output=True, text=True, check=True
         ).stdout
     return text
 
@@ -296,7 +288,7 @@ def scaffold(root: Path, spec: Spec) -> list[Path]:
     ]
     if new:
         texts.append(_join_modules(root, spec.module))
-    final = [(path, _formatted(root, path, text) if path.suffix == ".py" else text) for path, text in texts]
+    final = [(path, _formatted(root, text) if path.suffix == ".py" else text) for path, text in texts]
     for path, text in final:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
@@ -315,7 +307,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--feature")
     parser.add_argument("--module")
     parser.add_argument("--scenario", default=SCENARIO)
-    parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument("--root", default=".")
     return parser
 
 
@@ -323,16 +315,17 @@ def main(argv: list[str] | None = None) -> int:
     """Scaffold a step, or report which artefacts of a step exist with ``--check``."""
     parser = _parser()
     args = parser.parse_args(argv)
+    root = Path(args.root)
     if args.check:
-        found = check(args.root, args.check)
+        found = check(root, args.check)
         print(json.dumps(found, indent=1))
         return 0 if all(found.values()) else 1
     if not all((args.name, args.group, args.lane, args.interval, args.feature, args.module)):
         parser.error("a step needs a name, --group, --lane, --interval, --feature and --module")
     effects = frozenset(port.strip() for port in args.effects.split(",") if port.strip())
     spec = Spec(args.name, args.group, args.lane, args.interval, effects, args.feature, args.module, args.scenario)
-    for path in scaffold(args.root, spec):
-        print(path.relative_to(args.root).as_posix())
+    for path in scaffold(root, spec):
+        print(path.relative_to(root).as_posix())
     return 0
 
 
