@@ -67,10 +67,15 @@ def repository(hive: dict[str, Any], repo: str) -> str:
 
     if repo in hive["repos"]:
         return repo
-    identity = origin(Path(repo))
-    if identity and any(not Path(path).is_absolute() and "/" in path for path in hive["repos"]):
-        return identity if identity in hive["repos"] else ""
     name = Path(repo).name.removesuffix(".git")
+    identity = origin(Path(repo)) or (repo if not Path(repo).is_absolute() and "/" in repo else "")
+    remotes = [
+        path
+        for path in hive["repos"]
+        if not Path(path).is_absolute() and "/" in path and Path(path).name.removesuffix(".git") == name
+    ]
+    if identity and remotes:
+        return identity if identity in remotes else ""
     return next(
         (path for path in hive["repos"] if Path(path).is_absolute() and Path(path).name == name),
         "",

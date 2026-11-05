@@ -404,15 +404,19 @@ def test_placement_matches_the_repository_under_another_home(repo: str) -> None:
     assert [item["id"] for item in placement.round_robin(hives, 1, repo, NOW)] == ["pods"]
 
 
-def test_placement_uses_the_name_without_overriding_an_advertised_origin(tmp_path: Path) -> None:
+@pytest.mark.parametrize("remote_input", [False, True])
+def test_placement_uses_the_name_without_overriding_an_advertised_origin(tmp_path: Path, remote_input: bool) -> None:
     checkout = tmp_path / "agentihooks"
     (checkout / ".git").mkdir(parents=True)
     (checkout / ".git" / "config").write_text(
         '[remote "origin"]\n    url = https://github.com/the-cloud-clockwork/agentihooks.git\n'
     )
+    repo = "github.com/the-cloud-clockwork/agentihooks" if remote_input else str(checkout)
     hives = [hive("pods", repos=["/home/worker/dev/agentihooks"])]
-    assert place("eng", "claude", "acct", "subscription", str(checkout), hives, NOW) == "pods"
+    assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
+    hives[0]["repos"].append("github.com/org/another-repo")
+    assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
     hives[0]["repos"].append("github.com/someone/agentihooks")
-    assert place("eng", "claude", "acct", "subscription", str(checkout), hives, NOW) == Wait(
-        f"no hive for eng lists the repo {checkout}"
+    assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == Wait(
+        f"no hive for eng lists the repo {repo}"
     )
