@@ -181,7 +181,14 @@ def base_budget() -> float:
     """The pass budget on the integration branch, the initial budget before it holds one."""
     relative = BUDGET.relative_to(ROOT).as_posix()
     resolved = subprocess.run(["git", "rev-parse", "--verify", "origin/dev"], cwd=ROOT, capture_output=True, text=True)
-    assert resolved.returncode == 0, "origin/dev does not resolve, so the base budget cannot be read"
+    if resolved.returncode != 0:
+        fetched = subprocess.run(
+            ["git", "fetch", "--no-tags", "--depth=1", "origin", "+refs/heads/dev:refs/remotes/origin/dev"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert fetched.returncode == 0, f"origin/dev does not resolve and fetching dev failed: {fetched.stderr}"
     listed = subprocess.run(
         ["git", "ls-tree", "--name-only", "origin/dev", relative], cwd=ROOT, capture_output=True, text=True, check=True
     )
@@ -220,6 +227,30 @@ def test_a_step_made_300_seconds_slower_breaks_the_budget(monkeypatch: pytest.Mo
 @pytest.mark.feature("swarm-tick-pass-budget")
 def test_the_budget_only_shrinks_against_its_base() -> None:
     check_budget(budget(), base_budget())
+
+
+@pytest.mark.feature("swarm-tick-pass-budget")
+def test_the_base_budget_fetches_dev_when_origin_dev_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    relative = BUDGET.relative_to(ROOT).as_posix()
+    answers = {
+        "rev-parse": (128, "", "fatal: Needed a single revision"),
+        "fetch": (0, "", ""),
+        "ls-tree": (0, f"{relative}\n", ""),
+        "show": (0, json.dumps({"pass_budget_s": 123.5}), ""),
+    }
+
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        code, out, err = answers[args[1]]
+        return subprocess.CompletedProcess(args, code, out, err)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert base_budget() == 123.5
+    assert ["git", "fetch", "--no-tags", "--depth=1", "origin", "+refs/heads/dev:refs/remotes/origin/dev"] in calls
+    answers["fetch"] = (128, "", "fatal: unable to access origin")
+    with pytest.raises(AssertionError, match="fetching dev failed: fatal: unable to access origin"):
+        base_budget()
 
 
 @pytest.mark.feature("swarm-tick-pass-budget")
