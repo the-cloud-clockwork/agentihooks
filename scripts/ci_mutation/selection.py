@@ -78,7 +78,7 @@ def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list
         def __init__(self, ignored: IgnoredCode, allowed: Callable[[cst.CSTNode], bool]) -> None:
             super().__init__(mutation_operators, ignored)
             self.allowed = allowed
-            self.refused = False
+            self.refused: list[cst.CSTNode] = []
 
         # mutmut 3.6.0 skips every decorated class, yet a dataclass keeps its methods, so their trampolines work.
         def _skip_node_and_children(self, node: cst.CSTNode) -> bool:
@@ -86,7 +86,7 @@ def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list
             if not skipped or not isinstance(node, cst.FunctionDef | cst.ClassDef) or not node.decorators:
                 return skipped
             if not self.allowed(node):
-                self.refused = True
+                self.refused.append(node)
                 return True
             return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
 
@@ -97,7 +97,7 @@ def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list
         lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else True,
     )
     wrapper.visit(graded)
-    if not graded.refused:
+    if not any(graded.refused):
         return wrapper, graded.mutations, graded.mutations
     possible = Visitor(ignored, lambda node: True)
     wrapper.visit(possible)
