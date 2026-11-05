@@ -194,19 +194,19 @@ def test_skip_refused_turns_a_refusal_or_redis_timeout_into_a_skip_line(capsys: 
 def test_skip_dropped_retries_once_then_skips(capsys: pytest.CaptureFixture[str]) -> None:
     from redis.exceptions import ConnectionError as RedisConnectionError
 
-    calls: list[int] = []
+    calls: list[tuple[str, ...]] = []
 
-    def flaky() -> list[str]:
-        calls.append(1)
+    def flaky(*args: str) -> list[str]:
+        calls.append(args)
         if len(calls) == 1:
             raise RedisConnectionError("gone")
-        return ["ok"]
+        return ["ok", *args]
 
     def dead() -> None:
         raise RedisConnectionError("down")
 
-    assert common.skip_dropped(flaky) == ["ok"]
-    assert len(calls) == 2
+    assert common.skip_dropped(flaky, "a", "b") == ["ok", "a", "b"]
+    assert calls == [("a", "b"), ("a", "b")]
     assert common.skip_dropped(lambda: None) == []
     name = f"{__name__}.{dead.__qualname__}"
     assert common.skip_dropped(dead) == [f"skipped {name}: its Redis connection dropped or timed out twice"]
@@ -299,6 +299,24 @@ def test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task(
         )
     assert ledger.calls == ledger_calls
     assert settled == [(("inbox", "redis"), "a", "eng-1@slug" if reopened else "", "stopped")]
+
+
+@pytest.mark.feature("swarm-tick-common-helpers")
+def test_drop_releases_an_agent_whose_task_has_no_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    settled: list[tuple[object, ...]] = []
+    monkeypatch.setattr(tick, "InboxStore", lambda redis: ("inbox", redis))
+    monkeypatch.setattr(tick.exits, "settle", lambda *args: settled.append(args))
+    store = _DropStore(1)
+    ledger = _DropLedger({"state": "open", "claimed_by": ""}, {})
+    agent = SimpleNamespace(name="a", task="gone", seat="eng-1@slug")
+    assert common._drop("slug", store, ledger, {}, agent, refund=True) == ""
+    assert store.calls == [
+        ("claim_generation", "slug", "gone"),
+        ("release", "slug", "gone", "a"),
+        ("drop_agent", "slug", "a"),
+    ]
+    assert ledger.calls == []
+    assert settled == [(("inbox", "redis"), "a", "", "stopped")]
 
 
 class _CollectRedis:

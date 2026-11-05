@@ -139,7 +139,8 @@
         "tests/tick/steps/test_common.py::test_skip_refused_turns_a_refusal_or_redis_timeout_into_a_skip_line",
         "tests/tick/steps/test_common.py::test_skip_dropped_retries_once_then_skips",
         "tests/tick/steps/test_common.py::test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task",
-        "tests/tick/steps/test_common.py::test_collected_records_a_masters_retired_tasks_then_drops_the_agent"
+        "tests/tick/steps/test_common.py::test_collected_records_a_masters_retired_tasks_then_drops_the_agent",
+        "tests/tick/steps/test_common.py::test_drop_releases_an_agent_whose_task_has_no_row"
       ]
     },
     {
