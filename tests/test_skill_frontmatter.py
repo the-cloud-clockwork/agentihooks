@@ -107,7 +107,9 @@ def test_tick_pattern_rule_folds_into_every_role_persona(world: dict, role: str)
     from scripts.profiles import render
 
     world["install"]._save_state({})
-    persona = (render.render_claude(role) / "CLAUDE.md").read_text()
+    out = render.render_claude(role)
+    assert out is not None
+    persona = (out / "CLAUDE.md").read_text()
 
     assert persona.count(f"<!-- rule: tick-pattern.md (rule) -->\n{RULE.read_text().strip()}") == 1
 
