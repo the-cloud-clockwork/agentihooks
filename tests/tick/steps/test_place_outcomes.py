@@ -1,6 +1,7 @@
 """The place step's failed launch outcomes release the launch, report capacity and route waits through the tick seams."""
 
 import json
+import os
 from types import SimpleNamespace
 from typing import Any
 
@@ -77,9 +78,15 @@ def test_a_full_account_reservation_reports_the_accounts_with_room(
         lambda store, slug: read.append((store, slug)) or {"observed_at": observed_at, "accounts": rows},
     )
     monkeypatch.setattr(capacity, "Account", lambda **row: SimpleNamespace(**row))
-    monkeypatch.setattr(quota_handoff.Thresholds, "from_env", classmethod(lambda cls, env: "thresholds"))
     monkeypatch.setattr(
-        quota_handoff, "trigger", lambda account, thresholds: "handoff" if account.name == "spent" else ""
+        quota_handoff.Thresholds,
+        "from_env",
+        classmethod(lambda cls, env: "thresholds" if env == dict(os.environ) else "unread"),
+    )
+    monkeypatch.setattr(
+        quota_handoff,
+        "trigger",
+        lambda account, thresholds: "handoff" if account.name == "spent" or thresholds != "thresholds" else "",
     )
     error = tick.SpawnError("account reservation is full for claude", harness="claude")
     actions = place._spawn_failed(

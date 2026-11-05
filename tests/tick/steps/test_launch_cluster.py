@@ -61,7 +61,7 @@ def test_the_tick_module_holds_no_launch_definition() -> None:
 def test_moved_launch_code_reaches_tick_seams_through_the_tick_module(monkeypatch: pytest.MonkeyPatch) -> None:
     released: list[tuple[str, str, str]] = []
     gate = SimpleNamespace(release=lambda slug, task_id, reservation: released.append((slug, task_id, reservation)))
-    monkeypatch.setattr(tick, "_admission", lambda runtime: gate)
+    monkeypatch.setattr(tick, "_admission", lambda runtime: gate if runtime == "runtime" else None)
     place._release_admission("slug", "runtime", {"id": "t1", "admission": {"reservation": "r1"}})
     assert released == [("slug", "t1", "r1")]
 
