@@ -13,13 +13,13 @@ import os
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import Any, cast
 
 from scripts.gates.base import Who
 from scripts.gates.enforcement import STALL_WATCH
 from scripts.hive import join_report
 from scripts.inbox import exits
-from scripts.inbox.store import CLOSED, InboxError, InboxStore
+from scripts.inbox.store import CLOSED, InboxError, InboxStore, Item
 from scripts.swarm import capacity, freeze, idle, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.ledger_events import Mail
@@ -297,11 +297,12 @@ def _alert(watch, mail, task, case, minutes, action, limit):
     text = ALERT.format(
         slug=watch.slug, title=task.get("title") or "no title", wait=wait, **{**row, "case": CASES[case]}
     )
-    row["item"] = inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}").id
+    sent = cast(Item, inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}"))
+    row["item"] = sent.id
     watch.store.redis.hset(_key(watch, ALERTS), tid, json.dumps(row))
     for item in earlier:
         inbox.settle(item, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
-    return [f"stall: task {tid} {CASES[case]} for {minutes} minutes, {action}; told {address}"]
+    return [f"stall: task {tid} {CASES[case]} for {minutes} minutes, {action}; told {sent.address}"]
 
 
 def _lane_full(watch, lane, decision):
