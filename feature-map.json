@@ -103,6 +103,7 @@
         "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_three_runs_once_in_three_passes",
         "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_one_runs_every_pass",
         "tests/tick/test_intervals.py::test_a_skipped_step_counts_as_ended_for_its_dependents",
+        "tests/tick/test_intervals.py::test_a_skipped_step_in_a_parallel_pass_ends_for_its_dependents",
         "tests/tick/test_intervals.py::test_a_failed_run_records_its_end_and_a_late_run_does_not",
         "tests/tick/test_intervals.py::test_nothing_rests_without_a_recording_store",
         "tests/tick/test_intervals.py::test_a_step_never_recorded_is_due",
