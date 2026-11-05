@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pytest
 
-from scripts.hive import registry
+from scripts.hive import placement, registry
 from scripts.hive.placement import Wait, place
 
 NOW = 10_000_000
@@ -391,3 +393,54 @@ def test_a_hive_advertising_the_token_slug_takes_a_route_named_by_the_secret_key
         )
     ]
     assert place("eng", "claude", "nestorcolt-smatgmail-com", route_kind, REPO, hives, NOW) == "pods"
+
+
+@pytest.mark.parametrize(
+    "repo",
+    [
+        "/home/iamroot/dev/tcc-ecosystem/agentihooks",
+        "github.com/the-cloud-clockwork/agentihooks",
+        "github.com/the-cloud-clockwork/agentihooks.git",
+    ],
+)
+def test_placement_matches_the_repository_under_another_home(repo: str) -> None:
+    hives = [hive("pods", repos=["/home/worker/dev/agentihooks"])]
+    assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
+    assert [item["id"] for item in placement.round_robin(hives, 1, repo, NOW)] == ["pods"]
+
+
+@pytest.mark.parametrize("remote_input", [False, True])
+@pytest.mark.parametrize("remote_suffix", ["", ".git"])
+def test_placement_uses_the_name_without_overriding_an_advertised_origin(
+    tmp_path: Path, remote_input: bool, remote_suffix: str
+) -> None:
+    checkout = tmp_path / "agentihooks"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "config").write_text(
+        '[remote "origin"]\n    url = https://github.com/the-cloud-clockwork/agentihooks.git\n'
+    )
+    repo = "github.com/the-cloud-clockwork/agentihooks" if remote_input else str(checkout)
+    hives = [hive("pods", repos=["/home/worker/dev/agentihooks"])]
+    assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
+    hives[0]["repos"].append("github.com/org/another-repo")
+    assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
+    hives[0]["repos"].append(f"github.com/someone/agentihooks{remote_suffix}")
+    assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == Wait(
+        f"no hive for eng lists the repo {repo}"
+    )
+
+
+def test_a_checkout_without_remote_metadata_matches_a_hive_advertising_its_origin(tmp_path: Path) -> None:
+    checkout = tmp_path / "agentihooks"
+    checkout.mkdir()
+    hives = [hive("pods", repos=["/home/worker/dev/agentihooks", "github.com/the-cloud-clockwork/agentihooks"])]
+    assert place("eng", "claude", "acct", "subscription", str(checkout), hives, NOW) == "pods"
+
+
+def test_repository_matching_reports_no_path_for_an_unrelated_repository(tmp_path: Path) -> None:
+    checkout = tmp_path / "unrelated"
+    record = hive("pods", repos=["/home/worker/dev/agentihooks"])
+    assert placement.repository(record, str(checkout)) == ""
+    assert place("eng", "claude", "acct", "subscription", str(checkout), [record], NOW) == Wait(
+        f"no hive for eng lists the repo {checkout}"
+    )
