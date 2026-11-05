@@ -7,7 +7,7 @@ import pytest
 
 from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import cli, timer
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 
 real_roots = timer._roots
 real_reconcile = timer.reconcile
@@ -1079,11 +1079,11 @@ SWARM_WORK = (
 )
 
 
-def _swarm_store(*rows: tuple[str, str, str]) -> object:
+def _swarm_store(*rows: tuple[str, str, str]) -> RedisStore:
     """A fake swarm store holding one swarm per row of slug, state and stored ledger address."""
     import fakeredis
 
-    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.store import SwarmConfig
 
     found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     for slug, state, api_url in rows:
@@ -1142,10 +1142,12 @@ def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anto
     monkeypatch.setattr(timer, "unschedule", lambda: cancelled.append(True))
     monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the tick was scheduled"))
     calls = []
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
     for name, text in {**timer.units("/installed/bin/agentihooks"), **timer.tick_units()}.items():
-        (tmp_path / name).write_text(text)
+        (unit_dir / name).write_text(text)
     monkeypatch.setattr(timer, "hosts_work", lambda: False)
-    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is True
+    assert timer.ensure("/installed/bin/agentihooks", unit_dir, run=_systemctl(calls)) is True
     assert cancelled == [True]
     assert [argv for argv, _ in calls if argv[2] in ("disable", "enable", "daemon-reload")] == [
         ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
@@ -1154,12 +1156,12 @@ def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anto
         ["systemctl", "--user", "disable", "--now", "agentihooks-inbox-waker.service"],
         ["systemctl", "--user", "daemon-reload"],
     ]
-    assert sorted(path.name for path in tmp_path.iterdir()) == [
+    assert sorted(path.name for path in unit_dir.iterdir()) == [
         "agentihooks-quota-prober.service",
         "agentihooks-scheduler.service",
     ]
     calls.clear()
-    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is True
+    assert timer.ensure("/installed/bin/agentihooks", unit_dir, run=_systemctl(calls)) is True
     assert [argv for argv, _ in calls] == []
     assert cancelled == [True, True]
 
