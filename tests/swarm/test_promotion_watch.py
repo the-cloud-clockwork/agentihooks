@@ -1,6 +1,9 @@
 import json
+import os
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -1671,20 +1674,21 @@ def test_multiple_matching_coverage_consumers_are_named_as_consequences(store):
     )
 
 
-def test_a_controller_without_the_workstation_checkout_still_files_fixer_tasks(store, tmp_path):
-    import os
-
+def test_a_controller_without_the_workstation_checkout_still_files_fixer_tasks(
+    store: RedisStore, tmp_path: Path
+) -> None:
     missing = str(tmp_path / "workstation" / "agentihooks")
-    config = SimpleNamespace(repo=missing, repo_origin="github.com/o/r")
-    recorded, kwargs_seen = gh([RED], JOBS), []
+    config: Any = SimpleNamespace(repo=missing, repo_origin="github.com/o/r")
+    recorded = gh([RED], JOBS)
+    kwargs_seen: list[dict[str, Any]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         kwargs_seen.append(kwargs)
         if "cwd" in kwargs and not os.path.isdir(kwargs["cwd"]):
             raise FileNotFoundError(2, "No such file or directory", kwargs["cwd"])
         return recorded(argv, **kwargs)
 
-    ledger = Ledger()
+    ledger: Any = Ledger()
     actions = promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), NOW, run)
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-900-1"]
     assert "filed promo-900-0 for the failed dev job helm-kind" in actions
