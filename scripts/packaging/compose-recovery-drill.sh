@@ -276,9 +276,14 @@ printf 'done after the restore: %s\n' "$(drill done t2 t3 t4 t5 t6)"
 task() {
   printf '"%s": {"ledger": "done", "claim": null, "launches": %s, "jetstream": [%s]}' "$1" "$2" "$3"
 }
-want="{\"tasks\": {$(task t1 1 '"exited"'), $(task t2 2 '"exited", "exited"'), $(task t3 1 '"exited"'), "
-want+="$(task t4 2 '"exited", "exited"'), $(task t5 1 '"exited"'), $(task t6 1 '"exited"')}, \"agents\": []}"
-settle "$want"
+settle \
+  '"t1": {"ledger": "done", "claim": null, "launches": 1,' \
+  "$(task t2 2 '"exited", "exited"')" \
+  "$(task t3 1 '"exited"')" \
+  "$(task t4 2 '"exited", "exited"')" \
+  "$(task t5 1 '"exited"')" \
+  "$(task t6 1 '"exited"')" \
+  '"agents": []'
 printf 'ledger against the recorded state after reconcile: %s\n' "$found"
 lap 'final reconcile'
 
