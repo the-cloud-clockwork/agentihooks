@@ -865,8 +865,8 @@ and its declarations as below.
    the step where its hand written line stood. Use `held` when an exception
    from the call must still leave the pass.
 3. List the module in `scripts.tick.steps.MODULES` so it registers before the
-   registry is next read, delete the hand written line, and add `tasks.raise_held(box)` after the
-   group site if the site is new.
+   registry is next read, delete the hand written line, and add
+   `tasks.raise_held(box)` after the group site if the site is new.
 4. Map the step to a feature and its scenarios as described in
    [The feature and scenario catalogue](#the-feature-and-scenario-catalogue);
    `swarm-tick-example` stands for a real feature map id.
@@ -995,7 +995,7 @@ The delivered proof and limitations are recorded in
 | No heartbeat or last tick after a pass that printed actions | The pass raised or returned before its end, so `ended` was none and the closing group stamped nothing; read the tick log for the exception or the early return line. A pass that ended with `pass ended early` does stamp both |
 | `closing` steps recorded late | The step's own budget or the 30 second closing deadline ran out. The deadline starts at the pass `finally`, not at the start of the pass, so a long critical lane does not shorten it |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
-| A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
+| A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |

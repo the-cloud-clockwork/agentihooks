@@ -227,7 +227,7 @@ artefact holds prints all five `false`. Each artefact counts as present when:
 | Artefact | Present when |
 | --- | --- |
 | `step` | A file `scripts/tick/steps/*.py` calls `CallStep`, `WriteStep` or `register` with the name as its first, literal argument |
-| `budget row` | `FLOORS` in the budgets file holds the name |
+| `budget row` | A `FLOORS` or `MEASURED` table in the budgets file holds the name |
 | `test` | `tests/tick/steps/test_<slug>.py` exists |
 | `index row` | The scenario index lists the name under `scenarios` or `unmapped` |
 | `feature entry` | Some feature map entry lists the test node id `tests/tick/steps/test_<slug>.py::test_<slug>` |

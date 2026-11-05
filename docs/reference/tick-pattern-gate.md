@@ -328,8 +328,8 @@ exclusive and one of them is required.
 
 [`python -m scripts.tick.new_step`](tick-step-scaffold.md) writes a step
 that passes, with its budget row, feature test, scenario index row and feature
-map entry. A new step adds no offence when it has a budget row with an interval from the
-set, passes all six fields, and lives in a module that imports no banned
+map entry. A new step adds no offence when it has a budget row with an
+interval from the set, passes all six fields, and lives in a module that imports no banned
 module. The row in `FLOORS`:
 
 ```python
