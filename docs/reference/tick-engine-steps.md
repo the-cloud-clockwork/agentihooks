@@ -320,8 +320,9 @@ reached the workstation's dev checkout, the status publish median fell from
 In a parallel pass `run_group` takes the slow lane steps of a group, and every
 step that needs one of them, out of the group. It runs the rest eagerly and
 returns their records at once; the handed off steps start afterwards on a
-daemon thread the pass owns (`Pass.detach`) and run eagerly on up to 8
-workers. A handed off step that needs a step recorded late or dropped is
+daemon thread the pass owns (`Pass.detach`) and run eagerly on up to
+`workers` pool threads, 8 by default (see [Pass executors](#pass-executors)).
+A handed off step that needs a step recorded late or dropped is
 dropped and recorded late. Their records go to the `finished` callback; the
 tick site passes one that prints their actions, then
 `slow lane step <name> failed: <error>` for each failed step and
@@ -390,6 +391,74 @@ different lanes, and one lane when they share it, as in
 
 `agentihooks swarm <slug> tick-report` prints each lane's share of step CPU
 (see [Lane lines](tick-report.md#lane-lines)).
+
+### Pass executors
+
+A parallel pass owns two thread pools, built once by `scripts.tick.pool.running`
+and shared by every group and every fan out of that pass:
+
+| Field | Pool | Threads | Runs |
+| --- | --- | --- | --- |
+| `Pass.steps` | Step executor | Up to `workers`, named `tick-step_<n>` | Every eager step of every group, critical and handed off slow lane steps alike |
+| `Pass.fans` | Fan out executor | Up to `workers`, named `tick-fan-out_<n>` | Every item of every `scripts.tick.pool.fan_out` call |
+
+`workers` defaults to `scripts.tick.pool.WORKERS`, 8; `pool.running(workers=...)`
+sets it for one pass and refuses a value below one. No setting or environment
+variable changes it. Handed off slow lane work still runs from one daemon thread
+per detached group, named `tick-slow-lane`, which submits its steps to the same
+step executor. A pass of three groups of eight steps, each step fanning out over
+four items, therefore uses at most `2 × workers` pool threads plus one
+`tick-slow-lane` thread for each group that hands work off. Before this change
+each group and each fan out built and shut down a thread pool of its own.
+
+A fan out holds one of the pass's `workers` slots (`Pass.slots`) for each item
+it runs, so all fan outs of a pass together run at most `workers` items at once.
+A fan out started inside a fanned out action runs its items inline on the
+calling thread. A sequential pass, a pass-free call and a fan out over fewer than
+two items run inline as well, and none of them touches the executors.
+
+When the pass ends, `pool.running` joins the `tick-slow-lane` threads as
+described above, then shuts both executors down without waiting and cancels
+every future still queued on them. A step or fan out item already running is
+not interrupted: its daemon worker finishes in the background, as an abandoned
+step does. A submit after the pass ended raises `RuntimeError`. When one group or
+one fan out returns, it cancels only its own futures that never started; the
+executors stay open for the rest of the pass.
+
+A step that needs a step an earlier group handed off is not submitted until that
+step ends or is dropped (`Pass.settled`). While it waits, `_eager` holds it out
+of the ready set (`engine._waiting`) and re-checks every `SETTLE_S` (0.05
+seconds), so the wait
+holds no pass worker and the slow step it waits on can always get one. The hold
+lasts only while the needed step is still pending and the waiting step's own
+lane deadline has not expired; once either ends, the step is submitted and the
+usual drop rules apply.
+
+`run_group` orders a group through `registry.ordered`, which refuses a cycle
+among the group's steps before any step runs:
+
+```text
+ValueError: Dependency cycle: a, b
+```
+
+`_eager` keeps its own guard for steps handed to it without that ordering:
+when nothing runs, nothing is held and no pending step is ready, it raises on
+the first idle round instead of looping:
+
+```text
+ValueError: steps ['a', 'b'] wait on needs that never end
+```
+
+Read the executors of the active pass from a step or a test:
+
+```python
+from scripts.tick import pool
+
+with pool.running(workers=3) as found:
+    assert found.steps.submit(lambda: 1).result() == 1
+    assert found.fans.submit(lambda: 2).result() == 2
+    pool.fan_out(print, range(4))
+```
 
 ### The closing lane
 
@@ -849,6 +918,9 @@ by the engine and does not leave the pass.
 
 ## Adding a step to a group
 
+`python -m scripts.tick.new_step` scaffolds a new step with every artefact below; see
+[Tick step skill and rule](tick-step-skill.md). The manual steps:
+
 1. Write the call as a function `(tick, get) -> actions` in a module under
    `scripts/tick/steps/`, reading its arguments with `get`.
 2. Add the step name to `budgets.FLOORS` with its floor (two seconds unless
@@ -967,6 +1039,7 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
 | `tests/tick/test_report.py` | The slow lane report steps and a `CallStep` keeping the lane it is given |
 | `tests/tick/test_closing_lane.py` | The closing deadline starting once at `Pass.close` and outliving an expired critical lane, a closing step running while a critical step in the same group is dropped, the three closing steps in the `closing` group and lane, and a 300 second hung step under a 1 second critical lane still stamping last tick, the heartbeat and the status |
+| `tests/tick/test_executors.py` | Three groups of eight fanning out steps using at most `workers` `tick-step` threads, `workers` `tick-fan-out` threads and one `tick-slow-lane` thread; both executors refusing work after the pass; a queued fan out cancelled at pass end; a nested fan out running inline; a group whose needs never end refused on the first idle round; a step waiting on a handed off step holding no worker, also after the critical lane ended; and `_waiting` true only for a pending handed off need inside a live lane |
 | `tests/tick/test_early_end.py` | An early end names each left step once and counts the missing value without writing last tick or the heartbeat itself |
 | `tests/tick/test_pool.py` | A parallel group returning its critical records while its slow step runs, a handed off step starting after the critical step it needs and dropped when that step was dropped, a handed off step applying its writes through the group appliers on a daemon thread named `tick-slow-lane`, the pass waiting for a hung slow step only until the slow deadline plus the grace second, and a sequential pass running slow steps in the group |
 
@@ -989,6 +1062,9 @@ The delivered proof and limitations are recorded in
 | Preempt and spawn are late in a pass with no critical lane overrun | `fleet red notice` ran past its 30 second budget; both wait for it and are dropped when it is abandoned. Look for its `swarm_tick_step_abandoned` line in the same pass |
 | No heartbeat or last tick after a pass that printed actions | The pass raised or returned before its end, so `ended` was none and the closing group stamped nothing; read the tick log for the exception or the early return line. A pass that ended with `pass ended early` does stamp both |
 | `closing` steps recorded late | The step's own budget or the 30 second closing deadline ran out. The deadline starts at the pass `finally`, not at the start of the pass, so a long critical lane does not shorten it |
+| `Dependency cycle: <names>` from `run_group` | The named steps of one group are unplaced: they sit on or behind a `needs` cycle among the group's steps. Remove the need that closes the cycle |
+| `wait on needs that never end` | `_eager` was called directly with steps that need each other and none waits on a handed off step of an earlier group; `run_group` refuses the same steps earlier with `Dependency cycle`. Fix the `needs` cycle |
+| `RuntimeError: cannot schedule new futures after shutdown` from a step or fan out | The submit ran after its pass ended, for example from a worker that outlived the pass. The pass executors close at pass end; start such work inside a pass |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |

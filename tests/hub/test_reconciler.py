@@ -467,6 +467,24 @@ def test_an_exited_execution_whose_start_a_restore_removed_is_rebuilt_and_settle
     assert rig.store.agents("rig") == []
 
 
+def test_a_restore_orphaned_execution_waits_for_a_report_that_postdates_its_claim(rig, restored):
+    from scripts.hive import presence
+
+    rig.report["observed_at"] = rig.agent.launched_at - 1
+    rig.save()
+    restored.react.poll()
+    assert rig.row["state"] == "claimed"
+    assert rig.returned == []
+
+    rig.clock.return_value += 300_000
+    presence.beat(restored.bus, "hive", rig.clock())
+    rig.report["observed_at"] = rig.clock()
+    rig.save()
+    restored.react.poll()
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+
+
 def test_a_running_execution_whose_start_a_restore_removed_settles_on_its_later_exit(rig, restored):
     from scripts.hive import execution_events
 
