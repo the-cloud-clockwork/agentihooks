@@ -437,7 +437,7 @@ The delivered writers of each key:
 | `view` | `tick view` | The slow lane event steps, `health findings`, `metrics record`, `status publish` |
 | `live` | `stall watch` | `overrun pass` |
 | `found` | `health findings` | `findings pass`, `metrics record`, `status publish` |
-| `judged`, `stop`, `started` | `intent check`, `ledger health`, `snapshot job` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
+| `judged`, `stop` | `intent check`, `ledger health` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
 
 Because the readers of `config` need `drained resume`, that step carries
 `DRAINED_RESUME_NEEDS` (`scripts.tick.steps.tasks`) plus `sleeping`: every step
