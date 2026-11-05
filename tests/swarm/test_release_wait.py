@@ -223,7 +223,9 @@ def test_a_working_lookup_raises_no_release_alert(
     assert ledger.alerts == []
 
 
-def test_the_tick_hands_the_release_alert_pass_its_slug_config_ledger_and_state(store, monkeypatch):
+def test_the_tick_hands_the_release_alert_pass_its_slug_config_ledger_and_state(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm import tick
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
