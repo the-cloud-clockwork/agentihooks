@@ -2,21 +2,41 @@
 
 ``check`` loads ``feature-map.json`` and ``tests/swarm/tick_scenarios/steps.json``, imports every step module and
 validates the registry with that catalogue. ``shrink`` refuses an unmapped step a base tree's index does not hold; CI
-runs it from the base tree's copy of this module so a head cannot loosen it.
+runs it from the base tree's copy of this module so a head cannot loosen it. ``render`` writes the step catalogue page
+from the registry.
 """
 
 import argparse
 import json
 import pkgutil
+from collections.abc import Iterable
 from importlib import import_module
 from pathlib import Path
 
 from scripts.tick import registry, steps
 from scripts.tick.registry import Catalogue
+from scripts.tick.step import Step
 
 FEATURE_MAP = Path("feature-map.json")
 INDEX = Path("tests/swarm/tick_scenarios/steps.json")
 GOLDENS = Path("tests/swarm/tick_scenarios/goldens.json")
+PAGE = Path("docs/reference/tick-step-catalogue.md")
+HEADER = """---
+title: Tick step catalogue
+parent: Reference
+nav_order: 73
+---
+
+# Tick step catalogue
+
+Every registered tick step, by group and name, with the lane it runs on, its budget and interval in seconds, the steps
+it needs, the ports its effects name and its feature map id. `python -m scripts.tick.catalogue render` writes this page
+from `scripts.tick.registry.steps()`, and `tests/test_docs_tick.py` fails when it no longer matches the registry.
+How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step).
+
+| Step | Group | Lane | Budget | Interval | Needs | Effects | Feature |
+|---|---|---|---|---|---|---|---|
+"""
 
 
 def step_modules() -> list[str]:
@@ -69,15 +89,54 @@ def shrink(base: Path, head: Path) -> list[str]:
     return grown(unmapped(base), unmapped(head) or frozenset())
 
 
+def names(values: Iterable[str]) -> str:
+    """The sorted ``values`` joined by commas, or none when there are none."""
+    return ", ".join(sorted(values)) or "none"
+
+
+def row(step: Step) -> str:
+    """One catalogue table row of ``step``."""
+    cells = (
+        step.name,
+        step.group,
+        step.lane,
+        f"{step.budget_s:g}",
+        f"{step.interval_s:g}",
+        names(step.needs),
+        names(step.effects),
+        step.feature or "none",
+    )
+    return f"| {' | '.join(cells)} |"
+
+
+def page(found: Iterable[Step]) -> str:
+    """The catalogue page of the ``found`` steps, one row each, ordered by group and name."""
+    return HEADER + "".join(f"{row(step)}\n" for step in sorted(found, key=lambda step: (step.group, step.name)))
+
+
+def render(root: Path) -> Path:
+    """Write the catalogue page of every registered step under ``root`` and return its path."""
+    for module in step_modules():
+        import_module(module)
+    path = root / PAGE
+    path.write_text(page(registry.steps()))
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Check the registered steps of a tree against its catalogue, or its unmapped steps against a base tree."""
+    """Check the registered steps of a tree against its catalogue, its unmapped steps against a base tree, or render
+    the step catalogue page of a tree."""
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check").add_argument("--root", type=Path, default=Path("."))
+    commands.add_parser("render").add_argument("--root", type=Path, default=Path("."))
     shrinking = commands.add_parser("shrink")
     shrinking.add_argument("--base", type=Path, required=True)
     shrinking.add_argument("--head", type=Path, required=True)
     args = parser.parse_args(argv)
+    if args.command == "render":
+        print(f"wrote {render(args.root)}")
+        return 0
     errors = check(args.root) if args.command == "check" else shrink(args.base, args.head)
     print(f"{len(errors)} tick catalogue errors")
     for error in errors:
