@@ -119,6 +119,25 @@ def test_a_pass_cancels_fan_outs_still_queued_when_it_ends() -> None:
         gate.set()
 
 
+def test_a_group_whose_needs_never_end_is_refused_on_the_first_idle_round(monkeypatch: pytest.MonkeyPatch) -> None:
+    checks: list[str] = []
+    waiting = engine._waiting
+
+    def bounded(step: Step, names: set[str], found: pool.Pass) -> bool:
+        checks.append(step.name)
+        assert len(checks) <= 2, "the group kept looping on needs that never end"
+        return waiting(step, names, found)
+
+    def action(ctx: Context) -> Result:
+        return Result()
+
+    monkeypatch.setattr(engine, "_waiting", bounded)
+    steps = (Step("a", action, "never", frozenset({"b"})), Step("b", action, "never", frozenset({"a"})))
+    with pool.running(workers=2) as found, pytest.raises(ValueError, match="wait on needs that never end"):
+        engine._eager(steps, _ctx(), found, {})
+    assert checks == ["a", "b"]
+
+
 def test_a_fan_out_inside_a_fanned_out_action_runs_inline() -> None:
     outer: list[str] = []
     inner: list[str] = []
