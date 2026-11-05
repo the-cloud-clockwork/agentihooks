@@ -202,10 +202,12 @@ def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest
     assert kwargs == {"released": ("checker", CONFIG), "reread": ledger_events.view}
     assert (overrun_call[0], overrun_call[1], overrun_call[3]) == ("skip", overrun.overrun_pass, DOC)
     watch = overrun_call[2]
-    assert watch == ("overrun watch", STORE, "sw", frozenset({"a", "b"}), 7)
+    assert watch[:5] == ("overrun watch", STORE, "sw", "ledger", frozenset({"a", "b"}))
+    assert watch[6] == 7
     agent = SimpleNamespace(task="t9")
     args[5](agent)
-    assert state["runtime"].retired == [(agent, ("homes", "sw", "t9"))]
+    watch[5](agent)
+    assert state["runtime"].retired == [(agent, ("homes", "sw", "t9")), (agent, ("homes", "sw", "t9"))]
 
 
 def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
