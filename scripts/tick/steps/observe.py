@@ -16,8 +16,6 @@ from scripts.swarm.store import SwarmConfig
 from scripts.tick import registry
 from scripts.tick.steps import CallStep, Left, PassBox, pass_domains
 
-tick: Any = import_module("scripts.swarm.tick")
-
 RAISED = "raised"
 PASS_SETUP = "pass setup"
 PASS_KEYS = ("slug", "store", "ledger", "runtime", "now_ms", "box")
@@ -484,3 +482,5 @@ STEPS = (
 )
 
 list(map(registry.register, STEPS))
+
+tick: Any = import_module("scripts.swarm.tick")
