@@ -56,7 +56,8 @@ def load_lock(path: Path, architecture: str) -> dict:
 
 
 DOWNLOAD_ATTEMPTS = 10
-ATTEMPT_SECONDS = 300
+ATTEMPT_SECONDS = 120
+FETCH_SECONDS = 900
 
 
 def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
@@ -65,15 +66,16 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
         payload = cached.read_bytes()
         if hashlib.sha256(payload).hexdigest() == artifact["sha256"]:
             return payload
+    give_up = time.monotonic() + FETCH_SECONDS
     for attempt in range(DOWNLOAD_ATTEMPTS):
         try:
-            deadline = time.monotonic() + ATTEMPT_SECONDS
+            deadline = min(time.monotonic() + ATTEMPT_SECONDS, give_up)
             with urllib.request.urlopen(artifact["url"], timeout=120) as response:
                 chunks = []
-                while chunk := response.read(1 << 20):
+                while chunk := response.read1(1 << 16):
                     chunks.append(chunk)
                     if time.monotonic() > deadline:
-                        raise TimeoutError(f"download attempt exceeded {ATTEMPT_SECONDS} seconds: {name}")
+                        raise TimeoutError(f"download attempt passed its deadline: {name}")
                 payload = b"".join(chunks)
             break
         except (urllib.error.URLError, TimeoutError, http.client.IncompleteRead, ConnectionResetError) as error:
@@ -83,9 +85,10 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
                 transient = isinstance(error.reason, (TimeoutError, ConnectionResetError))
             else:
                 transient = True
-            if not transient or attempt == DOWNLOAD_ATTEMPTS - 1:
+            delay = min(2**attempt, 30)
+            if not transient or attempt == DOWNLOAD_ATTEMPTS - 1 or time.monotonic() + delay > give_up:
                 raise
-            time.sleep(min(2**attempt, 30))
+            time.sleep(delay)
     if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:
         raise ValueError(f"artifact checksum mismatch: {name}")
     if cached:

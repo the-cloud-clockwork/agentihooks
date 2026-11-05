@@ -688,7 +688,7 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
         response = io.BytesIO(payloads[url])
         if attempts.count(url) <= failures:
             if failure in {"read-timeout", "incomplete-read", "read-reset"}:
-                response.read = Mock(side_effect=error)
+                response.read1 = Mock(side_effect=error)
             else:
                 raise error
         return response
@@ -748,19 +748,38 @@ def test_tool_download_does_not_retry_permanent_errors(locked, tmp_path, monkeyp
     assert not (tmp_path / tool["sha256"]).exists()
 
 
-def test_tool_download_retries_an_attempt_that_overruns_its_deadline(locked, tmp_path, monkeypatch):
+@pytest.mark.parametrize("recovers", [True, False])
+def test_tool_download_abandons_a_trickling_body_at_its_deadline(locked, tmp_path, monkeypatch, recovers):
     _, lock, payloads = locked
     tool = lock["tools"]["herdr"]
-    clock = [0, worker_image.ATTEMPT_SECONDS + 1]
-    monkeypatch.setattr("time.monotonic", lambda: clock.pop(0) if clock else 1000)
-    sleeps = Mock()
-    monkeypatch.setattr("time.sleep", sleeps)
-    opened = Mock(side_effect=lambda url, timeout: io.BytesIO(payloads[url]))
-    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
-    assert worker_image.fetch("herdr", tool, tmp_path) == payloads[tool["url"]]
-    assert opened.call_count == 2
-    sleeps.assert_called_once_with(1)
-    assert (tmp_path / tool["sha256"]).read_bytes() == payloads[tool["url"]]
+    now = [0.0]
+    sleeps = []
+
+    class Trickle(io.BytesIO):
+        def read1(self, size: int = -1) -> bytes:
+            now[0] += 50
+            return b"x"
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    responses = [Trickle(), io.BytesIO(payloads[tool["url"]])] if recovers else None
+    opened_mock = Mock(side_effect=responses or (lambda url, timeout: Trickle()))
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened_mock)
+    if recovers:
+        assert worker_image.fetch("herdr", tool, tmp_path) == payloads[tool["url"]]
+        assert opened_mock.call_count == 2
+        assert sleeps == [1]
+        assert (tmp_path / tool["sha256"]).read_bytes() == payloads[tool["url"]]
+    else:
+        with pytest.raises(TimeoutError, match="deadline: herdr"):
+            worker_image.fetch("herdr", tool, tmp_path)
+        assert now[0] <= worker_image.FETCH_SECONDS + 50
+        assert opened_mock.call_count < worker_image.DOWNLOAD_ATTEMPTS
+        assert not (tmp_path / tool["sha256"]).exists()
 
 
 @pytest.mark.parametrize("action", ["install", "download"])
