@@ -7,7 +7,7 @@ import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts import session_bands
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
@@ -131,15 +131,17 @@ def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) ->
     from scripts.routing.slots import account_key
 
     wanted, newest = account_key(account), None
-    for hive in registry.hives(redis):
+    hives = cast("list[dict[str, Any]]", registry.hives(redis))  # pyright: ignore[reportUnknownMemberType]
+    for hive in hives:
         if not registry.live(hive, now_ms):
             continue
+        raw = cast("str | None", redis.get(f"{registry.key(hive['id'])}:quota"))
         try:
-            readings = dict(json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}"))
+            readings: dict[str, Any] = dict(json.loads(raw or "{}"))
         except (ValueError, TypeError):
             continue
         for slot, reading in readings.items():
-            named, _, name = str(slot).partition(":")
+            named, _, name = slot.partition(":")
             if named != harness or account_key(name) != wanted:
                 continue
             try:
@@ -152,7 +154,7 @@ def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) ->
                     "five_reset": five["resets_at"],
                     "week_reset": week["resets_at"],
                 }
-                fields = _report(report, now_ms)
+                fields = cast("dict[str, Any]", _report(report, now_ms))
             except (KeyError, TypeError, ValueError, SwarmError):
                 continue
             if newest is None or fields["observed_ms"] > newest.observed_ms:
@@ -225,9 +227,10 @@ class QuotaObservations:
 
     def latest(self, account: str, harness: str) -> Observation | None:
         """The newer of the published fleet observation and the newest live hive reading for the account."""
-        raw = self.store.redis.hget(latest_key(harness), account)
+        redis = cast("Redis", self.store.redis)
+        raw = cast("str | None", redis.hget(latest_key(harness), account))
         published = decode(raw) if raw else None
-        hive = hive_observation(self.store.redis, account, harness, self.clock())
+        hive = hive_observation(redis, account, harness, self.clock())
         if published is None or (hive is not None and hive.observed_ms > published.observed_ms):
             return hive
         return published
