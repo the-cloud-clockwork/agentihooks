@@ -17,6 +17,10 @@ narrowed grading to the files a pull request touches;
 [pull request 9726](https://github.com/the-cloud-clockwork/agentihooks/pull/9726)
 removed the bootstrap path, so a base without the allowlist and a dev without
 the grader both fail.
+[Pull request 9794](https://github.com/the-cloud-clockwork/agentihooks/pull/9794)
+runs the gate a second time in the `Tick equivalence` workflow on every pull
+request that touches a tick input, beside the catalogue check (see
+[The tick equivalence run](#the-tick-equivalence-run)).
 
 ## What it measures
 
@@ -220,6 +224,71 @@ A graded file or budgets file that does not parse, a failed `git ls-files`,
 a tree with no tracked Python files, an unreadable file or invalid allowlist
 JSON prints only `::error::<reason>` and exits 1 with no summary line.
 
+### The tick equivalence run
+
+The `Tick equivalence` workflow runs the same grader again, in the step
+`Hold the tick step pattern from the base grader copy`. It sits after the two
+catalogue steps and before the scenario replay:
+
+```bash
+grader=head
+if [[ -f base/scripts/tick_pattern.py ]]; then
+  grader=base
+fi
+cd "$grader"
+python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"
+```
+
+The workflow checks the head out into `head` and the base into `base`. On a
+pull request the base is `github.event.pull_request.base.sha`, the tip of the
+base branch when the event fired; on a manual dispatch it is the `base` input,
+default `dev`. The base copy grades when it carries
+`scripts/tick_pattern.py`, the same rule the catalogue `shrink` step uses for
+`scripts/tick/catalogue.py`. The step has no `if` and no `continue-on-error`,
+so any error from the grader fails the job.
+
+It differs from the lint job in three ways:
+
+| | Lint job, `Hold the tick step pattern` | Tick equivalence, `Hold the tick step pattern from the base grader copy` |
+| --- | --- | --- |
+| Base tree | Merge base of the head with the event base | Tip of the event base |
+| Base without the grader | Fails with `dev carries no scripts/tick_pattern.py` | The head copy grades |
+| Runs on | Every pull request | Pull requests touching a tick input, and manual dispatch |
+
+The head fallback does not open a hole: the lint job still refuses a base
+without the grader, and both jobs feed `Gate — Required`.
+
+#### When it runs
+
+The `Writer lock` workflow, called by the Tests workflow as its `writer-lock`
+job, selects the run. Its `inputs` job diffs the pull request head against its
+merge base with the base branch and sets `tick` to `true` when any changed
+path matches one entry of `TICK_INPUTS`. Its `tick` job then calls
+`Tick equivalence`. `Gate — Required` needs `writer-lock`, so a red tick
+equivalence run blocks the pull request. The `tick` job runs only on the
+`pull_request` event, so a merge group run does not repeat it.
+
+The entries the pattern gate added to `TICK_INPUTS`:
+
+```
+scripts/tick_pattern.py scripts/size_limits.py tests/TICK_PATTERN_ALLOWLIST.json tests/tick/*
+profiles/package/skills/tick-step/* profiles/package/rules/tick-pattern.md docs/reference/tick-step-catalogue.md
+```
+
+`scripts/size_limits.py` is listed because the grader reads its tracked file
+set through `scripts.size_limits.files`. The list already held
+`scripts/tick/*`, `scripts/swarm/tick*.py`, the tick scenarios and the two
+workflow files. Entries match as bash patterns inside `[[ ]]`, where `*` also
+matches `/`, so `tests/tick/*` selects `tests/tick/steps/test_common.py`.
+A path such as `profiles/package/rules/delivery-tiers.md` or
+`tests/test_tick_pattern_other.py` matches no entry and leaves the run off.
+
+To run it by hand against any base:
+
+```bash
+gh workflow run tick-equivalence.yml --ref <branch> -f base=dev
+```
+
 ### Threshold pins
 
 `scripts.threshold_pins` pins the gate's `SCOPE` as `covers`, so a change may
@@ -311,6 +380,12 @@ written JSON format; parse failures; a stale record for an untouched file is gre
 and a padded one red; a changed file keeping an offence its base held; and a
 budgets change grading the step files whose measurement it moves.
 
+`tests/test_ci_tick_guards.py` holds the CI wiring: each new `TICK_INPUTS`
+entry selects the tick run and five unrelated paths do not, and the tick
+equivalence step runs the grader from the base copy with the head fallback,
+next to the catalogue `check` step, with neither step carrying an `if` or
+`continue-on-error`.
+
 The missing grader branch is workflow shell with no unit test. Pull request
 9726 proved both bootstrap removals red with two plant steps on a diffcheck
 branch cut from its head, which rerun the step body in the lint job of
@@ -331,4 +406,6 @@ tree, and each printed its error above.
 | A file you did not touch is listed red | Its measurement moved, usually through a budgets row change, or the head allowlist adds an offence to its record |
 | `::error::cannot parse <file>` with no summary | Fix the syntax error in that graded file |
 | `TICK_PATTERN_ALLOWLIST.json is missing from the base` | The merge base lacks the allowlist: merge current `dev` into the branch, or restore the allowlist on `dev` through its own pull request first; adding it only on the head does not help |
+| Lint passes the tick pattern step, `Tick equivalence` fails it | The tick equivalence run grades against the tip of the base branch, the lint job against the merge base; merge current `dev` into the branch so both name the same base until `dev` moves again |
+| No `Tick equivalence` run for the pull request | The pull request touched no `TICK_INPUTS` path, so `Writer lock` skipped its `tick` job; the lint job still grades |
 | `dev carries no scripts/tick_pattern.py, so nothing trusted can grade.` | The protected copy at the pull request base lacks the grader; restore `scripts/tick_pattern.py` on `dev`, then close and reopen the pull request so its base names that `dev` |
