@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
+from scripts.hive.placement import account_key
 from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 
 if TYPE_CHECKING:
@@ -12,6 +13,11 @@ if TYPE_CHECKING:
 
 def enabled(environ: Mapping[str, str] | None = None) -> bool:
     return RuntimeRouter.from_environ((), os.environ if environ is None else environ).spawn_backend() != LOCAL
+
+
+def name(harness: str, account: str) -> str:
+    """The row key of an account, one key for its AH_CC_TOKEN_ slug and its Secret key spelling."""
+    return f"{harness}:{account_key(account)}"
 
 
 def read(redis: "Redis", now: float) -> dict[str, dict]:
@@ -30,19 +36,20 @@ def read(redis: "Redis", now: float) -> dict[str, dict]:
         seen.update(execution for ids in counts.get("_executions", {}).values() for execution in ids)
         quotas = json.loads(redis.get(f"{key}:quota") or "{}")
         for slot in hive["slots"]:
-            name = f"{slot['harness']}:{slot['account']}"
-            row = rows.setdefault(name, {**slot, "sessions": 0, "quota": None})
-            row["sessions"] += counts.get(name, 0)
-            row["masters"] = row.get("masters", 0) + counts.get(f"interactive:{name}", 0)
-            quota = quotas.get(name)
+            reported = f"{slot['harness']}:{slot['account']}"
+            row = rows.setdefault(name(slot["harness"], slot["account"]), {**slot, "sessions": 0, "quota": None})
+            row["sessions"] += counts.get(reported, 0)
+            row["masters"] = row.get("masters", 0) + counts.get(f"interactive:{reported}", 0)
+            quota = quotas.get(reported)
             if quota is not None and quota["observed_at"] is not None:
                 previous = row["quota"]
                 if previous is None or quota["observed_at"] > previous["observed_at"]:
                     row.update(slot, quota=quota)
-    for name, count in LaunchSlots(redis).counts(seen).items():
-        harness, account = name.split(":", 1)
+    for slot, count in LaunchSlots(redis).counts(seen).items():
+        harness, account = slot.split(":", 1)
         row = rows.setdefault(
-            name, {"harness": harness, "account": account, "kind": "subscription", "quota": None, "sessions": 0}
+            name(harness, account),
+            {"harness": harness, "account": account, "kind": "subscription", "quota": None, "sessions": 0},
         )
         row["sessions"] += count
     return rows

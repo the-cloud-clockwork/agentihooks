@@ -89,7 +89,9 @@ class Reservation:
         return reason(self.masters)
 
     def closes(self, slug: str, week_used: float | None) -> bool:
-        return slug == self.slug and reached(week_used, self.masters)
+        from scripts.hive.placement import account_key
+
+        return account_key(slug) == account_key(self.slug) and reached(week_used, self.masters)
 
     def closes_row(self, harness: str, kind: str, slug: str, week_left: float | None) -> bool:
         return harness == self.harness and kind != API and week_left is not None and self.closes(slug, 100 - week_left)
@@ -125,7 +127,7 @@ def current(
         if aggregate.enabled(environ):
             import time
 
-            row = aggregate.current(time.time()).get(f"{harness}:{declared.slug}", {})
+            row = aggregate.current(time.time()).get(aggregate.name(harness, declared.slug), {})
             masters = row.get("masters", 0) + master_agents(store, harness, declared.slug)
         else:
             masters = masters_live(harness, declared.slug, store, proc)

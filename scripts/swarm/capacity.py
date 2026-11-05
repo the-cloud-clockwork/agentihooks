@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
+from scripts.hive.placement import account_key
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import autoscale, freeze, host_budget, master_pin
@@ -192,7 +193,7 @@ def _global(environ: dict, now: float) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
-        if (row["harness"], row["account"]) in refused:
+        if (row["harness"], account_key(row["account"])) in refused:
             cap = 0
         rows.append(
             Account(
@@ -219,7 +220,7 @@ def _refused(environ: dict) -> set[tuple[str, str]]:
         result.account: result
         for _, result in sorted(balancer.cached_observations(environ=environ), key=lambda seen: seen[0])
     }
-    return {(balancer.HARNESS, account) for account, result in latest.items() if balancer.refused(result)}
+    return {(balancer.HARNESS, account_key(account)) for account, result in latest.items() if balancer.refused(result)}
 
 
 def probe(environ: dict[str, str], now: float) -> list[Account]:
@@ -262,7 +263,11 @@ def latch(rows: list[Account], held: "Reservation | None", store: RedisStore | N
         return rows
     key = f"{ROOT}:reserved-closed:{held.harness}:{held.slug}"
     index = next(
-        (i for i, row in enumerate(rows) if (row.harness, row.name) == (held.harness, held.slug) and row.kind != API),
+        (
+            i
+            for i, row in enumerate(rows)
+            if row.harness == held.harness and account_key(row.name) == account_key(held.slug) and row.kind != API
+        ),
         None,
     )
     if index is None:
