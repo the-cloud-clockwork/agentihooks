@@ -758,7 +758,7 @@ def test_tool_download_abandons_a_trickling_body_at_its_deadline(
     sleeps = []
 
     class Trickle(io.BytesIO):
-        def read1(self, size: int = -1) -> bytes:
+        def read1(self, size: int | None = -1, /) -> bytes:
             now[0] += 50
             return b"x"
 
@@ -782,6 +782,62 @@ def test_tool_download_abandons_a_trickling_body_at_its_deadline(
         assert now[0] <= worker_image.FETCH_SECONDS + 50
         assert opened_mock.call_count < worker_image.DOWNLOAD_ATTEMPTS
         assert not (tmp_path / tool["sha256"]).exists()
+
+
+def test_tool_download_keeps_a_body_that_ends_exactly_at_its_deadline(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, lock, payloads = locked
+    tool = lock["tools"]["herdr"]
+    body = payloads[tool["url"]]
+    now = [0.0]
+    parts = [body[: len(body) // 2], body[len(body) // 2 :], b""]
+
+    class Slow(io.BytesIO):
+        def read1(self, size: int | None = -1, /) -> bytes:
+            now[0] = float(worker_image.ATTEMPT_SECONDS)
+            return parts.pop(0)
+
+    opened_mock = Mock(return_value=Slow())
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", Mock(side_effect=AssertionError("no retry expected")))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened_mock)
+    assert worker_image.fetch("herdr", tool, tmp_path) == body
+    assert opened_mock.call_count == 1
+    assert (tmp_path / tool["sha256"]).read_bytes() == body
+
+
+@pytest.mark.parametrize(("failed_at", "retries"), [(899.0, True), (899.5, False)])
+def test_tool_download_retries_only_while_the_backoff_fits_its_total_budget(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_at: float, retries: bool
+) -> None:
+    _, lock, payloads = locked
+    tool = lock["tools"]["herdr"]
+    now = [0.0]
+    sleeps: list[float] = []
+    error = urllib.error.HTTPError(tool["url"], 504, "Gateway Time-out", http.client.HTTPMessage(), None)
+
+    def opened(url: str, timeout: int) -> io.BytesIO:
+        if now[0] == 0.0:
+            now[0] = failed_at
+            raise error
+        return io.BytesIO(payloads[url])
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    if retries:
+        assert worker_image.fetch("herdr", tool, tmp_path) == payloads[tool["url"]]
+        assert sleeps == [1]
+    else:
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            worker_image.fetch("herdr", tool, tmp_path)
+        assert caught.value is error
+        assert sleeps == []
 
 
 @pytest.mark.parametrize("action", ["install", "download"])

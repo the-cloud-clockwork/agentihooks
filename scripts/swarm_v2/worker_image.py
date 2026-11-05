@@ -71,8 +71,8 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
         try:
             deadline = min(time.monotonic() + ATTEMPT_SECONDS, give_up)
             with urllib.request.urlopen(artifact["url"], timeout=120) as response:
-                chunks = []
-                while chunk := response.read1(1 << 16):
+                chunks: list[bytes] = []
+                while chunk := response.read1():
                     chunks.append(chunk)
                     if time.monotonic() > deadline:
                         raise TimeoutError(f"download attempt passed its deadline: {name}")
