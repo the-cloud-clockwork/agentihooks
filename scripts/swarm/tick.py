@@ -896,7 +896,7 @@ def claim_view(
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
-    released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
+    released, applied = release_wait.checker(config), apply_wait.checker(config, rows)
     unshared = fleet_red.checker(fleet_red.saved_reader(store, slug))
     view = readiness.Snapshot(
         slug,

@@ -39,6 +39,17 @@ def workflow(name: str) -> dict:
         ("tests/swarm/test_delivery.py", "true"),
         ("scripts/swarm/cli.py", "false"),
         ("tests/swarm/test_store.py", "false"),
+        ("scripts/tick_pattern.py", "true"),
+        ("scripts/size_limits.py", "true"),
+        ("tests/TICK_PATTERN_ALLOWLIST.json", "true"),
+        ("tests/tick/test_catalogue.py", "true"),
+        ("tests/tick/steps/test_common.py", "true"),
+        ("tests/swarm/tick_scenarios/steps.json", "true"),
+        ("profiles/package/skills/tick-step/SKILL.md", "true"),
+        ("profiles/package/rules/tick-pattern.md", "true"),
+        ("docs/reference/tick-step-catalogue.md", "true"),
+        ("profiles/package/rules/delivery-tiers.md", "false"),
+        ("tests/test_tick_pattern_other.py", "false"),
     ],
 )
 def test_tick_guard_selection(path: str, expected: str, tmp_path: Path) -> None:
@@ -96,3 +107,17 @@ def test_tick_equivalence_runs_characterisation_equivalence_and_load_budget() ->
     assert "diff -ru tick-evidence/base tick-evidence/head" in script
     assert "|| true" not in script
     assert '[[ "$status" -le 1 ]]' in script
+
+
+def test_tick_equivalence_grades_the_pattern_and_catalogue_unconditionally() -> None:
+    steps = workflow("tick-equivalence")["jobs"]["tick-equivalence"]["steps"]
+    [pattern] = [step for step in steps if "scripts.tick_pattern" in step.get("run", "")]
+    assert (
+        'python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"'
+        in pattern["run"]
+    )
+    assert "if [[ -f base/scripts/tick_pattern.py ]]; then" in pattern["run"]
+    assert 'cd "$grader"' in pattern["run"]
+    [catalogue] = [step for step in steps if step.get("run") == "python -m scripts.tick.catalogue check"]
+    assert catalogue["working-directory"] == "head"
+    assert all("if" not in step and "continue-on-error" not in step for step in (pattern, catalogue))
