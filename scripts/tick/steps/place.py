@@ -395,7 +395,7 @@ def _owner_hold(slug, store, runtime, task):
 
 
 @contextmanager
-def _placement_pass(runtime):
+def _placement_pass(runtime: Any) -> Iterator[None]:
     try:
         yield
     finally:
@@ -670,7 +670,7 @@ def _unresolved(slug, ledger, rows, task_id, reason):
 def _lives_spent(slug, store, ledger, rows, task):
     try:
         return _claim_cap(slug, store, ledger, rows, task)
-    except Exception as exc:  # a crashed gate lets the claim through, counted in the gate log
+    except Exception as exc:
         who = Who(name="swarm", task=task["id"])
         gate_log.append(
             slug, gate_log.Row.of(claim_cap.GATE.name, "fail-open", who, reason=f"{type(exc).__name__}: {exc}")
